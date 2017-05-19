@@ -19,23 +19,27 @@ from typing import Callable
 
 import mxnet as mx
 
+from sockeye.layers import LayerNormalization
+
 logger = logging.getLogger(__name__)
 
 
 def get_coverage(coverage_type: str,
-                 coverage_num_hidden: int) -> 'Coverage':
+                 coverage_num_hidden: int,
+                 layer_normalization: bool) -> 'Coverage':
     """
     Returns a Coverage instance.
 
     :param coverage_type: Name of coverage type.
     :param coverage_num_hidden: Number of hidden units for coverage vectors.
+    :param layer_normalization: If true, applies layer normalization to ActivationCoverage.
     :return: Instance of Coverage.
     """
 
     if coverage_type == "gru":
         return GRUCoverage(coverage_num_hidden)
     elif coverage_type in {"tanh", "sigmoid", "relu", "softrelu"}:
-        return ActivationCoverage(coverage_num_hidden, coverage_type)
+        return ActivationCoverage(coverage_num_hidden, coverage_type, layer_normalization)
     elif coverage_type == "count":
         return CountCoverage()
     else:
@@ -175,9 +179,15 @@ class ActivationCoverage(Coverage):
 
     :param coverage_num_hidden: Number of hidden units for coverage vectors.
     :param activation: Type of activation for Perceptron.
+    :param layer_normalization: If true, applies layer normalization before non-linear activation.
+    :param prefix: Layer name prefix.
     """
 
-    def __init__(self, coverage_num_hidden: int, activation: str, prefix='') -> None:
+    def __init__(self,
+                 coverage_num_hidden: int,
+                 activation: str,
+                 layer_normalization: bool,
+                 prefix='') -> None:
         self.prefix = prefix
         self.activation = activation
         self.num_hidden = coverage_num_hidden
@@ -189,6 +199,11 @@ class ActivationCoverage(Coverage):
         self.cov_prev2h_weight = mx.sym.Variable("%scov_prev2h_weight" % self.prefix)
         # attention scores to hidden
         self.cov_a2h_weight = mx.sym.Variable("%scov_a2h_weight" % self.prefix)
+        # optional layer normalization
+        self.lnorm = None
+        if layer_normalization and not self.num_hidden != 1:
+            self.lnorm = LayerNormalization(self.num_hidden,
+                                            prefix="%scov_norm" % prefix) if layer_normalization else None
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """
@@ -269,6 +284,9 @@ class ActivationCoverage(Coverage):
 
             # (batch_size, source_seq_len, coverage_num_hidden)
             updated_coverage = intermediate + attention_hidden + coverage_hidden
+
+            if self.lnorm is not None:
+                updated_coverage = self.lnorm.normalize(updated_coverage)
 
             # (batch_size, seq_len, coverage_num_hidden)
             coverage = mx.sym.Activation(data=updated_coverage,

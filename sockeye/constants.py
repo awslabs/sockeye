@@ -37,6 +37,7 @@ TARGET_EMBEDDING_PREFIX = "target_embed_"
 
 # rnn types
 LSTM_TYPE = 'lstm'
+LNLSTM_TYPE = 'lnlstm'
 GRU_TYPE = 'gru'
 
 # init types

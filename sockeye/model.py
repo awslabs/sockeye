@@ -51,12 +51,14 @@ ModelConfig = sockeye.utils.namedtuple_with_defaults('ModelConfig',
                                                       "loss",
                                                       "normalize_loss",
                                                       "smoothed_cross_entropy_alpha",
+                                                      "layer_normalization",
                                                   ],
                                                      default_values={
                                                       "attention_use_prev_word": False,
                                                       "context_gating": False,
                                                       "loss": C.CROSS_ENTROPY,
-                                                      "normalize_loss": False
+                                                      "normalize_loss": False,
+                                                      "layer_normalization": False
                                                   })
 """
 ModelConfig defines model parameters defined at training time which are relevant to model inference.
@@ -159,7 +161,8 @@ class SockeyeModel:
                                                          self.config.rnn_num_hidden,
                                                          max_seq_len,
                                                          self.config.attention_coverage_type,
-                                                         self.config.attention_coverage_num_hidden)
+                                                         self.config.attention_coverage_num_hidden,
+                                                         self.config.layer_normalization)
 
         self.lexicon = sockeye.lexicon.Lexicon(self.config.vocab_source_size,
                                                self.config.vocab_target_size,
@@ -176,7 +179,8 @@ class SockeyeModel:
                                                    self.config.dropout,
                                                    self.config.weight_tying,
                                                    self.lexicon,
-                                                   self.config.context_gating)
+                                                   self.config.context_gating,
+                                                   self.config.layer_normalization)
 
         self.rnn_cells = self.encoder.get_rnn_cells() + self.decoder.get_rnn_cells()
 
