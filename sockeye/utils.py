@@ -256,7 +256,7 @@ def get_alignments(attention_matrix: np.ndarray, threshold: float = .9) -> Itera
                 yield (src_idx, trg_idx)
 
 
-def average_arrays(arrays: List[mx.sym.NDArray]) -> mx.sym.NDArray:
+def average_arrays(arrays: List[mx.nd.NDArray]) -> mx.nd.NDArray:
     """
     Take a list of arrays of the same shape and take the element wise average.
 
