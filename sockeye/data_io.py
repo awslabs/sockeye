@@ -16,6 +16,7 @@ Implements data iterators and I/O related functions for sequence-to-sequence mod
 """
 import bisect
 import gzip
+import pickle
 import logging
 import random
 from typing import Dict, Iterator, Iterable, List, NamedTuple, Optional, Tuple
@@ -323,6 +324,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         self.curr_idx = 0
 
         # holds NDArrays
+        self.indices = []  # This will define how the data arrays will be organized
         self.nd_source = []
         self.nd_length = []
         self.nd_target = []
@@ -426,13 +428,24 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         self.nd_length = []
         self.nd_target = []
         self.nd_label = []
+        self.indices = []
         for i in range(len(self.data_source)):
             # shuffle indices within each bucket
-            indices = np.random.permutation(len(self.data_source[i]))
-            self.nd_source.append(mx.nd.array(self.data_source[i].take(indices, axis=0), dtype=self.dtype))
-            self.nd_length.append(mx.nd.array(self.data_length[i].take(indices, axis=0), dtype=self.dtype))
-            self.nd_target.append(mx.nd.array(self.data_target[i].take(indices, axis=0), dtype=self.dtype))
-            self.nd_label.append(mx.nd.array(self.data_label[i].take(indices, axis=0), dtype=self.dtype))
+            self.indices.append(np.random.permutation(len(self.data_source[i])))
+            self._append_ndarrays(i, self.indices[-1])
+
+    def _append_ndarrays(self, bucket: int, shuffled_indices: np.array):
+        """
+        Appends the actual data, selected by the given indices, to the NDArrays
+        of the appropriate bucket. Use when reshuffling the data.
+
+        :param bucket: Current bucket
+        :param shuffled_indices: Indices indicating which data to select
+        """
+        self.nd_source.append(mx.nd.array(self.data_source[bucket].take(shuffled_indices, axis=0), dtype=self.dtype))
+        self.nd_length.append(mx.nd.array(self.data_length[bucket].take(shuffled_indices, axis=0), dtype=self.dtype))
+        self.nd_target.append(mx.nd.array(self.data_target[bucket].take(shuffled_indices, axis=0), dtype=self.dtype))
+        self.nd_label.append(mx.nd.array(self.data_label[bucket].take(shuffled_indices, axis=0), dtype=self.dtype))
 
     def iter_next(self) -> bool:
         """
@@ -465,3 +478,40 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         return mx.io.DataBatch(data, label,
                                pad=0, index=None, bucket_key=self.buckets[i],
                                provide_data=provide_data, provide_label=provide_label)
+
+    def save_state(self, fname: str):
+        """
+        Saves the current state of iterator to a file, so that iteration can be
+        continued. Note that the data is not saved, i.e. the iterator must be
+        initialized with the same parameters as in the first call.
+
+        :param fname: File name to save the information to.
+        """
+        with open(fname, "wb") as fp:
+            pickle.dump(self.idx, fp)
+            pickle.dump(self.curr_idx, fp)
+            np.save(fp, self.indices)
+
+    def load_state(self, fname: str):
+        """
+        Loads the state of the iterator from a file.
+
+        :param fname: File name to load the information from.
+        """
+        with open(fname, "rb") as fp:
+            self.idx = pickle.load(fp)
+            self.curr_idx = pickle.load(fp)
+            self.indices = np.load(fp)
+
+        # Because of how checkpointing is done (pre-fetching the next batch in
+        # each iteration), curr_idx should be always >= 1
+        assert self.curr_idx >= 1
+        # Right after loading the iterator state, next() should be called
+        self.curr_idx -= 1
+
+        self.nd_source = []
+        self.nd_length = []
+        self.nd_target = []
+        self.nd_label = []
+        for i in range(len(self.data_source)):
+            self._append_ndarrays(i, self.indices[i])

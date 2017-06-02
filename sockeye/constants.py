@@ -80,6 +80,17 @@ SYMBOL_NAME = "symbol" + JSON_SUFFIX
 METRICS_NAME = "metrics"
 TENSORBOARD_NAME = "tensorboard"
 
+TRAINING_STATE_DIRNAME= "training_state"
+TRAINING_STATE_TEMP_DIRNAME = "tmp.training_state"
+TRAINING_STATE_TEMP_DELETENAME = "delete.training_state"
+MODULE_OPT_STATE_NAME = "mx_optimizer.pkl"
+BUCKET_ITER_STATE_NAME = "bucket.pkl"
+RNG_STATE_NAME = "rng.pkl"
+MONITOR_STATE_NAME = "monitor.pkl"
+TRAINING_STATE_NAME = "training.pkl"
+SCHEDULER_STATE_NAME = "scheduler.pkl"
+TRAINING_STATE_PARAMS_NAME = "params"
+
 # data layout strings
 BATCH_MAJOR = "NTC"
 TIME_MAJOR = "TNC"

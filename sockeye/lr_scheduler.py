@@ -100,7 +100,6 @@ class LearningRateSchedulerPlateauReduce(LearningRateScheduler):
         self.reduce_factor = reduce_factor
         self.reduce_num_not_improved = reduce_num_not_improved
         self.num_not_improved = 0
-        self.logger = logging.getLogger("LearningRateSchedulerPlateauReduce")
         # Note: will be overwritten by optimizer in mxnet
         self.base_lr = None  # type: float
         self.lr = None  # type: float
@@ -118,7 +117,7 @@ class LearningRateSchedulerPlateauReduce(LearningRateScheduler):
             self.num_not_improved += 1
             if self.num_not_improved >= self.reduce_num_not_improved:
                 self.lr *= self.reduce_factor
-                self.logger.info("Validation score hasn't improved for %d checkpoints, "
+                logger.info("Validation score hasn't improved for %d checkpoints, "
                                  "lowering learning rate to %1.2e", self.num_not_improved, self.lr)
                 self.num_not_improved = 0
 

@@ -14,12 +14,17 @@
 """
 Code for training
 """
+from collections import namedtuple
 import logging
 import os
+import pickle
+import random
 import time
 from typing import List, AnyStr
+import shutil
 
 import mxnet as mx
+import numpy as np
 
 import sockeye.callback
 import sockeye.checkpoint_decoder
@@ -33,6 +38,18 @@ import sockeye.utils
 
 logger = logging.getLogger(__name__)
 
+class _TrainingState:
+    def __init__(self,
+                 num_not_improved = 0,
+                 epoch = 0,
+                 checkpoint = 0,
+                 updates = 0,
+                 samples = 0):
+        self.num_not_improved = num_not_improved
+        self.epoch = epoch
+        self.checkpoint = checkpoint
+        self.updates = updates
+        self.samples = samples
 
 class TrainingModel(sockeye.model.SockeyeModel):
     """
@@ -62,13 +79,13 @@ class TrainingModel(sockeye.model.SockeyeModel):
         super().__init__(model_config)
         self.context = context
         self.lr_scheduler = lr_scheduler
+        self.bucketing = bucketing
         self._build_model_components(self.config.max_seq_len, fused, rnn_forget_bias)
-        self.module = self._build_module(train_iter, self.config.max_seq_len, bucketing)
+        self.module = self._build_module(train_iter, self.config.max_seq_len)
 
     def _build_module(self,
                       train_iter: sockeye.data_io.ParallelBucketSentenceIter,
-                      max_seq_len: int,
-                      bucketing: bool):
+                      max_seq_len: int):
         """
         Initializes model components, creates training symbol and module, and binds it.
         """
@@ -99,7 +116,7 @@ class TrainingModel(sockeye.model.SockeyeModel):
 
             return mx.sym.Group(outputs), data_names, label_names
 
-        if bucketing:
+        if self.bucketing:
             logger.info("Using bucketing. Default max_seq_len=%s", train_iter.default_bucket_key)
             return mx.mod.BucketingModule(sym_gen=sym_gen,
                                           logger=logger,
@@ -184,35 +201,33 @@ class TrainingModel(sockeye.model.SockeyeModel):
             if monitor_bleu else None
 
         logger.info("Training started.")
-        training_monitor = sockeye.callback.TrainingMonitor(train_iter.batch_size, output_folder,
-                                                            optimized_metric=optimized_metric,
-                                                            use_tensorboard=use_tensorboard,
-                                                            checkpoint_decoder=checkpoint_decoder)
+        self.training_monitor = sockeye.callback.TrainingMonitor(train_iter.batch_size, output_folder,
+                                                                 optimized_metric=optimized_metric,
+                                                                 use_tensorboard=use_tensorboard,
+                                                                 checkpoint_decoder=checkpoint_decoder)
         self._fit(train_iter, val_iter, output_folder,
-                  training_monitor,
                   metrics=metrics,
                   max_updates=max_updates,
                   checkpoint_frequency=checkpoint_frequency,
                   max_num_not_improved=max_num_not_improved)
 
         logger.info("Training finished. Best checkpoint: %d. Best validation %s: %.6f",
-                    training_monitor.get_best_checkpoint(),
-                    training_monitor.optimized_metric,
-                    training_monitor.get_best_validation_score())
-        return training_monitor.get_best_validation_score()
+                    self.training_monitor.get_best_checkpoint(),
+                    self.training_monitor.optimized_metric,
+                    self.training_monitor.get_best_validation_score())
+        return self.training_monitor.get_best_validation_score()
 
     def _fit(self,
              train_iter: sockeye.data_io.ParallelBucketSentenceIter,
              val_iter: sockeye.data_io.ParallelBucketSentenceIter,
              output_folder: str,
-             training_monitor: sockeye.callback.TrainingMonitor,
              metrics: List[AnyStr],
              max_updates: int,
              checkpoint_frequency: int,
              max_num_not_improved: int):
         """
         Internal fit method. Runtime determined by early stopping.
-        
+
         :param train_iter: Training data iterator.
         :param val_iter: Validation data iterator.
         :param output_folder: Model output folder.
@@ -223,16 +238,25 @@ class TrainingModel(sockeye.model.SockeyeModel):
         """
         metric_train = self._create_eval_metric(metrics)
         metric_val = self._create_eval_metric(metrics)
-        num_not_improved = 0
         tic = time.time()
-        epoch = 0
-        checkpoint = 0
-        updates = 0
-        samples = 0
+
+        training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
+        if os.path.exists(training_state_dir):
+            training_state = self.load_checkpoint(training_state_dir, train_iter)
+        else:
+            training_state = _TrainingState(
+                num_not_improved = 0,
+                epoch = 0,
+                checkpoint = 0,
+                updates = 0,
+                samples = 0
+            )
+
         next_data_batch = train_iter.next()
-        while max_updates == -1 or updates < max_updates:
+
+        while max_updates == -1 or training_state.updates < max_updates:
             if not train_iter.iter_next():
-                epoch += 1
+                training_state.epoch += 1
                 train_iter.reset()
 
             # process batch
@@ -246,26 +270,26 @@ class TrainingModel(sockeye.model.SockeyeModel):
                 self.module.prepare(next_data_batch)
 
             self.module.update_metric(metric_train, batch.label)
-            training_monitor.batch_end_callback(epoch, updates, metric_train)
-            updates += 1
-            samples += train_iter.batch_size
+            self.training_monitor.batch_end_callback(training_state.epoch, training_state.updates, metric_train)
+            training_state.updates += 1
+            training_state.samples += train_iter.batch_size
 
-            if updates > 0 and updates % checkpoint_frequency == 0:
-                checkpoint += 1
-                self._checkpoint(checkpoint, output_folder)
-                training_monitor.checkpoint_callback(checkpoint, metric_train)
+            if training_state.updates > 0 and training_state.updates % checkpoint_frequency == 0:
+                training_state.checkpoint += 1
+                self._save_params(output_folder, training_state.checkpoint)
+                self.training_monitor.checkpoint_callback(training_state.checkpoint, metric_train)
 
                 toc = time.time()
                 logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f",
-                            checkpoint, updates, epoch, samples, (toc - tic))
+                            training_state.checkpoint, training_state.updates, training_state.epoch, training_state.samples, (toc - tic))
                 tic = time.time()
 
                 for name, val in metric_train.get_name_value():
-                    logger.info('Checkpoint [%d]\tTrain-%s=%f', checkpoint, name, val)
+                    logger.info('Checkpoint [%d]\tTrain-%s=%f', training_state.checkpoint, name, val)
                 metric_train.reset()
 
                 # evaluation on validation set
-                has_improved, best_checkpoint = self._evaluate(checkpoint, val_iter, metric_val, training_monitor)
+                has_improved, best_checkpoint = self._evaluate(training_state, val_iter, metric_val)
                 if self.lr_scheduler is not None:
                     self.lr_scheduler.new_evaluation_result(has_improved)
 
@@ -275,16 +299,31 @@ class TrainingModel(sockeye.model.SockeyeModel):
                         os.remove(best_path)
                     actual_best_fname = C.PARAMS_NAME % best_checkpoint
                     os.symlink(actual_best_fname, best_path)
-                    num_not_improved = 0
+                    training_state.num_not_improved = 0
                 else:
-                    num_not_improved += 1
+                    training_state.num_not_improved += 1
 
-                if num_not_improved == max_num_not_improved:
-                    logger.info("Model has not improved for %d checkpoints. Stopping fit.", num_not_improved)
-                    training_monitor.stop_fit_callback()
+                if training_state.num_not_improved == max_num_not_improved:
+                    logger.info("Model has not improved for %d checkpoints. Stopping fit.", training_state.num_not_improved)
+                    self.training_monitor.stop_fit_callback()
+                    final_training_state_dirname = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
+                    if os.path.exists(final_training_state_dirname):
+                        shutil.rmtree(final_training_state_dirname)
                     break
+                else:
+                    self._checkpoint(training_state, output_folder, train_iter)
 
-    def _evaluate(self, checkpoint, val_iter, val_metric, training_monitor):
+    def _save_params(self, output_folder: str, checkpoint: int):
+        """
+        sync aux params across devices
+        """
+        arg_params, aux_params = self.module.get_params()
+        self.module.set_params(arg_params, aux_params)
+        self.params = arg_params
+        params_base_fname = C.PARAMS_NAME % checkpoint
+        self.save_params_to_file(os.path.join(output_folder, params_base_fname))
+
+    def _evaluate(self, training_state, val_iter, val_metric):
         """
         Computes val_metric on val_iter. Returns whether model improved or not.
         """
@@ -296,16 +335,101 @@ class TrainingModel(sockeye.model.SockeyeModel):
             self.module.update_metric(val_metric, eval_batch.label)
 
         for name, val in val_metric.get_name_value():
-            logger.info('Checkpoint [%d]\tValidation-%s=%f', checkpoint, name, val)
+            logger.info('Checkpoint [%d]\tValidation-%s=%f', training_state.checkpoint, name, val)
 
-        return training_monitor.eval_end_callback(checkpoint, val_metric)
+        return self.training_monitor.eval_end_callback(training_state.checkpoint, val_metric)
 
-    def _checkpoint(self, checkpoint, output_folder):
+    def _checkpoint(self, training_state: _TrainingState, output_folder: str, train_iter: sockeye.data_io.ParallelBucketSentenceIter):
         """
         Saves checkpoint.
         """
-        # sync aux params across devices
-        arg_params, aux_params = self.module.get_params()
-        self.module.set_params(arg_params, aux_params)
-        self.params = arg_params
-        self.save_params_to_file(os.path.join(output_folder, C.PARAMS_NAME % checkpoint))
+        # Create temporary directory for storing the state of the optimization process
+        training_state_dirname = os.path.join(output_folder, C.TRAINING_STATE_TEMP_DIRNAME)
+        if not os.path.exists(training_state_dirname):
+            os.mkdir(training_state_dirname)
+        # Link current parameter file
+        params_base_fname = C.PARAMS_NAME % training_state.checkpoint
+        os.symlink(os.path.join("..", params_base_fname), os.path.join(training_state_dirname, C.TRAINING_STATE_PARAMS_NAME))
+
+        # Optimizer state (from mxnet)
+        opt_state_fname = os.path.join(training_state_dirname, C.MODULE_OPT_STATE_NAME)
+        if self.bucketing:
+            # This is a bit hacky, as BucketingModule does not provide a
+            # save_optimizer_states call. We take the current active module and
+            # save its state. This should work, as the individual modules in
+            # BucketingModule share the same optimizer through
+            # borrow_optimizer.
+            self.module._curr_module.save_optimizer_states(opt_state_fname)
+        else:
+            self.module.save_optimizer_states(opt_state_fname)
+
+        # State of the bucket iterator
+        train_iter.save_state(os.path.join(training_state_dirname, C.BUCKET_ITER_STATE_NAME))
+
+        # RNG states: python's random and np.random provide functions for
+        # storing the state, mxnet does not, but inside our code mxnet's RNG is
+        # not used AFAIK
+        with open(os.path.join(training_state_dirname, C.RNG_STATE_NAME), "wb") as fp:
+            pickle.dump(random.getstate(), fp)
+            pickle.dump(np.random.get_state(), fp) # Yes, one uses _, the other does not
+
+        # Monitor state, in order to get the full information about the metrics
+        self.training_monitor.save_state(os.path.join(training_state_dirname, C.MONITOR_STATE_NAME))
+
+        # Our own state
+        self.save_state(training_state, os.path.join(training_state_dirname, C.TRAINING_STATE_NAME))
+
+        # The lr scheduler
+        with open(os.path.join(training_state_dirname, C.SCHEDULER_STATE_NAME), "wb") as fp:
+            pickle.dump(self.lr_scheduler, fp)
+
+        # We are now finished with writing. Rename the temporary directory to
+        # the actual directory
+        final_training_state_dirname = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
+
+        # First we rename the existing directory to minimize the risk of state
+        # loss if the process is aborted during deletion (which will be slower
+        # than directory renaming)
+        delete_training_state_dirname = os.path.join(output_folder, C.TRAINING_STATE_TEMP_DELETENAME)
+        if os.path.exists(final_training_state_dirname):
+            os.rename(final_training_state_dirname, delete_training_state_dirname)
+        os.rename(training_state_dirname, final_training_state_dirname)
+        if os.path.exists(delete_training_state_dirname):
+            shutil.rmtree(delete_training_state_dirname)
+
+    def save_state(self, training_state: _TrainingState, fname: str):
+        with open(fname, "wb") as fp:
+            pickle.dump(training_state, fp)
+
+    def load_state(self, fname):
+        training_state = None
+        with open(fname, "rb") as fp:
+            training_state = pickle.load(fp)
+        return training_state
+
+    def load_checkpoint(self, directory: str, train_iter: sockeye.data_io.ParallelBucketSentenceIter):
+        # Note that params should have been taken care of by the initializer
+
+        # Optimzer state (from mxnet)
+        opt_state_fname = os.path.join(directory, C.MODULE_OPT_STATE_NAME)
+        if self.bucketing:
+            # Same hacky solution as for saving the state
+            self.module._curr_module.load_optimizer_states(opt_state_fname)
+        else:
+            self.module.load_optimizer_states(opt_state_fname)
+
+        # State of the bucket iterator
+        train_iter.load_state(os.path.join(directory, C.BUCKET_ITER_STATE_NAME))
+
+        # RNG states: python's random and np.random provide functions for
+        # storing the state, mxnet does not, but inside our code mxnet's RNG is
+        # not used AFAIK
+        with open(os.path.join(directory, C.RNG_STATE_NAME), "rb") as fp:
+            random.setstate(pickle.load(fp))
+            np.random.set_state(pickle.load(fp))
+
+        # Monitor state, in order to get the full information about the metrics
+        self.training_monitor.load_state(os.path.join(directory, C.MONITOR_STATE_NAME))
+
+        # And our own state
+        return self.load_state(os.path.join(directory, C.TRAINING_STATE_NAME))

@@ -320,6 +320,7 @@ def add_training_args(params):
                               type=int,
                               default=13,
                               help='Random seed. Default: %(default)s.')
+
     return params
 
 

@@ -16,6 +16,7 @@ Simple Training CLI.
 """
 import argparse
 import os
+import pickle
 import random
 import sys
 from contextlib import ExitStack
@@ -136,11 +137,18 @@ def main():
 
         # learning rate scheduling
         learning_rate_half_life = none_if_negative(args.learning_rate_half_life)
-        lr_scheduler = sockeye.lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
-                                                             args.checkpoint_frequency,
-                                                             learning_rate_half_life,
-                                                             args.learning_rate_reduce_factor,
-                                                             args.learning_rate_reduce_num_not_improved)
+        # TODO: The loading for continuation of the scheduler is done separately from the other parts
+        training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
+        resume_training = os.path.exists(training_state_dir)
+        if not resume_training:
+            lr_scheduler = sockeye.lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
+                                                                 args.checkpoint_frequency,
+                                                                 learning_rate_half_life,
+                                                                 args.learning_rate_reduce_factor,
+                                                                 args.learning_rate_reduce_num_not_improved)
+        else:
+            with open(os.path.join(training_state_dir, C.SCHEDULER_STATE_NAME), "rb") as fp:
+                lr_scheduler = pickle.load(fp)
 
         # model configuration
         num_embed_source = args.num_embed if args.num_embed_source is None else args.num_embed_source
@@ -179,9 +187,14 @@ def main():
                                                lr_scheduler=lr_scheduler,
                                                rnn_forget_bias=args.rnn_forget_bias)
 
-        if args.params:
+        # We may consider loading the params in TrainingModule, for consistency
+        # with the training state saving
+        if resume_training:
+            logger.info("Found partial training in directory %s. Resuming from saved state.", training_state_dir)
+            model.load_params_from_file(os.path.join(training_state_dir, C.TRAINING_STATE_PARAMS_NAME))
+        elif args.params:
+            logger.info("Training will initialize from parameters loaded from '%s'", args.params)
             model.load_params_from_file(args.params)
-            logger.info("Training will continue from parameters loaded from '%s'", args.params)
 
         lexicon = sockeye.lexicon.initialize_lexicon(args.lexical_bias,
                                                      vocab_source, vocab_target) if args.lexical_bias else None
