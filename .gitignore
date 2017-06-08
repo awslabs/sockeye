@@ -1,0 +1,17 @@
+*.pyc
+*.pyo
+*.class
+*~
+*#
+/docs/generated/*
+/docs/_build
+/runpy
+/build
+.coverage*
+.idea**
+.history**
+.cache**
+.eggs**
+*.egg**
+.*.swp
+.mypy_cache
