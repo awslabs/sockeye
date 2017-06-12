@@ -1,6 +1,6 @@
 # Sockeye
 
-[![Documentation Status](https://readthedocs.org/projects/sockeye/badge/?version=latest)](http://sockeye.readthedocs.io/en/latest/?badge=latest)
+[![Documentation Status](https://readthedocs.org/projects/sockeye/badge/?version=master)](http://sockeye.readthedocs.io/en/latest/?badge=master)
 
 This package contains the Sockeye project,
 a sequence-to-sequence framework for Neural Machine Translation based on MXNet.
