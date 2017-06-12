@@ -17,10 +17,9 @@ def get_version():
     return VERSION_RE.search(init).group(1)
 
 
-def get_requirements():
-    with open(os.path.join(ROOT, 'requirements.txt')) as f:
+def get_requirements(filename):
+    with open(os.path.join(ROOT, filename)) as f:
         return [line.rstrip() for line in f]
-
 
 try:
     from sphinx.setup_command import BuildDoc
@@ -52,15 +51,10 @@ args = dict(
 
     extras_require={
         'optional': ['tensorboard'],
-        'dev': [
-            'sphinx>=1.4',
-            'sphinx_rtd_theme',
-            'sphinx-autodoc-typehints',
-            'recommonmark'
-        ]
+        'dev': get_requirements('requirements.dev.txt')
     },
 
-    install_requires=get_requirements(),
+    install_requires=get_requirements('requirements.txt'),
 
     entry_points={
         'console_scripts': [
