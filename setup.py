@@ -8,7 +8,15 @@ ROOT = os.path.dirname(__file__)
 
 def get_long_description():
     with open(os.path.join(ROOT, 'README.md'), encoding='utf-8') as f:
-        return f.read()
+        markdown_txt = f.read()
+    try:
+        import pypandoc
+        long_description = pypandoc.convert(markdown_txt, 'rst', format='md')
+        print(long_description)
+    except(IOError, ImportError):
+        logging.warning("Could not import package 'pypandoc'. Will not convert markdown readme to rst for PyPI.")
+        long_description = markdown_txt
+    return long_description
 
 
 def get_version():
@@ -43,6 +51,8 @@ args = dict(
     maintainer_email='sockeye-dev@amazon.com',
 
     license='Apache License 2.0',
+    
+    python_requires='>=3',
 
     packages=find_packages(exclude=("test",)),
 
