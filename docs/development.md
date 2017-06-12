@@ -70,3 +70,27 @@ They can be run like this:
 ```bash
 > python setup.py test
 ```
+
+## Submitting a new version to PyPI
+
+Before starting make sure you have the [TestPyPI](https://wiki.python.org/moin/TestPyPI) and PyPI accounts and the 
+corresponding `~/.pypirc` set up.
+
+1. Build source distribution:
+   ``` bash
+   > python setup.py sdist
+   ```
+1. Upload to PyPITest: 
+   ```bash
+   > twine upload dist/sockeye-${VERSION}.tar.gz -r pypitest
+   ```
+1. In a new python environment check that the package is installable
+   ```bash
+   > pip install -i https://testpypi.python.org/pypi sockeye
+   ```
+1. Upload to PyPI
+   ```bash
+   > twine upload dist/sockeye-${VERSION}.tar.gz
+   ```
+
+ 
