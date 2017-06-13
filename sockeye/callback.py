@@ -63,7 +63,7 @@ class TrainingMonitor(object):
         self.start_tic = time.time()
         self.summary_writer = None
         if use_tensorboard:
-            import tensorboard
+            import tensorboard  # pylint: disable=import-error
             log_dir = os.path.join(output_folder, C.TENSORBOARD_NAME)
             if os.path.exists(log_dir):
                 logger.info("Deleting existing tensorboard log dir %s", log_dir)
