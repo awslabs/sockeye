@@ -80,6 +80,7 @@ SYMBOL_NAME = "symbol" + JSON_SUFFIX
 METRICS_NAME = "metrics"
 TENSORBOARD_NAME = "tensorboard"
 
+# training resumption constants
 TRAINING_STATE_DIRNAME= "training_state"
 TRAINING_STATE_TEMP_DIRNAME = "tmp.training_state"
 TRAINING_STATE_TEMP_DELETENAME = "delete.training_state"

@@ -439,8 +439,8 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         Appends the actual data, selected by the given indices, to the NDArrays
         of the appropriate bucket. Use when reshuffling the data.
 
-        :param bucket: Current bucket
-        :param shuffled_indices: Indices indicating which data to select
+        :param bucket: Current bucket.
+        :param shuffled_indices: Indices indicating which data to select.
         """
         self.nd_source.append(mx.nd.array(self.data_source[bucket].take(shuffled_indices, axis=0), dtype=self.dtype))
         self.nd_length.append(mx.nd.array(self.data_length[bucket].take(shuffled_indices, axis=0), dtype=self.dtype))

@@ -14,7 +14,6 @@
 """
 Code for training
 """
-from collections import namedtuple
 import logging
 import os
 import pickle
@@ -39,12 +38,16 @@ import sockeye.utils
 logger = logging.getLogger(__name__)
 
 class _TrainingState:
+    """
+    Stores the state of the training process. These are the variables that will
+    be stored to disk when resuming training.
+    """
     def __init__(self,
-                 num_not_improved = 0,
-                 epoch = 0,
-                 checkpoint = 0,
-                 updates = 0,
-                 samples = 0):
+                 num_not_improved,
+                 epoch,
+                 checkpoint,
+                 updates,
+                 samples):
         self.num_not_improved = num_not_improved
         self.epoch = epoch
         self.checkpoint = checkpoint
@@ -82,6 +85,7 @@ class TrainingModel(sockeye.model.SockeyeModel):
         self.bucketing = bucketing
         self._build_model_components(self.config.max_seq_len, fused, rnn_forget_bias)
         self.module = self._build_module(train_iter, self.config.max_seq_len)
+        self.training_monitor = None
 
     def _build_module(self,
                       train_iter: sockeye.data_io.ParallelBucketSentenceIter,
@@ -315,9 +319,9 @@ class TrainingModel(sockeye.model.SockeyeModel):
 
     def _save_params(self, output_folder: str, checkpoint: int):
         """
-        sync aux params across devices
+        Save the parameters to disk.
         """
-        arg_params, aux_params = self.module.get_params()
+        arg_params, aux_params = self.module.get_params() # sync aux params across devices
         self.module.set_params(arg_params, aux_params)
         self.params = arg_params
         params_base_fname = C.PARAMS_NAME % checkpoint
@@ -341,7 +345,7 @@ class TrainingModel(sockeye.model.SockeyeModel):
 
     def _checkpoint(self, training_state: _TrainingState, output_folder: str, train_iter: sockeye.data_io.ParallelBucketSentenceIter):
         """
-        Saves checkpoint.
+        Saves checkpoint. Note that the parameters are saved in _save_params.
         """
         # Create temporary directory for storing the state of the optimization process
         training_state_dirname = os.path.join(output_folder, C.TRAINING_STATE_TEMP_DIRNAME)
@@ -398,17 +402,30 @@ class TrainingModel(sockeye.model.SockeyeModel):
             shutil.rmtree(delete_training_state_dirname)
 
     def save_state(self, training_state: _TrainingState, fname: str):
+        """
+        Saves the state (of the TrainingModel class) to disk
+        """
         with open(fname, "wb") as fp:
             pickle.dump(training_state, fp)
 
-    def load_state(self, fname):
+    def load_state(self, fname: str) -> _TrainingState:
+        """
+        Loads the training state (of the TrainingModel class) from disk
+        """
         training_state = None
         with open(fname, "rb") as fp:
             training_state = pickle.load(fp)
         return training_state
 
-    def load_checkpoint(self, directory: str, train_iter: sockeye.data_io.ParallelBucketSentenceIter):
-        # Note that params should have been taken care of by the initializer
+    def load_checkpoint(self, directory: str, train_iter: sockeye.data_io.ParallelBucketSentenceIter) -> _TrainingState:
+        """
+        Loads the full training state from disk. This includes optimizer,
+        random number generators and everything needed.  Note that params
+        should have been loaded already by the initializer.
+
+        :param directory: directory where the state has been saved.
+        :param train_iter: training data iterator.
+        """
 
         # Optimzer state (from mxnet)
         opt_state_fname = os.path.join(directory, C.MODULE_OPT_STATE_NAME)

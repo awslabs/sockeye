@@ -5,27 +5,20 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
 from math import isclose
-import mxnet as mx
-import random
 import tempfile
+from test.test_utils import generate_random_sentence
 
 import sockeye.data_io
+import mxnet as mx
 
-def generate_random_sentence(vocab_size, max_len):
-    length = random.randint(1, max_len)
-    sentence = []
-    for _ in range(length):
-        sentence.append(random.randint(3, vocab_size + 2))
-    return sentence
-
-def create_ParallelBucketSentenceIter(source_sentences, target_sentences, max_len):
+def create_parallel_sentence_iter(source_sentences, target_sentences, max_len):
     buckets = sockeye.data_io.define_parallel_buckets(max_len, 10)
     batch_size = 50
     eos = 0
@@ -47,7 +40,7 @@ def data_batches_equal(db1, db2):
                 and isclose(mx.nd.prod(data1.reshape((-1,)) == data2.reshape((-1,))).asnumpy()[0], 1.0)
     return equal
 
-def test_ParallelBucketSentenceIter():
+def test_parallel_sentence_iter():
     # Create random sentences
     vocab_size = 100
     max_len = 100
@@ -57,7 +50,7 @@ def test_ParallelBucketSentenceIter():
         source_sentences.append(generate_random_sentence(vocab_size, max_len))
         target_sentences.append(generate_random_sentence(vocab_size, max_len))
 
-    ori_iterator = create_ParallelBucketSentenceIter(source_sentences, target_sentences, max_len)
+    ori_iterator = create_parallel_sentence_iter(source_sentences, target_sentences, max_len)
     ori_iterator.reset() # Random order
     # Simulate some iterations
     ori_iterator.next()
@@ -72,12 +65,10 @@ def test_ParallelBucketSentenceIter():
     ori_iterator.save_state(tmp_file.name)
 
     # Load the state in a new iterator
-    load_iterator = create_ParallelBucketSentenceIter(source_sentences, target_sentences, max_len)
+    load_iterator = create_parallel_sentence_iter(source_sentences, target_sentences, max_len)
     load_iterator.reset() # Random order
     load_iterator.load_state(tmp_file.name)
 
     # Compare the outputs
     loaded_output = load_iterator.next()
     assert data_batches_equal(expected_output, loaded_output)
-
-

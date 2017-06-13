@@ -244,17 +244,21 @@ class TrainingMonitor(object):
         self._empty_decoder_metric_queue()
         self._write_scores()
 
-    def save_state(self, fname):
+    def save_state(self, fname: str):
         """
-        Save the state: current metrics and best checkpoint
+        Saves the state: current metrics and best checkpoint.
+
+        :param fname: Name of the file to save the state to.
         """
         with open(fname, "wb") as fp:
             pickle.dump(self.metrics, fp)
             pickle.dump(self.best_checkpoint, fp)
 
-    def load_state(self, fname):
+    def load_state(self, fname: str):
         """
-        Load the state: current metrics and best checkpoint
+        Loads the state: current metrics and best checkpoint.
+
+        :param fname: Name of the file to load the state from.
         """
         with open(fname, "rb") as fp:
             self.metrics = pickle.load(fp)
