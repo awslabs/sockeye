@@ -75,7 +75,7 @@ def generate_random_sentence(vocab_size, max_len):
     :param vocab_size: Number of words in the "vocabulary". Note that due to
                        the inclusion of special words (BOS, EOS, UNK) this does *not*
                        correspond to the maximum possible value.
-    :param max_len: maximum sentence lenght
+    :param max_len: maximum sentence length.
     """
     length = random.randint(1, max_len)
     # Due to the special words, the actual words start at index 3 and go up to vocab_size+2

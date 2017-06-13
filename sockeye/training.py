@@ -319,9 +319,9 @@ class TrainingModel(sockeye.model.SockeyeModel):
 
     def _save_params(self, output_folder: str, checkpoint: int):
         """
-        Save the parameters to disk.
+        Saves the parameters to disk.
         """
-        arg_params, aux_params = self.module.get_params() # sync aux params across devices
+        arg_params, aux_params = self.module.get_params()  # sync aux params across devices
         self.module.set_params(arg_params, aux_params)
         self.params = arg_params
         params_base_fname = C.PARAMS_NAME % checkpoint
@@ -403,14 +403,18 @@ class TrainingModel(sockeye.model.SockeyeModel):
 
     def save_state(self, training_state: _TrainingState, fname: str):
         """
-        Saves the state (of the TrainingModel class) to disk
+        Saves the state (of the TrainingModel class) to disk.
+
+        :param fname: file name to save the state to.
         """
         with open(fname, "wb") as fp:
             pickle.dump(training_state, fp)
 
     def load_state(self, fname: str) -> _TrainingState:
         """
-        Loads the training state (of the TrainingModel class) from disk
+        Loads the training state (of the TrainingModel class) from disk.
+
+        :param fname: file name to load the state from.
         """
         training_state = None
         with open(fname, "rb") as fp:
