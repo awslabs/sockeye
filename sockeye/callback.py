@@ -265,7 +265,7 @@ def write_tensorboard(summary_writer,
     :param metrics: Mapping of metric names to their values.
     :param checkpoint: Current checkpoint.
     """
-    from tensorboard.summary import scalar
+    from tensorboard.summary import scalar  # pylint: disable=import-error
     for name, value in metrics.items():
         summary_writer.add_summary(
             scalar(
