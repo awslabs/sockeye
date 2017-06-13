@@ -14,9 +14,11 @@ python:
 install:
   - pip install -r requirements.txt
   - pip install pylint
+  - pip install mypy
 
 script:
   - python3 setup.py test
-  - pyline --version
+  - pylint --version
   - pylint --rcfile=sockeye.pylintrc sockeye -E
   - pylint --rcfile=sockeye.pylintrc test -E
+  - mypy --ignore-missing-imports @typechecked-files
