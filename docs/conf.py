@@ -20,9 +20,31 @@
 import os
 import re
 import sys
+from unittest.mock import MagicMock
 sys.path.insert(0, os.path.abspath('..'))
 
+
+class MockClass(MagicMock):
+
+    def __init__(self, name, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.name = name
+
+    def __repr__(self):
+        return ":class:`~%s`" % self.name
+
+
+class MockModule(MagicMock):
+    @classmethod
+    def __getattr__(cls, name):
+        return MockClass(name)
+
+MOCK_MODULES = ['mxnet', 'numpy']
+sys.modules.update((mod_name, MockModule()) for mod_name in MOCK_MODULES)
+
+
 ROOT = os.path.dirname(__file__)
+
 
 def get_version():
     VERSION_RE = re.compile(r'''__version__ = ['"]([0-9.]+)['"]''')
