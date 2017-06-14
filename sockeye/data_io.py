@@ -352,7 +352,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
             tokens_source += len(source)
             tokens_target += len(target)
             num_of_unks_source += source.count(self.unk_id)
-            num_of_unks_source += target.count(self.unk_id)
+            num_of_unks_target += target.count(self.unk_id)
 
             buck_idx, buck = self._get_bucket(self.buckets, len(source), len(target))
             if buck is None:
