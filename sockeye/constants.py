@@ -93,6 +93,9 @@ SCHEDULER_STATE_NAME = "scheduler.pkl"
 TRAINING_STATE_PARAMS_NAME = "params"
 ARGS_STATE_NAME = "args.json"
 
+# Arguments that may differ and still resume training
+ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet", "align_plot_prefix", "sure_align_threshold"]
+
 # data layout strings
 BATCH_MAJOR = "NTC"
 TIME_MAJOR = "TNC"

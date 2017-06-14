@@ -88,11 +88,14 @@ def main():
         "Must optimize either BLEU or one of tracked metrics (--metrics)"
 
     # Checking status of output folder, resumption, etc.
+    # Create temporary logger to console only
+    logger = setup_main_logger(__name__, console=not args.quiet)
     output_folder = os.path.abspath(args.output)
     resume_training = False
     training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
     if os.path.exists(output_folder):
         if args.overwrite_output:
+            logger.info("Removing existing output folder %s.", output_folder)
             shutil.rmtree(output_folder)
             os.makedirs(output_folder)
         elif os.path.exists(training_state_dir):
@@ -100,18 +103,16 @@ def main():
                 old_args = json.load(fp)
             arg_diffs = _dict_difference(vars(args), old_args) | _dict_difference(old_args, vars(args))
             # Remove args that may differ without affecting the training.
-            # TODO: should we include device-ids and use-cpu?
-            # Are there more?
-            arg_diffs -= set(["overwrite_output", "use-tensorboard", "quiet", "align_plot_prefix", "sure_align_threshold"])
+            arg_diffs -= set(C.ARGS_MAY_DIFFER)
             if not arg_diffs:
                 resume_training = True
             else:
                 # We do not have the logger yet
-                sys.stderr.write("ERROR: Mismatch in arguments for training continuation.\n")
-                sys.stderr.write("ERROR: Differing arguments: %s\n" % ", ".join(arg_diffs))
+                logger.error("Mismatch in arguments for training continuation.")
+                logger.error("Differing arguments: %s.", ", ".join(arg_diffs))
                 sys.exit(1)
         else:
-            sys.stderr.write("ERROR: Refusing to overwrite existing output directory.\n")
+            logger.error("Refusing to overwrite existing output folder %s.", output_folder)
             sys.exit(1)
     else:
         os.makedirs(output_folder)
