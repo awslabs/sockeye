@@ -57,6 +57,9 @@ def add_io_args(params):
     data_params.add_argument('--output', '-o',
                              required=True,
                              help='Folder where model & training results are written to.')
+    data_params.add_argument('--overwrite-output',
+                             action='store_true',
+                             help='Overwrite output folder if it exists')
 
     data_params.add_argument('--source-vocab',
                              required=False,

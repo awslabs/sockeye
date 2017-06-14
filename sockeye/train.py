@@ -15,9 +15,11 @@
 Simple Training CLI.
 """
 import argparse
+import json
 import os
 import pickle
 import random
+import shutil
 import sys
 from contextlib import ExitStack
 from typing import Optional, Dict
@@ -56,6 +58,12 @@ def _build_or_load_vocab(existing_vocab_path: Optional[str], data_path: str, num
         vocabulary = sockeye.vocab.vocab_from_json(existing_vocab_path)
     return vocabulary
 
+def _dict_difference(dict1: Dict, dict2: Dict):
+    diffs = set()
+    for k, v in dict1.items():
+        if k not in dict2 or dict2[k] != v:
+            diffs.add(k)
+    return diffs
 
 def main():
     params = argparse.ArgumentParser(description='CLI to train sockeye sequence-to-sequence models.')
@@ -79,14 +87,41 @@ def main():
     assert args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics, \
         "Must optimize either BLEU or one of tracked metrics (--metrics)"
 
+    # Checking status of output folder, resumption, etc.
     output_folder = os.path.abspath(args.output)
-    if not os.path.exists(output_folder):
+    resume_training = False
+    training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
+    if os.path.exists(output_folder):
+        if args.overwrite_output:
+            shutil.rmtree(output_folder)
+            os.makedirs(output_folder)
+        elif os.path.exists(training_state_dir):
+            with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "r") as fp:
+                old_args = json.load(fp)
+            arg_diffs = _dict_difference(vars(args), old_args) | _dict_difference(old_args, vars(args))
+            # Remove args that may differ without affecting the training.
+            # TODO: should we include device-ids and use-cpu?
+            # Are there more?
+            arg_diffs -= set(["overwrite_output", "use-tensorboard", "quiet", "align_plot_prefix", "sure_align_threshold"])
+            if not arg_diffs:
+                resume_training = True
+            else:
+                # We do not have the logger yet
+                sys.stderr.write("ERROR: Mismatch in arguments for training continuation.\n")
+                sys.stderr.write("ERROR: Differing arguments: %s\n" % ", ".join(arg_diffs))
+                sys.exit(1)
+        else:
+            sys.stderr.write("ERROR: Refusing to overwrite existing output directory.\n")
+            sys.exit(1)
+    else:
         os.makedirs(output_folder)
 
     logger = setup_main_logger(__name__, console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
 
     logger.info("Command: %s", " ".join(sys.argv))
     logger.info("Arguments: %s", args)
+    with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "w") as fp:
+        json.dump(vars(args), fp)
 
     with ExitStack() as exit_stack:
         # context
@@ -138,8 +173,6 @@ def main():
         # learning rate scheduling
         learning_rate_half_life = none_if_negative(args.learning_rate_half_life)
         # TODO: The loading for continuation of the scheduler is done separately from the other parts
-        training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
-        resume_training = os.path.exists(training_state_dir)
         if not resume_training:
             lr_scheduler = sockeye.lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
                                                                  args.checkpoint_frequency,

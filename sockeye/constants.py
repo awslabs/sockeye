@@ -91,6 +91,7 @@ MONITOR_STATE_NAME = "monitor.pkl"
 TRAINING_STATE_NAME = "training.pkl"
 SCHEDULER_STATE_NAME = "scheduler.pkl"
 TRAINING_STATE_PARAMS_NAME = "params"
+ARGS_STATE_NAME = "args.json"
 
 # data layout strings
 BATCH_MAJOR = "NTC"
