@@ -26,7 +26,7 @@ import sockeye.data_io
 import sockeye.inference
 import sockeye.output_handler
 from sockeye.log import setup_main_logger
-from sockeye.utils import acquire_gpu, get_num_gpus
+from sockeye.utils import acquire_gpus, get_num_gpus
 
 
 def main():
@@ -62,7 +62,8 @@ def main():
             gpu_id = args.device_ids[0]
             if gpu_id < 0:
                 # get a gpu id automatically:
-                gpu_id = exit_stack.enter_context(acquire_gpu())
+                gpu_ids = exit_stack.enter_context(acquire_gpus(1))
+                gpu_id = gpu_ids[0]
             context = mx.gpu(gpu_id)
 
         translator = sockeye.inference.Translator(context,

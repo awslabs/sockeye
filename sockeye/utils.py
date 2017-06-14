@@ -23,7 +23,8 @@ import shutil
 import subprocess
 import sys
 import time
-from contextlib import contextmanager
+import random
+from contextlib import contextmanager, ExitStack
 from typing import Mapping, NamedTuple, Any, List, Iterator, Tuple, Dict, Optional
 
 import mxnet as mx
@@ -271,49 +272,99 @@ def get_num_gpus() -> int:
 
 
 @contextmanager
-def acquire_gpu(lock_dir: str = "/var/lock", retry_wait: int = 10):
+def acquire_gpus(num_gpus:int, lock_dir: str = "/tmp", retry_wait_min: int = 30, retry_wait_rand: int = 30):
     """
-    Acquires a GPU by locking a file (therefore this assumes that everyone using GPUs calls this method and shares the
-    lock directory).
+    Acquire a number of GPUs in a transactional way. Will try to acquire all the requested number of GPUs. If currently
+    not enough GPUs are available all locks will be released and we wait until we retry. Will retry until enough
+    GPUs become available.
+
+    :param num_gpus: The number of GPUs to acquire.
+    :param lock_dir: The directory for storing the lock file.
+    :param retry_wait_min: The minimum number of seconds to wait between retries.
+    :param retry_wait_rand: Randomly add between 0 and `retry_wait_rand` seconds to the wait time.
+    :return: yields a list of GPU ids.
+    """
+    num_gpus_available = get_num_gpus()
+
+    if num_gpus > num_gpus_available:
+        raise ValueError("Requested %d GPUs, but only %d are available." % (num_gpus, num_gpus_available))
+
+    logger.info("Attempting to acquire %d GPUs of %d GPUs.", num_gpus, num_gpus_available)
+
+    while True:
+        with ExitStack() as exit_stack:
+            acquired_gpus = []
+            for _ in range(num_gpus):
+                gpu_id = exit_stack.enter_context(_acquire_single_gpu(lock_dir))
+                if gpu_id is not None:
+                    acquired_gpus.append(gpu_id)
+                else:
+                    break
+            if len(acquired_gpus) == num_gpus:
+                try:
+                    yield acquired_gpus
+                finally:
+                    return
+        # couldn't acquire all GPUs, let's wait and try again later
+
+        # randomize so that multiple processes starting at the same time don't retry at a similar point in time
+        if retry_wait_rand > 0:
+            retry_wait_actual = retry_wait_min + random.randint(0, retry_wait_rand)
+        else:
+            retry_wait_actual = retry_wait_min
+        logger.info("Not enough GPUs available will try again in %ss." % retry_wait_actual)
+        time.sleep(retry_wait_actual)
+
+
+@contextmanager
+def _acquire_single_gpu(lock_dir: str = "/var/lock"):
+    """
+    Acquires a single GPU by locking a file (therefore this assumes that everyone using GPUs calls this method and
+    shares the lock directory).
 
     :param lock_dir: The directory for storing the lock file.
     :param retry_wait: The number of seconds to wait between retries.
+    :return: yields a single GPU id or None if none is available.
     """
     num_gpus = get_num_gpus()
+    if num_gpus == 0:
+        raise RuntimeError("Can not acquire GPU, as no GPUs were found on this machine.")
 
-    logger.info("Trying to acquire one of %d available GPUs.", num_gpus)
+    if not os.path.exists(lock_dir):
+        raise IOError("Lock directory %s does not exist." % lock_dir)
+
+    if not os.access(lock_dir, os.W_OK):
+        raise IOError("Lock directory %s is not writeable." % lock_dir)
 
     # try to acquire a GPU lock
-    while True:
-        for gpu_id in range(num_gpus):
-            # try to acquire a lock
-            lockfile_path = os.path.join(lock_dir, "sockeye.gpu%d.lock" % gpu_id)
-            with open(lockfile_path, 'w') as lock_file:
+    for gpu_id in range(num_gpus):
+        # try to acquire a lock
+        lockfile_path = os.path.join(lock_dir, "sockeye.gpu%d.lock" % gpu_id)
+        with open(lockfile_path, 'w') as lock_file:
+            try:
+                # exclusive non-blocking lock
+                fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                # got the lock, let's write our PID into it:
+                lock_file.write("%d\n" % os.getpid())
+                lock_file.flush()
+                logger.info("Acquired GPU %d." % gpu_id)
+
                 try:
-                    # exclusive non-blocking lock
-                    fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    # got the lock, let's write our PID into it:
-                    lock_file.write("%d\n" % os.getpid())
-                    lock_file.flush()
-                    logger.info("Acquired GPU %d." % gpu_id)
-
                     yield gpu_id
-
+                finally:
                     logger.info("Releasing GPU %d." % gpu_id)
                     # release lock:
                     fcntl.flock(lock_file, fcntl.LOCK_UN)
                     os.remove(lockfile_path)
                     return
-                except IOError as e:
-                    # raise on unrelated IOErrors
-                    if e.errno != errno.EAGAIN:
-                        logger.error("Failed acquiring GPU lock.", exc_info=True)
-                        raise
-                    else:
-                        logger.info("GPU %d is currently locked." % gpu_id,
-                                    exc_info=True)
-        logger.info("No GPU available will try again in %ss." % retry_wait)
-        time.sleep(retry_wait)
+            except IOError as e:
+                # raise on unrelated IOErrors
+                if e.errno != errno.EAGAIN:
+                    logger.error("Failed acquiring GPU lock.", exc_info=True)
+                    raise
+                else:
+                    logger.debug("GPU %d is currently locked." % gpu_id)
+    yield None
 
 
 def namedtuple_with_defaults(typename, field_names, default_values: Mapping[str, Any] = ()) -> NamedTuple:

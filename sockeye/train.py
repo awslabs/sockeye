@@ -41,7 +41,7 @@ import sockeye.training
 import sockeye.utils
 import sockeye.vocab
 from sockeye.log import setup_main_logger
-from sockeye.utils import acquire_gpu, get_num_gpus
+from sockeye.utils import acquire_gpus, get_num_gpus
 
 
 def none_if_negative(val):
@@ -136,15 +136,15 @@ def main():
             assert num_gpus > 0, "No GPUs found, consider running on the CPU with --use-cpu " \
                                  "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi " \
                                  "binary isn't on the path)."
+            auto_n_required = 0
             context = []
             for gpu_id in args.device_ids:
                 if gpu_id < 0:
                     n_required = -gpu_id
-                    logger.info("Attempting to acquire %d GPUs.", n_required)
-                    # get n_required automatic gpu ids and add to context
-                    context += [exit_stack.enter_context(acquire_gpu()) for _ in range(n_required)]
+                    auto_n_required += n_required
                 else:
                     context.append(gpu_id)
+            context.extend(exit_stack.enter_context(acquire_gpus(auto_n_required)))
             logger.info("Device(s): GPU %s", context)
             context = [mx.gpu(gpu_id) for gpu_id in context]
 
