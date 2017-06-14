@@ -48,8 +48,17 @@ BLEU results reported or with results corresponding to older checkpoints. This
 is expected behaviour and sockeye internally keeps track of the results in the
 correct order.
 
-Note that evaluation metrics for training data and held-out validation data are written in a 
-tab-separated file called `metrics`.
+Note that evaluation metrics for training data and held-out validation data are
+written in a tab-separated file called `metrics`.
+
+At each checkpoint, the internal state of the training process is stored to
+disk. If the training is interrupted (e.g. due to a hardware failure), you can
+start sockeye again, with the same parameters as for the initial call, and
+training will resume from the last checkpoint. Note that this is different to
+using the `--params` argument. This argument is used only to initialize the
+training with pre-computed values for the parameters of the model, but the
+parameters of the optimizer and other parts of the system are initialized from
+scratch.
 
 ### Monitoring training progress with tensorboard
 

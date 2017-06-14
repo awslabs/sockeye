@@ -15,6 +15,7 @@ import sockeye.utils
 import numpy as np
 import mxnet as mx
 import numpy as np
+import random
 
 
 def test_get_alignments():
@@ -66,3 +67,16 @@ def uniform_vector(shape, min_value=0, max_value=1, return_symbol=False):
     """
     return mx.sym.random_uniform(low=min_value, high=max_value, shape=shape) if return_symbol \
         else np.random.uniform(low=min_value, high=max_value, size=shape)
+
+def generate_random_sentence(vocab_size, max_len):
+    """
+    Generates a random "sentence" as a list of integers.
+
+    :param vocab_size: Number of words in the "vocabulary". Note that due to
+                       the inclusion of special words (BOS, EOS, UNK) this does *not*
+                       correspond to the maximum possible value.
+    :param max_len: maximum sentence length.
+    """
+    length = random.randint(1, max_len)
+    # Due to the special words, the actual words start at index 3 and go up to vocab_size+2
+    return [random.randint(3, vocab_size + 2) for _ in range(length)]
