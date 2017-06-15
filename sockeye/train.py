@@ -58,12 +58,14 @@ def _build_or_load_vocab(existing_vocab_path: Optional[str], data_path: str, num
         vocabulary = sockeye.vocab.vocab_from_json(existing_vocab_path)
     return vocabulary
 
+
 def _dict_difference(dict1: Dict, dict2: Dict):
     diffs = set()
     for k, v in dict1.items():
         if k not in dict2 or dict2[k] != v:
             diffs.add(k)
     return diffs
+
 
 def main():
     params = argparse.ArgumentParser(description='CLI to train sockeye sequence-to-sequence models.')
@@ -127,6 +129,7 @@ def main():
     with ExitStack() as exit_stack:
         # context
         if args.use_cpu:
+            logger.info("Device: CPU")
             context = [mx.cpu()]
         else:
             num_gpus = get_num_gpus()
@@ -136,9 +139,14 @@ def main():
             context = []
             for gpu_id in args.device_ids:
                 if gpu_id < 0:
-                    # get an automatic gpu id:
-                    gpu_id = exit_stack.enter_context(acquire_gpu())
-                context.append(mx.gpu(gpu_id))
+                    n_required = -gpu_id
+                    logger.info("Attempting to acquire %d GPUs.", n_required)
+                    # get n_required automatic gpu ids and add to context
+                    context += [exit_stack.enter_context(acquire_gpu()) for _ in range(n_required)]
+                else:
+                    context.append(gpu_id)
+            logger.info("Device(s): GPU %s", context)
+            context = [mx.gpu(gpu_id) for gpu_id in context]
 
         # create vocabs
         vocab_source = _build_or_load_vocab(args.source_vocab, args.source, args.num_words, args.word_min_count)
