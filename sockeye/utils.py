@@ -273,7 +273,7 @@ def get_num_gpus() -> int:
 @contextmanager
 def acquire_gpu(lock_dir: str = "/var/lock", retry_wait: int = 10):
     """
-    Acquires a gpu by locking a file (therefore this assumes that everyone using gpus calls this method and shares the
+    Acquires a GPU by locking a file (therefore this assumes that everyone using GPUs calls this method and shares the
     lock directory).
 
     :param lock_dir: The directory for storing the lock file.
@@ -281,7 +281,7 @@ def acquire_gpu(lock_dir: str = "/var/lock", retry_wait: int = 10):
     """
     num_gpus = get_num_gpus()
 
-    logger.info("Trying to acquire one of the %d gpus", num_gpus)
+    logger.info("Trying to acquire one of %d available GPUs.", num_gpus)
 
     # try to acquire a GPU lock
     while True:
@@ -307,7 +307,7 @@ def acquire_gpu(lock_dir: str = "/var/lock", retry_wait: int = 10):
                 except IOError as e:
                     # raise on unrelated IOErrors
                     if e.errno != errno.EAGAIN:
-                        logger.error("Failed acquiring gpu lock.", exc_info=True)
+                        logger.error("Failed acquiring GPU lock.", exc_info=True)
                         raise
                     else:
                         logger.info("GPU %d is currently locked." % gpu_id,
