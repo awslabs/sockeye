@@ -1,6 +1,8 @@
+import sys
 import os
 import re
 import logging
+import argparse
 from setuptools import setup, find_packages
 
 ROOT = os.path.dirname(__file__)
@@ -36,6 +38,17 @@ except:
     logging.warning("Package 'sphinx' not found. You will not be able to build docs.")
     cmdclass = {}
 
+parser = argparse.ArgumentParser()
+parser.add_argument('-r', '--requirement', help='Optionally specify a different requirements.txt file.', required=False)
+args, unparsed_args = parser.parse_known_args()
+sys.argv[1:] = unparsed_args
+
+if args.requirement is None:
+    install_requires = get_requirements('requirements.txt')
+else:
+    install_requires = get_requirements(args.requirement)
+
+
 args = dict(
     name='sockeye',
 
@@ -64,7 +77,7 @@ args = dict(
         'dev': get_requirements('requirements.dev.txt')
     },
 
-    install_requires=get_requirements('requirements.txt'),
+    install_requires=install_requires,
 
     entry_points={
         'console_scripts': [
