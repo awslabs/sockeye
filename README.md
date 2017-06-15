@@ -29,18 +29,52 @@ Full dependencies are listed in requirements.txt.
 You have two options for installing sockeye: pip and directly from source.
 ### pip
 
+#### CPU
+
 ```bash
 > pip install sockeye
 ```
 
+#### GPU
+
+If you want to run sockeye on a GPU you need to make sure your version of MXNet contains the GPU code. Depending on your
+version of CUDA you can do this by running the following for CUDA 8.0:
+
+```bash
+> pip install sockeye --no-deps -r requirements.gpu-cu80.txt
+```
+or the following for CUDA 7.5:
+```bash
+> pip install sockeye --no-deps -r requirements.gpu-cu75.txt
+```
+
 ### From Source
+
+#### CPU
 
 If you want to just use sockeye without extending it, simply install it via
 ```bash
 > python setup.py install
 ```
-after cloning the repository from git. After installation, command line tools such as
-*sockeye-train, sockeye-translate, sockeye-average* 
+after cloning the repository from git.
+
+#### GPU
+
+If you want to run sockeye on a GPU you need to make sure your version of MXNet contains the GPU code. Depending on your
+version of CUDA you can do this by running the following for CUDA 8.0:
+
+```bash
+> python setup.py install -r requirements.gpu-cu80.txt
+```
+or the following for CUDA 7.5:
+```bash
+> python setup.py install -r requirements.gpu-cu75.txt
+```
+
+
+### Running sockeye
+
+After installation, command line tools such as *sockeye-train, sockeye-translate, sockeye-average* 
 and *sockeye-embeddings* are available. Alternatively, if the sockeye directory is on your
 PYTHONPATH you can run the modules 
 directly. For example *sockeye-train* can also be invoked as
