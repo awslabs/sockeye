@@ -443,11 +443,11 @@ class Translator:
         :return: translation result.
         """
         if not trans_input.tokens:
-            TranslatorOutput(id=trans_input.id,
-                             translation="",
-                             tokens=[""],
-                             attention_matrix=np.asarray([[0]]),
-                             score=-np.inf)
+            return TranslatorOutput(id=trans_input.id,
+                                    translation="",
+                                    tokens=[""],
+                                    attention_matrix=np.asarray([[0]]),
+                                    score=-np.inf)
 
         return self._make_result(trans_input, *self.translate_nd(*self._get_inference_input(trans_input.tokens)))
 
