@@ -81,7 +81,7 @@ By default, training is carried out on the first GPU device of your machine.
 You can specify alternative GPU devices with the `--device-ids` option, with
 which you can also activate multi-GPU training (see below). If
 `--device-ids -1`, sockeye will try to find a free GPU on your machine and block
-until all of them are available. The locking mechanism is based on files and therefore assumes all processes are running
+until one is available. The locking mechanism is based on files and therefore assumes all processes are running
 on the same machine with the same file system.
 If this is not the case there is a chance that two processes will be using the same GPU and you run out of GPU memory.
 If you do not have or do not want to use a GPU, specify `--use-cpu`.

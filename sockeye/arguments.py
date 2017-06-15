@@ -86,7 +86,7 @@ def add_device_args(params):
 
     device_params.add_argument('--device-ids', default=[-1],
                                help='List or number of GPUs ids to use. Default: %(default)s. '
-                                    'Use -x to automatically acquire x GPUs through a file locking mechanism. '
+                                    'Use -x to automatically acquire x GPUs. '
                                     'Use x [x] to use a specific GPU id on this host. '
                                     '(Note that automatic acquisition of GPUs assumes that all GPU processes on '
                                     'this host are using automatic sockeye GPU acquisition).',
