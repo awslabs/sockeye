@@ -12,9 +12,9 @@
 # permissions and limitations under the License.
 
 """
-Average parameters from multiple model checkpoints.  Checkpoints can be either
-specificed manually or automatically chosen according to one of several
-strategies.  The default strategy of simply selecting the top-scoring N points
+Average parameters from multiple model checkpoints. Checkpoints can be either
+specified manually or automatically chosen according to one of several
+strategies. The default strategy of simply selecting the top-scoring N points
 works well in practice.
 """
 
