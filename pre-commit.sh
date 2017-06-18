@@ -24,7 +24,7 @@ TESTS_LINT_RESULT=$?
 
 # Run mypy, we are currently limiting to modules that pass
 # Please feel free to fix mypy issues in other modules and add them to typechecked-files
-mypy --ignore-missing-imports @typechecked-files
+mypy --ignore-missing-imports --follow-imports=silent @typechecked-files
 MYPY_RESULT=$?
 
 # Pop our stashed files

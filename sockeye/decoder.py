@@ -138,7 +138,7 @@ class StackedRNNDecoder(Decoder):
                  residual: bool = False,
                  forget_bias: float = 0.0,
                  lexicon: Optional[sockeye.lexicon.Lexicon] = None,
-                 context_gating: bool = False):
+                 context_gating: bool = False) -> None:
         # TODO: implement variant without input feeding
         self.num_layers = num_layers
         self.prefix = prefix
