@@ -13,12 +13,15 @@ python:
 
 install:
   - pip install -r requirements.txt
-  - pip install pylint
-  - pip install mypy
+  - pip install -r requirements.dev.txt
+  - pip install -r requirements.docs.txt
 
 script:
   - python3 setup.py test
+  - python3 setup.py docs
   - pylint --version
   - pylint --rcfile=sockeye.pylintrc sockeye -E
   - pylint --rcfile=sockeye.pylintrc test -E
   - mypy --ignore-missing-imports --follow-imports=silent @typechecked-files
+  - check-manifest
+

@@ -1,3 +1,15 @@
 include README.md
-include requirements.txt
-include requirements.dev.txt
+include requirements*.txt
+include LICENSE
+include NOTICE
+include *.pylintrc
+include typechecked-files
+exclude *.sh
+include pytest.ini
+recursive-include test *.py
+recursive-include docs *.bat
+recursive-include docs *.md
+recursive-include docs *.py
+recursive-include docs *.rst
+recursive-include docs Makefile
+

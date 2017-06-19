@@ -14,7 +14,6 @@ def get_long_description():
     try:
         import pypandoc
         long_description = pypandoc.convert(markdown_txt, 'rst', format='md')
-        print(long_description)
     except(IOError, ImportError):
         logging.warning("Could not import package 'pypandoc'. Will not convert markdown readme to rst for PyPI.")
         long_description = markdown_txt
@@ -38,7 +37,7 @@ except:
     logging.warning("Package 'sphinx' not found. You will not be able to build docs.")
     cmdclass = {}
 
-parser = argparse.ArgumentParser()
+parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('-r', '--requirement', help='Optionally specify a different requirements.txt file.', required=False)
 args, unparsed_args = parser.parse_known_args()
 sys.argv[1:] = unparsed_args
