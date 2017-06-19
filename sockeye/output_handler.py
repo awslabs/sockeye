@@ -85,7 +85,7 @@ class StringWithAlignmentsOutputHandler(StringOutputHandler):
     :param threshold: Threshold for including alignment links.
     """
 
-    def __init__(self, stream, threshold: float):
+    def __init__(self, stream, threshold: float) -> None:
         super().__init__(stream)
         self.threshold = threshold
 
@@ -107,7 +107,7 @@ class AlignPlotHandler(OutputHandler):
     :param plot_prefix: Prefix for generated PNG files.
     """
 
-    def __init__(self, plot_prefix: str):
+    def __init__(self, plot_prefix: str) -> None:
         self.plot_prefix = plot_prefix
 
     def handle(self, t_input: sockeye.inference.TranslatorInput, t_output: sockeye.inference.TranslatorOutput):
@@ -128,7 +128,7 @@ class AlignTextHandler(OutputHandler):
     :param threshold: Threshold for considering alignment links as sure.
     """
 
-    def __init__(self, threshold: float):
+    def __init__(self, threshold: float) -> None:
         self.threshold = threshold
 
     def handle(self, t_input: sockeye.inference.TranslatorInput, t_output: sockeye.inference.TranslatorOutput):

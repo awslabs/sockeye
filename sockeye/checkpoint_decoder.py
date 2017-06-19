@@ -50,7 +50,7 @@ class CheckpointDecoder:
                  model: str,
                  max_input_len: int,
                  beam_size=C.DEFAULT_BEAM_SIZE,
-                 limit: int = -1):
+                 limit: int = -1) -> None:
         self.context = context
         self.max_input_len = max_input_len
         self.beam_size = beam_size

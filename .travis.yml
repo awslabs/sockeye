@@ -21,4 +21,4 @@ script:
   - pylint --version
   - pylint --rcfile=sockeye.pylintrc sockeye -E
   - pylint --rcfile=sockeye.pylintrc test -E
-  - mypy --ignore-missing-imports @typechecked-files
+  - mypy --ignore-missing-imports --follow-imports=silent @typechecked-files

@@ -34,7 +34,7 @@ class Lexicon:
     :param learn: Whether to adapt lexical biases during training.
     """
 
-    def __init__(self, source_vocab_size: int, target_vocab_size: int, learn: bool = False):
+    def __init__(self, source_vocab_size: int, target_vocab_size: int, learn: bool = False) -> None:
         self.source_vocab_size = source_vocab_size
         self.target_vocab_size = target_vocab_size
         # TODO: once half-precision works, use float16 for this variable to save memory
@@ -148,7 +148,7 @@ class LexiconInitializer(mx.initializer.Initializer):
     :param lexicon: Lexicon array.
     """
 
-    def __init__(self, lexicon: mx.nd.NDArray):
+    def __init__(self, lexicon: mx.nd.NDArray) -> None:
         super().__init__()
         self.lexicon = lexicon
 
