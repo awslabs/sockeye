@@ -93,9 +93,9 @@ def get_data_iter(data_source: str, data_target: str,
     assert len(source_sentences) == len(target_sentences)
     eos_id = vocab_target[C.EOS_SYMBOL]
 
-    length_ratio = sum(len(s) / float(len(t)) for s, t in zip(source_sentences, target_sentences)) / len(
-        source_sentences)
-    logger.info("Average length ratio between src & trg: %.2f", length_ratio)
+    length_ratio = sum(len(t) / float(len(s)) for t, s in zip(target_sentences, source_sentences)) / len(
+        target_sentences)
+    logger.info("Average target/source length ratio: %.2f", length_ratio)
 
     buckets = define_parallel_buckets(max_seq_len, bucket_width, length_ratio) if bucketing else [
         (max_seq_len, max_seq_len)]
