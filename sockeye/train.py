@@ -91,7 +91,7 @@ def main():
 
     # Checking status of output folder, resumption, etc.
     # Create temporary logger to console only
-    logger = setup_main_logger(__name__, console=not args.quiet)
+    logger = setup_main_logger(__name__, file_logging=False, console=not args.quiet)
     output_folder = os.path.abspath(args.output)
     resume_training = False
     training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
@@ -119,7 +119,9 @@ def main():
     else:
         os.makedirs(output_folder)
 
-    logger = setup_main_logger(__name__, console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
+    logger = setup_main_logger(__name__,
+                               file_logging=True,
+                               console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
 
     logger.info("Command: %s", " ".join(sys.argv))
     logger.info("Arguments: %s", args)
