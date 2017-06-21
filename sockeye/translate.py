@@ -89,8 +89,11 @@ def main():
 
             output_handler.handle(trans_input, trans_output)
 
-        logger.info("Processed %d lines. Total time: %.4f sec/sent: %.4f sent/sec: %.4f", i, total_time, total_time / i,
-                    i / total_time)
+        if i != 0:
+            logger.info("Processed %d lines. Total time: %.4f sec/sent: %.4f sent/sec: %.4f", i, total_time,
+                        total_time / i, i / total_time)
+        else:
+            logger.info("Processed 0 lines.")
 
 
 if __name__ == '__main__':
