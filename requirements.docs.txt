@@ -1,0 +1,5 @@
+sphinx>=1.4
+sphinx_rtd_theme
+sphinx-autodoc-typehints
+recommonmark
+pypandoc

@@ -2,17 +2,15 @@
 
 ## Requirements
 
-The following packages are required for developers (also see the requirements.txt):
- - pytest
- - pytest-cov
- - sphinx>=1.4
- - sphinx_rtd_theme
- - sphinx-autodoc-typehints
- - recommonmark
+
+
+There are three types of dependencies: core dependencies, development dependencies and dependencies for generating the documentation.
  
 Install them via
 ```bash
-> pip install -e '.[dev]'
+> pip install -r requirements.txt
+> pip install -r requirements.dev.txt
+> pip install -r requirements.docs.txt
 ```
 
 
@@ -78,11 +76,11 @@ corresponding `~/.pypirc` set up.
 
 1. Build source distribution:
    ``` bash
-   > python setup.py sdist
+   > python setup.py sdist bdist_wheel
    ```
 1. Upload to PyPITest: 
    ```bash
-   > twine upload dist/sockeye-${VERSION}.tar.gz -r pypitest
+   > twine upload dist/sockeye-${VERSION}.tar.gz sockeye-${VERSION}-py3-none-any.whl -r pypitest
    ```
 1. In a new python environment check that the package is installable
    ```bash
@@ -90,7 +88,7 @@ corresponding `~/.pypirc` set up.
    ```
 1. Upload to PyPI
    ```bash
-   > twine upload dist/sockeye-${VERSION}.tar.gz
+   > twine upload dist/sockeye-${VERSION}.tar.gz sockeye-${VERSION}-py3-none-any.whl
    ```
 
  
