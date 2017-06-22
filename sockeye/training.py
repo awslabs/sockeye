@@ -315,6 +315,7 @@ class TrainingModel(sockeye.model.SockeyeModel):
                         shutil.rmtree(final_training_state_dirname)
                     break
                 else:
+                    logger.info("Model has not improved for %d checkpoints.", training_state.num_not_improved)
                     self._checkpoint(training_state, output_folder, train_iter)
 
     def _save_params(self, output_folder: str, checkpoint: int):

@@ -117,7 +117,7 @@ class LearningRateSchedulerPlateauReduce(LearningRateScheduler):
             self.num_not_improved += 1
             if self.num_not_improved >= self.reduce_num_not_improved:
                 self.lr *= self.reduce_factor
-                logger.info("Validation score hasn't improved for %d checkpoints, "
+                logger.info("%d checkpoints since validation score improvement or rate scaling, "
                                  "lowering learning rate to %1.2e", self.num_not_improved, self.lr)
                 self.num_not_improved = 0
 
