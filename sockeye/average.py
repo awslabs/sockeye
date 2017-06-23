@@ -21,7 +21,7 @@ works well in practice.
 import argparse
 import itertools
 import os
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Iterable, Tuple, List
 
 import mxnet as mx
 
@@ -68,10 +68,12 @@ def average(param_paths: Iterable[str]) -> Dict[str, mx.nd.NDArray]:
     return avg_params
 
 
-def find_checkpoints(model_path: str, size=4, strategy="best", maximize=False) -> Iterable[str]:
+def find_checkpoints(model_path: str, size=4, strategy="best", maximize=False, metric: str = C.PERPLEXITY) \
+        -> Iterable[str]:
     """
     Finds N best points from .metrics file according to strategy
 
+    :param metric: Metric according to which checkpoints are selected.  Corresponds to columns in model\metrics file.
     :param model_path: Path to model.
     :param size: Number of checkpoints to combine.
     :param strategy: Combination strategy.
@@ -79,7 +81,7 @@ def find_checkpoints(model_path: str, size=4, strategy="best", maximize=False) -
     :return: List of paths corresponding to chosen checkpoints.
     """
     metrics_path = os.path.join(model_path, C.METRICS_NAME)
-    points = read_metrics_points(metrics_path)
+    points = _read_metrics_points(metrics_path, metric=metric)
 
     if strategy == "best":
         # N best scoring points
@@ -128,10 +130,11 @@ def find_checkpoints(model_path: str, size=4, strategy="best", maximize=False) -
     return params_paths
 
 
-def read_metrics_points(path: str) -> Iterable[Tuple[float, int]]:
+def _read_metrics_points(path: str, metric: str) -> List[Tuple[float, int]]:
     """
     Reads lines from .metrics file and return list of elements [val, checkpoint]
 
+    :param metric: Metric according to which checkpoints are selected.  Corresponds to columns in model\metrics file.
     :param path: File to read metric values from.
     :return: List of pairs (metric value, checkpoint).
     """
@@ -146,7 +149,7 @@ def read_metrics_points(path: str) -> Iterable[Tuple[float, int]]:
                 key_value = field.split("=")
                 if len(key_value) == 2:
                     metric_set = key_value[0].split("-")
-                    if len(metric_set) == 2 and metric_set[0] != C.ACCURACY and metric_set[1] == "val":
+                    if len(metric_set) == 2 and metric_set[0] == metric and metric_set[1] == "val":
                         metric_value = float(key_value[1])
                         points.append([metric_value, checkpoint])
     return points
@@ -166,7 +169,12 @@ def main():
         help="either a single model directory (automatic checkpoint selection) "
              "or multiple .params files (manual checkpoint selection)")
     params.add_argument(
-        "--max", action="store_true", help="maximize metric (default: min)")
+        "--max", action="store_true", help="Maximize metric.")
+    params.add_argument(
+        "--metric",
+        help="Name of the metric to choose n-best checkpoints from. (default: {})".format(C.PERPLEXITY),
+        default=C.PERPLEXITY,
+        choices=[C.PERPLEXITY, C.BLEU])
     params.add_argument(
         "-n",
         type=int,
@@ -185,7 +193,7 @@ def main():
         avg_params = average(args.inputs)
     else:
         param_paths = find_checkpoints(args.inputs[0], args.n, args.strategy,
-                                       args.max)
+                                       args.max, args.metric)
         avg_params = average(param_paths)
 
     mx.nd.save(args.output, avg_params)
