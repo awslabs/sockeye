@@ -18,6 +18,7 @@ import argparse
 import sys
 import time
 from contextlib import ExitStack
+from typing import Optional
 
 import mxnet as mx
 
@@ -28,14 +29,14 @@ import sockeye.output_handler
 from sockeye.log import setup_main_logger
 from sockeye.utils import acquire_gpu, get_num_gpus
 
+logger = setup_main_logger(__name__, file_logging=False)
+
 
 def main():
     params = argparse.ArgumentParser(description='Translate from STDIN to STDOUT')
     params = arguments.add_inference_args(params)
     params = arguments.add_device_args(params)
     args = params.parse_args()
-
-    logger = setup_main_logger(__name__, file_logging=False)
 
     assert args.beam_size > 0, "Beam size must be 1 or greater."
     if args.checkpoints is not None:
@@ -51,20 +52,7 @@ def main():
                                                                args.sure_align_threshold)
 
     with ExitStack() as exit_stack:
-        if args.use_cpu:
-            context = mx.cpu()
-        else:
-            num_gpus = get_num_gpus()
-            assert num_gpus > 0, "No GPUs found, consider running on the CPU with --use-cpu " \
-                                 "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi " \
-                                 "binary isn't on the path)."
-            assert len(args.device_ids) == 1, "cannot run on multiple devices for now"
-            gpu_id = args.device_ids[0]
-            if gpu_id < 0:
-                # get a gpu id automatically:
-                gpu_id = exit_stack.enter_context(acquire_gpu())
-            context = mx.gpu(gpu_id)
-
+        context = _setup_context(args, exit_stack)
         translator = sockeye.inference.Translator(context,
                                                   args.ensemble_mode,
                                                   *sockeye.inference.load_models(context,
@@ -73,27 +61,61 @@ def main():
                                                                                  args.models,
                                                                                  args.checkpoints,
                                                                                  args.softmax_temperature))
-        total_time = 0
-        i = 0
-        for i, line in enumerate(sys.stdin, 1):
-            trans_input = translator.make_input(i, line)
-            logger.debug(" IN: %s", trans_input)
+        read_and_translate(args.source, output_handler, translator)
 
-            tic = time.time()
-            trans_output = translator.translate(trans_input)
-            trans_wall_time = time.time() - tic
-            total_time += trans_wall_time
 
-            logger.debug("OUT: %s", trans_output)
-            logger.debug("OUT: time=%.2f", trans_wall_time)
+def read_and_translate(source: Optional[str], output_handler: OutputHandler, translator):
+    """
+    Method reads lines of a file (or stdin) and translates each line with translator.
+    :param source:
+    :param output_handler:
+    :param translator:
+    :return:
+    """
+    total_time = 0
+    i = 0
+    if source:
+        # Translate from a file
+        i, total_time = _translate(i, output_handler, source.get_lines(), total_time, translator, 0)
+    else:
+        # Translate from standard in
+        i, total_time = _translate(i, output_handler, sys.stdin, total_time, translator, 1)
+    if i != 0:
+        logger.info("Processed %d lines. Total time: %.4f sec/sent: %.4f sent/sec: %.4f", i, total_time,
+                    total_time / i, i / total_time)
+    else:
+        logger.info("Processed 0 lines.")
 
-            output_handler.handle(trans_input, trans_output)
 
-        if i != 0:
-            logger.info("Processed %d lines. Total time: %.4f sec/sent: %.4f sent/sec: %.4f", i, total_time,
-                        total_time / i, i / total_time)
-        else:
-            logger.info("Processed 0 lines.")
+def _translate(i, output_handler, stuff, total_time, translator, offset):
+    for i, line in enumerate(stuff, offset):
+        trans_input = translator.make_input(i, line)
+        logger.debug(" IN: %s", trans_input)
+        tic = time.time()
+        trans_output = translator.translate(trans_input)
+        trans_wall_time = time.time() - tic
+        total_time += trans_wall_time
+        logger.debug("OUT: %s", trans_output)
+        logger.debug("OUT: time=%.2f", trans_wall_time)
+        output_handler.handle(trans_input, trans_output)
+    return i, total_time
+
+
+def _setup_context(args, exit_stack):
+    if args.use_cpu:
+        context = mx.cpu()
+    else:
+        num_gpus = get_num_gpus()
+        assert num_gpus > 0, "No GPUs found, consider running on the CPU with --use-cpu " \
+                             "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi " \
+                             "binary isn't on the path)."
+        assert len(args.device_ids) == 1, "cannot run on multiple devices for now"
+        gpu_id = args.device_ids[0]
+        if gpu_id < 0:
+            # get a gpu id automatically:
+            gpu_id = exit_stack.enter_context(acquire_gpu())
+        context = mx.gpu(gpu_id)
+    return context
 
 
 if __name__ == '__main__':
