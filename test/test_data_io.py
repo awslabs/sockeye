@@ -48,14 +48,19 @@ def test_define_parallel_buckets(max_seq_len, bucket_width, length_ratio, expect
     assert buckets == expected_buckets
 
 
-get_bucket_tests = [(10, [10, 20, 30, 40, 50], 10),
-                    (11, [10], None),
-                    (2, [1, 4, 8], 4)]
+get_bucket_tests = [([10, 20, 30, 40, 50], 50, 50),
+                    ([10, 20, 30, 40, 50], 11, 20),
+                    ([10, 20, 30, 40, 50], 9, 10),
+                    ([10, 20, 30, 40, 50], 51, None),
+                    ([10, 20, 30, 40, 50], 1, 10),
+                    ([10, 20, 30, 40, 50], 0, 10),
+                    ([], 50, None)]
 
 
-@pytest.mark.parametrize("seq_len, buckets, expected_bucket", get_bucket_tests)
-def test_get_bucket(seq_len, buckets, expected_bucket):
-    bucket = sockeye.data_io.get_bucket(seq_len, buckets)
+@pytest.mark.parametrize("buckets, length, expected_bucket",
+                         get_bucket_tests)
+def test_get_bucket(buckets, length, expected_bucket):
+    bucket = sockeye.data_io.get_bucket(length, buckets)
     assert bucket == expected_bucket
 
 
@@ -101,20 +106,4 @@ get_parallel_bucket_tests = [([(10, 10), (20, 20), (30, 30), (40, 40), (50, 50)]
 def test_get_parallel_bucket(buckets, source_length, target_length, expected_bucket_index, expected_bucket):
     bucket_index, bucket = sockeye.data_io.get_parallel_bucket(buckets, source_length, target_length)
     assert bucket_index == expected_bucket_index
-    assert bucket == expected_bucket
-
-
-get_bucket_tests = [([10, 20, 30, 40, 50], 50, 50),
-                    ([10, 20, 30, 40, 50], 11, 20),
-                    ([10, 20, 30, 40, 50], 9, 10),
-                    ([10, 20, 30, 40, 50], 51, None),
-                    ([10, 20, 30, 40, 50], 1, 10),
-                    ([10, 20, 30, 40, 50], 0, 10),
-                    ([], 50, None)]
-
-
-@pytest.mark.parametrize("buckets, length, expected_bucket",
-                         get_bucket_tests)
-def test_get_parallel_bucket(buckets, length, expected_bucket):
-    bucket = sockeye.data_io.get_bucket(length, buckets)
     assert bucket == expected_bucket

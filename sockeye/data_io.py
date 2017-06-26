@@ -283,8 +283,8 @@ def get_default_bucket_key(buckets: List[Tuple[int, int]]) -> Tuple[int, int]:
 
 
 def get_parallel_bucket(buckets: List[Tuple[int, int]],
-               length_source: int,
-               length_target: int) -> Optional[Tuple[int, Tuple[int, int]]]:
+                        length_source: int,
+                        length_target: int) -> Optional[Tuple[int, Tuple[int, int]]]:
     """
     Returns bucket index and bucket from a list of buckets, given source and target length.
     Returns (None, None) if no bucket fits.
