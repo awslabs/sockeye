@@ -534,13 +534,14 @@ class Translator:
                      bucket_key: int,
                      max_output_length: int) -> Tuple[List[List[int]], List[np.ndarray], mx.nd.NDArray]:
         """
-            Translates a single sentence using beam search.
-            :param source: Source array.
-            :param source_length: Length of source.
-            :param bucket_key: Bucket key.
-            :param max_output_length: Cap the output at this maximum length.
-            :return List of lists of word ids, list of attentions, array of accumulated length-normalized
-            negative log-probs.
+        Translates a single sentence using beam search.
+
+        :param source: Source array.
+        :param source_length: Length of source.
+        :param bucket_key: Bucket key.
+        :param max_output_length: Cap the output at this maximum length.
+        :return List of lists of word ids, list of attentions, array of accumulated length-normalized
+        negative log-probs.
         """
 
         # encode source and initialize decoder states for each model
@@ -647,16 +648,18 @@ class Translator:
         
         return sequences, attention_lists, accumulated_scores
 
+    @staticmethod
     def _get_best_from_beam(self,
                             sequences: List[List[int]], 
                             attention_lists: List[np.ndarray],
                             accumulated_scores: mx.nd.NDArray) -> Tuple[List[int], np.ndarray, float]:
         """
-            Return the best (aka top) entry from the n-best list.
-            :param sequences: List of lists of word ids.
-            :param attention_lists: List of attention.
-            :param accumulated_scores: Array of length-normalized negative log-probs.
-            :return: Top sequence, top attention matrix, top accumulated score (length-normalized negative log-probs).
+        Return the best (aka top) entry from the n-best list.
+
+        :param sequences: List of lists of word ids.
+        :param attention_lists: List of attention.
+        :param accumulated_scores: Array of length-normalized negative log-probs.
+        :return: Top sequence, top attention matrix, top accumulated score (length-normalized negative log-probs).
         """
         # sequences & accumulated scores are in latest 'k-best order', thus 0th element is best
         best = 0
