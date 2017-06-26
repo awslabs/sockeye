@@ -649,8 +649,7 @@ class Translator:
         return sequences, attention_lists, accumulated_scores
 
     @staticmethod
-    def _get_best_from_beam(self,
-                            sequences: List[List[int]], 
+    def _get_best_from_beam(sequences: List[List[int]], 
                             attention_lists: List[np.ndarray],
                             accumulated_scores: mx.nd.NDArray) -> Tuple[List[int], np.ndarray, float]:
         """
