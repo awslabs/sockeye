@@ -60,10 +60,14 @@ def main():
                                  "binary isn't on the path)."
             assert len(args.device_ids) == 1, "cannot run on multiple devices for now"
             gpu_id = args.device_ids[0]
-            if gpu_id < 0:
-                # get a gpu id automatically:
-                gpu_ids = exit_stack.enter_context(acquire_gpus(1))
-                gpu_id = gpu_ids[0]
+            if args.disable_device_locking:
+                # without locking and a negative device id we just take the first device
+                gpu_id = 0
+            else:
+                if gpu_id < 0:
+                    # get a single (!) gpu id automatically:
+                    gpu_ids = exit_stack.enter_context(acquire_gpus([-1], lock_dir=args.lock_dir))
+                    gpu_id = gpu_ids[0]
             context = mx.gpu(gpu_id)
 
         translator = sockeye.inference.Translator(context,
