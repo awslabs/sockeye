@@ -331,6 +331,10 @@ def add_training_args(params):
 
 def add_inference_args(params):
     decode_params = params.add_argument_group("Inference parameters")
+    decode_params.add_argument('--source', '-s',
+                               required=False,
+                               default=None,
+                               help='A file containing a list of source sentences to translate.')
     decode_params.add_argument('--models', '-m',
                                required=True,
                                nargs='+',
