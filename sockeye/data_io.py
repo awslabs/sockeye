@@ -282,7 +282,7 @@ def get_default_bucket_key(buckets: List[Tuple[int, int]]) -> Tuple[int, int]:
     return max(buckets)
 
 
-def get_bucket(buckets: List[Tuple[int, int]],
+def get_parallel_bucket(buckets: List[Tuple[int, int]],
                length_source: int,
                length_target: int) -> Optional[Tuple[int, Tuple[int, int]]]:
     """
@@ -405,7 +405,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
             num_of_unks_source += source.count(self.unk_id)
             num_of_unks_target += target.count(self.unk_id)
 
-            buck_idx, buck = get_bucket(self.buckets, len(source), len(target))
+            buck_idx, buck = get_parallel_bucket(self.buckets, len(source), len(target))
             if buck is None:
                 ndiscard += 1
                 continue

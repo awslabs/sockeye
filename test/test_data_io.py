@@ -87,18 +87,34 @@ def test_get_default_bucket_key(buckets, expected_default_bucket_key):
     assert default_bucket_key == expected_default_bucket_key
 
 
-get_bucket_tests = [([(10, 10), (20, 20), (30, 30), (40, 40), (50, 50)], 50, 50, 4, (50, 50)),
-                    ([(10, 10), (20, 20), (30, 30), (40, 40), (50, 50)], 50, 10, 4, (50, 50)),
-                    ([(10, 10), (20, 20), (30, 30), (40, 40), (50, 50)], 20, 10, 1, (20, 20)),
-                    ([(10, 10)], 20, 10, None, None),
-                    ([], 20, 10, None, None),
-                    ([(10, 11)], 11, 10, None, None),
-                    ([(11, 10)], 11, 10, 0, (11, 10))]
+get_parallel_bucket_tests = [([(10, 10), (20, 20), (30, 30), (40, 40), (50, 50)], 50, 50, 4, (50, 50)),
+                             ([(10, 10), (20, 20), (30, 30), (40, 40), (50, 50)], 50, 10, 4, (50, 50)),
+                             ([(10, 10), (20, 20), (30, 30), (40, 40), (50, 50)], 20, 10, 1, (20, 20)),
+                             ([(10, 10)], 20, 10, None, None),
+                             ([], 20, 10, None, None),
+                             ([(10, 11)], 11, 10, None, None),
+                             ([(11, 10)], 11, 10, 0, (11, 10))]
 
 
 @pytest.mark.parametrize("buckets, source_length, target_length, expected_bucket_index, expected_bucket",
-                         get_bucket_tests)
-def test_get_bucket(buckets, source_length, target_length, expected_bucket_index, expected_bucket):
-    bucket_index, bucket = sockeye.data_io.get_bucket(buckets, source_length, target_length)
+                         get_parallel_bucket_tests)
+def test_get_parallel_bucket(buckets, source_length, target_length, expected_bucket_index, expected_bucket):
+    bucket_index, bucket = sockeye.data_io.get_parallel_bucket(buckets, source_length, target_length)
     assert bucket_index == expected_bucket_index
+    assert bucket == expected_bucket
+
+
+get_bucket_tests = [([10, 20, 30, 40, 50], 50, 50),
+                    ([10, 20, 30, 40, 50], 11, 20),
+                    ([10, 20, 30, 40, 50], 9, 10),
+                    ([10, 20, 30, 40, 50], 51, None),
+                    ([10, 20, 30, 40, 50], 1, 10),
+                    ([10, 20, 30, 40, 50], 0, 10),
+                    ([], 50, None)]
+
+
+@pytest.mark.parametrize("buckets, length, expected_bucket",
+                         get_bucket_tests)
+def test_get_parallel_bucket(buckets, length, expected_bucket):
+    bucket = sockeye.data_io.get_bucket(length, buckets)
     assert bucket == expected_bucket
