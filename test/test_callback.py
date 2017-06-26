@@ -18,7 +18,6 @@ import pytest
 import numpy as np
 import sockeye.callback
 import tempfile
-import os
 
 test_constants = [('perplexity', np.inf, True,
                    [{'perplexity': 100.0, '_': 42}, {'perplexity': 50.0}, {'perplexity': 60.0}, {'perplexity': 80.0}],

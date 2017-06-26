@@ -69,7 +69,7 @@ def test_activation_coverage(act_type):
 
     # this is needed to modulate the 0 input. The output changes according to the activation type used.
     activation = mx.sym.Activation(name="activation", act_type=act_type)
-    modulated = activation.eval(ctx=mx.cpu(), activation_data=mx.nd.zeros((1,)))[0].asnumpy()
+    activation.eval(ctx=mx.cpu(), activation_data=mx.nd.zeros((1,)))[0].asnumpy()
 
     new_coverage = result[0].asnumpy()
 

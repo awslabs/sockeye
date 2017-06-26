@@ -12,7 +12,6 @@
 # permissions and limitations under the License.
 
 import sockeye.utils
-import numpy as np
 import mxnet as mx
 import numpy as np
 import random
@@ -67,6 +66,7 @@ def uniform_vector(shape, min_value=0, max_value=1, return_symbol=False):
     """
     return mx.sym.random_uniform(low=min_value, high=max_value, shape=shape) if return_symbol \
         else np.random.uniform(low=min_value, high=max_value, size=shape)
+
 
 def generate_random_sentence(vocab_size, max_len):
     """

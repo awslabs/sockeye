@@ -18,6 +18,7 @@ from test.test_utils import generate_random_sentence
 import sockeye.data_io
 import mxnet as mx
 
+
 def create_parallel_sentence_iter(source_sentences, target_sentences, max_len):
     buckets = sockeye.data_io.define_parallel_buckets(max_len, 10)
     batch_size = 50
@@ -25,11 +26,12 @@ def create_parallel_sentence_iter(source_sentences, target_sentences, max_len):
     pad = 1
     unk = 2
     bucket_iterator = sockeye.data_io.ParallelBucketSentenceIter(source_sentences,
-                                                         target_sentences,
-                                                         buckets,
-                                                         batch_size,
-                                                         eos, pad, unk)
+                                                                 target_sentences,
+                                                                 buckets,
+                                                                 batch_size,
+                                                                 eos, pad, unk)
     return bucket_iterator
+
 
 def data_batches_equal(db1, db2):
     # We just compare the data, should probably be enough
@@ -39,6 +41,7 @@ def data_batches_equal(db1, db2):
                 and (data1.shape == data2.shape) \
                 and isclose(mx.nd.prod(data1.reshape((-1,)) == data2.reshape((-1,))).asnumpy()[0], 1.0)
     return equal
+
 
 def test_parallel_sentence_iter():
     # Create random sentences
@@ -51,7 +54,7 @@ def test_parallel_sentence_iter():
         target_sentences.append(generate_random_sentence(vocab_size, max_len))
 
     ori_iterator = create_parallel_sentence_iter(source_sentences, target_sentences, max_len)
-    ori_iterator.reset() # Random order
+    ori_iterator.reset()  # Random order
     # Simulate some iterations
     ori_iterator.next()
     ori_iterator.next()
@@ -66,7 +69,7 @@ def test_parallel_sentence_iter():
 
     # Load the state in a new iterator
     load_iterator = create_parallel_sentence_iter(source_sentences, target_sentences, max_len)
-    load_iterator.reset() # Random order
+    load_iterator.reset()  # Random order
     load_iterator.load_state(tmp_file.name)
 
     # Compare the outputs
