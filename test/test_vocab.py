@@ -18,14 +18,21 @@ from sockeye.vocab import build_vocab
 
 test_vocab = [
         # Example 1
-        (["one two three", "one two three"], 3, 1, {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "two": 4, "three": 5, "one": 6}),
-        (["one two three", "one two three"], 3, 2, {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "two": 4, "three": 5, "one": 6}),
-        (["one two three", "one two three"], 2, 2, {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "two": 4, "three": 5}),
+        (["one two three", "one two three"], 3, 1,
+         {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "two": 4, "three": 5, "one": 6}),
+        (["one two three", "one two three"], 3, 2,
+         {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "two": 4, "three": 5, "one": 6}),
+        (["one two three", "one two three"], 2, 2,
+         {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "two": 4, "three": 5}),
         # Example 2
-        (["one one two three ", "one two three"], 3, 1, {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "one": 4, "two": 5, "three": 6}),
-        (["one one two three ", "one two three"], 3, 2, {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "one": 4, "two": 5, "three": 6}),
-        (["one one two three ", "one two three"], 3, 3, {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "one": 4}),
-        (["one one two three ", "one two three"], 2, 1, {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "one": 4, "two": 5}),
+        (["one one two three ", "one two three"], 3, 1,
+         {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "one": 4, "two": 5, "three": 6}),
+        (["one one two three ", "one two three"], 3, 2,
+         {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "one": 4, "two": 5, "three": 6}),
+        (["one one two three ", "one two three"], 3, 3,
+         {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "one": 4}),
+        (["one one two three ", "one two three"], 2, 1,
+         {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "one": 4, "two": 5}),
         ]
 
 

@@ -111,7 +111,6 @@ def test_coverage_attention(attention_coverage_type,
     dynamic_source_result = exec_output[2].asnumpy()
 
     expected_probs = (1 / source_length_vector).reshape((batch_size, 1))
-    expected_dynamic_source = (1 / source_length_vector).reshape((batch_size, 1))
 
     assert context_result.shape == (batch_size, encoder_num_hidden)
     assert attention_prob_result.shape == (batch_size, source_seq_len)

@@ -29,7 +29,7 @@ def test_step(cell_type, context_gating,
               decoder_num_hidden=5):
 
     attention_num_hidden, vocab_size, num_layers, \
-    batch_size, source_seq_len, coverage_num_hidden = 2, 10, 1, 10, 7, 2
+        batch_size, source_seq_len, coverage_num_hidden = 2, 10, 1, 10, 7, 2
 
     # (batch_size, source_seq_len, encoder_num_hidden)
     source = mx.sym.Variable("source")
