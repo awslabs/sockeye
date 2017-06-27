@@ -86,14 +86,25 @@ def add_device_args(params):
 
     device_params.add_argument('--device-ids', default=[-1],
                                help='List or number of GPUs ids to use. Default: %(default)s. '
-                                    'Use -x to automatically acquire x GPUs. '
-                                    'Use x [x] to use a specific GPU id on this host. '
+                                    'Use negative numbers to automatically acquire a certain number of GPUs, e.g. -5 '
+                                    'will find 5 free GPUs. '
+                                    'Use positive numbers to acquire a specific GPU id on this host. '
                                     '(Note that automatic acquisition of GPUs assumes that all GPU processes on '
                                     'this host are using automatic sockeye GPU acquisition).',
                                nargs='+', type=int)
     device_params.add_argument('--use-cpu',
                                action='store_true',
                                help='Use CPU device instead of GPU.')
+    device_params.add_argument('--disable-device-locking',
+                               action='store_true',
+                               help='Just use the specified device ids without locking.')
+    device_params.add_argument('--lock-dir',
+                               default="/tmp",
+                               help='When aquiring a GPU we do file based locking so that only one Sockeye process '
+                                    'can run on the a GPU. This is the folder in which we store the file '
+                                    'locks. For locking to work correctly it is assumed all processes use the same '
+                                    'lock directory. The only requirement for the directory are file '
+                                    'write permissions.')
     return params
 
 
