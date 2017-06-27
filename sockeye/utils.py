@@ -274,8 +274,8 @@ def get_num_gpus() -> int:
 def expand_requested_device_ids(requested_device_ids: List[int]) -> List[int]:
     """
     Transform a list of device id requests to concrete device ids. For example on a host with 8 GPUs when requesting
-    [-3, 3, 5] you will get [1, 2, 3, 4, 5]. Namely you will get device 3 and 5, as well as 3 other available
-    device ids.
+    [-4, 3, 5] you will get [0, 1, 2, 3, 4, 5]. Namely you will get device 3 and 5, as well as 3 other available
+    device ids (starting to fill up from low to high device ids).
 
     :param requested_device_ids: The requested device ids, each number is either negative indicating the number of GPUs
      that will be allocated, or positive indicating we want to acquire a specific device id.
@@ -285,10 +285,9 @@ def expand_requested_device_ids(requested_device_ids: List[int]) -> List[int]:
     return _expand_requested_device_ids(requested_device_ids, num_gpus_available)
 
 
-def _expand_requested_device_ids(requested_device_ids: List[int], num_gpus_available):
+def _expand_requested_device_ids(requested_device_ids: List[int], num_gpus_available: int) -> List[int]:
     if num_gpus_available == 0:
         raise RuntimeError("Can not acquire GPU, as no GPUs were found on this machine.")
-    remaining_device_ids = set(range(num_gpus_available))
 
     num_arbitrary_device_ids = 0
     device_ids = []
@@ -298,17 +297,18 @@ def _expand_requested_device_ids(requested_device_ids: List[int], num_gpus_avail
             num_arbitrary_device_ids += num_gpus
         else:
             device_ids.append(device_id)
-            remaining_device_ids.remove(device_id)
     num_gpus_requested = len(device_ids) + num_arbitrary_device_ids
     if num_gpus_requested > num_gpus_available:
         raise ValueError("Requested %d GPUs, but only %d are available." % (num_gpus_requested, num_gpus_available))
+    remaining_device_ids = set(range(num_gpus_available)) - set(device_ids)
     logger.info("Attempting to acquire %d GPUs of %d GPUs.", num_gpus_requested, num_gpus_available)
     return device_ids + list(remaining_device_ids)[:num_arbitrary_device_ids]
 
 
 @contextmanager
 def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
-                 retry_wait_min: int = 10, retry_wait_rand: int = 60):
+                 retry_wait_min: int = 10, retry_wait_rand: int = 60,
+                 num_gpus_available: Optional[int]=None):
     """
     Acquire a number of GPUs in a transactional way. This method should be used inside a `with` statement.
     Will try to acquire all the requested number of GPUs. If currently
@@ -320,9 +320,11 @@ def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
     :param lock_dir: The directory for storing the lock file.
     :param retry_wait_min: The minimum number of seconds to wait between retries.
     :param retry_wait_rand: Randomly add between 0 and `retry_wait_rand` seconds to the wait time.
+    :param num_gpus_available: The number of GPUs available, if None we will call get_num_gpus().
     :return: yields a list of GPU ids.
     """
-    num_gpus_available = get_num_gpus()
+    if num_gpus_available is None:
+        num_gpus_available = get_num_gpus()
     if num_gpus_available == 0:
         raise RuntimeError("Can not acquire GPU, as no GPUs were found on this machine.")
 
@@ -342,7 +344,7 @@ def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
             num_arbitrary_device_ids += num_gpus
         else:
             if device_id in specific_device_ids:
-                raise RuntimeError("Requested GPU %d twice." % device_id)
+                raise ValueError("Requested GPU %d twice." % device_id)
             specific_device_ids.add(device_id)
 
     # make sure we have enough GPUs available
@@ -367,7 +369,7 @@ def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
             acquired_gpus = []
             any_failed = False
             for candidates in candidates_to_request:
-                gpu_id = exit_stack.enter_context(_acquire_single_gpu(candidates=candidates, lock_dir=lock_dir))
+                gpu_id = exit_stack.enter_context(GpuFileLock(candidates=candidates, lock_dir=lock_dir))
                 if gpu_id is not None:
                     acquired_gpus.append(gpu_id)
                 else:
@@ -378,8 +380,9 @@ def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
             if not any_failed:
                 try:
                     yield acquired_gpus
-                finally:
-                    return
+                except:
+                    raise
+                return
         # couldn't acquire all GPUs, let's wait and try again later
 
         # randomize so that multiple processes starting at the same time don't retry at a similar point in time
@@ -391,45 +394,59 @@ def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
         time.sleep(retry_wait_actual)
 
 
-@contextmanager
-def _acquire_single_gpu(candidates: List[int], lock_dir: str):
+class GpuFileLock:
     """
     Acquires a single GPU by locking a file (therefore this assumes that everyone using GPUs calls this method and
-    shares the lock directory).
+    shares the lock directory). Sets target to a GPU id or None if none is available.
 
     :param candidates: List of candidate device ids to try to acquire.
     :param lock_dir: The directory for storing the lock file.
-    :return: yields a single GPU id or None if none is available.
     """
 
-    # try to acquire a GPU lock
-    for gpu_id in candidates:
-        lockfile_path = os.path.join(lock_dir, "sockeye.gpu%d.lock" % gpu_id)
-        with open(lockfile_path, 'w') as lock_file:
+    def __init__(self, candidates: List[int], lock_dir: str):
+        self.candidates = candidates
+        self.lock_dir = lock_dir
+        self.lock_file = None
+        self.lock_file_path = None
+        self.gpu_id = None
+        self._acquired_lock = False
+
+    def __enter__(self) -> Optional[int]:
+        for gpu_id in self.candidates:
+            lockfile_path = os.path.join(self.lock_dir, "sockeye.gpu%d.lock" % gpu_id)
+            lock_file = open(lockfile_path, 'w')
             try:
                 # exclusive non-blocking lock
                 fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 # got the lock, let's write our PID into it:
                 lock_file.write("%d\n" % os.getpid())
                 lock_file.flush()
+
+                self._acquired_lock = True
+                self.gpu_id = gpu_id
+                self.lock_file = lock_file
+                self.lockfile_path = lockfile_path
+
                 logger.info("Acquired GPU %d." % gpu_id)
 
-                try:
-                    yield gpu_id
-                finally:
-                    logger.info("Releasing GPU %d." % gpu_id)
-                    # release lock:
-                    fcntl.flock(lock_file, fcntl.LOCK_UN)
-                    os.remove(lockfile_path)
-                    return
+                return gpu_id
             except IOError as e:
                 # raise on unrelated IOErrors
                 if e.errno != errno.EAGAIN:
                     logger.error("Failed acquiring GPU lock.", exc_info=True)
                     raise
                 else:
-                    logger.debug("GPU %d is currently locked." % gpu_id)
-    yield None
+                    logger.debug("GPU %d is currently locked.", gpu_id)
+        return None
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.gpu_id is not None:
+            logger.info("Releasing GPU %d.", self.gpu_id)
+        if self.lock_file is not None:
+            if self._acquired_lock:
+                fcntl.flock(self.lock_file, fcntl.LOCK_UN)
+            self.lock_file.close()
+            os.remove(self.lockfile_path)
 
 
 def namedtuple_with_defaults(typename, field_names, default_values: Mapping[str, Any] = ()) -> NamedTuple:

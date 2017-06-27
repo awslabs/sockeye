@@ -12,10 +12,10 @@
 # permissions and limitations under the License.
 
 import sockeye.utils
-import numpy as np
 import mxnet as mx
 import numpy as np
 import random
+import pytest
 
 
 def test_get_alignments():
@@ -68,6 +68,7 @@ def uniform_vector(shape, min_value=0, max_value=1, return_symbol=False):
     return mx.sym.random_uniform(low=min_value, high=max_value, shape=shape) if return_symbol \
         else np.random.uniform(low=min_value, high=max_value, size=shape)
 
+
 def generate_random_sentence(vocab_size, max_len):
     """
     Generates a random "sentence" as a list of integers.
@@ -80,3 +81,117 @@ def generate_random_sentence(vocab_size, max_len):
     length = random.randint(1, max_len)
     # Due to the special words, the actual words start at index 3 and go up to vocab_size+2
     return [random.randint(3, vocab_size + 2) for _ in range(length)]
+
+
+device_params = [([-4, 3, 5], 6, [0, 1, 2, 3, 4, 5]),
+                 ([-2, 3, -2, 5], 6, [0, 1, 2, 3, 4, 5]),
+                 ([-1], 1, [0]),
+                 ([1], 1, [1])]
+
+
+@pytest.mark.parametrize("requested_device_ids, num_gpus_available, expected", device_params)
+def test_expand_requested_device_ids(requested_device_ids, num_gpus_available, expected):
+    assert set(sockeye.utils._expand_requested_device_ids(requested_device_ids, num_gpus_available)) == set(expected)
+
+
+@pytest.mark.parametrize("requested_device_ids, num_gpus_available, expected", device_params)
+def test_aquire_gpus(tmpdir, requested_device_ids, num_gpus_available, expected):
+    with sockeye.utils.acquire_gpus(requested_device_ids, lock_dir=str(tmpdir),
+                                    num_gpus_available=num_gpus_available) as acquired_gpus:
+        assert set(acquired_gpus) == set(expected)
+
+
+# We expect the following settings to raise a ValueError
+device_params_expected_exception = [
+    # requesting the same gpu twice
+    ([-4, 3, 3, 5], 5),
+    # too few GPUs available
+    ([-4, 3, 5], 5),
+    ([3, 5], 1),
+    ([-2], 1),
+    ([-1, -1], 1)]
+
+
+@pytest.mark.parametrize("requested_device_ids, num_gpus_available", device_params_expected_exception)
+def test_expand_requested_device_ids_exception(requested_device_ids, num_gpus_available):
+    with pytest.raises(ValueError):
+        sockeye.utils._expand_requested_device_ids(requested_device_ids, num_gpus_available)
+
+
+@pytest.mark.parametrize("requested_device_ids, num_gpus_available", device_params_expected_exception)
+def test_aquire_gpus_exception(tmpdir, requested_device_ids, num_gpus_available):
+    with pytest.raises(ValueError):
+        with sockeye.utils.acquire_gpus(requested_device_ids, lock_dir=str(tmpdir),
+                                        num_gpus_available=num_gpus_available) as _:
+            pass
+
+
+# Let's assume GPU 1 is locked already
+device_params_1_locked = [([-4, 3, 5], 7, [0, 2, 3, 4, 5, 6]),
+                          ([-2, 3, -2, 5], 7, [0, 2, 3, 4, 5, 6])]
+
+
+@pytest.mark.parametrize("requested_device_ids, num_gpus_available, expected", device_params_1_locked)
+def test_aquire_gpus_1_locked(tmpdir, requested_device_ids, num_gpus_available, expected):
+    gpu_1 = 1
+    with sockeye.utils.GpuFileLock([gpu_1], str(tmpdir)) as lock:
+        with sockeye.utils.acquire_gpus(requested_device_ids, lock_dir=str(tmpdir),
+                          num_gpus_available=num_gpus_available) as acquired_gpus:
+            assert set(acquired_gpus) == set(expected)
+
+
+def test_acquire_gpus_exception_propagation(tmpdir):
+    raised_exception = RuntimeError("This exception should be propagated properly.")
+    caught_exception = None
+    try:
+        with sockeye.utils.acquire_gpus([-1, 4, -1], lock_dir=str(tmpdir), num_gpus_available=12) as _:
+            raise raised_exception
+    except Exception as e:
+        caught_exception = e
+    assert caught_exception is raised_exception
+
+
+def test_gpu_file_lock_cleanup(tmpdir):
+    gpu_id = 0
+    candidates = [gpu_id]
+
+    # Test that the lock files get created and clean up
+    with sockeye.utils.GpuFileLock(candidates, str(tmpdir)) as lock:
+        assert lock == gpu_id
+        assert tmpdir.join("sockeye.gpu0.lock").check(), "Lock file did not exist."
+        assert not tmpdir.join("sockeye.gpu1.lock").check(), "Unrelated lock file did exist"
+    assert not tmpdir.join("sockeye.gpu0.lock").check(), "Lock file was not cleaned up."
+
+
+def test_gpu_file_lock_exception_propagation(tmpdir):
+    gpu_ids = [0]
+    # Test that exceptions are properly propagated
+    raised_exception = RuntimeError("This exception should be propagated properly.")
+    caught_exception = None
+    try:
+        with sockeye.utils.GpuFileLock(gpu_ids, str(tmpdir)) as lock:
+            raise raised_exception
+    except Exception as e:
+        caught_exception = e
+    assert caught_exception is raised_exception
+
+
+def test_gpu_file_lock_locking(tmpdir):
+    # the second time we try to acquire a lock for the same device we should not succeed
+    gpu_id = 0
+    candidates = [gpu_id]
+
+    with sockeye.utils.GpuFileLock(candidates, str(tmpdir)) as lock_inner:
+        assert lock_inner == 0
+        with sockeye.utils.GpuFileLock(candidates, str(tmpdir)) as lock_outer:
+            assert lock_outer is None
+
+
+def test_gpu_file_lock_permission_exception(tmpdir):
+    with pytest.raises(PermissionError):
+        tmpdir = tmpdir.mkdir("sub")
+        # remove permissions
+        tmpdir.chmod(0)
+
+        with sockeye.utils.GpuFileLock([0], str(tmpdir)) as lock:
+            assert False, "We expect to raise an exception when aquiring the lock and never reach this code."
