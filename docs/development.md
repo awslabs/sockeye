@@ -52,6 +52,12 @@ If you want to develop sockeye, please adhere to the following development guide
  * Make sure to pass unit tests before submitting a pull request.
  
  * Whenever reasonable, write py.test unit tests covering your contribution.
+ 
+ * When importing other sockeye modules import the entire module instead of individual functions and classes using
+   relative imports:
+    ```python
+    from . import attention
+    ```  
    
 
 ## Building the Documentation
