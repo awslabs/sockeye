@@ -11,29 +11,32 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import sys
+from typing import Optional
+
+import sockeye.data_io
 import sockeye.inference
 from sockeye.utils import plot_attention, print_attention_text, get_alignments
 
 
 def get_output_handler(output_type: str,
-                       output_stream,
-                       align_plot_prefix: str,
+                       output_fname: Optional[str],
                        sure_align_threshold: float) -> 'OutputHandler':
     """
 
     :param output_type: Type of output handler.
-    :param output_stream: Output stream to write to.
-    :param align_plot_prefix: Prefix for alignment plot files.
+    :param output_fname: Output filename. If none sys.stdout is used.
     :param sure_align_threshold: Threshold to consider an alignment link as 'sure'.
-    :raises: ValueError for unknown output_type
+    :raises: ValueError for unknown output_type.
     :return: Output handler.
     """
+    output_stream = sys.stdout if output_fname is None else sockeye.data_io.smart_open(output_fname, mode='w')
     if output_type == "translation":
         return StringOutputHandler(output_stream)
     elif output_type == "translation_with_alignments":
         return StringWithAlignmentsOutputHandler(output_stream, sure_align_threshold)
     elif output_type == "align_plot":
-        return AlignPlotHandler(plot_prefix=align_plot_prefix)
+        return AlignPlotHandler(plot_prefix=output_fname)
     elif output_type == "align_text":
         return AlignTextHandler(sure_align_threshold)
     else:

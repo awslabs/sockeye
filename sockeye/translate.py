@@ -33,7 +33,7 @@ logger = setup_main_logger(__name__, file_logging=False)
 
 
 def main():
-    params = argparse.ArgumentParser(description='Translate from STDIN to STDOUT')
+    params = argparse.ArgumentParser(description='Translate CLI')
     params = arguments.add_inference_args(params)
     params = arguments.add_device_args(params)
     args = params.parse_args()
@@ -45,10 +45,8 @@ def main():
     logger.info("Command: %s", " ".join(sys.argv))
     logger.info("Arguments: %s", args)
 
-    output_stream = sys.stdout
     output_handler = sockeye.output_handler.get_output_handler(args.output_type,
-                                                               output_stream,
-                                                               args.align_plot_prefix,
+                                                               args.output,
                                                                args.sure_align_threshold)
 
     with ExitStack() as exit_stack:
@@ -62,7 +60,7 @@ def main():
                                                                                  args.models,
                                                                                  args.checkpoints,
                                                                                  args.softmax_temperature))
-        read_and_translate(translator, output_handler, args.source)
+        read_and_translate(translator, output_handler, args.input)
 
 
 def read_and_translate(translator: sockeye.inference.Translator, output_handler: sockeye.output_handler.OutputHandler,
@@ -75,12 +73,10 @@ def read_and_translate(translator: sockeye.inference.Translator, output_handler:
     :param source: Path to file which will be translated line-by-line if included, if none use stdin.
     """
 
-    if source is not None:
-        # Translates from a file.
-        i, total_time = translate_lines(output_handler, sockeye.data_io.smart_open(source), translator)
-    else:
-        # Translates from standard in.
-        i, total_time = translate_lines(output_handler, sys.stdin, translator)
+    source_data = sys.stdin if source is None else sockeye.data_io.smart_open(source)
+
+    i, total_time = translate_lines(output_handler, source_data, translator)
+
     if i != 0:
         logger.info("Processed %d lines. Total time: %.4f sec/sent: %.4f sent/sec: %.4f", i, total_time,
                     total_time / i, i / total_time)
@@ -99,9 +95,9 @@ def translate_lines(output_handler: sockeye.output_handler.OutputHandler, source
     :return: The number of lines translated, and the total time taken.
     """
 
-    i = 1
+    i = 0
     total_time = 0.0
-    for i, line in enumerate(source_data, i):
+    for i, line in enumerate(source_data, 1):
         trans_input = translator.make_input(i, line)
         logger.debug(" IN: %s", trans_input)
         tic = time.time()
