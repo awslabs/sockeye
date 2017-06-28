@@ -236,7 +236,8 @@ def add_training_args(params):
     train_params.add_argument('--normalize-loss',
                               default=False,
                               action="store_true",
-                              help='Normalize the loss by dividing by the number of non-PAD tokens.')
+                              help='If turned on we normalize the loss by dividing by the number of non-PAD tokens.'
+                                   'If turned off the loss is only normalized by the number of sentences in a batch.')
 
     train_params.add_argument('--metrics',
                               nargs='+',

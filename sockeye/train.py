@@ -250,6 +250,13 @@ def main():
             optimizer_params["clip_gradient"] = clip_gradient
         if args.momentum is not None:
             optimizer_params["momentum"] = args.momentum
+        if args.normalize_loss:
+            # When normalize_loss is turned on we normalize by the number of non-PAD symbols in a batch which implicitly
+            # already contains the number of sentences and therefore we need to disable rescale_grad.
+            optimizer_params["rescale_grad"] = 1.0
+        else:
+            # Making MXNet module API's default scaling factor explicit
+            optimizer_params["rescale_grad"] = 1.0 / args.batch_size
         logger.info("Optimizer: %s", optimizer)
         logger.info("Optimizer Parameters: %s", optimizer_params)
 
