@@ -343,9 +343,17 @@ def add_training_args(params):
 
 def add_inference_args(params):
     decode_params = params.add_argument_group("Inference parameters")
+
     decode_params.add_argument('--input', '-i',
                                default=None,
-                               help='A file containing a list of source sentences to translate.')
+                               help='Input file to translate. One sentence per line. '
+                                    'If not given, will read from stdin.')
+    
+    decode_params.add_argument('--output', '-o',
+                               default=None,
+                               help='Output file to write translations to. '
+                                    'If not given, will write to stdout.')
+
     decode_params.add_argument('--models', '-m',
                                required=True,
                                nargs='+',
@@ -382,9 +390,6 @@ def add_inference_args(params):
                                choices=["translation", "translation_with_alignments", "align_plot", "align_text"],
                                help='Output type. Choices: [translation, translation_with_alignments, '
                                     'align_plot, align_text]. Default: %(default)s.')
-    decode_params.add_argument('--align-plot-prefix',
-                               default="align",
-                               help='Filename prefix for generated alignment visualization. Default: %(default)s')
     decode_params.add_argument('--sure-align-threshold',
                                default=0.9,
                                type=float,
