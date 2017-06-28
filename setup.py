@@ -87,6 +87,12 @@ args = dict(
         ],
     },
 
+    classifiers = [
+        'License :: OSI Approved :: Apache Software License',
+        'Programming Language :: Python :: 3 :: Only',
+
+    ],
+
     cmdclass=cmdclass,
 
 )
