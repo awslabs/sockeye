@@ -1,2 +1,2 @@
-mxnet-cu80mkl==0.10.0
+mxnet-cu80==0.10.0
 numpy>=1.12
