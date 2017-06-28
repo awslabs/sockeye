@@ -16,15 +16,6 @@ Sockeye requires:
 - [MXNet-0.10.0](https://github.com/dmlc/mxnet/tree/v0.10.0)
 - numpy
 
-Install them with:
-```bash
-> pip install -r requirements.txt
-```
-
-Optionally, dmlc's tensorboard fork is supported to track learning curves (````pip install tensorboard````).
-
-Full dependencies are listed in requirements.txt.
-
 ## Installation
 You have two options for installing sockeye: pip and directly from source.
 ### pip
@@ -71,6 +62,15 @@ or the following for CUDA 7.5:
 > python setup.py install -r requirements.gpu-cu75.txt
 ```
 
+### Optional dependencies
+In order to track learning curves during training you can optionally install dmlc's tensorboard fork
+ (````pip install tensorboard````).
+If you want to create alignment plots you will need to install matplotlib (````pip install matplotlib````).
+
+In general you can install all optional dependencies from the Sockeye source folder using:
+```bash
+> pip install -e '.[optional]'
+```
 
 ### Running sockeye
 
