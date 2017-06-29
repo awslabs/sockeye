@@ -363,6 +363,7 @@ class StackedRNNDecoder(Decoder):
         lexical_biases = []
 
         self.rnn.reset()
+        # TODO remove this once mxnet.rnn.SequentialRNNCell.reset() invokes recursive calls on layer cells
         for cell in self.rnn._cells:
             cell.reset()
 
