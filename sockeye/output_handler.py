@@ -36,7 +36,7 @@ def get_output_handler(output_type: str,
     elif output_type == "translation_with_alignments":
         return StringWithAlignmentsOutputHandler(output_stream, sure_align_threshold)
     elif output_type == "align_plot":
-        return AlignPlotHandler(plot_prefix=output_fname)
+        return AlignPlotHandler(plot_prefix="align" if output_fname is None else output_fname)
     elif output_type == "align_text":
         return AlignTextHandler(sure_align_threshold)
     else:
