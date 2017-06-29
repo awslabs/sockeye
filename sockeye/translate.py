@@ -34,8 +34,8 @@ logger = setup_main_logger(__name__, file_logging=False)
 
 def main():
     params = argparse.ArgumentParser(description='Translate CLI')
-    params = arguments.add_inference_args(params)
-    params = arguments.add_device_args(params)
+    arguments.add_inference_args(params)
+    arguments.add_device_args(params)
     args = params.parse_args()
 
     assert args.beam_size > 0, "Beam size must be 1 or greater."

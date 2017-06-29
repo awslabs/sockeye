@@ -27,6 +27,7 @@ import mxnet as mx
 
 import sockeye.constants as C
 import sockeye.utils
+import sockeye.arguments
 from sockeye.log import setup_main_logger
 
 logger = setup_main_logger(__name__, console=True, file_logging=False)
@@ -159,34 +160,8 @@ def main():
     """
     Commandline interface to average parameters.
     """
-    params = argparse.ArgumentParser(
-        description="Averages parameters from multiple models.")
-    params.add_argument(
-        "inputs",
-        metavar="INPUT",
-        type=str,
-        nargs="+",
-        help="either a single model directory (automatic checkpoint selection) "
-             "or multiple .params files (manual checkpoint selection)")
-    params.add_argument(
-        "--max", action="store_true", help="Maximize metric.")
-    params.add_argument(
-        "--metric",
-        help="Name of the metric to choose n-best checkpoints from. (default: {})".format(C.PERPLEXITY),
-        default=C.PERPLEXITY,
-        choices=[C.PERPLEXITY, C.BLEU])
-    params.add_argument(
-        "-n",
-        type=int,
-        default=4,
-        help="number of checkpoints to find (default: 4)")
-    params.add_argument(
-        "--output", "-o", required=True, type=str, help="output param file")
-    params.add_argument(
-        "--strategy",
-        choices=["best", "last", "lifespan"],
-        default="best",
-        help="selection method (default: best)")
+    params = argparse.ArgumentParser(description="Averages parameters from multiple models.")
+    sockeye.arguments.add_average_args(params)
     args = params.parse_args()
 
     if len(args.inputs) > 1:
