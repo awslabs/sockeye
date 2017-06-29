@@ -54,6 +54,7 @@ class _TrainingState:
         self.updates = updates
         self.samples = samples
 
+
 class TrainingModel(sockeye.model.SockeyeModel):
     """
     Defines an Encoder/Decoder model (with attention).

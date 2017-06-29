@@ -62,9 +62,12 @@ class CheckpointDecoder:
             if limit <= 0:
                 limit = len(input_sentences)
             if limit < len(input_sentences):
+                # custom random number generator to guarantee the same samples across runs in order to be able to
+                # compare metrics across independent runs
+                random_gen = random.Random(42)
                 self.input_sentences, self.target_sentences = zip(
-                    *random.sample(list(zip(input_sentences, target_sentences)),
-                                   limit))
+                    *random_gen.sample(list(zip(input_sentences, target_sentences)),
+                                       limit))
             else:
                 self.input_sentences, self.target_sentences = input_sentences, target_sentences
 
