@@ -37,6 +37,36 @@ def int_greater_or_equal(threshold: int) -> Callable:
     return check_greater_equal
 
 
+def add_average_args(params):
+    average_params = params.add_argument_group("Averaging")
+    average_params.add_argument(
+        "inputs",
+        metavar="INPUT",
+        type=str,
+        nargs="+",
+        help="either a single model directory (automatic checkpoint selection) "
+             "or multiple .params files (manual checkpoint selection)")
+    average_params.add_argument(
+        "--max", action="store_true", help="Maximize metric.")
+    average_params.add_argument(
+        "--metric",
+        help="Name of the metric to choose n-best checkpoints from. (default: {})".format(C.PERPLEXITY),
+        default=C.PERPLEXITY,
+        choices=[C.PERPLEXITY, C.BLEU])
+    average_params.add_argument(
+        "-n",
+        type=int,
+        default=4,
+        help="number of checkpoints to find (default: 4)")
+    average_params.add_argument(
+        "--output", "-o", required=True, type=str, help="output param file")
+    average_params.add_argument(
+        "--strategy",
+        choices=["best", "last", "lifespan"],
+        default="best",
+        help="selection method (default: best)")
+
+
 def add_io_args(params):
     data_params = params.add_argument_group("Data & I/O")
 
@@ -78,7 +108,6 @@ def add_io_args(params):
                              default=False,
                              action="store_true",
                              help='Suppress console logging.')
-    return params
 
 
 def add_device_args(params):
@@ -100,12 +129,11 @@ def add_device_args(params):
                                help='Just use the specified device ids without locking.')
     device_params.add_argument('--lock-dir',
                                default="/tmp",
-                               help='When aquiring a GPU we do file based locking so that only one Sockeye process '
+                               help='When acquiring a GPU we do file based locking so that only one Sockeye process '
                                     'can run on the a GPU. This is the folder in which we store the file '
                                     'locks. For locking to work correctly it is assumed all processes use the same '
                                     'lock directory. The only requirement for the directory are file '
                                     'write permissions.')
-    return params
 
 
 def add_model_parameters(params):
@@ -202,8 +230,6 @@ def add_model_parameters(params):
     model_params.add_argument('--context-gating', action="store_true",
                               help="Enables a context gate which adaptively weighs the decoder input against the"
                                    "source context vector before each update of the decoder hidden state.")
-
-    return params
 
 
 def add_training_args(params):
@@ -338,8 +364,6 @@ def add_training_args(params):
                               default=13,
                               help='Random seed. Default: %(default)s.')
 
-    return params
-
 
 def add_inference_args(params):
     decode_params = params.add_argument_group("Inference parameters")
@@ -394,4 +418,3 @@ def add_inference_args(params):
                                default=0.9,
                                type=float,
                                help='Threshold to consider a soft alignment a sure alignment. Default: %(default)s')
-    return params
