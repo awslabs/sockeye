@@ -83,7 +83,8 @@ args = dict(
             'sockeye-train = sockeye.train:main',
             'sockeye-translate = sockeye.translate:main',
             'sockeye-average = sockeye.average:main',
-            'sockeye-embeddings = sockeye.embeddings:main'
+            'sockeye-embeddings = sockeye.embeddings:main',
+            'sockeye-evaluate = sockeye.evaluate:main'
         ],
     },
 
