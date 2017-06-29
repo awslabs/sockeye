@@ -70,7 +70,7 @@ def get_encoder(num_embed: int,
     if num_layers > 1:
         encoders.append(EncoderClass(num_hidden=rnn_num_hidden,
                                      num_layers=num_layers - 1,
-                                     dropout=0.,
+                                     dropout=dropout,
                                      layout=C.TIME_MAJOR,
                                      cell_type=cell_type,
                                      residual=residual,
