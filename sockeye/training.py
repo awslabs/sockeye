@@ -307,16 +307,16 @@ class TrainingModel(sockeye.model.SockeyeModel):
                     training_state.num_not_improved = 0
                 else:
                     training_state.num_not_improved += 1
+                    logger.info("Model has not improved for %d checkpoints", training_state.num_not_improved)
 
                 if training_state.num_not_improved == max_num_not_improved:
-                    logger.info("Model has not improved for %d checkpoints. Stopping fit.", training_state.num_not_improved)
+                    logger.info("Stopping fit (no improvements for %d checkpoints)", training_state.num_not_improved)
                     self.training_monitor.stop_fit_callback()
                     final_training_state_dirname = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
                     if os.path.exists(final_training_state_dirname):
                         shutil.rmtree(final_training_state_dirname)
                     break
                 else:
-                    logger.info("Model has not improved for %d checkpoints.", training_state.num_not_improved)
                     self._checkpoint(training_state, output_folder, train_iter)
 
     def _save_params(self, output_folder: str, checkpoint: int):

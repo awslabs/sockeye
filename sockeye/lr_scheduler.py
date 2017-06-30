@@ -97,6 +97,7 @@ class LearningRateSchedulerPlateauReduce(LearningRateScheduler):
     """
 
     def __init__(self, reduce_factor: float, reduce_num_not_improved: int) -> None:
+        assert 0.0 < reduce_factor <= 1, "reduce_factor should be in ]0,1]."
         self.reduce_factor = reduce_factor
         self.reduce_num_not_improved = reduce_num_not_improved
         self.num_not_improved = 0
@@ -115,10 +116,11 @@ class LearningRateSchedulerPlateauReduce(LearningRateScheduler):
             self.num_not_improved = 0
         else:
             self.num_not_improved += 1
-            if self.num_not_improved >= self.reduce_num_not_improved:
+            if self.num_not_improved >= self.reduce_num_not_improved and self.reduce_factor < 1.0:
+                old_lr = self.lr
                 self.lr *= self.reduce_factor
-                logger.info("%d checkpoints since validation score improvement or rate scaling, "
-                                 "lowering learning rate to %1.2e", self.num_not_improved, self.lr)
+                logger.info("%d checkpoints since improvement or rate scaling, "
+                            "lowering learning rate: %1.2e -> %1.2e", self.num_not_improved, old_lr, self.lr)
                 self.num_not_improved = 0
 
     def __call__(self, t):
@@ -156,10 +158,13 @@ def get_lr_scheduler(scheduler_type: str,
     elif scheduler_type == "fixed-rate-inv-t":
         return LearningRateSchedulerInvT(updates_per_checkpoint, learning_rate_half_life)
     elif scheduler_type == "plateau-reduce":
-        assert learning_rate_reduce_factor is not None, "learning_rate_reduce_factor needed for plateau-reduce " \
-                                                        "scheduler"
-        assert learning_rate_reduce_num_not_improved is not None, "learning_rate_reduce_num_not_improved needed for " \
-                                                                  "plateau-reduce scheduler"
+        assert learning_rate_reduce_factor is not None, \
+            "learning_rate_reduce_factor needed for plateau-reduce scheduler"
+        assert learning_rate_reduce_num_not_improved is not None, \
+            "learning_rate_reduce_num_not_improved needed for plateau-reduce scheduler"
+        if learning_rate_reduce_factor >= 1.0:
+            logger.warning("Not using plateau-reduce learning rate scheduling: learning_rate_reduce_factor == 1.0")
+            return None
         return LearningRateSchedulerPlateauReduce(learning_rate_reduce_factor, learning_rate_reduce_num_not_improved)
     else:
         raise ValueError("Unknown learning rate scheduler type %s." % scheduler_type)
