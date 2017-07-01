@@ -39,6 +39,11 @@ ModelConfig = sockeye.utils.namedtuple_with_defaults('ModelConfig',
                                                       "attention_coverage_num_hidden",
                                                       "attention_use_prev_word",
                                                       "dropout",
+                                                      "char_seq_encoder",
+                                                      "cse_max_filter_width",
+                                                      "cse_num_filters",
+                                                      "cse_pool_stride",
+                                                      "cse_num_highway_layers",
                                                       "rnn_cell_type",
                                                       "rnn_num_layers",
                                                       "rnn_num_hidden",
@@ -58,7 +63,12 @@ ModelConfig = sockeye.utils.namedtuple_with_defaults('ModelConfig',
                                                       "context_gating": False,
                                                       "loss": C.CROSS_ENTROPY,
                                                       "normalize_loss": False,
-                                                      "layer_normalization": False
+                                                      "layer_normalization": False,
+                                                      "char_seq_encoder": False,
+                                                      "cse_max_filter_width": 8,
+                                                      "cse_num_filters": None,
+                                                      "cse_pool_stride": 5,
+                                                      "cse_num_highway_layers": 4,
                                                      })
 """
 ModelConfig defines model parameters defined at training time which are relevant to model inference.
@@ -153,7 +163,12 @@ class SockeyeModel:
                                                    self.config.rnn_residual_connections,
                                                    self.config.dropout,
                                                    rnn_forget_bias,
-                                                   fused_encoder)
+                                                   fused_encoder,
+                                                   self.config.char_seq_encoder,
+                                                   self.config.cse_max_filter_width,
+                                                   self.config.cse_num_filters,
+                                                   self.config.cse_pool_stride,
+                                                   self.config.cse_num_highway_layers)
 
         self.attention = sockeye.attention.get_attention(self.config.attention_use_prev_word,
                                                          self.config.attention_type,
