@@ -8,6 +8,8 @@ It implements the well-known encoder-decoder architecture with attention.
 
 If you are interested in collaborating or have any questions, please submit a pull request or issue.
 You can also send questions to *sockeye-dev-at-amazon-dot-com*.
+
+If you are AWS DeepLearning AMI user please refer to the corresponding section below.
  
 ## Dependencies
 
@@ -17,7 +19,16 @@ Sockeye requires:
 - numpy
 
 ## Installation
-You have two options for installing sockeye: pip and directly from source.
+
+### For AWS DeepLearning AMI users
+
+AWS DeepLearning AMI users need to run only one line in order to install the sockeye:
+
+```bash
+> sudo pip3 install sockeye --no-deps
+```
+
+For non DLAMI users - you have two options for installing sockeye: pip and directly from source.
 ### pip
 
 #### CPU
@@ -32,11 +43,15 @@ If you want to run sockeye on a GPU you need to make sure your version of MXNet 
 version of CUDA you can do this by running the following for CUDA 8.0:
 
 ```bash
+> wget https://raw.githubusercontent.com/awslabs/sockeye/master/requirements.gpu-cu80.txt
 > pip install sockeye --no-deps -r requirements.gpu-cu80.txt
+> rm requirements.gpu-cu80.txt
 ```
 or the following for CUDA 7.5:
 ```bash
+> wget https://raw.githubusercontent.com/awslabs/sockeye/master/requirements.gpu-cu75.txt
 > pip install sockeye --no-deps -r requirements.gpu-cu75.txt
+> rm requirements.gpu-cu75.txt
 ```
 
 ### From Source
@@ -73,6 +88,8 @@ In general you can install all optional dependencies from the Sockeye source fol
 ```
 
 ### Running sockeye
+
+*AWS DeepLearning AMI user need to use python3 command instead of the python*
 
 After installation, command line tools such as *sockeye-train, sockeye-translate, sockeye-average* 
 and *sockeye-embeddings* are available. Alternatively, if the sockeye directory is on your
@@ -118,3 +135,4 @@ This will take the best set of parameters found during training and then transla
 write translations to STDOUT.
 
 For more detailed examples check out our user documentation.
+
