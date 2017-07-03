@@ -18,9 +18,9 @@ import logging
 import os
 import pickle
 import random
-import time
-from typing import List, AnyStr
 import shutil
+import time
+from typing import AnyStr, List, Optional
 
 import mxnet as mx
 import numpy as np
@@ -164,6 +164,7 @@ class TrainingModel(sockeye.model.SockeyeModel):
             optimizer_params: dict,
             optimized_metric: str = "perplexity",
             max_num_not_improved: int = 3,
+            min_num_epochs: Optional[int] = None,
             monitor_bleu: int = 0,
             use_tensorboard: bool = False):
         """
@@ -181,6 +182,7 @@ class TrainingModel(sockeye.model.SockeyeModel):
         :param optimizer_params: The parameters for the optimizer.
         :param optimized_metric: The metric that is tracked for early stopping.
         :param max_num_not_improved: Stop training if the optimized_metric does not improve for this many checkpoints.
+        :param min_num_epochs: Minimum number of epochs to train, even if validation scores did not improve.
         :param monitor_bleu: Monitor BLEU during training (0: off, >=0: the number of sentences to decode for BLEU
                evaluation, -1: decode the full validation set.).
         :param use_tensorboard: If True write tensorboard compatible logs for monitoring training and
@@ -214,7 +216,8 @@ class TrainingModel(sockeye.model.SockeyeModel):
                   metrics=metrics,
                   max_updates=max_updates,
                   checkpoint_frequency=checkpoint_frequency,
-                  max_num_not_improved=max_num_not_improved)
+                  max_num_not_improved=max_num_not_improved,
+                  min_num_epochs=min_num_epochs)
 
         logger.info("Training finished. Best checkpoint: %d. Best validation %s: %.6f",
                     self.training_monitor.get_best_checkpoint(),
@@ -229,7 +232,8 @@ class TrainingModel(sockeye.model.SockeyeModel):
              metrics: List[AnyStr],
              max_updates: int,
              checkpoint_frequency: int,
-             max_num_not_improved: int):
+             max_num_not_improved: int,
+             min_num_epochs: Optional[int] = None):
         """
         Internal fit method. Runtime determined by early stopping.
 
@@ -240,6 +244,7 @@ class TrainingModel(sockeye.model.SockeyeModel):
         :param max_updates: Maximum number of batches to process.
         :param checkpoint_frequency: Frequency of checkpointing.
         :param max_num_not_improved: Maximum number of checkpoints until fitting is stopped if model does not improve.
+        :param min_num_epochs: Minimum number of epochs to train, even if validation scores did not improve.
         """
         metric_train = self._create_eval_metric(metrics)
         metric_val = self._create_eval_metric(metrics)
@@ -247,21 +252,21 @@ class TrainingModel(sockeye.model.SockeyeModel):
 
         training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
         if os.path.exists(training_state_dir):
-            training_state = self.load_checkpoint(training_state_dir, train_iter)
+            train_state = self.load_checkpoint(training_state_dir, train_iter)
         else:
-            training_state = _TrainingState(
-                num_not_improved = 0,
-                epoch = 0,
-                checkpoint = 0,
-                updates = 0,
-                samples = 0
+            train_state = _TrainingState(
+                num_not_improved=0,
+                epoch=0,
+                checkpoint=0,
+                updates=0,
+                samples=0
             )
 
         next_data_batch = train_iter.next()
 
-        while max_updates == -1 or training_state.updates < max_updates:
+        while max_updates == -1 or train_state.updates < max_updates:
             if not train_iter.iter_next():
-                training_state.epoch += 1
+                train_state.epoch += 1
                 train_iter.reset()
 
             # process batch
@@ -275,26 +280,27 @@ class TrainingModel(sockeye.model.SockeyeModel):
                 self.module.prepare(next_data_batch)
 
             self.module.update_metric(metric_train, batch.label)
-            self.training_monitor.batch_end_callback(training_state.epoch, training_state.updates, metric_train)
-            training_state.updates += 1
-            training_state.samples += train_iter.batch_size
+            self.training_monitor.batch_end_callback(train_state.epoch, train_state.updates, metric_train)
+            train_state.updates += 1
+            train_state.samples += train_iter.batch_size
 
-            if training_state.updates > 0 and training_state.updates % checkpoint_frequency == 0:
-                training_state.checkpoint += 1
-                self._save_params(output_folder, training_state.checkpoint)
-                self.training_monitor.checkpoint_callback(training_state.checkpoint, metric_train)
+            if train_state.updates > 0 and train_state.updates % checkpoint_frequency == 0:
+                train_state.checkpoint += 1
+                self._save_params(output_folder, train_state.checkpoint)
+                self.training_monitor.checkpoint_callback(train_state.checkpoint, metric_train)
 
                 toc = time.time()
                 logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f",
-                            training_state.checkpoint, training_state.updates, training_state.epoch, training_state.samples, (toc - tic))
+                            train_state.checkpoint, train_state.updates, train_state.epoch,
+                            train_state.samples, (toc - tic))
                 tic = time.time()
 
                 for name, val in metric_train.get_name_value():
-                    logger.info('Checkpoint [%d]\tTrain-%s=%f', training_state.checkpoint, name, val)
+                    logger.info('Checkpoint [%d]\tTrain-%s=%f', train_state.checkpoint, name, val)
                 metric_train.reset()
 
                 # evaluation on validation set
-                has_improved, best_checkpoint = self._evaluate(training_state, val_iter, metric_val)
+                has_improved, best_checkpoint = self._evaluate(train_state, val_iter, metric_val)
                 if self.lr_scheduler is not None:
                     self.lr_scheduler.new_evaluation_result(has_improved)
 
@@ -304,20 +310,29 @@ class TrainingModel(sockeye.model.SockeyeModel):
                         os.remove(best_path)
                     actual_best_fname = C.PARAMS_NAME % best_checkpoint
                     os.symlink(actual_best_fname, best_path)
-                    training_state.num_not_improved = 0
+                    train_state.num_not_improved = 0
                 else:
-                    training_state.num_not_improved += 1
-                    logger.info("Model has not improved for %d checkpoints", training_state.num_not_improved)
+                    train_state.num_not_improved += 1
+                    logger.info("Model has not improved for %d checkpoints", train_state.num_not_improved)
 
-                if training_state.num_not_improved == max_num_not_improved:
-                    logger.info("Stopping fit (no improvements for %d checkpoints)", training_state.num_not_improved)
+                stop_fit = False
+
+                if train_state.num_not_improved == max_num_not_improved:
+                    logger.info("Stopping fit (no improvements for %d checkpoints)", train_state.num_not_improved)
+                    stop_fit = True
+
+                if (min_num_epochs is not None and train_state.epoch < min_num_epochs):
+                    logger.info("Minimum number of epochs not reached. Will not stop yet.")
+                    stop_fit = False
+
+                if stop_fit:
                     self.training_monitor.stop_fit_callback()
                     final_training_state_dirname = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
                     if os.path.exists(final_training_state_dirname):
                         shutil.rmtree(final_training_state_dirname)
                     break
                 else:
-                    self._checkpoint(training_state, output_folder, train_iter)
+                    self._checkpoint(train_state, output_folder, train_iter)
 
     def _save_params(self, output_folder: str, checkpoint: int):
         """
