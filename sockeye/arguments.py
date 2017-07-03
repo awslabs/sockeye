@@ -291,6 +291,11 @@ def add_training_args(params):
                               help='Maximum number of checkpoints the model is allowed to not improve in '
                                    '<optimized-metric> on validation data before training is stopped. '
                                    'Default: %(default)s')
+    train_params.add_argument('--min-num-epochs',
+                              type=int,
+                              default=0,
+                              help='Minimum number of epochs (passes through the training data) '
+                                   'before fitting is stopped. Default: %(default)s.')
 
     train_params.add_argument('--dropout',
                               type=float,

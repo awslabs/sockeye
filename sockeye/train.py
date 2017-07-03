@@ -269,6 +269,7 @@ def main():
                   optimizer=optimizer, optimizer_params=optimizer_params,
                   optimized_metric=args.optimized_metric,
                   max_num_not_improved=args.max_num_checkpoint_not_improved,
+                  min_num_epochs=args.min_num_epochs,
                   monitor_bleu=args.monitor_bleu,
                   use_tensorboard=args.use_tensorboard)
 
