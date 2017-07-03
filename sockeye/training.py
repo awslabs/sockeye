@@ -321,8 +321,10 @@ class TrainingModel(sockeye.model.SockeyeModel):
                     logger.info("Stopping fit (no improvements for %d checkpoints)", train_state.num_not_improved)
                     stop_fit = True
 
-                if (min_num_epochs is not None and train_state.epoch < min_num_epochs):
-                    logger.info("Minimum number of epochs not reached. Will not stop yet.")
+                if min_num_epochs is not None and train_state.epoch < min_num_epochs:
+                    logger.info("Minimum number of epochs (%d) not reached: %d. Will not stop yet.",
+                                min_num_epochs,
+                                train_state.epoch)
                     stop_fit = False
 
                 if stop_fit:
