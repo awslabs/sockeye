@@ -315,26 +315,26 @@ class TrainingModel(sockeye.model.SockeyeModel):
                     train_state.num_not_improved += 1
                     logger.info("Model has not improved for %d checkpoints", train_state.num_not_improved)
 
-                stop_fit = False
-
-                if train_state.num_not_improved == max_num_not_improved:
-                    logger.info("Stopping fit (no improvements for %d checkpoints)", train_state.num_not_improved)
+                if train_state.num_not_improved >= max_num_not_improved:
+                    logger.info("Maximum number of not improved checkpoints (%d) reached: %d",
+                                max_num_not_improved, train_state.num_not_improved)
                     stop_fit = True
 
-                if min_num_epochs is not None and train_state.epoch < min_num_epochs:
-                    logger.info("Minimum number of epochs (%d) not reached: %d. Will not stop yet.",
-                                min_num_epochs,
-                                train_state.epoch)
-                    stop_fit = False
+                    if min_num_epochs is not None and train_state.epoch < min_num_epochs:
+                        logger.info("Minimum number of epochs (%d) not reached yet: %d",
+                                    min_num_epochs,
+                                    train_state.epoch)
+                        stop_fit = False
 
-                if stop_fit:
-                    self.training_monitor.stop_fit_callback()
-                    final_training_state_dirname = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
-                    if os.path.exists(final_training_state_dirname):
-                        shutil.rmtree(final_training_state_dirname)
-                    break
-                else:
-                    self._checkpoint(train_state, output_folder, train_iter)
+                    if stop_fit:
+                        logger.info("Stopping fit")
+                        self.training_monitor.stop_fit_callback()
+                        final_training_state_dirname = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
+                        if os.path.exists(final_training_state_dirname):
+                            shutil.rmtree(final_training_state_dirname)
+                        break
+
+                self._checkpoint(train_state, output_folder, train_iter)
 
     def _save_params(self, output_folder: str, checkpoint: int):
         """
