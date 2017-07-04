@@ -22,7 +22,9 @@ from typing import Optional, Iterable, Tuple
 
 import mxnet as mx
 
+import sockeye
 import sockeye.arguments as arguments
+import sockeye.constants as C
 import sockeye.data_io
 import sockeye.inference
 import sockeye.output_handler
@@ -38,10 +40,14 @@ def main():
     arguments.add_device_args(params)
     args = params.parse_args()
 
-    assert args.beam_size > 0, "Beam size must be 1 or greater."
+    if args.output is not None:
+        global logger
+        logger = setup_main_logger(__name__, file_logging=True, path="%s.%s" % (args.output, C.LOG_NAME))
+
     if args.checkpoints is not None:
         assert len(args.checkpoints) == len(args.models), "must provide checkpoints for each model"
 
+    logger.info("Sockeye version %s", sockeye.__version__)
     logger.info("Command: %s", " ".join(sys.argv))
     logger.info("Arguments: %s", args)
 
