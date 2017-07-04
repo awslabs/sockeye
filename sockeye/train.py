@@ -27,6 +27,7 @@ from typing import Optional, Dict
 import mxnet as mx
 import numpy as np
 
+import sockeye
 import sockeye.arguments as arguments
 import sockeye.attention
 import sockeye.constants as C
@@ -119,10 +120,11 @@ def main():
     else:
         os.makedirs(output_folder)
 
+
     logger = setup_main_logger(__name__,
                                file_logging=True,
                                console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
-
+    logger.info("Sockeye version %s", sockeye.__version__)
     logger.info("Command: %s", " ".join(sys.argv))
     logger.info("Arguments: %s", args)
     with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "w") as fp:
