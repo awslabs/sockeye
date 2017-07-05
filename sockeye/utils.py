@@ -33,8 +33,26 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 def error_exit(error_message, error_code=1):
+    """
+    Exit the programm with an error message and an error code.
+
+    :param error_message: Error message to show to the user.
+    :param error_code: Error code to return to the system.
+    """
     logger.error(error_message)
     sys.exit(error_code)
+
+def check_condition(condition: bool, error_message: str, error_code:int = 1):
+    """
+    Check the condition and if it is not met, exit with the given error message
+    and error_code, similar to assertions.
+
+    :param condition: Condition to check.
+    :param error_message: Error message to show to the user.
+    :param error_code: Error code to return to the system.
+    """
+    if not condition:
+        error_exit(error_message, error_code)
 
 def save_graph(symbol: mx.sym.Symbol, filename: str, hide_weights: bool = True):
     """

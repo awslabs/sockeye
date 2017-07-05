@@ -25,7 +25,7 @@ import mxnet as mx
 import numpy as np
 
 import sockeye.constants as C
-from sockeye.utils import error_exit
+from sockeye.utils import check_condition
 
 logger = logging.getLogger(__name__)
 
@@ -101,8 +101,8 @@ def read_parallel_corpus(data_source: str,
     """
     source_sentences = read_sentences(data_source, vocab_source, add_bos=False)
     target_sentences = read_sentences(data_target, vocab_target, add_bos=True)
-    if len(source_sentences) != len(target_sentences):
-        error_exit("Number of source sentences does not match number of target sentences")
+    check_condition(len(source_sentences) == len(target_sentences),
+        "Number of source sentences does not match number of target sentences")
     return source_sentences, target_sentences
 
 
@@ -265,8 +265,7 @@ def read_sentences(path: str, vocab: Dict[str, int], add_bos=False, limit=None) 
     sentences = []
     for sentence_tokens in read_content(path, limit):
         sentence = tokens2ids(sentence_tokens, vocab)
-        if not sentence:
-            error_exit("Empty sentence in file %s" % path)
+        check_condition(sentence, "Empty sentence in file %s" % path)
         if add_bos:
             sentence.insert(0, vocab[C.BOS_SYMBOL])
         sentences.append(sentence)
@@ -432,8 +431,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         for bkt, buck in zip(self.buckets, self.data_length):
             logger.info("bucket of {0} : {1} samples".format(bkt, len(buck)))
             nsamples += len(buck)
-        if nsamples == 0:
-            error_exit("0 data points available in the data iterator. " \
+        check_condition(nsamples > 0, "0 data points available in the data iterator. " \
                        "%d data points have been discarded because they didn't fit into any bucket. Consider " \
                        "increasing the --max-seq-len to fit your data." % ndiscard)
         logger.info("%d sentence pairs out of buckets", ndiscard)

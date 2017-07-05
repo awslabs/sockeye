@@ -14,7 +14,7 @@
 import logging
 from math import sqrt
 from typing import Optional
-from sockeye.utils import error_exit
+from sockeye.utils import check_condition
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +37,8 @@ class LearningRateSchedulerInvSqrtT(LearningRateScheduler):
     """
 
     def __init__(self, updates_per_checkpoint: int, half_life: int) -> None:
-        if updates_per_checkpoint <= 0:
-            error_exit("updates_per_checkpoint needs to be > 0.")
-        if half_life <= 0:
-            error_exit("half_life needs to be > 0.")
+        check_condition(updates_per_checkpoint > 0, "updates_per_checkpoint needs to be > 0.")
+        check_condition(half_life > 0, "half_life needs to be > 0.")
         # Note: will be overwritten by optimizer  in mxnet
         self.base_lr = None
         # 0.5 base_lr = base_lr * sqrt(1 + T * factor)
@@ -70,10 +68,8 @@ class LearningRateSchedulerInvT(LearningRateScheduler):
     """
 
     def __init__(self, updates_per_checkpoint: int, half_life: int) -> None:
-        if updates_per_checkpoint <= 0:
-            error_exit("updates_per_checkpoint needs to be > 0.")
-        if half_life <= 0:
-            error_exit("half_life needs to be > 0.")
+        check_condition(updates_per_checkpoint > 0, "updates_per_checkpoint needs to be > 0.")
+        check_condition(half_life > 0, "half_life needs to be > 0.")
         # Note: will be overwritten by optimizer
         self.base_lr = None
         # 0.5 base_lr = base_lr * (1 + T * factor)
@@ -102,8 +98,7 @@ class LearningRateSchedulerPlateauReduce(LearningRateScheduler):
     """
 
     def __init__(self, reduce_factor: float, reduce_num_not_improved: int) -> None:
-        if not (0.0 < reduce_factor <= 1):
-            error_exit("reduce_factor should be in ]0,1].")
+        check_condition(0.0 < reduce_factor <= 1, "reduce_factor should be in ]0,1].")
         self.reduce_factor = reduce_factor
         self.reduce_num_not_improved = reduce_num_not_improved
         self.num_not_improved = 0
@@ -164,10 +159,10 @@ def get_lr_scheduler(scheduler_type: str,
     elif scheduler_type == "fixed-rate-inv-t":
         return LearningRateSchedulerInvT(updates_per_checkpoint, learning_rate_half_life)
     elif scheduler_type == "plateau-reduce":
-        if learning_rate_reduce_factor is None:
-            error_exit("learning_rate_reduce_factor needed for plateau-reduce scheduler")
-        if learning_rate_reduce_num_not_improved is None:
-            error_exit("learning_rate_reduce_num_not_improved needed for plateau-reduce scheduler")
+        check_condition(learning_rate_reduce_factor is not None,
+                "learning_rate_reduce_factor needed for plateau-reduce scheduler")
+        check_condition(learning_rate_reduce_num_not_improved is not None,
+                "learning_rate_reduce_num_not_improved needed for plateau-reduce scheduler")
         if learning_rate_reduce_factor >= 1.0:
             logger.warning("Not using plateau-reduce learning rate scheduling: learning_rate_reduce_factor == 1.0")
             return None

@@ -22,7 +22,7 @@ import logging
 from sockeye.log import setup_main_logger
 from sockeye.bleu import corpus_bleu, bleu_from_counts, corpus_bleu_counts, bleu_counts
 from sockeye.data_io import read_content
-from sockeye.utils import error_exit
+from sockeye.utils import check_condition
 
 def main():
     params = argparse.ArgumentParser(description='Evaluate translations by calculating 4-BLEU score with respect to a reference set')
@@ -34,8 +34,7 @@ def main():
                          help="Numerical value of the offset of zero n-gram counts")
     args = params.parse_args()
 
-    if args.offset < 0:
-        error_exit("Offset should be non-negative.")
+    check_condition(args.offset >= 0, "Offset should be non-negative.")
 
     logger = setup_main_logger(__name__, file_logging=False)
 
@@ -51,8 +50,7 @@ def main():
     logger.info("Loaded %d hypotheses", len(hypotheses))
     logger.info("Loaded %d references", len(references))
 
-    if len(hypotheses) != len(references):
-        error_exit("Hypotheses and references have different number of lines.")
+    check_condition(len(hypotheses) == len(references), "Hypotheses and references have different number of lines.")
 
     if not args.sentence:
         bleu = corpus_bleu(hypotheses, references, args.offset)

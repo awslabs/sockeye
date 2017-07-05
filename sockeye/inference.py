@@ -29,7 +29,7 @@ import sockeye.utils
 import sockeye.vocab
 from sockeye.attention import AttentionState
 from sockeye.decoder import DecoderState
-from sockeye.utils import error_exit
+from sockeye.utils import check_condition
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +71,7 @@ class InferenceModel(sockeye.model.SockeyeModel):
                                self.config.max_seq_len, max_input_len)
         self.max_input_len = max_input_len
 
-        if beam_size >= self.config.vocab_target_size:
-            error_exit('The beam size must be smaller than the target vocabulary size.')
+        check_condition(beam_size < self.config.vocab_target_size, 'The beam size must be smaller than the target vocabulary size.')
 
         self.beam_size = beam_size
         self.softmax_temperature = softmax_temperature
