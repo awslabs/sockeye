@@ -22,6 +22,7 @@ import mxnet as mx
 import sockeye.constants as C
 import sockeye.rnn
 import sockeye.utils
+from sockeye.utils import error_exit
 
 logger = logging.getLogger(__name__)
 
