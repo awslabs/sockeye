@@ -16,7 +16,7 @@ import mxnet as mx
 import numpy as np
 import random
 import pytest
-
+from sockeye.utils import check_condition, SockeyeError
 
 def test_get_alignments():
     attention_matrix = np.asarray([[0.1, 0.4, 0.5],
@@ -195,3 +195,19 @@ def test_gpu_file_lock_permission_exception(tmpdir):
 
         with sockeye.utils.GpuFileLock([0], str(tmpdir)) as lock:
             assert False, "We expect to raise an exception when aquiring the lock and never reach this code."
+
+
+def test_check_condition_true():
+    check_condition(1 == 1, "Nice")
+
+
+def test_check_condition_false():
+    with pytest.raises(SockeyeError):
+        check_condition(1 == 2, "Wrong")
+
+
+def test_check_condition_message():
+    try:
+        check_condition(1 == 2, "Wrong")
+    except SockeyeError as e:
+        assert str(e) == "Wrong"
