@@ -35,6 +35,10 @@ REVERSE_PREFIX = "reverse_"
 SOURCE_EMBEDDING_PREFIX = "source_embed_"
 TARGET_EMBEDDING_PREFIX = "target_embed_"
 
+# encoder types
+RNN_TYPE = "rnn"
+TRANSFORMER_TYPE = "transformer"
+
 # rnn types
 LSTM_TYPE = 'lstm'
 GRU_TYPE = 'gru'

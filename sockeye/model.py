@@ -51,12 +51,18 @@ ModelConfig = sockeye.utils.namedtuple_with_defaults('ModelConfig',
                                                       "loss",
                                                       "normalize_loss",
                                                       "smoothed_cross_entropy_alpha",
+                                                      "encoder",
+                                                      "transformer_model_size",
+                                                      "transformer_num_layers",
                                                   ],
                                                      default_values={
                                                       "attention_use_prev_word": False,
                                                       "context_gating": False,
                                                       "loss": C.CROSS_ENTROPY,
-                                                      "normalize_loss": False
+                                                      "normalize_loss": False,
+                                                      "encoder": C.RNN_TYPE,
+                                                      "transformer_model_size": 512,
+                                                      "transformer_num_layers": 6,
                                                   })
 """
 ModelConfig defines model parameters defined at training time which are relevant to model inference.
@@ -143,15 +149,21 @@ class SockeyeModel:
         :param fused_encoder: Use FusedRNNCells in encoder.
         :param rnn_forget_bias: forget bias initialization for RNNs.
         """
-        self.encoder = sockeye.encoder.get_encoder(self.config.num_embed_source,
-                                                   self.config.vocab_source_size,
-                                                   self.config.rnn_num_layers,
-                                                   self.config.rnn_num_hidden,
-                                                   self.config.rnn_cell_type,
-                                                   self.config.rnn_residual_connections,
-                                                   self.config.dropout,
-                                                   rnn_forget_bias,
-                                                   fused_encoder)
+        if self.config.encoder == C.RNN_TYPE:
+            self.encoder = sockeye.encoder.get_encoder_rnn(self.config.num_embed_source,
+                                                           self.config.vocab_source_size,
+                                                           self.config.rnn_num_layers,
+                                                           self.config.rnn_num_hidden,
+                                                           self.config.rnn_cell_type,
+                                                           self.config.rnn_residual_connections,
+                                                           self.config.dropout,
+                                                           rnn_forget_bias,
+                                                           fused_encoder)
+        elif self.config.encoder == C.TRANSFORMER_TYPE:
+            self.encoder = sockeye.encoder.get_encoder_transformer(self.config.transformer_model_size,
+                                                                   self.config.vocab_source_size,
+                                                                   self.config.transformer_num_layers,
+                                                                   self.config.dropout)
 
         self.attention = sockeye.attention.get_attention(self.config.attention_use_prev_word,
                                                          self.config.attention_type,

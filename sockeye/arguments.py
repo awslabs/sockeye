@@ -153,6 +153,11 @@ def add_model_parameters(params):
                               default=1,
                               help='Minimum frequency of words to be included in vocabularies. Default: %(default)s.')
 
+    model_params.add_argument('--encoder',
+                              choices=[C.RNN_TYPE, C.TRANSFORMER_TYPE],
+                              default=C.RNN_TYPE,
+                              help='Type of encoder. Default: %(default)s.')
+
     model_params.add_argument('--rnn-num-layers',
                               type=int_greater_or_equal(1),
                               default=1,
@@ -170,6 +175,15 @@ def add_model_parameters(params):
                               default=False,
                               help="Add residual connections to stacked RNNs if --rnn-num-layers > 3. "
                                    "(see Wu ETAL'16). Default: %(default)s.")
+
+    model_params.add_argument('--transformer-model-size',
+                              type=int_greater_or_equal(1),
+                              default=512,
+                              help='Size of all layers and embeddings when using transformer. Default: %(default)s.')
+    model_params.add_argument('--transformer-num-layers',
+                              type=int_greater_or_equal(1),
+                              default=6,
+                              help='Number of encoder and decoder layers when using transformer. Default: %(default)s.')
 
     model_params.add_argument('--num-embed',
                               type=int_greater_or_equal(1),

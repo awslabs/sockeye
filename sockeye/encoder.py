@@ -26,15 +26,15 @@ import sockeye.utils
 logger = logging.getLogger(__name__)
 
 
-def get_encoder(num_embed: int,
-                vocab_size: int,
-                num_layers: int,
-                rnn_num_hidden: int,
-                cell_type: str,
-                residual: bool,
-                dropout: float,
-                forget_bias: float,
-                fused: bool = False) -> 'Encoder':
+def get_encoder_rnn(num_embed: int,
+                    vocab_size: int,
+                    num_layers: int,
+                    rnn_num_hidden: int,
+                    cell_type: str,
+                    residual: bool,
+                    dropout: float,
+                    forget_bias: float,
+                    fused: bool = False) -> 'Encoder':
     """
     Returns an encoder with embedding, batch2time-major conversion, and bidirectional RNN encoder.
     If num_layers > 1, adds uni-directional RNNs.
@@ -75,6 +75,43 @@ def get_encoder(num_embed: int,
                                      cell_type=cell_type,
                                      residual=residual,
                                      forget_bias=forget_bias))
+
+    return EncoderSequence(encoders)
+
+
+def get_encoder_transformer(model_size: int,
+                            vocab_size: int,
+                            num_layers: int,
+                            dropout: float) -> 'Encoder':
+    """
+    TODO
+
+    :param model_size: Size of all layers and embeddings (dimension of model).
+    :param vocab_size: Source vocabulary size.
+    :param num_layers: Number of encoder layers.
+    :param dropout: Dropout probability for encoders (RNN and embedding).
+    :return: Encoder instance.
+    """
+
+    encoders = list()
+    encoders.append(Embedding(num_embed=model_size,
+                              vocab_size=vocab_size,
+                              prefix=C.SOURCE_EMBEDDING_PREFIX,
+                              dropout=dropout,
+                              add_pos_encoding=True))
+
+    encoders.append(BatchMajor2TimeMajor())
+
+    encoders.append(BiDirectionalRNNEncoder(num_hidden=model_size,
+                                            num_layers=1,
+                                            dropout=dropout,
+                                            layout=C.TIME_MAJOR))
+
+    if num_layers > 1:
+        encoders.append(RecurrentEncoder(num_hidden=model_size,
+                                         num_layers=num_layers - 1,
+                                         dropout=dropout,
+                                         layout=C.TIME_MAJOR))
 
     return EncoderSequence(encoders)
 
@@ -148,11 +185,17 @@ class Embedding(Encoder):
     :param dropout: Dropout probability.
     """
 
-    def __init__(self, num_embed: int, vocab_size: int, prefix: str, dropout: float):
+    def __init__(self,
+                 num_embed: int,
+                 vocab_size: int,
+                 prefix: str,
+                 dropout: float,
+                 add_pos_encoding: bool = False):
         self.num_embed = num_embed
         self.vocab_size = vocab_size
         self.prefix = prefix
         self.dropout = dropout
+        self.add_pos_encoding = add_pos_encoding
         self.embed_weight = mx.sym.Variable(prefix + "weight")
 
     def encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
@@ -169,9 +212,42 @@ class Embedding(Encoder):
                                      weight=self.embed_weight,
                                      output_dim=self.num_embed,
                                      name=self.prefix + 'embed')
+        if self.add_pos_encoding:
+            embedding = self._add_pos_encoding(embedding, seq_len)
         if self.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.dropout, name="source_embed_dropout")
         return embedding
+
+    def _add_pos_encoding(self, embedding: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
+        """
+        Adds positional encodings based on sine functions to embeddings.
+
+        Attention Is All You Need, Section 3.5
+        Vaswani et al. (https://arxiv.org/pdf/1706.03762.pdf)
+
+        :param embedding: Input embeddings (batch_size, seq_len, num_embed).
+        :param seq_len: Maximum sequence length.
+        :return: Summed input embeddings and position encodings (batch_size, seq_len, num_embed).
+        """
+
+        # (seq_len)
+        position = mx.sym.arange(start=0, stop=seq_len)
+        # (seq_len, 1)
+        position = mx.sym.expand_dims(data=position, axis=1)
+        pos_encoding_dims = []
+        for i in range(self.num_embed):
+            # (seq_len, 1)
+            pos_encoding_dim = mx.sym.sin(position / mx.sym.pow(10000, ((2 * i) / self.num_embed)))
+            pos_encoding_dims.append(pos_encoding_dim)
+        # (seq_len, num_embed)
+        pos_encoding = mx.sym.concat(*pos_encoding_dims, dim=1)
+        # (1, seq_len, num_embed)
+        pos_encoding = mx.sym.expand_dims(data=pos_encoding, axis=0)
+        # Position encodings are constant
+        pos_encoding = mx.sym.BlockGrad(pos_encoding)
+        # (batch_size, seq_len, num_embed)
+        summed = mx.sym.broadcast_add(embedding, pos_encoding)
+        return summed
 
     def get_num_hidden(self) -> int:
         """
