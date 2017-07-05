@@ -100,18 +100,12 @@ def get_encoder_transformer(model_size: int,
                               dropout=dropout,
                               add_pos_encoding=True))
 
+    encoders.append(TransformerEncoder(model_size=model_size,
+                                       num_layers=num_layers,
+                                       dropout=dropout,
+                                       prefix=C.TRANSFORMER_ENCODER_PREFIX))
+
     encoders.append(BatchMajor2TimeMajor())
-
-    encoders.append(BiDirectionalRNNEncoder(num_hidden=model_size,
-                                            num_layers=1,
-                                            dropout=dropout,
-                                            layout=C.TIME_MAJOR))
-
-    if num_layers > 1:
-        encoders.append(RecurrentEncoder(num_hidden=model_size,
-                                         num_layers=num_layers - 1,
-                                         dropout=dropout,
-                                         layout=C.TIME_MAJOR))
 
     return EncoderSequence(encoders)
 
@@ -487,3 +481,50 @@ class BiDirectionalRNNEncoder(Encoder):
         Returns a list of RNNCells used by this encoder.
         """
         return self.forward_rnn.get_rnn_cells() + self.reverse_rnn.get_rnn_cells()
+
+
+class TransformerEncoder(Encoder):
+    """
+    TODO
+
+    Attention Is All You Need
+    Vaswani et al. (https://arxiv.org/pdf/1706.03762.pdf)
+
+    :param model_size: Size of all layers and embeddings (dimension of model).
+    :param num_layers: Number of encoder layers.
+    :param dropout: Dropout probability for encoders (RNN and embedding).
+    :param prefix: Name prefix for symbols of this encoder.
+    """
+
+    def __init__(self,
+                 model_size: int = 512,
+                 num_layers: int = 6,
+                 dropout: float = 0.,
+                 prefix=C.TRANSFORMER_ENCODER_PREFIX):
+        self.model_size = model_size
+        self.num_layers = num_layers
+        self.dropout = dropout
+        self.prefix = prefix
+
+    def encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
+        """
+        Encodes data given sequence lengths of individual examples and maximum sequence length.
+
+        :param data: Input data (batch_size, seq_len, num_embed).
+        :param data_length: Vector with sequence lengths (batch_size).
+        :param seq_len: Maximum sequence length.
+        :return: Encoded input data.
+        """
+        return data
+
+    def get_num_hidden(self) -> int:
+        """
+        Return the representation size of this encoder.
+        """
+        return self.model_size
+
+    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
+        """
+        Returns a list of RNNCells used by this encoder.
+        """
+        return []
