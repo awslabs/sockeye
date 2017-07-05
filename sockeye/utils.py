@@ -32,7 +32,10 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-def check_condition(condition: bool, error_message: str, exception: Exception = RuntimeError):
+class SockeyeError(Exception):
+    pass
+
+def check_condition(condition: bool, error_message: str):
     """
     Check the condition and if it is not met, exit with the given error message
     and error_code, similar to assertions.
@@ -42,7 +45,7 @@ def check_condition(condition: bool, error_message: str, exception: Exception = 
     :param error_code: Error code to return to the system.
     """
     if not condition:
-        raise exception(error_message)
+        raise SockeyeError(error_message)
 
 def save_graph(symbol: mx.sym.Symbol, filename: str, hide_weights: bool = True):
     """
