@@ -31,7 +31,7 @@ FILE_LOGGING = {
     'formatters': FORMATTERS,
     'handlers': {
         'rotating': {
-            'level': 'DEBUG',
+            'level': 'INFO',
             'formatter': 'verbose',
             'class': 'logging.handlers.RotatingFileHandler',
             'maxBytes': 10000000,
@@ -75,7 +75,7 @@ FILE_CONSOLE_LOGGING = {
             'stream': None
         },
         'rotating': {
-            'level': 'DEBUG',
+            'level': 'INFO',
             'formatter': 'verbose',
             'class': 'logging.handlers.RotatingFileHandler',
             'maxBytes': 10000000,

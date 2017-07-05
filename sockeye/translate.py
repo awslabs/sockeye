@@ -81,6 +81,8 @@ def read_and_translate(translator: sockeye.inference.Translator, output_handler:
 
     source_data = sys.stdin if source is None else sockeye.data_io.smart_open(source)
 
+    logger.info("Translating...")
+
     i, total_time = translate_lines(output_handler, source_data, translator)
 
     if i != 0:
