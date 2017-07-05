@@ -41,7 +41,7 @@ import sockeye.model
 import sockeye.training
 import sockeye.utils
 import sockeye.vocab
-from sockeye.log import setup_main_logger
+from sockeye.log import setup_main_logger, log_sockeye_version
 from sockeye.utils import acquire_gpus, get_num_gpus, expand_requested_device_ids
 
 
@@ -120,11 +120,10 @@ def main():
     else:
         os.makedirs(output_folder)
 
-
     logger = setup_main_logger(__name__,
                                file_logging=True,
                                console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
-    logger.info("Sockeye version %s", sockeye.__version__)
+    log_sockeye_version(logger)
     logger.info("Command: %s", " ".join(sys.argv))
     logger.info("Arguments: %s", args)
     with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "w") as fp:
