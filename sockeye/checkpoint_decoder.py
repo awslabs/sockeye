@@ -26,6 +26,7 @@ import sockeye.inference
 import sockeye.output_handler
 from sockeye import constants as C
 from sockeye.data_io import smart_open
+from sockeye.utils import error_exit
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,8 @@ class CheckpointDecoder:
         with smart_open(inputs) as inputs_fin, smart_open(references) as references_fin:
             input_sentences = inputs_fin.readlines()
             target_sentences = references_fin.readlines()
-            assert len(input_sentences) == len(target_sentences), "Number of sentence pairs do not match"
+            if len(input_sentences) != len(target_sentences):
+                error_exit("Number of sentence pairs do not match")
             if limit <= 0:
                 limit = len(input_sentences)
             if limit < len(input_sentences):

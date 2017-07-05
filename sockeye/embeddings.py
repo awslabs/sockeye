@@ -26,6 +26,7 @@ import sockeye.translate
 import sockeye.utils
 import sockeye.vocab
 from sockeye.log import setup_main_logger
+from sockeye.utils import error_exit
 
 logger = setup_main_logger(__name__, file_logging=False)
 
@@ -94,8 +95,8 @@ def main():
     sims = compute_sims(weights, args.norm)
 
     # weights (vocab, num_target_embed)
-    assert weights.shape[0] == len(vocab), "vocab and embeddings matrix do not match: %d vs. %d" % (
-        weights.shape[0], len(vocab))
+    if weights.shape[0] != len(vocab):
+        error_exit("vocab and embeddings matrix do not match: %d vs. %d" % (weights.shape[0], len(vocab)))
 
     for line in sys.stdin:
         line = line.rstrip()

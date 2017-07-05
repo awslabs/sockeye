@@ -348,7 +348,8 @@ class BiDirectionalRNNEncoder(Encoder):
                  cell_type=C.LSTM_TYPE,
                  EncoderClass: Encoder = RecurrentEncoder,
                  forget_bias: float = 0.0):
-        assert num_hidden % 2 == 0, "num_hidden must be a multiple of 2 for BiDirectionalRNNEncoders."
+        if num_hidden % 2 != 0:
+            error_exit("num_hidden must be a multiple of 2 for BiDirectionalRNNEncoders.")
         self.num_hidden = num_hidden
         if layout[0] == 'N':
             logger.warning("Batch-major layout for encoder input. Consider using time-major layout for faster speed")
