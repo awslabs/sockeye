@@ -26,7 +26,7 @@ import sockeye.encoder
 import sockeye.lexicon
 import sockeye.rnn
 import sockeye.utils
-
+from sockeye.utils import check_condition
 
 def get_decoder(num_embed: int,
                 vocab_size: int,
@@ -170,8 +170,7 @@ class StackedRNNDecoder(Decoder):
         self.embedding = sockeye.encoder.Embedding(self.num_target_embed, self.target_vocab_size,
                                                    prefix=C.TARGET_EMBEDDING_PREFIX, dropout=0.)  # TODO dropout?
         if weight_tying:
-            assert self.num_hidden == self.num_target_embed, \
-                "Weight tying requires target embedding size and rnn_num_hidden to be equal"
+            check_condition(self.num_hidden == self.num_target_embed, "Weight tying requires target embedding size and rnn_num_hidden to be equal")
             self.cls_w = self.embedding.embed_weight
         else:
             self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
