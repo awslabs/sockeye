@@ -43,6 +43,7 @@ import sockeye.utils
 import sockeye.vocab
 from sockeye.log import setup_main_logger, log_sockeye_version
 from sockeye.utils import acquire_gpus, get_num_gpus, expand_requested_device_ids
+from sockeye.utils import check_condition
 
 
 def none_if_negative(val):
@@ -82,13 +83,13 @@ def main():
     mx.random.seed(args.seed)
 
     if args.use_fused_rnn:
-        assert not args.use_cpu, "GPU required for FusedRNN cells"
+        check_condition(not args.use_cpu, "GPU required for FusedRNN cells")
 
     if args.rnn_residual_connections:
-        assert args.rnn_num_layers > 2, "Residual connections require at least 3 RNN layers"
+        check_condition(args.rnn_num_layers > 2, "Residual connections require at least 3 RNN layers")
 
-    assert args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics, \
-        "Must optimize either BLEU or one of tracked metrics (--metrics)"
+    check_condition(args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics,
+            "Must optimize either BLEU or one of tracked metrics (--metrics)")
 
     # Checking status of output folder, resumption, etc.
     # Create temporary logger to console only
@@ -136,9 +137,10 @@ def main():
             context = [mx.cpu()]
         else:
             num_gpus = get_num_gpus()
-            assert num_gpus > 0, "No GPUs found, consider running on the CPU with --use-cpu " \
-                                 "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi " \
-                                 "binary isn't on the path)."
+            check_condition(num_gpus >= 1,
+                           "No GPUs found, consider running on the CPU with --use-cpu " \
+                           "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi " \
+                           "binary isn't on the path).")
             if args.disable_device_locking:
                 context = expand_requested_device_ids(args.device_ids)
             else:

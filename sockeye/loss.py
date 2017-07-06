@@ -20,7 +20,7 @@ import mxnet as mx
 
 import sockeye.constants as C
 import sockeye.model
-
+from sockeye.utils import check_condition
 
 def get_loss(config: sockeye.model.ModelConfig) -> 'Loss':
     """
@@ -110,7 +110,7 @@ class SmoothedCrossEntropyLoss(Loss):
     """
 
     def __init__(self, alpha: float, vocab_size: int, normalize: bool = False):
-        assert alpha >= 0, "alpha must be >= 0"
+        check_condition(alpha >= 0, "alpha for smoothed loss must be >= 0")
         self._alpha = alpha
         self._vocab_size = vocab_size
         self._normalize = normalize

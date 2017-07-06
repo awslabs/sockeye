@@ -30,6 +30,7 @@ import sockeye.inference
 import sockeye.output_handler
 from sockeye.log import setup_main_logger, log_sockeye_version
 from sockeye.utils import acquire_gpus, get_num_gpus
+from sockeye.utils import check_condition
 
 logger = setup_main_logger(__name__, file_logging=False)
 
@@ -45,7 +46,7 @@ def main():
         logger = setup_main_logger(__name__, file_logging=True, path="%s.%s" % (args.output, C.LOG_NAME))
 
     if args.checkpoints is not None:
-        assert len(args.checkpoints) == len(args.models), "must provide checkpoints for each model"
+        check_condition(len(args.checkpoints) == len(args.models), "must provide checkpoints for each model")
 
     log_sockeye_version(logger)
     logger.info("Command: %s", " ".join(sys.argv))
@@ -123,10 +124,11 @@ def _setup_context(args, exit_stack):
         context = mx.cpu()
     else:
         num_gpus = get_num_gpus()
-        assert num_gpus > 0, "No GPUs found, consider running on the CPU with --use-cpu " \
-                             "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi " \
-                             "binary isn't on the path)."
-        assert len(args.device_ids) == 1, "cannot run on multiple devices for now"
+        check_condition(num_gpus >= 1,
+                "No GPUs found, consider running on the CPU with --use-cpu " \
+                "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi " \
+                "binary isn't on the path).")
+        check_condition(len(args.device_ids) == 1, "cannot run on multiple devices for now")
         gpu_id = args.device_ids[0]
         if args.disable_device_locking:
             # without locking and a negative device id we just take the first device

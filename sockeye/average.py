@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -29,6 +29,8 @@ import sockeye.constants as C
 import sockeye.utils
 import sockeye.arguments
 from sockeye.log import setup_main_logger, log_sockeye_version
+from sockeye.utils import check_condition
+
 
 logger = setup_main_logger(__name__, console=True, file_logging=False)
 
@@ -49,12 +51,10 @@ def average(param_paths: Iterable[str]) -> Dict[str, mx.nd.NDArray]:
         all_aux_params.append(aux_params)
 
     logger.info("%d models loaded", len(all_arg_params))
-    assert all(
-        all_arg_params[0].keys() == p.keys()
-        for p in all_arg_params), "arg_param names do not match across models"
-    assert all(
-        all_aux_params[0].keys() == p.keys()
-        for p in all_aux_params), "aux_param names do not match across models"
+    check_condition(all(all_arg_params[0].keys() == p.keys() for p in all_arg_params),
+        "arg_param names do not match across models")
+    check_condition(all(all_aux_params[0].keys() == p.keys() for p in all_aux_params),
+        "aux_param names do not match across models")
 
     avg_params = {}
     # average arg_params

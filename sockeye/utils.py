@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -32,11 +32,25 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+class SockeyeError(Exception):
+    pass
+
+def check_condition(condition: bool, error_message: str):
+    """
+    Check the condition and if it is not met, exit with the given error message
+    and error_code, similar to assertions.
+
+    :param condition: Condition to check.
+    :param error_message: Error message to show to the user.
+    :param error_code: Error code to return to the system.
+    """
+    if not condition:
+        raise SockeyeError(error_message)
 
 def save_graph(symbol: mx.sym.Symbol, filename: str, hide_weights: bool = True):
     """
     Dumps computation graph visualization to .pdf and .dot file.
-    
+
     :param symbol: The symbol representing the computation graph.
     :param filename: The filename to save the graphic to.
     :param hide_weights: If true the weights will not be shown.
