@@ -47,8 +47,9 @@ def define_buckets(max_seq_len: int, step=10) -> List[int]:
 def define_parallel_buckets(max_seq_len: int, bucket_width=10, length_ratio=1.0) -> List[Tuple[int, int]]:
     """
     Returns (src,trg) buckets in steps of bucket_width. Minimum bucket size for both source and target is 2.
-    If length_ratio >=1, then we make sure that a target sentence of max_seq_len will be covered by a bucket.
-    Otherwise, we make sure that a source sentence of max_seq_len will be covered by a bucket.
+    Largest bucket is (max_seq_len, max_seq_len).  The longer side of the corpus uses steps of bucket_width
+    until max_seq_len is covered, then repeats the final value.  The shorter side uses steps scaled by length
+    ratio until max_seq_len is covered.
 
     :param max_seq_len: Maximum bucket size.
     :param bucket_width: Width of buckets.
@@ -58,12 +59,14 @@ def define_parallel_buckets(max_seq_len: int, bucket_width=10, length_ratio=1.0)
         # target side is longer, hence defines number of buckets
         target_buckets = define_buckets(max_seq_len, step=bucket_width)
         source_step_size = max(1, int(bucket_width / length_ratio))
-        source_buckets = define_buckets(len(target_buckets) * source_step_size, step=source_step_size)
+        source_buckets = define_buckets(max_seq_len, step=source_step_size)
+        target_buckets += [target_buckets[-1] for _ in range(len(source_buckets) - len(target_buckets))]
     else:
         # source side is longer, hence defines number of buckets
         source_buckets = define_buckets(max_seq_len, step=bucket_width)
         target_step_size = max(1, int(bucket_width * length_ratio))
-        target_buckets = define_buckets(len(source_buckets) * target_step_size, step=target_step_size)
+        target_buckets = define_buckets(max_seq_len, step=target_step_size)
+        source_buckets += [source_buckets[-1] for _ in range(len(target_buckets) - len(source_buckets))]
 
     # minimum bucket size is 2 (as we add BOS symbol to target side)
     source_buckets = [max(2, b) for b in source_buckets]
@@ -135,7 +138,7 @@ def get_training_data_iters(source: str, target: str,
                                                                           target,
                                                                           vocab_source,
                                                                           vocab_target)
-    length_ratio = sum(len(t) / float(len(s)) for t, s in zip(train_source_sentences, train_target_sentences)) / len(
+    length_ratio = sum(len(t) / float(len(s)) for t, s in zip(train_target_sentences, train_source_sentences)) / len(
         train_target_sentences)
     logger.info("Average training target/source length ratio: %.2f", length_ratio)
 
