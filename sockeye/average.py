@@ -28,7 +28,7 @@ import mxnet as mx
 import sockeye.constants as C
 import sockeye.utils
 import sockeye.arguments
-from sockeye.log import setup_main_logger
+from sockeye.log import setup_main_logger, log_sockeye_version
 
 logger = setup_main_logger(__name__, console=True, file_logging=False)
 
@@ -174,6 +174,7 @@ def main():
     """
     Commandline interface to average parameters.
     """
+    log_sockeye_version(logger)
     params = argparse.ArgumentParser(description="Averages parameters from multiple models.")
     sockeye.arguments.add_average_args(params)
     args = params.parse_args()

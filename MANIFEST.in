@@ -4,6 +4,7 @@ include LICENSE
 include NOTICE
 include *.pylintrc
 include typechecked-files
+include sockeye/git_version.py
 exclude *.sh
 include pytest.ini
 recursive-include test *.py
