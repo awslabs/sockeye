@@ -19,7 +19,7 @@ import sys
 import time
 import logging
 
-from sockeye.log import setup_main_logger
+from sockeye.log import setup_main_logger, log_sockeye_version
 from sockeye.bleu import corpus_bleu, bleu_from_counts, corpus_bleu_counts, bleu_counts
 from sockeye.data_io import read_content
 from sockeye.utils import check_condition
@@ -37,6 +37,7 @@ def main():
     check_condition(args.offset >= 0, "Offset should be non-negative.")
 
     logger = setup_main_logger(__name__, file_logging=False)
+    log_sockeye_version(logger)
 
     if args.quiet:
         logger.setLevel(logging.ERROR)

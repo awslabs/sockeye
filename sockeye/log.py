@@ -15,6 +15,7 @@ import logging
 import logging.config
 from typing import Optional
 
+
 FORMATTERS = {
     'verbose': {
         'format': '[%(asctime)s:%(levelname)s:%(name)s:%(funcName)s] %(message)s',
@@ -117,3 +118,13 @@ def setup_main_logger(name: str, file_logging=True, console=True, path: Optional
 
     logging.config.dictConfig(log_config)
     return logging.getLogger(name)
+
+
+def log_sockeye_version(logger):
+    from sockeye import __version__
+    try:
+        from sockeye.git_version import git_hash
+    except ImportError:
+        git_hash = "unknown"
+    logger.info("Sockeye version %s commit %s", __version__, git_hash)
+

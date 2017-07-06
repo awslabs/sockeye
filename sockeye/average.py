@@ -28,8 +28,9 @@ import mxnet as mx
 import sockeye.constants as C
 import sockeye.utils
 import sockeye.arguments
-from sockeye.log import setup_main_logger
+from sockeye.log import setup_main_logger, log_sockeye_version
 from sockeye.utils import check_condition
+
 
 logger = setup_main_logger(__name__, console=True, file_logging=False)
 
@@ -85,36 +86,16 @@ def find_checkpoints(model_path: str, size=4, strategy="best", maximize=False, m
 
     if strategy == "best":
         # N best scoring points
-        top_n = sorted(points, reverse=maximize)[:size]
+        top_n = _strategy_best(points, size, maximize)
 
     elif strategy == "last":
         # N sequential points ending with overall best
-        best = max if maximize else min
-        after_top = points.index(best(points)) + 1
-        top_n = points[after_top - size:after_top]
+        top_n = _strategy_last(points, size, maximize)
 
     elif strategy == "lifespan":
         # Track lifespan of every "new best" point
         # Points dominated by a previous better point have lifespan 0
-        top_n = []
-        cur_best = points[0]
-        cur_lifespan = 0
-        for point in points[1:]:
-            better = point > cur_best if maximize else point < cur_best
-            if better:
-                top_n.append(list(itertools.chain([cur_lifespan], cur_best)))
-                cur_best = point
-                cur_lifespan = 0
-            else:
-                top_n.append(list(itertools.chain([0], point)))
-                cur_lifespan += 1
-        top_n.append(list(itertools.chain([cur_lifespan], cur_best)))
-        # Sort by lifespan, then by val
-        top_n = sorted(
-            top_n,
-            key=lambda point: [point[0], point[1] if maximize else -point[1]],
-            reverse=True)[:size]
-
+        top_n = _strategy_lifespan(points, size, maximize)
     else:
         raise RuntimeError("Unknown strategy, options: best last lifespan")
 
@@ -155,10 +136,45 @@ def _read_metrics_points(path: str, metric: str) -> List[Tuple[float, int]]:
     return points
 
 
+def _strategy_best(points, size, maximize):
+    top_n = sorted(points, reverse=maximize)[:size]
+    return top_n
+
+
+def _strategy_last(points, size, maximize):
+    best = max if maximize else min
+    after_top = points.index(best(points)) + 1
+    top_n = points[max(0, after_top - size):after_top]
+    return top_n
+
+
+def _strategy_lifespan(points, size, maximize):
+    top_n = []
+    cur_best = points[0]
+    cur_lifespan = 0
+    for point in points[1:]:
+        better = point > cur_best if maximize else point < cur_best
+        if better:
+            top_n.append(list(itertools.chain([cur_lifespan], cur_best)))
+            cur_best = point
+            cur_lifespan = 0
+        else:
+            top_n.append(list(itertools.chain([0], point)))
+            cur_lifespan += 1
+    top_n.append(list(itertools.chain([cur_lifespan], cur_best)))
+    # Sort by lifespan, then by val
+    top_n = sorted(
+        top_n,
+        key=lambda point: [point[0], point[1] if maximize else -point[1]],
+        reverse=True)[:size]
+    return top_n
+
+
 def main():
     """
     Commandline interface to average parameters.
     """
+    log_sockeye_version(logger)
     params = argparse.ArgumentParser(description="Averages parameters from multiple models.")
     sockeye.arguments.add_average_args(params)
     args = params.parse_args()

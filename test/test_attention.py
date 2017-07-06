@@ -171,7 +171,7 @@ def test_get_context_and_attention_probs():
 
     # data
     source_nd = mx.nd.random_normal(shape=(batch_size, seq_len, num_hidden))
-    source_length_np = np.random.random_integers(1, seq_len, (batch_size,))
+    source_length_np = np.random.randint(1, seq_len+1, (batch_size,))
     source_length_nd = mx.nd.array(source_length_np)
     scores_nd = mx.nd.zeros((batch_size, seq_len, 1))
 
