@@ -202,12 +202,6 @@ def test_check_condition_true():
 
 
 def test_check_condition_false():
-    with pytest.raises(SockeyeError):
+    with pytest.raises(SockeyeError) as e:
         check_condition(1 == 2, "Wrong")
-
-
-def test_check_condition_message():
-    try:
-        check_condition(1 == 2, "Wrong")
-    except SockeyeError as e:
-        assert str(e) == "Wrong"
+    assert "Wrong"  == str(e.value)
