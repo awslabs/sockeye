@@ -108,6 +108,9 @@ def main():
             arg_diffs = _dict_difference(vars(args), old_args) | _dict_difference(old_args, vars(args))
             # Remove args that may differ without affecting the training.
             arg_diffs -= set(C.ARGS_MAY_DIFFER)
+            # allow different device-ids provided their total count is the same
+            if 'device_ids' in arg_diffs and len(old_args['device_ids']) == len(vars(args)['device_ids']):
+                arg_diffs.discard('device_ids')
             if not arg_diffs:
                 resume_training = True
             else:
@@ -148,12 +151,16 @@ def main():
             logger.info("Device(s): GPU %s", context)
             context = [mx.gpu(gpu_id) for gpu_id in context]
 
-        # create vocabs
-        vocab_source = _build_or_load_vocab(args.source_vocab, args.source, args.num_words, args.word_min_count)
-        sockeye.vocab.vocab_to_json(vocab_source, os.path.join(output_folder, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
+        # load existing or create vocabs
+        if resume_training:
+            vocab_source = sockeye.vocab.vocab_from_json_or_pickle(os.path.join(output_folder, C.VOCAB_SRC_NAME))
+            vocab_target = sockeye.vocab.vocab_from_json_or_pickle(os.path.join(output_folder, C.VOCAB_TRG_NAME))
+        else:
+            vocab_source = _build_or_load_vocab(args.source_vocab, args.source, args.num_words, args.word_min_count)
+            sockeye.vocab.vocab_to_json(vocab_source, os.path.join(output_folder, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
 
-        vocab_target = _build_or_load_vocab(args.target_vocab, args.target, args.num_words, args.word_min_count)
-        sockeye.vocab.vocab_to_json(vocab_target, os.path.join(output_folder, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX)
+            vocab_target = _build_or_load_vocab(args.target_vocab, args.target, args.num_words, args.word_min_count)
+            sockeye.vocab.vocab_to_json(vocab_target, os.path.join(output_folder, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX)
 
         vocab_source_size = len(vocab_source)
         vocab_target_size = len(vocab_target)
