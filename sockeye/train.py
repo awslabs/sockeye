@@ -228,7 +228,9 @@ def main():
                                                  smoothed_cross_entropy_alpha=args.smoothed_cross_entropy_alpha,
                                                  encoder=args.encoder,
                                                  transformer_model_size=args.transformer_model_size,
-                                                 transformer_num_layers=args.transformer_num_layers)
+                                                 transformer_num_layers=args.transformer_num_layers,
+                                                 transformer_attention_heads=args.transformer_attention_heads,
+                                                 transformer_feed_forward_num_hidden=args.transformer_feed_forward_num_hidden)
 
         # create training model
         model = sockeye.training.TrainingModel(model_config=model_config,

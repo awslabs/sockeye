@@ -184,6 +184,14 @@ def add_model_parameters(params):
                               type=int_greater_or_equal(1),
                               default=6,
                               help='Number of encoder and decoder layers when using transformer. Default: %(default)s.')
+    model_params.add_argument('--transformer-attention-heads',
+                              type=int_greater_or_equal(1),
+                              default=8,
+                              help='Number of heads for all attention when using transformer. Default: %(default)s.')
+    model_params.add_argument('--transformer-feed-forward-num-hidden',
+                              type=int_greater_or_equal(1),
+                              default=2048,
+                              help='Number of hidden units in feed forward layers when using transformer. Default: %(default)s.')
 
     model_params.add_argument('--num-embed',
                               type=int_greater_or_equal(1),

@@ -69,19 +69,21 @@ class MultiHeadAttention:
 
     def __init__(self,
                  length: int,
+                 prefix: str,
                  depth_att: int = 512,
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0) -> None:
         self.length = length
+        self.prefix = prefix
         self.depth_att = depth_att
         self.heads = heads
         self.depth_out = depth_out
         self.dropout = dropout
 
-        self.depth_per_head = self.depth_att // self.head
-        self.w_i2h = mx.sym.Variable("i2h_weight")
-        self.b_i2h = mx.sym.Variable("i2h_bias")
+        self.depth_per_head = self.depth_att // self.heads
+        self.w_i2h = mx.sym.Variable("%s_i2h_weight" % prefix)
+        self.b_i2h = mx.sym.Variable("%s_i2h_bias" % prefix)
         self.use_loop = True  # use naive loop
 
     def _split_heads(self, x: mx.sym.Symbol):
@@ -94,7 +96,7 @@ class MultiHeadAttention:
         # (batch, length, heads, depth_per_head)
         x = mx.sym.reshape(data=x, shape=(0, self.length, self.heads, -1))
         # (batch, heads, length, depth/heads)
-        x = mx.sym.transpose(data=x, shape=(0, 2, 1, 3))
+        x = mx.sym.transpose(data=x, axes=(0, 2, 1, 3))
         # (batch * heads, length, depth/heads)
         return mx.sym.reshape(data=x, shape=(-3, self.length, -1))
 
@@ -108,7 +110,7 @@ class MultiHeadAttention:
         # (batch, heads, length, depth_per_head)
         x = mx.sym.reshape(data=x, shape=(-4, -1, self.heads, self.length, 0))
         # (batch, length, heads, depth_per_head)
-        x = mx.sym.transpose(x, shape=(0, 2, 1, 3))
+        x = mx.sym.transpose(x, axes=(0, 2, 1, 3))
         # (batch * length, depth)
         return mx.sym.reshape(x, shape=(-3, -3))
 
@@ -183,7 +185,7 @@ class MultiHeadAttention:
         contexts = self._combine_heads(contexts)
 
         # contexts: (batch * length, output_depth)
-        contexts = mx.sym.FullyConnected(contexts, num_hidden=self.depth_out)
+        contexts = mx.sym.FullyConnected(data=contexts, num_hidden=self.depth_out)
         # contexts: (batch, length, output_depth)
         return mx.sym.reshape(contexts, shape=(-1, self.length, self.depth_out))
 
@@ -193,14 +195,15 @@ class FFNRelu:
     Position-wise feed-forward network with ReLU activation.
     """
 
-    def __init__(self, num_hidden: int = 2014, num_model: int = 512, dropout: float = 0.0):
+    def __init__(self, prefix: str, num_hidden: int = 2048, num_model: int = 512, dropout: float = 0.0):
+        self.prefix = prefix
         self.num_hidden = num_hidden
         self.num_model = num_model
         self.dropout = dropout
-        self.w_i2h = mx.sym.Variable('i2h_weight')
-        self.b_i2h = mx.sym.Variable('i2h_bias')
-        self.w_h2o = mx.sym.Variable('h2o_weight')
-        self.b_h2o = mx.sym.Variable('h2o_bias')
+        self.w_i2h = mx.sym.Variable('%s_i2h_weight' % prefix)
+        self.b_i2h = mx.sym.Variable('%s_i2h_bias' % prefix)
+        self.w_h2o = mx.sym.Variable('%s_h2o_weight' % prefix)
+        self.b_h2o = mx.sym.Variable('%s_h2o_bias' % prefix)
 
     def apply(self, x, length):
         """
@@ -213,11 +216,11 @@ class FFNRelu:
         # TODO: use a convolution to avoid needing to know the sequence length and reshapes?
         # FIXME reuse variables?
         x = mx.sym.reshape(x, shape=(-3, -1))
-        h = mx.sym.FullyConnected(x, num_hidden=self.num_hidden, weight=self.w_i2h, bias=self.b_i2h)
+        h = mx.sym.FullyConnected(data=x, num_hidden=self.num_hidden, weight=self.w_i2h, bias=self.b_i2h)
         h = mx.sym.Activation(h, act_type="relu")
         if self.dropout > 0.0:
             h = mx.sym.Dropout(h, p=self.dropout)
-        y = mx.sym.FullyConnected(h, num_hidden=self.num_model, weight=self.w_h2o, bias=self.b_h2o)
+        y = mx.sym.FullyConnected(data=h, num_hidden=self.num_model, weight=self.w_h2o, bias=self.b_h2o)
         y = mx.sym.reshape(y, shape=(-1, length, self.num_model))
         return y
 

@@ -54,6 +54,8 @@ ModelConfig = sockeye.utils.namedtuple_with_defaults('ModelConfig',
                                                       "encoder",
                                                       "transformer_model_size",
                                                       "transformer_num_layers",
+                                                      "transformer_attention_heads",
+                                                      "transformer_feed_forward_num_hidden",
                                                   ],
                                                      default_values={
                                                       "attention_use_prev_word": False,
@@ -63,6 +65,8 @@ ModelConfig = sockeye.utils.namedtuple_with_defaults('ModelConfig',
                                                       "encoder": C.RNN_TYPE,
                                                       "transformer_model_size": 512,
                                                       "transformer_num_layers": 6,
+                                                      "transformer_attention_heads": 8,
+                                                      "transformer_feed_forward_num_hidden": 2048,
                                                   })
 """
 ModelConfig defines model parameters defined at training time which are relevant to model inference.
@@ -163,6 +167,8 @@ class SockeyeModel:
             self.encoder = sockeye.encoder.get_encoder_transformer(self.config.transformer_model_size,
                                                                    self.config.vocab_source_size,
                                                                    self.config.transformer_num_layers,
+                                                                   self.config.transformer_attention_heads,
+                                                                   self.config.transformer_feed_forward_num_hidden,
                                                                    self.config.dropout)
 
         self.attention = sockeye.attention.get_attention(self.config.attention_use_prev_word,

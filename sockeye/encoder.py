@@ -22,6 +22,7 @@ import mxnet as mx
 import sockeye.constants as C
 import sockeye.rnn
 import sockeye.utils
+from sockeye.layers import FFNRelu, LayerNormalization, MultiHeadAttention
 from sockeye.utils import check_condition
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,8 @@ def get_encoder_rnn(num_embed: int,
 def get_encoder_transformer(model_size: int,
                             vocab_size: int,
                             num_layers: int,
+                            attention_heads: int,
+                            feed_forward_num_hidden: int,
                             dropout: float) -> 'Encoder':
     """
     TODO
@@ -103,6 +106,8 @@ def get_encoder_transformer(model_size: int,
 
     encoders.append(TransformerEncoder(model_size=model_size,
                                        num_layers=num_layers,
+                                       attention_heads=attention_heads,
+                                       feed_forward_num_hidden=feed_forward_num_hidden,
                                        dropout=dropout,
                                        prefix=C.TRANSFORMER_ENCODER_PREFIX))
 
@@ -501,10 +506,14 @@ class TransformerEncoder(Encoder):
     def __init__(self,
                  model_size: int = 512,
                  num_layers: int = 6,
+                 attention_heads: int = 8,
+                 feed_forward_num_hidden: int = 2048,
                  dropout: float = 0.,
                  prefix=C.TRANSFORMER_ENCODER_PREFIX):
         self.model_size = model_size
         self.num_layers = num_layers
+        self.attention_heads = attention_heads
+        self.feed_forward_num_hidden = feed_forward_num_hidden
         self.dropout = dropout
         self.prefix = prefix
 
@@ -517,7 +526,27 @@ class TransformerEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded input data.
         """
-        return data
+        encoded = data
+        # Encoder layers
+        # All symbols (batch_size, seq_len, num_embed=model_size)
+        for i in range(self.num_layers):
+            # Self-attention
+            attention = MultiHeadAttention(length=seq_len,
+                                           depth_att=self.model_size,
+                                           heads=self.attention_heads,
+                                           depth_out=self.model_size,
+                                           dropout=self.dropout,
+                                           prefix="%sattn_%d" % (self.prefix, i))
+            attention_ln = LayerNormalization(num_hidden=self.model_size, prefix="%sattn_ln_%d" % (self.prefix, i))
+            encoded = attention_ln.normalize(encoded + attention.on(encoded))
+            # Feed forward
+            feed_forward = FFNRelu(prefix="%sffn_%d" % (self.prefix, i),
+                                   num_hidden=self.feed_forward_num_hidden,
+                                   num_model=self.model_size,
+                                   dropout=self.dropout)
+            feed_forward_ln = LayerNormalization(num_hidden=self.model_size, prefix="%sffn_ln_%d" % (self.prefix, i))
+            encoded = feed_forward_ln.normalize(encoded + feed_forward.apply(encoded, seq_len))
+        return encoded
 
     def get_num_hidden(self) -> int:
         """
