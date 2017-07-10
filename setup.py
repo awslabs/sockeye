@@ -48,8 +48,12 @@ git_hash = "%s"
         raise RuntimeError("%s already exists, will not overwrite" % filename)
     with open(filename, "w") as out:
         out.write(content)
-    yield
-    os.remove(filename)
+    try:
+        yield
+    except:
+        raise
+    finally:
+        os.remove(filename)
 
 
 def get_requirements(filename):
