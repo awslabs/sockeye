@@ -20,7 +20,7 @@ import mxnet as mx
 
 
 def create_parallel_sentence_iter(source_sentences, target_sentences, max_len):
-    buckets = sockeye.data_io.define_parallel_buckets(max_len, 10)
+    buckets = sockeye.data_io.define_parallel_buckets(max_len, max_len, 10)
     batch_size = 50
     eos = 0
     pad = 1
