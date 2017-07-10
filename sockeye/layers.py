@@ -78,6 +78,7 @@ def split_heads(x, length, num_heads):
 
 w_in = mx.sym.Variable('project_in')
 
+
 def multihead_attention(inputs,
                         length,
                         num_hidden,
@@ -140,6 +141,22 @@ def multihead_attention(inputs,
 
 
 
+def ffn_relu(x, seq_len, hidden_size: int = 2048, model_size: int = 512, dropout: float = 0.0):
+    """
+    Position-wise feed-forward network with ReLU activation.
+
+    :param x: Symbol of shape (batch_size, seq_len, num_hidden)
+    :return: Symbol of shape (batch_size, seq_len, num_hidden)
+    """
+    # TODO: use a convolution to avoid needing to know the sequence length and reshapes?
+    x = mx.sym.reshape(x, shape=(-3, -1))
+    h = mx.sym.FullyConnected(x, num_hidden=hidden_size)
+    h = mx.sym.Activation(h, act_type="relu")
+    if dropout > 0.0:
+        h = mx.sym.Dropout(h, p=dropout)
+    y = mx.sym.FullyConnected(h, num_hidden=model_size)
+    y = mx.sym.reshape(y, shape=(-1, seq_len, model_size))
+    return y
 
 
 
