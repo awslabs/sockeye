@@ -65,98 +65,143 @@ class LayerNormalization:
         return inputs_norm
 
 
-
-
-def split_heads(x, length, num_heads):
-    # (batch, length, depth) -> (batch, length, num_heads, depth/num_heads)
-    ret = mx.sym.reshape(data=x, shape=(0, length, num_heads, -1))
-    # (batch, num_heads, length, depth/num_heads)
-    ret =  mx.sym.transpose(data=ret, shape=(0, 2, 1, 3))
-    # (batch * num_heads, length, depth/num_heads)
-    return mx.sym.reshape(data=ret, shape=(-3, length, -1))
-
-
-w_in = mx.sym.Variable('project_in')
+def _split_heads(x, length, heads):
+    # (batch, length, depth) -> (batch, length, heads, depth/heads)
+    x = mx.sym.reshape(data=x, shape=(0, length, heads, -1))
+    # (batch, heads, length, depth/heads)
+    x =  mx.sym.transpose(data=x, shape=(0, 2, 1, 3))
+    # (batch * heads, length, depth/heads)
+    return mx.sym.reshape(data=x, shape=(-3, length, -1))
 
 
 def multihead_attention(inputs,
                         length,
-                        num_hidden,
                         depth=512,
-                        num_heads=8,
-                        ):
+                        heads=8,
+                        output_depth=512,
+                        dropout = 0.0):
+    """
+    Multi-head self attention. WIP.
+
+    :param inputs:
+    :param length:
+    :param depth:
+    :param heads:
+    :param output_depth:
+    :param dropout:
+    :return: contexts: (batch, length, output_depth)
+    """
     # lets do self attention first (code is constrained to q length == k length)
-    # inputs: (batch, seq_len, num_hidden)
+    # inputs: (batch, length, num_hidden)
 
     # Combine batch and time dimension
-    # inputs: (batch * seq_len, num_hidden)
+    # inputs: (batch * length, num_hidden)
     inputs = mx.sym.reshape(data=inputs, shape=(-3, -1))
 
     # project with 1 large matrix
-    # combined: (batch * seq_len, depth * 3)
+    # combined: (batch * length, depth * 3)
     combined = mx.sym.FullyConnected(data=inputs, weight=w_in, no_bias=True, num_hidden=depth * 3)
 
     # split batch and time dimension
-    # combined: (batch, seq_len, depth * 3)
+    # combined: (batch, length, depth * 3)
     combined = mx.sym.reshape(data=combined, shape=(-1, length, depth * 3))
 
     # split into query, keys and values
-    # q/k/v: (batch, seq_len, depth) NOTE: requires depth to be equal across all 3 parts (tf doesnt require this)
+    # q/k/v: (batch, length, depth)
+    # NOTE: requires depth to be equal across all 3 parts.
     q, k, v = mx.sym.split(data=combined, num_outputs=3, axis=2)
 
-    #
-    # q/k/v: (batch * num_heads, seq_len, depth/num_heads)
-    q = split_heads(q, length, num_heads)
-    k = split_heads(k, length, num_heads)
-    v = split_heads(v, length, num_heads)
-    depth_per_head = depth // num_heads
+    # q/k/v: (batch * heads, length, depth/heads)
+    q = _split_heads(q, length, heads)
+    k = _split_heads(k, length, heads)
+    v = _split_heads(v, length, heads)
+    depth_per_head = depth // heads
     q *= depth_per_head**-0.5
 
-    # (batch * num_heads, seq_len, depth/num_heads) X (batch * num_heads, depth/num_heads, seq_len) = (batch * num_heads, seq_len)
+    # (batch * heads, length, depth/heads) X (batch * heads, depth/heads, length) = (batch * heads, length, length)
+    # (B, L, D) X (B, D, L) = (B, L, L)
     logits = mx.sym.batch_dot(lhs=q, rhs=k, transpose_b=True)
     # TODO masking. SequenceMask requires time-major....
 
-    # weights: (batch * num_heads, seq_len)
+    # weights: (batch * heads, length, length)
     weights = mx.sym.softmax(logits)
-    # TODO dropout?
 
-    # weights: (batch * num_heads, seq_len, 1)
-    weights = mx.sym.expand_dims(data=weights, axis=2)
-    # weights: (batch * num_heads, seq_len, seq_len)
-    weights = mx.sym.broadcast_to(data=weights, shape=(0, length, length))  # TODO: correct?!
+    if dropout > 0.0:
+        weights = mx.sym.Dropout(weights, p=dropout)
 
-    # contexts: (B*H, L, L) X (B*H, L, D) –> (B*H, L, D).
-    # contexts: (batch * num_heads, seq_len, depth/num_heads)
-    contexts = mx.sym.batch_dot(lhs=weights, rhs=v)
+    if True:
+        # lets try naive approach first (stacked for loop)
+        contexts = []
+        # weights: length * (batch * heads, 1, length)
+        weights = mx.sym.split(weights, axis=1, num_outputs=length, squeeze_axis=False)
+        for t in range(length):
+            # w_t: (batch * heads, 1, length)
+            w_t = weights[t]
+            # w_t * v = c_t
+            # (_, 1, length) * (_, length, depth/heads) -> (X, 1, depth/heads)
+            context_t = mx.sym.batch_dot(lhs=w_t, rhs=v)
+            # context_t: (batch * heads, 1, depth/heads
+            contexts.append(context_t)
+        # contexts: (batch_size * heads, length, depth/heads)
+        contexts = mx.sym.concat(*contexts, dim=1)
+    else:
+        # TODO check if this is correct
+        # weights: (batch * heads, length, 1)
+        weights = mx.sym.expand_dims(data=weights, axis=2)
+        # weights: (batch * heads, length, length)
+        weights = mx.sym.broadcast_to(data=weights, shape=(0, length, length))
+        # contexts: (B*H, L, L) X (B*H, L, D) –> (B*H, L, D).
+        # contexts: (batch * heads, length, depth/heads)
+        contexts = mx.sym.batch_dot(lhs=weights, rhs=v)
 
-    # contexts: (batch, num_heads, seq_len, depth/num_heads)
-    contexts = mx.sym.reshape(data=contexts, shape=(-4, -1, num_heads, length, 0))
+    # separate out heads
+    # contexts: (batch, heads, length, depth/heads)
+    contexts = mx.sym.reshape(data=contexts, shape=(-4, -1, heads, length, 0))
+    # contexts: (batch, length, heads, depth/heads)
+    contexts = mx.sym.transpose(contexts, shape=(0, 2, 1, 3))
+    # contexts: (batch * length, depth)
+    contexts = mx.sym.reshape(contexts, shape=(-3, -3))
 
-    # batch dot should give: batch, num_heads, seq_len, depth / num_heads)
+    # contexts: (batch * length, output_depth)
+    contexts = mx.sym.FullyConnected(contexts, num_hidden=output_depth)
+    # contexts: (batch, length, output_depth)
+    contexts = mx.sym.reshape(contexts, shape=(-1, length, output_depth))
+
+    return contexts
 
 
-
-    #context = mx.sym.reshape(data=context, shape=(0, 0))
-
-
-
-
-def ffn_relu(x, seq_len, hidden_size: int = 2048, model_size: int = 512, dropout: float = 0.0):
+class FFNRelu:
     """
     Position-wise feed-forward network with ReLU activation.
-
-    :param x: Symbol of shape (batch_size, seq_len, num_hidden)
-    :return: Symbol of shape (batch_size, seq_len, num_hidden)
     """
-    # TODO: use a convolution to avoid needing to know the sequence length and reshapes?
-    x = mx.sym.reshape(x, shape=(-3, -1))
-    h = mx.sym.FullyConnected(x, num_hidden=hidden_size)
-    h = mx.sym.Activation(h, act_type="relu")
-    if dropout > 0.0:
-        h = mx.sym.Dropout(h, p=dropout)
-    y = mx.sym.FullyConnected(h, num_hidden=model_size)
-    y = mx.sym.reshape(y, shape=(-1, seq_len, model_size))
-    return y
+
+    def __init__(self, num_hidden: int = 2014, num_model: int = 512, dropout: float = 0.0):
+        self.num_hidden = num_hidden
+        self.num_model = num_model
+        self.dropout = dropout
+        self.w_i2h = mx.sym.Variable('i2h_weight')
+        self.b_i2h = mx.sym.Variable('i2h_bias')
+        self.w_h2o = mx.sym.Variable('h2o_weight')
+        self.b_h2o = mx.sym.Variable('h2o_bias')
+
+    def apply(self, x, length):
+        """
+        Position-wise feed-forward network with ReLU activation.
+
+        :param x: Symbol of shape (batch_size, seq_len, num_hidden)
+        :param length: sequence length
+        :return: Symbol of shape (batch_size, seq_len, num_hidden)
+        """
+        # TODO: use a convolution to avoid needing to know the sequence length and reshapes?
+        # FIXME reuse variables?
+        x = mx.sym.reshape(x, shape=(-3, -1))
+        h = mx.sym.FullyConnected(x, num_hidden=self.num_hidden, weight=self.w_i2h, bias=self.b_i2h)
+        h = mx.sym.Activation(h, act_type="relu")
+        if self.dropout > 0.0:
+            h = mx.sym.Dropout(h, p=self.dropout)
+        y = mx.sym.FullyConnected(h, num_hidden=self.num_model, weight=self.w_h2o, bias=self.b_h2o)
+        y = mx.sym.reshape(y, shape=(-1, length, self.num_model))
+        return y
 
 
 
