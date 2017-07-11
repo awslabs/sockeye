@@ -13,6 +13,8 @@
 
 from typing import Optional, Tuple
 
+from sockeye.utils import check_condition
+
 import mxnet as mx
 
 
@@ -36,6 +38,7 @@ class LayerNormalization:
                  shift: Optional[mx.sym.Symbol] = None,
                  scale_init: float = 1.0,
                  shift_init: float = 0.0) -> None:
+        check_condition(num_hidden > 1, "Layer normalization should only be applied to layers with more than 1 neuron.")
         self.prefix = prefix
         self.scale = scale if scale is not None else mx.sym.Variable('%s_gamma' % prefix, shape=(num_hidden,),
                                                                      init=mx.init.Constant(value=scale_init))

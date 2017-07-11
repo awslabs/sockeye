@@ -162,7 +162,7 @@ class StackedRNNDecoder(Decoder):
             self.mapped_rnn_output_b = mx.sym.Variable("%smapped_rnn_output_bias" % prefix)
             self.mapped_context_w = mx.sym.Variable("%smapped_context_weight" % prefix)
             self.mapped_context_b = mx.sym.Variable("%smapped_context_bias" % prefix)
-        self.lnorm = layer_normalization
+        self.layer_norm = layer_normalization
 
         # Decoder stacked RNN
         self.rnn = sockeye.rnn.get_stacked_rnn(cell_type, num_hidden, num_layers, dropout, prefix, residual,
@@ -176,7 +176,7 @@ class StackedRNNDecoder(Decoder):
         self.hidden_w = mx.sym.Variable("%shidden_weight" % prefix)
         self.hidden_b = mx.sym.Variable("%shidden_bias" % prefix)
         self.hidden_norm = LayerNormalization(self.num_hidden,
-                                              prefix="%shidden_norm" % prefix) if self.lnorm else None
+                                              prefix="%shidden_norm" % prefix) if self.layer_norm else None
         # Embedding & output parameters
         self.embedding = sockeye.encoder.Embedding(self.num_target_embed, self.target_vocab_size,
                                                    prefix=C.TARGET_EMBEDDING_PREFIX, dropout=0.)  # TODO dropout?
@@ -213,7 +213,7 @@ class StackedRNNDecoder(Decoder):
         for state_idx, (_, init_num_hidden) in enumerate(self.rnn.state_shape):
             self.init_ws.append(mx.sym.Variable("%senc2decinit_%d_weight" % (self.prefix, state_idx)))
             self.init_bs.append(mx.sym.Variable("%senc2decinit_%d_bias" % (self.prefix, state_idx)))
-            if self.lnorm:
+            if self.layer_norm:
                 self.init_norms.append(LayerNormalization(num_hidden=init_num_hidden,
                                                           prefix="%senc2decinit_%d_norm" % (self.prefix, state_idx)))
 
@@ -257,7 +257,7 @@ class StackedRNNDecoder(Decoder):
                                          weight=self.init_ws[state_idx],
                                          bias=self.init_bs[state_idx],
                                          name="%senc2decinit_%d" % (self.prefix, state_idx))
-            if self.lnorm:
+            if self.layer_norm:
                 init = self.init_norms[state_idx].normalize(init)
             init = mx.sym.Activation(data=init, act_type="tanh",
                                      name="%senc2dec_inittanh_%d" % (self.prefix, state_idx))
@@ -329,7 +329,7 @@ class StackedRNNDecoder(Decoder):
                                            weight=self.hidden_w,
                                            bias=self.hidden_b)
 
-            if self.lnorm:
+            if self.layer_norm:
                 hidden = self.hidden_norm.normalize(hidden)
 
             # hidden: (batch_size, rnn_num_hidden)

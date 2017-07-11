@@ -200,10 +200,10 @@ class ActivationCoverage(Coverage):
         # attention scores to hidden
         self.cov_a2h_weight = mx.sym.Variable("%sa2h_weight" % self.prefix)
         # optional layer normalization
-        self.lnorm = None
+        self.layer_norm = None
         if layer_normalization and not self.num_hidden != 1:
-            self.lnorm = LayerNormalization(self.num_hidden,
-                                            prefix="%snorm" % prefix) if layer_normalization else None
+            self.layer_norm = LayerNormalization(self.num_hidden,
+                                                 prefix="%snorm" % prefix) if layer_normalization else None
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """
@@ -285,8 +285,8 @@ class ActivationCoverage(Coverage):
             # (batch_size, source_seq_len, coverage_num_hidden)
             updated_coverage = intermediate + attention_hidden + coverage_hidden
 
-            if self.lnorm is not None:
-                updated_coverage = self.lnorm.normalize(updated_coverage)
+            if self.layer_norm is not None:
+                updated_coverage = self.layer_norm.normalize(updated_coverage)
 
             # (batch_size, seq_len, coverage_num_hidden)
             coverage = mx.sym.Activation(data=updated_coverage,

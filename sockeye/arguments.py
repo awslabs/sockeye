@@ -158,7 +158,7 @@ def add_model_parameters(params):
                               default=1,
                               help='Number of layers for encoder and decoder. Default: %(default)s.')
     model_params.add_argument('--rnn-cell-type',
-                              choices=[C.LSTM_TYPE, C.LNLSTM_TYPE, C.GRU_TYPE],
+                              choices=[C.LSTM_TYPE, C.LNLSTM_TYPE, C.LNGLSTM_TYPE, C.GRU_TYPE],
                               default=C.LSTM_TYPE,
                               help='RNN cell type for encoder and decoder. Default: %(default)s.')
     model_params.add_argument('--rnn-num-hidden',
@@ -235,7 +235,8 @@ def add_model_parameters(params):
                               help="Adds layer normalization before non-linear activations of 1) MLP attention, "
                                    "2) decoder RNN state initialization, and 3) RNN hidden state. "
                                    "It does not normalize RNN cell activations "
-                                   "(this can be done using the '%s' rnn-cell-type." % C.LNLSTM_TYPE)
+                                   "(this can be done using the '%s' or '%s' rnn-cell-type." % (C.LNLSTM_TYPE,
+                                                                                                C.LNGLSTM_TYPE))
 
 
 def add_training_args(params):

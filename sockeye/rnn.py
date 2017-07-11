@@ -11,7 +11,7 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-from typing import List, Optional
+from typing import Optional
 
 import mxnet as mx
 
@@ -47,7 +47,9 @@ def get_stacked_rnn(cell_type: str,
         if cell_type == C.LSTM_TYPE:
             cell = mx.rnn.LSTMCell(num_hidden=num_hidden, prefix=cell_prefix, forget_bias=forget_bias)
         elif cell_type == C.LNLSTM_TYPE:
-            cell = LnLSTMCell(num_hidden=num_hidden, prefix=cell_prefix, forget_bias=forget_bias)
+            cell = LayerNormLSTMCell(num_hidden=num_hidden, prefix=cell_prefix, forget_bias=forget_bias)
+        elif cell_type == C.LNGLSTM_TYPE:
+            cell = LayerNormPerGateLSTMCell(num_hidden=num_hidden, prefix=cell_prefix, forget_bias=forget_bias)
         elif cell_type == C.GRU_TYPE:
             cell = mx.rnn.GRUCell(num_hidden=num_hidden, prefix=cell_prefix)
         else:
@@ -62,9 +64,86 @@ def get_stacked_rnn(cell_type: str,
     return rnn
 
 
-class LnLSTMCell(mx.rnn.LSTMCell):
+class LayerNormLSTMCell(mx.rnn.LSTMCell):
     """
-    Long-Short Term Memory (LSTM) network cell with layer normalization.
+    Long-Short Term Memory (LSTM) network cell with layer normalization across gates.
+    Based on Jimmy Lei Ba et al: Layer Normalization (https://arxiv.org/pdf/1607.06450.pdf)
+
+    :param num_hidden: number of RNN hidden units. Number of units in output symbol.
+    :param prefix: prefix for name of layers (and name of weight if params is None).
+    :param params: RNNParams or None. Container for weight sharing between cells. Created if None.
+    :param forget_bias: bias added to forget gate, default 1.0. Jozefowicz et al. 2015 recommends setting this to 1.0.
+    :param norm_scale: scale/gain for layer normalization.
+    :param norm_shift: shift/bias after layer normalization.
+    """
+
+    def __init__(self,
+                 num_hidden: int,
+                 prefix: str = 'lnlstm_',
+                 params: Optional[mx.rnn.RNNParams] = None,
+                 forget_bias: float = 1.0,
+                 norm_scale: float = 1.0,
+                 norm_shift: float = 0.0) -> None:
+        super(LayerNormLSTMCell, self).__init__(num_hidden, prefix, params, forget_bias)
+        self._iN = LayerNormalization(num_hidden=num_hidden * 4,
+                                      prefix="%si2h" % self._prefix,
+                                      scale=self.params.get('i2h_scale', shape=(num_hidden * 4,),
+                                                            init=mx.init.Constant(value=norm_scale)),
+                                      shift=self.params.get('i2h_shift', shape=(num_hidden * 4,),
+                                                            init=mx.init.Constant(value=norm_shift)))
+        self._hN = LayerNormalization(num_hidden=num_hidden * 4,
+                                      prefix="%sh2h" % self._prefix,
+                                      scale=self.params.get('h2h_scale', shape=(num_hidden * 4,),
+                                                            init=mx.init.Constant(value=norm_scale)),
+                                      shift=self.params.get('h2h_shift', shape=(num_hidden * 4,),
+                                                            init=mx.init.Constant(value=norm_shift)))
+        self._cN = LayerNormalization(num_hidden=num_hidden,
+                                      prefix="%sc" % self._prefix,
+                                      scale=self.params.get('c_scale', shape=(num_hidden,),
+                                                            init=mx.init.Constant(value=norm_scale)),
+                                      shift=self.params.get('c_shift', shape=(num_hidden,),
+                                                            init=mx.init.Constant(value=norm_shift)))
+        self._shape_fix = None
+
+    def __call__(self, inputs, states):
+        self._counter += 1
+        name = '%st%d_' % (self._prefix, self._counter)
+        i2h = mx.sym.FullyConnected(data=inputs, weight=self._iW, no_bias=True,
+                                    num_hidden=self._num_hidden * 4,
+                                    name='%si2h' % name)
+        if self._counter == 0:
+            self._shape_fix = mx.sym.zeros_like(i2h)
+        else:
+            assert self._shape_fix is not None
+        h2h = mx.sym.FullyConnected(data=states[0], weight=self._hW, no_bias=True,
+                                    num_hidden=self._num_hidden * 4,
+                                    name='%sh2h' % name)
+        gates = self._iN.normalize(i2h) + self._iB + \
+                self._hN.normalize(self._shape_fix + h2h) + self._hB
+        in_gate, forget_gate, in_transform, out_gate = mx.sym.split(gates,
+                                                                    num_outputs=4,
+                                                                    axis=1,
+                                                                    name="%sslice" % name)
+        in_gate = mx.sym.Activation(in_gate, act_type="sigmoid",
+                                    name='%si' % name)
+        forget_gate = mx.sym.Activation(forget_gate, act_type="sigmoid",
+                                        name='%sf' % name)
+        in_transform = mx.sym.Activation(in_transform, act_type="tanh",
+                                         name='%sc' % name)
+        out_gate = mx.sym.Activation(out_gate, act_type="sigmoid",
+                                     name='%so' % name)
+        next_c = mx.sym._internal._plus(forget_gate * states[1], in_gate * in_transform,
+                                        name='%sstate' % name)
+        next_h = mx.sym._internal._mul(out_gate,
+                                       mx.sym.Activation(self._cN.normalize(next_c),
+                                                         act_type="tanh"),
+                                       name='%sout' % name)
+        return next_h, [next_h, next_c]
+
+
+class LayerNormPerGateLSTMCell(mx.rnn.LSTMCell):
+    """
+    Long-Short Term Memory (LSTM) network cell with layer normalization per gate.
     Based on Jimmy Lei Ba et al: Layer Normalization (https://arxiv.org/pdf/1607.06450.pdf)
 
     :param num_hidden: number of RNN hidden units. Number of units in output symbol.
@@ -82,16 +161,24 @@ class LnLSTMCell(mx.rnn.LSTMCell):
                  forget_bias: float = 1.0,
                  norm_scale: float = 1.0,
                  norm_shift: float = 0.0) -> None:
-        super(LnLSTMCell, self).__init__(num_hidden, prefix, params, forget_bias)
-
+        super(LayerNormPerGateLSTMCell, self).__init__(num_hidden, prefix, params, forget_bias)
         self._norm_layers = list()  # type: List[LayerNormalization]
         for name in ['i', 'f', 'c', 'o', 's']:
             scale = self.params.get('%s_shift' % name, shape=(num_hidden,),
                                     init=mx.init.Constant(value=norm_shift))
             shift = self.params.get('%s_scale' % name, shape=(num_hidden,),
-                                    init=mx.init.Constant(value=norm_scale))
+                                    init=mx.init.Constant(value=norm_scale if name != "f" else forget_bias))
             self._norm_layers.append(
                 LayerNormalization(num_hidden, prefix="%s%s" % (self._prefix, name), scale=scale, shift=shift))
+
+    @property
+    def state_info(self):
+        return [{'shape': (0, self._num_hidden), '__layout__': 'NC'},
+                {'shape': (0, self._num_hidden), '__layout__': 'NC'}]
+
+    @property
+    def _gate_names(self):
+        return ['_i', '_f', '_c', '_o']
 
     def __call__(self, inputs, states):
         self._counter += 1
@@ -103,7 +190,7 @@ class LnLSTMCell(mx.rnn.LSTMCell):
                                     num_hidden=self._num_hidden * 4,
                                     name='%sh2h' % name)
         gates = i2h + h2h
-        in_gate, forget_gate, in_transform, out_gate = mx.sym.SliceChannel(
+        in_gate, forget_gate, in_transform, out_gate = mx.sym.split(
             gates, num_outputs=4, name="%sslice" % name)
 
         in_gate = self._norm_layers[0].normalize(in_gate)
@@ -121,7 +208,7 @@ class LnLSTMCell(mx.rnn.LSTMCell):
                                      name='%so' % name)
         next_c = mx.sym._internal._plus(forget_gate * states[1], in_gate * in_transform,
                                         name='%sstate' % name)
-        next_c = self._norm_layers[4].normalize(next_c)
-        next_h = mx.sym._internal._mul(out_gate, mx.sym.Activation(next_c, act_type="tanh"),
+        next_h = mx.sym._internal._mul(out_gate,
+                                       mx.sym.Activation(self._norm_layers[4].normalize(next_c), act_type="tanh"),
                                        name='%sout' % name)
         return next_h, [next_h, next_c]
