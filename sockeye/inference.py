@@ -428,7 +428,7 @@ class Translator:
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
         self.buckets = data_io.define_buckets(self.models[0].max_input_len)
-        self.pad_dist = mx.nd.zeros((self.beam_size, len(self.vocab_target)), ctx=self.context) + np.inf
+        self.pad_dist = mx.nd.full((self.beam_size, len(self.vocab_target)), val=np.inf, ctx=self.context)
         logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s)",
                     len(self.models), self.beam_size, "None" if len(self.models) == 1 else ensemble_mode)
 
@@ -556,8 +556,7 @@ class Translator:
         :param bucket_key: Bucket key.
         :return: List of ModelStates.
         """
-        prev_target_word_id = mx.nd.zeros((self.beam_size,), ctx=self.context)
-        prev_target_word_id[:] = self.start_id
+        prev_target_word_id = mx.nd.full((self.beam_size,), val=self.start_id, ctx=self.context)
         model_states = [ModelState(bucket_key,
                                    prev_target_word_id,
                                    *m.run_encoder(source, source_length, bucket_key))
