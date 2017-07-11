@@ -244,39 +244,4 @@ class FFNRelu:
         y = mx.sym.FullyConnected(data=h, num_hidden=self.num_model, weight=self.w_h2o, bias=self.b_h2o)
         y = mx.sym.reshape(y, shape=(-1, length, self.num_model))
         return y
-
-
-
-def attention_bias_lower_triangle(length):
-  """Create an bias tensor to be added to attention logits.
-  Args:
-   length: a Scalar.
-  Returns:
-    a `Tensor` with shape [1, 1, length, length].
-  """
-  lower_triangle = tf.matrix_band_part(tf.ones([length, length]), -1, 0)
-  ret = -1e9 * (1.0 - lower_triangle)
-  return tf.reshape(ret, [1, 1, length, length])
-
-
-def embedding_to_padding(emb):
-  """Input embeddings -> is_padding.
-  We have hacked symbol_modality to return all-zero embeddings for padding.
-  Args:
-    emb: a Tensor with shape [..., depth].
-  Returns:
-    a boolean Tensor with shape [...].
-  """
-  emb_sum = tf.reduce_sum(tf.abs(emb), axis=-1)
-  return tf.equal(emb_sum, 0.0)
-
-
-def attention_bias_ignore_padding(memory_padding):
-  """Create an bias tensor to be added to attention logits.
-  Args:
-    memory_padding: a boolean `Tensor` with shape [batch, memory_length].
-  Returns:
-    a `Tensor` with shape [batch, 1, 1, memory_length].
-  """
-  ret = tf.to_float(memory_padding) * -1e9
-  return tf.expand_dims(tf.expand_dims(ret, 1), 1)
+    
