@@ -176,7 +176,7 @@ class StackedRNNDecoder(Decoder):
         self.hidden_w = mx.sym.Variable("%shidden_weight" % prefix)
         self.hidden_b = mx.sym.Variable("%shidden_bias" % prefix)
         self.hidden_norm = LayerNormalization(self.num_hidden,
-                                              prefix="%shidden_weight_norm" % prefix) if self.lnorm else None
+                                              prefix="%shidden_norm" % prefix) if self.lnorm else None
         # Embedding & output parameters
         self.embedding = sockeye.encoder.Embedding(self.num_target_embed, self.target_vocab_size,
                                                    prefix=C.TARGET_EMBEDDING_PREFIX, dropout=0.)  # TODO dropout?
