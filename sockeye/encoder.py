@@ -86,7 +86,7 @@ def get_encoder_transformer(model_size: int,
                             num_layers: int,
                             attention_heads: int,
                             feed_forward_num_hidden: int,
-                            dropout: float) -> 'Encoder':
+                            dropout: float) -> "Encoder":
     """
     TODO
 
@@ -211,7 +211,7 @@ class Embedding(Encoder):
                                      input_dim=self.vocab_size,
                                      weight=self.embed_weight,
                                      output_dim=self.num_embed,
-                                     name=self.prefix + 'embed')
+                                     name=self.prefix + "embed")
         if self.add_pos_encoding:
             embedding = self._add_pos_encoding(embedding, seq_len)
         if self.dropout > 0:
@@ -492,9 +492,9 @@ class BiDirectionalRNNEncoder(Encoder):
 
 class TransformerEncoder(Encoder):
     """
-    TODO
+    Non-recurrent encoder based on the transformer architecture in:
 
-    Attention Is All You Need
+    Attention Is All You Need, Figure 1 (left)
     Vaswani et al. (https://arxiv.org/pdf/1706.03762.pdf)
 
     :param model_size: Size of all layers and embeddings (dimension of model).
@@ -517,30 +517,33 @@ class TransformerEncoder(Encoder):
         self.dropout = dropout
         self.prefix = prefix
 
+        # TODO: make these available to the decoder.  Borrow/update get_rnn_cells?
         self.layers = list()
         for i in range(self.num_layers):
-            # self-attention
+            # Self-attention sub-layer
             attention = MultiHeadAttention(depth_att=self.model_size,
                                            heads=self.attention_heads,
                                            depth_out=self.model_size,
                                            dropout=self.dropout,
-                                           prefix="%sattn_%d" % (self.prefix, i))
-            # layer normalization
+                                           prefix="%sattn_%d_" % (self.prefix, i))
+            # Layer normalization after attention
             attention_ln = LayerNormalization(num_hidden=self.model_size,
-                                              prefix="%sattn_ln_%d" % (self.prefix, i))
-            # feed forward
-            feed_forward = FFNRelu(prefix="%sffn_%d" % (self.prefix, i),
+                                              prefix="%sattn_ln_%d_" % (self.prefix, i))
+            # Feed-forward sub-layer
+            feed_forward = FFNRelu(prefix="%sffn_%d_" % (self.prefix, i),
                                    num_hidden=self.feed_forward_num_hidden,
                                    num_model=self.model_size,
                                    dropout=self.dropout)
-            # layer normalization
+            # Layer normalization after feed-forward
             feed_forward_ln = LayerNormalization(num_hidden=self.model_size,
-                                                 prefix="%sffn_ln_%d" % (self.prefix, i))
+                                                 prefix="%sffn_ln_%d_" % (self.prefix, i))
 
+            # Apply one layer of the encoder
             def apply(data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int):
-                data = attention_ln.normalize(data + attention.on(data, data_length, seq_len))
-                data = feed_forward_ln.normalize(data + feed_forward.apply(data, seq_len))
-                return data
+                encoded_attn = attention_ln.normalize(data + attention.on(data, data_length, seq_len))
+                encoded_attn_ffn = feed_forward_ln.normalize(encoded_attn + feed_forward.apply(encoded_attn, seq_len))
+                return encoded_attn_ffn
+
             self.layers.append(apply)
 
     def encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:

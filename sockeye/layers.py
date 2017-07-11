@@ -33,8 +33,8 @@ class LayerNormalization:
                  gamma_init: float = 1.0,
                  beta_init: float = 0.0) -> None:
         self.prefix = prefix
-        self.scale = mx.sym.Variable('%s_gamma' % prefix, shape=(num_hidden,), init=mx.init.Constant(value=gamma_init))
-        self.shift = mx.sym.Variable('%s_beta' % prefix, shape=(num_hidden,), init=mx.init.Constant(value=beta_init))
+        self.scale = mx.sym.Variable('%sgamma' % prefix, shape=(num_hidden,), init=mx.init.Constant(value=gamma_init))
+        self.shift = mx.sym.Variable('%sbeta' % prefix, shape=(num_hidden,), init=mx.init.Constant(value=beta_init))
 
     @staticmethod
     def moments(inputs: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
@@ -59,10 +59,10 @@ class LayerNormalization:
         :return: inputs_norm: Normalized inputs. Shape(batch_size, num_hidden).
         """
         mean, var = self.moments(inputs)
-        inputs_norm = mx.sym.broadcast_minus(inputs, mean, name='%s_inp_minus_mean' % self.prefix)
-        inputs_norm = mx.sym.broadcast_mul(inputs_norm, mx.sym.rsqrt(var + eps), name='%s_inp_norm' % self.prefix)
-        inputs_norm = mx.sym.broadcast_mul(inputs_norm, self.scale, name='%s_inp_norm_scaled' % self.prefix)
-        inputs_norm = mx.sym.broadcast_add(inputs_norm, self.shift, name='%s_inp_norm_scaled_shifted' % self.prefix)
+        inputs_norm = mx.sym.broadcast_minus(inputs, mean, name='%sinp_minus_mean' % self.prefix)
+        inputs_norm = mx.sym.broadcast_mul(inputs_norm, mx.sym.rsqrt(var + eps), name='%sinp_norm' % self.prefix)
+        inputs_norm = mx.sym.broadcast_mul(inputs_norm, self.scale, name='%sinp_norm_scaled' % self.prefix)
+        inputs_norm = mx.sym.broadcast_add(inputs_norm, self.shift, name='%sinp_norm_scaled_shifted' % self.prefix)
         return inputs_norm
 
 
@@ -81,8 +81,10 @@ class MultiHeadAttention:
         self.dropout = dropout
 
         self.depth_per_head = self.depth_att // self.heads
-        self.w_i2h = mx.sym.Variable("%s_i2h_weight" % prefix)
-        self.b_i2h = mx.sym.Variable("%s_i2h_bias" % prefix)
+        self.w_i2h = mx.sym.Variable("%si2h_weight" % prefix)
+        self.b_i2h = mx.sym.Variable("%si2h_bias" % prefix)
+        self.w_h2o = mx.sym.Variable("%sh2o_weight" % prefix)
+        self.b_h2o = mx.sym.Variable("%sh2o_bias" % prefix)
         self.use_loop = False  # use naive loop
 
     def _split_heads(self, x: mx.sym.Symbol, length: int):
@@ -201,7 +203,10 @@ class MultiHeadAttention:
         contexts = self._combine_heads(contexts, length)
 
         # contexts: (batch * length, output_depth)
-        contexts = mx.sym.FullyConnected(data=contexts, num_hidden=self.depth_out)
+        contexts = mx.sym.FullyConnected(data=contexts,
+                                         weight=self.w_h2o,
+                                         bias=self.b_h2o,
+                                         num_hidden=self.depth_out)
         # contexts: (batch, length, output_depth)
         return mx.sym.reshape(contexts, shape=(-1, length, self.depth_out))
 
@@ -216,10 +221,10 @@ class FFNRelu:
         self.num_hidden = num_hidden
         self.num_model = num_model
         self.dropout = dropout
-        self.w_i2h = mx.sym.Variable('%s_i2h_weight' % prefix)
-        self.b_i2h = mx.sym.Variable('%s_i2h_bias' % prefix)
-        self.w_h2o = mx.sym.Variable('%s_h2o_weight' % prefix)
-        self.b_h2o = mx.sym.Variable('%s_h2o_bias' % prefix)
+        self.w_i2h = mx.sym.Variable('%si2h_weight' % prefix)
+        self.b_i2h = mx.sym.Variable('%si2h_bias' % prefix)
+        self.w_h2o = mx.sym.Variable('%sh2o_weight' % prefix)
+        self.b_h2o = mx.sym.Variable('%sh2o_bias' % prefix)
 
     def apply(self, x, length):
         """
