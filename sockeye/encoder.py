@@ -96,7 +96,7 @@ def get_encoder_transformer(model_size: int,
     :param dropout: Dropout probability for encoders (RNN and embedding).
     :return: Encoder instance.
     """
-
+    logging.info("Using transformer encoder")
     encoders = list()
     encoders.append(Embedding(num_embed=model_size,
                               vocab_size=vocab_size,

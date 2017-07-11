@@ -12,6 +12,7 @@
 # permissions and limitations under the License.
 
 from typing import Tuple
+
 import mxnet as mx
 
 
@@ -82,7 +83,7 @@ class MultiHeadAttention:
         self.depth_per_head = self.depth_att // self.heads
         self.w_i2h = mx.sym.Variable("%s_i2h_weight" % prefix)
         self.b_i2h = mx.sym.Variable("%s_i2h_bias" % prefix)
-        self.use_loop = True  # use naive loop
+        self.use_loop = False  # use naive loop
 
     def _split_heads(self, x: mx.sym.Symbol, length: int):
         """
@@ -112,12 +113,21 @@ class MultiHeadAttention:
         # (batch * length, depth)
         return mx.sym.reshape(x, shape=(-3, -3))
 
-    def on(self, inputs: mx.sym.Symbol, lengths: mx.sym.Symbol, length: int):
+    def _broadcast_lengths(self, x: mx.sym.Symbol):
+        # x: (batch, 1)
+        x = mx.sym.expand_dims(x, axis=1)
+        # x: (batch, heads)
+        x = mx.sym.broadcast_to(x, shape=(0, self.heads))
+        # x: (batch * heads, 1)
+        x = mx.sym.reshape(x, shape=(-3,))
+        return x
+
+    def on(self, inputs: mx.sym.Symbol, inputs_length: mx.sym.Symbol, length: int):
         """
         Returns a symbol of shape (batch, length, output_depth).
 
         :param inputs: Symbol of shape (batch, length, input_depth).
-        :param lengths: Symbol of shape (batch, 1).
+        :param inputs_length: Symbol of shape (batch, 1).
         :param length: Size of time dimension.
         :return: Symbol of shape (batch, length, output_depth).
         """
@@ -130,7 +140,10 @@ class MultiHeadAttention:
 
         # project with 1 large matrix
         # combined: (batch * length, depth * 3)
-        combined = mx.sym.FullyConnected(data=inputs, weight=self.w_i2h, bias=self.b_i2h, num_hidden=self.depth_att * 3)
+        combined = mx.sym.FullyConnected(data=inputs,
+                                         weight=self.w_i2h,
+                                         bias=self.b_i2h,
+                                         num_hidden=self.depth_att * 3)
 
         # split batch and time dimension
         # combined: (batch, length, depth * 3)
@@ -151,7 +164,16 @@ class MultiHeadAttention:
         # (batch*heads, length, depth_per_head) X (batch*heads, depth_per_head, length)
         #   -> (batch*heads, length, length)
         logits = mx.sym.batch_dot(lhs=q, rhs=k, transpose_b=True)
-        # TODO masking. SequenceMask requires time-major....
+
+        # mask variable sequence-length (unfortunately requires time-major data)
+        # logits: (length, batch * heads, length)
+        logits = mx.sym.swapaxes(data=logits, dim1=0, dim2=1)
+        logits = mx.sym.SequenceMask(data=logits,
+                                     use_sequence_length=True,
+                                     sequence_length=self._broadcast_lengths(inputs_length),
+                                     value=-99999999.)
+        # logits: (batch * heads, length, length)
+        logits = mx.sym.swapaxes(data=logits, dim1=0, dim2=1)
 
         # weights: (batch * heads, length, length)
         weights = mx.sym.softmax(logits)
@@ -171,11 +193,6 @@ class MultiHeadAttention:
             # contexts: (batch_size * heads, length, depth_per_head)
             contexts = mx.sym.concat(*contexts, dim=1)
         else:
-            # TODO check if this is correct
-            # weights: (batch * heads, length, 1)
-            weights = mx.sym.expand_dims(data=weights, axis=2)
-            # weights: (batch * heads, length, length)
-            weights = mx.sym.broadcast_to(data=weights, shape=(0, length, length))
             # contexts: (B*H, L, L) X (B*H, L, D) –> (B*H, L, D).
             # contexts: (batch * heads, length, depth_per_head)
             contexts = mx.sym.batch_dot(lhs=weights, rhs=v)
@@ -225,3 +242,36 @@ class FFNRelu:
 
 
 
+def attention_bias_lower_triangle(length):
+  """Create an bias tensor to be added to attention logits.
+  Args:
+   length: a Scalar.
+  Returns:
+    a `Tensor` with shape [1, 1, length, length].
+  """
+  lower_triangle = tf.matrix_band_part(tf.ones([length, length]), -1, 0)
+  ret = -1e9 * (1.0 - lower_triangle)
+  return tf.reshape(ret, [1, 1, length, length])
+
+
+def embedding_to_padding(emb):
+  """Input embeddings -> is_padding.
+  We have hacked symbol_modality to return all-zero embeddings for padding.
+  Args:
+    emb: a Tensor with shape [..., depth].
+  Returns:
+    a boolean Tensor with shape [...].
+  """
+  emb_sum = tf.reduce_sum(tf.abs(emb), axis=-1)
+  return tf.equal(emb_sum, 0.0)
+
+
+def attention_bias_ignore_padding(memory_padding):
+  """Create an bias tensor to be added to attention logits.
+  Args:
+    memory_padding: a boolean `Tensor` with shape [batch, memory_length].
+  Returns:
+    a `Tensor` with shape [batch, 1, 1, memory_length].
+  """
+  ret = tf.to_float(memory_padding) * -1e9
+  return tf.expand_dims(tf.expand_dims(ret, 1), 1)
