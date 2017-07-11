@@ -68,13 +68,11 @@ class LayerNormalization:
 class MultiHeadAttention:
 
     def __init__(self,
-                 length: int,
                  prefix: str,
                  depth_att: int = 512,
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0) -> None:
-        self.length = length
         self.prefix = prefix
         self.depth_att = depth_att
         self.heads = heads
@@ -86,7 +84,7 @@ class MultiHeadAttention:
         self.b_i2h = mx.sym.Variable("%s_i2h_bias" % prefix)
         self.use_loop = True  # use naive loop
 
-    def _split_heads(self, x: mx.sym.Symbol):
+    def _split_heads(self, x: mx.sym.Symbol, length: int):
         """
         Returns a symbol with head dimension folded into batch and depth divided by the number of heads.
 
@@ -94,13 +92,13 @@ class MultiHeadAttention:
         :return: Symbol of shape (batch * heads, length, depth_per_heads).
         """
         # (batch, length, heads, depth_per_head)
-        x = mx.sym.reshape(data=x, shape=(0, self.length, self.heads, -1))
+        x = mx.sym.reshape(data=x, shape=(0, length, self.heads, -1))
         # (batch, heads, length, depth/heads)
         x = mx.sym.transpose(data=x, axes=(0, 2, 1, 3))
         # (batch * heads, length, depth/heads)
-        return mx.sym.reshape(data=x, shape=(-3, self.length, -1))
+        return mx.sym.reshape(data=x, shape=(-3, length, -1))
 
-    def _combine_heads(self, x: mx.sym.Symbol):
+    def _combine_heads(self, x: mx.sym.Symbol, length: int):
         """
         Returns a symbol with batch and length dimensions, and head and depth dimensions combined.
 
@@ -108,18 +106,19 @@ class MultiHeadAttention:
         :return: Symbol of shape (batch * length, depth).
         """
         # (batch, heads, length, depth_per_head)
-        x = mx.sym.reshape(data=x, shape=(-4, -1, self.heads, self.length, 0))
+        x = mx.sym.reshape(data=x, shape=(-4, -1, self.heads, length, 0))
         # (batch, length, heads, depth_per_head)
         x = mx.sym.transpose(x, axes=(0, 2, 1, 3))
         # (batch * length, depth)
         return mx.sym.reshape(x, shape=(-3, -3))
 
-
-    def on(self, x: mx.sym.Symbol):
+    def on(self, inputs: mx.sym.Symbol, lengths: mx.sym.Symbol, length: int):
         """
         Returns a symbol of shape (batch, length, output_depth).
 
         :param inputs: Symbol of shape (batch, length, input_depth).
+        :param lengths: Symbol of shape (batch, 1).
+        :param length: Size of time dimension.
         :return: Symbol of shape (batch, length, output_depth).
         """
         # lets do self attention first (code is constrained to q length == k length)
@@ -127,15 +126,15 @@ class MultiHeadAttention:
 
         # Combine batch and time dimension
         # inputs: (batch * length, num_hidden)
-        x = mx.sym.reshape(data=x, shape=(-3, -1))
+        inputs = mx.sym.reshape(data=inputs, shape=(-3, -1))
 
         # project with 1 large matrix
         # combined: (batch * length, depth * 3)
-        combined = mx.sym.FullyConnected(data=x, weight=self.w_i2h, bias=self.b_i2h, num_hidden=self.depth_att * 3)
+        combined = mx.sym.FullyConnected(data=inputs, weight=self.w_i2h, bias=self.b_i2h, num_hidden=self.depth_att * 3)
 
         # split batch and time dimension
         # combined: (batch, length, depth * 3)
-        combined = mx.sym.reshape(data=combined, shape=(-1, self.length, self.depth_att * 3))
+        combined = mx.sym.reshape(data=combined, shape=(-1, length, self.depth_att * 3))
 
         # split into query, keys and values
         # q/k/v: (batch, length, depth)
@@ -143,9 +142,9 @@ class MultiHeadAttention:
         q, k, v = mx.sym.split(data=combined, num_outputs=3, axis=2)
 
         # q/k/v: (batch * heads, length, depth/heads)
-        q = self._split_heads(q)
-        k = self._split_heads(k)
-        v = self._split_heads(v)
+        q = self._split_heads(q, length)
+        k = self._split_heads(k, length,)
+        v = self._split_heads(v, length)
         # scale by sqrt(depth_per_head)
         q *= self.depth_per_head ** -0.5
 
@@ -163,8 +162,8 @@ class MultiHeadAttention:
         if self.use_loop:
             contexts = []
             # weights: length * (batch * heads, 1, length)
-            weights = mx.sym.split(weights, axis=1, num_outputs=self.length, squeeze_axis=False)
-            for t in range(self.length):
+            weights = mx.sym.split(weights, axis=1, num_outputs=length, squeeze_axis=False)
+            for t in range(length):
                 # (_, 1, length) * (_, length, depth_per_head) -> (X, 1, depth_per_head)
                 context_t = mx.sym.batch_dot(lhs=weights[t], rhs=v)
                 # context_t: (batch * heads, 1, depth/heads
@@ -176,18 +175,18 @@ class MultiHeadAttention:
             # weights: (batch * heads, length, 1)
             weights = mx.sym.expand_dims(data=weights, axis=2)
             # weights: (batch * heads, length, length)
-            weights = mx.sym.broadcast_to(data=weights, shape=(0, self.length, self.length))
+            weights = mx.sym.broadcast_to(data=weights, shape=(0, length, length))
             # contexts: (B*H, L, L) X (B*H, L, D) –> (B*H, L, D).
             # contexts: (batch * heads, length, depth_per_head)
             contexts = mx.sym.batch_dot(lhs=weights, rhs=v)
 
         # contexts: (batch * length, depth)
-        contexts = self._combine_heads(contexts)
+        contexts = self._combine_heads(contexts, length)
 
         # contexts: (batch * length, output_depth)
         contexts = mx.sym.FullyConnected(data=contexts, num_hidden=self.depth_out)
         # contexts: (batch, length, output_depth)
-        return mx.sym.reshape(contexts, shape=(-1, self.length, self.depth_out))
+        return mx.sym.reshape(contexts, shape=(-1, length, self.depth_out))
 
 
 class FFNRelu:

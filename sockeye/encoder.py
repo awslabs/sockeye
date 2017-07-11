@@ -517,6 +517,32 @@ class TransformerEncoder(Encoder):
         self.dropout = dropout
         self.prefix = prefix
 
+        self.layers = list()
+        for i in range(self.num_layers):
+            # self-attention
+            attention = MultiHeadAttention(depth_att=self.model_size,
+                                           heads=self.attention_heads,
+                                           depth_out=self.model_size,
+                                           dropout=self.dropout,
+                                           prefix="%sattn_%d" % (self.prefix, i))
+            # layer normalization
+            attention_ln = LayerNormalization(num_hidden=self.model_size,
+                                              prefix="%sattn_ln_%d" % (self.prefix, i))
+            # feed forward
+            feed_forward = FFNRelu(prefix="%sffn_%d" % (self.prefix, i),
+                                   num_hidden=self.feed_forward_num_hidden,
+                                   num_model=self.model_size,
+                                   dropout=self.dropout)
+            # layer normalization
+            feed_forward_ln = LayerNormalization(num_hidden=self.model_size,
+                                                 prefix="%sffn_ln_%d" % (self.prefix, i))
+
+            def apply(data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int):
+                data = attention_ln.normalize(data + attention.on(data, data_length, seq_len))
+                data = feed_forward_ln.normalize(data + feed_forward.apply(data, seq_len))
+                return data
+            self.layers.append(apply)
+
     def encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
@@ -529,23 +555,8 @@ class TransformerEncoder(Encoder):
         encoded = data
         # Encoder layers
         # All symbols (batch_size, seq_len, num_embed=model_size)
-        for i in range(self.num_layers):
-            # Self-attention
-            attention = MultiHeadAttention(length=seq_len,
-                                           depth_att=self.model_size,
-                                           heads=self.attention_heads,
-                                           depth_out=self.model_size,
-                                           dropout=self.dropout,
-                                           prefix="%sattn_%d" % (self.prefix, i))
-            attention_ln = LayerNormalization(num_hidden=self.model_size, prefix="%sattn_ln_%d" % (self.prefix, i))
-            encoded = attention_ln.normalize(encoded + attention.on(encoded))
-            # Feed forward
-            feed_forward = FFNRelu(prefix="%sffn_%d" % (self.prefix, i),
-                                   num_hidden=self.feed_forward_num_hidden,
-                                   num_model=self.model_size,
-                                   dropout=self.dropout)
-            feed_forward_ln = LayerNormalization(num_hidden=self.model_size, prefix="%sffn_ln_%d" % (self.prefix, i))
-            encoded = feed_forward_ln.normalize(encoded + feed_forward.apply(encoded, seq_len))
+        for i, layer in enumerate(self.layers):
+            encoded = layer(encoded, data_length, seq_len)
         return encoded
 
     def get_num_hidden(self) -> int:
