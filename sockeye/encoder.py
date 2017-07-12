@@ -86,17 +86,18 @@ def get_encoder_transformer(model_size: int,
                             num_layers: int,
                             attention_heads: int,
                             feed_forward_num_hidden: int,
-                            dropout: float) -> "Encoder":
+                            dropout: float) -> 'Encoder':
     """
-    TODO
+    Returns a Transformer encoder.
 
     :param model_size: Size of all layers and embeddings (dimension of model).
     :param vocab_size: Source vocabulary size.
     :param num_layers: Number of encoder layers.
-    :param dropout: Dropout probability for encoders (RNN and embedding).
+    :param attention_heads: Number of attention heads.
+    :param feed_forward_num_hidden: number of hidden units in FFN layers.
+    :param dropout: Dropout probability for encoders.
     :return: Encoder instance.
     """
-    logging.info("Using transformer encoder")
     encoders = list()
     encoders.append(Embedding(num_embed=model_size,
                               vocab_size=vocab_size,
@@ -111,7 +112,7 @@ def get_encoder_transformer(model_size: int,
                                        dropout=dropout,
                                        prefix=C.TRANSFORMER_ENCODER_PREFIX))
 
-    encoders.append(BatchMajor2TimeMajor())
+    encoders.append(BatchMajor2TimeMajor(num_hidden=model_size))
 
     return EncoderSequence(encoders)
 
@@ -149,6 +150,10 @@ class BatchMajor2TimeMajor(Encoder):
     """
     Converts batch major data to time major
     """
+    def __init__(self, num_hidden: int = 0):
+        # TODO(fhieber): lets allow BatchMajor2TimeMajor to pass on number of hidden units if used as last encoder.
+        # we need a better strategy for this though.
+        self.num_hidden = num_hidden
 
     def encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
         """
@@ -166,7 +171,7 @@ class BatchMajor2TimeMajor(Encoder):
         """
         Return the representation size of this encoder.
         """
-        return 0
+        return self.num_hidden
 
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """
@@ -499,6 +504,8 @@ class TransformerEncoder(Encoder):
 
     :param model_size: Size of all layers and embeddings (dimension of model).
     :param num_layers: Number of encoder layers.
+    :param attention_heads: Number of attention heads.
+    :param feed_forward_num_hidden: number of hidden units in FFN layers.
     :param dropout: Dropout probability for encoders (RNN and embedding).
     :param prefix: Name prefix for symbols of this encoder.
     """

@@ -244,4 +244,3 @@ class FFNRelu:
         y = mx.sym.FullyConnected(data=h, num_hidden=self.num_model, weight=self.w_h2o, bias=self.b_h2o)
         y = mx.sym.reshape(y, shape=(-1, length, self.num_model))
         return y
-    
