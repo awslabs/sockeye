@@ -15,7 +15,7 @@
 Defines Encoder interface and various implementations.
 """
 import logging
-from typing import Callable, List
+from typing import Callable, List, Optional
 
 import mxnet as mx
 
@@ -82,7 +82,8 @@ def get_encoder_rnn(num_embed: int,
     return EncoderSequence(encoders)
 
 
-def get_encoder_transformer(model_size: int,
+def get_encoder_transformer(max_seq_len: int,
+                            model_size: int,
                             vocab_size: int,
                             num_layers: int,
                             attention_heads: int,
@@ -91,6 +92,7 @@ def get_encoder_transformer(model_size: int,
     """
     Returns a Transformer encoder.
 
+    :param max_seq_len: Maximum sequence length.
     :param model_size: Size of all layers and embeddings (dimension of model).
     :param vocab_size: Source vocabulary size.
     :param num_layers: Number of encoder layers.
@@ -104,7 +106,8 @@ def get_encoder_transformer(model_size: int,
                               vocab_size=vocab_size,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
                               dropout=dropout,
-                              add_positional_encoding=True))
+                              add_positional_encoding=True,
+                              max_seq_len=max_seq_len))
 
     encoders.append(TransformerEncoder(model_size=model_size,
                                        num_layers=num_layers,
@@ -196,13 +199,17 @@ class Embedding(Encoder):
                  vocab_size: int,
                  prefix: str,
                  dropout: float,
-                 add_positional_encoding: bool = False):
+                 add_positional_encoding: bool = False,
+                 max_seq_len: Optional[int] = None):
         self.num_embed = num_embed
         self.vocab_size = vocab_size
         self.prefix = prefix
         self.dropout = dropout
         self.embed_weight = mx.sym.Variable(prefix + "weight")
         self.add_positional_encoding = add_positional_encoding
+        self.max_seq_len = max_seq_len
+        if self.add_positional_encoding:
+            check_condition(max_seq_len is not None, "Positional encodings require maximum sequence length.")
 
     def encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
         """
@@ -233,12 +240,9 @@ class Embedding(Encoder):
         :param seq_len: Maximum sequence length
         :return: Symbol(1, max_seq_len, self.num_embed)
         """
-        #FIXME: we cant have variable-sized variables if they are not batch-major.... :/
-        # Either we go back to original version (including cosines) or we find a better way with this initialization.
-        max_seq_len = 500
         encodings = mx.sym.Variable("%spositional_encodings" % self.prefix,
-                                    shape=(max_seq_len, self.num_embed),
-                                    init=PositionalEncodingInitializer(max_seq_len, self.num_embed))
+                                    shape=(self.max_seq_len, self.num_embed),
+                                    init=PositionalEncodingInitializer(self.max_seq_len, self.num_embed))
         encodings = mx.sym.slice_axis(encodings, axis=0, begin=0, end=seq_len)
         encodings = mx.sym.BlockGrad(mx.sym.expand_dims(encodings, axis=0))
         return encodings

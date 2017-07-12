@@ -168,7 +168,8 @@ class SockeyeModel:
                                                            rnn_forget_bias,
                                                            fused_encoder)
         elif self.config.encoder == C.TRANSFORMER_TYPE:
-            self.encoder = sockeye.encoder.get_encoder_transformer(self.config.transformer_model_size,
+            self.encoder = sockeye.encoder.get_encoder_transformer(self.config.max_seq_len,
+                                                                   self.config.transformer_model_size,
                                                                    self.config.vocab_source_size,
                                                                    self.config.transformer_num_layers,
                                                                    self.config.transformer_attention_heads,
