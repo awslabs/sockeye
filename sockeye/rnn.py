@@ -52,6 +52,10 @@ def get_stacked_rnn(cell_type: str,
             cell = LayerNormPerGateLSTMCell(num_hidden=num_hidden, prefix=cell_prefix, forget_bias=forget_bias)
         elif cell_type == C.GRU_TYPE:
             cell = mx.rnn.GRUCell(num_hidden=num_hidden, prefix=cell_prefix)
+        elif cell_type == C.LNGRU_TYPE:
+            cell = LayerNormGRUCell(num_hidden=num_hidden, prefix=cell_prefix)
+        elif cell_type == C.LNGGRU_TYPE:
+            cell = LayerNormPerGateGRUCell(num_hidden=num_hidden, prefix=cell_prefix)
         else:
             raise NotImplementedError()
         if residual and layer > 0:
@@ -156,7 +160,7 @@ class LayerNormPerGateLSTMCell(mx.rnn.LSTMCell):
 
     def __init__(self,
                  num_hidden: int,
-                 prefix: str = 'lstm_',
+                 prefix: str = 'lnglstm_',
                  params: Optional[mx.rnn.RNNParams] = None,
                  forget_bias: float = 1.0,
                  norm_scale: float = 1.0,
@@ -170,15 +174,6 @@ class LayerNormPerGateLSTMCell(mx.rnn.LSTMCell):
                                     init=mx.init.Constant(value=norm_scale if name != "f" else forget_bias))
             self._norm_layers.append(
                 LayerNormalization(num_hidden, prefix="%s%s" % (self._prefix, name), scale=scale, shift=shift))
-
-    @property
-    def state_info(self):
-        return [{'shape': (0, self._num_hidden), '__layout__': 'NC'},
-                {'shape': (0, self._num_hidden), '__layout__': 'NC'}]
-
-    @property
-    def _gate_names(self):
-        return ['_i', '_f', '_c', '_o']
 
     def __call__(self, inputs, states):
         self._counter += 1
@@ -212,3 +207,137 @@ class LayerNormPerGateLSTMCell(mx.rnn.LSTMCell):
                                        mx.sym.Activation(self._norm_layers[4].normalize(next_c), act_type="tanh"),
                                        name='%sout' % name)
         return next_h, [next_h, next_c]
+
+
+class LayerNormGRUCell(mx.rnn.GRUCell):
+    """
+    Gated Recurrent Unit (GRU) network cell with layer normalization across gates.
+    Based on Jimmy Lei Ba et al: Layer Normalization (https://arxiv.org/pdf/1607.06450.pdf)
+
+    :param num_hidden: number of RNN hidden units. Number of units in output symbol.
+    :param prefix: prefix for name of layers (and name of weight if params is None).
+    :param params: RNNParams or None. Container for weight sharing between cells. Created if None.
+    :param norm_scale: scale/gain for layer normalization.
+    :param norm_shift: shift/bias after layer normalization.
+    """
+
+    def __init__(self,
+                 num_hidden: int,
+                 prefix: str = 'lngru_',
+                 params: Optional[mx.rnn.RNNParams] = None,
+                 norm_scale: float = 1.0,
+                 norm_shift: float = 0.0) -> None:
+        super(LayerNormGRUCell, self).__init__(num_hidden, prefix, params)
+        self._iN = LayerNormalization(num_hidden=num_hidden * 3,
+                                      prefix="%si2h" % self._prefix,
+                                      scale=self.params.get('i2h_scale', shape=(num_hidden * 3,),
+                                                            init=mx.init.Constant(value=norm_scale)),
+                                      shift=self.params.get('i2h_shift', shape=(num_hidden * 3,),
+                                                            init=mx.init.Constant(value=norm_shift)))
+        self._hN = LayerNormalization(num_hidden=num_hidden * 3,
+                                      prefix="%sh2h" % self._prefix,
+                                      scale=self.params.get('h2h_scale', shape=(num_hidden * 3,),
+                                                            init=mx.init.Constant(value=norm_scale)),
+                                      shift=self.params.get('h2h_shift', shape=(num_hidden * 3,),
+                                                            init=mx.init.Constant(value=norm_shift)))
+        self._shape_fix = None
+
+    def __call__(self, inputs, states):
+        self._counter += 1
+
+        seq_idx = self._counter
+        name = '%st%d_' % (self._prefix, seq_idx)
+        prev_state_h = states[0]
+
+        i2h = mx.sym.FullyConnected(data=inputs,
+                                    weight=self._iW, no_bias=True,
+                                    num_hidden=self._num_hidden * 3,
+                                    name="%s_i2h" % name)
+        h2h = mx.sym.FullyConnected(data=prev_state_h,
+                                    weight=self._hW, no_bias=True,
+                                    num_hidden=self._num_hidden * 3,
+                                    name="%s_h2h" % name)
+        if self._counter == 0:
+            self._shape_fix = mx.sym.zeros_like(i2h)
+        else:
+            assert self._shape_fix is not None
+
+        i2h = self._iN.normalize(i2h) + self._iB
+        h2h = self._hN.normalize(self._shape_fix + h2h) + self._hB
+
+        i2h_r, i2h_z, i2h = mx.sym.split(i2h, num_outputs=3, name="%s_i2h_slice" % name)
+        h2h_r, h2h_z, h2h = mx.sym.split(h2h, num_outputs=3, name="%s_h2h_slice" % name)
+
+        reset_gate = mx.sym.Activation(i2h_r + h2h_r, act_type="sigmoid",
+                                       name="%s_r_act" % name)
+        update_gate = mx.sym.Activation(i2h_z + h2h_z, act_type="sigmoid",
+                                        name="%s_z_act" % name)
+
+        next_h_tmp = mx.sym.Activation(i2h + reset_gate * h2h, act_type="tanh",
+                                       name="%s_h_act" % name)
+
+        next_h = mx.sym._internal._plus((1. - update_gate) * next_h_tmp, update_gate * prev_state_h,
+                                        name='%sout' % name)
+
+        return next_h, [next_h]
+
+
+class LayerNormPerGateGRUCell(mx.rnn.GRUCell):
+    """
+    Gated Recurrent Unit (GRU) network cell with layer normalization per gate.
+    Based on Jimmy Lei Ba et al: Layer Normalization (https://arxiv.org/pdf/1607.06450.pdf)
+
+    :param num_hidden: number of RNN hidden units. Number of units in output symbol.
+    :param prefix: prefix for name of layers (and name of weight if params is None).
+    :param params: RNNParams or None. Container for weight sharing between cells. Created if None.
+    :param norm_scale: scale/gain for layer normalization.
+    :param norm_shift: shift/bias after layer normalization.
+    """
+
+    def __init__(self,
+                 num_hidden: int,
+                 prefix: str = 'lnggru_',
+                 params: Optional[mx.rnn.RNNParams] = None,
+                 norm_scale: float = 1.0,
+                 norm_shift: float = 0.0) -> None:
+        super(LayerNormPerGateGRUCell, self).__init__(num_hidden, prefix, params)
+        self._norm_layers = list()  # type: List[LayerNormalization]
+        for name in ['r', 'z', 'o']:
+            scale = self.params.get('%s_shift' % name, shape=(num_hidden,), init=mx.init.Constant(value=norm_shift))
+            shift = self.params.get('%s_scale' % name, shape=(num_hidden,), init=mx.init.Constant(value=norm_scale))
+            self._norm_layers.append(
+                LayerNormalization(num_hidden, prefix="%s%s" % (self._prefix, name), scale=scale, shift=shift))
+
+    def __call__(self, inputs, states):
+        self._counter += 1
+
+        seq_idx = self._counter
+        name = '%st%d_' % (self._prefix, seq_idx)
+        prev_state_h = states[0]
+
+        i2h = mx.sym.FullyConnected(data=inputs,
+                                    weight=self._iW,
+                                    bias=self._iB,
+                                    num_hidden=self._num_hidden * 3,
+                                    name="%s_i2h" % name)
+        h2h = mx.sym.FullyConnected(data=prev_state_h,
+                                    weight=self._hW,
+                                    bias=self._hB,
+                                    num_hidden=self._num_hidden * 3,
+                                    name="%s_h2h" % name)
+
+        i2h_r, i2h_z, i2h = mx.sym.split(i2h, num_outputs=3, name="%s_i2h_slice" % name)
+        h2h_r, h2h_z, h2h = mx.sym.split(h2h, num_outputs=3, name="%s_h2h_slice" % name)
+
+        reset_gate = mx.sym.Activation(self._norm_layers[0].normalize(i2h_r + h2h_r),
+                                       act_type="sigmoid", name="%s_r_act" % name)
+        update_gate = mx.sym.Activation(self._norm_layers[1].normalize(i2h_z + h2h_z),
+                                        act_type="sigmoid", name="%s_z_act" % name)
+
+        next_h_tmp = mx.sym.Activation(self._norm_layers[2].normalize(i2h + reset_gate * h2h),
+                                       act_type="tanh", name="%s_h_act" % name)
+
+        next_h = mx.sym._internal._plus((1. - update_gate) * next_h_tmp, update_gate * prev_state_h,
+                                        name='%sout' % name)
+
+        return next_h, [next_h]

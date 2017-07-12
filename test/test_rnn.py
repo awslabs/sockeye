@@ -16,7 +16,7 @@ import pytest
 from sockeye import constants as C
 from sockeye import rnn
 
-lstm_test_cases = [
+cell_test_cases = [
     (rnn.LayerNormLSTMCell(100, prefix='rnn_', forget_bias=1.0),
      sorted(['rnn_c_scale', 'rnn_c_shift',
              'rnn_h2h_bias', 'rnn_h2h_scale', 'rnn_h2h_shift', 'rnn_h2h_weight',
@@ -28,15 +28,25 @@ lstm_test_cases = [
              'rnn_i2h_bias', 'rnn_i2h_weight',
              'rnn_i_scale', 'rnn_i_shift',
              'rnn_o_scale', 'rnn_o_shift',
-             'rnn_s_scale', 'rnn_s_shift']))
+             'rnn_s_scale', 'rnn_s_shift'])),
+    (rnn.LayerNormGRUCell(100, prefix='rnn_'),
+     sorted(['rnn_h2h_bias', 'rnn_h2h_scale', 'rnn_h2h_shift', 'rnn_h2h_weight',
+             'rnn_i2h_bias', 'rnn_i2h_scale', 'rnn_i2h_shift', 'rnn_i2h_weight'])),
+    (rnn.LayerNormPerGateGRUCell(100, prefix='rnn_'),
+     sorted(['rnn_h2h_bias', 'rnn_h2h_weight',
+             'rnn_i2h_bias', 'rnn_i2h_weight',
+             'rnn_o_scale', 'rnn_o_shift',
+             'rnn_r_scale', 'rnn_r_shift',
+             'rnn_z_scale', 'rnn_z_shift']))
 ]
 
 
-@pytest.mark.parametrize("cell, expected_param_keys", lstm_test_cases)
-def test_ln_lstm(cell, expected_param_keys):
+@pytest.mark.parametrize("cell, expected_param_keys", cell_test_cases)
+def test_ln_cell(cell, expected_param_keys):
     inputs = [mx.sym.Variable('rnn_t%d_data' % i) for i in range(3)]
     outputs, _ = cell.unroll(3, inputs)
     outputs = mx.sym.Group(outputs)
+    print(sorted(cell.params._params.keys()))
     assert sorted(cell.params._params.keys()) == expected_param_keys
     assert outputs.list_outputs() == ['rnn_t0_out_output', 'rnn_t1_out_output', 'rnn_t2_out_output']
 
@@ -48,7 +58,9 @@ get_rnn_test_cases = [
     (C.LSTM_TYPE, 100, mx.rnn.LSTMCell),
     (C.LNLSTM_TYPE, 100, rnn.LayerNormLSTMCell),
     (C.LNGLSTM_TYPE, 100, rnn.LayerNormPerGateLSTMCell),
-    (C.GRU_TYPE, 100, mx.rnn.GRUCell)]
+    (C.GRU_TYPE, 100, mx.rnn.GRUCell),
+    (C.LNGRU_TYPE, 100, rnn.LayerNormGRUCell),
+    (C.LNGGRU_TYPE, 100, rnn.LayerNormPerGateGRUCell)]
 
 
 @pytest.mark.parametrize("cell_type, num_hidden, expected_cell", get_rnn_test_cases)

@@ -20,6 +20,7 @@ from typing import Callable
 import mxnet as mx
 
 from sockeye.layers import LayerNormalization
+from sockeye.rnn import LayerNormPerGateGRUCell
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ def get_coverage(coverage_type: str,
     """
 
     if coverage_type == "gru":
-        return GRUCoverage(coverage_num_hidden)
+        return GRUCoverage(coverage_num_hidden, layer_normalization)
     elif coverage_type in {"tanh", "sigmoid", "relu", "softrelu"}:
         return ActivationCoverage(coverage_num_hidden, coverage_type, layer_normalization)
     elif coverage_type == "count":
@@ -116,12 +117,20 @@ class GRUCoverage(Coverage):
     It would be better to pre-compute the mapping of the source but this will likely mean opening up the GRU.
 
     :param coverage_num_hidden: Number of hidden units for coverage vectors.
+    :param layer_normalization: If true, applies layer normalization for each gate in the GRU cell.
     """
 
-    def __init__(self, coverage_num_hidden: int, prefix='cov_') -> None:
+    def __init__(self,
+                 coverage_num_hidden: int,
+                 layer_normalization: bool,
+                 prefix='cov_') -> None:
         self.prefix = prefix
         self.num_hidden = coverage_num_hidden
-        self.gru = mx.rnn.GRUCell(self.num_hidden, prefix="coverage_gru")
+        gru_prefix= "%s_gru" % prefix
+        if layer_normalization:
+            self.gru = LayerNormPerGateGRUCell(self.num_hidden, prefix=gru_prefix)
+        else:
+            self.gru = mx.rnn.GRUCell(self.num_hidden, prefix=gru_prefix)
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """

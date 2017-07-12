@@ -158,7 +158,7 @@ def add_model_parameters(params):
                               default=1,
                               help='Number of layers for encoder and decoder. Default: %(default)s.')
     model_params.add_argument('--rnn-cell-type',
-                              choices=[C.LSTM_TYPE, C.LNLSTM_TYPE, C.LNGLSTM_TYPE, C.GRU_TYPE],
+                              choices=C.CELL_TYPES,
                               default=C.LSTM_TYPE,
                               help='RNN cell type for encoder and decoder. Default: %(default)s.')
     model_params.add_argument('--rnn-num-hidden',

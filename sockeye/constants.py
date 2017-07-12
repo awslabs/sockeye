@@ -40,6 +40,9 @@ LSTM_TYPE = 'lstm'
 LNLSTM_TYPE = 'lnlstm'
 LNGLSTM_TYPE = 'lnglstm'
 GRU_TYPE = 'gru'
+LNGRU_TYPE = 'lngru'
+LNGGRU_TYPE = 'lnggru'
+CELL_TYPES = [LSTM_TYPE, LNLSTM_TYPE, LNGLSTM_TYPE, GRU_TYPE, LNGRU_TYPE, LNGGRU_TYPE]
 
 # init types
 RNN_INIT_ORTHOGONAL = 'orthogonal'
