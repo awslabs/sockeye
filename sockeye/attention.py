@@ -557,7 +557,7 @@ class MlpAttention(Attention):
                                                       layer_normalization) if attention_coverage_type else None
 
         if layer_normalization:
-            self._ln = LayerNormalization(num_hidden=attention_num_hidden, prefix="att_norm")
+            self._ln = layers.LayerNormalization(num_hidden=attention_num_hidden, prefix="att_norm")
         else:
             self._ln = None
 
