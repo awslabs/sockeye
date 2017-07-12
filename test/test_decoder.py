@@ -53,7 +53,8 @@ def test_step(cell_type, context_gating,
                                                 max_seq_len=source_seq_len,
                                                 attention_coverage_type="tanh",
                                                 attention_coverage_num_hidden=coverage_num_hidden,
-                                                layer_normalization=False)
+                                                layer_normalization=False,
+                                                attention_mhdot_heads=8,)
     attention_state = attention.get_initial_state(source_length, source_seq_len)
     attention_func = attention.on(source, source_length, source_seq_len)
 

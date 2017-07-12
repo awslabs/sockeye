@@ -67,19 +67,28 @@ def test_device_args(test_params, expected_params):
               attention_type='mlp', attention_num_hidden=None, attention_coverage_type='count',
               attention_coverage_num_hidden=1,
               lexical_bias=None, learn_lexical_bias=False, weight_tying=False, max_seq_len=100,
-              attention_use_prev_word=False, context_gating=False, layer_normalization=False)),
+              attention_use_prev_word=False, context_gating=False, layer_normalization=False,
+              attention_mhdot_heads=8, encoder='rnn', transformer_attention_heads=8,
+              transformer_feed_forward_num_hidden=2048, transformer_model_size=512,
+              transformer_num_layers=6)),
     ('--params test_params --num-words 10 --word-min-count 10 --rnn-num-layers 10 --rnn-cell-type gru '
      '--rnn-num-hidden 512 --rnn-residual-connections --num-embed 1024 --num-embed-source 10 --num-embed-target 10 '
      '--attention-type dot --attention-num-hidden 10 --attention-coverage-type tanh '
      '--attention-coverage-num-hidden 10 --lexical-bias test_bias --learn-lexical-bias --weight-tying '
-     '--max-seq-len 10 --attention-use-prev-word --context-gating --layer-normalization',
+     '--max-seq-len 10 --attention-use-prev-word --context-gating --layer-normalization '
+     '--attention-mhdot-heads 2 --encoder transformer --transformer-attention-heads 2 '
+     '--transformer-feed-forward-num-hidden 12 --transformer-model-size 6 --transformer-num-layers 3',
      dict(params='test_params', num_words=10, word_min_count=10, rnn_num_layers=10, rnn_cell_type=C.GRU_TYPE,
           rnn_num_hidden=512,
           rnn_residual_connections=True, num_embed=1024, num_embed_source=10, num_embed_target=10,
           attention_type='dot', attention_num_hidden=10, attention_coverage_type='tanh',
           attention_coverage_num_hidden=10,
           lexical_bias='test_bias', learn_lexical_bias=True, weight_tying=True, max_seq_len=10,
-          attention_use_prev_word=True, context_gating=True, layer_normalization=True))
+          attention_use_prev_word=True, context_gating=True, layer_normalization=True,
+          attention_mhdot_heads=2, encoder='transformer', transformer_attention_heads=2,
+          transformer_feed_forward_num_hidden=12, transformer_model_size=6,
+          transformer_num_layers=3
+          ))
 ])
 def test_model_parameters(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_model_parameters)

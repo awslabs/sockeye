@@ -39,6 +39,7 @@ def test_attention(attention_type,
                                                 max_seq_len=source_seq_len,
                                                 attention_coverage_type="",
                                                 attention_coverage_num_hidden=2,
+                                                attention_mhdot_heads=8,
                                                 layer_normalization=False)
     attention_state = attention.get_initial_state(source_length, source_seq_len)
     attention_func = attention.on(source, source_length, source_seq_len)
@@ -87,6 +88,7 @@ def test_coverage_attention(attention_coverage_type,
                                                 max_seq_len=source_seq_len,
                                                 attention_coverage_type=attention_coverage_type,
                                                 attention_coverage_num_hidden=attention_coverage_num_hidden,
+                                                attention_mhdot_heads=8,
                                                 layer_normalization=False)
     attention_state = attention.get_initial_state(source_length, source_seq_len)
     attention_func = attention.on(source, source_length, source_seq_len)
@@ -139,6 +141,7 @@ def test_last_state_attention(batch_size=1,
                                                 max_seq_len=source_seq_len,
                                                 attention_coverage_type="",
                                                 attention_coverage_num_hidden=0,
+                                                attention_mhdot_heads=8,
                                                 layer_normalization=False)
     attention_state = attention.get_initial_state(source_length, source_seq_len)
     attention_func = attention.on(source, source_length, source_seq_len)
