@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -15,7 +15,7 @@
 Defines Encoder interface and various implementations.
 """
 import logging
-from typing import List
+from typing import Callable, List
 
 import mxnet as mx
 
@@ -59,23 +59,23 @@ def get_encoder(num_embed: int,
                               dropout=dropout))
     encoders.append(BatchMajor2TimeMajor())
 
-    EncoderClass = FusedRecurrentEncoder if fused else RecurrentEncoder
+    encoder_class = FusedRecurrentEncoder if fused else RecurrentEncoder
     encoders.append(BiDirectionalRNNEncoder(num_hidden=rnn_num_hidden,
                                             num_layers=1,
                                             dropout=dropout,
                                             layout=C.TIME_MAJOR,
                                             cell_type=cell_type,
-                                            EncoderClass=EncoderClass,
+                                            encoder_class=encoder_class,
                                             forget_bias=forget_bias))
 
     if num_layers > 1:
-        encoders.append(EncoderClass(num_hidden=rnn_num_hidden,
-                                     num_layers=num_layers - 1,
-                                     dropout=dropout,
-                                     layout=C.TIME_MAJOR,
-                                     cell_type=cell_type,
-                                     residual=residual,
-                                     forget_bias=forget_bias))
+        encoders.append(encoder_class(num_hidden=rnn_num_hidden,
+                                      num_layers=num_layers - 1,
+                                      dropout=dropout,
+                                      layout=C.TIME_MAJOR,
+                                      cell_type=cell_type,
+                                      residual=residual,
+                                      forget_bias=forget_bias))
 
     return EncoderSequence(encoders)
 
@@ -88,7 +88,7 @@ class Encoder:
     def encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
-        
+
         :param data: Input data.
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
@@ -294,6 +294,7 @@ class FusedRecurrentEncoder(Encoder):
                                         num_layers=num_layers,
                                         mode=cell_type,
                                         bidirectional=False,
+                                        dropout=dropout,
                                         forget_bias=forget_bias,
                                         prefix=prefix)]
 
@@ -347,7 +348,7 @@ class BiDirectionalRNNEncoder(Encoder):
                  dropout: float = 0.,
                  layout=C.TIME_MAJOR,
                  cell_type=C.LSTM_TYPE,
-                 EncoderClass: Encoder = RecurrentEncoder,
+                 encoder_class: Callable = RecurrentEncoder,
                  forget_bias: float = 0.0):
         check_condition(num_hidden % 2 == 0, "num_hidden must be a multiple of 2 for BiDirectionalRNNEncoders.")
         self.num_hidden = num_hidden
@@ -355,14 +356,14 @@ class BiDirectionalRNNEncoder(Encoder):
             logger.warning("Batch-major layout for encoder input. Consider using time-major layout for faster speed")
 
         # time-major layout as _encode needs to swap layout for SequenceReverse
-        self.forward_rnn = EncoderClass(num_hidden=num_hidden // 2, num_layers=num_layers,
-                                        prefix=prefix + C.FORWARD_PREFIX, dropout=dropout,
-                                        layout=C.TIME_MAJOR, cell_type=cell_type,
-                                        forget_bias=forget_bias)
-        self.reverse_rnn = EncoderClass(num_hidden=num_hidden // 2, num_layers=num_layers,
-                                        prefix=prefix + C.REVERSE_PREFIX, dropout=dropout,
-                                        layout=C.TIME_MAJOR, cell_type=cell_type,
-                                        forget_bias=forget_bias)
+        self.forward_rnn = encoder_class(num_hidden=num_hidden // 2, num_layers=num_layers,
+                                         prefix=prefix + C.FORWARD_PREFIX, dropout=dropout,
+                                         layout=C.TIME_MAJOR, cell_type=cell_type,
+                                         forget_bias=forget_bias)
+        self.reverse_rnn = encoder_class(num_hidden=num_hidden // 2, num_layers=num_layers,
+                                         prefix=prefix + C.REVERSE_PREFIX, dropout=dropout,
+                                         layout=C.TIME_MAJOR, cell_type=cell_type,
+                                         forget_bias=forget_bias)
         self.layout = layout
         self.prefix = prefix
 

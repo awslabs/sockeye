@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -20,6 +20,7 @@ from typing import Callable, NamedTuple, Optional, Tuple
 import mxnet as mx
 
 import sockeye.coverage
+from sockeye.layers import LayerNormalization
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,8 @@ def get_attention(input_previous_word: bool,
                   rnn_num_hidden: int,
                   max_seq_len: int,
                   attention_coverage_type: str,
-                  attention_coverage_num_hidden: int) -> 'Attention':
+                  attention_coverage_num_hidden: int,
+                  layer_normalization: bool) -> 'Attention':
     """
     Returns an Attention instance based on attention_type.
 
@@ -41,6 +43,7 @@ def get_attention(input_previous_word: bool,
     :param max_seq_len: Maximum length of source sequences.
     :param attention_coverage_type: The type of update for the dynamic source encoding.
     :param attention_coverage_num_hidden: Number of hidden units for coverage attention.
+    :param layer_normalization: Apply layer normalization to MLP attention.
     :return: Instance of Attention.
     """
     if attention_type == "bilinear":
@@ -55,7 +58,8 @@ def get_attention(input_previous_word: bool,
         return LocationAttention(input_previous_word, max_seq_len)
     elif attention_type == "mlp":
         return MlpAttention(input_previous_word=input_previous_word,
-                            attention_num_hidden=attention_num_hidden)
+                            attention_num_hidden=attention_num_hidden,
+                            layer_normalization=layer_normalization)
     elif attention_type == "coverage":
         if attention_coverage_type == 'count' and attention_coverage_num_hidden != 1:
             logging.warning("Ignoring coverage_num_hidden=%d and setting to 1" % attention_coverage_num_hidden)
@@ -63,7 +67,8 @@ def get_attention(input_previous_word: bool,
         return MlpAttention(input_previous_word=input_previous_word,
                             attention_num_hidden=attention_num_hidden,
                             attention_coverage_type=attention_coverage_type,
-                            attention_coverage_num_hidden=attention_coverage_num_hidden)
+                            attention_coverage_num_hidden=attention_coverage_num_hidden,
+                            layer_normalization=layer_normalization)
     else:
         raise ValueError("Unknown attention type %s" % attention_type)
 
@@ -163,7 +168,7 @@ class BilinearAttention(Attention):
     Bilinear attention based on Luong et al. 2015.
 
     :math:`score(h_t, h_s) = h_t^T \\mathbf{W} h_s`
-    
+
     For implementation reasons we modify to:
 
     :math:`score(h_t, h_s) = h_s^T \\mathbf{W} h_t`
@@ -417,6 +422,8 @@ class MlpAttention(Attention):
     :param attention_coverage_type: The type of update for the dynamic source encoding.
            If None, no dynamic source encoding is done.
     :param attention_coverage_num_hidden: Number of hidden units for coverage attention.
+    :param prefix: Layer name prefix.
+    :param layer_normalization: If true, normalizes hidden layer outputs before tanh activation.
     """
 
     def __init__(self,
@@ -424,7 +431,8 @@ class MlpAttention(Attention):
                  attention_num_hidden: int,
                  attention_coverage_type: Optional[str] = None,
                  attention_coverage_num_hidden: int = 1,
-                 prefix='') -> None:
+                 prefix='',
+                 layer_normalization: bool = False) -> None:
         dynamic_source_num_hidden = 1 if attention_coverage_type is None else attention_coverage_num_hidden
         super().__init__(input_previous_word=input_previous_word,
                          dynamic_source_num_hidden=dynamic_source_num_hidden)
@@ -440,7 +448,13 @@ class MlpAttention(Attention):
         # input (coverage) to hidden
         self.att_c2h_weight = mx.sym.Variable("%satt_c2h_weight" % prefix) if attention_coverage_type else None
         self.coverage = sockeye.coverage.get_coverage(attention_coverage_type,
-                                                      dynamic_source_num_hidden) if attention_coverage_type else None
+                                                      dynamic_source_num_hidden,
+                                                      layer_normalization) if attention_coverage_type else None
+
+        if layer_normalization:
+            self._ln = LayerNormalization(num_hidden=attention_num_hidden, prefix="att_norm")
+        else:
+            self._ln = None
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """
@@ -496,7 +510,8 @@ class MlpAttention(Attention):
                 # (batch_size * seq_len, attention_num_hidden)
                 dynamic_hidden = mx.sym.FullyConnected(data=mx.sym.reshape(data=att_state.dynamic_source,
                                                                            shape=(-3, -1),
-                                                                           name="%satt_flat_dynamic_source" % self.prefix),
+                                                                           name="%satt_flat_dynamic_source"
+                                                                                % self.prefix),
                                                        weight=self.att_c2h_weight,
                                                        num_hidden=self.attention_num_hidden,
                                                        no_bias=True,
@@ -518,6 +533,9 @@ class MlpAttention(Attention):
             attention_hidden = mx.sym.reshape(data=attention_hidden,
                                               shape=(-3, -1),
                                               name="%satt_query_plus_input_before_fc" % self.prefix)
+
+            if self._ln is not None:
+                attention_hidden = self._ln.normalize(attention_hidden)
 
             # (batch_size * seq_len, attention_num_hidden)
             attention_hidden = mx.sym.Activation(attention_hidden, act_type="tanh",
@@ -558,7 +576,7 @@ def get_context_and_attention_probs(source: mx.sym.Symbol,
                                     attention_scores: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
     """
     Returns context vector and attention probs via a weighted sum over the masked, softmaxed attention scores.
-    
+
     :param source: Shape: (batch_size, seq_len, encoder_num_hidden).
     :param source_length: Shape: (batch_size,).
     :param attention_scores: Shape: (batch_size, seq_len, 1).

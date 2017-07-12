@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -71,7 +71,8 @@ class InferenceModel(sockeye.model.SockeyeModel):
                                self.config.max_seq_len, max_input_len)
         self.max_input_len = max_input_len
 
-        check_condition(beam_size < self.config.vocab_target_size, 'The beam size must be smaller than the target vocabulary size.')
+        check_condition(beam_size < self.config.vocab_target_size,
+                        'The beam size must be smaller than the target vocabulary size.')
 
         self.beam_size = beam_size
         self.softmax_temperature = softmax_temperature
@@ -162,7 +163,7 @@ class InferenceModel(sockeye.model.SockeyeModel):
         """
         Returns data shapes of the encoder module.
         Encoder batch size is always 1.
-        
+
         Shapes:
         source: (1, max_input_len)
         length: (1,)
@@ -177,7 +178,7 @@ class InferenceModel(sockeye.model.SockeyeModel):
         """
         Returns data shapes of the decoder module, given a bucket_key (source input length)
         Caches results for bucket_keys if called iteratively.
-        
+
         Shapes:
         source_encoded: (beam_size, input_length, encoder_num_hidden)
         source_length: (beam_size,)
@@ -196,10 +197,10 @@ class InferenceModel(sockeye.model.SockeyeModel):
 
     def _get_decoder_variable_shapes(self, input_length):
         """
-        Returns only the data shapes of input variables. Auxiliary method to adjust the computation graph to the 
+        Returns only the data shapes of input variables. Auxiliary method to adjust the computation graph to the
         presence or absence of coverage vectors.
-        
-        :param input_length: The maximal source sentence length 
+
+        :param input_length: The maximal source sentence length
         :return: A list of input shapes
         """
         shapes = [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
@@ -439,7 +440,7 @@ class Translator:
     def translate(self, trans_input: TranslatorInput) -> TranslatorOutput:
         """
         Translates a TranslatorInput and returns a TranslatorOutput
-        
+
         :param trans_input: TranslatorInput as returned by make_input().
         :return: translation result.
         """
@@ -504,7 +505,7 @@ class Translator:
         :param source: Source.
         :param source_length: Source length.
         :param bucket_key: Bucket key.
-        
+
         :return: Sequence of translated ids, attention matrix, length-normalized negative log probability.
         """
         # allow output sentence to be at most 2 times the current bucket_key
@@ -646,11 +647,11 @@ class Translator:
                                     next_dynamic_source in model_next_dynamic_source]
             model_decoder_states = [[mx.nd.take(state, prev_hyp_indices_nd) for state in decoder_states] for
                                     decoder_states in model_next_decoder_states]
-        
+
         return sequences, attention_lists, accumulated_scores
 
     @staticmethod
-    def _get_best_from_beam(sequences: List[List[int]], 
+    def _get_best_from_beam(sequences: List[List[int]],
                             attention_lists: List[np.ndarray],
                             accumulated_scores: mx.nd.NDArray) -> Tuple[List[int], np.ndarray, float]:
         """

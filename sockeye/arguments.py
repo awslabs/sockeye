@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -158,7 +158,7 @@ def add_model_parameters(params):
                               default=1,
                               help='Number of layers for encoder and decoder. Default: %(default)s.')
     model_params.add_argument('--rnn-cell-type',
-                              choices=[C.LSTM_TYPE, C.GRU_TYPE],
+                              choices=C.CELL_TYPES,
                               default=C.LSTM_TYPE,
                               help='RNN cell type for encoder and decoder. Default: %(default)s.')
     model_params.add_argument('--rnn-num-hidden',
@@ -238,6 +238,13 @@ def add_model_parameters(params):
     model_params.add_argument('--context-gating', action="store_true",
                               help="Enables a context gate which adaptively weighs the decoder input against the"
                                    "source context vector before each update of the decoder hidden state.")
+
+    model_params.add_argument('--layer-normalization', action="store_true",
+                              help="Adds layer normalization before non-linear activations of 1) MLP attention, "
+                                   "2) decoder RNN state initialization, and 3) RNN hidden state. "
+                                   "It does not normalize RNN cell activations "
+                                   "(this can be done using the '%s' or '%s' rnn-cell-type." % (C.LNLSTM_TYPE,
+                                                                                                C.LNGLSTM_TYPE))
 
 
 def add_training_args(params):
@@ -385,7 +392,7 @@ def add_inference_args(params):
                                default=None,
                                help='Input file to translate. One sentence per line. '
                                     'If not given, will read from stdin.')
-    
+
     decode_params.add_argument('--output', '-o',
                                default=None,
                                help='Output file to write translations to. '

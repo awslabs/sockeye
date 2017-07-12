@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 def get_initializer(rnn_init_type, lexicon: Optional[mx.nd.NDArray] = None) -> mx.initializer.Initializer:
     """
     Returns a mixed MXNet initializer given rnn_init_type and optional lexicon.
-    
+
     :param rnn_init_type: Initialization type.
     :param lexicon: Optional lexicon.
     :return: Mixed initializer.

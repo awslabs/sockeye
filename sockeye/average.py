@@ -52,9 +52,9 @@ def average(param_paths: Iterable[str]) -> Dict[str, mx.nd.NDArray]:
 
     logger.info("%d models loaded", len(all_arg_params))
     check_condition(all(all_arg_params[0].keys() == p.keys() for p in all_arg_params),
-        "arg_param names do not match across models")
+                    "arg_param names do not match across models")
     check_condition(all(all_aux_params[0].keys() == p.keys() for p in all_aux_params),
-        "aux_param names do not match across models")
+                    "aux_param names do not match across models")
 
     avg_params = {}
     # average arg_params

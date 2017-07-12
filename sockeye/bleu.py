@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -33,22 +33,19 @@ def zipngram(words, n):
 def bleu_from_counts(count_triple, offset=0.01):
     counts, hyp_count, ref_count = count_triple
     bleu = 0.0
-    brevity = 0.0
     effective_order = 0
     for n in range(ORDER):
         count = counts.common[n]
         total = counts.total[n]
-        if total <= 0:
-            if n == 0:
-                return 0
-            else:
-                break
-        effective_order += 1
+        count = offset if count == 0 else count
         if count == 0:
-            count = offset
-        bleu += log(float(count) / total)
-    if hyp_count > 0:
-        brevity = min(0., 1. - float(ref_count) / hyp_count)
+            return 0
+        if total > 0:
+            bleu += log(count / total)
+            effective_order += 1
+    if effective_order == 0:
+        return 0
+    brevity = min(0.0, 1.0 - ref_count / hyp_count) if hyp_count > 0 else 0.0
     return exp(bleu / effective_order + brevity)
 
 

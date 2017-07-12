@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -125,9 +125,9 @@ def _setup_context(args, exit_stack):
     else:
         num_gpus = get_num_gpus()
         check_condition(num_gpus >= 1,
-                "No GPUs found, consider running on the CPU with --use-cpu " \
-                "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi " \
-                "binary isn't on the path).")
+                        "No GPUs found, consider running on the CPU with --use-cpu "
+                        "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
+                        "binary isn't on the path).")
         check_condition(len(args.device_ids) == 1, "cannot run on multiple devices for now")
         gpu_id = args.device_ids[0]
         if args.disable_device_locking:
