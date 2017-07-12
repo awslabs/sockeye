@@ -57,6 +57,7 @@ ModelConfig = sockeye.utils.namedtuple_with_defaults('ModelConfig',
                                                       "transformer_num_layers",
                                                       "transformer_attention_heads",
                                                       "transformer_feed_forward_num_hidden",
+                                                      "layer_normalization",
                                                   ],
                                                      default_values={
                                                       "attention_use_prev_word": False,
@@ -69,6 +70,7 @@ ModelConfig = sockeye.utils.namedtuple_with_defaults('ModelConfig',
                                                       "transformer_num_layers": 6,
                                                       "transformer_attention_heads": 8,
                                                       "transformer_feed_forward_num_hidden": 2048,
+                                                      "layer_normalization": False
                                                   })
 """
 ModelConfig defines model parameters defined at training time which are relevant to model inference.
@@ -180,7 +182,8 @@ class SockeyeModel:
                                                          max_seq_len,
                                                          self.config.attention_coverage_type,
                                                          self.config.attention_coverage_num_hidden,
-                                                         self.config.attention_mhdot_heads)
+                                                         self.config.attention_mhdot_heads,
+                                                         self.config.layer_normalization)
 
         self.lexicon = sockeye.lexicon.Lexicon(self.config.vocab_source_size,
                                                self.config.vocab_target_size,
@@ -197,7 +200,8 @@ class SockeyeModel:
                                                    self.config.dropout,
                                                    self.config.weight_tying,
                                                    self.lexicon,
-                                                   self.config.context_gating)
+                                                   self.config.context_gating,
+                                                   self.config.layer_normalization)
 
         self.rnn_cells = self.encoder.get_rnn_cells() + self.decoder.get_rnn_cells()
 

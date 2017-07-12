@@ -231,7 +231,8 @@ def main():
                                                  transformer_model_size=args.transformer_model_size,
                                                  transformer_num_layers=args.transformer_num_layers,
                                                  transformer_attention_heads=args.transformer_attention_heads,
-                                                 transformer_feed_forward_num_hidden=args.transformer_feed_forward_num_hidden)
+                                                 transformer_feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
+                                                 layer_normalization=args.layer_normalization)
 
         # create training model
         model = sockeye.training.TrainingModel(model_config=model_config,

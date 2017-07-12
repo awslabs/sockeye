@@ -85,6 +85,13 @@ sockeye.initializer module
     :members:
     :show-inheritance:
 
+sockeye.layers module
+---------------------
+
+.. automodule:: sockeye.layers
+    :members:
+    :show-inheritance:
+
 sockeye.lexicon module
 ----------------------
 

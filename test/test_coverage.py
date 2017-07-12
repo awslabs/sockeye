@@ -64,7 +64,9 @@ def _test_activation_coverage(act_type):
     prev_coverage_data = gaussian_vector(shape=prev_coverage_shape)
     attention_scores_data = uniform_vector(shape=attention_scores_shape)
     attention_scores_data = attention_scores_data / np.sum(attention_scores_data)
-    coverage = sockeye.coverage.get_coverage(coverage_type=act_type, coverage_num_hidden=coverage_num_hidden)
+    coverage = sockeye.coverage.get_coverage(coverage_type=act_type,
+                                             coverage_num_hidden=coverage_num_hidden,
+                                             layer_normalization=False)
     coverage_func = coverage.on(source, source_length, source_seq_len)
     updated_coverage = coverage_func(prev_hidden, attention_scores, prev_coverage)
     executor = updated_coverage.simple_bind(ctx=mx.cpu(),
@@ -110,7 +112,9 @@ def _test_gru_coverage():
     prev_coverage_data = gaussian_vector(shape=prev_coverage_shape)
     attention_scores_data = uniform_vector(shape=attention_scores_shape)
     attention_scores_data = attention_scores_data / np.sum(attention_scores_data)
-    coverage = sockeye.coverage.get_coverage(coverage_type="gru", coverage_num_hidden=coverage_num_hidden)
+    coverage = sockeye.coverage.get_coverage(coverage_type="gru",
+                                             coverage_num_hidden=coverage_num_hidden,
+                                             layer_normalization=False)
     coverage_func = coverage.on(source, source_length, source_seq_len)
     updated_coverage = coverage_func(prev_hidden, attention_scores, prev_coverage)
     executor = updated_coverage.simple_bind(ctx=mx.cpu(),
