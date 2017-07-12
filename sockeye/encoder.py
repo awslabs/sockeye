@@ -19,9 +19,10 @@ from typing import Callable, List
 
 import mxnet as mx
 
-import sockeye.constants as C
+from . import constants as C
 import sockeye.rnn
 import sockeye.utils
+from sockeye.initializer import PositionalEncodingInitializer
 from sockeye.layers import FFNRelu, LayerNormalization, MultiHeadAttention
 from sockeye.utils import check_condition
 
@@ -103,7 +104,7 @@ def get_encoder_transformer(model_size: int,
                               vocab_size=vocab_size,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
                               dropout=dropout,
-                              add_pos_encoding=True))
+                              add_positional_encoding=True))
 
     encoders.append(TransformerEncoder(model_size=model_size,
                                        num_layers=num_layers,
@@ -195,13 +196,13 @@ class Embedding(Encoder):
                  vocab_size: int,
                  prefix: str,
                  dropout: float,
-                 add_pos_encoding: bool = False):
+                 add_positional_encoding: bool = False):
         self.num_embed = num_embed
         self.vocab_size = vocab_size
         self.prefix = prefix
         self.dropout = dropout
-        self.add_pos_encoding = add_pos_encoding
         self.embed_weight = mx.sym.Variable(prefix + "weight")
+        self.add_positional_encoding = add_positional_encoding
 
     def encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
         """
@@ -217,11 +218,24 @@ class Embedding(Encoder):
                                      weight=self.embed_weight,
                                      output_dim=self.num_embed,
                                      name=self.prefix + "embed")
-        if self.add_pos_encoding:
-            embedding = self._add_pos_encoding(embedding, seq_len)
+        if self.add_positional_encoding:
+            embedding = mx.sym.broadcast_add(embedding,
+                                             self._get_positional_encoding(seq_len),
+                                             name='%sadd_encoding' % self.prefix)
         if self.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.dropout, name="source_embed_dropout")
         return embedding
+
+    def _get_positional_encoding(self, max_seq_len: int) -> mx.sym.Symbol:
+        """
+        Returns a variable initialized with positional encodings as in Vaswani et al.
+
+        :param max_seq_len: Maximum sequence length
+        :return: Symbol(1, max_seq_len, self.num_embed)
+        """
+        return mx.sym.BlockGrad(mx.sym.Variable("%spositional_encodings" % self.prefix,
+                                                shape=(1, max_seq_len, self.num_embed),
+                                                init=PositionalEncodingInitializer(max_seq_len, self.num_embed)))
 
     def _add_pos_encoding(self, embedding: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
         """
@@ -234,6 +248,11 @@ class Embedding(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Summed input embeddings and position encodings (batch_size, seq_len, num_embed).
         """
+
+        # (1, seq_len, self.num_embed)
+        positional_encodings = self.get_positional_encodings(seq_len, self.num_embed)
+        return mx.symbol
+
 
         # (seq_len)
         position = mx.sym.arange(start=0, stop=seq_len)

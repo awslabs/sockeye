@@ -51,6 +51,7 @@ def get_initializer(rnn_init_type, lexicon: Optional[mx.nd.NDArray] = None) -> m
     return mx.initializer.Mixed(*zip(*params_init_pairs))
 
 
+@mx.init.register
 class StackedOrthogonalInit(mx.initializer.Initializer):
     """
     Initializes weight as Orthogonal matrix. Here we assume that the weight consists of stacked square matrices of
@@ -97,3 +98,36 @@ class StackedOrthogonalInit(mx.initializer.Initializer):
                 raise ValueError("unknown rand_type %s" % self.rand_type)
             q = self.scale * q
             arr[mat_idx * base_dim:mat_idx * base_dim + base_dim] = q
+
+
+@mx.init.register
+class PositionalEncodingInitializer(mx.initializer.Initializer):
+    """
+    Initialize variable of shape (max_seq_len, num_embed) with positional encodings as in Vaswani et al, 2017.
+    """
+
+    def __init__(self, max_seq_len, num_embed):
+        super().__init__(max_seq_len=max_seq_len,
+                         num_embed=num_embed)
+        self.max_seq_len = max_seq_len
+        self.num_embed = num_embed
+
+    def _init_weight(self, name, arr):
+        assert arr.shape == (1, self.max_seq_len, self.num_embed)
+        # (max_seq_len/2, 1)
+        positions_even = np.arange(0, self.max_seq_len, 2).reshape((-1, 1))
+        # (max_seq_len/2, 1)
+        positions_odd = np.arange(1, self.max_seq_len, 2).reshape((-1, 1))
+
+        # (1, num_embed)
+        channels = np.arange(self.num_embed).reshape((1, -1))
+
+        # sinusoids for even positions: (max_seq_len/2, num_embed)
+        sin = np.sin(positions_even / np.power(10000, (2 * channels) / self.num_embed))
+        # cosines for odd positions: (max_seq_len/2, num_embed)
+        cos = np.cos(positions_odd / np.power(10000, (2 * channels) / self.num_embed))
+
+        # interleave: (1, max_seq_len, num_embed)
+        positional_encodings = np.expand_dims(np.hstack([sin, cos]).reshape((self.max_seq_len, self.num_embed)),
+                                              axis=0)
+        arr[:] = positional_encodings
