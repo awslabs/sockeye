@@ -19,12 +19,12 @@ from typing import Callable, List
 
 import mxnet as mx
 
-from . import constants as C
 import sockeye.rnn
 import sockeye.utils
 from sockeye.initializer import PositionalEncodingInitializer
 from sockeye.layers import FFNRelu, LayerNormalization, MultiHeadAttention
 from sockeye.utils import check_condition
+from . import constants as C
 
 logger = logging.getLogger(__name__)
 
@@ -226,52 +226,22 @@ class Embedding(Encoder):
             embedding = mx.sym.Dropout(data=embedding, p=self.dropout, name="source_embed_dropout")
         return embedding
 
-    def _get_positional_encoding(self, max_seq_len: int) -> mx.sym.Symbol:
+    def _get_positional_encoding(self, seq_len: int) -> mx.sym.Symbol:
         """
         Returns a variable initialized with positional encodings as in Vaswani et al.
 
-        :param max_seq_len: Maximum sequence length
+        :param seq_len: Maximum sequence length
         :return: Symbol(1, max_seq_len, self.num_embed)
         """
-        return mx.sym.BlockGrad(mx.sym.Variable("%spositional_encodings" % self.prefix,
-                                                shape=(1, max_seq_len, self.num_embed),
-                                                init=PositionalEncodingInitializer(max_seq_len, self.num_embed)))
-
-    def _add_pos_encoding(self, embedding: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
-        """
-        Adds positional encodings based on sine functions to embeddings.
-
-        Attention Is All You Need, Section 3.5
-        Vaswani et al. (https://arxiv.org/pdf/1706.03762.pdf)
-
-        :param embedding: Input embeddings (batch_size, seq_len, num_embed).
-        :param seq_len: Maximum sequence length.
-        :return: Summed input embeddings and position encodings (batch_size, seq_len, num_embed).
-        """
-
-        # (1, seq_len, self.num_embed)
-        positional_encodings = self.get_positional_encodings(seq_len, self.num_embed)
-        return mx.symbol
-
-
-        # (seq_len)
-        position = mx.sym.arange(start=0, stop=seq_len)
-        # (seq_len, 1)
-        position = mx.sym.expand_dims(data=position, axis=1)
-        pos_encoding_dims = []
-        for i in range(self.num_embed):
-            # (seq_len, 1)
-            pos_encoding_dim = mx.sym.sin(position / mx.sym.pow(10000, ((2 * i) / self.num_embed)))
-            pos_encoding_dims.append(pos_encoding_dim)
-        # (seq_len, num_embed)
-        pos_encoding = mx.sym.concat(*pos_encoding_dims, dim=1)
-        # (1, seq_len, num_embed)
-        pos_encoding = mx.sym.expand_dims(data=pos_encoding, axis=0)
-        # Position encodings are constant
-        pos_encoding = mx.sym.BlockGrad(pos_encoding)
-        # (batch_size, seq_len, num_embed)
-        summed = mx.sym.broadcast_add(embedding, pos_encoding)
-        return summed
+        #FIXME: we cant have variable-sized variables if they are not batch-major.... :/
+        # Either we go back to original version (including cosines) or we find a better way with this initialization.
+        max_seq_len = 500
+        encodings = mx.sym.Variable("%spositional_encodings" % self.prefix,
+                                    shape=(max_seq_len, self.num_embed),
+                                    init=PositionalEncodingInitializer(max_seq_len, self.num_embed))
+        encodings = mx.sym.slice_axis(encodings, axis=0, begin=0, end=seq_len)
+        encodings = mx.sym.BlockGrad(mx.sym.expand_dims(encodings, axis=0))
+        return encodings
 
     def get_num_hidden(self) -> int:
         """

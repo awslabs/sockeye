@@ -113,7 +113,7 @@ class PositionalEncodingInitializer(mx.initializer.Initializer):
         self.num_embed = num_embed
 
     def _init_weight(self, name, arr):
-        assert arr.shape == (1, self.max_seq_len, self.num_embed)
+        assert arr.shape == (self.max_seq_len, self.num_embed)
         # (max_seq_len/2, 1)
         positions_even = np.arange(0, self.max_seq_len, 2).reshape((-1, 1))
         # (max_seq_len/2, 1)
@@ -128,6 +128,5 @@ class PositionalEncodingInitializer(mx.initializer.Initializer):
         cos = np.cos(positions_odd / np.power(10000, (2 * channels) / self.num_embed))
 
         # interleave: (1, max_seq_len, num_embed)
-        positional_encodings = np.expand_dims(np.hstack([sin, cos]).reshape((self.max_seq_len, self.num_embed)),
-                                              axis=0)
+        positional_encodings = np.hstack([sin, cos]).reshape((self.max_seq_len, self.num_embed))
         arr[:] = positional_encodings
