@@ -371,7 +371,7 @@ def add_training_args(params):
 
     train_params.add_argument('--keep-last-params',
                               type=int,
-                              default=20,
+                              default=-1,
                               help='Keep only the last n params files, use -1 to keep all files. Default: %(default)s')
 
 

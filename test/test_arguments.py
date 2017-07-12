@@ -95,7 +95,7 @@ def test_model_parameters(test_params, expected_params):
               learning_rate_scheduler_type='plateau-reduce', learning_rate_reduce_factor=0.5,
               learning_rate_reduce_num_not_improved=3, learning_rate_half_life=10, use_fused_rnn=False,
               rnn_forget_bias=0.0, rnn_h2h_init=C.RNN_INIT_ORTHOGONAL, monitor_bleu=0, seed=13,
-              keep_last_params=20)),
+              keep_last_params=-1)),
     ('--batch-size 128 --fill-up test_fill_up --no-bucketing --bucket-width 20 --loss smoothed-cross-entropy '
      '--smoothed-cross-entropy-alpha 1.0 --normalize-loss --metrics perplexity accuracy '
      '--optimized-metric bleu --max-updates 10 --checkpoint-frequency 10 --min-num-epochs 10 '
