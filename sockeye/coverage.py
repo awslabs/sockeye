@@ -21,6 +21,7 @@ import mxnet as mx
 
 from sockeye.layers import LayerNormalization
 from sockeye.rnn import LayerNormPerGateGRUCell
+from . import constants as C
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,8 @@ class Coverage:
     Generic coverage class. Similar to Attention classes, a coverage instance returns a callable, update_coverage(),
     function when self.on() is called.
     """
+    def __init__(self, prefix=C.COVERAGE_PREFIX):
+        self.prefix = prefix
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """
@@ -82,8 +85,8 @@ class CountCoverage(Coverage):
     Coverage class that accumulates the attention weights for each source word.
     """
 
-    def __init__(self, prefix='') -> None:
-        self.prefix = prefix
+    def __init__(self) -> None:
+        super().__init__()
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """
@@ -120,13 +123,10 @@ class GRUCoverage(Coverage):
     :param layer_normalization: If true, applies layer normalization for each gate in the GRU cell.
     """
 
-    def __init__(self,
-                 coverage_num_hidden: int,
-                 layer_normalization: bool,
-                 prefix='cov_') -> None:
-        self.prefix = prefix
+    def __init__(self, coverage_num_hidden: int, layer_normalization: bool) -> None:
+        super().__init__()
         self.num_hidden = coverage_num_hidden
-        gru_prefix = "%s_gru" % prefix
+        gru_prefix= "%sgru" % self.prefix
         if layer_normalization:
             self.gru = LayerNormPerGateGRUCell(self.num_hidden, prefix=gru_prefix)
         else:
@@ -195,9 +195,8 @@ class ActivationCoverage(Coverage):
     def __init__(self,
                  coverage_num_hidden: int,
                  activation: str,
-                 layer_normalization: bool,
-                 prefix="cov_") -> None:
-        self.prefix = prefix
+                 layer_normalization: bool) -> None:
+        super().__init__()
         self.activation = activation
         self.num_hidden = coverage_num_hidden
         # input (encoder) to hidden
@@ -212,7 +211,7 @@ class ActivationCoverage(Coverage):
         self.layer_norm = None
         if layer_normalization and not self.num_hidden != 1:
             self.layer_norm = LayerNormalization(self.num_hidden,
-                                                 prefix="%snorm" % prefix) if layer_normalization else None
+                                                 prefix="%snorm" % self.prefix) if layer_normalization else None
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """

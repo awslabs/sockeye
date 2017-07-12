@@ -21,6 +21,7 @@ import mxnet as mx
 
 import sockeye.coverage
 from sockeye.layers import LayerNormalization
+from . import constants as C
 
 logger = logging.getLogger(__name__)
 
@@ -104,9 +105,13 @@ class Attention(object):
     :param dynamic_source_num_hidden: Number of hidden units of dynamic source encoding update mechanism.
     """
 
-    def __init__(self, input_previous_word: bool, dynamic_source_num_hidden: int = 1) -> None:
+    def __init__(self,
+                 input_previous_word: bool,
+                 dynamic_source_num_hidden: int = 1,
+                 prefix: str = C.ATTENTION_PREFIX) -> None:
         self.dynamic_source_num_hidden = dynamic_source_num_hidden
         self._input_previous_word = input_previous_word
+        self.prefix = prefix
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """
@@ -159,7 +164,8 @@ class Attention(object):
         query = decoder_state
         if self._input_previous_word:
             # (batch_size, num_target_embed + rnn_num_hidden)
-            query = mx.sym.concat(word_vec_prev, decoder_state, dim=1, name='att_concat_prev_word_%d' % seq_idx)
+            query = mx.sym.concat(word_vec_prev, decoder_state, dim=1,
+                                  name='%sconcat_prev_word_%d' % (self.prefix, seq_idx))
         return AttentionInput(seq_idx=seq_idx, query=query)
 
 
@@ -176,13 +182,10 @@ class BilinearAttention(Attention):
     :param num_hidden: Number of hidden units.
     """
 
-    def __init__(self,
-                 num_hidden: int,
-                 prefix: str = '') -> None:
+    def __init__(self, num_hidden: int) -> None:
         super().__init__(False)
-        self.prefix = prefix
         self.num_hidden = num_hidden
-        self.s2t_weight = mx.sym.Variable("%satt_s2t_weight", self.prefix)
+        self.s2t_weight = mx.sym.Variable("%ss2t_weight" % self.prefix)
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """
@@ -197,12 +200,13 @@ class BilinearAttention(Attention):
         """
 
         # (batch_size * seq_len, self.num_hidden)
-        source_hidden = mx.sym.FullyConnected(data=mx.sym.reshape(data=source, shape=(-3, -1), name="att_flat_source"),
+        source_hidden = mx.sym.FullyConnected(data=mx.sym.reshape(data=source, shape=(-3, -1),
+                                                                  name="%sflat_source" % self.prefix),
                                               weight=self.s2t_weight, num_hidden=self.num_hidden,
-                                              no_bias=True, name="att_source_hidden_fc")
+                                              no_bias=True, name="%ssource_hidden_fc" % self.prefix)
         # (batch_size, seq_len, self.num_hidden)
         source_hidden = mx.sym.reshape(source_hidden, shape=(-1, source_seq_len, self.num_hidden),
-                                       name="att_source_hidden")
+                                       name="%ssource_hidden" % self.prefix)
 
         def attend(att_input: AttentionInput, att_state: AttentionState) -> AttentionState:
             """
@@ -217,7 +221,7 @@ class BilinearAttention(Attention):
 
             # in:  (batch_size, source_seq_len, self.num_hidden) X (batch_size, self.num_hidden, 1)
             # out: (batch_size, source_seq_len, 1).
-            attention_scores = mx.sym.batch_dot(lhs=source_hidden, rhs=query, name="att_batch_dot")
+            attention_scores = mx.sym.batch_dot(lhs=source_hidden, rhs=query, name="%sbatch_dot" % self.prefix)
 
             context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores)
 
@@ -252,8 +256,8 @@ class DotAttention(Attention):
         super().__init__(input_previous_word)
         self.project = rnn_num_hidden != num_hidden
         self.num_hidden = num_hidden
-        self.t2h_weight = mx.sym.Variable("att_t2h_weight") if self.project else None
-        self.s2h_weight = mx.sym.Variable("att_s2h_weight") if self.project else None
+        self.t2h_weight = mx.sym.Variable("%st2h_weight" % self.prefix) if self.project else None
+        self.s2h_weight = mx.sym.Variable("%ss2h_weight" % self.prefix) if self.project else None
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """
@@ -270,12 +274,12 @@ class DotAttention(Attention):
         if self.project:
             # (batch_size * seq_len, self.num_hidden)
             source_hidden = mx.sym.FullyConnected(
-                data=mx.sym.reshape(data=source, shape=(-3, -1), name="att_flat_source"),
+                data=mx.sym.reshape(data=source, shape=(-3, -1), name="%sflat_source" % self.prefix),
                 weight=self.s2h_weight, num_hidden=self.num_hidden,
-                no_bias=True, name="att_source_hidden_fc")
+                no_bias=True, name="%ssource_hidden_fc" % self.prefix)
             # (batch_size, seq_len, self.num_hidden)
             source_hidden = mx.sym.reshape(source_hidden, shape=(-1, source_seq_len, self.num_hidden),
-                                           name="att_source_hidden")
+                                           name="%ssource_hidden" % self.prefix)
 
         def attend(att_input: AttentionInput, att_state: AttentionState) -> AttentionState:
             """
@@ -293,14 +297,15 @@ class DotAttention(Attention):
                 query = mx.sym.FullyConnected(data=query,
                                               weight=self.t2h_weight,
                                               num_hidden=self.num_hidden,
-                                              no_bias=True, name="att_query_hidden_fc")
+                                              no_bias=True, name="%squery_hidden_fc" % self.prefix)
 
             # (batch_size, decoder_num_hidden, 1)
             expanded_decoder_state = mx.sym.expand_dims(query, axis=2)
 
             # batch_dot: (batch, M, K) X (batch, K, N) –> (batch, M, N).
             # (batch_size, seq_len, 1)
-            attention_scores = mx.sym.batch_dot(lhs=local_source, rhs=expanded_decoder_state, name="att_batch_dot")
+            attention_scores = mx.sym.batch_dot(lhs=local_source, rhs=expanded_decoder_state,
+                                                name="%sbatch_dot" % self.prefix)
 
             context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores)
             return AttentionState(context=context,
@@ -352,11 +357,13 @@ class LocationAttention(Attention):
     :param max_source_seq_len: Maximum length of source sequences.
     """
 
-    def __init__(self, input_previous_word: bool, max_source_seq_len: int) -> None:
+    def __init__(self,
+                 input_previous_word: bool,
+                 max_source_seq_len: int) -> None:
         super().__init__(input_previous_word)
         self.max_source_seq_len = max_source_seq_len
-        self.location_weight = mx.sym.Variable("att_loc_weight")
-        self.location_bias = mx.sym.Variable("att_loc_bias")
+        self.location_weight = mx.sym.Variable("%sloc_weight" % self.prefix)
+        self.location_bias = mx.sym.Variable("%sloc_bias" % self.prefix)
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """
@@ -431,22 +438,20 @@ class MlpAttention(Attention):
                  attention_num_hidden: int,
                  attention_coverage_type: Optional[str] = None,
                  attention_coverage_num_hidden: int = 1,
-                 prefix='',
                  layer_normalization: bool = False) -> None:
         dynamic_source_num_hidden = 1 if attention_coverage_type is None else attention_coverage_num_hidden
         super().__init__(input_previous_word=input_previous_word,
                          dynamic_source_num_hidden=dynamic_source_num_hidden)
-        self.prefix = prefix
         self.attention_num_hidden = attention_num_hidden
         # input (encoder) to hidden
-        self.att_e2h_weight = mx.sym.Variable("%satt_e2h_weight" % prefix)
+        self.att_e2h_weight = mx.sym.Variable("%se2h_weight" % self.prefix)
         # input (query) to hidden
-        self.att_q2h_weight = mx.sym.Variable("%satt_q2h_weight" % prefix)
+        self.att_q2h_weight = mx.sym.Variable("%sq2h_weight" % self.prefix)
         # hidden to score
-        self.att_h2s_weight = mx.sym.Variable("%satt_h2s_weight" % prefix)
+        self.att_h2s_weight = mx.sym.Variable("%sh2s_weight" % self.prefix)
         # dynamic source (coverage) weights and settings
         # input (coverage) to hidden
-        self.att_c2h_weight = mx.sym.Variable("%satt_c2h_weight" % prefix) if attention_coverage_type else None
+        self.att_c2h_weight = mx.sym.Variable("%sc2h_weight" % self.prefix) if attention_coverage_type else None
         self.coverage = sockeye.coverage.get_coverage(attention_coverage_type,
                                                       dynamic_source_num_hidden,
                                                       layer_normalization) if attention_coverage_type else None
@@ -477,12 +482,12 @@ class MlpAttention(Attention):
                                               weight=self.att_e2h_weight,
                                               num_hidden=self.attention_num_hidden,
                                               no_bias=True,
-                                              name="%satt_source_hidden_fc" % self.prefix)
+                                              name="%ssource_hidden_fc" % self.prefix)
 
         # (batch_size, seq_len, attention_num_hidden)
         source_hidden = mx.sym.reshape(source_hidden,
                                        shape=(-1, source_seq_len, self.attention_num_hidden),
-                                       name="%satt_source_hidden" % self.prefix)
+                                       name="%ssource_hidden" % self.prefix)
 
         def attend(att_input: AttentionInput, att_state: AttentionState) -> AttentionState:
             """
@@ -498,48 +503,47 @@ class MlpAttention(Attention):
                                                  weight=self.att_q2h_weight,
                                                  num_hidden=self.attention_num_hidden,
                                                  no_bias=True,
-                                                 name="%satt_query_hidden" % self.prefix)
+                                                 name="%squery_hidden" % self.prefix)
 
             # (batch_size, 1, attention_num_hidden)
             query_hidden = mx.sym.expand_dims(data=query_hidden,
                                               axis=1,
-                                              name="%satt_query_hidden_expanded" % self.prefix)
+                                              name="%squery_hidden_expanded" % self.prefix)
 
             attention_hidden_lhs = source_hidden
             if self.coverage:
                 # (batch_size * seq_len, attention_num_hidden)
                 dynamic_hidden = mx.sym.FullyConnected(data=mx.sym.reshape(data=att_state.dynamic_source,
                                                                            shape=(-3, -1),
-                                                                           name="%satt_flat_dynamic_source"
-                                                                                % self.prefix),
+                                                                           name="%sflat_dynamic_source" % self.prefix),
                                                        weight=self.att_c2h_weight,
                                                        num_hidden=self.attention_num_hidden,
                                                        no_bias=True,
-                                                       name="%satt_dynamic_source_hidden_fc" % self.prefix)
+                                                       name="%sdynamic_source_hidden_fc" % self.prefix)
 
                 # (batch_size, seq_len, attention_num_hidden)
                 dynamic_hidden = mx.sym.reshape(dynamic_hidden,
                                                 shape=(-1, source_seq_len, self.attention_num_hidden),
-                                                name="%satt_dynamic_source_hidden" % self.prefix)
+                                                name="%sdynamic_source_hidden" % self.prefix)
 
                 # (batch_size, seq_len, attention_num_hidden
                 attention_hidden_lhs = dynamic_hidden + source_hidden
 
             # (batch_size, seq_len, attention_num_hidden)
             attention_hidden = mx.sym.broadcast_add(lhs=attention_hidden_lhs, rhs=query_hidden,
-                                                    name="%satt_query_plus_input" % self.prefix)
+                                                    name="%squery_plus_input" % self.prefix)
 
             # (batch_size * seq_len, attention_num_hidden)
             attention_hidden = mx.sym.reshape(data=attention_hidden,
                                               shape=(-3, -1),
-                                              name="%satt_query_plus_input_before_fc" % self.prefix)
+                                              name="%squery_plus_input_before_fc" % self.prefix)
 
             if self._ln is not None:
                 attention_hidden = self._ln.normalize(attention_hidden)
 
             # (batch_size * seq_len, attention_num_hidden)
             attention_hidden = mx.sym.Activation(attention_hidden, act_type="tanh",
-                                                 name="%satt_hidden" % self.prefix)
+                                                 name="%shidden" % self.prefix)
 
             # (batch_size * seq_len, 1)
             attention_scores = mx.sym.FullyConnected(data=attention_hidden,
