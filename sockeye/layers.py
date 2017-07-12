@@ -87,7 +87,7 @@ class MultiHeadAttention:
         self.b_h2o = mx.sym.Variable("%sh2o_bias" % prefix)
         self.use_loop = False  # use naive loop
 
-    def _split_heads(self, x: mx.sym.Symbol, length: int):
+    def _split_heads(self, x: mx.sym.Symbol, length: int) -> mx.sym.Symbol:
         """
         Returns a symbol with head dimension folded into batch and depth divided by the number of heads.
 
@@ -101,9 +101,9 @@ class MultiHeadAttention:
         # (batch * heads, length, depth/heads)
         return mx.sym.reshape(data=x, shape=(-3, length, -1))
 
-    def _combine_heads(self, x: mx.sym.Symbol, length: int):
+    def _combine_heads(self, x: mx.sym.Symbol, length: int) -> mx.sym.Symbol:
         """
-        Returns a symbol with batch and length dimensions, and head and depth dimensions combined.
+        Returns a symbol with both batch & length, and head & depth dimensions combined.
 
         :param x: Symbol of shape (batch * heads, length, depth_per_head).
         :return: Symbol of shape (batch * length, depth).
@@ -115,7 +115,13 @@ class MultiHeadAttention:
         # (batch * length, depth)
         return mx.sym.reshape(x, shape=(-3, -3))
 
-    def _broadcast_lengths(self, x: mx.sym.Symbol):
+    def _broadcast_lengths(self, x: mx.sym.Symbol) -> mx.sym.Symbol:
+        """
+        Broadcasts the length information of each sequence to multiple heads.
+
+        :param x: Symbol(batch, 1)
+        :return: Symbol(batch * heads, 1)
+        """
         # x: (batch, 1)
         x = mx.sym.expand_dims(x, axis=1)
         # x: (batch, heads)
@@ -124,7 +130,7 @@ class MultiHeadAttention:
         x = mx.sym.reshape(x, shape=(-3,))
         return x
 
-    def on(self, inputs: mx.sym.Symbol, inputs_length: mx.sym.Symbol, length: int):
+    def on(self, inputs: mx.sym.Symbol, inputs_length: mx.sym.Symbol, length: int) -> mx.sym.Symbol:
         """
         Returns a symbol of shape (batch, length, output_depth).
 
@@ -145,7 +151,8 @@ class MultiHeadAttention:
         combined = mx.sym.FullyConnected(data=inputs,
                                          weight=self.w_i2h,
                                          bias=self.b_i2h,
-                                         num_hidden=self.depth_att * 3)
+                                         num_hidden=self.depth_att * 3,
+                                         name="%sqkv_transform" % self.prefix)
 
         # split batch and time dimension
         # combined: (batch, length, depth * 3)
