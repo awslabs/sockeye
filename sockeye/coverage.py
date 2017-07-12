@@ -126,7 +126,7 @@ class GRUCoverage(Coverage):
                  prefix='cov_') -> None:
         self.prefix = prefix
         self.num_hidden = coverage_num_hidden
-        gru_prefix= "%s_gru" % prefix
+        gru_prefix = "%s_gru" % prefix
         if layer_normalization:
             self.gru = LayerNormPerGateGRUCell(self.num_hidden, prefix=gru_prefix)
         else:

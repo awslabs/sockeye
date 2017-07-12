@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -89,7 +89,7 @@ def main():
         check_condition(args.rnn_num_layers > 2, "Residual connections require at least 3 RNN layers")
 
     check_condition(args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics,
-            "Must optimize either BLEU or one of tracked metrics (--metrics)")
+                    "Must optimize either BLEU or one of tracked metrics (--metrics)")
 
     # Checking status of output folder, resumption, etc.
     # Create temporary logger to console only
@@ -141,9 +141,9 @@ def main():
         else:
             num_gpus = get_num_gpus()
             check_condition(num_gpus >= 1,
-                           "No GPUs found, consider running on the CPU with --use-cpu " \
-                           "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi " \
-                           "binary isn't on the path).")
+                            "No GPUs found, consider running on the CPU with --use-cpu "
+                            "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
+                            "binary isn't on the path).")
             if args.disable_device_locking:
                 context = expand_requested_device_ids(args.device_ids)
             else:

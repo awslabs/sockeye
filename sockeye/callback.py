@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -263,6 +263,7 @@ class TrainingMonitor(object):
         with open(fname, "rb") as fp:
             self.metrics = pickle.load(fp)
             self.best_checkpoint = pickle.load(fp)
+
 
 def _decode_and_evaluate(checkpoint_decoder: sockeye.checkpoint_decoder.CheckpointDecoder,
                          checkpoint: int,
