@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 # List is needed for mypy, but not used in the code, only in special comments
-from typing import Optional, List  # pylint: disable=unused-import # noqa
+from typing import Optional, List
 
 import mxnet as mx
 
