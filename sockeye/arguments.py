@@ -223,6 +223,14 @@ def add_model_parameters(params):
                               type=int_greater_or_equal(1),
                               default=100,
                               help='Maximum sequence length in tokens. Default: %(default)s')
+    model_params.add_argument('--max-seq-len-source',
+                              type=int_greater_or_equal(1),
+                              default=None,
+                              help='Maximum source sequence length in tokens. Overrides --max-seq-len. Default: %(default)s')
+    model_params.add_argument('--max-seq-len-target',
+                              type=int_greater_or_equal(1),
+                              default=None,
+                              help='Maximum target sequence length in tokens. Overrides --max-seq-len. Default: %(default)s')
 
     model_params.add_argument('--attention-use-prev-word', action="store_true",
                               help="Feed the previous target embedding into the attention mechanism.")

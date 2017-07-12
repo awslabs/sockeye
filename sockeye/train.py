@@ -174,6 +174,8 @@ def main():
                                              args.target_vocab)
 
         # create data iterators
+        max_seq_len_source = args.max_seq_len if args.max_seq_len_source is None else args.max_seq_len_source
+        max_seq_len_target = args.max_seq_len if args.max_seq_len_target is None else args.max_seq_len_target
         train_iter, eval_iter = sockeye.data_io.get_training_data_iters(source=data_info.source,
                                                                         target=data_info.target,
                                                                         validation_source=data_info.validation_source,
@@ -182,7 +184,8 @@ def main():
                                                                         vocab_target=vocab_target,
                                                                         batch_size=args.batch_size,
                                                                         fill_up=args.fill_up,
-                                                                        max_seq_len=args.max_seq_len,
+                                                                        max_seq_len_source=max_seq_len_source,
+                                                                        max_seq_len_target=max_seq_len_target,
                                                                         bucketing=not args.no_bucketing,
                                                                         bucket_width=args.bucket_width)
 
@@ -203,7 +206,7 @@ def main():
         num_embed_source = args.num_embed if args.num_embed_source is None else args.num_embed_source
         num_embed_target = args.num_embed if args.num_embed_target is None else args.num_embed_target
         attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
-        model_config = sockeye.model.ModelConfig(max_seq_len=args.max_seq_len,
+        model_config = sockeye.model.ModelConfig(max_seq_len=max_seq_len_source,
                                                  vocab_source_size=vocab_source_size,
                                                  vocab_target_size=vocab_target_size,
                                                  num_embed_source=num_embed_source,

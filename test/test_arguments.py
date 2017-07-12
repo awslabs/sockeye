@@ -67,18 +67,20 @@ def test_device_args(test_params, expected_params):
               attention_type='mlp', attention_num_hidden=None, attention_coverage_type='count',
               attention_coverage_num_hidden=1,
               lexical_bias=None, learn_lexical_bias=False, weight_tying=False, max_seq_len=100,
+              max_seq_len_source=None, max_seq_len_target=None,
               attention_use_prev_word=False, context_gating=False, layer_normalization=False)),
     ('--params test_params --num-words 10 --word-min-count 10 --rnn-num-layers 10 --rnn-cell-type gru '
      '--rnn-num-hidden 512 --rnn-residual-connections --num-embed 1024 --num-embed-source 10 --num-embed-target 10 '
      '--attention-type dot --attention-num-hidden 10 --attention-coverage-type tanh '
      '--attention-coverage-num-hidden 10 --lexical-bias test_bias --learn-lexical-bias --weight-tying '
-     '--max-seq-len 10 --attention-use-prev-word --context-gating --layer-normalization',
+     '--max-seq-len 10 --max-seq-len-source 11 --max-seq-len-target 12 --attention-use-prev-word --context-gating --layer-normalization',
      dict(params='test_params', num_words=10, word_min_count=10, rnn_num_layers=10, rnn_cell_type=C.GRU_TYPE,
           rnn_num_hidden=512,
           rnn_residual_connections=True, num_embed=1024, num_embed_source=10, num_embed_target=10,
           attention_type='dot', attention_num_hidden=10, attention_coverage_type='tanh',
           attention_coverage_num_hidden=10,
           lexical_bias='test_bias', learn_lexical_bias=True, weight_tying=True, max_seq_len=10,
+          max_seq_len_source=11, max_seq_len_target=12,
           attention_use_prev_word=True, context_gating=True, layer_normalization=True))
 ])
 def test_model_parameters(test_params, expected_params):
