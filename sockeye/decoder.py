@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -26,7 +26,9 @@ import sockeye.encoder
 import sockeye.lexicon
 import sockeye.rnn
 import sockeye.utils
+from sockeye.layers import LayerNormalization
 from sockeye.utils import check_condition
+
 
 def get_decoder(num_embed: int,
                 vocab_size: int,
@@ -38,10 +40,11 @@ def get_decoder(num_embed: int,
                 dropout=0.,
                 weight_tying: bool = False,
                 lexicon: Optional[sockeye.lexicon.Lexicon] = None,
-                context_gating: bool = False) -> 'Decoder':
+                context_gating: bool = False,
+                layer_normalization: bool = False) -> 'Decoder':
     """
     Returns a StackedRNNDecoder with the following properties.
-    
+
     :param num_embed: Target word embedding size.
     :param vocab_size: Target vocabulary size.
     :param num_layers: Number of RNN layers in the decoder.
@@ -54,6 +57,7 @@ def get_decoder(num_embed: int,
     :param weight_tying: Whether to share embedding and prediction parameter matrices.
     :param lexicon: Optional Lexicon.
     :param context_gating: Whether to use context gating.
+    :param layer_normalization: Apply layer normalization.
     :return: Decoder instance.
     """
     return StackedRNNDecoder(rnn_num_hidden,
@@ -67,7 +71,8 @@ def get_decoder(num_embed: int,
                              residual=residual,
                              forget_bias=forget_bias,
                              lexicon=lexicon,
-                             context_gating=context_gating)
+                             context_gating=context_gating,
+                             layer_normalization=layer_normalization)
 
 
 class Decoder:
@@ -123,6 +128,7 @@ class StackedRNNDecoder(Decoder):
     :param forget_bias: Initial value of the RNN forget bias.
     :param lexicon: Optional Lexicon.
     :param context_gating: Whether to use context gating.
+    :param layer_normalization: Apply layer normalization to output layer and decoder state initializations.
     """
 
     def __init__(self,
@@ -138,7 +144,8 @@ class StackedRNNDecoder(Decoder):
                  residual: bool = False,
                  forget_bias: float = 0.0,
                  lexicon: Optional[sockeye.lexicon.Lexicon] = None,
-                 context_gating: bool = False) -> None:
+                 context_gating: bool = False,
+                 layer_normalization: bool = False) -> None:
         # TODO: implement variant without input feeding
         self.num_layers = num_layers
         self.prefix = prefix
@@ -155,6 +162,7 @@ class StackedRNNDecoder(Decoder):
             self.mapped_rnn_output_b = mx.sym.Variable("%smapped_rnn_output_bias" % prefix)
             self.mapped_context_w = mx.sym.Variable("%smapped_context_weight" % prefix)
             self.mapped_context_b = mx.sym.Variable("%smapped_context_bias" % prefix)
+        self.layer_norm = layer_normalization
 
         # Decoder stacked RNN
         self.rnn = sockeye.rnn.get_stacked_rnn(cell_type, num_hidden, num_layers, dropout, prefix, residual,
@@ -163,14 +171,18 @@ class StackedRNNDecoder(Decoder):
         # Decoder parameters
         # RNN init state parameters
         self._create_layer_parameters()
+
         # Hidden state parameters
         self.hidden_w = mx.sym.Variable("%shidden_weight" % prefix)
         self.hidden_b = mx.sym.Variable("%shidden_bias" % prefix)
+        self.hidden_norm = LayerNormalization(self.num_hidden,
+                                              prefix="%shidden_norm" % prefix) if self.layer_norm else None
         # Embedding & output parameters
         self.embedding = sockeye.encoder.Embedding(self.num_target_embed, self.target_vocab_size,
                                                    prefix=C.TARGET_EMBEDDING_PREFIX, dropout=0.)  # TODO dropout?
         if weight_tying:
-            check_condition(self.num_hidden == self.num_target_embed, "Weight tying requires target embedding size and rnn_num_hidden to be equal")
+            check_condition(self.num_hidden == self.num_target_embed,
+                            "Weight tying requires target embedding size and rnn_num_hidden to be equal")
             self.cls_w = self.embedding.embed_weight
         else:
             self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
@@ -197,9 +209,13 @@ class StackedRNNDecoder(Decoder):
         Creates parameters for encoder last state transformation into decoder layer initial states.
         """
         self.init_ws, self.init_bs = [], []
+        self.init_norms = []
         for state_idx, (_, init_num_hidden) in enumerate(self.rnn.state_shape):
             self.init_ws.append(mx.sym.Variable("%senc2decinit_%d_weight" % (self.prefix, state_idx)))
             self.init_bs.append(mx.sym.Variable("%senc2decinit_%d_bias" % (self.prefix, state_idx)))
+            if self.layer_norm:
+                self.init_norms.append(LayerNormalization(num_hidden=init_num_hidden,
+                                                          prefix="%senc2decinit_%d_norm" % (self.prefix, state_idx)))
 
     def create_layer_input_variables(self, batch_size: int) \
             -> Tuple[List[mx.sym.Symbol], List[mx.io.DataDesc], List[str]]:
@@ -241,6 +257,8 @@ class StackedRNNDecoder(Decoder):
                                          weight=self.init_ws[state_idx],
                                          bias=self.init_bs[state_idx],
                                          name="%senc2decinit_%d" % (self.prefix, state_idx))
+            if self.layer_norm:
+                init = self.init_norms[state_idx].normalize(init)
             init = mx.sym.Activation(data=init, act_type="tanh",
                                      name="%senc2dec_inittanh_%d" % (self.prefix, state_idx))
             layer_states.append(init)
@@ -256,7 +274,7 @@ class StackedRNNDecoder(Decoder):
         """
         Performs single-time step in the RNN, given previous word vector, previous hidden state, attention function,
         and RNN layer states.
-        
+
         :param word_vec_prev: Embedding of previous target word. Shape: (batch_size, num_target_embed).
         :param state: Decoder state consisting of hidden and layer states.
         :param attention_func: Attention function to produce context vector.
@@ -310,6 +328,10 @@ class StackedRNNDecoder(Decoder):
                                            num_hidden=self.num_hidden,
                                            weight=self.hidden_w,
                                            bias=self.hidden_b)
+
+            if self.layer_norm:
+                hidden = self.hidden_norm.normalize(hidden)
+
             # hidden: (batch_size, rnn_num_hidden)
             hidden = mx.sym.Activation(data=hidden, act_type="tanh",
                                        name="%snext_hidden_t%d" % (self.prefix, seq_idx))
