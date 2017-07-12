@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -246,6 +246,14 @@ def add_model_parameters(params):
                               type=int_greater_or_equal(1),
                               default=100,
                               help='Maximum sequence length in tokens. Default: %(default)s')
+    model_params.add_argument('--max-seq-len-source',
+                              type=int_greater_or_equal(1),
+                              default=None,
+                              help='Maximum source sequence length in tokens. Overrides --max-seq-len. Default: %(default)s')
+    model_params.add_argument('--max-seq-len-target',
+                              type=int_greater_or_equal(1),
+                              default=None,
+                              help='Maximum target sequence length in tokens. Overrides --max-seq-len. Default: %(default)s')
 
     model_params.add_argument('--attention-use-prev-word', action="store_true",
                               help="Feed the previous target embedding into the attention mechanism.")
@@ -407,7 +415,7 @@ def add_inference_args(params):
                                default=None,
                                help='Input file to translate. One sentence per line. '
                                     'If not given, will read from stdin.')
-    
+
     decode_params.add_argument('--output', '-o',
                                default=None,
                                help='Output file to write translations to. '

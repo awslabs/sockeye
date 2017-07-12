@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -96,7 +96,7 @@ def main():
 
     # weights (vocab, num_target_embed)
     check_condition(weights.shape[0] == len(vocab),
-        "vocab and embeddings matrix do not match: %d vs. %d" % (weights.shape[0], len(vocab)))
+                    "vocab and embeddings matrix do not match: %d vs. %d" % (weights.shape[0], len(vocab)))
 
     for line in sys.stdin:
         line = line.rstrip()

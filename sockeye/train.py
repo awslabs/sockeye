@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -89,7 +89,7 @@ def main():
         check_condition(args.rnn_num_layers > 2, "Residual connections require at least 3 RNN layers")
 
     check_condition(args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics,
-            "Must optimize either BLEU or one of tracked metrics (--metrics)")
+                    "Must optimize either BLEU or one of tracked metrics (--metrics)")
 
     # Checking status of output folder, resumption, etc.
     # Create temporary logger to console only
@@ -141,9 +141,9 @@ def main():
         else:
             num_gpus = get_num_gpus()
             check_condition(num_gpus >= 1,
-                           "No GPUs found, consider running on the CPU with --use-cpu " \
-                           "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi " \
-                           "binary isn't on the path).")
+                            "No GPUs found, consider running on the CPU with --use-cpu "
+                            "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
+                            "binary isn't on the path).")
             if args.disable_device_locking:
                 context = expand_requested_device_ids(args.device_ids)
             else:
@@ -174,6 +174,8 @@ def main():
                                              args.target_vocab)
 
         # create data iterators
+        max_seq_len_source = args.max_seq_len if args.max_seq_len_source is None else args.max_seq_len_source
+        max_seq_len_target = args.max_seq_len if args.max_seq_len_target is None else args.max_seq_len_target
         train_iter, eval_iter = sockeye.data_io.get_training_data_iters(source=data_info.source,
                                                                         target=data_info.target,
                                                                         validation_source=data_info.validation_source,
@@ -182,7 +184,8 @@ def main():
                                                                         vocab_target=vocab_target,
                                                                         batch_size=args.batch_size,
                                                                         fill_up=args.fill_up,
-                                                                        max_seq_len=args.max_seq_len,
+                                                                        max_seq_len_source=max_seq_len_source,
+                                                                        max_seq_len_target=max_seq_len_target,
                                                                         bucketing=not args.no_bucketing,
                                                                         bucket_width=args.bucket_width)
 
@@ -203,7 +206,7 @@ def main():
         num_embed_source = args.num_embed if args.num_embed_source is None else args.num_embed_source
         num_embed_target = args.num_embed if args.num_embed_target is None else args.num_embed_target
         attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
-        model_config = sockeye.model.ModelConfig(max_seq_len=args.max_seq_len,
+        model_config = sockeye.model.ModelConfig(max_seq_len=max_seq_len_source,
                                                  vocab_source_size=vocab_source_size,
                                                  vocab_target_size=vocab_target_size,
                                                  num_embed_source=num_embed_source,

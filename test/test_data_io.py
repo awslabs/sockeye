@@ -17,11 +17,11 @@ import sockeye.constants as C
 import sockeye.data_io
 
 define_bucket_tests = [(50, 10, [10, 20, 30, 40, 50]),
-                       (50, 20, [20, 40, 60]),
+                       (50, 20, [20, 40, 50]),
                        (50, 50, [50]),
-                       (5, 10, [10]),
-                       (11, 10, [10, 20]),
-                       (19, 10, [10, 20])]
+                       (5, 10, [5]),
+                       (11, 5, [5, 10, 11]),
+                       (19, 10, [10, 19])]
 
 
 @pytest.mark.parametrize("max_seq_len, step, expected_buckets", define_bucket_tests)
@@ -30,21 +30,21 @@ def test_define_buckets(max_seq_len, step, expected_buckets):
     assert buckets == expected_buckets
 
 
-define_parallel_bucket_tests = [(50, 10, 1.0, [(10, 10), (20, 20), (30, 30), (40, 40), (50, 50)]),
-                                (50, 10, 0.5, [(10, 5), (20, 10), (30, 15), (40, 20), (50, 25)]),
-                                (50, 10, 0.1, [(10, 2), (20, 2), (30, 3), (40, 4), (50, 5)]),
-                                (50, 10, 0.01, [(10, 2), (20, 2), (30, 3), (40, 4), (50, 5)]),
-                                (50, 10, 2.0, [(5, 10), (10, 20), (15, 30), (20, 40), (25, 50)]),
-                                (50, 10, 10.0, [(2, 10), (2, 20), (3, 30), (4, 40), (5, 50)]),
-                                (50, 10, 11.0, [(2, 10), (2, 20), (3, 30), (4, 40), (5, 50)]),
-                                (50, 50, 0.5, [(50, 25)]),
-                                (50, 50, 1.5, [(33, 50)]),
-                                (75, 50, 1.5, [(33, 50), (66, 100)])]
+define_parallel_bucket_tests = [(50, 50, 10, 1.0, [(10, 10), (20, 20), (30, 30), (40, 40), (50, 50)]),
+                                (50, 50, 10, 0.5, [(10, 5), (20, 10), (30, 15), (40, 20), (50, 25), (50, 30), (50, 35), (50, 40), (50, 45), (50, 50)]),
+                                (10, 10, 10, 0.1, [(10, 2), (10, 3), (10, 4), (10, 5), (10, 6), (10, 7), (10, 8), (10, 9), (10, 10)]),
+                                (10, 5, 10, 0.01, [(10, 2), (10, 3), (10, 4), (10, 5)]),
+                                (50, 50, 10, 2.0, [(5, 10), (10, 20), (15, 30), (20, 40), (25, 50), (30, 50), (35, 50), (40, 50), (45, 50), (50, 50)]),
+                                (5, 10, 10, 10.0, [(2, 10), (3, 10), (4, 10), (5, 10)]),
+                                (5, 10, 10, 11.0, [(2, 10), (3, 10), (4, 10), (5, 10)]),
+                                (50, 50, 50, 0.5, [(50, 25), (50, 50)]),
+                                (50, 50, 50, 1.5, [(33, 50), (50, 50)]),
+                                (75, 75, 50, 1.5, [(33, 50), (66, 75), (75, 75)])]
 
 
-@pytest.mark.parametrize("max_seq_len, bucket_width, length_ratio, expected_buckets", define_parallel_bucket_tests)
-def test_define_parallel_buckets(max_seq_len, bucket_width, length_ratio, expected_buckets):
-    buckets = sockeye.data_io.define_parallel_buckets(max_seq_len, bucket_width=bucket_width, length_ratio=length_ratio)
+@pytest.mark.parametrize("max_seq_len_source, max_seq_len_target, bucket_width, length_ratio, expected_buckets", define_parallel_bucket_tests)
+def test_define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width, length_ratio, expected_buckets):
+    buckets = sockeye.data_io.define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width=bucket_width, length_ratio=length_ratio)
     assert buckets == expected_buckets
 
 

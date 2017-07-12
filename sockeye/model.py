@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -58,7 +58,7 @@ ModelConfig = sockeye.utils.namedtuple_with_defaults('ModelConfig',
                                                       "transformer_attention_heads",
                                                       "transformer_feed_forward_num_hidden",
                                                       "layer_normalization",
-                                                  ],
+                                                     ],
                                                      default_values={
                                                       "attention_use_prev_word": False,
                                                       "attention_mhdot_heads": 8,
@@ -71,7 +71,7 @@ ModelConfig = sockeye.utils.namedtuple_with_defaults('ModelConfig',
                                                       "transformer_attention_heads": 8,
                                                       "transformer_feed_forward_num_hidden": 2048,
                                                       "layer_normalization": False
-                                                  })
+                                                     })
 """
 ModelConfig defines model parameters defined at training time which are relevant to model inference.
 Add new model parameters here. If you want backwards compatibility for models trained with code that did not
@@ -152,7 +152,7 @@ class SockeyeModel:
     def _build_model_components(self, max_seq_len: int, fused_encoder: bool, rnn_forget_bias: float = 0.0):
         """
         Builds and sets model components given maximum sequence length.
-        
+
         :param max_seq_len: Maximum sequence length supported by the model.
         :param fused_encoder: Use FusedRNNCells in encoder.
         :param rnn_forget_bias: forget bias initialization for RNNs.

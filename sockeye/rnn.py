@@ -5,13 +5,14 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-from typing import List, Optional
+# List is needed for mypy, but not used in the code, only in special comments
+from typing import Optional, List
 
 import mxnet as mx
 
@@ -122,8 +123,7 @@ class LayerNormLSTMCell(mx.rnn.LSTMCell):
         h2h = mx.sym.FullyConnected(data=states[0], weight=self._hW, no_bias=True,
                                     num_hidden=self._num_hidden * 4,
                                     name='%sh2h' % name)
-        gates = self._iN.normalize(i2h) + self._iB + \
-                self._hN.normalize(self._shape_fix + h2h) + self._hB
+        gates = self._iN.normalize(i2h) + self._iB + self._hN.normalize(self._shape_fix + h2h) + self._hB
         in_gate, forget_gate, in_transform, out_gate = mx.sym.split(gates,
                                                                     num_outputs=4,
                                                                     axis=1,

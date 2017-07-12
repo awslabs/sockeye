@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -36,6 +36,7 @@ import sockeye.model
 import sockeye.utils
 
 logger = logging.getLogger(__name__)
+
 
 class _TrainingState:
     """
@@ -362,7 +363,8 @@ class TrainingModel(sockeye.model.SockeyeModel):
 
         return self.training_monitor.eval_end_callback(training_state.checkpoint, val_metric)
 
-    def _checkpoint(self, training_state: _TrainingState, output_folder: str, train_iter: sockeye.data_io.ParallelBucketSentenceIter):
+    def _checkpoint(self, training_state: _TrainingState, output_folder: str,
+                    train_iter: sockeye.data_io.ParallelBucketSentenceIter):
         """
         Saves checkpoint. Note that the parameters are saved in _save_params.
         """
@@ -372,7 +374,8 @@ class TrainingModel(sockeye.model.SockeyeModel):
             os.mkdir(training_state_dirname)
         # Link current parameter file
         params_base_fname = C.PARAMS_NAME % training_state.checkpoint
-        os.symlink(os.path.join("..", params_base_fname), os.path.join(training_state_dirname, C.TRAINING_STATE_PARAMS_NAME))
+        os.symlink(os.path.join("..", params_base_fname),
+                   os.path.join(training_state_dirname, C.TRAINING_STATE_PARAMS_NAME))
 
         # Optimizer state (from mxnet)
         opt_state_fname = os.path.join(training_state_dirname, C.MODULE_OPT_STATE_NAME)
@@ -394,7 +397,7 @@ class TrainingModel(sockeye.model.SockeyeModel):
         # not used AFAIK
         with open(os.path.join(training_state_dirname, C.RNG_STATE_NAME), "wb") as fp:
             pickle.dump(random.getstate(), fp)
-            pickle.dump(np.random.get_state(), fp) # Yes, one uses _, the other does not
+            pickle.dump(np.random.get_state(), fp)  # Yes, one uses _, the other does not
 
         # Monitor state, in order to get the full information about the metrics
         self.training_monitor.save_state(os.path.join(training_state_dirname, C.MONITOR_STATE_NAME))

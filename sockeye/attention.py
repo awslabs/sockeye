@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -173,7 +173,7 @@ class BilinearAttention(Attention):
     Bilinear attention based on Luong et al. 2015.
 
     :math:`score(h_t, h_s) = h_t^T \\mathbf{W} h_s`
-    
+
     For implementation reasons we modify to:
 
     :math:`score(h_t, h_s) = h_s^T \\mathbf{W} h_t`
@@ -615,7 +615,8 @@ class MlpAttention(Attention):
                 # (batch_size * seq_len, attention_num_hidden)
                 dynamic_hidden = mx.sym.FullyConnected(data=mx.sym.reshape(data=att_state.dynamic_source,
                                                                            shape=(-3, -1),
-                                                                           name="%satt_flat_dynamic_source" % self.prefix),
+                                                                           name="%satt_flat_dynamic_source"
+                                                                                % self.prefix),
                                                        weight=self.att_c2h_weight,
                                                        num_hidden=self.attention_num_hidden,
                                                        no_bias=True,
@@ -680,8 +681,8 @@ def get_context_and_attention_probs(source: mx.sym.Symbol,
                                     attention_scores: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
     """
     Returns context vector and attention probs via a weighted sum over the masked, softmaxed attention scores.
-    
-    :param source: Shape: (batch_size, seq_len, depth).
+
+    :param source: Shape: (batch_size, seq_len, encoder_num_hidden).
     :param source_length: Shape: (batch_size,).
     :param attention_scores: Shape: (batch_size, seq_len, 1).
     :return: context: (batch_size, depth), attention_probs: (batch_size, seq_len).

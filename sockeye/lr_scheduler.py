@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -160,9 +160,9 @@ def get_lr_scheduler(scheduler_type: str,
         return LearningRateSchedulerInvT(updates_per_checkpoint, learning_rate_half_life)
     elif scheduler_type == "plateau-reduce":
         check_condition(learning_rate_reduce_factor is not None,
-                "learning_rate_reduce_factor needed for plateau-reduce scheduler")
+                        "learning_rate_reduce_factor needed for plateau-reduce scheduler")
         check_condition(learning_rate_reduce_num_not_improved is not None,
-                "learning_rate_reduce_num_not_improved needed for plateau-reduce scheduler")
+                        "learning_rate_reduce_num_not_improved needed for plateau-reduce scheduler")
         if learning_rate_reduce_factor >= 1.0:
             logger.warning("Not using plateau-reduce learning rate scheduling: learning_rate_reduce_factor == 1.0")
             return None

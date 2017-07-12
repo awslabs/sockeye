@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -19,6 +19,7 @@ import gzip
 import logging
 import pickle
 import random
+from collections import OrderedDict
 from typing import Dict, Iterator, Iterable, List, NamedTuple, Optional, Tuple
 
 import mxnet as mx
@@ -34,42 +35,53 @@ def define_buckets(max_seq_len: int, step=10) -> List[int]:
     """
     Returns a list of integers defining bucket boundaries.
     Bucket boundaries are created according to the following policy:
-    We generate buckets with a step size of step making sure that max_seq_len is covered by a bucket.
-    This entails that generation of the next-largest bucket that includes max_seq_len.
+    We generate buckets with a step size of step until the final bucket fits max_seq_len.
+    We then limit that bucket to max_seq_len (difference between semi-final and final bucket may be less than step).
 
     :param max_seq_len: Maximum bucket size.
     :param step: Distance between buckets.
     :return: List of bucket sizes.
     """
-    return [bucket_len for bucket_len in range(step, max_seq_len + step, step)]
+    buckets = [bucket_len for bucket_len in range(step, max_seq_len + step, step)]
+    buckets[-1] = max_seq_len
+    return buckets
 
 
-def define_parallel_buckets(max_seq_len: int, bucket_width=10, length_ratio=1.0) -> List[Tuple[int, int]]:
+def define_parallel_buckets(max_seq_len_source: int,
+                            max_seq_len_target: int,
+                            bucket_width=10,
+                            length_ratio=1.0) -> List[Tuple[int, int]]:
     """
-    Returns (src,trg) buckets in steps of bucket_width. Minimum bucket size for both source and target is 2.
-    If length_ratio >=1, then we make sure that a target sentence of max_seq_len will be covered by a bucket.
-    Otherwise, we make sure that a source sentence of max_seq_len will be covered by a bucket.
+    Returns (source, target) buckets up to (max_seq_len_source, max_seq_len_target).  The longer side of the data uses
+    steps of bucket_width while the shorter side uses steps scaled down by the average target/source length ratio.  If
+    one side reaches its max_seq_len before the other, width of extra buckets on that side is fixed to that max_seq_len.
 
-    :param max_seq_len: Maximum bucket size.
-    :param bucket_width: Width of buckets.
-    :param length_ratio: Length ratio between source and target data.
+    :param max_seq_len_source: Maximum source bucket size.
+    :param max_seq_len_target: Maximum target bucket size.
+    :param bucket_width: Width of buckets on longer side.
+    :param length_ratio: Length ratio of data (target/source).
     """
+    source_step_size = bucket_width
+    target_step_size = bucket_width
     if length_ratio >= 1.0:
-        # target side is longer, hence defines number of buckets
-        target_buckets = define_buckets(max_seq_len, step=bucket_width)
+        # target side is longer -> scale source
         source_step_size = max(1, int(bucket_width / length_ratio))
-        source_buckets = define_buckets(len(target_buckets) * source_step_size, step=source_step_size)
     else:
-        # source side is longer, hence defines number of buckets
-        source_buckets = define_buckets(max_seq_len, step=bucket_width)
+        # source side is longer, -> scale target
         target_step_size = max(1, int(bucket_width * length_ratio))
-        target_buckets = define_buckets(len(source_buckets) * target_step_size, step=target_step_size)
-
+    source_buckets = define_buckets(max_seq_len_source, step=source_step_size)
+    target_buckets = define_buckets(max_seq_len_target, step=target_step_size)
+    # Extra buckets
+    if len(source_buckets) < len(target_buckets):
+        source_buckets += [source_buckets[-1] for _ in range(len(target_buckets) - len(source_buckets))]
+    elif len(target_buckets) < len(source_buckets):
+        target_buckets += [target_buckets[-1] for _ in range(len(source_buckets) - len(target_buckets))]
     # minimum bucket size is 2 (as we add BOS symbol to target side)
     source_buckets = [max(2, b) for b in source_buckets]
     target_buckets = [max(2, b) for b in target_buckets]
-
-    return list(zip(source_buckets, target_buckets))
+    parallel_buckets = list(zip(source_buckets, target_buckets))
+    # deduplicate for return
+    return list(OrderedDict.fromkeys(parallel_buckets))
 
 
 def get_bucket(seq_len: int, buckets: List[int]) -> Optional[int]:
@@ -102,7 +114,7 @@ def read_parallel_corpus(data_source: str,
     source_sentences = read_sentences(data_source, vocab_source, add_bos=False)
     target_sentences = read_sentences(data_target, vocab_target, add_bos=True)
     check_condition(len(source_sentences) == len(target_sentences),
-        "Number of source sentences does not match number of target sentences")
+                    "Number of source sentences does not match number of target sentences")
     return source_sentences, target_sentences
 
 
@@ -111,7 +123,8 @@ def get_training_data_iters(source: str, target: str,
                             vocab_source: Dict[str, int], vocab_target: Dict[str, int],
                             batch_size: int,
                             fill_up: str,
-                            max_seq_len: int,
+                            max_seq_len_source: int,
+                            max_seq_len_target: int,
                             bucketing: bool,
                             bucket_width: int) -> Tuple['ParallelBucketSentenceIter', 'ParallelBucketSentenceIter']:
     """
@@ -125,7 +138,8 @@ def get_training_data_iters(source: str, target: str,
     :param vocab_target: Target vocabulary.
     :param batch_size: Batch size.
     :param fill_up: Fill-up strategy for buckets.
-    :param max_seq_len: Maximum sequence length.
+    :param max_seq_len_source: Maximum source sequence length.
+    :param max_seq_len_target: Maximum target sequence length.
     :param bucketing: Whether to use bucketing.
     :param bucket_width: Size of buckets.
     :return: Tuple of (training data iterator, validation data iterator).
@@ -135,13 +149,16 @@ def get_training_data_iters(source: str, target: str,
                                                                           target,
                                                                           vocab_source,
                                                                           vocab_target)
-    length_ratio = sum(len(t) / float(len(s)) for t, s in zip(train_source_sentences, train_target_sentences)) / len(
+    length_ratio = sum(len(t) / float(len(s)) for t, s in zip(train_target_sentences, train_source_sentences)) / len(
         train_target_sentences)
     logger.info("Average training target/source length ratio: %.2f", length_ratio)
 
     # define buckets
-    buckets = define_parallel_buckets(max_seq_len, bucket_width, length_ratio) if bucketing else [
-        (max_seq_len, max_seq_len)]
+    buckets = define_parallel_buckets(max_seq_len_source,
+                                      max_seq_len_target,
+                                      bucket_width,
+                                      length_ratio) if bucketing else [
+        (max_seq_len_source, max_seq_len_target)]
 
     train_iter = ParallelBucketSentenceIter(train_source_sentences,
                                             train_target_sentences,
@@ -212,7 +229,7 @@ def smart_open(filename: str, mode="rt", ftype="auto", errors='replace'):
 def read_content(path: str, limit=None) -> Iterator[List[str]]:
     """
     Returns a list of tokens for each line in path up to a limit.
-    
+
     :param path: Path to files containing sentences.
     :param limit: How many lines to read from path.
     :return: Iterator over lists of words.
@@ -239,7 +256,7 @@ def get_tokens(line: str) -> Iterator[str]:
 def tokens2ids(tokens: Iterable[str], vocab: Dict[str, int]) -> List[int]:
     """
     Returns sequence of ids given a sequence of tokens and vocab.
-    
+
     :param tokens: List of tokens.
     :param vocab: Vocabulary (containing UNK symbol).
     :return: List of word ids.
@@ -431,9 +448,10 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         for bkt, buck in zip(self.buckets, self.data_length):
             logger.info("bucket of {0} : {1} samples".format(bkt, len(buck)))
             nsamples += len(buck)
-        check_condition(nsamples > 0, "0 data points available in the data iterator. " \
-                       "%d data points have been discarded because they didn't fit into any bucket. Consider " \
-                       "increasing the --max-seq-len to fit your data." % ndiscard)
+        check_condition(nsamples > 0, "0 data points available in the data iterator. "
+                                      "%d data points have been discarded because they "
+                                      "didn't fit into any bucket. Consider increasing "
+                                      "the --max-seq-len to fit your data." % ndiscard)
         logger.info("%d sentence pairs out of buckets", ndiscard)
         logger.info("fill up mode: %s", self.fill_up)
         logger.info("")

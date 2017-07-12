@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -30,7 +30,7 @@ def build_from_path(path: str, num_words: int = 50000, min_count: int = 1) -> Di
     Creates vocabulary from path to a file in sentence-per-line format. A sentence is just a whitespace delimited
     list of tokens. Note that special symbols like the beginning of sentence (BOS) symbol will be added to the
     vocabulary.
-    
+
     :param path: Path to file with one sentence per line.
     :param num_words: Maximum number of words in the vocabulary.
     :param min_count: Minimum occurrences of words to be included in the vocabulary.
