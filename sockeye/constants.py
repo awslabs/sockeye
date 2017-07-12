@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -71,7 +71,8 @@ LOG_NAME = "log"
 JSON_SUFFIX = ".json"
 VOCAB_SRC_NAME = "vocab.src"
 VOCAB_TRG_NAME = "vocab.trg"
-PARAMS_NAME = "params.%04d"
+PARAMS_PREFIX = "params."
+PARAMS_NAME = PARAMS_PREFIX + "%04d"
 PARAMS_BEST_NAME = "params.best"
 DECODE_OUT_NAME = "decode.output.%04d"
 DECODE_IN_NAME = "decode.source"
@@ -81,7 +82,7 @@ METRICS_NAME = "metrics"
 TENSORBOARD_NAME = "tensorboard"
 
 # training resumption constants
-TRAINING_STATE_DIRNAME= "training_state"
+TRAINING_STATE_DIRNAME = "training_state"
 TRAINING_STATE_TEMP_DIRNAME = "tmp.training_state"
 TRAINING_STATE_TEMP_DELETENAME = "delete.training_state"
 MODULE_OPT_STATE_NAME = "mx_optimizer.pkl"
@@ -94,7 +95,9 @@ TRAINING_STATE_PARAMS_NAME = "params"
 ARGS_STATE_NAME = "args.json"
 
 # Arguments that may differ and still resume training
-ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet", "align_plot_prefix", "sure_align_threshold"]
+ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet",
+                   "align_plot_prefix", "sure_align_threshold",
+                   "keep_last_params"]
 
 # data layout strings
 BATCH_MAJOR = "NTC"

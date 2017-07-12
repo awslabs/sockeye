@@ -272,6 +272,7 @@ def main():
 
         model.fit(train_iter, eval_iter,
                   output_folder=output_folder,
+                  max_params_files_to_keep=args.keep_last_params,
                   metrics=args.metrics,
                   initializer=initializer,
                   max_updates=args.max_updates,

@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -14,6 +14,7 @@
 """
 Code for training
 """
+import glob
 import logging
 import os
 import pickle
@@ -36,6 +37,7 @@ import sockeye.model
 import sockeye.utils
 
 logger = logging.getLogger(__name__)
+
 
 class _TrainingState:
     """
@@ -156,6 +158,7 @@ class TrainingModel(sockeye.model.SockeyeModel):
             train_iter: sockeye.data_io.ParallelBucketSentenceIter,
             val_iter: sockeye.data_io.ParallelBucketSentenceIter,
             output_folder: str,
+            max_params_files_to_keep: int,
             metrics: List[AnyStr],
             initializer: mx.initializer.Initializer,
             max_updates: int,
@@ -174,6 +177,7 @@ class TrainingModel(sockeye.model.SockeyeModel):
         :param train_iter: The training data iterator.
         :param val_iter: The validation data iterator.
         :param output_folder: The folder in which all model artifacts will be stored in (parameters, checkpoints, etc.).
+        :param max_params_files_to_keep: Maximum number of params files to keep in the output folder
         :param metrics: The metrics that will be evaluated during training.
         :param initializer: The parameter initializer.
         :param max_updates: Maximum number of batches to process.
@@ -213,6 +217,7 @@ class TrainingModel(sockeye.model.SockeyeModel):
                                                                  use_tensorboard=use_tensorboard,
                                                                  checkpoint_decoder=checkpoint_decoder)
         self._fit(train_iter, val_iter, output_folder,
+                  max_params_files_to_keep,
                   metrics=metrics,
                   max_updates=max_updates,
                   checkpoint_frequency=checkpoint_frequency,
@@ -229,6 +234,7 @@ class TrainingModel(sockeye.model.SockeyeModel):
              train_iter: sockeye.data_io.ParallelBucketSentenceIter,
              val_iter: sockeye.data_io.ParallelBucketSentenceIter,
              output_folder: str,
+             max_params_files_to_keep: int,
              metrics: List[AnyStr],
              max_updates: int,
              checkpoint_frequency: int,
@@ -240,6 +246,7 @@ class TrainingModel(sockeye.model.SockeyeModel):
         :param train_iter: Training data iterator.
         :param val_iter: Validation data iterator.
         :param output_folder: Model output folder.
+        :params max_params_files_to_keep: Maximum number of params files to keep in the output folder
         :param metrics: List of metric names to track on training and validation data.
         :param max_updates: Maximum number of batches to process.
         :param checkpoint_frequency: Frequency of checkpointing.
@@ -287,6 +294,8 @@ class TrainingModel(sockeye.model.SockeyeModel):
             if train_state.updates > 0 and train_state.updates % checkpoint_frequency == 0:
                 train_state.checkpoint += 1
                 self._save_params(output_folder, train_state.checkpoint)
+                cleanup_params_files(output_folder, max_params_files_to_keep,
+                                     train_state.checkpoint, self.training_monitor.get_best_checkpoint())
                 self.training_monitor.checkpoint_callback(train_state.checkpoint, metric_train)
 
                 toc = time.time()
@@ -335,6 +344,8 @@ class TrainingModel(sockeye.model.SockeyeModel):
                         break
 
                 self._checkpoint(train_state, output_folder, train_iter)
+        cleanup_params_files(output_folder, max_params_files_to_keep,
+                             train_state.checkpoint, self.training_monitor.get_best_checkpoint())
 
     def _save_params(self, output_folder: str, checkpoint: int):
         """
@@ -362,7 +373,8 @@ class TrainingModel(sockeye.model.SockeyeModel):
 
         return self.training_monitor.eval_end_callback(training_state.checkpoint, val_metric)
 
-    def _checkpoint(self, training_state: _TrainingState, output_folder: str, train_iter: sockeye.data_io.ParallelBucketSentenceIter):
+    def _checkpoint(self, training_state: _TrainingState, output_folder: str,
+                    train_iter: sockeye.data_io.ParallelBucketSentenceIter):
         """
         Saves checkpoint. Note that the parameters are saved in _save_params.
         """
@@ -372,7 +384,8 @@ class TrainingModel(sockeye.model.SockeyeModel):
             os.mkdir(training_state_dirname)
         # Link current parameter file
         params_base_fname = C.PARAMS_NAME % training_state.checkpoint
-        os.symlink(os.path.join("..", params_base_fname), os.path.join(training_state_dirname, C.TRAINING_STATE_PARAMS_NAME))
+        os.symlink(os.path.join("..", params_base_fname),
+                   os.path.join(training_state_dirname, C.TRAINING_STATE_PARAMS_NAME))
 
         # Optimizer state (from mxnet)
         opt_state_fname = os.path.join(training_state_dirname, C.MODULE_OPT_STATE_NAME)
@@ -394,7 +407,7 @@ class TrainingModel(sockeye.model.SockeyeModel):
         # not used AFAIK
         with open(os.path.join(training_state_dirname, C.RNG_STATE_NAME), "wb") as fp:
             pickle.dump(random.getstate(), fp)
-            pickle.dump(np.random.get_state(), fp) # Yes, one uses _, the other does not
+            pickle.dump(np.random.get_state(), fp)  # Yes, one uses _, the other does not
 
         # Monitor state, in order to get the full information about the metrics
         self.training_monitor.save_state(os.path.join(training_state_dirname, C.MONITOR_STATE_NAME))
@@ -473,3 +486,23 @@ class TrainingModel(sockeye.model.SockeyeModel):
 
         # And our own state
         return self.load_state(os.path.join(directory, C.TRAINING_STATE_NAME))
+
+
+def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int):
+    """
+    Cleanup the params files in the output folder.
+
+    :param output_folder: folder where param files are created.
+    :param max_to_keep: maximum number of files to keep, negative to keep all.
+    :param checkpoint: current checkpoint (i.e. index of last params file created).
+    :param best_checkpoint: best checkpoint, we will not delete its params.
+    """
+    if max_to_keep <= 0:  # We assume we do not want to delete all params
+        return
+    existing_files = glob.glob(os.path.join(output_folder, C.PARAMS_PREFIX + "*"))
+    params_name_with_dir = os.path.join(output_folder, C.PARAMS_NAME)
+    for n in range(1, max(1, checkpoint - max_to_keep + 1)):
+        if n != best_checkpoint:
+            param_fname_n = params_name_with_dir % n
+            if param_fname_n in existing_files:
+                os.remove(param_fname_n)
