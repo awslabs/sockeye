@@ -23,7 +23,6 @@ PAD_ID = 0
 TOKEN_SEPARATOR = " "
 VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
 
-# default encoder prefixes
 ENCODER_PREFIX = "encoder_"
 EMBEDDING_PREFIX = "embed_"
 BIDIRECTIONALRNN_PREFIX = ENCODER_PREFIX + "birnn_"
@@ -43,6 +42,17 @@ TRANSFORMER_TYPE = "transformer"
 # rnn types
 LSTM_TYPE = 'lstm'
 GRU_TYPE = 'gru'
+
+
+# attention types
+ATT_BILINEAR="bilinear"
+ATT_DOT="dot"
+ATT_MH_DOT="mhdot"
+ATT_FIXED="fixed"
+ATT_LOC="location"
+ATT_MLP="mlp"
+ATT_COV="coverage"
+ATTENTION_TYPES = [ATT_BILINEAR, ATT_DOT, ATT_MH_DOT, ATT_FIXED, ATT_LOC, ATT_MLP, ATT_COV]
 
 # init types
 RNN_INIT_ORTHOGONAL = 'orthogonal'

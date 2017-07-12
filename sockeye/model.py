@@ -38,6 +38,7 @@ ModelConfig = sockeye.utils.namedtuple_with_defaults('ModelConfig',
                                                       "attention_coverage_type",
                                                       "attention_coverage_num_hidden",
                                                       "attention_use_prev_word",
+                                                      "attention_mhdot_heads",
                                                       "dropout",
                                                       "rnn_cell_type",
                                                       "rnn_num_layers",
@@ -59,6 +60,7 @@ ModelConfig = sockeye.utils.namedtuple_with_defaults('ModelConfig',
                                                   ],
                                                      default_values={
                                                       "attention_use_prev_word": False,
+                                                      "attention_mhdot_heads": 8,
                                                       "context_gating": False,
                                                       "loss": C.CROSS_ENTROPY,
                                                       "normalize_loss": False,
@@ -177,7 +179,8 @@ class SockeyeModel:
                                                          self.config.rnn_num_hidden,
                                                          max_seq_len,
                                                          self.config.attention_coverage_type,
-                                                         self.config.attention_coverage_num_hidden)
+                                                         self.config.attention_coverage_num_hidden,
+                                                         self.config.attention_mhdot_heads)
 
         self.lexicon = sockeye.lexicon.Lexicon(self.config.vocab_source_size,
                                                self.config.vocab_target_size,

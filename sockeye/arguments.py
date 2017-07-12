@@ -207,10 +207,8 @@ def add_model_parameters(params):
                               help='Embedding size for target tokens. Overrides --num-embed. Default: %(default)s')
 
     model_params.add_argument('--attention-type',
-                              choices=["bilinear", "dot", "fixed", "location", "mlp", "coverage"],
-                              default="mlp",
-                              help='Attention model. Choices: {%(choices)s}. '
-                                   'Default: %(default)s.')
+                              choices=C.ATTENTION_TYPES, default=C.ATT_MLP,
+                              help='Attention model. Choices: {%(choices)s}. Default: %(default)s.')
     model_params.add_argument('--attention-num-hidden',
                               default=None,
                               type=int,
@@ -226,7 +224,10 @@ def add_model_parameters(params):
     model_params.add_argument('--attention-coverage-num-hidden',
                               type=int,
                               default=1,
-                              help="Number of hidden units for coverage vectors. Default: %(default)s")
+                              help="Number of hidden units for coverage vectors. Default: %(default)s.")
+    model_params.add_argument('--attention-mhdot-heads',
+                              type=int, default=8,
+                              help='Number of heads for Multi-head dot attention. Default: %(default)s.')
 
     model_params.add_argument('--lexical-bias',
                               default=None,

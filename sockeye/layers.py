@@ -15,6 +15,7 @@ from typing import Tuple
 
 import mxnet as mx
 
+from . import utils
 
 class LayerNormalization:
     """
@@ -66,6 +67,57 @@ class LayerNormalization:
         return inputs_norm
 
 
+def split_heads(x: mx.sym.Symbol, length: int, heads: int) -> mx.sym.Symbol:
+    """
+    Returns a symbol with head dimension folded into batch and depth divided by the number of heads.
+
+    :param x: Symbol of shape (batch, length, depth).
+    :param length: Sequence length.
+    :param heads: Number of heads.
+    :return: Symbol of shape (batch * heads, length, depth_per_heads).
+    """
+    # (batch, length, heads, depth_per_head)
+    x = mx.sym.reshape(data=x, shape=(0, length, heads, -1))
+    # (batch, heads, length, depth/heads)
+    x = mx.sym.transpose(data=x, axes=(0, 2, 1, 3))
+    # (batch * heads, length, depth/heads)
+    return mx.sym.reshape(data=x, shape=(-3, length, -1))
+
+
+def combine_heads(x: mx.sym.Symbol, length: int, heads: int) -> mx.sym.Symbol:
+    """
+    Returns a symbol with both batch & length, and head & depth dimensions combined.
+
+    :param x: Symbol of shape (batch * heads, length, depth_per_head).
+    :param length: Sequence length.
+    :param heads: Number of heads.
+    :return: Symbol of shape (batch * length, depth).
+    """
+    # (batch, heads, length, depth_per_head)
+    x = mx.sym.reshape(data=x, shape=(-4, -1, heads, length, 0))
+    # (batch, length, heads, depth_per_head)
+    x = mx.sym.transpose(x, axes=(0, 2, 1, 3))
+    # (batch * length, depth)
+    return mx.sym.reshape(x, shape=(-3, -3))
+
+
+def broadcast_lengths(x: mx.sym.Symbol, heads: int) -> mx.sym.Symbol:
+    """
+    Broadcasts the length information of each sequence to multiple heads.
+
+    :param x: Symbol(batch, 1)
+    :param heads: Number of heads.
+    :return: Symbol(batch * heads, 1)
+    """
+    # x: (batch, 1)
+    x = mx.sym.expand_dims(x, axis=1)
+    # x: (batch, heads)
+    x = mx.sym.broadcast_to(x, shape=(0, heads))
+    # x: (batch * heads, 1)
+    x = mx.sym.reshape(x, shape=(-3,))
+    return x
+
+
 class MultiHeadAttention:
 
     def __init__(self,
@@ -75,6 +127,8 @@ class MultiHeadAttention:
                  depth_out: int = 512,
                  dropout: float = 0.0) -> None:
         self.prefix = prefix
+        utils.check_condition(depth_att % heads == 0,
+                              "Number of heads (%d) must divide attention depth (%d)" % (heads, depth_att))
         self.depth_att = depth_att
         self.heads = heads
         self.depth_out = depth_out
@@ -86,49 +140,6 @@ class MultiHeadAttention:
         self.w_h2o = mx.sym.Variable("%sh2o_weight" % prefix)
         self.b_h2o = mx.sym.Variable("%sh2o_bias" % prefix)
         self.use_loop = False  # use naive loop
-
-    def _split_heads(self, x: mx.sym.Symbol, length: int) -> mx.sym.Symbol:
-        """
-        Returns a symbol with head dimension folded into batch and depth divided by the number of heads.
-
-        :param x: Symbol of shape (batch, length, depth).
-        :return: Symbol of shape (batch * heads, length, depth_per_heads).
-        """
-        # (batch, length, heads, depth_per_head)
-        x = mx.sym.reshape(data=x, shape=(0, length, self.heads, -1))
-        # (batch, heads, length, depth/heads)
-        x = mx.sym.transpose(data=x, axes=(0, 2, 1, 3))
-        # (batch * heads, length, depth/heads)
-        return mx.sym.reshape(data=x, shape=(-3, length, -1))
-
-    def _combine_heads(self, x: mx.sym.Symbol, length: int) -> mx.sym.Symbol:
-        """
-        Returns a symbol with both batch & length, and head & depth dimensions combined.
-
-        :param x: Symbol of shape (batch * heads, length, depth_per_head).
-        :return: Symbol of shape (batch * length, depth).
-        """
-        # (batch, heads, length, depth_per_head)
-        x = mx.sym.reshape(data=x, shape=(-4, -1, self.heads, length, 0))
-        # (batch, length, heads, depth_per_head)
-        x = mx.sym.transpose(x, axes=(0, 2, 1, 3))
-        # (batch * length, depth)
-        return mx.sym.reshape(x, shape=(-3, -3))
-
-    def _broadcast_lengths(self, x: mx.sym.Symbol) -> mx.sym.Symbol:
-        """
-        Broadcasts the length information of each sequence to multiple heads.
-
-        :param x: Symbol(batch, 1)
-        :return: Symbol(batch * heads, 1)
-        """
-        # x: (batch, 1)
-        x = mx.sym.expand_dims(x, axis=1)
-        # x: (batch, heads)
-        x = mx.sym.broadcast_to(x, shape=(0, self.heads))
-        # x: (batch * heads, 1)
-        x = mx.sym.reshape(x, shape=(-3,))
-        return x
 
     def on(self, inputs: mx.sym.Symbol, inputs_length: mx.sym.Symbol, length: int) -> mx.sym.Symbol:
         """
@@ -164,9 +175,9 @@ class MultiHeadAttention:
         q, k, v = mx.sym.split(data=combined, num_outputs=3, axis=2)
 
         # q/k/v: (batch * heads, length, depth/heads)
-        q = self._split_heads(q, length)
-        k = self._split_heads(k, length,)
-        v = self._split_heads(v, length)
+        q = split_heads(q, length, self.heads)
+        k = split_heads(k, length, self.heads)
+        v = split_heads(v, length, self.heads)
         # scale by sqrt(depth_per_head)
         q *= self.depth_per_head ** -0.5
 
@@ -179,7 +190,7 @@ class MultiHeadAttention:
         logits = mx.sym.swapaxes(data=logits, dim1=0, dim2=1)
         logits = mx.sym.SequenceMask(data=logits,
                                      use_sequence_length=True,
-                                     sequence_length=self._broadcast_lengths(inputs_length),
+                                     sequence_length=broadcast_lengths(inputs_length, self.heads),
                                      value=-99999999.)
         # logits: (batch * heads, length, length)
         logits = mx.sym.swapaxes(data=logits, dim1=0, dim2=1)
@@ -207,7 +218,7 @@ class MultiHeadAttention:
             contexts = mx.sym.batch_dot(lhs=weights, rhs=v)
 
         # contexts: (batch * length, depth)
-        contexts = self._combine_heads(contexts, length)
+        contexts = combine_heads(contexts, length, self.heads)
 
         # contexts: (batch * length, output_depth)
         contexts = mx.sym.FullyConnected(data=contexts,

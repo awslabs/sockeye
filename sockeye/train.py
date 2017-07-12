@@ -213,6 +213,7 @@ def main():
                                                  attention_coverage_type=args.attention_coverage_type,
                                                  attention_coverage_num_hidden=args.attention_coverage_num_hidden,
                                                  attention_use_prev_word=args.attention_use_prev_word,
+                                                 attention_mhdot_heads=args.attention_mhdot_heads,
                                                  dropout=args.dropout,
                                                  rnn_cell_type=args.rnn_cell_type,
                                                  rnn_num_layers=args.rnn_num_layers,

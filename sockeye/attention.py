@@ -20,6 +20,9 @@ from typing import Callable, NamedTuple, Optional, Tuple
 import mxnet as mx
 
 import sockeye.coverage
+from . import layers
+from . import utils
+from . import constants as C
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +33,8 @@ def get_attention(input_previous_word: bool,
                   rnn_num_hidden: int,
                   max_seq_len: int,
                   attention_coverage_type: str,
-                  attention_coverage_num_hidden: int) -> 'Attention':
+                  attention_coverage_num_hidden: int,
+                  attention_mhdot_heads: int) -> 'Attention':
     """
     Returns an Attention instance based on attention_type.
 
@@ -43,20 +47,22 @@ def get_attention(input_previous_word: bool,
     :param attention_coverage_num_hidden: Number of hidden units for coverage attention.
     :return: Instance of Attention.
     """
-    if attention_type == "bilinear":
+    if attention_type == C.ATT_BILINEAR:
         if input_previous_word:
-            logger.warning("bilinear attention does not support input_previous_word")
+            logger.warning("Attention type '%s' does not support input_previous_word", C.ATT_BILINEAR)
         return BilinearAttention(rnn_num_hidden)
-    elif attention_type == "dot":
+    elif attention_type == C.ATT_DOT:
         return DotAttention(input_previous_word, rnn_num_hidden, attention_num_hidden)
-    elif attention_type == "fixed":
+    elif attention_type == C.ATT_MH_DOT:
+        return MultiHeadDotAttention(input_previous_word, depth=attention_num_hidden, heads=attention_mhdot_heads)
+    elif attention_type == C.ATT_FIXED:
         return EncoderLastStateAttention(input_previous_word)
-    elif attention_type == "location":
+    elif attention_type == C.ATT_LOC:
         return LocationAttention(input_previous_word, max_seq_len)
-    elif attention_type == "mlp":
+    elif attention_type == C.ATT_MLP:
         return MlpAttention(input_previous_word=input_previous_word,
                             attention_num_hidden=attention_num_hidden)
-    elif attention_type == "coverage":
+    elif attention_type == C.ATT_COV:
         if attention_coverage_type == 'count' and attention_coverage_num_hidden != 1:
             logging.warning("Ignoring coverage_num_hidden=%d and setting to 1" % attention_coverage_num_hidden)
             attention_coverage_num_hidden = 1
@@ -298,6 +304,106 @@ class DotAttention(Attention):
             attention_scores = mx.sym.batch_dot(lhs=local_source, rhs=expanded_decoder_state, name="att_batch_dot")
 
             context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores)
+            return AttentionState(context=context,
+                                  probs=attention_probs,
+                                  dynamic_source=att_state.dynamic_source)
+
+        return attend
+
+
+class MultiHeadDotAttention(Attention):
+    """
+    TODO
+    """
+
+    def __init__(self,
+                 input_previous_word: bool,
+                 depth: int,
+                 heads: int,
+                 prefix="att_") -> None:
+        super().__init__(input_previous_word)
+        utils.check_condition(depth % heads == 0,
+                              "Number of heads (%d) must divide attention depth (%d)" % (heads, depth))
+        self.depth = depth
+        self.heads = heads
+        self.depth_per_head = self.depth // self.heads
+        self.prefix = prefix
+        self.s2h_weight = mx.sym.Variable("%ss2h_weight" % self.prefix)
+        self.s2h_bias = mx.sym.Variable("%ss2h_bias" % self.prefix)
+        self.t2h_weight = mx.sym.Variable("%st2h_weight" % self.prefix)
+        self.t2h_bias = mx.sym.Variable("%st2h_bias" % self.prefix)
+        self.h2o_weight = mx.sym.Variable("%sh2o_weight" % self.prefix)
+        self.h2o_bias = mx.sym.Variable("%sh2o_bias" % self.prefix)
+
+    def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
+        """
+        Returns callable to be used for recurrent attention in a sequence decoder.
+        The callable is a recurrent function of the form:
+        AttentionState = attend(AttentionInput, AttentionState).
+
+        :param source: Shape: (batch_size, seq_len, encoder_num_hidden).
+        :param source_length: Shape: (batch_size,).
+        :param source_seq_len: Maximum length of source sequences.
+        :return: Attention callable.
+        """
+
+        # Combine batch and time dimension
+        # (batch * length, input_depth)
+        source = mx.sym.reshape(data=source, shape=(-3, -1))
+
+        # (batch * length, depth * 2)
+        source_hidden = mx.sym.FullyConnected(data=source,
+                                              weight=self.s2h_weight, bias=self.s2h_bias,
+                                              num_hidden=self.depth * 2,
+                                              name="%ssource_hidden_fc" % self.prefix)
+        # (batch, length, depth * 2)
+        source_hidden = mx.sym.reshape(data=source_hidden, shape=(-1, source_seq_len, self.depth * 2))
+        # split keys and values
+        # (batch, length, depth)
+        keys, values = mx.sym.split(data=source_hidden, num_outputs=2, axis=2)
+
+        # (batch*heads, length, depth/heads)
+        keys = layers.split_heads(keys, source_seq_len, self.heads)
+        values = layers.split_heads(values, source_seq_len, self.heads)
+
+        def attend(att_input: AttentionInput, att_state: AttentionState) -> AttentionState:
+            """
+            Returns updated attention state given attention input and current attention state.
+
+            :param att_input: Attention input as returned by make_input().
+            :param att_state: Current attention state
+            :return: Updated attention state.
+            """
+            # (batch, depth)
+            query = mx.sym.FullyConnected(data=att_input.query,
+                                          weight=self.t2h_weight, bias=self.t2h_bias,
+                                          num_hidden=self.depth, name="%squery_hidden_fc" % self.prefix)
+            # (batch, length, heads, depth_per_head)
+            query = mx.sym.reshape(query, shape=(0, 1, self.heads, self.depth_per_head))
+            # (batch, heads, depth_per_head, length)
+            query = mx.sym.transpose(query, axes=(0, 2, 3, 1))
+            # (batch * heads, depth/heads, 1)
+            query = mx.sym.reshape(query, shape=(-3, self.depth_per_head, 1))
+
+            # scale dot product
+            query *= self.depth_per_head ** -0.5
+
+            # (batch*heads, length, depth_per_head) X (batch*heads, depth_per_head, 1)
+            #   -> (batch*heads, length, 1)
+            attention_scores = mx.sym.batch_dot(lhs=keys, rhs=query, name="%sdot" % self.prefix)
+
+            # (batch*heads, 1)
+            lengths = layers.broadcast_lengths(source_length, self.heads)
+
+            # context: (batch*heads, depth_per_head)
+            context, attention_probs = get_context_and_attention_probs(values, lengths, attention_scores)
+
+            # combine heads
+            # (batch*heads, 1, depth_per_head
+            context = mx.sym.expand_dims(context, axis=1)
+            # (batch * 1, depth)
+            context = layers.combine_heads(context, length=1, heads=self.heads)
+
             return AttentionState(context=context,
                                   probs=attention_probs,
                                   dynamic_source=att_state.dynamic_source)
@@ -559,10 +665,10 @@ def get_context_and_attention_probs(source: mx.sym.Symbol,
     """
     Returns context vector and attention probs via a weighted sum over the masked, softmaxed attention scores.
     
-    :param source: Shape: (batch_size, seq_len, encoder_num_hidden).
+    :param source: Shape: (batch_size, seq_len, depth).
     :param source_length: Shape: (batch_size,).
     :param attention_scores: Shape: (batch_size, seq_len, 1).
-    :return: context: (batch_size, encoder_num_hidden), attention_probs: (batch_size, seq_len).
+    :return: context: (batch_size, depth), attention_probs: (batch_size, seq_len).
     """
 
     # TODO: It would be nice if SequenceMask could take a 2d input...
@@ -586,7 +692,7 @@ def get_context_and_attention_probs(source: mx.sym.Symbol,
     attention_probs_expanded = mx.sym.expand_dims(data=attention_probs, axis=2)
 
     # batch_dot: (batch, M, K) X (batch, K, N) –> (batch, M, N).
-    # (batch_size, seq_len, encoder_num_hidden) X (batch_size, seq_len, 1) -> (batch_size, encoder_num_hidden)
+    # (batch_size, seq_len, depth) X (batch_size, seq_len, 1) -> (batch_size, depth)
     context = mx.sym.batch_dot(lhs=source, rhs=attention_probs_expanded, transpose_a=True)
     context = mx.sym.reshape(data=context, shape=(0, 0))
 
