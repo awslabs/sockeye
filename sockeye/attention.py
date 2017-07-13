@@ -19,59 +19,78 @@ from typing import Callable, NamedTuple, Optional, Tuple
 
 import mxnet as mx
 
-import sockeye.coverage
-from sockeye.layers import LayerNormalization
-from . import constants as C
+from . import config
+from . import coverage
+from . import layers
 
 logger = logging.getLogger(__name__)
 
 
-def get_attention(input_previous_word: bool,
-                  attention_type: str,
-                  attention_num_hidden: int,
-                  rnn_num_hidden: int,
-                  max_seq_len: int,
-                  attention_coverage_type: str,
-                  attention_coverage_num_hidden: int,
-                  layer_normalization: bool) -> 'Attention':
+class AttentionConfig(config.Config):
+    """
+    Attention configuration.
+
+    :param type: Attention name.
+    :param num_hidden: Number of hidden units for attention networks.
+    :param input_previous_word: Feeds the previous target embedding into the attention mechanism.
+    :param rnn_num_hidden: Number of hidden units of encoder/decoder RNNs.
+    :param max_seq_len: Maximum length of source sequences.
+    :param coverage_type: The type of update for the dynamic source encoding.
+    :param coverage_num_hidden: Number of hidden units for coverage attention.
+    :param layer_normalization: Apply layer normalization to MLP attention.
+    """
+    def __init__(self,
+                 type: str,
+                 num_hidden: int,
+                 input_previous_word: bool,
+                 rnn_num_hidden: int,
+                 coverage_type: str,
+                 coverage_num_hidden: int,
+                 layer_normalization: bool) -> None:
+        self.type = type
+        self.num_hidden = num_hidden
+        self.input_previous_word = input_previous_word
+        self.rnn_num_hidden = rnn_num_hidden
+        # TODO coverage config
+        self.coverage_type = coverage_type
+        self.coverage_num_hidden = coverage_num_hidden
+        self.layer_normalization = layer_normalization
+
+
+def get_attention(config: AttentionConfig, max_seq_len: int) -> 'Attention':
     """
     Returns an Attention instance based on attention_type.
 
-    :param input_previous_word: Feeds the previous target embedding into the attention mechanism.
-    :param attention_type: Attention name.
-    :param attention_num_hidden: Number of hidden units for attention networks.
-    :param rnn_num_hidden: Number of hidden units of encoder/decoder RNNs.
+    :param config: Attention configuration.
     :param max_seq_len: Maximum length of source sequences.
-    :param attention_coverage_type: The type of update for the dynamic source encoding.
-    :param attention_coverage_num_hidden: Number of hidden units for coverage attention.
-    :param layer_normalization: Apply layer normalization to MLP attention.
     :return: Instance of Attention.
     """
-    if attention_type == "bilinear":
-        if input_previous_word:
+    if config.type == "bilinear":
+        if config.input_previous_word:
             logger.warning("bilinear attention does not support input_previous_word")
-        return BilinearAttention(rnn_num_hidden)
-    elif attention_type == "dot":
-        return DotAttention(input_previous_word, rnn_num_hidden, attention_num_hidden)
-    elif attention_type == "fixed":
-        return EncoderLastStateAttention(input_previous_word)
-    elif attention_type == "location":
-        return LocationAttention(input_previous_word, max_seq_len)
-    elif attention_type == "mlp":
-        return MlpAttention(input_previous_word=input_previous_word,
-                            attention_num_hidden=attention_num_hidden,
-                            layer_normalization=layer_normalization)
-    elif attention_type == "coverage":
-        if attention_coverage_type == 'count' and attention_coverage_num_hidden != 1:
-            logging.warning("Ignoring coverage_num_hidden=%d and setting to 1" % attention_coverage_num_hidden)
-            attention_coverage_num_hidden = 1
-        return MlpAttention(input_previous_word=input_previous_word,
-                            attention_num_hidden=attention_num_hidden,
-                            attention_coverage_type=attention_coverage_type,
-                            attention_coverage_num_hidden=attention_coverage_num_hidden,
-                            layer_normalization=layer_normalization)
+        return BilinearAttention(config.rnn_num_hidden)
+    elif config.type == "dot":
+        return DotAttention(config.input_previous_word, config.rnn_num_hidden, config.num_hidden)
+    elif config.type == "fixed":
+        return EncoderLastStateAttention(config.input_previous_word)
+    elif config.type == "location":
+        return LocationAttention(config.input_previous_word, max_seq_len)
+    elif config.type == "mlp":
+        return MlpAttention(input_previous_word=config.input_previous_word,
+                            attention_num_hidden=config.num_hidden,
+                            layer_normalization=config.layer_normalization)
+    elif config.type == "coverage":
+        coverage_num_hidden = config.coverage_num_hidden
+        if config.coverage_type == 'count' and coverage_num_hidden != 1:
+            logging.warning("Ignoring coverage_num_hidden=%d and setting to 1" % coverage_num_hidden)
+            coverage_num_hidden = 1
+        return MlpAttention(input_previous_word=config.input_previous_word,
+                            attention_num_hidden=config.num_hidden,
+                            attention_coverage_type=config.coverage_type,
+                            attention_coverage_num_hidden=coverage_num_hidden,
+                            layer_normalization=config.layer_normalization)
     else:
-        raise ValueError("Unknown attention type %s" % attention_type)
+        raise ValueError("Unknown attention type %s" % config.type)
 
 
 AttentionInput = NamedTuple('AttentionInput', [('seq_idx', int), ('query', mx.sym.Symbol)])
@@ -452,12 +471,12 @@ class MlpAttention(Attention):
         # dynamic source (coverage) weights and settings
         # input (coverage) to hidden
         self.att_c2h_weight = mx.sym.Variable("%sc2h_weight" % self.prefix) if attention_coverage_type else None
-        self.coverage = sockeye.coverage.get_coverage(attention_coverage_type,
-                                                      dynamic_source_num_hidden,
-                                                      layer_normalization) if attention_coverage_type else None
+        self.coverage = coverage.get_coverage(attention_coverage_type,
+                                              dynamic_source_num_hidden,
+                                              layer_normalization) if attention_coverage_type else None
 
         if layer_normalization:
-            self._ln = LayerNormalization(num_hidden=attention_num_hidden, prefix="att_norm")
+            self._ln = layers.LayerNormalization(num_hidden=attention_num_hidden, prefix="att_norm")
         else:
             self._ln = None
 
