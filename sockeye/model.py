@@ -19,10 +19,11 @@ import sockeye.attention
 import sockeye.coverage
 import sockeye.data_io
 import sockeye.decoder
-import sockeye.encoder
 import sockeye.lexicon
 import sockeye.utils
-from sockeye import constants as C
+from sockeye.config import Config
+from . import constants as C
+from . import encoder
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,15 @@ ModelConfig defines model parameters defined at training time which are relevant
 Add new model parameters here. If you want backwards compatibility for models trained with code that did not
 contain these parameters, provide a reasonable default under default_values.
 """
+
+
+class ModelConfig(Config):
+    def __init__(self,
+                 max_seq_len: int,
+                 vocab_source_size: int,
+                 vocab_target_size: int,
+                 encoder_config: encoder.RecurrentEncoderConfig):
+        super().__init__(**Config.get_params(locals()))
 
 
 class SockeyeModel:
@@ -145,15 +155,7 @@ class SockeyeModel:
         :param fused_encoder: Use FusedRNNCells in encoder.
         :param rnn_forget_bias: forget bias initialization for RNNs.
         """
-        self.encoder = sockeye.encoder.get_encoder(self.config.num_embed_source,
-                                                   self.config.vocab_source_size,
-                                                   self.config.rnn_num_layers,
-                                                   self.config.rnn_num_hidden,
-                                                   self.config.rnn_cell_type,
-                                                   self.config.rnn_residual_connections,
-                                                   self.config.dropout,
-                                                   rnn_forget_bias,
-                                                   fused_encoder)
+        self.encoder = sockeye.encoder.get_encoder(self.config.encoder_config)
 
         self.attention = sockeye.attention.get_attention(self.config.attention_use_prev_word,
                                                          self.config.attention_type,
