@@ -24,8 +24,7 @@ class Config:
     def __init__(self, arg_values) -> None:
         for i in inspect.getfullargspec(arg_values['self'].__init__).args[0:]:
             setattr(arg_values['self'], i, arg_values[i])
-        setattr(arg_values['self'], "_frozen", False)
-        # self._frozen = False
+        self._frozen = False
 
     def __setattr__(self, key, value):
         if hasattr(self, '_frozen') and self._frozen:
