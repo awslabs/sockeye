@@ -12,8 +12,8 @@
 # permissions and limitations under the License.
 from typing import Any, Dict
 
+import inspect
 import jsonpickle
-
 
 class Config:
     """
@@ -21,9 +21,11 @@ class Config:
     Actual Configuration should subclass this object.
     """
 
-    def __init__(self, **kwargs) -> None:
-        self.__dict__.update(kwargs)
-        self._frozen = False
+    def __init__(self, arg_values) -> None:
+        for i in inspect.getfullargspec(arg_values['self'].__init__).args[0:]:
+            setattr(arg_values['self'], i, arg_values[i])
+        setattr(arg_values['self'], "_frozen", False)
+        # self._frozen = False
 
     def __setattr__(self, key, value):
         if hasattr(self, '_frozen') and self._frozen:
@@ -35,8 +37,10 @@ class Config:
         Freezes this Config object, disallowing modification or addition of any parameters.
         """
         self._frozen = True
-        for v in self.__dict__.values():
+        for k, v in self.__dict__.items():
             if isinstance(v, Config):
+                if k == "self":
+                    continue
                 v.freeze()
 
     def __repr__(self):
@@ -61,7 +65,3 @@ class Config:
         """
         with open(fname) as fin:
             return jsonpickle.decode(fin.read())
-
-    @staticmethod
-    def get_params(loc: Dict[Any, Any]) -> Dict[Any, Any]:
-        return {k: v for k, v in loc.items() if k == 'self' or k.startswith('__')}
