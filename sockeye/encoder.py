@@ -51,13 +51,13 @@ def get_encoder(config: "ModelConfig",
                               dropout=config.dropout))
 
     if config.encoder == C.RNN_WITH_CONV_EMBED_NAME:
-        encoders.append(CharacterSequenceEncoder(num_embed=config.num_embed_source,
-                                                 max_filter_width=config.conv_embed_max_filter_width,
-                                                 num_filters=config.conv_embed_num_filters,
-                                                 pool_stride=config.conv_embed_pool_stride,
-                                                 num_highway_layers=config.conv_embed_num_highway_layers,
-                                                 prefix=C.CHAR_SEQ_ENCODER_PREFIX,
-                                                 dropout=config.dropout))
+        encoders.append(ConvolutionalEmbeddingEncoder(num_embed=config.num_embed_source,
+                                                      max_filter_width=config.conv_embed_max_filter_width,
+                                                      num_filters=config.conv_embed_num_filters,
+                                                      pool_stride=config.conv_embed_pool_stride,
+                                                      num_highway_layers=config.conv_embed_num_highway_layers,
+                                                      prefix=C.CHAR_SEQ_ENCODER_PREFIX,
+                                                      dropout=config.dropout))
 
     encoders.append(BatchMajor2TimeMajor())
 
@@ -87,14 +87,17 @@ class Encoder:
     Generic encoder interface.
     """
 
-    def encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: mx.sym.Symbol,
+               seq_len: int) -> (mx.sym.Symbol, mx.sym.Symbol, int):
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
         :param data: Input data.
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
-        :return: Encoded input data.
+        :return: Encoded versions of input data (data, data_length, seq_len).
         """
         raise NotImplementedError()
 
@@ -110,12 +113,6 @@ class Encoder:
         """
         raise NotImplementedError()
 
-    def get_encoded_data_length(self, data_length: mx.sym.Symbol) -> mx.sym.Symbol:
-        """
-        Returns the data lengths of the encoded sequence.
-        """
-        return data_length
-
     def get_encoded_seq_len(self, seq_len: int) -> int:
         """
         Returns the size of the encoded sequence.
@@ -128,15 +125,21 @@ class BatchMajor2TimeMajor(Encoder):
     Converts batch major data to time major
     """
 
-    def encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: mx.sym.Symbol,
+               seq_len: int) -> (mx.sym.Symbol, mx.sym.Symbol, int):
         """
-        Encodes data given sequence lengths of individual examples (data_length) and maximum sequence length (seq_len).
+        Encodes data given sequence lengths of individual examples and maximum sequence length.
 
         :param data: Input data.
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
-        :return: Encoded input data.
+        :return: Encoded versions of input data (data, data_length, seq_len).
         """
+        return (self._encode(data), data_length, seq_len)
+
+    def _encode(self, data: mx.sym.Symbol) -> mx.sym.Symbol:
         with mx.AttrScope(__layout__=C.TIME_MAJOR):
             return mx.sym.swapaxes(data=data, dim1=0, dim2=1)
 
@@ -170,14 +173,17 @@ class Embedding(Encoder):
         self.dropout = dropout
         self.embed_weight = mx.sym.Variable(prefix + "weight")
 
-    def encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: mx.sym.Symbol,
+               seq_len: int) -> (mx.sym.Symbol, mx.sym.Symbol, int):
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
         :param data: Input data.
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
-        :return: Encoded input data.
+        :return: Encoded versions of input data (data, data_length, seq_len).
         """
         embedding = mx.sym.Embedding(data=data,
                                      input_dim=self.vocab_size,
@@ -186,7 +192,7 @@ class Embedding(Encoder):
                                      name=self.prefix + 'embed')
         if self.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.dropout, name="source_embed_dropout")
-        return embedding
+        return (embedding, data_length, seq_len)
 
     def get_num_hidden(self) -> int:
         """
@@ -211,22 +217,21 @@ class EncoderSequence(Encoder):
     def __init__(self, encoders: List[Encoder]):
         self.encoders = encoders
 
-    def encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: mx.sym.Symbol,
+               seq_len: int) -> (mx.sym.Symbol, mx.sym.Symbol, int):
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
         :param data: Input data.
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
-        :return: Encoded input data.
+        :return: Encoded versions of input data (data, data_length, seq_len).
         """
-        current_data_length = data_length
-        current_seq_len = seq_len
         for encoder in self.encoders:
-            data = encoder.encode(data, current_data_length, current_seq_len)
-            current_data_length = encoder.get_encoded_data_length(current_data_length)
-            current_seq_len = encoder.get_encoded_seq_len(current_seq_len)
-        return data
+            data, data_length, seq_len = encoder.encode(data, data_length, seq_len)
+        return (data, data_length, seq_len)
 
     def get_num_hidden(self) -> int:
         """
@@ -244,23 +249,13 @@ class EncoderSequence(Encoder):
                 cells.append(cell)
         return cells
 
-    def get_encoded_data_length(self, data_length: mx.sym.Symbol) -> mx.sym.Symbol:
-        """
-        Returns the data lengths of the encoded sequence.
-        """
-        current_data_length = data_length
-        for encoder in self.encoders:
-            current_data_length = encoder.get_encoded_data_length(current_data_length)
-        return current_data_length
-
     def get_encoded_seq_len(self, seq_len: int) -> int:
         """
         Returns the size of the encoded sequence.
         """
-        current_seq_len = seq_len
         for encoder in self.encoders:
-            current_seq_len = encoder.get_encoded_seq_len(current_seq_len)
-        return current_seq_len
+            seq_len = encoder.get_encoded_seq_len(seq_len)
+        return seq_len
 
 
 class RecurrentEncoder(Encoder):
@@ -283,18 +278,21 @@ class RecurrentEncoder(Encoder):
                                                num_layers, dropout, prefix,
                                                residual, forget_bias)
 
-    def encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: mx.sym.Symbol,
+               seq_len: int) -> (mx.sym.Symbol, mx.sym.Symbol, int):
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
         :param data: Input data.
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
-        :return: Encoded input data.
+        :return: Encoded versions of input data (data, data_length, seq_len).
         """
         outputs, _ = self.rnn.unroll(seq_len, inputs=data, merge_outputs=True, layout=self.layout)
 
-        return outputs
+        return (outputs, data_length, seq_len)
 
     def get_rnn_cells(self):
         """
@@ -334,20 +332,23 @@ class FusedRecurrentEncoder(Encoder):
                                         forget_bias=forget_bias,
                                         prefix=prefix)]
 
-    def encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: mx.sym.Symbol,
+               seq_len: int) -> (mx.sym.Symbol, mx.sym.Symbol, int):
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
         :param data: Input data.
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
-        :return: Encoded input data.
+        :return: Encoded versions of input data (data, data_length, seq_len).
         """
         outputs = data
         for cell in self.rnn:
             outputs, _ = cell.unroll(seq_len, inputs=outputs, merge_outputs=True, layout=self.layout)
 
-        return outputs
+        return (outputs, data_length, seq_len)
 
     def get_rnn_cells(self):
         """
@@ -403,21 +404,24 @@ class BiDirectionalRNNEncoder(Encoder):
         self.layout = layout
         self.prefix = prefix
 
-    def encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: mx.sym.Symbol,
+               seq_len: int) -> (mx.sym.Symbol, mx.sym.Symbol, int):
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
         :param data: Input data.
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
-        :return: Encoded input data.
+        :return: Encoded versions of input data (data, data_length, seq_len).
         """
         if self.layout[0] == 'N':
             data = mx.sym.swapaxes(data=data, dim1=0, dim2=1)
         data = self._encode(data, data_length, seq_len)
         if self.layout[0] == 'N':
             data = mx.sym.swapaxes(data=data, dim1=0, dim2=1)
-        return data
+        return (data, data_length, seq_len)
 
     def _encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
         """
@@ -427,9 +431,9 @@ class BiDirectionalRNNEncoder(Encoder):
         data_reverse = mx.sym.SequenceReverse(data=data, sequence_length=data_length,
                                               use_sequence_length=True)
         # (seq_length, batch, cell_num_hidden)
-        hidden_forward = self.forward_rnn.encode(data, data_length, seq_len)
+        hidden_forward, _, _ = self.forward_rnn.encode(data, data_length, seq_len)
         # (seq_length, batch, cell_num_hidden)
-        hidden_reverse = self.reverse_rnn.encode(data_reverse, data_length, seq_len)
+        hidden_reverse, _, _ = self.reverse_rnn.encode(data_reverse, data_length, seq_len)
         # (seq_length, batch, cell_num_hidden)
         hidden_reverse = mx.sym.SequenceReverse(data=hidden_reverse, sequence_length=data_length,
                                                 use_sequence_length=True)
@@ -451,11 +455,11 @@ class BiDirectionalRNNEncoder(Encoder):
         return self.forward_rnn.get_rnn_cells() + self.reverse_rnn.get_rnn_cells()
 
 
-class CharacterSequenceEncoder(Encoder):
+class ConvolutionalEmbeddingEncoder(Encoder):
     """
-    An encoder that maps a sequence of character embeddings to a shorter
-    sequence of segment embeddings using convolutional, pooling, and highway
-    layers.
+    An encoder developed to map a sequence of character embeddings to a shorter sequence of segment
+    embeddings using convolutional, pooling, and highway layers.  More generally, it maps a sequence
+    of input embeddings to a sequence of span embeddings.
         * "Fully Character-Level Neural Machine Translation without Explicit Segmentation"
           Jason Lee; Kyunghyun Cho; Thomas Hofmann (https://arxiv.org/pdf/1610.03017.pdf)
 
@@ -503,16 +507,18 @@ class CharacterSequenceEncoder(Encoder):
         self.transform_bias = [mx.sym.Variable("%s%s%d%s" % (self.prefix, "transform_", i, "_bias"))
                                for i in range(self.num_highway_layers)]
 
-    def encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: mx.sym.Symbol,
+               seq_len: int) -> (mx.sym.Symbol, mx.sym.Symbol, int):
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
-        :param data: Input data (batch_size, seq_len, num_embed).
+        :param data: Input data.
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
-        :return: Encoded input data.
+        :return: Encoded versions of input data (data, data_length, seq_len).
         """
-
         total_num_filters = sum(self.num_filters)
         encoded_seq_len = self.get_encoded_seq_len(seq_len)
 
@@ -566,8 +572,7 @@ class CharacterSequenceEncoder(Encoder):
 
         # Highway network
         # (batch_size * seq_len/stride, total_num_filters)
-        pool_flat = mx.sym.Reshape(data=pool, shape=(-3, total_num_filters))
-        seg_embedding = pool_flat
+        seg_embedding = mx.sym.Reshape(data=pool, shape=(-3, total_num_filters))
         for i in range(self.num_highway_layers):
             # Gate
             gate = mx.sym.FullyConnected(data=seg_embedding,
@@ -591,7 +596,13 @@ class CharacterSequenceEncoder(Encoder):
         # (batch_size, encoded_seq_len, num_segment_emded)
         seg_embedding = mx.sym.Reshape(data=seg_embedding,
                                        shape=(-1, encoded_seq_len, total_num_filters))
-        return seg_embedding
+
+        # Ceiling function isn't differentiable so this will throw errors if we
+        # attempt to compute gradients.  Fortunately we aren't updating inputs
+        # so we can just block the backward pass here.
+        encoded_data_length = mx.sym.BlockGrad(mx.sym.ceil(data_length / self.pool_stride))
+
+        return (seg_embedding, encoded_data_length, encoded_seq_len)
 
     def get_num_hidden(self) -> int:
         """
@@ -604,15 +615,6 @@ class CharacterSequenceEncoder(Encoder):
         Returns a list of RNNCells used by this encoder.
         """
         return []
-
-    def get_encoded_data_length(self, data_length: mx.sym.Symbol) -> mx.sym.Symbol:
-        """
-        Returns the data lengths of the encoded sequence.
-        """
-        # Ceiling function isn't differentiable so this will throw errors if we
-        # attempt to compute gradients.  Fortunately we aren't updating inputs
-        # so we can just block the backward pass here.
-        return mx.sym.BlockGrad(mx.sym.ceil(data_length / self.pool_stride))
 
     def get_encoded_seq_len(self, seq_len: int) -> int:
         """

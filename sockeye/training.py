@@ -112,9 +112,9 @@ class TrainingModel(sockeye.model.SockeyeModel):
             """
             source_seq_len, target_seq_len = seq_lens
 
-            source_encoded = self.encoder.encode(source, source_length, seq_len=source_seq_len)
-            source_encoded_length = self.encoder.get_encoded_data_length(source_length)
-            source_encoded_seq_len = self.encoder.get_encoded_seq_len(source_seq_len)
+            (source_encoded,
+             source_encoded_length,
+             source_encoded_seq_len) = self.encoder.encode(source, source_length, seq_len=source_seq_len)
             source_lexicon = self.lexicon.lookup(source) if self.lexicon else None
 
             logits = self.decoder.decode(source_encoded, source_encoded_seq_len, source_encoded_length,

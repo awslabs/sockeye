@@ -97,11 +97,13 @@ class InferenceModel(sockeye.model.SockeyeModel):
         # Encoder symbol & module
         source = mx.sym.Variable(C.SOURCE_NAME)
         source_length = mx.sym.Variable(C.SOURCE_LENGTH_NAME)
+        source_encoded_length = mx.sym.Variable(C.SOURCE_ENCODED_LENGTH_NAME)
 
         def encoder_sym_gen(source_seq_len: int):
-            source_encoded = self.encoder.encode(source, source_length, seq_len=source_seq_len)
-            source_encoded_length = self.encoder.get_encoded_data_length(source_length)
-            source_encoded_seq_len = self.encoder.get_encoded_seq_len(source_seq_len)
+            nonlocal source_encoded_length
+            (source_encoded,
+             source_encoded_length,
+             source_encoded_seq_len) = self.encoder.encode(source, source_length, source_seq_len)
             source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
 
             # initial decoder states
@@ -139,7 +141,6 @@ class InferenceModel(sockeye.model.SockeyeModel):
                           C.HIDDEN_PREVIOUS_NAME] + layer_names
             label_names = []
 
-            source_encoded_length = self.encoder.get_encoded_data_length(source_length)
             source_encoded_seq_len = self.encoder.get_encoded_seq_len(source_seq_len)
             attention_func = self.attention.on(source_encoded, source_encoded_length, source_encoded_seq_len)
 
