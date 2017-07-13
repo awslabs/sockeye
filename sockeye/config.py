@@ -15,17 +15,35 @@ from typing import Any, Dict
 import inspect
 import jsonpickle
 
-class Config:
+
+class Metaconfig(type):
+    def __new__(mcs, name, bases, namespace, **kwargs):
+        new_cls = super(Metaconfig, mcs).__new__(mcs, name, bases, namespace, **kwargs)
+        user_init = new_cls.__init__
+        defaults = {}
+        for name, v in inspect.signature(user_init).parameters.items():
+            if v.default != inspect.Parameter.empty:
+                defaults[name] = v.default
+
+        def __init__(self, *args, **kwargs):
+            for name, value in defaults.items():
+                if name not in kwargs:
+                    kwargs[name] = value
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+            self._frozen = False
+            # Normally we won't be doing anything here, but just to be sure
+            user_init(self, *args, **kwargs)
+
+        setattr(new_cls, '__init__', __init__)
+        return new_cls
+
+
+class Config(metaclass=Metaconfig):
     """
     Base configuration object that supports freezing of members and JSON (de-)serialization.
     Actual Configuration should subclass this object.
     """
-
-    def __init__(self, arg_values) -> None:
-        for i in inspect.getfullargspec(arg_values['self'].__init__).args[0:]:
-            setattr(arg_values['self'], i, arg_values[i])
-        self._frozen = False
-
     def __setattr__(self, key, value):
         if hasattr(self, '_frozen') and self._frozen:
             raise AttributeError("Cannot set '%s' in frozen config" % key)

@@ -43,7 +43,7 @@ class RecurrentEncoderConfig(Config):
                  vocab_size: int,
                  rnn_config: rnn.RNNConfig,
                  fused: bool = False) -> None:
-        super().__init__(**Config.get_params(locals()))
+        pass
 
 
 def get_encoder(config: RecurrentEncoderConfig) -> 'Encoder':

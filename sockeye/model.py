@@ -74,7 +74,7 @@ class ModelConfig(Config):
                  vocab_source_size: int,
                  vocab_target_size: int,
                  encoder_config: encoder.RecurrentEncoderConfig):
-        super().__init__(vars())
+        pass
 
 
 class SockeyeModel:

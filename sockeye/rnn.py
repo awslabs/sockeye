@@ -39,7 +39,7 @@ class RNNConfig(Config):
                  dropout: float,
                  residual: bool = False,
                  forget_bias: float = 0.0) -> None:
-        super().__init__(vars())
+        pass
 
 
 def get_stacked_rnn(config: RNNConfig, prefix: str) -> mx.rnn.SequentialRNNCell:
