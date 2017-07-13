@@ -70,15 +70,16 @@ def test_device_args(test_params, expected_params):
               lexical_bias=None, learn_lexical_bias=False, weight_tying=False, max_seq_len=100,
               max_seq_len_source=None, max_seq_len_target=None,
               attention_use_prev_word=False, context_gating=False, layer_normalization=False,
-              char_seq_encoder=False, cse_max_filter_width=8, cse_num_filters=[200, 200, 250, 250, 300, 300, 300, 300],
-              cse_num_highway_layers=4, cse_pool_stride=5)),
+              encoder=C.RNN_NAME, conv_embed_max_filter_width=8, conv_embed_num_filters=[200, 200, 250, 250, 300, 300, 300, 300],
+              conv_embed_num_highway_layers=4, conv_embed_pool_stride=5)),
     ('--params test_params --num-words 10 --num-words-source 11 --num-words-target 12 --word-min-count 10 '
      '--rnn-num-layers 10 --rnn-cell-type gru '
      '--rnn-num-hidden 512 --rnn-residual-connections --num-embed 1024 --num-embed-source 10 --num-embed-target 10 '
      '--attention-type dot --attention-num-hidden 10 --attention-coverage-type tanh '
      '--attention-coverage-num-hidden 10 --lexical-bias test_bias --learn-lexical-bias --weight-tying '
      '--max-seq-len 10 --max-seq-len-source 11 --max-seq-len-target 12 --attention-use-prev-word --context-gating --layer-normalization '
-     '--char-seq-encoder --cse-max-filter-width 2 --cse-num-filters 100 100 --cse-num-highway-layers 2 --cse-pool-stride 2',
+     '--encoder rnn-with-conv-embed --conv-embed-max-filter-width 2 --conv-embed-num-filters 100 100 '
+     '--conv-embed-num-highway-layers 2 --conv-embed-pool-stride 2',
      dict(params='test_params', num_words=10, num_words_source=11, num_words_target=12,
           word_min_count=10, rnn_num_layers=10, rnn_cell_type=C.GRU_TYPE,
           rnn_num_hidden=512,
@@ -88,8 +89,8 @@ def test_device_args(test_params, expected_params):
           lexical_bias='test_bias', learn_lexical_bias=True, weight_tying=True, max_seq_len=10,
           max_seq_len_source=11, max_seq_len_target=12,
           attention_use_prev_word=True, context_gating=True, layer_normalization=True,
-          char_seq_encoder=True, cse_max_filter_width=2, cse_num_filters=[100, 100],
-          cse_num_highway_layers=2, cse_pool_stride=2))
+          encoder=C.RNN_WITH_CONV_EMBED_NAME, conv_embed_max_filter_width=2, conv_embed_num_filters=[100, 100],
+          conv_embed_num_highway_layers=2, conv_embed_pool_stride=2))
 ])
 def test_model_parameters(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_model_parameters)

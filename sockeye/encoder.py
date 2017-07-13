@@ -29,75 +29,54 @@ from sockeye.utils import check_condition
 logger = logging.getLogger(__name__)
 
 
-def get_encoder(num_embed: int,
-                vocab_size: int,
-                num_layers: int,
-                rnn_num_hidden: int,
-                cell_type: str,
-                residual: bool,
-                dropout: float,
+# TODO break out EncoderConfig to allow use without populating options for full translation model
+def get_encoder(config: "ModelConfig",
                 forget_bias: float,
-                fused: bool,
-                char_seq_encoder: bool,
-                cse_max_filter_width: int,
-                cse_num_filters: List[int],
-                cse_pool_stride: int,
-                cse_num_highway_layers: int) -> 'Encoder':
+                fused: bool) -> 'Encoder':
     """
     Returns an encoder with embedding, batch2time-major conversion, and bidirectional RNN encoder.
     If num_layers > 1, adds uni-directional RNNs.
 
-    :param num_embed: Size of embedding layer.
-    :param vocab_size: Source vocabulary size.
-    :param num_layers: Number of encoder layers.
-    :param rnn_num_hidden: Number of hidden units for RNN cells.
-    :param cell_type: RNN cell type.
-    :param residual: Whether to add residual connections to multi-layered RNNs.
-    :param dropout: Dropout probability for encoders (RNN and embedding).
+    :param config: ModelConfig populated by command line args and/or defaults.
     :param forget_bias: Initial value of RNN forget biases.
     :param fused: Whether to use FusedRNNCell (CuDNN). Only works with GPU context.
-    :param char_seq_encoder: Whether to use CharacterSequenceEncoder after source embedding.
-    :param cse_max_filter_width: Maximum filter width for CharacterSequenceEncoder.
-    :param cse_num_filters: Number of filters of each width for CharacterSequenceEncoder.
-    :param cse_pool_stride: Pooling stride for CharacterSequenceEncoder.
-    :param cse_num_highway_layers: Number of highway layers for CharacterSequenceEncoder.
     :return: Encoder instance.
     """
     # TODO give more control on encoder architecture
     encoders = list()
 
-    encoders.append(Embedding(num_embed=num_embed,
-                              vocab_size=vocab_size,
+    encoders.append(Embedding(num_embed=config.num_embed_source,
+                              vocab_size=config.vocab_source_size,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
-                              dropout=dropout))
+                              dropout=config.dropout))
 
-    if char_seq_encoder:
-        encoders.append(CharacterSequenceEncoder(num_embed=num_embed,
-                                                 max_filter_width=cse_max_filter_width,
-                                                 num_filters=cse_num_filters,
-                                                 pool_stride=cse_pool_stride,
-                                                 num_highway_layers=cse_num_highway_layers,
+    if config.encoder == C.RNN_WITH_CONV_EMBED_NAME:
+        encoders.append(CharacterSequenceEncoder(num_embed=config.num_embed_source,
+                                                 max_filter_width=config.conv_embed_max_filter_width,
+                                                 num_filters=config.conv_embed_num_filters,
+                                                 pool_stride=config.conv_embed_pool_stride,
+                                                 num_highway_layers=config.conv_embed_num_highway_layers,
                                                  prefix=C.CHAR_SEQ_ENCODER_PREFIX,
-                                                 dropout=dropout))
+                                                 dropout=config.dropout))
 
     encoders.append(BatchMajor2TimeMajor())
 
     encoder_class = FusedRecurrentEncoder if fused else RecurrentEncoder
-    encoders.append(BiDirectionalRNNEncoder(num_hidden=rnn_num_hidden,
+    encoders.append(BiDirectionalRNNEncoder(num_hidden=config.rnn_num_hidden,
                                             num_layers=1,
-                                            dropout=dropout,
+                                            dropout=config.dropout,
                                             layout=C.TIME_MAJOR,
-                                            cell_type=cell_type,
+                                            cell_type=config.rnn_cell_type,
                                             encoder_class=encoder_class,
                                             forget_bias=forget_bias))
 
-    if num_layers > 1:
-        encoders.append(encoder_class(num_hidden=rnn_num_hidden,
-                                      num_layers=num_layers - 1,
-                                      dropout=dropout,
+    if config.rnn_num_layers > 1:
+        encoders.append(encoder_class(num_hidden=config.rnn_num_hidden,
+                                      num_layers=config.rnn_num_layers - 1,
+                                      dropout=config.dropout,
                                       layout=C.TIME_MAJOR,
-                                      cell_type=cell_type,
-                                      residual=residual,
+                                      cell_type=config.rnn_cell_type,
+                                      residual=config.rnn_residual_connections,
                                       forget_bias=forget_bias))
 
     return EncoderSequence(encoders)
