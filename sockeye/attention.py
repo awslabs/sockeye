@@ -34,7 +34,6 @@ class AttentionConfig(config.Config):
     :param num_hidden: Number of hidden units for attention networks.
     :param input_previous_word: Feeds the previous target embedding into the attention mechanism.
     :param rnn_num_hidden: Number of hidden units of encoder/decoder RNNs.
-    :param max_seq_len: Maximum length of source sequences.
     :param coverage_type: The type of update for the dynamic source encoding.
     :param coverage_num_hidden: Number of hidden units for coverage attention.
     :param layer_normalization: Apply layer normalization to MLP attention.
