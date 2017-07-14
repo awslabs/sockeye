@@ -97,7 +97,7 @@ class InferenceModel(sockeye.model.SockeyeModel):
         # Encoder symbol & module
         source = mx.sym.Variable(C.SOURCE_NAME)
         source_length = mx.sym.Variable(C.SOURCE_LENGTH_NAME)
-        source_encoded_length = mx.sym.Variable(C.SOURCE_ENCODED_LENGTH_NAME)
+        source_encoded_length = None
 
         def encoder_sym_gen(source_seq_len: int):
             nonlocal source_encoded_length

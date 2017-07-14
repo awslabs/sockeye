@@ -17,7 +17,7 @@ Defines Encoder interface and various implementations.
 import logging
 
 from math import ceil, floor
-from typing import Callable, List
+from typing import Callable, List, Tuple
 
 import mxnet as mx
 
@@ -90,7 +90,7 @@ class Encoder:
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
-               seq_len: int) -> (mx.sym.Symbol, mx.sym.Symbol, int):
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -128,7 +128,7 @@ class BatchMajor2TimeMajor(Encoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
-               seq_len: int) -> (mx.sym.Symbol, mx.sym.Symbol, int):
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -137,7 +137,7 @@ class BatchMajor2TimeMajor(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
-        return (self._encode(data), data_length, seq_len)
+        return self._encode(data), data_length, seq_len
 
     def _encode(self, data: mx.sym.Symbol) -> mx.sym.Symbol:
         with mx.AttrScope(__layout__=C.TIME_MAJOR):
@@ -176,7 +176,7 @@ class Embedding(Encoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
-               seq_len: int) -> (mx.sym.Symbol, mx.sym.Symbol, int):
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -192,7 +192,7 @@ class Embedding(Encoder):
                                      name=self.prefix + 'embed')
         if self.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.dropout, name="source_embed_dropout")
-        return (embedding, data_length, seq_len)
+        return embedding, data_length, seq_len
 
     def get_num_hidden(self) -> int:
         """
@@ -220,7 +220,7 @@ class EncoderSequence(Encoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
-               seq_len: int) -> (mx.sym.Symbol, mx.sym.Symbol, int):
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -231,7 +231,7 @@ class EncoderSequence(Encoder):
         """
         for encoder in self.encoders:
             data, data_length, seq_len = encoder.encode(data, data_length, seq_len)
-        return (data, data_length, seq_len)
+        return data, data_length, seq_len
 
     def get_num_hidden(self) -> int:
         """
@@ -281,7 +281,7 @@ class RecurrentEncoder(Encoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
-               seq_len: int) -> (mx.sym.Symbol, mx.sym.Symbol, int):
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -292,7 +292,7 @@ class RecurrentEncoder(Encoder):
         """
         outputs, _ = self.rnn.unroll(seq_len, inputs=data, merge_outputs=True, layout=self.layout)
 
-        return (outputs, data_length, seq_len)
+        return outputs, data_length, seq_len
 
     def get_rnn_cells(self):
         """
@@ -335,7 +335,7 @@ class FusedRecurrentEncoder(Encoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
-               seq_len: int) -> (mx.sym.Symbol, mx.sym.Symbol, int):
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -348,7 +348,7 @@ class FusedRecurrentEncoder(Encoder):
         for cell in self.rnn:
             outputs, _ = cell.unroll(seq_len, inputs=outputs, merge_outputs=True, layout=self.layout)
 
-        return (outputs, data_length, seq_len)
+        return outputs, data_length, seq_len
 
     def get_rnn_cells(self):
         """
@@ -407,7 +407,7 @@ class BiDirectionalRNNEncoder(Encoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
-               seq_len: int) -> (mx.sym.Symbol, mx.sym.Symbol, int):
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -421,7 +421,7 @@ class BiDirectionalRNNEncoder(Encoder):
         data = self._encode(data, data_length, seq_len)
         if self.layout[0] == 'N':
             data = mx.sym.swapaxes(data=data, dim1=0, dim2=1)
-        return (data, data_length, seq_len)
+        return data, data_length, seq_len
 
     def _encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
         """
@@ -482,7 +482,7 @@ class ConvolutionalEmbeddingEncoder(Encoder):
                  dropout: float = 0.):
         if not num_filters:
             num_filters = [200, 200, 250, 250, 300, 300, 300, 300]
-        assert len(num_filters) == max_filter_width, "num_filters must have max_filter_width elements."
+        check_condition(len(num_filters) == max_filter_width, "num_filters must have max_filter_width elements.")
         self.num_embed = num_embed
         self.max_filter_width = max_filter_width
         self.num_filters = num_filters[:]
@@ -510,7 +510,7 @@ class ConvolutionalEmbeddingEncoder(Encoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
-               seq_len: int) -> (mx.sym.Symbol, mx.sym.Symbol, int):
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -602,7 +602,7 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         # so we can just block the backward pass here.
         encoded_data_length = mx.sym.BlockGrad(mx.sym.ceil(data_length / self.pool_stride))
 
-        return (seg_embedding, encoded_data_length, encoded_seq_len)
+        return seg_embedding, encoded_data_length, encoded_seq_len
 
     def get_num_hidden(self) -> int:
         """

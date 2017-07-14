@@ -59,7 +59,6 @@ DECODER_PREFIX = "decoder_"
 # default I/O variable names
 SOURCE_NAME = "source"
 SOURCE_LENGTH_NAME = "source_length"
-SOURCE_ENCODED_LENGTH_NAME = "source_encoded_length"
 TARGET_NAME = "target"
 TARGET_LABEL_NAME = "target_label"
 LEXICON_NAME = "lexicon"
