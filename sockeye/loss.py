@@ -14,7 +14,7 @@
 """
 Functions to generate loss symbols for sequence-to-sequence models.
 """
-from typing import Tuple
+from typing import List
 
 import mxnet as mx
 
@@ -47,13 +47,13 @@ class Loss:
     provides softmax outputs for forward() AND cross_entropy gradients for backward().
     """
 
-    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> mx.sym.Symbol:
+    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> List[mx.sym.Symbol]:
         """
         Returns loss and softmax output symbols given logits and integer-coded labels.
 
         :param logits: Shape: (batch_size * target_seq_len, target_vocab_size).
         :param labels: Shape: (batch_size * target_seq_len,).
-        :return: Loss and softmax output symbols.
+        :return: List of loss and softmax output symbols.
         """
         raise NotImplementedError()
 
@@ -68,24 +68,24 @@ class CrossEntropyLoss(Loss):
     def __init__(self, normalize: bool = False):
         self._normalize = normalize
 
-    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> mx.sym.Symbol:
+    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> List[mx.sym.Symbol]:
         """
         Returns loss and softmax output symbols given logits and integer-coded labels.
 
         :param logits: Shape: (batch_size * target_seq_len, target_vocab_size).
         :param labels: Shape: (batch_size * target_seq_len,).
-        :return: Loss and softmax output symbols.
+        :return: List of loss symbol.
         """
         if self._normalize:
             normalization = "valid"
         else:
             normalization = "null"
-        return mx.sym.SoftmaxOutput(data=logits,
+        return [mx.sym.SoftmaxOutput(data=logits,
                                     label=labels,
                                     ignore_label=C.PAD_ID,
                                     use_ignore=True,
                                     normalization=normalization,
-                                    name=C.SOFTMAX_NAME)
+                                    name=C.SOFTMAX_NAME)]
 
 
 def _normalize(loss: mx.sym.Symbol, labels: mx.sym.Symbol):
@@ -116,13 +116,13 @@ class SmoothedCrossEntropyLoss(Loss):
         self._vocab_size = vocab_size
         self._normalize = normalize
 
-    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> Tuple[mx.sym.Symbol]:
+    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> List[mx.sym.Symbol]:
         """
         Returns loss and softmax output symbols given logits and integer-coded labels.
 
         :param logits: Shape: (batch_size * target_seq_len, target_vocab_size).
         :param labels: Shape: (batch_size * target_seq_len,).
-        :return: Loss and softmax output symbols.
+        :return: List of loss and softmax output symbols.
         """
         probs = mx.sym.softmax(data=logits)
 
@@ -145,4 +145,4 @@ class SmoothedCrossEntropyLoss(Loss):
 
         cross_entropy = mx.sym.MakeLoss(cross_entropy, name=C.SMOOTHED_CROSS_ENTROPY)
         probs = mx.sym.BlockGrad(probs, name=C.SOFTMAX_NAME)
-        return cross_entropy, probs
+        return [cross_entropy, probs]
