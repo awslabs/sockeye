@@ -106,6 +106,13 @@ ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet",
                    "align_plot_prefix", "sure_align_threshold",
                    "keep_last_params"]
 
+# Other argument constants
+INFERENCE_ARG_INPUT_LONG = "--input"
+INFERENCE_ARG_INPUT_SHORT = "-i"
+INFERENCE_ARG_OUTPUT_LONG = "--output"
+INFERENCE_ARG_OUTPUT_SHORT = "-o"
+
+
 # data layout strings
 BATCH_MAJOR = "NTC"
 TIME_MAJOR = "TNC"
