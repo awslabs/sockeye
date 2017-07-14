@@ -177,7 +177,7 @@ class TrainingModel(sockeye.model.SockeyeModel):
         :param train_iter: The training data iterator.
         :param val_iter: The validation data iterator.
         :param output_folder: The folder in which all model artifacts will be stored in (parameters, checkpoints, etc.).
-        :param max_params_files_to_keep: Maximum number of params files to keep in the output folder.
+        :param max_params_files_to_keep: Maximum number of params files to keep in the output folder (last n are kept).
         :param metrics: The metrics that will be evaluated during training.
         :param initializer: The parameter initializer.
         :param max_updates: Maximum number of batches to process.
@@ -246,7 +246,7 @@ class TrainingModel(sockeye.model.SockeyeModel):
         :param train_iter: Training data iterator.
         :param val_iter: Validation data iterator.
         :param output_folder: Model output folder.
-        :params max_params_files_to_keep: Maximum number of params files to keep in the output folder.
+        :params max_params_files_to_keep: Maximum number of params files to keep in the output folder (last n are kept).
         :param metrics: List of metric names to track on training and validation data.
         :param max_updates: Maximum number of batches to process.
         :param checkpoint_frequency: Frequency of checkpointing.
