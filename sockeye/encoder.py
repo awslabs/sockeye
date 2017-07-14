@@ -12,70 +12,67 @@
 # permissions and limitations under the License.
 
 """
-Defines Encoder interface and various implementations.
+Encoders for sequence-to-sequence models.
 """
 import logging
 from typing import Callable, List
 
 import mxnet as mx
 
-import sockeye.constants as C
-import sockeye.rnn
-import sockeye.utils
-from sockeye.utils import check_condition
+from sockeye.config import Config
+from . import constants as C
+from . import rnn
+from . import utils
 
 logger = logging.getLogger(__name__)
 
 
-def get_encoder(num_embed: int,
-                vocab_size: int,
-                num_layers: int,
-                rnn_num_hidden: int,
-                cell_type: str,
-                residual: bool,
-                dropout: float,
-                forget_bias: float,
-                fused: bool = False) -> 'Encoder':
+class RecurrentEncoderConfig(Config):
     """
-    Returns an encoder with embedding, batch2time-major conversion, and bidirectional RNN encoder.
-    If num_layers > 1, adds uni-directional RNNs.
+    Recurrent encoder configuration.
 
-    :param num_embed: Size of embedding layer.
     :param vocab_size: Source vocabulary size.
-    :param num_layers: Number of encoder layers.
-    :param rnn_num_hidden: Number of hidden units for RNN cells.
-    :param cell_type: RNN cell type.
-    :param residual: Whether to add residual connections to multi-layered RNNs.
-    :param dropout: Dropout probability for encoders (RNN and embedding).
-    :param forget_bias: Initial value of RNN forget biases.
+    :param num_embed: Size of embedding layer.
+    :param rnn_config: RNN configuration.
+    """
+    yaml_tag = u"!RecurrentEncoderConfig"
+
+    def __init__(self,
+                 vocab_size: int,
+                 num_embed: int,
+                 rnn_config: rnn.RNNConfig) -> None:
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.num_embed = num_embed
+        self.rnn_config = rnn_config
+
+
+def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool) -> 'Encoder':
+    """
+    Returns a recurrent encoder with embedding, batch2time-major conversion, and bidirectional RNN.
+    If num_layers > 1, adds additional uni-directional RNNs.
+
+    :param config: Configuration for recurrent encoder.
     :param fused: Whether to use FusedRNNCell (CuDNN). Only works with GPU context.
     :return: Encoder instance.
     """
     # TODO give more control on encoder architecture
     encoders = list()
-    encoders.append(Embedding(num_embed=num_embed,
-                              vocab_size=vocab_size,
+    encoders.append(Embedding(num_embed=config.num_embed,
+                              vocab_size=config.vocab_size,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
-                              dropout=dropout))
+                              dropout=config.rnn_config.dropout))
     encoders.append(BatchMajor2TimeMajor())
 
     encoder_class = FusedRecurrentEncoder if fused else RecurrentEncoder
-    encoders.append(BiDirectionalRNNEncoder(num_hidden=rnn_num_hidden,
-                                            num_layers=1,
-                                            dropout=dropout,
-                                            layout=C.TIME_MAJOR,
-                                            cell_type=cell_type,
-                                            encoder_class=encoder_class,
-                                            forget_bias=forget_bias))
+    encoders.append(BiDirectionalRNNEncoder(rnn_config=config.rnn_config,
+                                            prefix=C.BIDIRECTIONALRNN_PREFIX,
+                                            layout=C.TIME_MAJOR))
 
-    if num_layers > 1:
-        encoders.append(encoder_class(num_hidden=rnn_num_hidden,
-                                      num_layers=num_layers - 1,
-                                      dropout=dropout,
-                                      layout=C.TIME_MAJOR,
-                                      cell_type=cell_type,
-                                      residual=residual,
-                                      forget_bias=forget_bias))
+    if config.rnn_config.num_layers > 1:
+        encoders.append(encoder_class(rnn_config=config.rnn_config,
+                                      prefix=C.STACKEDRNN_PREFIX,
+                                      layout=C.TIME_MAJOR))
 
     return EncoderSequence(encoders)
 
@@ -229,23 +226,20 @@ class EncoderSequence(Encoder):
 
 class RecurrentEncoder(Encoder):
     """
-    Uni-directional (multi-layered) recurrent encoder
+    Uni-directional (multi-layered) recurrent encoder.
+
+    :param rnn_config: RNN configuration.
+    :param prefix: Prefix.
+    :param layout: Data layout.
     """
 
     def __init__(self,
-                 num_hidden: int,
-                 num_layers: int,
+                 rnn_config: rnn.RNNConfig,
                  prefix: str = C.STACKEDRNN_PREFIX,
-                 dropout: float = 0.,
-                 layout: str = C.TIME_MAJOR,
-                 cell_type: str = C.LSTM_TYPE,
-                 residual: bool = False,
-                 forget_bias=0.0):
+                 layout: str = C.TIME_MAJOR):
+        self.rnn_config = rnn_config
         self.layout = layout
-        self.num_hidden = num_hidden
-        self.rnn = sockeye.rnn.get_stacked_rnn(cell_type, num_hidden,
-                                               num_layers, dropout, prefix,
-                                               residual, forget_bias)
+        self.rnn = rnn.get_stacked_rnn(rnn_config, prefix)
 
     def encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
         """
@@ -270,32 +264,31 @@ class RecurrentEncoder(Encoder):
         """
         Return the representation size of this encoder.
         """
-        return self.num_hidden
+        return self.rnn_config.num_hidden
 
 
 class FusedRecurrentEncoder(Encoder):
     """
-    Uni-directional (multi-layered) recurrent encoder
+    Uni-directional (multi-layered) recurrent encoder.
+
+    :param rnn_config: RNN configuration.
+    :param prefix: Prefix.
+    :param layout: Data layout.
     """
 
     def __init__(self,
-                 num_hidden: int,
-                 num_layers: int,
+                 rnn_config: rnn.RNNConfig,
                  prefix: str = C.STACKEDRNN_PREFIX,
-                 dropout: float = 0.,
-                 layout: str = C.TIME_MAJOR,
-                 cell_type: str = C.LSTM_TYPE,
-                 residual: bool = False,
-                 forget_bias=0.0):
+                 layout: str = C.TIME_MAJOR):
+        self.rnn_config = rnn_config
         self.layout = layout
-        self.num_hidden = num_hidden
         logger.warning("%s: FusedRNNCell uses standard MXNet Orthogonal initializer w/ rand_type=uniform", prefix)
-        self.rnn = [mx.rnn.FusedRNNCell(num_hidden,
-                                        num_layers=num_layers,
-                                        mode=cell_type,
+        self.rnn = [mx.rnn.FusedRNNCell(self.rnn_config.num_hidden,
+                                        num_layers=self.rnn_config.num_layers,
+                                        mode=self.rnn_config.cell_type,
                                         bidirectional=False,
-                                        dropout=dropout,
-                                        forget_bias=forget_bias,
+                                        dropout=self.rnn_config.dropout,
+                                        forget_bias=self.rnn_config.forget_bias,
                                         prefix=prefix)]
 
     def encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
@@ -323,7 +316,7 @@ class FusedRecurrentEncoder(Encoder):
         """
         Return the representation size of this encoder.
         """
-        return self.num_hidden
+        return self.rnn_config.num_hidden
 
 
 class BiDirectionalRNNEncoder(Encoder):
@@ -331,39 +324,36 @@ class BiDirectionalRNNEncoder(Encoder):
     An encoder that runs a forward and a reverse RNN over input data.
     States from both RNNs are concatenated together.
 
-    :param num_hidden: Number of hidden units for final, concatenated encoder states. Must be a multiple of 2.
-    :param num_layers: Number of RNN layers.
-    :param prefix: Name prefix for symbols of this encoder.
-    :param dropout: Dropout probability.
-    :param layout: Input data layout. Default: time-major.
-    :param cell_type: RNN cell type.
-    :param fused: Whether to use FusedRNNCell (CuDNN). Only works with GPU context.
-    :param forget_bias: Initial value of RNN forget biases.
+    :param rnn_config: RNN configuration.
+    :param prefix: Prefix.
+    :param layout: Data layout.
+    :param encoder_class: Recurrent encoder class to use.
     """
 
     def __init__(self,
-                 num_hidden: int,
-                 num_layers: int,
+                 rnn_config: rnn.RNNConfig,
                  prefix=C.BIDIRECTIONALRNN_PREFIX,
-                 dropout: float = 0.,
                  layout=C.TIME_MAJOR,
-                 cell_type=C.LSTM_TYPE,
-                 encoder_class: Callable = RecurrentEncoder,
-                 forget_bias: float = 0.0):
-        check_condition(num_hidden % 2 == 0, "num_hidden must be a multiple of 2 for BiDirectionalRNNEncoders.")
-        self.num_hidden = num_hidden
+                 encoder_class: Callable = RecurrentEncoder):
+        utils.check_condition(rnn_config.num_hidden % 2 == 0,
+                              "num_hidden must be a multiple of 2 for BiDirectionalRNNEncoders.")
+        self.rnn_config = rnn_config
+        self.internal_rnn_config = rnn.RNNConfig(cell_type=rnn_config.cell_type,
+                                                 num_hidden=rnn_config.num_hidden // 2,
+                                                 num_layers=rnn_config.num_layers,
+                                                 dropout=rnn_config.dropout,
+                                                 residual=rnn_config.residual,
+                                                 forget_bias=rnn_config.forget_bias)
         if layout[0] == 'N':
             logger.warning("Batch-major layout for encoder input. Consider using time-major layout for faster speed")
 
         # time-major layout as _encode needs to swap layout for SequenceReverse
-        self.forward_rnn = encoder_class(num_hidden=num_hidden // 2, num_layers=num_layers,
-                                         prefix=prefix + C.FORWARD_PREFIX, dropout=dropout,
-                                         layout=C.TIME_MAJOR, cell_type=cell_type,
-                                         forget_bias=forget_bias)
-        self.reverse_rnn = encoder_class(num_hidden=num_hidden // 2, num_layers=num_layers,
-                                         prefix=prefix + C.REVERSE_PREFIX, dropout=dropout,
-                                         layout=C.TIME_MAJOR, cell_type=cell_type,
-                                         forget_bias=forget_bias)
+        self.forward_rnn = encoder_class(rnn_config=self.internal_rnn_config,
+                                         prefix=prefix + C.FORWARD_PREFIX,
+                                         layout=C.TIME_MAJOR)
+        self.reverse_rnn = encoder_class(rnn_config=self.internal_rnn_config,
+                                         prefix=prefix + C.REVERSE_PREFIX,
+                                         layout=C.TIME_MAJOR)
         self.layout = layout
         self.prefix = prefix
 
@@ -406,7 +396,7 @@ class BiDirectionalRNNEncoder(Encoder):
         """
         Return the representation size of this encoder.
         """
-        return self.num_hidden
+        return self.rnn_config.num_hidden
 
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """

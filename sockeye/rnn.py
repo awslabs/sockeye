@@ -16,56 +16,77 @@ from typing import Optional, List
 
 import mxnet as mx
 
-from sockeye import constants as C
+from sockeye.config import Config
 from sockeye.layers import LayerNormalization
+from . import constants as C
 
 
-def get_stacked_rnn(cell_type: str,
-                    num_hidden: int,
-                    num_layers: int,
-                    dropout: float,
-                    prefix: str,
-                    residual: bool = False,
-                    forget_bias: float = 0.0) -> mx.rnn.SequentialRNNCell:
+class RNNConfig(Config):
     """
-    Returns (stacked) RNN cell given parameters.
+    RNN configuration.
 
     :param cell_type: RNN cell type.
     :param num_hidden: Number of RNN hidden units.
     :param num_layers: Number of RNN layers.
     :param dropout: Dropout probability on RNN outputs.
-    :param prefix: Symbol prefix for RNN.
     :param residual: Whether to add residual connections between multi-layered RNNs.
     :param forget_bias: Initial value of forget biases.
+    """
+    yaml_tag = u'!RNNConfig'
+
+    def __init__(self,
+                 cell_type: str,
+                 num_hidden: int,
+                 num_layers: int,
+                 dropout: float,
+                 residual: bool = False,
+                 forget_bias: float = 0.0) -> None:
+        super().__init__()
+        self.cell_type = cell_type
+        self.num_hidden = num_hidden
+        self.num_layers = num_layers
+        self.dropout = dropout
+        self.residual = residual
+        self.forget_bias = forget_bias
+
+
+
+def get_stacked_rnn(config: RNNConfig, prefix: str) -> mx.rnn.SequentialRNNCell:
+    """
+    Returns (stacked) RNN cell given parameters.
+
+    :param config: rnn configuration.
+    :param prefix: Symbol prefix for RNN.
     :return: RNN cell.
     """
 
     rnn = mx.rnn.SequentialRNNCell()
-    for layer in range(num_layers):
+    for layer in range(config.num_layers):
         # fhieber: the 'l' in the prefix does NOT stand for 'layer' but for the direction 'l' as in mx.rnn.rnn_cell::517
         # this ensures parameter name compatibility of training w/ FusedRNN and decoding with 'unfused' RNN.
         cell_prefix = "%sl%d_" % (prefix, layer)
-        if cell_type == C.LSTM_TYPE:
-            cell = mx.rnn.LSTMCell(num_hidden=num_hidden, prefix=cell_prefix, forget_bias=forget_bias)
-        elif cell_type == C.LNLSTM_TYPE:
-            cell = LayerNormLSTMCell(num_hidden=num_hidden, prefix=cell_prefix, forget_bias=forget_bias)
-        elif cell_type == C.LNGLSTM_TYPE:
-            cell = LayerNormPerGateLSTMCell(num_hidden=num_hidden, prefix=cell_prefix, forget_bias=forget_bias)
-        elif cell_type == C.GRU_TYPE:
-            cell = mx.rnn.GRUCell(num_hidden=num_hidden, prefix=cell_prefix)
-        elif cell_type == C.LNGRU_TYPE:
-            cell = LayerNormGRUCell(num_hidden=num_hidden, prefix=cell_prefix)
-        elif cell_type == C.LNGGRU_TYPE:
-            cell = LayerNormPerGateGRUCell(num_hidden=num_hidden, prefix=cell_prefix)
+        if config.cell_type == C.LSTM_TYPE:
+            cell = mx.rnn.LSTMCell(num_hidden=config.num_hidden, prefix=cell_prefix, forget_bias=config.forget_bias)
+        elif config.cell_type == C.LNLSTM_TYPE:
+            cell = LayerNormLSTMCell(num_hidden=config.num_hidden, prefix=cell_prefix, forget_bias=config.forget_bias)
+        elif config.cell_type == C.LNGLSTM_TYPE:
+            cell = LayerNormPerGateLSTMCell(num_hidden=config.num_hidden, prefix=cell_prefix,
+                                            forget_bias=config.forget_bias)
+        elif config.cell_type == C.GRU_TYPE:
+            cell = mx.rnn.GRUCell(num_hidden=config.num_hidden, prefix=cell_prefix)
+        elif config.cell_type == C.LNGRU_TYPE:
+            cell = LayerNormGRUCell(num_hidden=config.num_hidden, prefix=cell_prefix)
+        elif config.cell_type == C.LNGGRU_TYPE:
+            cell = LayerNormPerGateGRUCell(num_hidden=config.num_hidden, prefix=cell_prefix)
         else:
             raise NotImplementedError()
-        if residual and layer > 0:
+        if config.residual and layer > 0:
             cell = mx.rnn.ResidualCell(cell)
         rnn.add(cell)
 
-        if dropout > 0.:
+        if config.dropout > 0.:
             # TODO(fhieber): add pervasive dropout?
-            rnn.add(mx.rnn.DropoutCell(dropout, prefix=cell_prefix + "_dropout"))
+            rnn.add(mx.rnn.DropoutCell(config.dropout, prefix=cell_prefix + "_dropout"))
     return rnn
 
 
