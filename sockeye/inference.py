@@ -634,7 +634,8 @@ class Translator:
         # scores_accumulated: chosen smallest scores in scores (ascending).
         scores_accumulated = mx.nd.zeros((self.beam_size, 1), ctx=self.context)
 
-        self.pad_dist += np.inf
+        # reset all padding distribution cells to np.inf
+        self.pad_dist[:] = np.inf
 
         # (0) encode source sentence
         model_states = self._encode(source, source_length, bucket_key)
@@ -650,12 +651,15 @@ class Translator:
             if t == 0:  # only one hypothesis at t==0
                 scores = scores[:1]
             else:
-                # renormalize scores by length+1, but not for finished hyps;
-                # their predicted distribution is set to one-hot at C.PAD_ID.
+                # renormalize scores by length+1 ...
                 scores = (scores + scores_accumulated * lengths) / (lengths + 1)
+                # ... but not for finished hyps.
+                # their predicted distribution is set to their accumulated scores at C.PAD_ID.
                 self.pad_dist[:, C.PAD_ID] = scores_accumulated
+                # this is equivalent to doing this in numpy:
+                #   self.pad_dist[finished, :] = np.inf
+                #   self.pad_dist[finished, C.PAD_ID] = scores_accumulated[finished]
                 scores = mx.nd.where(finished, self.pad_dist, scores)
-                self.pad_dist += np.inf
 
             # (3) get beam_size winning hypotheses
             # TODO(fhieber): once mx.nd.topk is sped-up no numpy conversion necessary anymore.
