@@ -23,6 +23,9 @@ class Config(yaml.YAMLObject):
     """
     yaml_tag = u'!Config'
 
+    def __init__(self):
+        self._frozen = False
+
     def __setattr__(self, key, value):
         if hasattr(self, '_frozen') and self._frozen:
             raise AttributeError("Cannot set '%s' in frozen config" % key)
@@ -37,7 +40,7 @@ class Config(yaml.YAMLObject):
         self._frozen = True
         for k, v in self.__dict__.items():
             if isinstance(v, Config):
-                v.freeze()
+                v.freeze()  # pylint: disable= no-member
 
     def __repr__(self):
         return "Config[%s]" % ", ".join("%s=%s" %(str(k), str(v)) for k, v in sorted(self.__dict__.items()))
@@ -46,13 +49,13 @@ class Config(yaml.YAMLObject):
         self.__delattr__('_frozen')
         for attr, val in self.__dict__.items():
             if isinstance(val, Config) and hasattr(val, '_frozen'):
-                val.__del_frozen()
+                val.__del_frozen()  # pylint: disable= no-member
 
     def __add_frozen(self):
         setattr(self, "_frozen", False)
         for attr, val in self.__dict__.items():
             if isinstance(val, Config):
-                val.__add_frozen()
+                val.__add_frozen()  # pylint: disable= no-member
 
     def save(self, fname: str):
         """

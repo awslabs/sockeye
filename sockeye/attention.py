@@ -20,6 +20,7 @@ from typing import Callable, NamedTuple, Optional, Tuple
 import mxnet as mx
 
 from . import config
+from . import constants as C
 from . import coverage
 from . import layers
 
