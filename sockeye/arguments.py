@@ -384,6 +384,11 @@ def add_training_args(params):
                               default=13,
                               help='Random seed. Default: %(default)s.')
 
+    train_params.add_argument('--keep-last-params',
+                              type=int,
+                              default=-1,
+                              help='Keep only the last n params files, use -1 to keep all files. Default: %(default)s')
+
 
 def add_inference_args(params):
     decode_params = params.add_argument_group("Inference parameters")

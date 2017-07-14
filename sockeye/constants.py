@@ -78,7 +78,8 @@ LOG_NAME = "log"
 JSON_SUFFIX = ".json"
 VOCAB_SRC_NAME = "vocab.src"
 VOCAB_TRG_NAME = "vocab.trg"
-PARAMS_NAME = "params.%04d"
+PARAMS_PREFIX = "params."
+PARAMS_NAME = PARAMS_PREFIX + "%04d"
 PARAMS_BEST_NAME = "params.best"
 DECODE_OUT_NAME = "decode.output.%04d"
 DECODE_IN_NAME = "decode.source"
@@ -101,7 +102,9 @@ TRAINING_STATE_PARAMS_NAME = "params"
 ARGS_STATE_NAME = "args.json"
 
 # Arguments that may differ and still resume training
-ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet", "align_plot_prefix", "sure_align_threshold"]
+ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet",
+                   "align_plot_prefix", "sure_align_threshold",
+                   "keep_last_params"]
 
 # data layout strings
 BATCH_MAJOR = "NTC"

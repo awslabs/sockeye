@@ -96,14 +96,17 @@ def test_model_parameters(test_params, expected_params):
               initial_learning_rate=0.0003, weight_decay=0.0, momentum=None, clip_gradient=1.0,
               learning_rate_scheduler_type='plateau-reduce', learning_rate_reduce_factor=0.5,
               learning_rate_reduce_num_not_improved=3, learning_rate_half_life=10, use_fused_rnn=False,
-              rnn_forget_bias=0.0, rnn_h2h_init=C.RNN_INIT_ORTHOGONAL, monitor_bleu=0, seed=13)),
+              rnn_forget_bias=0.0, rnn_h2h_init=C.RNN_INIT_ORTHOGONAL, monitor_bleu=0, seed=13,
+              keep_last_params=-1)),
     ('--batch-size 128 --fill-up test_fill_up --no-bucketing --bucket-width 20 --loss smoothed-cross-entropy '
      '--smoothed-cross-entropy-alpha 1.0 --normalize-loss --metrics perplexity accuracy '
      '--optimized-metric bleu --max-updates 10 --checkpoint-frequency 10 --min-num-epochs 10 '
      '--max-num-checkpoint-not-improved 16 --dropout 1.0 --optimizer sgd --initial-learning-rate 1.0 '
      '--weight-decay 1.0 --momentum 1.0 --clip-gradient 2.0 --learning-rate-scheduler-type fixed-rate-inv-t '
      '--learning-rate-reduce-factor 1.0 --learning-rate-reduce-num-not-improved 10 --learning-rate-half-life 20 '
-     '--use-fused-rnn --rnn-forget-bias 1.0 --rnn-h2h-init orthogonal_stacked --monitor-bleu 10 --seed 10',
+     '--use-fused-rnn --rnn-forget-bias 1.0 --rnn-h2h-init orthogonal_stacked --monitor-bleu 10 --seed 10 '
+     '--keep-last-params 50'
+     ,
     dict(batch_size=128, fill_up='test_fill_up', no_bucketing=True, bucket_width=20, loss=C.SMOOTHED_CROSS_ENTROPY,
          smoothed_cross_entropy_alpha=1.0, normalize_loss=True, metrics=[C.PERPLEXITY, C.ACCURACY],
          optimized_metric=C.BLEU, min_num_epochs=10,
@@ -111,7 +114,8 @@ def test_model_parameters(test_params, expected_params):
          initial_learning_rate=1.0, weight_decay=1.0, momentum=1.0, clip_gradient=2.0,
          learning_rate_scheduler_type='fixed-rate-inv-t', learning_rate_reduce_factor=1.0,
          learning_rate_reduce_num_not_improved=10, learning_rate_half_life=20.0, use_fused_rnn=True,
-         rnn_forget_bias=1.0, rnn_h2h_init=C.RNN_INIT_ORTHOGONAL_STACKED, monitor_bleu=10, seed=10)),
+         rnn_forget_bias=1.0, rnn_h2h_init=C.RNN_INIT_ORTHOGONAL_STACKED, monitor_bleu=10, seed=10,
+         keep_last_params=50)),
 ])
 def test_training_arg(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_training_args)

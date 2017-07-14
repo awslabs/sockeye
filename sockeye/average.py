@@ -82,7 +82,7 @@ def find_checkpoints(model_path: str, size=4, strategy="best", maximize=False, m
     :return: List of paths corresponding to chosen checkpoints.
     """
     metrics_path = os.path.join(model_path, C.METRICS_NAME)
-    points = _read_metrics_points(metrics_path, metric=metric)
+    points = _read_metrics_points(metrics_path, model_path, metric=metric)
 
     if strategy == "best":
         # N best scoring points
@@ -111,12 +111,13 @@ def find_checkpoints(model_path: str, size=4, strategy="best", maximize=False, m
     return params_paths
 
 
-def _read_metrics_points(path: str, metric: str) -> List[Tuple[float, int]]:
+def _read_metrics_points(path: str, model_path: str, metric: str) -> List[Tuple[float, int]]:
     """
     Reads lines from .metrics file and return list of elements [val, checkpoint]
 
     :param metric: Metric according to which checkpoints are selected.  Corresponds to columns in model\metrics file.
     :param path: File to read metric values from.
+    :param model_path: path where the params files reside.
     :return: List of pairs (metric value, checkpoint).
     """
     points = []
@@ -126,6 +127,9 @@ def _read_metrics_points(path: str, metric: str) -> List[Tuple[float, int]]:
         for line in metrics_in:
             fields = line.split()
             checkpoint = int(fields[0])
+            # Check that the corresponding params files exists
+            if not os.path.exists(os.path.join(model_path, C.PARAMS_NAME % checkpoint)):
+                continue
             for field in fields[1:]:
                 key_value = field.split("=")
                 if len(key_value) == 2:
