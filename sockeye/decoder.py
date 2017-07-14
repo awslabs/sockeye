@@ -41,6 +41,7 @@ class RecurrentDecoderConfig(Config):
     :param context_gating: Whether to use context gating.
     :param layer_normalization: Apply layer normalization.
     """
+    yaml_tag = u"!RecurrentDecoderConfig"
 
     def __init__(self,
                  vocab_size: int,
@@ -50,7 +51,14 @@ class RecurrentDecoderConfig(Config):
                  weight_tying: bool = False,
                  context_gating: bool = False,
                  layer_normalization: bool = False) -> None:
-        pass
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.num_embed = num_embed
+        self.rnn_config = rnn_config
+        self.dropout = dropout
+        self.weight_tying = weight_tying
+        self.context_gating = context_gating
+        self.layer_normalization = layer_normalization
 
 
 def get_recurrent_decoder(config: RecurrentDecoderConfig,

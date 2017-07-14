@@ -32,6 +32,8 @@ class RNNConfig(Config):
     :param residual: Whether to add residual connections between multi-layered RNNs.
     :param forget_bias: Initial value of forget biases.
     """
+    yaml_tag = u'!RNNConfig'
+
     def __init__(self,
                  cell_type: str,
                  num_hidden: int,
@@ -39,7 +41,14 @@ class RNNConfig(Config):
                  dropout: float,
                  residual: bool = False,
                  forget_bias: float = 0.0) -> None:
-        pass
+        super().__init__()
+        self.cell_type = cell_type
+        self.num_hidden = num_hidden
+        self.num_layers = num_layers
+        self.dropout = dropout
+        self.residual = residual
+        self.forget_bias = forget_bias
+
 
 
 def get_stacked_rnn(config: RNNConfig, prefix: str) -> mx.rnn.SequentialRNNCell:

@@ -34,26 +34,25 @@ class AttentionConfig(config.Config):
     :param num_hidden: Number of hidden units for attention networks.
     :param input_previous_word: Feeds the previous target embedding into the attention mechanism.
     :param rnn_num_hidden: Number of hidden units of encoder/decoder RNNs.
-    :param coverage_type: The type of update for the dynamic source encoding.
-    :param coverage_num_hidden: Number of hidden units for coverage attention.
     :param layer_normalization: Apply layer normalization to MLP attention.
+    :param config_coverage: Optional coverage configuration.
     """
+    yaml_tag = u"!AttentionConfig"
+
     def __init__(self,
                  type: str,
                  num_hidden: int,
                  input_previous_word: bool,
                  rnn_num_hidden: int,
-                 coverage_type: str,
-                 coverage_num_hidden: int,
-                 layer_normalization: bool) -> None:
+                 layer_normalization: bool,
+                 config_coverage: Optional[coverage.CoverageConfig] = None) -> None:
+        super().__init__()
         self.type = type
         self.num_hidden = num_hidden
         self.input_previous_word = input_previous_word
         self.rnn_num_hidden = rnn_num_hidden
-        # TODO coverage config
-        self.coverage_type = coverage_type
-        self.coverage_num_hidden = coverage_num_hidden
         self.layer_normalization = layer_normalization
+        self.config_coverage = config_coverage
 
 
 def get_attention(config: AttentionConfig, max_seq_len: int) -> 'Attention':
@@ -79,15 +78,10 @@ def get_attention(config: AttentionConfig, max_seq_len: int) -> 'Attention':
                             attention_num_hidden=config.num_hidden,
                             layer_normalization=config.layer_normalization)
     elif config.type == "coverage":
-        coverage_num_hidden = config.coverage_num_hidden
-        if config.coverage_type == 'count' and coverage_num_hidden != 1:
-            logging.warning("Ignoring coverage_num_hidden=%d and setting to 1" % coverage_num_hidden)
-            coverage_num_hidden = 1
         return MlpAttention(input_previous_word=config.input_previous_word,
                             attention_num_hidden=config.num_hidden,
-                            attention_coverage_type=config.coverage_type,
-                            attention_coverage_num_hidden=coverage_num_hidden,
-                            layer_normalization=config.layer_normalization)
+                            layer_normalization=config.layer_normalization,
+                            config_coverage=config.config_coverage)
     else:
         raise ValueError("Unknown attention type %s" % config.type)
 
@@ -454,10 +448,9 @@ class MlpAttention(Attention):
     def __init__(self,
                  input_previous_word: bool,
                  attention_num_hidden: int,
-                 attention_coverage_type: Optional[str] = None,
-                 attention_coverage_num_hidden: int = 1,
-                 layer_normalization: bool = False) -> None:
-        dynamic_source_num_hidden = 1 if attention_coverage_type is None else attention_coverage_num_hidden
+                 layer_normalization: bool = False,
+                 config_coverage: Optional[coverage.CoverageConfig] = None) -> None:
+        dynamic_source_num_hidden = 1 if config_coverage is None else config_coverage.num_hidden
         super().__init__(input_previous_word=input_previous_word,
                          dynamic_source_num_hidden=dynamic_source_num_hidden)
         self.attention_num_hidden = attention_num_hidden
@@ -467,17 +460,14 @@ class MlpAttention(Attention):
         self.att_q2h_weight = mx.sym.Variable("%sq2h_weight" % self.prefix)
         # hidden to score
         self.att_h2s_weight = mx.sym.Variable("%sh2s_weight" % self.prefix)
+        # coverage
+        self.coverage = coverage.get_coverage(config_coverage) if config_coverage is not None else None
         # dynamic source (coverage) weights and settings
         # input (coverage) to hidden
-        self.att_c2h_weight = mx.sym.Variable("%sc2h_weight" % self.prefix) if attention_coverage_type else None
-        self.coverage = coverage.get_coverage(attention_coverage_type,
-                                              dynamic_source_num_hidden,
-                                              layer_normalization) if attention_coverage_type else None
-
-        if layer_normalization:
-            self._ln = layers.LayerNormalization(num_hidden=attention_num_hidden, prefix="att_norm")
-        else:
-            self._ln = None
+        self.att_c2h_weight = mx.sym.Variable("%sc2h_weight" % self.prefix) if config_coverage is not None else None
+        # layer normalization
+        self._ln = layers.LayerNormalization(num_hidden=attention_num_hidden,
+                                             prefix="%s_norm" % self.prefix) if layer_normalization else None
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """

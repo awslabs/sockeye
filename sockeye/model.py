@@ -11,6 +11,7 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import copy
 import logging
 import os
 
@@ -32,6 +33,7 @@ class ModelConfig(Config):
     Add new model parameters here. If you want backwards compatibility for models trained with code that did not
     contain these parameters, provide a reasonable default under default_values.
     """
+    yaml_tag = u"!ModelConfig"
 
     def __init__(self,
                  max_seq_len: int,
@@ -43,17 +45,16 @@ class ModelConfig(Config):
                  config_loss: loss.LossConfig,
                  lexical_bias: bool = False,
                  learn_lexical_bias: bool = False):
-        # super().__init__(vars())
-        # self.max_seq_len = max_seq_len
-        # self.vocab_source_size = vocab_source_size
-        # self.vocab_target_size = vocab_target_size
-        # self.config_encoder = config_encoder
-        # self.config_decoder = config_decoder
-        # self.config_attention = config_attention
-        # self.config_loss = config_loss
-        # self.lexical_bias = lexical_bias
-        # self.learn_lexical_bias = learn_lexical_bias
-        pass
+        super().__init__()
+        self.max_seq_len = max_seq_len
+        self.vocab_source_size = vocab_source_size
+        self.vocab_target_size = vocab_target_size
+        self.config_encoder = config_encoder
+        self.config_decoder = config_decoder
+        self.config_attention = config_attention
+        self.config_loss = config_loss
+        self.lexical_bias = lexical_bias
+        self.learn_lexical_bias = learn_lexical_bias
 
 
 class SockeyeModel:
@@ -66,7 +67,8 @@ class SockeyeModel:
     """
 
     def __init__(self, config: ModelConfig):
-        self.config = config
+        self.config = copy.deepcopy(config)
+        self.config.freeze()
         logger.info("%s", self.config)
         self.encoder = None
         self.attention = None

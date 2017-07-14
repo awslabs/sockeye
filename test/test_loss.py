@@ -20,7 +20,8 @@ import sockeye.model
 
 
 def test_cross_entropy_loss():
-    loss = sockeye.loss.get_loss(sockeye.model.ModelConfig(loss=C.CROSS_ENTROPY))
+    config = sockeye.loss.LossConfig(type=C.CROSS_ENTROPY, vocab_size=4, normalize=False)
+    loss = sockeye.loss.get_loss(config)
     assert isinstance(loss, sockeye.loss.CrossEntropyLoss)
 
     logits = mx.sym.Variable("logits")
@@ -64,11 +65,11 @@ def test_cross_entropy_loss():
 
 
 def test_smoothed_cross_entropy_loss():
-    alpha = 0.5
-    vocab_target_size = 4
-    loss = sockeye.loss.get_loss(sockeye.model.ModelConfig(loss=C.SMOOTHED_CROSS_ENTROPY,
-                                                           vocab_target_size=vocab_target_size,
-                                                           smoothed_cross_entropy_alpha=alpha))
+    config = sockeye.loss.LossConfig(type=C.SMOOTHED_CROSS_ENTROPY,
+                                     vocab_size=4,
+                                     normalize=False,
+                                     smoothed_cross_entropy_alpha=0.5)
+    loss = sockeye.loss.get_loss(config)
     assert isinstance(loss, sockeye.loss.SmoothedCrossEntropyLoss)
 
     logits = mx.sym.Variable("logits")

@@ -32,6 +32,7 @@ from sockeye.utils import acquire_gpus, check_condition, get_num_gpus, expand_re
 from . import arguments
 from . import attention
 from . import constants as C
+from . import coverage
 from . import data_io
 from . import decoder
 from . import encoder
@@ -225,13 +226,17 @@ def main():
                                                         layer_normalization=args.layer_normalization)
 
         attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
+        config_coverage = None
+        if args.attention_type == "coverage":
+            config_coverage = coverage.CoverageConfig(type=args.attention_coverage_type,
+                                                      num_hidden=args.attention_coverage_num_hidden,
+                                                      layer_normalization=args.layer_normalization)
         config_attention = attention.AttentionConfig(type=args.attention_type,
                                                      num_hidden=attention_num_hidden,
                                                      input_previous_word=args.attention_use_prev_word,
                                                      rnn_num_hidden=config_rnn.num_hidden,
-                                                     coverage_type=args.attention_coverage_type,
-                                                     coverage_num_hidden=args.attention_coverage_num_hidden,
-                                                     layer_normalization=args.layer_normalization)
+                                                     layer_normalization=args.layer_normalization,
+                                                     config_coverage=config_coverage)
 
         config_loss = loss.LossConfig(type=args.loss,
                                       vocab_size=vocab_target_size,

@@ -55,21 +55,21 @@ def test_ln_cell(cell, expected_param_keys):
 
 
 get_rnn_test_cases = [
-    (C.LSTM_TYPE, 100, mx.rnn.LSTMCell),
-    (C.LNLSTM_TYPE, 100, rnn.LayerNormLSTMCell),
-    (C.LNGLSTM_TYPE, 100, rnn.LayerNormPerGateLSTMCell),
-    (C.GRU_TYPE, 100, mx.rnn.GRUCell),
-    (C.LNGRU_TYPE, 100, rnn.LayerNormGRUCell),
-    (C.LNGGRU_TYPE, 100, rnn.LayerNormPerGateGRUCell)]
+    (rnn.RNNConfig(cell_type=C.LSTM_TYPE, num_hidden=100, num_layers=2, dropout=0.5, residual=False, forget_bias=0.0), mx.rnn.LSTMCell),
+    (rnn.RNNConfig(cell_type=C.LNLSTM_TYPE, num_hidden=12, num_layers=2, dropout=0.5, residual=False, forget_bias=1.0), rnn.LayerNormLSTMCell),
+    (rnn.RNNConfig(cell_type=C.LNGLSTM_TYPE, num_hidden=55, num_layers=2, dropout=0.5, residual=False, forget_bias=0.0), rnn.LayerNormPerGateLSTMCell),
+    (rnn.RNNConfig(cell_type=C.GRU_TYPE, num_hidden=200, num_layers=2, dropout=0.9, residual=False, forget_bias=0.0), mx.rnn.GRUCell),
+    (rnn.RNNConfig(cell_type=C.LNGRU_TYPE, num_hidden=100, num_layers=2, dropout=0.5, residual=False, forget_bias=0.0), rnn.LayerNormGRUCell),
+    (rnn.RNNConfig(cell_type=C.LNGGRU_TYPE, num_hidden=2, num_layers=2, dropout=0.0, residual=False, forget_bias=0.0), rnn.LayerNormPerGateGRUCell)]
 
 
-@pytest.mark.parametrize("cell_type, num_hidden, expected_cell", get_rnn_test_cases)
-def test_get_stacked_rnn(cell_type, num_hidden, expected_cell):
-    layers = 1
-    dropout = 0.5
-    cell = rnn.get_stacked_rnn(cell_type, num_hidden, layers, dropout, prefix="")
+@pytest.mark.parametrize("config, expected_cell", get_rnn_test_cases)
+def test_get_stacked_rnn(config, expected_cell):
+    cell = rnn.get_stacked_rnn(config, prefix=config.cell_type)
     assert isinstance(cell, mx.rnn.SequentialRNNCell)
-    assert len(cell._cells) == 2
     assert isinstance(cell._cells[0], expected_cell)
-    assert cell._cells[0]._num_hidden == num_hidden
-    assert isinstance(cell._cells[-1], mx.rnn.DropoutCell)
+    assert cell._cells[0]._num_hidden, config.num_hidden
+    assert cell._cells[0]._num_hidden == config.num_hidden
+    if config.dropout > 0.0:
+        assert isinstance(cell._cells[-1], mx.rnn.DropoutCell)
+        assert cell._cells[-1].dropout == config.dropout
