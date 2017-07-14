@@ -50,7 +50,7 @@ class RecurrentDecoderConfig(Config):
                  weight_tying: bool = False,
                  context_gating: bool = False,
                  layer_normalization: bool = False) -> None:
-        super().__init__(vars())
+        pass
 
 
 def get_recurrent_decoder(config: RecurrentDecoderConfig,

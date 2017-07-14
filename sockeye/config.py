@@ -53,6 +53,8 @@ class Config(metaclass=Metaconfig):
         """
         Freezes this Config object, disallowing modification or addition of any parameters.
         """
+        if self._frozen:  # It's ok to freeze an already frozen config
+            return
         self._frozen = True
         for k, v in self.__dict__.items():
             if isinstance(v, Config):

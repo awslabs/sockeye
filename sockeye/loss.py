@@ -37,11 +37,7 @@ class LossConfig(config.Config):
                  vocab_size: int,
                  normalize: bool,
                  smoothed_cross_entropy_alpha: float = 0.0) -> None:
-        super().__init__(vars())
-        self.type = type
-        self.vocab_size = vocab_size
-        self.normalize = normalize
-        self.smoothed_cross_entropy_alpha = smoothed_cross_entropy_alpha
+        pass
 
 
 def get_loss(config: LossConfig) -> 'Loss':
