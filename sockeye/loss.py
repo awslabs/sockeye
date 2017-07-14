@@ -74,7 +74,7 @@ class CrossEntropyLoss(Loss):
 
         :param logits: Shape: (batch_size * target_seq_len, target_vocab_size).
         :param labels: Shape: (batch_size * target_seq_len,).
-        :return: List of loss and softmax output symbols.
+        :return: List of loss symbol.
         """
         if self._normalize:
             normalization = "valid"
