@@ -10,40 +10,22 @@
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
-from typing import Any, Dict
 
-import inspect
-import jsonpickle
+import copy
 
-
-class Metaconfig(type):
-    def __new__(mcs, name, bases, namespace, **kwargs):
-        new_cls = super(Metaconfig, mcs).__new__(mcs, name, bases, namespace, **kwargs)
-        user_init = new_cls.__init__
-        defaults = {}
-        for name, v in inspect.signature(user_init).parameters.items():
-            if v.default != inspect.Parameter.empty:
-                defaults[name] = v.default
-
-        def __init__(self, *args, **kwargs):
-            for name, value in defaults.items():
-                if name not in kwargs:
-                    kwargs[name] = value
-            for k, v in kwargs.items():
-                setattr(self, k, v)
-            self._frozen = False
-            # Normally we won't be doing anything here, but just to be sure
-            user_init(self, *args, **kwargs)
-
-        setattr(new_cls, '__init__', __init__)
-        return new_cls
+import yaml
 
 
-class Config(metaclass=Metaconfig):
+class Config(yaml.YAMLObject):
     """
     Base configuration object that supports freezing of members and JSON (de-)serialization.
     Actual Configuration should subclass this object.
     """
+    yaml_tag = u'!Config'
+
+    def __init__(self):
+        self._frozen = False
+
     def __setattr__(self, key, value):
         if hasattr(self, '_frozen') and self._frozen:
             raise AttributeError("Cannot set '%s' in frozen config" % key)
@@ -53,26 +35,38 @@ class Config(metaclass=Metaconfig):
         """
         Freezes this Config object, disallowing modification or addition of any parameters.
         """
-        if self._frozen:  # It's ok to freeze an already frozen config
+        if hasattr(self, '_frozen') and self._frozen:  # It's ok to freeze an already frozen config
             return
         self._frozen = True
         for k, v in self.__dict__.items():
             if isinstance(v, Config):
-                if k == "self":
-                    continue
-                v.freeze()
+                v.freeze()  # pylint: disable= no-member
 
     def __repr__(self):
-        return "Config%s" % str(self.__dict__)
+        return "Config[%s]" % ", ".join("%s=%s" %(str(k), str(v)) for k, v in sorted(self.__dict__.items()))
+
+    def __del_frozen(self):
+        self.__delattr__('_frozen')
+        for attr, val in self.__dict__.items():
+            if isinstance(val, Config) and hasattr(val, '_frozen'):
+                val.__del_frozen()  # pylint: disable= no-member
+
+    def __add_frozen(self):
+        setattr(self, "_frozen", False)
+        for attr, val in self.__dict__.items():
+            if isinstance(val, Config):
+                val.__add_frozen()  # pylint: disable= no-member
 
     def save(self, fname: str):
         """
         Saves this Config to a file called fname.
+
         :param fname: Name of file to store this Config in.
         """
-        jsonpickle.set_encoder_options('json', sort_keys=True, indent=1)
+        obj = copy.deepcopy(self)
+        obj.__del_frozen()
         with open(fname, 'w') as fout:
-            fout.write(jsonpickle.encode(self))
+            yaml.dump(obj, fout, default_flow_style=False)
 
     @staticmethod
     def load(fname: str) -> 'Config':
@@ -83,4 +77,6 @@ class Config(metaclass=Metaconfig):
         :return: Configuration.
         """
         with open(fname) as fin:
-            return jsonpickle.decode(fin.read())
+            obj = yaml.load(fin)
+            obj.__add_frozen()
+            return obj

@@ -37,11 +37,16 @@ class RecurrentEncoderConfig(Config):
     :param num_embed: Size of embedding layer.
     :param rnn_config: RNN configuration.
     """
+    yaml_tag = u"!RecurrentEncoderConfig"
+
     def __init__(self,
                  vocab_size: int,
                  num_embed: int,
                  rnn_config: rnn.RNNConfig) -> None:
-        pass
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.num_embed = num_embed
+        self.rnn_config = rnn_config
 
 
 def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool) -> 'Encoder':
@@ -379,17 +384,23 @@ class BiDirectionalRNNEncoder(Encoder):
                  encoder_class: Callable = RecurrentEncoder):
         utils.check_condition(rnn_config.num_hidden % 2 == 0,
                               "num_hidden must be a multiple of 2 for BiDirectionalRNNEncoders.")
+        self.rnn_config = rnn_config
+        self.internal_rnn_config = rnn.RNNConfig(cell_type=rnn_config.cell_type,
+                                                 num_hidden=rnn_config.num_hidden // 2,
+                                                 num_layers=rnn_config.num_layers,
+                                                 dropout=rnn_config.dropout,
+                                                 residual=rnn_config.residual,
+                                                 forget_bias=rnn_config.forget_bias)
         if layout[0] == 'N':
             logger.warning("Batch-major layout for encoder input. Consider using time-major layout for faster speed")
 
         # time-major layout as _encode needs to swap layout for SequenceReverse
-        self.forward_rnn = encoder_class(rnn_config=rnn_config,
+        self.forward_rnn = encoder_class(rnn_config=self.internal_rnn_config,
                                          prefix=prefix + C.FORWARD_PREFIX,
                                          layout=C.TIME_MAJOR)
-        self.reverse_rnn = encoder_class(rnn_config=rnn_config,
+        self.reverse_rnn = encoder_class(rnn_config=self.internal_rnn_config,
                                          prefix=prefix + C.REVERSE_PREFIX,
                                          layout=C.TIME_MAJOR)
-        self.rnn_config = rnn_config
         self.layout = layout
         self.prefix = prefix
 

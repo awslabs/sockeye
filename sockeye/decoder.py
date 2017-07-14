@@ -22,10 +22,10 @@ import mxnet as mx
 from sockeye.config import Config
 from sockeye.layers import LayerNormalization
 from sockeye.utils import check_condition
-from . import attention
+from . import attention as attentions
 from . import constants as C
 from . import encoder
-from . import lexicon
+from . import lexicon as lexicons
 from . import rnn
 
 
@@ -41,6 +41,7 @@ class RecurrentDecoderConfig(Config):
     :param context_gating: Whether to use context gating.
     :param layer_normalization: Apply layer normalization.
     """
+    yaml_tag = u"!RecurrentDecoderConfig"
 
     def __init__(self,
                  vocab_size: int,
@@ -50,12 +51,19 @@ class RecurrentDecoderConfig(Config):
                  weight_tying: bool = False,
                  context_gating: bool = False,
                  layer_normalization: bool = False) -> None:
-        pass
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.num_embed = num_embed
+        self.rnn_config = rnn_config
+        self.dropout = dropout
+        self.weight_tying = weight_tying
+        self.context_gating = context_gating
+        self.layer_normalization = layer_normalization
 
 
 def get_recurrent_decoder(config: RecurrentDecoderConfig,
-                          attention: attention.Attention,
-                          lexicon: Optional[lexicon.Lexicon] = None) -> 'Decoder':
+                          attention: attentions.Attention,
+                          lexicon: Optional[lexicons.Lexicon] = None) -> 'Decoder':
     """
     Returns a recurrent decoder.
 
@@ -130,11 +138,11 @@ class RecurrentDecoder(Decoder):
                  rnn_config: rnn.RNNConfig,
                  vocab_size: int,
                  num_target_embed: int,
-                 attention: attention.Attention,
+                 attention: attentions.Attention,
                  weight_tying: bool = False,
                  context_gating: bool = False,
                  layer_normalization: bool = False,
-                 lexicon: Optional[lexicon.Lexicon] = None,
+                 lexicon: Optional[lexicons.Lexicon] = None,
                  prefix=C.DECODER_PREFIX) -> None:
         # TODO: implement variant without input feeding
         self.rnn_config = rnn_config
@@ -256,8 +264,8 @@ class RecurrentDecoder(Decoder):
               word_vec_prev: mx.sym.Symbol,
               state: DecoderState,
               attention_func: Callable,
-              attention_state: attention.AttentionState,
-              seq_idx: int = 0) -> Tuple[DecoderState, attention.AttentionState]:
+              attention_state: attentions.AttentionState,
+              seq_idx: int = 0) -> Tuple[DecoderState, attentions.AttentionState]:
 
         """
         Performs single-time step in the RNN, given previous word vector, previous hidden state, attention function,
@@ -415,11 +423,11 @@ class RecurrentDecoder(Decoder):
                 word_id_prev: mx.sym.Symbol,
                 state_prev: DecoderState,
                 attention_func: Callable,
-                attention_state_prev: attention.AttentionState,
+                attention_state_prev: attentions.AttentionState,
                 source_lexicon: Optional[mx.sym.Symbol] = None,
                 softmax_temperature: Optional[float] = None) -> Tuple[mx.sym.Symbol,
                                                                       DecoderState,
-                                                                      attention.AttentionState]:
+                                                                      attentions.AttentionState]:
         """
         Given previous word id, attention function, previous hidden state and RNN layer states,
         returns Softmax predictions (not a loss symbol), next hidden state, and next layer
