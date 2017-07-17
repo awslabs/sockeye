@@ -13,10 +13,11 @@
 
 import mxnet as mx
 import numpy as np
+
 import sockeye.encoder
 
-def test_convolutional_embedding_encoder():
 
+def test_convolutional_embedding_encoder():
     batch_size = 8
     seq_len = 10
 
@@ -26,13 +27,14 @@ def test_convolutional_embedding_encoder():
     pool_stride = 5
     num_highway_layers = 2
     dropout = 0.1
+    config = sockeye.encoder.ConvolutionalEmbeddingConfig(num_embed=num_embed,
+                                                          max_filter_width=max_filter_width,
+                                                          num_filters=num_filters,
+                                                          pool_stride=pool_stride,
+                                                          num_highway_layers=num_highway_layers,
+                                                          dropout=dropout)
 
-    conv_embed = sockeye.encoder.ConvolutionalEmbeddingEncoder(num_embed=num_embed,
-                                                               max_filter_width=max_filter_width,
-                                                               num_filters=num_filters,
-                                                               pool_stride=pool_stride,
-                                                               num_highway_layers=num_highway_layers,
-                                                               dropout=dropout)
+    conv_embed = sockeye.encoder.ConvolutionalEmbeddingEncoder(config)
 
     data_nd = mx.nd.random_normal(shape=(batch_size, seq_len, num_embed))
     data_length_nd = mx.nd.array([1, 2, 3, 4, 5, 6, 7, 8])

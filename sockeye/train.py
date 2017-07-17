@@ -27,23 +27,23 @@ from typing import Optional, Dict
 import mxnet as mx
 import numpy as np
 
-import sockeye
-import sockeye.arguments as arguments
-import sockeye.attention
-import sockeye.constants as C
-import sockeye.data_io
-import sockeye.decoder
-import sockeye.encoder
-import sockeye.initializer
-import sockeye.lexicon
-import sockeye.lr_scheduler
-import sockeye.model
-import sockeye.training
-import sockeye.utils
-import sockeye.vocab
 from sockeye.log import setup_main_logger, log_sockeye_version
-from sockeye.utils import acquire_gpus, get_num_gpus, expand_requested_device_ids
-from sockeye.utils import check_condition
+from sockeye.utils import acquire_gpus, check_condition, get_num_gpus, expand_requested_device_ids
+from . import arguments
+from . import attention
+from . import constants as C
+from . import coverage
+from . import data_io
+from . import decoder
+from . import encoder
+from . import initializer
+from . import lexicon
+from . import loss
+from . import lr_scheduler
+from . import model
+from . import rnn
+from . import training
+from . import vocab
 
 
 def none_if_negative(val):
@@ -53,11 +53,11 @@ def none_if_negative(val):
 def _build_or_load_vocab(existing_vocab_path: Optional[str], data_path: str, num_words: int,
                          word_min_count: int) -> Dict:
     if existing_vocab_path is None:
-        vocabulary = sockeye.vocab.build_from_path(data_path,
-                                                   num_words=num_words,
-                                                   min_count=word_min_count)
+        vocabulary = vocab.build_from_path(data_path,
+                                           num_words=num_words,
+                                           min_count=word_min_count)
     else:
-        vocabulary = sockeye.vocab.vocab_from_json(existing_vocab_path)
+        vocabulary = vocab.vocab_from_json(existing_vocab_path)
     return vocabulary
 
 
@@ -153,119 +153,146 @@ def main():
 
         # load existing or create vocabs
         if resume_training:
-            vocab_source = sockeye.vocab.vocab_from_json_or_pickle(os.path.join(output_folder, C.VOCAB_SRC_NAME))
-            vocab_target = sockeye.vocab.vocab_from_json_or_pickle(os.path.join(output_folder, C.VOCAB_TRG_NAME))
+            vocab_source = vocab.vocab_from_json_or_pickle(os.path.join(output_folder, C.VOCAB_SRC_NAME))
+            vocab_target = vocab.vocab_from_json_or_pickle(os.path.join(output_folder, C.VOCAB_TRG_NAME))
         else:
             num_words_source = args.num_words if args.num_words_source is None else args.num_words_source
             vocab_source = _build_or_load_vocab(args.source_vocab, args.source, num_words_source, args.word_min_count)
-            sockeye.vocab.vocab_to_json(vocab_source, os.path.join(output_folder, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
+            vocab.vocab_to_json(vocab_source, os.path.join(output_folder, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
 
             num_words_target = args.num_words if args.num_words_target is None else args.num_words_target
             vocab_target = _build_or_load_vocab(args.target_vocab, args.target, num_words_target, args.word_min_count)
-            sockeye.vocab.vocab_to_json(vocab_target, os.path.join(output_folder, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX)
+            vocab.vocab_to_json(vocab_target, os.path.join(output_folder, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX)
 
         vocab_source_size = len(vocab_source)
         vocab_target_size = len(vocab_target)
         logger.info("Vocabulary sizes: source=%d target=%d", vocab_source_size, vocab_target_size)
 
-        data_info = sockeye.data_io.DataInfo(os.path.abspath(args.source),
-                                             os.path.abspath(args.target),
-                                             os.path.abspath(args.validation_source),
-                                             os.path.abspath(args.validation_target),
-                                             args.source_vocab,
-                                             args.target_vocab)
+        data_info = data_io.DataInfo(os.path.abspath(args.source),
+                                     os.path.abspath(args.target),
+                                     os.path.abspath(args.validation_source),
+                                     os.path.abspath(args.validation_target),
+                                     args.source_vocab,
+                                     args.target_vocab)
 
         # create data iterators
         max_seq_len_source = args.max_seq_len if args.max_seq_len_source is None else args.max_seq_len_source
         max_seq_len_target = args.max_seq_len if args.max_seq_len_target is None else args.max_seq_len_target
-        train_iter, eval_iter = sockeye.data_io.get_training_data_iters(source=data_info.source,
-                                                                        target=data_info.target,
-                                                                        validation_source=data_info.validation_source,
-                                                                        validation_target=data_info.validation_target,
-                                                                        vocab_source=vocab_source,
-                                                                        vocab_target=vocab_target,
-                                                                        batch_size=args.batch_size,
-                                                                        fill_up=args.fill_up,
-                                                                        max_seq_len_source=max_seq_len_source,
-                                                                        max_seq_len_target=max_seq_len_target,
-                                                                        bucketing=not args.no_bucketing,
-                                                                        bucket_width=args.bucket_width)
+        train_iter, eval_iter = data_io.get_training_data_iters(source=data_info.source,
+                                                                target=data_info.target,
+                                                                validation_source=data_info.validation_source,
+                                                                validation_target=data_info.validation_target,
+                                                                vocab_source=vocab_source,
+                                                                vocab_target=vocab_target,
+                                                                batch_size=args.batch_size,
+                                                                fill_up=args.fill_up,
+                                                                max_seq_len_source=max_seq_len_source,
+                                                                max_seq_len_target=max_seq_len_target,
+                                                                bucketing=not args.no_bucketing,
+                                                                bucket_width=args.bucket_width)
 
         # learning rate scheduling
         learning_rate_half_life = none_if_negative(args.learning_rate_half_life)
         # TODO: The loading for continuation of the scheduler is done separately from the other parts
         if not resume_training:
-            lr_scheduler = sockeye.lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
-                                                                 args.checkpoint_frequency,
-                                                                 learning_rate_half_life,
-                                                                 args.learning_rate_reduce_factor,
-                                                                 args.learning_rate_reduce_num_not_improved)
+            lr_scheduler_instance = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
+                                                                  args.checkpoint_frequency,
+                                                                  learning_rate_half_life,
+                                                                  args.learning_rate_reduce_factor,
+                                                                  args.learning_rate_reduce_num_not_improved)
         else:
             with open(os.path.join(training_state_dir, C.SCHEDULER_STATE_NAME), "rb") as fp:
-                lr_scheduler = pickle.load(fp)
+                lr_scheduler_instance = pickle.load(fp)
 
         # model configuration
         num_embed_source = args.num_embed if args.num_embed_source is None else args.num_embed_source
         num_embed_target = args.num_embed if args.num_embed_target is None else args.num_embed_target
+
+        config_rnn = rnn.RNNConfig(cell_type=args.rnn_cell_type,
+                                   num_hidden=args.rnn_num_hidden,
+                                   num_layers=args.rnn_num_layers,
+                                   dropout=args.dropout,
+                                   residual=args.rnn_residual_connections,
+                                   forget_bias=args.rnn_forget_bias)
+
+        config_conv = None
+        if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
+            config_conv = encoder.ConvolutionalEmbeddingConfig(num_embed=num_embed_source,
+                                                               max_filter_width=args.conv_embed_max_filter_width,
+                                                               num_filters=args.conv_embed_num_filters,
+                                                               pool_stride=args.conv_embed_pool_stride,
+                                                               num_highway_layers=args.conv_embed_num_highway_layers,
+                                                               dropout=args.dropout)
+
+        config_encoder = encoder.RecurrentEncoderConfig(vocab_size=vocab_source_size,
+                                                        num_embed=num_embed_source,
+                                                        rnn_config=config_rnn,
+                                                        conv_config=config_conv)
+
+        config_decoder = decoder.RecurrentDecoderConfig(vocab_size=vocab_target_size,
+                                                        num_embed=num_embed_target,
+                                                        rnn_config=config_rnn,
+                                                        dropout=args.dropout,
+                                                        weight_tying=args.weight_tying,
+                                                        context_gating=args.context_gating,
+                                                        layer_normalization=args.layer_normalization)
+
         attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
-        model_config = sockeye.model.ModelConfig(max_seq_len=max_seq_len_source,
-                                                 vocab_source_size=vocab_source_size,
-                                                 vocab_target_size=vocab_target_size,
-                                                 num_embed_source=num_embed_source,
-                                                 num_embed_target=num_embed_target,
-                                                 attention_type=args.attention_type,
-                                                 attention_num_hidden=attention_num_hidden,
-                                                 attention_coverage_type=args.attention_coverage_type,
-                                                 attention_coverage_num_hidden=args.attention_coverage_num_hidden,
-                                                 attention_use_prev_word=args.attention_use_prev_word,
-                                                 dropout=args.dropout,
-                                                 encoder=args.encoder,
-                                                 conv_embed_max_filter_width=args.conv_embed_max_filter_width,
-                                                 conv_embed_num_filters=args.conv_embed_num_filters,
-                                                 conv_embed_pool_stride=args.conv_embed_pool_stride,
-                                                 conv_embed_num_highway_layers=args.conv_embed_num_highway_layers,
-                                                 rnn_cell_type=args.rnn_cell_type,
-                                                 rnn_num_layers=args.rnn_num_layers,
-                                                 rnn_num_hidden=args.rnn_num_hidden,
-                                                 rnn_residual_connections=args.rnn_residual_connections,
-                                                 weight_tying=args.weight_tying,
-                                                 context_gating=args.context_gating,
-                                                 lexical_bias=args.lexical_bias,
-                                                 learn_lexical_bias=args.learn_lexical_bias,
-                                                 data_info=data_info,
-                                                 loss=args.loss,
-                                                 normalize_loss=args.normalize_loss,
-                                                 smoothed_cross_entropy_alpha=args.smoothed_cross_entropy_alpha,
-                                                 layer_normalization=args.layer_normalization)
+        config_coverage = None
+        if args.attention_type == "coverage":
+            config_coverage = coverage.CoverageConfig(type=args.attention_coverage_type,
+                                                      num_hidden=args.attention_coverage_num_hidden,
+                                                      layer_normalization=args.layer_normalization)
+        config_attention = attention.AttentionConfig(type=args.attention_type,
+                                                     num_hidden=attention_num_hidden,
+                                                     input_previous_word=args.attention_use_prev_word,
+                                                     rnn_num_hidden=config_rnn.num_hidden,
+                                                     layer_normalization=args.layer_normalization,
+                                                     config_coverage=config_coverage)
+
+        config_loss = loss.LossConfig(type=args.loss,
+                                      vocab_size=vocab_target_size,
+                                      normalize=args.normalize_loss,
+                                      smoothed_cross_entropy_alpha=args.smoothed_cross_entropy_alpha)
+
+        model_config = model.ModelConfig(max_seq_len=max_seq_len_source,
+                                         vocab_source_size=vocab_source_size,
+                                         vocab_target_size=vocab_target_size,
+                                         config_encoder=config_encoder,
+                                         config_decoder=config_decoder,
+                                         config_attention=config_attention,
+                                         config_loss=config_loss,
+                                         lexical_bias=args.lexical_bias,
+                                         learn_lexical_bias=args.learn_lexical_bias)
+        model_config.freeze()
 
         # create training model
-        model = sockeye.training.TrainingModel(model_config=model_config,
-                                               context=context,
-                                               train_iter=train_iter,
-                                               fused=args.use_fused_rnn,
-                                               bucketing=not args.no_bucketing,
-                                               lr_scheduler=lr_scheduler,
-                                               rnn_forget_bias=args.rnn_forget_bias)
+        training_model = training.TrainingModel(config=model_config,
+                                                context=context,
+                                                train_iter=train_iter,
+                                                fused=args.use_fused_rnn,
+                                                bucketing=not args.no_bucketing,
+                                                lr_scheduler=lr_scheduler_instance)
 
         # We may consider loading the params in TrainingModule, for consistency
         # with the training state saving
         if resume_training:
             logger.info("Found partial training in directory %s. Resuming from saved state.", training_state_dir)
-            model.load_params_from_file(os.path.join(training_state_dir, C.TRAINING_STATE_PARAMS_NAME))
+            training_model.load_params_from_file(os.path.join(training_state_dir, C.TRAINING_STATE_PARAMS_NAME))
         elif args.params:
             logger.info("Training will initialize from parameters loaded from '%s'", args.params)
-            model.load_params_from_file(args.params)
+            training_model.load_params_from_file(args.params)
 
-        lexicon = sockeye.lexicon.initialize_lexicon(args.lexical_bias,
-                                                     vocab_source, vocab_target) if args.lexical_bias else None
+        lexicon_array = lexicon.initialize_lexicon(args.lexical_bias,
+                                                   vocab_source, vocab_target) if args.lexical_bias else None
 
-        initializer = sockeye.initializer.get_initializer(args.rnn_h2h_init, lexicon=lexicon)
+        weight_initializer = initializer.get_initializer(args.rnn_h2h_init, lexicon=lexicon_array)
 
         optimizer = args.optimizer
         optimizer_params = {'wd': args.weight_decay,
                             "learning_rate": args.initial_learning_rate}
-        if lr_scheduler is not None:
-            optimizer_params["lr_scheduler"] = lr_scheduler
+        if lr_scheduler_instance is not None:
+            optimizer_params["lr_scheduler"] = lr_scheduler_instance
         clip_gradient = none_if_negative(args.clip_gradient)
         if clip_gradient is not None:
             optimizer_params["clip_gradient"] = clip_gradient
@@ -281,19 +308,19 @@ def main():
         logger.info("Optimizer: %s", optimizer)
         logger.info("Optimizer Parameters: %s", optimizer_params)
 
-        model.fit(train_iter, eval_iter,
-                  output_folder=output_folder,
-                  max_params_files_to_keep=args.keep_last_params,
-                  metrics=args.metrics,
-                  initializer=initializer,
-                  max_updates=args.max_updates,
-                  checkpoint_frequency=args.checkpoint_frequency,
-                  optimizer=optimizer, optimizer_params=optimizer_params,
-                  optimized_metric=args.optimized_metric,
-                  max_num_not_improved=args.max_num_checkpoint_not_improved,
-                  min_num_epochs=args.min_num_epochs,
-                  monitor_bleu=args.monitor_bleu,
-                  use_tensorboard=args.use_tensorboard)
+        training_model.fit(train_iter, eval_iter,
+                           output_folder=output_folder,
+                           max_params_files_to_keep=args.keep_last_params,
+                           metrics=args.metrics,
+                           initializer=weight_initializer,
+                           max_updates=args.max_updates,
+                           checkpoint_frequency=args.checkpoint_frequency,
+                           optimizer=optimizer, optimizer_params=optimizer_params,
+                           optimized_metric=args.optimized_metric,
+                           max_num_not_improved=args.max_num_checkpoint_not_improved,
+                           min_num_epochs=args.min_num_epochs,
+                           monitor_bleu=args.monitor_bleu,
+                           use_tensorboard=args.use_tensorboard)
 
 
 if __name__ == "__main__":

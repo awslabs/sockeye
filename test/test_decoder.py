@@ -13,11 +13,13 @@
 
 import mxnet as mx
 import pytest
-import sockeye.decoder
-import sockeye.attention
-import sockeye.constants as C
-from test.test_utils import gaussian_vector, integer_vector
 
+import sockeye.attention
+import sockeye.rnn
+import sockeye.constants as C
+import sockeye.coverage
+import sockeye.decoder
+from test.test_utils import gaussian_vector, integer_vector
 
 step_tests = [(C.GRU_TYPE, True), (C.LSTM_TYPE, False)]
 
@@ -28,8 +30,7 @@ def test_step(cell_type, context_gating,
               encoder_num_hidden=5,
               decoder_num_hidden=5):
 
-    attention_num_hidden, vocab_size, num_layers, \
-        batch_size, source_seq_len, coverage_num_hidden = 2, 10, 1, 10, 7, 2
+    vocab_size, batch_size, source_seq_len = 10, 10, 7,
 
     # (batch_size, source_seq_len, encoder_num_hidden)
     source = mx.sym.Variable("source")
@@ -46,34 +47,37 @@ def test_step(cell_type, context_gating,
     # List(mx.sym.Symbol(batch_size, decoder_num_hidden)
     states_shape = (batch_size, decoder_num_hidden)
 
-    attention = sockeye.attention.get_attention(input_previous_word=False,
-                                                attention_type="coverage",
-                                                attention_num_hidden=attention_num_hidden,
-                                                rnn_num_hidden=decoder_num_hidden,
-                                                max_seq_len=source_seq_len,
-                                                attention_coverage_type="tanh",
-                                                attention_coverage_num_hidden=coverage_num_hidden,
-                                                layer_normalization=False)
+    config_coverage = sockeye.coverage.CoverageConfig(type="tanh",
+                                                      num_hidden=2,
+                                                      layer_normalization=False)
+    config_attention = sockeye.attention.AttentionConfig(type="coverage",
+                                                         num_hidden=2,
+                                                         input_previous_word=False,
+                                                         rnn_num_hidden=decoder_num_hidden,
+                                                         layer_normalization=False,
+                                                         config_coverage=config_coverage)
+    attention = sockeye.attention.get_attention(config_attention, max_seq_len=source_seq_len)
     attention_state = attention.get_initial_state(source_length, source_seq_len)
     attention_func = attention.on(source, source_length, source_seq_len)
 
-    decoder = sockeye.decoder.get_decoder(num_embed=num_embed,
-                                          vocab_size=vocab_size,
-                                          num_layers=num_layers,
-                                          rnn_num_hidden=decoder_num_hidden,
-                                          attention=attention,
-                                          cell_type=cell_type,
-                                          residual=False,
-                                          forget_bias=0.,
-                                          dropout=0.,
-                                          weight_tying=False,
-                                          lexicon=None,
-                                          context_gating=context_gating)
+    config_rnn = sockeye.rnn.RNNConfig(cell_type=cell_type,
+                                       num_hidden=decoder_num_hidden,
+                                       num_layers=1,
+                                       dropout=0.,
+                                       residual=False,
+                                       forget_bias=0.)
+
+    config_decoder = sockeye.decoder.RecurrentDecoderConfig(vocab_size=vocab_size,
+                                                            num_embed=num_embed,
+                                                            rnn_config=config_rnn,
+                                                            context_gating=context_gating)
+
+    decoder = sockeye.decoder.get_recurrent_decoder(config_decoder, attention)
 
     if cell_type == C.GRU_TYPE:
-        layer_states = [gaussian_vector(shape=states_shape, return_symbol=True) for _ in range(num_layers)]
+        layer_states = [gaussian_vector(shape=states_shape, return_symbol=True) for _ in range(config_rnn.num_layers)]
     elif cell_type == C.LSTM_TYPE:
-        layer_states = [gaussian_vector(shape=states_shape, return_symbol=True) for _ in range(num_layers*2)]
+        layer_states = [gaussian_vector(shape=states_shape, return_symbol=True) for _ in range(config_rnn.num_layers*2)]
 
     state, attention_state = decoder._step(word_vec_prev=word_vec_prev,
                                            state=sockeye.decoder.DecoderState(hidden_prev, layer_states),
@@ -95,4 +99,4 @@ def test_step(cell_type, context_gating,
 
     assert hidden_result.shape == hidden_prev_shape
     assert attention_probs_result.shape == (batch_size, source_seq_len)
-    assert attention_dynamic_source_result.shape == (batch_size, source_seq_len, coverage_num_hidden)
+    assert attention_dynamic_source_result.shape == (batch_size, source_seq_len, config_coverage.num_hidden)

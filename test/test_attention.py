@@ -32,14 +32,14 @@ def test_attention(attention_type,
     source_length = mx.sym.Variable("source_length")
     source_seq_len = 3
 
-    attention = sockeye.attention.get_attention(input_previous_word=False,
-                                                attention_type=attention_type,
-                                                attention_num_hidden=2,
-                                                rnn_num_hidden=2,
-                                                max_seq_len=source_seq_len,
-                                                attention_coverage_type="",
-                                                attention_coverage_num_hidden=2,
-                                                layer_normalization=False)
+    config_attention = sockeye.attention.AttentionConfig(type=attention_type,
+                                                         num_hidden=2,
+                                                         input_previous_word=False,
+                                                         rnn_num_hidden=2,
+                                                         layer_normalization=False,
+                                                         config_coverage=None)
+    attention = sockeye.attention.get_attention(config_attention, max_seq_len=source_seq_len)
+
     attention_state = attention.get_initial_state(source_length, source_seq_len)
     attention_func = attention.on(source, source_length, source_seq_len)
     attention_input = attention.make_input(0, mx.sym.Variable("word_vec_prev"), mx.sym.Variable("decoder_state"))
@@ -80,14 +80,17 @@ def test_coverage_attention(attention_coverage_type,
     source_length = mx.sym.Variable("source_length")
     source_seq_len = 10
 
-    attention = sockeye.attention.get_attention(input_previous_word=False,
-                                                attention_type="coverage",
-                                                attention_num_hidden=5,
-                                                rnn_num_hidden=0,
-                                                max_seq_len=source_seq_len,
-                                                attention_coverage_type=attention_coverage_type,
-                                                attention_coverage_num_hidden=attention_coverage_num_hidden,
-                                                layer_normalization=False)
+    config_coverage = sockeye.coverage.CoverageConfig(type=attention_coverage_type,
+                                                      num_hidden=attention_coverage_num_hidden,
+                                                      layer_normalization=False)
+    config_attention = sockeye.attention.AttentionConfig(type="coverage",
+                                                         num_hidden=5,
+                                                         input_previous_word=False,
+                                                         rnn_num_hidden=0,
+                                                         layer_normalization=False,
+                                                         config_coverage=config_coverage)
+    attention = sockeye.attention.get_attention(config_attention, max_seq_len=source_seq_len)
+
     attention_state = attention.get_initial_state(source_length, source_seq_len)
     attention_func = attention.on(source, source_length, source_seq_len)
     attention_input = attention.make_input(0, mx.sym.Variable("word_vec_prev"), mx.sym.Variable("decoder_state"))
@@ -132,14 +135,14 @@ def test_last_state_attention(batch_size=1,
     source_length = mx.sym.Variable("source_length")
     source_seq_len = 3
 
-    attention = sockeye.attention.get_attention(input_previous_word=False,
-                                                attention_type="fixed",
-                                                attention_num_hidden=0,
-                                                rnn_num_hidden=0,
-                                                max_seq_len=source_seq_len,
-                                                attention_coverage_type="",
-                                                attention_coverage_num_hidden=0,
-                                                layer_normalization=False)
+    config_attention = sockeye.attention.AttentionConfig(type="fixed",
+                                                         num_hidden=0,
+                                                         input_previous_word=False,
+                                                         rnn_num_hidden=0,
+                                                         layer_normalization=False,
+                                                         config_coverage=None)
+    attention = sockeye.attention.get_attention(config_attention, max_seq_len=source_seq_len)
+
     attention_state = attention.get_initial_state(source_length, source_seq_len)
     attention_func = attention.on(source, source_length, source_seq_len)
     attention_input = attention.make_input(0, mx.sym.Variable("word_vec_prev"), mx.sym.Variable("decoder_state"))
