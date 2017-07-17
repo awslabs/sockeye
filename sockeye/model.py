@@ -33,7 +33,7 @@ class ModelConfig(Config):
     Add new model parameters here. If you want backwards compatibility for models trained with code that did not
     contain these parameters, provide a reasonable default under default_values.
     """
-    yaml_tag = u"!ModelConfig"
+    yaml_tag = "!ModelConfig"
 
     def __init__(self,
                  max_seq_len: int,

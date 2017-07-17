@@ -38,7 +38,7 @@ class AttentionConfig(config.Config):
     :param layer_normalization: Apply layer normalization to MLP attention.
     :param config_coverage: Optional coverage configuration.
     """
-    yaml_tag = u"!AttentionConfig"
+    yaml_tag = "!AttentionConfig"
 
     def __init__(self,
                  type: str,

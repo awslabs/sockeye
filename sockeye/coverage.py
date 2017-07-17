@@ -36,7 +36,7 @@ class CoverageConfig(config.Config):
     :param num_hidden: Number of hidden units for coverage networks.
     :param layer_normalization: Apply layer normalization to coverage networks.
     """
-    yaml_tag = u"!AttentionConfig"
+    yaml_tag = "!AttentionConfig"
 
     def __init__(self,
                  type: str,

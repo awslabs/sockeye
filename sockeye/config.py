@@ -18,40 +18,48 @@ import yaml
 
 class Config(yaml.YAMLObject):
     """
-    Base configuration object that supports freezing of members and JSON (de-)serialization.
+    Base configuration object that supports freezing of members and YAML (de-)serialization.
     Actual Configuration should subclass this object.
     """
-    yaml_tag = u'!Config'
+    yaml_tag = '!Config'
 
     def __init__(self):
-        self._frozen = False
+        self.__add_frozen()
 
     def __setattr__(self, key, value):
-        if hasattr(self, '_frozen') and self._frozen:
+        if hasattr(self, '_frozen') and getattr(self, '_frozen'):
             raise AttributeError("Cannot set '%s' in frozen config" % key)
+        if value == self:
+            raise AttributeError("Cannot set self as attribute")
         object.__setattr__(self, key, value)
 
     def freeze(self):
         """
         Freezes this Config object, disallowing modification or addition of any parameters.
         """
-        if hasattr(self, '_frozen') and self._frozen:  # It's ok to freeze an already frozen config
+        if getattr(self, '_frozen'):
             return
-        self._frozen = True
+        object.__setattr__(self, "_frozen", True)
         for k, v in self.__dict__.items():
-            if isinstance(v, Config):
+            if isinstance(v, Config) and k != "self":
                 v.freeze()  # pylint: disable= no-member
 
     def __repr__(self):
-        return "Config[%s]" % ", ".join("%s=%s" %(str(k), str(v)) for k, v in sorted(self.__dict__.items()))
+        return "Config[%s]" % ", ".join("%s=%s" % (str(k), str(v)) for k, v in sorted(self.__dict__.items()))
 
     def __del_frozen(self):
+        """
+        Removes _frozen attribute from this instance and all its child configurations.
+        """
         self.__delattr__('_frozen')
         for attr, val in self.__dict__.items():
             if isinstance(val, Config) and hasattr(val, '_frozen'):
                 val.__del_frozen()  # pylint: disable= no-member
 
     def __add_frozen(self):
+        """
+        Adds _frozen attribute to this instance and all its child configurations.
+        """
         setattr(self, "_frozen", False)
         for attr, val in self.__dict__.items():
             if isinstance(val, Config):
@@ -59,24 +67,24 @@ class Config(yaml.YAMLObject):
 
     def save(self, fname: str):
         """
-        Saves this Config to a file called fname.
+        Saves this Config (without the frozen state) to a file called fname.
 
         :param fname: Name of file to store this Config in.
         """
         obj = copy.deepcopy(self)
         obj.__del_frozen()
-        with open(fname, 'w') as fout:
-            yaml.dump(obj, fout, default_flow_style=False)
+        with open(fname, 'w') as out:
+            yaml.dump(obj, out, default_flow_style=False)
 
     @staticmethod
     def load(fname: str) -> 'Config':
         """
-        Returns a Config object loaded from a file.
+        Returns a Config object loaded from a file. The loaded object is not frozen.
 
         :param fname: Name of file to load the Config from.
         :return: Configuration.
         """
-        with open(fname) as fin:
-            obj = yaml.load(fin)
+        with open(fname) as inp:
+            obj = yaml.load(inp)
             obj.__add_frozen()
             return obj

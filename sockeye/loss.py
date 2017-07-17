@@ -32,7 +32,7 @@ class LossConfig(config.Config):
     :param normalize: Whether to normalize loss value.
     :param smoothed_cross_entropy_alpha: Smoothing value for smoothed-cross-entropy loss.
     """
-    yaml_tag = u'!LossConfig'
+    yaml_tag = '!LossConfig'
 
     def __init__(self,
                  type: str,

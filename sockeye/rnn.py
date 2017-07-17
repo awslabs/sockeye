@@ -32,7 +32,7 @@ class RNNConfig(Config):
     :param residual: Whether to add residual connections between multi-layered RNNs.
     :param forget_bias: Initial value of forget biases.
     """
-    yaml_tag = u'!RNNConfig'
+    yaml_tag = '!RNNConfig'
 
     def __init__(self,
                  cell_type: str,
