@@ -148,10 +148,42 @@ def add_model_parameters(params):
                               type=int_greater_or_equal(0),
                               default=50000,
                               help='Maximum vocabulary size. Default: %(default)s.')
+    model_params.add_argument('--num-words-source',
+                              type=int_greater_or_equal(0),
+                              default=None,
+                              help='Maximum source vocabulary size. Overrides --num-words. Default: %(default)s')
+    model_params.add_argument('--num-words-target',
+                              type=int_greater_or_equal(0),
+                              default=None,
+                              help='Maximum target vocabulary size. Overrides --num-words. Default: %(default)s')
     model_params.add_argument('--word-min-count',
                               type=int_greater_or_equal(1),
                               default=1,
                               help='Minimum frequency of words to be included in vocabularies. Default: %(default)s.')
+
+    model_params.add_argument('--encoder',
+                              choices=[C.RNN_NAME, C.RNN_WITH_CONV_EMBED_NAME],
+                              default=C.RNN_NAME,
+                              help="Type of encoder. Default: %(default)s.")
+
+    model_params.add_argument('--conv-embed-max-filter-width',
+                              type=int_greater_or_equal(1),
+                              default=8,
+                              help="Maximum filter width for ConvolutionalEmbeddingEncoder. Default: %(default)s.")
+    model_params.add_argument('--conv-embed-num-filters',
+                              nargs='+',
+                              type=int,
+                              default=[200, 200, 250, 250, 300, 300, 300, 300],
+                              help="List of number of filters of each width 1..max for ConvolutionalEmbeddingEncoder. "
+                              "Default: %(default)s.")
+    model_params.add_argument('--conv-embed-pool-stride',
+                              type=int_greater_or_equal(1),
+                              default=5,
+                              help="Pooling stride for ConvolutionalEmbeddingEncoder. Default: %(default)s.")
+    model_params.add_argument('--conv-embed-num-highway-layers',
+                              type=int_greater_or_equal(0),
+                              default=4,
+                              help="Number of highway layers for ConvolutionalEmbeddingEncoder. Default: %(default)s.")
 
     model_params.add_argument('--rnn-num-layers',
                               type=int_greater_or_equal(1),

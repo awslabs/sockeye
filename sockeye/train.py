@@ -156,10 +156,12 @@ def main():
             vocab_source = sockeye.vocab.vocab_from_json_or_pickle(os.path.join(output_folder, C.VOCAB_SRC_NAME))
             vocab_target = sockeye.vocab.vocab_from_json_or_pickle(os.path.join(output_folder, C.VOCAB_TRG_NAME))
         else:
-            vocab_source = _build_or_load_vocab(args.source_vocab, args.source, args.num_words, args.word_min_count)
+            num_words_source = args.num_words if args.num_words_source is None else args.num_words_source
+            vocab_source = _build_or_load_vocab(args.source_vocab, args.source, num_words_source, args.word_min_count)
             sockeye.vocab.vocab_to_json(vocab_source, os.path.join(output_folder, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
 
-            vocab_target = _build_or_load_vocab(args.target_vocab, args.target, args.num_words, args.word_min_count)
+            num_words_target = args.num_words if args.num_words_target is None else args.num_words_target
+            vocab_target = _build_or_load_vocab(args.target_vocab, args.target, num_words_target, args.word_min_count)
             sockeye.vocab.vocab_to_json(vocab_target, os.path.join(output_folder, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX)
 
         vocab_source_size = len(vocab_source)
@@ -217,6 +219,11 @@ def main():
                                                  attention_coverage_num_hidden=args.attention_coverage_num_hidden,
                                                  attention_use_prev_word=args.attention_use_prev_word,
                                                  dropout=args.dropout,
+                                                 encoder=args.encoder,
+                                                 conv_embed_max_filter_width=args.conv_embed_max_filter_width,
+                                                 conv_embed_num_filters=args.conv_embed_num_filters,
+                                                 conv_embed_pool_stride=args.conv_embed_pool_stride,
+                                                 conv_embed_num_highway_layers=args.conv_embed_num_highway_layers,
                                                  rnn_cell_type=args.rnn_cell_type,
                                                  rnn_num_layers=args.rnn_num_layers,
                                                  rnn_num_hidden=args.rnn_num_hidden,

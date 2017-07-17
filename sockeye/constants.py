@@ -32,10 +32,15 @@ BIDIRECTIONALRNN_PREFIX = ENCODER_PREFIX + "birnn_"
 STACKEDRNN_PREFIX = ENCODER_PREFIX + "rnn_"
 FORWARD_PREFIX = "forward_"
 REVERSE_PREFIX = "reverse_"
+CHAR_SEQ_ENCODER_PREFIX = ENCODER_PREFIX + "char_"
 
 # embedding prefixes
 SOURCE_EMBEDDING_PREFIX = "source_embed_"
 TARGET_EMBEDDING_PREFIX = "target_embed_"
+
+# encoder names (arguments)
+RNN_NAME = "rnn"
+RNN_WITH_CONV_EMBED_NAME = "rnn-with-conv-embed"
 
 # rnn types
 LSTM_TYPE = 'lstm'

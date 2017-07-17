@@ -363,7 +363,7 @@ class StackedRNNDecoder(Decoder):
 
         # embed and slice target words
         # target_embed: (batch_size, target_seq_len, num_target_embed)
-        target_embed = self.embedding.encode(target, None, target_seq_len)
+        target_embed, _, _ = self.embedding.encode(target, None, target_seq_len)
         # target_embed: target_seq_len * (batch_size, num_target_embed)
         target_embed = mx.sym.split(data=target_embed, num_outputs=target_seq_len, axis=1, squeeze_axis=True)
 
@@ -447,7 +447,7 @@ class StackedRNNDecoder(Decoder):
         :return: (predicted next-word distribution, decoder state, attention state).
         """
         # target side embedding
-        word_vec_prev = self.embedding.encode(word_id_prev, None, 1)
+        word_vec_prev, _, _ = self.embedding.encode(word_id_prev, None, 1)
 
         # state.hidden: (batch_size, rnn_num_hidden)
         # attention_state.dynamic_source: (batch_size, source_seq_len, coverage_num_hidden)

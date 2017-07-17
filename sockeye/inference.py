@@ -97,16 +97,20 @@ class InferenceModel(sockeye.model.SockeyeModel):
         # Encoder symbol & module
         source = mx.sym.Variable(C.SOURCE_NAME)
         source_length = mx.sym.Variable(C.SOURCE_LENGTH_NAME)
+        source_encoded_length = None
 
         def encoder_sym_gen(source_seq_len: int):
-            source_encoded = self.encoder.encode(source, source_length, seq_len=source_seq_len)
+            nonlocal source_encoded_length
+            (source_encoded,
+             source_encoded_length,
+             source_encoded_seq_len) = self.encoder.encode(source, source_length, source_seq_len)
             source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
 
             # initial decoder states
             decoder_hidden_init, decoder_init_states = self.decoder.compute_init_states(source_encoded,
-                                                                                        source_length)
+                                                                                        source_encoded_length)
             # initial attention state
-            attention_state = self.attention.get_initial_state(source_length, source_seq_len)
+            attention_state = self.attention.get_initial_state(source_encoded_length, source_encoded_seq_len)
 
             data_names = [C.SOURCE_NAME, C.SOURCE_LENGTH_NAME]
             label_names = []
@@ -137,7 +141,8 @@ class InferenceModel(sockeye.model.SockeyeModel):
                           C.HIDDEN_PREVIOUS_NAME] + layer_names
             label_names = []
 
-            attention_func = self.attention.on(source_encoded, source_length, source_seq_len)
+            source_encoded_seq_len = self.encoder.get_encoded_seq_len(source_seq_len)
+            attention_func = self.attention.on(source_encoded, source_encoded_length, source_encoded_seq_len)
 
             softmax_out, next_state, next_attention_state = \
                 self.decoder.predict(word_id_prev,
@@ -203,11 +208,12 @@ class InferenceModel(sockeye.model.SockeyeModel):
         :param input_length: The maximal source sentence length
         :return: A list of input shapes
         """
+        encoded_input_length = self.encoder.get_encoded_seq_len(input_length)
         shapes = [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
-                                 (self.beam_size, input_length, self.encoder.get_num_hidden()),
+                                 (self.beam_size, encoded_input_length, self.encoder.get_num_hidden()),
                                  layout=C.BATCH_MAJOR),
                   mx.io.DataDesc(C.SOURCE_DYNAMIC_PREVIOUS_NAME,
-                                 (self.beam_size, input_length, self.attention.dynamic_source_num_hidden),
+                                 (self.beam_size, encoded_input_length, self.attention.dynamic_source_num_hidden),
                                  layout=C.BATCH_MAJOR),
                   mx.io.DataDesc(C.SOURCE_LENGTH_NAME,
                                  (self.beam_size,),

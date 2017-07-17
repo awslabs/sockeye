@@ -39,6 +39,11 @@ ModelConfig = sockeye.utils.namedtuple_with_defaults('ModelConfig',
                                                       "attention_coverage_num_hidden",
                                                       "attention_use_prev_word",
                                                       "dropout",
+                                                      "encoder",
+                                                      "conv_embed_max_filter_width",
+                                                      "conv_embed_num_filters",
+                                                      "conv_embed_pool_stride",
+                                                      "conv_embed_num_highway_layers",
                                                       "rnn_cell_type",
                                                       "rnn_num_layers",
                                                       "rnn_num_hidden",
@@ -58,7 +63,12 @@ ModelConfig = sockeye.utils.namedtuple_with_defaults('ModelConfig',
                                                       "context_gating": False,
                                                       "loss": C.CROSS_ENTROPY,
                                                       "normalize_loss": False,
-                                                      "layer_normalization": False
+                                                      "layer_normalization": False,
+                                                      "encoder": C.RNN_NAME,
+                                                      "conv_embed_max_filter_width": 8,
+                                                      "conv_embed_num_filters": None,
+                                                      "conv_embed_pool_stride": 5,
+                                                      "conv_embed_num_highway_layers": 4,
                                                      })
 """
 ModelConfig defines model parameters defined at training time which are relevant to model inference.
@@ -145,13 +155,7 @@ class SockeyeModel:
         :param fused_encoder: Use FusedRNNCells in encoder.
         :param rnn_forget_bias: forget bias initialization for RNNs.
         """
-        self.encoder = sockeye.encoder.get_encoder(self.config.num_embed_source,
-                                                   self.config.vocab_source_size,
-                                                   self.config.rnn_num_layers,
-                                                   self.config.rnn_num_hidden,
-                                                   self.config.rnn_cell_type,
-                                                   self.config.rnn_residual_connections,
-                                                   self.config.dropout,
+        self.encoder = sockeye.encoder.get_encoder(self.config,
                                                    rnn_forget_bias,
                                                    fused_encoder)
 
