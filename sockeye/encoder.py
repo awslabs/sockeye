@@ -17,7 +17,7 @@ Encoders for sequence-to-sequence models.
 import logging
 
 from math import ceil, floor
-from typing import Callable, List, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import mxnet as mx
 
@@ -42,11 +42,13 @@ class RecurrentEncoderConfig(Config):
     def __init__(self,
                  vocab_size: int,
                  num_embed: int,
-                 rnn_config: rnn.RNNConfig) -> None:
+                 rnn_config: rnn.RNNConfig,
+                 conv_config: Optional['ConvolutionalEmbeddingConfig'] = None) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
         self.rnn_config = rnn_config
+        self.conv_config = conv_config
 
 
 def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool) -> 'Encoder':
@@ -65,15 +67,9 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool) -> 'Encod
                               vocab_size=config.vocab_size,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
                               dropout=config.rnn_config.dropout))
-    # FIXME
-    if config.encoder == C.RNN_WITH_CONV_EMBED_NAME:
-        encoders.append(ConvolutionalEmbeddingEncoder(num_embed=config.num_embed_source,
-                                                      max_filter_width=config.conv_embed_max_filter_width,
-                                                      num_filters=config.conv_embed_num_filters,
-                                                      pool_stride=config.conv_embed_pool_stride,
-                                                      num_highway_layers=config.conv_embed_num_highway_layers,
-                                                      prefix=C.CHAR_SEQ_ENCODER_PREFIX,
-                                                      dropout=config.dropout))
+    if config.conv_config is not None:
+        encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
+
     encoders.append(BatchMajor2TimeMajor())
 
     encoder_class = FusedRecurrentEncoder if fused else RecurrentEncoder
@@ -455,6 +451,35 @@ class BiDirectionalRNNEncoder(Encoder):
         return self.forward_rnn.get_rnn_cells() + self.reverse_rnn.get_rnn_cells()
 
 
+class ConvolutionalEmbeddingConfig(Config):
+    """
+    Convolutional embedding encoder configuration.
+
+    :param num_embed: Input embedding size.
+    :param max_filter_width: Maximum filter width for convolutions.
+    :param num_filters: Number of filters of each width.
+    :param pool_stride: Stride for pooling layer after convolutions.
+    :param num_highway_layers: Number of highway layers for segment embeddings.
+    :param dropout: Dropout probability.
+    """
+    yaml_tag = u"!ConvolutionalEmbeddingConfig"
+
+    def __init__(self,
+                 num_embed: int,
+                 max_filter_width: int = 8,
+                 num_filters: Tuple[int] = (200, 200, 250, 250, 300, 300, 300, 300),
+                 pool_stride: int = 5,
+                 num_highway_layers: int = 4,
+                 dropout: float = 0.0) -> None:
+        super().__init__()
+        self.num_embed = num_embed
+        self.max_filter_width = max_filter_width
+        self.num_filters = num_filters
+        self.pool_stride = pool_stride
+        self.num_highway_layers = num_highway_layers
+        self.dropout = dropout
+
+
 class ConvolutionalEmbeddingEncoder(Encoder):
     """
     An encoder developed to map a sequence of character embeddings to a shorter sequence of segment
@@ -463,34 +488,22 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         * "Fully Character-Level Neural Machine Translation without Explicit Segmentation"
           Jason Lee; Kyunghyun Cho; Thomas Hofmann (https://arxiv.org/pdf/1610.03017.pdf)
 
-    :param num_embed: Input embedding size.
-    :param max_filter_width: Maximum filter width for convolutions.
-    :param num_filters: Number of filters of each width.
-    :param pool_stride: Stride for pooling layer after convolutions.
-    :param num_highway_layers: Number of highway layers for segment embeddings.
+    :param config: Convolutional embedding config.
     :param prefix: Name prefix for symbols of this encoder.
-    :param dropout: Dropout probability.
     """
 
     def __init__(self,
-                 num_embed: int,
-                 max_filter_width: int = 8,
-                 num_filters: List[int] = None,
-                 pool_stride: int = 5,
-                 num_highway_layers: int = 4,
-                 prefix: str = C.CHAR_SEQ_ENCODER_PREFIX,
-                 dropout: float = 0.):
-        if not num_filters:
-            num_filters = [200, 200, 250, 250, 300, 300, 300, 300]
-        check_condition(len(num_filters) == max_filter_width, "num_filters must have max_filter_width elements.")
-        self.num_embed = num_embed
-        self.max_filter_width = max_filter_width
-        self.num_filters = num_filters[:]
-        self.pool_stride = pool_stride
-        self.num_highway_layers = num_highway_layers
+                 config: ConvolutionalEmbeddingConfig,
+                 prefix: str = C.CHAR_SEQ_ENCODER_PREFIX):
+        utils.check_condition(len(config.num_filters) == config.max_filter_width,
+                              "num_filters must have max_filter_width elements.")
+        self.num_embed = config.num_embed
+        self.max_filter_width = config.max_filter_width
+        self.num_filters = config.num_filters[:]
+        self.pool_stride = config.pool_stride
+        self.num_highway_layers = config.num_highway_layers
         self.prefix = prefix
-        self.dropout = dropout
-        self.prefix = prefix
+        self.dropout = config.dropout
 
         self.conv_weight = {filter_width: mx.sym.Variable("%s%s%d%s" % (self.prefix, "conv_", filter_width, "_weight"))
                             for filter_width in range(1, self.max_filter_width + 1)}

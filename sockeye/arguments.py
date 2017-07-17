@@ -162,7 +162,7 @@ def add_model_parameters(params):
                               help='Minimum frequency of words to be included in vocabularies. Default: %(default)s.')
 
     model_params.add_argument('--encoder',
-                              choices=[C.RNN_NAME, C.RNN_WITH_CONV_EMBED_NAME],
+                              choices=C.ENCODERS,
                               default=C.RNN_NAME,
                               help="Type of encoder. Default: %(default)s.")
 
@@ -173,7 +173,7 @@ def add_model_parameters(params):
     model_params.add_argument('--conv-embed-num-filters',
                               nargs='+',
                               type=int,
-                              default=[200, 200, 250, 250, 300, 300, 300, 300],
+                              default=(200, 200, 250, 250, 300, 300, 300, 300),
                               help="List of number of filters of each width 1..max for ConvolutionalEmbeddingEncoder. "
                               "Default: %(default)s.")
     model_params.add_argument('--conv-embed-pool-stride',

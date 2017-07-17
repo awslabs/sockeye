@@ -215,9 +215,19 @@ def main():
                                    residual=args.rnn_residual_connections,
                                    forget_bias=args.rnn_forget_bias)
 
+        config_conv = None
+        if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
+            config_conv = encoder.ConvolutionalEmbeddingConfig(num_embed=num_embed_source,
+                                                               max_filter_width=args.conv_embed_max_filter_width,
+                                                               num_filters=args.conv_embed_num_filters,
+                                                               pool_stride=args.conv_embed_pool_stride,
+                                                               num_highway_layers=args.conv_embed_num_highway_layers,
+                                                               dropout=args.dropout)
+
         config_encoder = encoder.RecurrentEncoderConfig(vocab_size=vocab_source_size,
                                                         num_embed=num_embed_source,
-                                                        rnn_config=config_rnn)
+                                                        rnn_config=config_rnn,
+                                                        conv_config=config_conv)
 
         config_decoder = decoder.RecurrentDecoderConfig(vocab_size=vocab_target_size,
                                                         num_embed=num_embed_target,

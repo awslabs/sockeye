@@ -70,7 +70,8 @@ def test_device_args(test_params, expected_params):
               lexical_bias=None, learn_lexical_bias=False, weight_tying=False, max_seq_len=100,
               max_seq_len_source=None, max_seq_len_target=None,
               attention_use_prev_word=False, context_gating=False, layer_normalization=False,
-              encoder=C.RNN_NAME, conv_embed_max_filter_width=8, conv_embed_num_filters=[200, 200, 250, 250, 300, 300, 300, 300],
+              encoder=C.RNN_NAME, conv_embed_max_filter_width=8,
+              conv_embed_num_filters=(200, 200, 250, 250, 300, 300, 300, 300),
               conv_embed_num_highway_layers=4, conv_embed_pool_stride=5)),
     ('--params test_params --num-words 10 --num-words-source 11 --num-words-target 12 --word-min-count 10 '
      '--rnn-num-layers 10 --rnn-cell-type gru '
