@@ -191,6 +191,7 @@ class TrainingModel(model.SockeyeModel):
                validation metrics.
         :return: Best score on validation data observed during training.
         """
+        self.save_version(output_folder)
         self.save_config(output_folder)
 
         self.module.bind(data_shapes=train_iter.provide_data, label_shapes=train_iter.provide_label,
