@@ -42,6 +42,7 @@ class _TrainingState:
     Stores the state of the training process. These are the variables that will
     be stored to disk when resuming training.
     """
+
     def __init__(self,
                  num_not_improved,
                  epoch,
@@ -204,17 +205,17 @@ class TrainingModel(model.SockeyeModel):
         self.module.init_optimizer(kvstore='device', optimizer=optimizer, optimizer_params=optimizer_params)
 
         cp_decoder = checkpoint_decoder.CheckpointDecoder(self.context[-1],
-                                                                          self.config.data_info.validation_source,
-                                                                          self.config.data_info.validation_target,
-                                                                          output_folder, self.config.max_seq_len,
-                                                                          limit=monitor_bleu) \
+                                                          self.config.config_data.validation_source,
+                                                          self.config.config_data.validation_target,
+                                                          output_folder, self.config.max_seq_len,
+                                                          limit=monitor_bleu) \
             if monitor_bleu else None
 
         logger.info("Training started.")
         self.training_monitor = callback.TrainingMonitor(train_iter.batch_size, output_folder,
-                                                                 optimized_metric=optimized_metric,
-                                                                 use_tensorboard=use_tensorboard,
-                                                                 checkpoint_decoder=cp_decoder)
+                                                         optimized_metric=optimized_metric,
+                                                         use_tensorboard=use_tensorboard,
+                                                         checkpoint_decoder=cp_decoder)
         self._fit(train_iter, val_iter, output_folder,
                   max_params_files_to_keep,
                   metrics=metrics,

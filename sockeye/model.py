@@ -14,12 +14,12 @@
 import copy
 import logging
 import os
-from typing import Tuple
 
-from sockeye.config import Config
 from sockeye import __version__
+from sockeye.config import Config
 from . import attention
 from . import constants as C
+from . import data_io
 from . import decoder
 from . import encoder
 from . import lexicon
@@ -34,10 +34,22 @@ class ModelConfig(Config):
     ModelConfig defines model parameters defined at training time which are relevant to model inference.
     Add new model parameters here. If you want backwards compatibility for models trained with code that did not
     contain these parameters, provide a reasonable default under default_values.
+
+    :param config_data: Used training data.
+    :param max_seq_len: Maximum sequence length to unroll during training.
+    :param vocab_source_size: Source vocabulary size.
+    :param vocab_target_size: Target vocabulary size.
+    :param config_encoder: Encoder configuration.
+    :param config_decoder: Decoder configuration.
+    :param config_attention: Attention configuration.
+    :param config_loss: Loss configuration.
+    :param lexical_bias: Use lexical biases.
+    :param learn_lexical_bias: Learn lexical biases during training.
     """
     yaml_tag = "!ModelConfig"
 
     def __init__(self,
+                 config_data: data_io.DataConfig,
                  max_seq_len: int,
                  vocab_source_size: int,
                  vocab_target_size: int,
@@ -48,6 +60,7 @@ class ModelConfig(Config):
                  lexical_bias: bool = False,
                  learn_lexical_bias: bool = False):
         super().__init__()
+        self.config_data = config_data
         self.max_seq_len = max_seq_len
         self.vocab_source_size = vocab_source_size
         self.vocab_target_size = vocab_target_size

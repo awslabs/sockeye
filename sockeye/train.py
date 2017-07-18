@@ -168,20 +168,20 @@ def main():
         vocab_target_size = len(vocab_target)
         logger.info("Vocabulary sizes: source=%d target=%d", vocab_source_size, vocab_target_size)
 
-        data_info = data_io.DataInfo(os.path.abspath(args.source),
-                                     os.path.abspath(args.target),
-                                     os.path.abspath(args.validation_source),
-                                     os.path.abspath(args.validation_target),
-                                     args.source_vocab,
-                                     args.target_vocab)
+        config_data = data_io.DataConfig(os.path.abspath(args.source),
+                                         os.path.abspath(args.target),
+                                         os.path.abspath(args.validation_source),
+                                         os.path.abspath(args.validation_target),
+                                         args.source_vocab,
+                                         args.target_vocab)
 
         # create data iterators
         max_seq_len_source = args.max_seq_len if args.max_seq_len_source is None else args.max_seq_len_source
         max_seq_len_target = args.max_seq_len if args.max_seq_len_target is None else args.max_seq_len_target
-        train_iter, eval_iter = data_io.get_training_data_iters(source=data_info.source,
-                                                                target=data_info.target,
-                                                                validation_source=data_info.validation_source,
-                                                                validation_target=data_info.validation_target,
+        train_iter, eval_iter = data_io.get_training_data_iters(source=config_data.source,
+                                                                target=config_data.target,
+                                                                validation_source=config_data.validation_source,
+                                                                validation_target=config_data.validation_target,
                                                                 vocab_source=vocab_source,
                                                                 vocab_target=vocab_target,
                                                                 batch_size=args.batch_size,
@@ -255,7 +255,8 @@ def main():
                                       normalize=args.normalize_loss,
                                       smoothed_cross_entropy_alpha=args.smoothed_cross_entropy_alpha)
 
-        model_config = model.ModelConfig(max_seq_len=max_seq_len_source,
+        model_config = model.ModelConfig(config_data=config_data,
+                                         max_seq_len=max_seq_len_source,
                                          vocab_source_size=vocab_source_size,
                                          vocab_target_size=vocab_target_size,
                                          config_encoder=config_encoder,
