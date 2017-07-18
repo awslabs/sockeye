@@ -14,8 +14,10 @@
 import copy
 import logging
 import os
+from typing import Tuple
 
 from sockeye.config import Config
+from sockeye import __version__
 from . import attention
 from . import constants as C
 from . import decoder
@@ -125,6 +127,17 @@ class SockeyeModel:
         for cell in self.rnn_cells:
             self.params = cell.pack_weights(self.params)
         logger.info('Loaded params from "%s"', fname)
+
+    @staticmethod
+    def save_version(folder: str):
+        """
+        Saves version to <folder>/version.
+
+        :param folder: Destination folder.
+        """
+        fname = os.path.join(folder, C.VERSION_NAME)
+        with open(fname, "w") as out:
+            out.write(__version__)
 
     def _build_model_components(self, max_seq_len: int, fused_encoder: bool):
         """

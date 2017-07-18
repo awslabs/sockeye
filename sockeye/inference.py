@@ -61,6 +61,10 @@ class InferenceModel(model.SockeyeModel):
         super().__init__(model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME)))
         fname_params = os.path.join(model_folder, C.PARAMS_NAME % checkpoint if checkpoint else C.PARAMS_BEST_NAME)
 
+        self.model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
+        logger.info("Model version: %s", self.model_version)
+        utils.check_version(self.model_version)
+
         if max_input_len is None:
             max_input_len = self.config.max_seq_len
         else:

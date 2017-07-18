@@ -80,6 +80,7 @@ MEASURE_SPEED_EVERY = 50  # measure speed and metrics every X batches
 
 DEFAULT_BEAM_SIZE = 5
 
+VERSION_NAME = "version"
 CONFIG_NAME = "config"
 LOG_NAME = "log"
 JSON_SUFFIX = ".json"
