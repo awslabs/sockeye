@@ -78,7 +78,8 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool) -> 'Encod
                                             layout=C.TIME_MAJOR))
 
     if config.rnn_config.num_layers > 1:
-        encoders.append(encoder_class(rnn_config=config.rnn_config,
+        remaining_rnn_config = config.rnn_config.copy(num_layers=config.rnn_config.num_layers - 1)
+        encoders.append(encoder_class(rnn_config=remaining_rnn_config,
                                       prefix=C.STACKEDRNN_PREFIX,
                                       layout=C.TIME_MAJOR))
 
