@@ -22,6 +22,7 @@ import mxnet as mx
 
 from sockeye.config import Config
 from . import constants as C
+from . import initializer
 from . import layers
 from . import rnn
 from . import utils
@@ -295,7 +296,7 @@ class Embedding(Encoder):
         """
         encodings = mx.sym.Variable("%spositional_encodings" % self.prefix,
                                     shape=(self.max_seq_len, self.num_embed),
-                                    init=PositionalEncodingInitializer(self.max_seq_len, self.num_embed))
+                                    init=initializer.PositionalEncodingInitializer(self.max_seq_len, self.num_embed))
         encodings = mx.sym.slice_axis(encodings, axis=0, begin=0, end=seq_len)
         encodings = mx.sym.BlockGrad(mx.sym.expand_dims(encodings, axis=0))
         return encodings
