@@ -50,7 +50,6 @@ class RNNConfig(Config):
         self.forget_bias = forget_bias
 
 
-
 def get_stacked_rnn(config: RNNConfig, prefix: str) -> mx.rnn.SequentialRNNCell:
     """
     Returns (stacked) RNN cell given parameters.
@@ -164,6 +163,30 @@ class LayerNormLSTMCell(mx.rnn.LSTMCell):
                                                          act_type="tanh"),
                                        name='%sout' % name)
         return next_h, [next_h, next_c]
+
+    def unpack_weights(self, args):
+        args = args.copy()
+        if not self._gate_names:
+            return args
+        h = self._num_hidden
+        for group_name in ['i2h', 'h2h']:
+            weight = args.pop('%s%s_weight'%(self._prefix, group_name))
+            for j, gate in enumerate(self._gate_names):
+                wname = '%s%s%s_weight' % (self._prefix, group_name, gate)
+                args[wname] = weight[j*h:(j+1)*h].copy()
+        return args
+
+    def pack_weights(self, args):
+        args = args.copy()
+        if not self._gate_names:
+            return args
+        for group_name in ['i2h', 'h2h']:
+            weight = []
+            for gate in self._gate_names:
+                wname = '%s%s%s_weight'%(self._prefix, group_name, gate)
+                weight.append(args.pop(wname))
+            args['%s%s_weight'%(self._prefix, group_name)] = mx.nd.concatenate(weight)
+        return args
 
 
 class LayerNormPerGateLSTMCell(mx.rnn.LSTMCell):
@@ -301,6 +324,30 @@ class LayerNormGRUCell(mx.rnn.GRUCell):
                                         name='%sout' % name)
 
         return next_h, [next_h]
+
+    def unpack_weights(self, args):
+        args = args.copy()
+        if not self._gate_names:
+            return args
+        h = self._num_hidden
+        for group_name in ['i2h', 'h2h']:
+            weight = args.pop('%s%s_weight'%(self._prefix, group_name))
+            for j, gate in enumerate(self._gate_names):
+                wname = '%s%s%s_weight' % (self._prefix, group_name, gate)
+                args[wname] = weight[j*h:(j+1)*h].copy()
+        return args
+
+    def pack_weights(self, args):
+        args = args.copy()
+        if not self._gate_names:
+            return args
+        for group_name in ['i2h', 'h2h']:
+            weight = []
+            for gate in self._gate_names:
+                wname = '%s%s%s_weight'%(self._prefix, group_name, gate)
+                weight.append(args.pop(wname))
+            args['%s%s_weight'%(self._prefix, group_name)] = mx.nd.concatenate(weight)
+        return args
 
 
 class LayerNormPerGateGRUCell(mx.rnn.GRUCell):
