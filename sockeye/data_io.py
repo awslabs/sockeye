@@ -25,8 +25,9 @@ from typing import Dict, Iterator, Iterable, List, NamedTuple, Optional, Tuple
 import mxnet as mx
 import numpy as np
 
-import sockeye.constants as C
 from sockeye.utils import check_condition
+from . import config
+from . import constants as C
 
 logger = logging.getLogger(__name__)
 
@@ -185,24 +186,26 @@ def get_training_data_iters(source: str, target: str,
     return train_iter, val_iter
 
 
-DataInfo = NamedTuple('DataInfo', [
-    ('source', str),
-    ('target', str),
-    ('validation_source', str),
-    ('validation_target', str),
-    ('vocab_source', str),
-    ('vocab_target', str),
-])
-"""
-Tuple to collect data information for training.
+class DataConfig(config.Config):
+    """
+    Stores data paths from training.
+    """
+    yaml_tag = "!DataConfig"
 
-:param source: Path to training source.
-:param target: Path to training target.
-:param validation_source: Path to validation source.
-:param validation_target: Path to validation target.
-:param vocab_source: Path to source vocabulary.
-:param vocab_target: Path to target vocabulary.
-"""
+    def __init__(self,
+                 source: str,
+                 target: str,
+                 validation_source: str,
+                 validation_target: str,
+                 vocab_source: str,
+                 vocab_target: str) -> None:
+        super().__init__()
+        self.source = source
+        self.target = target
+        self.validation_source = validation_source
+        self.validation_target = validation_target
+        self.vocab_source = vocab_source
+        self.vocab_target = vocab_target
 
 
 def smart_open(filename: str, mode="rt", ftype="auto", errors='replace'):
