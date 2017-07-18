@@ -168,7 +168,9 @@ class TrainingModel(model.SockeyeModel):
             max_num_not_improved: int = 3,
             min_num_epochs: Optional[int] = None,
             monitor_bleu: int = 0,
-            use_tensorboard: bool = False):
+            use_tensorboard: bool = False,
+            mxmonitor_pattern: Optional[str] = None,
+            mxmonitor_stat_func: Optional[str] = None):
         """
         Fits model to data given by train_iter using early-stopping w.r.t data given by val_iter.
         Saves all intermediate and final output to output_folder
@@ -190,6 +192,10 @@ class TrainingModel(model.SockeyeModel):
                evaluation, -1: decode the full validation set.).
         :param use_tensorboard: If True write tensorboard compatible logs for monitoring training and
                validation metrics.
+        :param mxmonitor_pattern: Optional pattern to match to monitor weights/gradients/outputs
+               with MXNet's monitor. Default is None which means no monitoring.
+        :param mxmonitor_stat_func: Choice of statistics function to run on monitored weights/gradients/outputs
+               when using MXNEt's monitor.
         :return: Best score on validation data observed during training.
         """
         self.save_version(output_folder)
@@ -216,13 +222,25 @@ class TrainingModel(model.SockeyeModel):
                                                          optimized_metric=optimized_metric,
                                                          use_tensorboard=use_tensorboard,
                                                          checkpoint_decoder=cp_decoder)
+
+        monitor = None
+        if mxmonitor_pattern is not None:
+            monitor = mx.monitor.Monitor(interval=C.MEASURE_SPEED_EVERY,
+                                         stat_func=C.MONITOR_STAT_FUNCS.get(mxmonitor_stat_func),
+                                         pattern=mxmonitor_pattern,
+                                         sort=True)
+            self.module.install_monitor(monitor)
+            logger.info("Installed MXNet monitor; pattern='%s'; statistics_func='%s'",
+                        mxmonitor_pattern, mxmonitor_stat_func)
+
         self._fit(train_iter, val_iter, output_folder,
                   max_params_files_to_keep,
                   metrics=metrics,
                   max_updates=max_updates,
                   checkpoint_frequency=checkpoint_frequency,
                   max_num_not_improved=max_num_not_improved,
-                  min_num_epochs=min_num_epochs)
+                  min_num_epochs=min_num_epochs,
+                  mxmonitor=monitor)
 
         logger.info("Training finished. Best checkpoint: %d. Best validation %s: %.6f",
                     self.training_monitor.get_best_checkpoint(),
@@ -239,7 +257,8 @@ class TrainingModel(model.SockeyeModel):
              max_updates: int,
              checkpoint_frequency: int,
              max_num_not_improved: int,
-             min_num_epochs: Optional[int] = None):
+             min_num_epochs: Optional[int] = None,
+             mxmonitor: Optional[mx.monitor.Monitor] = None):
         """
         Internal fit method. Runtime determined by early stopping.
 
@@ -252,9 +271,11 @@ class TrainingModel(model.SockeyeModel):
         :param checkpoint_frequency: Frequency of checkpointing.
         :param max_num_not_improved: Maximum number of checkpoints until fitting is stopped if model does not improve.
         :param min_num_epochs: Minimum number of epochs to train, even if validation scores did not improve.
+        :param mxmonitor: Optional MXNet monitor instance.
         """
         metric_train = self._create_eval_metric(metrics)
         metric_val = self._create_eval_metric(metrics)
+
         tic = time.time()
 
         training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
@@ -278,8 +299,18 @@ class TrainingModel(model.SockeyeModel):
 
             # process batch
             batch = next_data_batch
+
+            if mxmonitor is not None:
+                mxmonitor.tic()
+
             self.module.forward_backward(batch)
             self.module.update()
+
+            if mxmonitor is not None:
+                results = mxmonitor.toc()
+                if results:
+                    for _, k, v in results:
+                        logger.info('Monitor: Batch [{:d}] {:s} {:s}'.format(train_state.updates, k, v))
 
             if train_iter.iter_next():
                 # pre-fetch next batch
@@ -287,6 +318,7 @@ class TrainingModel(model.SockeyeModel):
                 self.module.prepare(next_data_batch)
 
             self.module.update_metric(metric_train, batch.label)
+
             self.training_monitor.batch_end_callback(train_state.epoch, train_state.updates, metric_train)
             train_state.updates += 1
             train_state.samples += train_iter.batch_size

@@ -26,7 +26,8 @@ import argparse
      dict(source='test_src', target='test_tgt',
           validation_source='test_validation_src', validation_target='test_validation_tgt',
           output='test_output', overwrite_output=False,
-          source_vocab=None, target_vocab=None, use_tensorboard=False, quiet=False)),
+          source_vocab=None, target_vocab=None, use_tensorboard=False, quiet=False,
+          monitor_pattern=None, monitor_stat_func='mx_default')),
 
     # all parameters
     ('--source test_src --target test_tgt '
@@ -37,7 +38,8 @@ import argparse
      dict(source='test_src', target='test_tgt',
           validation_source='test_validation_src', validation_target='test_validation_tgt',
           output='test_output', overwrite_output=True,
-          source_vocab='test_src_vocab', target_vocab='test_tgt_vocab', use_tensorboard=True, quiet=True)),
+          source_vocab='test_src_vocab', target_vocab='test_tgt_vocab', use_tensorboard=True, quiet=True,
+          monitor_pattern=None, monitor_stat_func='mx_default')),
 
     # short parameters
     ('-s test_src -t test_tgt '
@@ -46,7 +48,8 @@ import argparse
      dict(source='test_src', target='test_tgt',
           validation_source='test_validation_src', validation_target='test_validation_tgt',
           output='test_output', overwrite_output=False,
-          source_vocab=None, target_vocab=None, use_tensorboard=False, quiet=True))
+          source_vocab=None, target_vocab=None, use_tensorboard=False, quiet=True,
+          monitor_pattern=None, monitor_stat_func='mx_default'))
 ])
 def test_io_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_io_args)
