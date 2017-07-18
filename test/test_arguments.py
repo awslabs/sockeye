@@ -62,25 +62,33 @@ def test_device_args(test_params, expected_params):
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('', dict(params=None, num_words=50000, word_min_count=1, rnn_num_layers=1, rnn_cell_type=C.LSTM_TYPE, rnn_num_hidden=1024,
+    ('', dict(params=None, num_words=50000, num_words_source=None, num_words_target=None, word_min_count=1,
+              rnn_num_layers=1, rnn_cell_type=C.LSTM_TYPE, rnn_num_hidden=1024,
               rnn_residual_connections=False, num_embed=512, num_embed_source=None, num_embed_target=None,
               attention_type='mlp', attention_num_hidden=None, attention_coverage_type='count',
               attention_coverage_num_hidden=1,
               lexical_bias=None, learn_lexical_bias=False, weight_tying=False, max_seq_len=100,
-              attention_mhdot_heads=8, encoder='rnn', transformer_attention_heads=8,
+              attention_mhdot_heads=8, transformer_attention_heads=8,
               transformer_feed_forward_num_hidden=2048, transformer_model_size=512,
               transformer_num_layers=6,
               max_seq_len_source=None, max_seq_len_target=None,
-              attention_use_prev_word=False, context_gating=False, layer_normalization=False)),
-    ('--params test_params --num-words 10 --word-min-count 10 --rnn-num-layers 10 --rnn-cell-type gru '
+              attention_use_prev_word=False, context_gating=False, layer_normalization=False,
+              encoder=C.RNN_NAME, conv_embed_max_filter_width=8,
+              conv_embed_num_filters=(200, 200, 250, 250, 300, 300, 300, 300),
+              conv_embed_num_highway_layers=4, conv_embed_pool_stride=5)),
+    ('--params test_params --num-words 10 --num-words-source 11 --num-words-target 12 --word-min-count 10 '
+     '--rnn-num-layers 10 --rnn-cell-type gru '
      '--rnn-num-hidden 512 --rnn-residual-connections --num-embed 1024 --num-embed-source 10 --num-embed-target 10 '
      '--attention-type dot --attention-num-hidden 10 --attention-coverage-type tanh '
      '--attention-coverage-num-hidden 10 --lexical-bias test_bias --learn-lexical-bias --weight-tying '
-     '--max-seq-len 10 --max-seq-len-source 11 --max-seq-len-target 12 '
-     '--attention-use-prev-word --context-gating --layer-normalization '
-     '--attention-mhdot-heads 2 --encoder transformer --transformer-attention-heads 2 '
-     '--transformer-feed-forward-num-hidden 12 --transformer-model-size 6 --transformer-num-layers 3',
-     dict(params='test_params', num_words=10, word_min_count=10, rnn_num_layers=10, rnn_cell_type=C.GRU_TYPE,
+     '--max-seq-len 10 --max-seq-len-source 11 --max-seq-len-target 12 --attention-use-prev-word --context-gating '
+     '--layer-normalization '
+     '--conv-embed-max-filter-width 2 --conv-embed-num-filters 100 100 '
+     '--conv-embed-num-highway-layers 2 --conv-embed-pool-stride 2 --attention-mhdot-heads 2 --encoder transformer '
+     '--transformer-attention-heads 2 --transformer-feed-forward-num-hidden 12 --transformer-model-size 6 '
+     '--transformer-num-layers 3',
+     dict(params='test_params', num_words=10, num_words_source=11, num_words_target=12,
+          word_min_count=10, rnn_num_layers=10, rnn_cell_type=C.GRU_TYPE,
           rnn_num_hidden=512,
           rnn_residual_connections=True, num_embed=1024, num_embed_source=10, num_embed_target=10,
           attention_type='dot', attention_num_hidden=10, attention_coverage_type='tanh',
@@ -89,7 +97,10 @@ def test_device_args(test_params, expected_params):
           attention_use_prev_word=True, context_gating=True, layer_normalization=True,
           attention_mhdot_heads=2, encoder='transformer', transformer_attention_heads=2,
           transformer_feed_forward_num_hidden=12, transformer_model_size=6,
-          transformer_num_layers=3, max_seq_len_source=11, max_seq_len_target=12))
+          transformer_num_layers=3,
+          max_seq_len_source=11, max_seq_len_target=12,
+          conv_embed_max_filter_width=2, conv_embed_num_filters=[100, 100],
+          conv_embed_num_highway_layers=2, conv_embed_pool_stride=2))
 ])
 def test_model_parameters(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_model_parameters)
@@ -104,14 +115,17 @@ def test_model_parameters(test_params, expected_params):
               initial_learning_rate=0.0003, weight_decay=0.0, momentum=None, clip_gradient=1.0,
               learning_rate_scheduler_type='plateau-reduce', learning_rate_reduce_factor=0.5,
               learning_rate_reduce_num_not_improved=3, learning_rate_half_life=10, use_fused_rnn=False,
-              rnn_forget_bias=0.0, rnn_h2h_init=C.RNN_INIT_ORTHOGONAL, monitor_bleu=0, seed=13)),
+              rnn_forget_bias=0.0, rnn_h2h_init=C.RNN_INIT_ORTHOGONAL, monitor_bleu=0, seed=13,
+              keep_last_params=-1)),
     ('--batch-size 128 --fill-up test_fill_up --no-bucketing --bucket-width 20 --loss smoothed-cross-entropy '
      '--smoothed-cross-entropy-alpha 1.0 --normalize-loss --metrics perplexity accuracy '
      '--optimized-metric bleu --max-updates 10 --checkpoint-frequency 10 --min-num-epochs 10 '
      '--max-num-checkpoint-not-improved 16 --dropout 1.0 --optimizer sgd --initial-learning-rate 1.0 '
      '--weight-decay 1.0 --momentum 1.0 --clip-gradient 2.0 --learning-rate-scheduler-type fixed-rate-inv-t '
      '--learning-rate-reduce-factor 1.0 --learning-rate-reduce-num-not-improved 10 --learning-rate-half-life 20 '
-     '--use-fused-rnn --rnn-forget-bias 1.0 --rnn-h2h-init orthogonal_stacked --monitor-bleu 10 --seed 10',
+     '--use-fused-rnn --rnn-forget-bias 1.0 --rnn-h2h-init orthogonal_stacked --monitor-bleu 10 --seed 10 '
+     '--keep-last-params 50'
+     ,
     dict(batch_size=128, fill_up='test_fill_up', no_bucketing=True, bucket_width=20, loss=C.SMOOTHED_CROSS_ENTROPY,
          smoothed_cross_entropy_alpha=1.0, normalize_loss=True, metrics=[C.PERPLEXITY, C.ACCURACY],
          optimized_metric=C.BLEU, min_num_epochs=10,
@@ -119,7 +133,8 @@ def test_model_parameters(test_params, expected_params):
          initial_learning_rate=1.0, weight_decay=1.0, momentum=1.0, clip_gradient=2.0,
          learning_rate_scheduler_type='fixed-rate-inv-t', learning_rate_reduce_factor=1.0,
          learning_rate_reduce_num_not_improved=10, learning_rate_half_life=20.0, use_fused_rnn=True,
-         rnn_forget_bias=1.0, rnn_h2h_init=C.RNN_INIT_ORTHOGONAL_STACKED, monitor_bleu=10, seed=10)),
+         rnn_forget_bias=1.0, rnn_h2h_init=C.RNN_INIT_ORTHOGONAL_STACKED, monitor_bleu=10, seed=10,
+         keep_last_params=50)),
 ])
 def test_training_arg(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_training_args)

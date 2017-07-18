@@ -11,72 +11,65 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import json
+import copy
 import logging
 import os
 
-import sockeye.attention
-import sockeye.coverage
-import sockeye.data_io
-import sockeye.decoder
-import sockeye.encoder
-import sockeye.lexicon
-import sockeye.utils
-from sockeye import constants as C
+from sockeye import __version__
+from sockeye.config import Config
+from . import attention
+from . import constants as C
+from . import data_io
+from . import decoder
+from . import encoder
+from . import lexicon
+from . import loss
+from . import utils
 
 logger = logging.getLogger(__name__)
 
-ModelConfig = sockeye.utils.namedtuple_with_defaults('ModelConfig',
-                                                     [
-                                                      "max_seq_len",
-                                                      "vocab_source_size",
-                                                      "vocab_target_size",
-                                                      "num_embed_source",
-                                                      "num_embed_target",
-                                                      "attention_type",
-                                                      "attention_num_hidden",
-                                                      "attention_coverage_type",
-                                                      "attention_coverage_num_hidden",
-                                                      "attention_use_prev_word",
-                                                      "attention_mhdot_heads",
-                                                      "dropout",
-                                                      "rnn_cell_type",
-                                                      "rnn_num_layers",
-                                                      "rnn_num_hidden",
-                                                      "rnn_residual_connections",
-                                                      "weight_tying",
-                                                      "context_gating",
-                                                      "lexical_bias",
-                                                      "learn_lexical_bias",
-                                                      "data_info",
-                                                      "loss",
-                                                      "normalize_loss",
-                                                      "smoothed_cross_entropy_alpha",
-                                                      "encoder",
-                                                      "transformer_model_size",
-                                                      "transformer_num_layers",
-                                                      "transformer_attention_heads",
-                                                      "transformer_feed_forward_num_hidden",
-                                                      "layer_normalization",
-                                                     ],
-                                                     default_values={
-                                                      "attention_use_prev_word": False,
-                                                      "attention_mhdot_heads": 8,
-                                                      "context_gating": False,
-                                                      "loss": C.CROSS_ENTROPY,
-                                                      "normalize_loss": False,
-                                                      "encoder": C.RNN_TYPE,
-                                                      "transformer_model_size": 512,
-                                                      "transformer_num_layers": 6,
-                                                      "transformer_attention_heads": 8,
-                                                      "transformer_feed_forward_num_hidden": 2048,
-                                                      "layer_normalization": False
-                                                     })
-"""
-ModelConfig defines model parameters defined at training time which are relevant to model inference.
-Add new model parameters here. If you want backwards compatibility for models trained with code that did not
-contain these parameters, provide a reasonable default under default_values.
-"""
+
+class ModelConfig(Config):
+    """
+    ModelConfig defines model parameters defined at training time which are relevant to model inference.
+    Add new model parameters here. If you want backwards compatibility for models trained with code that did not
+    contain these parameters, provide a reasonable default under default_values.
+
+    :param config_data: Used training data.
+    :param max_seq_len: Maximum sequence length to unroll during training.
+    :param vocab_source_size: Source vocabulary size.
+    :param vocab_target_size: Target vocabulary size.
+    :param config_encoder: Encoder configuration.
+    :param config_decoder: Decoder configuration.
+    :param config_attention: Attention configuration.
+    :param config_loss: Loss configuration.
+    :param lexical_bias: Use lexical biases.
+    :param learn_lexical_bias: Learn lexical biases during training.
+    """
+    yaml_tag = "!ModelConfig"
+
+    def __init__(self,
+                 config_data: data_io.DataConfig,
+                 max_seq_len: int,
+                 vocab_source_size: int,
+                 vocab_target_size: int,
+                 config_encoder: encoder.EncoderConfig,
+                 config_decoder: decoder.RecurrentDecoderConfig,
+                 config_attention: attention.AttentionConfig,
+                 config_loss: loss.LossConfig,
+                 lexical_bias: bool = False,
+                 learn_lexical_bias: bool = False):
+        super().__init__()
+        self.config_data = config_data
+        self.max_seq_len = max_seq_len
+        self.vocab_source_size = vocab_source_size
+        self.vocab_target_size = vocab_target_size
+        self.config_encoder = config_encoder
+        self.config_decoder = config_decoder
+        self.config_attention = config_attention
+        self.config_loss = config_loss
+        self.lexical_bias = lexical_bias
+        self.learn_lexical_bias = learn_lexical_bias
 
 
 class SockeyeModel:
@@ -89,7 +82,8 @@ class SockeyeModel:
     """
 
     def __init__(self, config: ModelConfig):
-        self.config = config
+        self.config = copy.deepcopy(config)
+        self.config.freeze()
         logger.info("%s", self.config)
         self.encoder = None
         self.attention = None
@@ -105,9 +99,8 @@ class SockeyeModel:
         :param folder: Destination folder.
         """
         fname = os.path.join(folder, C.CONFIG_NAME)
-        with open(fname, "w") as out:
-            json.dump(self.config._asdict(), out, indent=2, sort_keys=True)
-            logger.info('Saved config to "%s"', fname)
+        self.config.save(fname)
+        logger.info('Saved config to "%s"', fname)
 
     @staticmethod
     def load_config(fname: str) -> ModelConfig:
@@ -117,10 +110,9 @@ class SockeyeModel:
         :param fname: Path to load model configuration from.
         :return: Model configuration.
         """
-        with open(fname, "r") as inp:
-            config = ModelConfig(**json.load(inp))
-            logger.info('ModelConfig loaded from "%s"', fname)
-            return config
+        config = ModelConfig.load(fname)
+        logger.info('ModelConfig loaded from "%s"', fname)
+        return config
 
     def save_params_to_file(self, fname: str):
         """
@@ -133,7 +125,7 @@ class SockeyeModel:
         # unpack rnn cell weights
         for cell in self.rnn_cells:
             params = cell.unpack_weights(params)
-        sockeye.utils.save_params(params, fname)
+        utils.save_params(params, fname)
         logging.info('Saved params to "%s"', fname)
 
     def load_params_from_file(self, fname: str):
@@ -143,66 +135,41 @@ class SockeyeModel:
         :param fname: Path to load parameters from.
         """
         assert self.built
-        self.params, _ = sockeye.utils.load_params(fname)
+        self.params, _ = utils.load_params(fname)
         # pack rnn cell weights
         for cell in self.rnn_cells:
             self.params = cell.pack_weights(self.params)
         logger.info('Loaded params from "%s"', fname)
 
-    def _build_model_components(self, max_seq_len: int, fused_encoder: bool, rnn_forget_bias: float = 0.0):
+    @staticmethod
+    def save_version(folder: str):
+        """
+        Saves version to <folder>/version.
+
+        :param folder: Destination folder.
+        """
+        fname = os.path.join(folder, C.VERSION_NAME)
+        with open(fname, "w") as out:
+            out.write(__version__)
+
+    def _build_model_components(self, max_seq_len: int, fused_encoder: bool):
         """
         Builds and sets model components given maximum sequence length.
 
         :param max_seq_len: Maximum sequence length supported by the model.
         :param fused_encoder: Use FusedRNNCells in encoder.
-        :param rnn_forget_bias: forget bias initialization for RNNs.
         """
-        if self.config.encoder == C.RNN_TYPE:
-            self.encoder = sockeye.encoder.get_encoder_rnn(self.config.num_embed_source,
-                                                           self.config.vocab_source_size,
-                                                           self.config.rnn_num_layers,
-                                                           self.config.rnn_num_hidden,
-                                                           self.config.rnn_cell_type,
-                                                           self.config.rnn_residual_connections,
-                                                           self.config.dropout,
-                                                           rnn_forget_bias,
-                                                           fused_encoder)
-        elif self.config.encoder == C.TRANSFORMER_TYPE:
-            self.encoder = sockeye.encoder.get_encoder_transformer(self.config.max_seq_len,
-                                                                   self.config.transformer_model_size,
-                                                                   self.config.vocab_source_size,
-                                                                   self.config.transformer_num_layers,
-                                                                   self.config.transformer_attention_heads,
-                                                                   self.config.transformer_feed_forward_num_hidden,
-                                                                   self.config.dropout)
+        self.encoder = encoder.get_encoder(self.config.config_encoder, fused_encoder)
 
-        self.attention = sockeye.attention.get_attention(self.config.attention_use_prev_word,
-                                                         self.config.attention_type,
-                                                         self.config.attention_num_hidden,
-                                                         self.config.rnn_num_hidden,
-                                                         max_seq_len,
-                                                         self.config.attention_coverage_type,
-                                                         self.config.attention_coverage_num_hidden,
-                                                         self.config.attention_mhdot_heads,
-                                                         self.config.layer_normalization)
+        self.attention = attention.get_attention(self.config.config_attention, max_seq_len)
 
-        self.lexicon = sockeye.lexicon.Lexicon(self.config.vocab_source_size,
-                                               self.config.vocab_target_size,
-                                               self.config.learn_lexical_bias) if self.config.lexical_bias else None
+        self.lexicon = lexicon.Lexicon(self.config.vocab_source_size,
+                                       self.config.vocab_target_size,
+                                       self.config.learn_lexical_bias) if self.config.lexical_bias else None
 
-        self.decoder = sockeye.decoder.get_decoder(self.config.num_embed_target,
-                                                   self.config.vocab_target_size,
-                                                   self.config.rnn_num_layers,
-                                                   self.config.rnn_num_hidden,
-                                                   self.attention,
-                                                   self.config.rnn_cell_type,
-                                                   self.config.rnn_residual_connections,
-                                                   rnn_forget_bias,
-                                                   self.config.dropout,
-                                                   self.config.weight_tying,
-                                                   self.lexicon,
-                                                   self.config.context_gating,
-                                                   self.config.layer_normalization)
+        self.decoder = decoder.get_recurrent_decoder(self.config.config_decoder,
+                                                     self.attention,
+                                                     self.lexicon)
 
         self.rnn_cells = self.encoder.get_rnn_cells() + self.decoder.get_rnn_cells()
 

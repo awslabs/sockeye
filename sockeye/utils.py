@@ -30,11 +30,53 @@ from typing import Mapping, NamedTuple, Any, List, Iterator, Tuple, Dict, Option
 import mxnet as mx
 import numpy as np
 
+from sockeye import __version__
+
 logger = logging.getLogger(__name__)
 
 
 class SockeyeError(Exception):
     pass
+
+
+def check_version(version: str):
+    """
+    Checks given version against code version and determines compatibility.
+    Throws if versions are incompatible.
+
+    :param version: Given version.
+    """
+    code_version = parse_version(__version__)
+    given_version = parse_version(version)
+    check_condition(code_version[0] == given_version[0],
+                    "Given release version (%s) does not match release code version (%s)" % (version, __version__))
+    check_condition(code_version[1] == given_version[1],
+                    "Given major version (%s) does not match major code version (%s)" % (version, __version__))
+
+
+def load_version(fname: str) -> str:
+    """
+    Loads version from file.
+
+    :param fname: Name of file to load version from.
+    :return: Version string.
+    """
+    if not os.path.exists(fname):
+        logger.warning("No version file found. Defaulting to 1.0.3")
+        return "1.0.3"
+    with open(fname) as inp:
+        return inp.read().strip()
+
+
+def parse_version(version_string: str) -> Tuple[str, str, str]:
+    """
+    Parse version string into release, major, minor version.
+
+    :param version_string: Version string.
+    :return: Tuple of strings.
+    """
+    release, major, minor = version_string.split(".", 2)
+    return release, major, minor
 
 
 def check_condition(condition: bool, error_message: str):
@@ -256,7 +298,7 @@ def get_alignments(attention_matrix: np.ndarray, threshold: float = .9) -> Itera
                 yield (src_idx, trg_idx)
 
 
-def average_arrays(arrays: List[mx.sym.NDArray]) -> mx.sym.NDArray:
+def average_arrays(arrays: List[mx.nd.NDArray]) -> mx.nd.NDArray:
     """
     Take a list of arrays of the same shape and take the element wise average.
 

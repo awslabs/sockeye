@@ -25,19 +25,25 @@ VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
 
 ENCODER_PREFIX = "encoder_"
 EMBEDDING_PREFIX = "embed_"
+ATTENTION_PREFIX = "att_"
+COVERAGE_PREFIX = "cov_"
 BIDIRECTIONALRNN_PREFIX = ENCODER_PREFIX + "birnn_"
 STACKEDRNN_PREFIX = ENCODER_PREFIX + "rnn_"
 FORWARD_PREFIX = "forward_"
 REVERSE_PREFIX = "reverse_"
 TRANSFORMER_ENCODER_PREFIX = ENCODER_PREFIX + "transformer_"
+CHAR_SEQ_ENCODER_PREFIX = ENCODER_PREFIX + "char_"
 
 # embedding prefixes
 SOURCE_EMBEDDING_PREFIX = "source_embed_"
 TARGET_EMBEDDING_PREFIX = "target_embed_"
 
-# encoder types
-RNN_TYPE = "rnn"
+# encoder names (arguments)
+RNN_NAME = "rnn"
+RNN_WITH_CONV_EMBED_NAME = "rnn-with-conv-embed"
 TRANSFORMER_TYPE = "transformer"
+# available encoders
+ENCODERS = [RNN_NAME, RNN_WITH_CONV_EMBED_NAME, TRANSFORMER_TYPE]
 
 # rnn types
 LSTM_TYPE = 'lstm'
@@ -86,12 +92,14 @@ MEASURE_SPEED_EVERY = 50  # measure speed and metrics every X batches
 
 DEFAULT_BEAM_SIZE = 5
 
+VERSION_NAME = "version"
 CONFIG_NAME = "config"
 LOG_NAME = "log"
 JSON_SUFFIX = ".json"
 VOCAB_SRC_NAME = "vocab.src"
 VOCAB_TRG_NAME = "vocab.trg"
-PARAMS_NAME = "params.%04d"
+PARAMS_PREFIX = "params."
+PARAMS_NAME = PARAMS_PREFIX + "%04d"
 PARAMS_BEST_NAME = "params.best"
 DECODE_OUT_NAME = "decode.output.%04d"
 DECODE_IN_NAME = "decode.source"
@@ -114,7 +122,16 @@ TRAINING_STATE_PARAMS_NAME = "params"
 ARGS_STATE_NAME = "args.json"
 
 # Arguments that may differ and still resume training
-ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet", "align_plot_prefix", "sure_align_threshold"]
+ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet",
+                   "align_plot_prefix", "sure_align_threshold",
+                   "keep_last_params"]
+
+# Other argument constants
+INFERENCE_ARG_INPUT_LONG = "--input"
+INFERENCE_ARG_INPUT_SHORT = "-i"
+INFERENCE_ARG_OUTPUT_LONG = "--output"
+INFERENCE_ARG_OUTPUT_SHORT = "-o"
+
 
 # data layout strings
 BATCH_MAJOR = "NTC"

@@ -19,32 +19,52 @@ from typing import Callable
 
 import mxnet as mx
 
-from sockeye.layers import LayerNormalization
-from sockeye.rnn import LayerNormPerGateGRUCell
+from . import config
+from . import constants as C
+from . import layers
+from . import rnn
+from . import utils
 
 logger = logging.getLogger(__name__)
 
 
-def get_coverage(coverage_type: str,
-                 coverage_num_hidden: int,
-                 layer_normalization: bool) -> 'Coverage':
+class CoverageConfig(config.Config):
+    """
+    Coverage configuration.
+
+    :param type: Coverage name.
+    :param num_hidden: Number of hidden units for coverage networks.
+    :param layer_normalization: Apply layer normalization to coverage networks.
+    """
+    yaml_tag = "!AttentionConfig"
+
+    def __init__(self,
+                 type: str,
+                 num_hidden: int,
+                 layer_normalization: bool) -> None:
+        super().__init__()
+        self.type = type
+        self.num_hidden = num_hidden
+        self.layer_normalization = layer_normalization
+
+
+def get_coverage(config: CoverageConfig) -> 'Coverage':
     """
     Returns a Coverage instance.
 
-    :param coverage_type: Name of coverage type.
-    :param coverage_num_hidden: Number of hidden units for coverage vectors.
-    :param layer_normalization: If true, applies layer normalization to ActivationCoverage.
+    :param config: Coverage configuration.
     :return: Instance of Coverage.
     """
-
-    if coverage_type == "gru":
-        return GRUCoverage(coverage_num_hidden, layer_normalization)
-    elif coverage_type in {"tanh", "sigmoid", "relu", "softrelu"}:
-        return ActivationCoverage(coverage_num_hidden, coverage_type, layer_normalization)
-    elif coverage_type == "count":
+    if config.type == 'count':
+        utils.check_condition(config.num_hidden == 1, "Count coverage requires coverage_num_hidden==1")
+    if config.type == "gru":
+        return GRUCoverage(config.num_hidden, config.layer_normalization)
+    elif config.type in {"tanh", "sigmoid", "relu", "softrelu"}:
+        return ActivationCoverage(config.num_hidden, config.type, config.layer_normalization)
+    elif config.type == "count":
         return CountCoverage()
     else:
-        raise ValueError("Unknown coverage type %s" % coverage_type)
+        raise ValueError("Unknown coverage type %s" % config.type)
 
 
 class Coverage:
@@ -52,6 +72,8 @@ class Coverage:
     Generic coverage class. Similar to Attention classes, a coverage instance returns a callable, update_coverage(),
     function when self.on() is called.
     """
+    def __init__(self, prefix=C.COVERAGE_PREFIX):
+        self.prefix = prefix
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """
@@ -82,8 +104,8 @@ class CountCoverage(Coverage):
     Coverage class that accumulates the attention weights for each source word.
     """
 
-    def __init__(self, prefix='') -> None:
-        self.prefix = prefix
+    def __init__(self) -> None:
+        super().__init__()
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """
@@ -120,15 +142,12 @@ class GRUCoverage(Coverage):
     :param layer_normalization: If true, applies layer normalization for each gate in the GRU cell.
     """
 
-    def __init__(self,
-                 coverage_num_hidden: int,
-                 layer_normalization: bool,
-                 prefix='cov_') -> None:
-        self.prefix = prefix
+    def __init__(self, coverage_num_hidden: int, layer_normalization: bool) -> None:
+        super().__init__()
         self.num_hidden = coverage_num_hidden
-        gru_prefix = "%s_gru" % prefix
+        gru_prefix= "%sgru" % self.prefix
         if layer_normalization:
-            self.gru = LayerNormPerGateGRUCell(self.num_hidden, prefix=gru_prefix)
+            self.gru = rnn.LayerNormPerGateGRUCell(self.num_hidden, prefix=gru_prefix)
         else:
             self.gru = mx.rnn.GRUCell(self.num_hidden, prefix=gru_prefix)
 
@@ -195,9 +214,8 @@ class ActivationCoverage(Coverage):
     def __init__(self,
                  coverage_num_hidden: int,
                  activation: str,
-                 layer_normalization: bool,
-                 prefix="cov_") -> None:
-        self.prefix = prefix
+                 layer_normalization: bool) -> None:
+        super().__init__()
         self.activation = activation
         self.num_hidden = coverage_num_hidden
         # input (encoder) to hidden
@@ -211,8 +229,8 @@ class ActivationCoverage(Coverage):
         # optional layer normalization
         self.layer_norm = None
         if layer_normalization and not self.num_hidden != 1:
-            self.layer_norm = LayerNormalization(self.num_hidden,
-                                                 prefix="%snorm" % prefix) if layer_normalization else None
+            self.layer_norm = layers.LayerNormalization(self.num_hidden,
+                                                        prefix="%snorm" % self.prefix) if layer_normalization else None
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """
