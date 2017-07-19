@@ -133,17 +133,17 @@ class LayerNormLSTMCell(mx.rnn.LSTMCell):
     def __call__(self, inputs, states):
         self._counter += 1
         name = '%st%d_' % (self._prefix, self._counter)
-        i2h = mx.sym.FullyConnected(data=inputs, weight=self._iW, no_bias=True,
+        i2h = mx.sym.FullyConnected(data=inputs, weight=self._iW, bias=self._iB,
                                     num_hidden=self._num_hidden * 4,
                                     name='%si2h' % name)
         if self._counter == 0:
             self._shape_fix = mx.sym.zeros_like(i2h)
         else:
             assert self._shape_fix is not None
-        h2h = mx.sym.FullyConnected(data=states[0], weight=self._hW, no_bias=True,
+        h2h = mx.sym.FullyConnected(data=states[0], weight=self._hW, bias=self._hB,
                                     num_hidden=self._num_hidden * 4,
                                     name='%sh2h' % name)
-        gates = self._iN.normalize(i2h) + self._iB + self._hN.normalize(self._shape_fix + h2h) + self._hB
+        gates = self._iN.normalize(i2h) + self._hN.normalize(self._shape_fix + h2h)
         in_gate, forget_gate, in_transform, out_gate = mx.sym.split(gates,
                                                                     num_outputs=4,
                                                                     axis=1,
@@ -163,30 +163,6 @@ class LayerNormLSTMCell(mx.rnn.LSTMCell):
                                                          act_type="tanh"),
                                        name='%sout' % name)
         return next_h, [next_h, next_c]
-
-    def unpack_weights(self, args):
-        args = args.copy()
-        if not self._gate_names:
-            return args
-        h = self._num_hidden
-        for group_name in ['i2h', 'h2h']:
-            weight = args.pop('%s%s_weight'%(self._prefix, group_name))
-            for j, gate in enumerate(self._gate_names):
-                wname = '%s%s%s_weight' % (self._prefix, group_name, gate)
-                args[wname] = weight[j*h:(j+1)*h].copy()
-        return args
-
-    def pack_weights(self, args):
-        args = args.copy()
-        if not self._gate_names:
-            return args
-        for group_name in ['i2h', 'h2h']:
-            weight = []
-            for gate in self._gate_names:
-                wname = '%s%s%s_weight'%(self._prefix, group_name, gate)
-                weight.append(args.pop(wname))
-            args['%s%s_weight'%(self._prefix, group_name)] = mx.nd.concatenate(weight)
-        return args
 
 
 class LayerNormPerGateLSTMCell(mx.rnn.LSTMCell):
@@ -294,11 +270,13 @@ class LayerNormGRUCell(mx.rnn.GRUCell):
         prev_state_h = states[0]
 
         i2h = mx.sym.FullyConnected(data=inputs,
-                                    weight=self._iW, no_bias=True,
+                                    weight=self._iW,
+                                    bias=self._iB,
                                     num_hidden=self._num_hidden * 3,
                                     name="%s_i2h" % name)
         h2h = mx.sym.FullyConnected(data=prev_state_h,
-                                    weight=self._hW, no_bias=True,
+                                    weight=self._hW,
+                                    bias=self._hB,
                                     num_hidden=self._num_hidden * 3,
                                     name="%s_h2h" % name)
         if self._counter == 0:
@@ -306,8 +284,8 @@ class LayerNormGRUCell(mx.rnn.GRUCell):
         else:
             assert self._shape_fix is not None
 
-        i2h = self._iN.normalize(i2h) + self._iB
-        h2h = self._hN.normalize(self._shape_fix + h2h) + self._hB
+        i2h = self._iN.normalize(i2h)
+        h2h = self._hN.normalize(self._shape_fix + h2h)
 
         i2h_r, i2h_z, i2h = mx.sym.split(i2h, num_outputs=3, name="%s_i2h_slice" % name)
         h2h_r, h2h_z, h2h = mx.sym.split(h2h, num_outputs=3, name="%s_h2h_slice" % name)
@@ -324,30 +302,6 @@ class LayerNormGRUCell(mx.rnn.GRUCell):
                                         name='%sout' % name)
 
         return next_h, [next_h]
-
-    def unpack_weights(self, args):
-        args = args.copy()
-        if not self._gate_names:
-            return args
-        h = self._num_hidden
-        for group_name in ['i2h', 'h2h']:
-            weight = args.pop('%s%s_weight'%(self._prefix, group_name))
-            for j, gate in enumerate(self._gate_names):
-                wname = '%s%s%s_weight' % (self._prefix, group_name, gate)
-                args[wname] = weight[j*h:(j+1)*h].copy()
-        return args
-
-    def pack_weights(self, args):
-        args = args.copy()
-        if not self._gate_names:
-            return args
-        for group_name in ['i2h', 'h2h']:
-            weight = []
-            for gate in self._gate_names:
-                wname = '%s%s%s_weight'%(self._prefix, group_name, gate)
-                weight.append(args.pop(wname))
-            args['%s%s_weight'%(self._prefix, group_name)] = mx.nd.concatenate(weight)
-        return args
 
 
 class LayerNormPerGateGRUCell(mx.rnn.GRUCell):
