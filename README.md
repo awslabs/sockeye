@@ -3,7 +3,7 @@
 [![Documentation Status](https://readthedocs.org/projects/sockeye/badge/?version=latest)](http://sockeye.readthedocs.io/en/latest/?badge=latest) [![Build Status](https://travis-ci.org/awslabs/sockeye.svg?branch=master)](https://travis-ci.org/awslabs/sockeye)
 
 This package contains the Sockeye project,
-a sequence-to-sequence framework for Neural Machine Translation based on MXNet.
+a sequence-to-sequence framework for Neural Machine Translation based on Apache MXNet.
 It implements the well-known encoder-decoder architecture with attention.
 
 If you are interested in collaborating or have any questions, please submit a pull request or issue.
@@ -37,7 +37,7 @@ For other environments, you can choose between installing via pip or directly fr
 
 #### GPU
 
-If you want to run sockeye on a GPU you need to make sure your version of MXNet contains the GPU code. Depending on your
+If you want to run sockeye on a GPU you need to make sure your version of Apache MXNet contains the GPU code. Depending on your
 version of CUDA you can do this by running the following for CUDA 8.0:
 
 ```bash
@@ -64,7 +64,7 @@ after cloning the repository from git.
 
 #### GPU
 
-If you want to run sockeye on a GPU you need to make sure your version of MXNet contains the GPU code. Depending on your
+If you want to run sockeye on a GPU you need to make sure your version of Apache MXNet contains the GPU code. Depending on your
 version of CUDA you can do this by running the following for CUDA 8.0:
 
 ```bash
