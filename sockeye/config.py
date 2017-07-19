@@ -47,6 +47,17 @@ class Config(yaml.YAMLObject):
     def __repr__(self):
         return "Config[%s]" % ", ".join("%s=%s" % (str(k), str(v)) for k, v in sorted(self.__dict__.items()))
 
+    def __eq__(self, other):
+        if type(other) is not type(self):
+            return False
+        for k, v in self.__dict__.items():
+            if k != "self":
+                if k not in other.__dict__:
+                    return False
+                if self.__dict__[k] != other.__dict__[k]:
+                    return False
+        return True
+
     def __del_frozen(self):
         """
         Removes _frozen attribute from this instance and all its child configurations.
@@ -88,3 +99,17 @@ class Config(yaml.YAMLObject):
             obj = yaml.load(inp)
             obj.__add_frozen()
             return obj
+
+    def copy(self, **kwargs):
+        """
+        Create a copy of the config object, optionally modifying some of the attributes.
+        For example `nn_config.copy(num_hidden=512)` will create a copy of `nn_config` where the attribute `num_hidden`
+        will be set to the new value of num_hidden.
+
+        :param kwargs:
+        :return: A deep copy of the config object.
+        """
+        copy_obj = copy.deepcopy(self)
+        for name, value in kwargs.items():
+            object.__setattr__(copy_obj, name, value)
+        return copy_obj

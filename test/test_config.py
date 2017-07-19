@@ -64,6 +64,24 @@ def test_config_repr():
     assert str(c1) == "Config[_frozen=False, config=Config[_frozen=True, config=None, param=3], param=1]"
 
 
+def test_eq():
+    basic_c = config.Config()
+    c1 = ConfigTest(param=1)
+    c1_other = ConfigTest(param=1)
+    c2 = ConfigTest(param=2)
+
+    c_nested = ConfigTest(param=1, config=c1)
+    c_nested_other = ConfigTest(param=1, config=c1_other)
+    c_nested_c2 = ConfigTest(param=1, config=c2)
+
+    assert c1 != "OTHER_TYPE"
+    assert c1 != basic_c
+    assert c1 == c1_other
+    assert c1 != c2
+    assert c_nested == c_nested_other
+    assert c_nested != c_nested_c2
+
+
 def test_no_self_attribute():
     c1 = ConfigTest(param=1)
     with pytest.raises(AttributeError) as e:
@@ -91,4 +109,20 @@ param: 1
         assert c2.param == c1.param
         assert c2.config.param == c1.config.param
         assert not c2._frozen
+
+
+def test_copy():
+    c1 = ConfigTest(param=1)
+    copy_c1 = c1.copy()
+    # should be a different object that is equal to the original object
+    assert c1 is not copy_c1
+    assert c1 == copy_c1
+
+    # optionally you can modify attributes when copying:
+    mod_c1 = ConfigTest(param=5)
+    mod_copy_c1 = c1.copy(param=5)
+    assert mod_c1 is not mod_copy_c1
+    assert mod_c1 == mod_copy_c1
+    assert c1 != mod_copy_c1
+
 
