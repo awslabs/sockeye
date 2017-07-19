@@ -72,13 +72,8 @@ def get_recurrent_decoder(config: RecurrentDecoderConfig,
     :param lexicon: Optional Lexicon.
     :return: Decoder instance.
     """
-    return RecurrentDecoder(rnn_config=config.rnn_config,
-                            vocab_size=config.vocab_size,
-                            num_target_embed=config.num_embed,
+    return RecurrentDecoder(config,
                             attention=attention,
-                            weight_tying=config.weight_tying,
-                            context_gating=config.context_gating,
-                            layer_normalization=config.layer_normalization,
                             lexicon=lexicon,
                             prefix=C.DECODER_PREFIX)
 
@@ -123,35 +118,25 @@ class RecurrentDecoder(Decoder):
     Class to generate the decoder part of the computation graph in sequence-to-sequence models.
     The architecture is based on Luong et al, 2015: Effective Approaches to Attention-based Neural Machine Translation.
 
-    :param rnn_config: RNN configuration.
-    :param vocab_size: Size of target vocabulary.
-    :param num_target_embed: Size of target word embedding.
+    :param config: Configuration for recurrent decoder.
     :param attention: Attention model.
-    :param weight_tying: Whether to share embedding and prediction parameter matrices.
-    :param context_gating: Whether to use context gating.
-    :param layer_normalization: Apply layer normalization to output layer and decoder state initializations.
     :param lexicon: Optional Lexicon.
     :param prefix: Decoder symbol prefix.
     """
 
     def __init__(self,
-                 rnn_config: rnn.RNNConfig,
-                 vocab_size: int,
-                 num_target_embed: int,
+                 config: RecurrentDecoderConfig,
                  attention: attentions.Attention,
-                 weight_tying: bool = False,
-                 context_gating: bool = False,
-                 layer_normalization: bool = False,
                  lexicon: Optional[lexicons.Lexicon] = None,
                  prefix=C.DECODER_PREFIX) -> None:
         # TODO: implement variant without input feeding
-        self.rnn_config = rnn_config
-        self.target_vocab_size = vocab_size
-        self.num_target_embed = num_target_embed
+        self.rnn_config = config.rnn_config
+        self.target_vocab_size = config.vocab_size
+        self.num_target_embed = config.num_embed
         self.attention = attention
-        self.weight_tying = weight_tying
-        self.context_gating = context_gating
-        self.layer_norm = layer_normalization
+        self.weight_tying = config.weight_tying
+        self.context_gating = config.context_gating
+        self.layer_norm = config.layer_normalization
         self.lexicon = lexicon
         self.prefix = prefix
 
@@ -178,7 +163,7 @@ class RecurrentDecoder(Decoder):
         # Embedding & output parameters
         self.embedding = encoder.Embedding(self.num_target_embed, self.target_vocab_size,
                                            prefix=C.TARGET_EMBEDDING_PREFIX, dropout=0.)  # TODO dropout?
-        if weight_tying:
+        if self.weight_tying:
             check_condition(self.num_hidden == self.num_target_embed,
                             "Weight tying requires target embedding size and rnn_num_hidden to be equal")
             self.cls_w = self.embedding.embed_weight
