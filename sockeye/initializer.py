@@ -103,30 +103,57 @@ class StackedOrthogonalInit(mx.initializer.Initializer):
 @mx.init.register
 class PositionalEncodingInitializer(mx.initializer.Initializer):
     """
-    Initialize variable of shape (max_seq_len, num_embed) with positional encodings as in Vaswani et al, 2017.
+    Initialize variable of shape (1, max_seq_len, num_embed) with positional encodings as in Vaswani et al, 2017.
+
+    :param max_seq_len: Maximum sequence length.
+    :param num_embed: Embedding size.
+    :param relative: Relative encoding.
     """
 
-    def __init__(self, max_seq_len, num_embed):
+    def __init__(self,
+                 max_seq_len: int,
+                 num_embed: int,
+                 relative: bool = True) -> None:
         super().__init__(max_seq_len=max_seq_len,
-                         num_embed=num_embed)
+                         num_embed=num_embed,
+                         relative=relative)
         self.max_seq_len = max_seq_len
         self.num_embed = num_embed
+        self.relative = relative
 
-    def _init_weight(self, name, arr):
-        assert arr.shape == (self.max_seq_len, self.num_embed)
-        # (max_seq_len/2, 1)
-        positions_even = np.arange(0, self.max_seq_len, 2).reshape((-1, 1))
-        # (max_seq_len/2, 1)
-        positions_odd = np.arange(1, self.max_seq_len, 2).reshape((-1, 1))
-
+    def get_encodings(self):
         # (1, num_embed)
         channels = np.arange(self.num_embed).reshape((1, -1))
 
-        # sinusoids for even positions: (max_seq_len/2, num_embed)
-        sin = np.sin(positions_even / np.power(10000, (2 * channels) / self.num_embed))
-        # cosines for odd positions: (max_seq_len/2, num_embed)
-        cos = np.cos(positions_odd / np.power(10000, (2 * channels) / self.num_embed))
+        if self.relative:
+            # (max_seq_len/2, 1)
+            positions_even = np.arange(0, self.max_seq_len, 2).reshape((-1, 1))
+            # (max_seq_len/2, 1)
+            positions_odd = np.arange(1, self.max_seq_len, 2).reshape((-1, 1))
+            # sinusoids for even positions: (max_seq_len/2, num_embed)
+            sin = np.sin(positions_even / np.power(10000, (2 * channels) / self.num_embed))
+            # cosines for odd positions: (max_seq_len/2, num_embed)
+            cos = np.cos(positions_odd / np.power(10000, (2 * channels) / self.num_embed))
+            # interleave: (1, max_seq_len, num_embed)
+            encodings = np.hstack([sin, cos]).reshape(1, self.max_seq_len, self.num_embed)
 
-        # interleave: (1, max_seq_len, num_embed)
-        positional_encodings = np.hstack([sin, cos]).reshape((self.max_seq_len, self.num_embed))
-        arr[:] = positional_encodings
+        else:
+            # (max_seq_len, 1)
+            positions = np.arange(0, self.max_seq_len).reshape((-1, 1))
+            # sinusoids for positions: (max_seq_len, num_embed)
+            sin = np.sin(positions / np.power(10000, (2 * channels) / self.num_embed))
+            encodings = sin.reshape(1, self.max_seq_len, self.num_embed)
+
+        return encodings
+
+    def _init_weight(self, name: str, arr: mx.nd.NDArray):
+        assert arr.shape == (1, self.max_seq_len, self.num_embed)
+        arr[:] = self.get_encodings()
+
+
+
+if __name__ == '__main__':
+    i = PositionalEncodingInitializer(100, 512, True)
+    print(i.get_encodings()[:, :5, :2])
+    i = PositionalEncodingInitializer(100, 512, False)
+    print(i.get_encodings()[:,:5,:2])

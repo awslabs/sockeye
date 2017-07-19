@@ -216,22 +216,26 @@ def main():
                                    forget_bias=args.rnn_forget_bias)
 
         if args.encoder == C.TRANSFORMER_TYPE:
-            config_encoder = encoder.TransformerEncoderConfig(vocab_size=vocab_source_size,
-                                                              max_seq_len=max_seq_len_source,
-                                                              num_embed=args.transformer_model_size,
-                                                              num_layers=args.transformer_num_layers,
-                                                              attention_heads=args.transformer_attention_heads,
-                                                              feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
-                                                              dropout=args.dropout)
+            config_encoder = encoder.TransformerEncoderConfig(
+                vocab_size=vocab_source_size,
+                max_seq_len=max_seq_len_source,
+                num_embed=args.transformer_model_size,
+                num_layers=args.transformer_num_layers,
+                attention_heads=args.transformer_attention_heads,
+                feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
+                dropout=args.dropout,
+                positional_encodings=not args.transformer_no_positional_encodings,
+                relative_positional_encodings=not args.transformer_absolute_positional_encodings)
         else:
             config_conv = None
             if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
-                config_conv = encoder.ConvolutionalEmbeddingConfig(num_embed=num_embed_source,
-                                                                   max_filter_width=args.conv_embed_max_filter_width,
-                                                                   num_filters=args.conv_embed_num_filters,
-                                                                   pool_stride=args.conv_embed_pool_stride,
-                                                                   num_highway_layers=args.conv_embed_num_highway_layers,
-                                                                   dropout=args.dropout)
+                config_conv = encoder.ConvolutionalEmbeddingConfig(
+                    num_embed=num_embed_source,
+                    max_filter_width=args.conv_embed_max_filter_width,
+                    num_filters=args.conv_embed_num_filters,
+                    pool_stride=args.conv_embed_pool_stride,
+                    num_highway_layers=args.conv_embed_num_highway_layers,
+                    dropout=args.dropout)
             config_encoder = encoder.RecurrentEncoderConfig(vocab_size=vocab_source_size,
                                                             num_embed=num_embed_source,
                                                             rnn_config=config_rnn,

@@ -92,7 +92,9 @@ class TransformerEncoderConfig(EncoderConfig):
                  num_layers: int = 6,
                  attention_heads: int = 8,
                  feed_forward_num_hidden: int = 2048,
-                 dropout: float = 0.0) -> None:
+                 dropout: float = 0.0,
+                 positional_encodings: bool = True,
+                 relative_positional_encodings: bool = True) -> None:
         super().__init__(vocab_size, num_embed)
         self.model_size = self.num_embed
         self.max_seq_len = max_seq_len
@@ -100,6 +102,8 @@ class TransformerEncoderConfig(EncoderConfig):
         self.attention_heads = attention_heads
         self.feed_forward_num_hidden = feed_forward_num_hidden
         self.dropout = dropout
+        self.positional_encodings = positional_encodings
+        self.relative_positional_encodings = relative_positional_encodings
 
 
 def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool) -> 'Encoder':
@@ -149,7 +153,8 @@ def get_transformer_encoder(config: TransformerEncoderConfig) -> 'Encoder':
                               vocab_size=config.vocab_size,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
                               dropout=config.dropout,
-                              add_positional_encoding=True,
+                              add_positional_encoding=config.positional_encodings,
+                              relative_positional_encoding=config.relative_positional_encodings,
                               max_seq_len=config.max_seq_len))
     encoders.append(TransformerEncoder(config))
     encoders.append(BatchMajor2TimeMajor(num_hidden=config.num_embed))
@@ -252,6 +257,7 @@ class Embedding(Encoder):
                  prefix: str,
                  dropout: float,
                  add_positional_encoding: bool = False,
+                 relative_positional_encoding: bool = True,
                  max_seq_len: Optional[int] = None):
         self.num_embed = num_embed
         self.vocab_size = vocab_size
@@ -259,6 +265,7 @@ class Embedding(Encoder):
         self.dropout = dropout
         self.embed_weight = mx.sym.Variable(prefix + "weight")
         self.add_positional_encoding = add_positional_encoding
+        self.relative_positional_encoding = relative_positional_encoding
         self.max_seq_len = max_seq_len
         if self.add_positional_encoding:
             utils.check_condition(max_seq_len is not None, "Positional encodings require maximum sequence length.")
@@ -296,10 +303,12 @@ class Embedding(Encoder):
         :return: Symbol(1, max_seq_len, self.num_embed)
         """
         encodings = mx.sym.Variable("%spositional_encodings" % self.prefix,
-                                    shape=(self.max_seq_len, self.num_embed),
-                                    init=initializer.PositionalEncodingInitializer(self.max_seq_len, self.num_embed))
-        encodings = mx.sym.slice_axis(encodings, axis=0, begin=0, end=seq_len)
-        encodings = mx.sym.BlockGrad(mx.sym.expand_dims(encodings, axis=0))
+                                    shape=(1, self.max_seq_len, self.num_embed),
+                                    init=initializer.PositionalEncodingInitializer(
+                                        self.max_seq_len,
+                                        self.num_embed,
+                                        relative=self.relative_positional_encoding))
+        encodings = mx.sym.BlockGrad(mx.sym.slice_axis(encodings, axis=1, begin=0, end=seq_len))
         return encodings
 
     def get_num_hidden(self) -> int:

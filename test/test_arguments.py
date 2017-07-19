@@ -11,11 +11,12 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import argparse
+
 import pytest
 
-import sockeye.constants as C
 import sockeye.arguments as arguments
-import argparse
+import sockeye.constants as C
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
@@ -71,6 +72,8 @@ def test_device_args(test_params, expected_params):
               attention_mhdot_heads=8, transformer_attention_heads=8,
               transformer_feed_forward_num_hidden=2048, transformer_model_size=512,
               transformer_num_layers=6,
+              transformer_no_positional_encodings=False,
+              transformer_absolute_positional_encodings=False,
               max_seq_len_source=None, max_seq_len_target=None,
               attention_use_prev_word=False, context_gating=False, layer_normalization=False,
               encoder=C.RNN_NAME, conv_embed_max_filter_width=8,
@@ -86,7 +89,7 @@ def test_device_args(test_params, expected_params):
      '--conv-embed-max-filter-width 2 --conv-embed-num-filters 100 100 '
      '--conv-embed-num-highway-layers 2 --conv-embed-pool-stride 2 --attention-mhdot-heads 2 --encoder transformer '
      '--transformer-attention-heads 2 --transformer-feed-forward-num-hidden 12 --transformer-model-size 6 '
-     '--transformer-num-layers 3',
+     '--transformer-num-layers 3 --transformer-no-positional-encodings --transformer-absolute-positional-encodings',
      dict(params='test_params', num_words=10, num_words_source=11, num_words_target=12,
           word_min_count=10, rnn_num_layers=10, rnn_cell_type=C.GRU_TYPE,
           rnn_num_hidden=512,
@@ -98,6 +101,8 @@ def test_device_args(test_params, expected_params):
           attention_mhdot_heads=2, encoder='transformer', transformer_attention_heads=2,
           transformer_feed_forward_num_hidden=12, transformer_model_size=6,
           transformer_num_layers=3,
+          transformer_no_positional_encodings=True,
+          transformer_absolute_positional_encodings=True,
           max_seq_len_source=11, max_seq_len_target=12,
           conv_embed_max_filter_width=2, conv_embed_num_filters=[100, 100],
           conv_embed_num_highway_layers=2, conv_embed_pool_stride=2))
@@ -126,15 +131,15 @@ def test_model_parameters(test_params, expected_params):
      '--use-fused-rnn --rnn-forget-bias 1.0 --rnn-h2h-init orthogonal_stacked --monitor-bleu 10 --seed 10 '
      '--keep-last-params 50'
      ,
-    dict(batch_size=128, fill_up='test_fill_up', no_bucketing=True, bucket_width=20, loss=C.SMOOTHED_CROSS_ENTROPY,
-         smoothed_cross_entropy_alpha=1.0, normalize_loss=True, metrics=[C.PERPLEXITY, C.ACCURACY],
-         optimized_metric=C.BLEU, min_num_epochs=10,
-         max_updates=10, checkpoint_frequency=10, max_num_checkpoint_not_improved=16, dropout=1.0, optimizer='sgd',
-         initial_learning_rate=1.0, weight_decay=1.0, momentum=1.0, clip_gradient=2.0,
-         learning_rate_scheduler_type='fixed-rate-inv-t', learning_rate_reduce_factor=1.0,
-         learning_rate_reduce_num_not_improved=10, learning_rate_half_life=20.0, use_fused_rnn=True,
-         rnn_forget_bias=1.0, rnn_h2h_init=C.RNN_INIT_ORTHOGONAL_STACKED, monitor_bleu=10, seed=10,
-         keep_last_params=50)),
+     dict(batch_size=128, fill_up='test_fill_up', no_bucketing=True, bucket_width=20, loss=C.SMOOTHED_CROSS_ENTROPY,
+          smoothed_cross_entropy_alpha=1.0, normalize_loss=True, metrics=[C.PERPLEXITY, C.ACCURACY],
+          optimized_metric=C.BLEU, min_num_epochs=10,
+          max_updates=10, checkpoint_frequency=10, max_num_checkpoint_not_improved=16, dropout=1.0, optimizer='sgd',
+          initial_learning_rate=1.0, weight_decay=1.0, momentum=1.0, clip_gradient=2.0,
+          learning_rate_scheduler_type='fixed-rate-inv-t', learning_rate_reduce_factor=1.0,
+          learning_rate_reduce_num_not_improved=10, learning_rate_half_life=20.0, use_fused_rnn=True,
+          rnn_forget_bias=1.0, rnn_h2h_init=C.RNN_INIT_ORTHOGONAL_STACKED, monitor_bleu=10, seed=10,
+          keep_last_params=50)),
 ])
 def test_training_arg(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_training_args)

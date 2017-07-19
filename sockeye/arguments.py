@@ -219,6 +219,12 @@ def add_model_parameters(params):
                               type=int_greater_or_equal(1),
                               default=2048,
                               help='Number of hidden units in feed forward layers when using transformer. Default: %(default)s.')
+    model_params.add_argument('--transformer-no-positional-encodings',
+                              action='store_true',
+                              help='Do not use positional encodings.')
+    model_params.add_argument('--transformer-absolute-positional-encodings',
+                              action='store_true',
+                              help='Use absolute positional encodings.')
 
     model_params.add_argument('--num-embed',
                               type=int_greater_or_equal(1),
