@@ -630,12 +630,18 @@ class Translator:
         :return List of lists of word ids, list of attentions, array of accumulated length-normalized
                 negative log-probs.
         """
+        # Length of encoded sequence (may differ from initial input length)
+        encoded_source_length = self.models[0].encoder.get_encoded_seq_len(bucket_key)
+        for m in self.models[1:]:
+            utils.check_condition(m.get_encoded_seq_len(bucket_key) == encoded_source_length,
+                                  "Models must agree on encoded sequence length")
+
         lengths = mx.nd.zeros((self.beam_size, 1), ctx=self.context)
         finished = mx.nd.zeros((self.beam_size,), dtype='int32', ctx=self.context)
         # sequences: (beam_size, output_length)
         sequences = mx.nd.array(np.full((self.beam_size, max_output_length), C.PAD_ID), dtype='int32', ctx=self.context)
-        # attentions: (beam_size, output_length, bucket_key/source_length)
-        attentions = mx.nd.zeros((self.beam_size, max_output_length, bucket_key), ctx=self.context)
+        # attentions: (beam_size, output_length, encoded_source_length)
+        attentions = mx.nd.zeros((self.beam_size, max_output_length, encoded_source_length), ctx=self.context)
 
         # best_hyp_indices: row indices of smallest scores (ascending).
         best_hyp_indices = mx.nd.zeros((self.beam_size,), ctx=self.context)
