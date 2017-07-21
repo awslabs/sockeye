@@ -632,9 +632,8 @@ class Translator:
         """
         # Length of encoded sequence (may differ from initial input length)
         encoded_source_length = self.models[0].encoder.get_encoded_seq_len(bucket_key)
-        for m in self.models[1:]:
-            utils.check_condition(m.get_encoded_seq_len(bucket_key) == encoded_source_length,
-                                  "Models must agree on encoded sequence length")
+        utils.check_condition(all(encoded_source_length == m.encoder.get_encoded_seq_len(bucket_key) for m in self.models),
+                              "Models must agree on encoded sequence length")
 
         lengths = mx.nd.zeros((self.beam_size, 1), ctx=self.context)
         finished = mx.nd.zeros((self.beam_size,), dtype='int32', ctx=self.context)
