@@ -49,7 +49,7 @@ class AttentionConfig(config.Config):
                  rnn_num_hidden: int,
                  layer_normalization: bool,
                  config_coverage: Optional[coverage.CoverageConfig] = None,
-                 num_heads: int = 8) -> None:
+                 num_heads: int = 1) -> None:
         super().__init__()
         self.type = type
         self.num_hidden = num_hidden
@@ -319,6 +319,7 @@ class DotAttention(Attention):
                                               weight=self.t2h_weight,
                                               num_hidden=self.num_hidden,
                                               no_bias=True, name="%squery_hidden_fc" % self.prefix)
+            query *= self.num_hidden ** -0.5
 
             # (batch_size, decoder_num_hidden, 1)
             expanded_decoder_state = mx.sym.expand_dims(query, axis=2)
@@ -421,13 +422,21 @@ class MultiHeadDotAttention(Attention):
             lengths = layers.broadcast_lengths(source_length, self.heads)
 
             # context: (batch*heads, depth_per_head)
+            # attention_probs: (batch*heads, length)
             context, attention_probs = get_context_and_attention_probs(values, lengths, attention_scores)
 
             # combine heads
             # (batch*heads, 1, depth_per_head
             context = mx.sym.expand_dims(context, axis=1)
-            # (batch * 1, depth)
+            # (batch, 1, depth)
             context = layers.combine_heads(context, length=1, heads=self.heads)
+            # (batch, depth)
+            context = mx.sym.reshape(context, shape=(-3, -1))
+
+            # (batch, heads, length)
+            attention_probs = mx.sym.reshape(data=attention_probs, shape=(-4, -1, self.heads, source_seq_len))
+            # just average over distributions
+            attention_probs = mx.sym.mean(attention_probs, axis=1, keepdims=False)
 
             return AttentionState(context=context,
                                   probs=attention_probs,
@@ -576,7 +585,7 @@ class MlpAttention(Attention):
         self.att_c2h_weight = mx.sym.Variable("%sc2h_weight" % self.prefix) if config_coverage is not None else None
         # layer normalization
         self._ln = layers.LayerNormalization(num_hidden=attention_num_hidden,
-                                             prefix="%s_norm" % self.prefix) if layer_normalization else None
+                                             prefix="%snorm" % self.prefix) if layer_normalization else None
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """

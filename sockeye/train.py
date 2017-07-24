@@ -260,7 +260,8 @@ def main():
                                                      input_previous_word=args.attention_use_prev_word,
                                                      rnn_num_hidden=config_rnn.num_hidden,
                                                      layer_normalization=args.layer_normalization,
-                                                     config_coverage=config_coverage)
+                                                     config_coverage=config_coverage,
+                                                     num_heads=args.transformer_attention_heads)
 
         config_loss = loss.LossConfig(type=args.loss,
                                       vocab_size=vocab_target_size,

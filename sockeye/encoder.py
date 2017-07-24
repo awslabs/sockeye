@@ -557,7 +557,7 @@ class TransformerEncoderConfig(EncoderConfig):
                  dropout: float = 0.0,
                  positional_encodings: bool = True,
                  relative_positions: bool = True,
-                 layer_normalization: bool = False) -> None:
+                 layer_normalization: bool = True) -> None:
         super().__init__(vocab_size, num_embed)
         self.model_size = self.num_embed
         self.max_seq_len = max_seq_len
@@ -604,23 +604,33 @@ class TransformerEncoder(Encoder):
             if config.layer_normalization:
                 # Layer normalization after attention
                 layer_norm_att = layers.LayerNormalization(num_hidden=config.model_size,
-                                                           prefix="%sattn_ln_%d_" % (self.prefix, i))
+                                                           prefix="%sattn_ln_%d" % (self.prefix, i))
 
                 # Layer normalization after feed-forward
                 layer_norm_ffn = layers.LayerNormalization(num_hidden=config.model_size,
-                                                           prefix="%sffn_ln_%d_" % (self.prefix, i))
+                                                           prefix="%sffn_ln_%d" % (self.prefix, i))
 
             # Apply one layer of the encoder
             def apply(data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int):
                 encoded = data + attention.on(data, data_length, seq_len)
                 if config.layer_normalization:
-                    encoded = layer_norm_att.normalize(encoded)
+                    encoded = self._reshape_and_normalize(encoded, seq_len, layer_norm_att)
                 encoded = encoded + feed_forward.apply(encoded, seq_len)
                 if config.layer_normalization:
-                    encoded = layer_norm_ffn.normalize(encoded)
+                    encoded = self._reshape_and_normalize(encoded, seq_len, layer_norm_ffn)
                 return encoded
 
             self.layers.append(apply)
+
+    @staticmethod
+    def _reshape_and_normalize(data: mx.sym.Symbol,
+                               length: int,
+                               layer_norm: layers.LayerNormalization):
+        # (batch * length, num_hidden)
+        data = mx.sym.reshape(data, shape=(-3, -1))
+        data = layer_norm.normalize(data)
+        data = mx.sym.reshape(data, shape=(-4, -1, length, 0))
+        return data
 
     def encode(self,
                data: mx.sym.Symbol,
