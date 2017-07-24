@@ -71,41 +71,6 @@ class RecurrentEncoderConfig(EncoderConfig):
         self.conv_config = conv_config
 
 
-class TransformerEncoderConfig(EncoderConfig):
-    """
-    Transformer encoder configuration.
-
-    :param vocab_size: Source vocabulary size.
-    :param max_seq_len: Maximum sequence length.
-    :param num_embed: Model size.
-    :param num_layers: Number of layers.
-    :param attention_heads: Number of attention heads
-    :param feed_forward_num_hidden: FFN num hidden.
-    :param dropout: Dropout.
-    """
-    yaml_tag = "!TransformerEncoderConfig"
-
-    def __init__(self,
-                 vocab_size: int,
-                 max_seq_len: int,
-                 num_embed: int = 512,
-                 num_layers: int = 6,
-                 attention_heads: int = 8,
-                 feed_forward_num_hidden: int = 2048,
-                 dropout: float = 0.0,
-                 positional_encodings: bool = True,
-                 relative_positional_encodings: bool = True) -> None:
-        super().__init__(vocab_size, num_embed)
-        self.model_size = self.num_embed
-        self.max_seq_len = max_seq_len
-        self.num_layers = num_layers
-        self.attention_heads = attention_heads
-        self.feed_forward_num_hidden = feed_forward_num_hidden
-        self.dropout = dropout
-        self.positional_encodings = positional_encodings
-        self.relative_positional_encodings = relative_positional_encodings
-
-
 def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool) -> 'Encoder':
     """
     Returns a recurrent encoder with embedding, batch2time-major conversion, and bidirectional RNN.
@@ -141,7 +106,7 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool) -> 'Encod
     return EncoderSequence(encoders)
 
 
-def get_transformer_encoder(config: TransformerEncoderConfig) -> 'Encoder':
+def get_transformer_encoder(config: 'TransformerEncoderConfig') -> 'Encoder':
     """
     Returns a Transformer encoder.
 
@@ -154,7 +119,7 @@ def get_transformer_encoder(config: TransformerEncoderConfig) -> 'Encoder':
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
                               dropout=config.dropout,
                               add_positional_encoding=config.positional_encodings,
-                              relative_positional_encoding=config.relative_positional_encodings,
+                              relative_positional_encoding=config.relative_positions,
                               max_seq_len=config.max_seq_len))
     encoders.append(TransformerEncoder(config))
     encoders.append(BatchMajor2TimeMajor(num_hidden=config.num_embed))
@@ -565,6 +530,46 @@ class BiDirectionalRNNEncoder(Encoder):
         return self.forward_rnn.get_rnn_cells() + self.reverse_rnn.get_rnn_cells()
 
 
+class TransformerEncoderConfig(EncoderConfig):
+    """
+    Transformer encoder configuration.
+
+    :param vocab_size: Source vocabulary size.
+    :param max_seq_len: Maximum sequence length.
+    :param num_embed: Model size.
+    :param num_layers: Number of layers.
+    :param attention_heads: Number of attention heads
+    :param feed_forward_num_hidden: Number of hidden units for feed-forward layers.
+    :param dropout: Dropout.
+    :param positional_encodings: Use positional encodings.
+    :param relative_positions: Use relative positional encodings.
+    :param layer_normalization: Use layer normalization.
+    """
+    yaml_tag = "!TransformerEncoderConfig"
+
+    def __init__(self,
+                 vocab_size: int,
+                 max_seq_len: int,
+                 num_embed: int = 512,
+                 num_layers: int = 6,
+                 attention_heads: int = 8,
+                 feed_forward_num_hidden: int = 2048,
+                 dropout: float = 0.0,
+                 positional_encodings: bool = True,
+                 relative_positions: bool = True,
+                 layer_normalization: bool = False) -> None:
+        super().__init__(vocab_size, num_embed)
+        self.model_size = self.num_embed
+        self.max_seq_len = max_seq_len
+        self.num_layers = num_layers
+        self.attention_heads = attention_heads
+        self.feed_forward_num_hidden = feed_forward_num_hidden
+        self.dropout = dropout
+        self.positional_encodings = positional_encodings
+        self.relative_positions = relative_positions
+        self.layer_normalization = layer_normalization
+
+
 class TransformerEncoder(Encoder):
     """
     Non-recurrent encoder based on the transformer architecture in:
@@ -590,23 +595,30 @@ class TransformerEncoder(Encoder):
                                                   depth_out=config.model_size,
                                                   dropout=config.dropout,
                                                   prefix="%sattn_%d_" % (self.prefix, i))
-            # Layer normalization after attention
-            attention_ln = layers.LayerNormalization(num_hidden=config.model_size,
-                                                     prefix="%sattn_ln_%d_" % (self.prefix, i))
+
             # Feed-forward sub-layer
             feed_forward = layers.FFNRelu(prefix="%sffn_%d_" % (self.prefix, i),
                                           num_hidden=config.feed_forward_num_hidden,
                                           num_model=config.model_size,
                                           dropout=config.dropout)
-            # Layer normalization after feed-forward
-            feed_forward_ln = layers.LayerNormalization(num_hidden=config.model_size,
-                                                        prefix="%sffn_ln_%d_" % (self.prefix, i))
+            if config.layer_normalization:
+                # Layer normalization after attention
+                layer_norm_att = layers.LayerNormalization(num_hidden=config.model_size,
+                                                           prefix="%sattn_ln_%d_" % (self.prefix, i))
+
+                # Layer normalization after feed-forward
+                layer_norm_ffn = layers.LayerNormalization(num_hidden=config.model_size,
+                                                           prefix="%sffn_ln_%d_" % (self.prefix, i))
 
             # Apply one layer of the encoder
             def apply(data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int):
-                encoded_attn = attention_ln.normalize(data + attention.on(data, data_length, seq_len))
-                encoded_attn_ffn = feed_forward_ln.normalize(encoded_attn + feed_forward.apply(encoded_attn, seq_len))
-                return encoded_attn_ffn
+                encoded = data + attention.on(data, data_length, seq_len)
+                if config.layer_normalization:
+                    encoded = layer_norm_att.normalize(encoded)
+                encoded = encoded + feed_forward.apply(encoded, seq_len)
+                if config.layer_normalization:
+                    encoded = layer_norm_ffn.normalize(encoded)
+                return encoded
 
             self.layers.append(apply)
 

@@ -149,11 +149,3 @@ class PositionalEncodingInitializer(mx.initializer.Initializer):
     def _init_weight(self, name: str, arr: mx.nd.NDArray):
         assert arr.shape == (1, self.max_seq_len, self.num_embed)
         arr[:] = self.get_encodings()
-
-
-
-if __name__ == '__main__':
-    i = PositionalEncodingInitializer(100, 512, True)
-    print(i.get_encodings()[:, :5, :2])
-    i = PositionalEncodingInitializer(100, 512, False)
-    print(i.get_encodings()[:,:5,:2])

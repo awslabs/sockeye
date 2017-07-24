@@ -225,7 +225,7 @@ def main():
                 feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
                 dropout=args.dropout,
                 positional_encodings=not args.transformer_no_positional_encodings,
-                relative_positional_encodings=not args.transformer_absolute_positional_encodings)
+                relative_positions=not args.transformer_absolute_positional_encodings)
         else:
             config_conv = None
             if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
