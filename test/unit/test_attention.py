@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 import sockeye.attention
 import sockeye.coverage
-from test.test_utils import gaussian_vector, integer_vector
+from test.common import gaussian_vector, integer_vector
 
 attention_types = ['bilinear', 'dot', 'location', 'mlp']
 

@@ -16,7 +16,7 @@ import mxnet as mx
 import numpy as np
 import pytest
 import sockeye.coverage
-from test.test_utils import gaussian_vector, integer_vector, uniform_vector
+from test.common import gaussian_vector, integer_vector, uniform_vector
 
 activation_types = ["tanh", "sigmoid", "relu", "softrelu"]
 

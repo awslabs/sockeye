@@ -74,7 +74,7 @@ def find_checkpoints(model_path: str, size=4, strategy="best", maximize=False, m
     """
     Finds N best points from .metrics file according to strategy
 
-    :param metric: Metric according to which checkpoints are selected.  Corresponds to columns in model\metrics file.
+    :param metric: Metric according to which checkpoints are selected.  Corresponds to columns in model/metrics file.
     :param model_path: Path to model.
     :param size: Number of checkpoints to combine.
     :param strategy: Combination strategy.

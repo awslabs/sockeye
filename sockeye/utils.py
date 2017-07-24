@@ -532,7 +532,7 @@ def read_metrics_points(path: str, model_path: str, metric: str) -> List[Tuple[f
     """
     Reads lines from .metrics file and return list of elements [val, checkpoint]
 
-    :param metric: Metric according to which checkpoints are selected.  Corresponds to columns in model\metrics file.
+    :param metric: Metric according to which checkpoints are selected.  Corresponds to columns in model/metrics file.
     :param path: File to read metric values from.
     :param model_path: path where the params files reside.
     :return: List of pairs (metric value, checkpoint).
