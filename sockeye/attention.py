@@ -310,6 +310,9 @@ class DotAttention(Attention):
                                               num_hidden=self.num_hidden,
                                               no_bias=True, name="%squery_hidden_fc" % self.prefix)
 
+            # scale down dot product by sqrt(num_hidden) [Vaswani et al, 17]
+            query *= self.num_hidden ** -0.5
+
             # (batch_size, decoder_num_hidden, 1)
             expanded_decoder_state = mx.sym.expand_dims(query, axis=2)
 
@@ -582,41 +585,48 @@ class MlpAttention(Attention):
         return attend
 
 
-def get_context_and_attention_probs(source: mx.sym.Symbol,
-                                    source_length: mx.sym.Symbol,
-                                    attention_scores: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
+def mask_attention_scores(logits: mx.sym.Symbol,
+                          length: mx.sym.Symbol) -> mx.sym.Symbol:
     """
-    Returns context vector and attention probs via a weighted sum over the masked, softmaxed attention scores.
+    Masks attention scores according to sequence length.
 
-    :param source: Shape: (batch_size, seq_len, encoder_num_hidden).
-    :param source_length: Shape: (batch_size,).
-    :param attention_scores: Shape: (batch_size, seq_len, 1).
+    :param logits: Shape: (batch_size, seq_len, 1).
+    :param length: Shape: (batch_size,).
+    :return: Masked logits: (batch_size, seq_len, 1).
+    """
+    # Note: we need to add an axis as SequenceMask expects 3D input
+    # TODO: SequenceMask should accept 2d input.
+    # TODO: Masking with 0-1 mask, to avoid the multiplication
+    logits = mx.sym.swapaxes(data=logits, dim1=0, dim2=1)
+    logits = mx.sym.SequenceMask(data=logits,
+                                 use_sequence_length=True,
+                                 sequence_length=length,
+                                 value=-99999999.)
+    # (batch_size, seq_len, 1)
+    return mx.sym.swapaxes(data=logits, dim1=0, dim2=1)
+
+
+def get_context_and_attention_probs(values: mx.sym.Symbol,
+                                    length: mx.sym.Symbol,
+                                    logits: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
+    """
+    Returns context vector and attention probabilities
+    via a weighted sum over values.
+
+    :param values: Shape: (batch_size, seq_len, encoder_num_hidden).
+    :param length: Shape: (batch_size,).
+    :param logits: Shape: (batch_size, seq_len, 1).
     :return: context: (batch_size, encoder_num_hidden), attention_probs: (batch_size, seq_len).
     """
-
-    # TODO: It would be nice if SequenceMask could take a 2d input...
-    # Note: we need to add an axis as SequenceMask expects 3D input
-    # TODO: we should probably replace this with a multiplication of a 0-1 mask, to avoid the multiplication
-    attention_scores = mx.sym.swapaxes(data=attention_scores, dim1=0, dim2=1)
-    attention_scores = mx.sym.SequenceMask(data=attention_scores,
-                                           use_sequence_length=True,
-                                           sequence_length=source_length,
-                                           value=-99999999.)
-    attention_scores = mx.sym.swapaxes(data=attention_scores, dim1=0, dim2=1)
-    # attention_scores is batch_major from here: (batch_size, seq_len, 1)
-
-    # (batch_size, seq_len)
-    attention_scores = mx.sym.reshape(data=attention_scores, shape=(0, 0))
-
-    # (batch_size, seq_len)
-    attention_probs = mx.sym.softmax(attention_scores, name='attention_softmax')
+    # (batch_size, seq_len, 1)
+    logits = mask_attention_scores(logits, length)
 
     # (batch_size, seq_len, 1)
-    attention_probs_expanded = mx.sym.expand_dims(data=attention_probs, axis=2)
+    probs = mx.sym.softmax(logits, axis=1, name='attention_softmax')
 
     # batch_dot: (batch, M, K) X (batch, K, N) –> (batch, M, N).
     # (batch_size, seq_len, encoder_num_hidden) X (batch_size, seq_len, 1) -> (batch_size, encoder_num_hidden)
-    context = mx.sym.batch_dot(lhs=source, rhs=attention_probs_expanded, transpose_a=True)
+    context = mx.sym.batch_dot(lhs=values, rhs=probs, transpose_a=True)
     context = mx.sym.reshape(data=context, shape=(0, 0))
 
-    return context, attention_probs
+    return context, mx.sym.reshape(data=probs, shape=(0, 0))
