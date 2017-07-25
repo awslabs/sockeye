@@ -41,8 +41,6 @@ class RecurrentDecoderConfig(Config):
     :param context_gating: Whether to use context gating.
     :param layer_normalization: Apply layer normalization.
     """
-    yaml_tag = "!RecurrentDecoderConfig"
-
     def __init__(self,
                  vocab_size: int,
                  num_embed: int,

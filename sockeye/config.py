@@ -16,13 +16,17 @@ import copy
 import yaml
 
 
-class Config(yaml.YAMLObject):
+class TaggedYamlObjectMetaclass(yaml.YAMLObjectMetaclass):
+    def __init__(cls, name, bases, kwds):
+        cls.yaml_tag = "!" + name
+        super().__init__(name, bases, {**kwds, **{'yaml_tag': "!" + name}})
+
+
+class Config(yaml.YAMLObject, metaclass=TaggedYamlObjectMetaclass):
     """
     Base configuration object that supports freezing of members and YAML (de-)serialization.
     Actual Configuration should subclass this object.
     """
-    yaml_tag = '!Config'
-
     def __init__(self):
         self.__add_frozen()
 

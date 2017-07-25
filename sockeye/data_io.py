@@ -190,8 +190,6 @@ class DataConfig(config.Config):
     """
     Stores data paths from training.
     """
-    yaml_tag = "!DataConfig"
-
     def __init__(self,
                  source: str,
                  target: str,
