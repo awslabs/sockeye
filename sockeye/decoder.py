@@ -107,8 +107,53 @@ Decoder state.
 
 :param hidden: Hidden state after attention mechanism. Shape: (batch_size, num_hidden).
 :param layer_states: Hidden states for RNN layers of RecurrentDecoder. Shape: List[(batch_size, rnn_num_hidden)]
-
 """
+
+
+class TransformerDecoder(Decoder):
+    """
+    TODO
+    """
+
+    def __init__(self,
+                 model_size: int = 512):
+        self.model_size = model_size
+
+    def get_num_hidden(self) -> int:
+        """
+        Returns the representation size of this decoder.
+
+        :raises: NotImplementedError
+        """
+        return self.model_size
+
+    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
+        """
+        Returns a list of RNNCells used by this decoder.
+        """
+        return []
+
+    def decode(self,
+               source_encoded: mx.sym.Symbol,
+               source_seq_len: int,
+               source_length: mx.sym.Symbol,
+               target: mx.sym.Symbol,
+               target_seq_len: int,
+               source_lexicon: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
+        """
+        Returns decoder logits with batch size and target sequence length collapsed into a single dimension.
+
+        :param source_encoded: Concatenated encoder states. Shape: (source_seq_len, batch_size, encoder_num_hidden).
+        :param source_seq_len: Maximum source sequence length.
+        :param source_length: Lengths of source sequences. Shape: (batch_size,).
+        :param target: Target sequence. Shape: (batch_size, target_seq_len).
+        :param target_seq_len: Maximum target sequence length.
+        :param source_lexicon: Lexical biases for current sentence.
+               Shape: (batch_size, target_vocab_size, source_seq_len)
+        :return: Logits of next-word predictions for target sequence.
+                 Shape: (batch_size * target_seq_len, target_vocab_size)
+        """
+
 
 
 class RecurrentDecoder(Decoder):
