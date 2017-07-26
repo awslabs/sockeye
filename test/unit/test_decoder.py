@@ -19,7 +19,7 @@ import sockeye.rnn
 import sockeye.constants as C
 import sockeye.coverage
 import sockeye.decoder
-from test.test_utils import gaussian_vector, integer_vector
+from test.common import gaussian_vector, integer_vector
 
 step_tests = [(C.GRU_TYPE, True), (C.LSTM_TYPE, False)]
 

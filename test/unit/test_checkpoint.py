@@ -13,7 +13,7 @@
 
 from math import isclose
 import tempfile
-from test.test_utils import generate_random_sentence
+from test.common import generate_random_sentence
 
 import sockeye.data_io
 import mxnet as mx
