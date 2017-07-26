@@ -116,7 +116,7 @@ class TransformerDecoder(Decoder):
     """
 
     def __init__(self,
-                 model_size: int = 512):
+                 model_size: int = 512) -> None:
         self.model_size = model_size
 
     def get_num_hidden(self) -> int:

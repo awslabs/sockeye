@@ -18,7 +18,6 @@ import pytest
 
 from test.common import generate_digits_file, run_train_translate
 
-
 _TRAIN_LINE_COUNT = 10000
 _DEV_LINE_COUNT = 100
 _LINE_MAX_LENGTH = 9
@@ -31,6 +30,16 @@ _LINE_MAX_LENGTH = 9
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
      1.01,
+     0.98),
+    # 2-layer transformer encoder, LSTM decoder with attention
+    ("--encoder transformer --rnn-num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
+     " --attention-type mhdot --attention-num-hidden 32 --batch-size 16"
+     " --loss cross-entropy --optimized-metric perplexity --max-updates 4000"
+     " --transformer-num-layers 2 --transformer-attention-heads 4 --transformer-model-size 64"
+     " --transformer-feed-forward-num-hidden 64"
+     " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
+     "--beam-size 5",
+     1.001,
      0.98),
 ])
 def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh):
@@ -64,6 +73,16 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
      "--beam-size 5",
      1.01,
      0.98),
+    # 1-layer transformer encoder, LSTM decoder with attention
+    ("--encoder transformer --rnn-num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
+     " --attention-type mhdot --attention-num-hidden 32 --batch-size 16"
+     " --loss cross-entropy --optimized-metric perplexity --max-updates 6000"
+     " --transformer-num-layers 1 --transformer-attention-heads 4 --transformer-model-size 64"
+     " --transformer-feed-forward-num-hidden 64"
+     " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
+     "--beam-size 5",
+     1.001,
+     0.98),
 ])
 def test_seq_sort(train_params, translate_params, perplexity_thresh, bleu_thresh):
     """Task: sort short sequences of digits"""
@@ -73,7 +92,8 @@ def test_seq_sort(train_params, translate_params, perplexity_thresh, bleu_thresh
         train_target_path = os.path.join(work_dir, "train.tgt")
         dev_source_path = os.path.join(work_dir, "dev.src")
         dev_target_path = os.path.join(work_dir, "dev.tgt")
-        generate_digits_file(train_source_path, train_target_path, _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, sort_target=True)
+        generate_digits_file(train_source_path, train_target_path, _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH,
+                             sort_target=True)
         generate_digits_file(dev_source_path, dev_target_path, _DEV_LINE_COUNT, _LINE_MAX_LENGTH, sort_target=True)
         # Test model configuration
         perplexity, bleu = run_train_translate(train_params,
