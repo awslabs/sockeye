@@ -14,11 +14,13 @@
 import mxnet as mx
 import numpy as np
 import pytest
+
 import sockeye.attention
+import sockeye.constants as C
 import sockeye.coverage
 from test.common import gaussian_vector, integer_vector
 
-attention_types = ['bilinear', 'dot', 'location', 'mlp']
+attention_types = [C.ATT_BILINEAR, C.ATT_DOT, C.ATT_DOT_SCALED, C.ATT_LOC, C.ATT_MLP]
 
 
 @pytest.mark.parametrize("attention_type", attention_types)
