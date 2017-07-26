@@ -57,6 +57,16 @@ CELL_TYPES = [LSTM_TYPE, LNLSTM_TYPE, LNGLSTM_TYPE, GRU_TYPE, LNGRU_TYPE, LNGGRU
 RNN_INIT_ORTHOGONAL = 'orthogonal'
 RNN_INIT_ORTHOGONAL_STACKED = 'orthogonal_stacked'
 
+# attention types
+ATT_BILINEAR = 'bilinear'
+ATT_DOT = 'dot'
+ATT_DOT_SCALED = 'dot_scaled'
+ATT_FIXED = 'fixed'
+ATT_LOC = 'location'
+ATT_MLP = 'mlp'
+ATT_COV = "coverage"
+ATT_TYPES = [ATT_BILINEAR, ATT_DOT, ATT_DOT_SCALED, ATT_FIXED, ATT_LOC, ATT_MLP, ATT_COV]
+
 # default decoder prefixes
 DECODER_PREFIX = "decoder_"
 

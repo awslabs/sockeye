@@ -62,21 +62,24 @@ def get_attention(config: AttentionConfig, max_seq_len: int) -> 'Attention':
     :param max_seq_len: Maximum length of source sequences.
     :return: Instance of Attention.
     """
-    if config.type == "bilinear":
+    if config.type == C.ATT_BILINEAR:
         if config.input_previous_word:
             logger.warning("bilinear attention does not support input_previous_word")
         return BilinearAttention(config.rnn_num_hidden)
-    elif config.type == "dot":
+    elif config.type == C.ATT_DOT:
         return DotAttention(config.input_previous_word, config.rnn_num_hidden, config.num_hidden)
-    elif config.type == "fixed":
+    elif config.type == C.ATT_DOT_SCALED:
+        return DotAttention(config.input_previous_word, config.rnn_num_hidden, config.num_hidden,
+                            scale=config.rnn_num_hidden ** -0.5)
+    elif config.type == C.ATT_FIXED:
         return EncoderLastStateAttention(config.input_previous_word)
-    elif config.type == "location":
+    elif config.type == C.ATT_LOC:
         return LocationAttention(config.input_previous_word, max_seq_len)
-    elif config.type == "mlp":
+    elif config.type == C.ATT_MLP:
         return MlpAttention(input_previous_word=config.input_previous_word,
                             attention_num_hidden=config.num_hidden,
                             layer_normalization=config.layer_normalization)
-    elif config.type == "coverage":
+    elif config.type == C.ATT_COV:
         return MlpAttention(input_previous_word=config.input_previous_word,
                             attention_num_hidden=config.num_hidden,
                             layer_normalization=config.layer_normalization,
@@ -258,15 +261,18 @@ class DotAttention(Attention):
     :param input_previous_word: Feed the previous target embedding into the attention mechanism.
     :param rnn_num_hidden: Number of hidden units in encoder/decoder RNNs.
     :param num_hidden: Number of hidden units.
+    :param scale: Optionally scale query before dot product [Vaswani et al, 2017].
     """
 
     def __init__(self,
                  input_previous_word: bool,
                  rnn_num_hidden: int,
-                 num_hidden: int) -> None:
+                 num_hidden: int,
+                 scale: Optional[float] = None) -> None:
         super().__init__(input_previous_word)
         self.project = rnn_num_hidden != num_hidden
         self.num_hidden = num_hidden
+        self.scale = scale
         self.t2h_weight = mx.sym.Variable("%st2h_weight" % self.prefix) if self.project else None
         self.s2h_weight = mx.sym.Variable("%ss2h_weight" % self.prefix) if self.project else None
 
@@ -311,7 +317,8 @@ class DotAttention(Attention):
                                               no_bias=True, name="%squery_hidden_fc" % self.prefix)
 
             # scale down dot product by sqrt(num_hidden) [Vaswani et al, 17]
-            query *= self.num_hidden ** -0.5
+            if self.scale is not None:
+                query *= self.scale
 
             # (batch_size, decoder_num_hidden, 1)
             expanded_decoder_state = mx.sym.expand_dims(query, axis=2)
