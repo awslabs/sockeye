@@ -62,21 +62,24 @@ def get_attention(config: AttentionConfig, max_seq_len: int) -> 'Attention':
     :param max_seq_len: Maximum length of source sequences.
     :return: Instance of Attention.
     """
-    if config.type == "bilinear":
+    if config.type == C.ATT_BILINEAR:
         if config.input_previous_word:
             logger.warning("bilinear attention does not support input_previous_word")
         return BilinearAttention(config.rnn_num_hidden)
-    elif config.type == "dot":
+    elif config.type == C.ATT_DOT:
         return DotAttention(config.input_previous_word, config.rnn_num_hidden, config.num_hidden)
-    elif config.type == "fixed":
+    elif config.type == C.ATT_DOT_SCALED:
+        return DotAttention(config.input_previous_word, config.rnn_num_hidden, config.num_hidden,
+                            scale=config.rnn_num_hidden ** -0.5)
+    elif config.type == C.ATT_FIXED:
         return EncoderLastStateAttention(config.input_previous_word)
-    elif config.type == "location":
+    elif config.type == C.ATT_LOC:
         return LocationAttention(config.input_previous_word, max_seq_len)
-    elif config.type == "mlp":
+    elif config.type == C.ATT_MLP:
         return MlpAttention(input_previous_word=config.input_previous_word,
                             attention_num_hidden=config.num_hidden,
                             layer_normalization=config.layer_normalization)
-    elif config.type == "coverage":
+    elif config.type == C.ATT_COV:
         return MlpAttention(input_previous_word=config.input_previous_word,
                             attention_num_hidden=config.num_hidden,
                             layer_normalization=config.layer_normalization,
@@ -258,15 +261,18 @@ class DotAttention(Attention):
     :param input_previous_word: Feed the previous target embedding into the attention mechanism.
     :param rnn_num_hidden: Number of hidden units in encoder/decoder RNNs.
     :param num_hidden: Number of hidden units.
+    :param scale: Optionally scale query before dot product [Vaswani et al, 2017].
     """
 
     def __init__(self,
                  input_previous_word: bool,
                  rnn_num_hidden: int,
-                 num_hidden: int) -> None:
+                 num_hidden: int,
+                 scale: Optional[float] = None) -> None:
         super().__init__(input_previous_word)
         self.project = rnn_num_hidden != num_hidden
         self.num_hidden = num_hidden
+        self.scale = scale
         self.t2h_weight = mx.sym.Variable("%st2h_weight" % self.prefix) if self.project else None
         self.s2h_weight = mx.sym.Variable("%ss2h_weight" % self.prefix) if self.project else None
 
@@ -309,6 +315,10 @@ class DotAttention(Attention):
                                               weight=self.t2h_weight,
                                               num_hidden=self.num_hidden,
                                               no_bias=True, name="%squery_hidden_fc" % self.prefix)
+
+            # scale down dot product by sqrt(num_hidden) [Vaswani et al, 17]
+            if self.scale is not None:
+                query *= self.scale
 
             # (batch_size, decoder_num_hidden, 1)
             expanded_decoder_state = mx.sym.expand_dims(query, axis=2)
@@ -582,41 +592,48 @@ class MlpAttention(Attention):
         return attend
 
 
-def get_context_and_attention_probs(source: mx.sym.Symbol,
-                                    source_length: mx.sym.Symbol,
-                                    attention_scores: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
+def mask_attention_scores(logits: mx.sym.Symbol,
+                          length: mx.sym.Symbol) -> mx.sym.Symbol:
     """
-    Returns context vector and attention probs via a weighted sum over the masked, softmaxed attention scores.
+    Masks attention scores according to sequence length.
 
-    :param source: Shape: (batch_size, seq_len, encoder_num_hidden).
-    :param source_length: Shape: (batch_size,).
-    :param attention_scores: Shape: (batch_size, seq_len, 1).
+    :param logits: Shape: (batch_size, seq_len, 1).
+    :param length: Shape: (batch_size,).
+    :return: Masked logits: (batch_size, seq_len, 1).
+    """
+    # Note: we need to add an axis as SequenceMask expects 3D input
+    # TODO: SequenceMask should accept 2d input.
+    # TODO: Masking with 0-1 mask, to avoid the multiplication
+    logits = mx.sym.swapaxes(data=logits, dim1=0, dim2=1)
+    logits = mx.sym.SequenceMask(data=logits,
+                                 use_sequence_length=True,
+                                 sequence_length=length,
+                                 value=-99999999.)
+    # (batch_size, seq_len, 1)
+    return mx.sym.swapaxes(data=logits, dim1=0, dim2=1)
+
+
+def get_context_and_attention_probs(values: mx.sym.Symbol,
+                                    length: mx.sym.Symbol,
+                                    logits: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
+    """
+    Returns context vector and attention probabilities
+    via a weighted sum over values.
+
+    :param values: Shape: (batch_size, seq_len, encoder_num_hidden).
+    :param length: Shape: (batch_size,).
+    :param logits: Shape: (batch_size, seq_len, 1).
     :return: context: (batch_size, encoder_num_hidden), attention_probs: (batch_size, seq_len).
     """
-
-    # TODO: It would be nice if SequenceMask could take a 2d input...
-    # Note: we need to add an axis as SequenceMask expects 3D input
-    # TODO: we should probably replace this with a multiplication of a 0-1 mask, to avoid the multiplication
-    attention_scores = mx.sym.swapaxes(data=attention_scores, dim1=0, dim2=1)
-    attention_scores = mx.sym.SequenceMask(data=attention_scores,
-                                           use_sequence_length=True,
-                                           sequence_length=source_length,
-                                           value=-99999999.)
-    attention_scores = mx.sym.swapaxes(data=attention_scores, dim1=0, dim2=1)
-    # attention_scores is batch_major from here: (batch_size, seq_len, 1)
-
-    # (batch_size, seq_len)
-    attention_scores = mx.sym.reshape(data=attention_scores, shape=(0, 0))
-
-    # (batch_size, seq_len)
-    attention_probs = mx.sym.softmax(attention_scores, name='attention_softmax')
+    # (batch_size, seq_len, 1)
+    logits = mask_attention_scores(logits, length)
 
     # (batch_size, seq_len, 1)
-    attention_probs_expanded = mx.sym.expand_dims(data=attention_probs, axis=2)
+    probs = mx.sym.softmax(logits, axis=1, name='attention_softmax')
 
     # batch_dot: (batch, M, K) X (batch, K, N) –> (batch, M, N).
     # (batch_size, seq_len, encoder_num_hidden) X (batch_size, seq_len, 1) -> (batch_size, encoder_num_hidden)
-    context = mx.sym.batch_dot(lhs=source, rhs=attention_probs_expanded, transpose_a=True)
+    context = mx.sym.batch_dot(lhs=values, rhs=probs, transpose_a=True)
     context = mx.sym.reshape(data=context, shape=(0, 0))
 
-    return context, attention_probs
+    return context, mx.sym.reshape(data=probs, shape=(0, 0))
