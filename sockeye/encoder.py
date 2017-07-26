@@ -59,8 +59,6 @@ class RecurrentEncoderConfig(EncoderConfig):
     :param num_embed: Size of embedding layer.
     :param rnn_config: RNN configuration.
     """
-    yaml_tag = "!RecurrentEncoderConfig"
-
     def __init__(self,
                  vocab_size: int,
                  num_embed: int,
@@ -681,8 +679,6 @@ class ConvolutionalEmbeddingConfig(Config):
     :param num_highway_layers: Number of highway layers for segment embeddings.
     :param dropout: Dropout probability.
     """
-    yaml_tag = "!ConvolutionalEmbeddingConfig"
-
     def __init__(self,
                  num_embed: int,
                  max_filter_width: int = 8,

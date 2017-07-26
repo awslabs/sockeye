@@ -54,20 +54,20 @@ LNGRU_TYPE = 'lngru'
 LNGGRU_TYPE = 'lnggru'
 CELL_TYPES = [LSTM_TYPE, LNLSTM_TYPE, LNGLSTM_TYPE, GRU_TYPE, LNGRU_TYPE, LNGGRU_TYPE]
 
-
-# attention types
-ATT_BILINEAR="bilinear"
-ATT_DOT="dot"
-ATT_MH_DOT="mhdot"
-ATT_FIXED="fixed"
-ATT_LOC="location"
-ATT_MLP="mlp"
-ATT_COV="coverage"
-ATTENTION_TYPES = [ATT_BILINEAR, ATT_DOT, ATT_MH_DOT, ATT_FIXED, ATT_LOC, ATT_MLP, ATT_COV]
-
 # init types
 RNN_INIT_ORTHOGONAL = 'orthogonal'
 RNN_INIT_ORTHOGONAL_STACKED = 'orthogonal_stacked'
+
+# attention types
+ATT_BILINEAR = 'bilinear'
+ATT_DOT = 'dot'
+ATT_DOT_SCALED = 'dot_scaled'
+ATT_MH_DOT = 'mhdot'
+ATT_FIXED = 'fixed'
+ATT_LOC = 'location'
+ATT_MLP = 'mlp'
+ATT_COV = "coverage"
+ATT_TYPES = [ATT_BILINEAR, ATT_DOT, ATT_DOT_SCALED, ATT_MH_DOT, ATT_FIXED, ATT_LOC, ATT_MLP, ATT_COV]
 
 # default decoder prefixes
 DECODER_PREFIX = "decoder_"

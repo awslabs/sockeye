@@ -15,11 +15,11 @@ python3 setup.py test
 TEST_RESULT=$?
 
 # Run pylint on the sockeye package, failing on any reported errors.
-pylint --rcfile=sockeye.pylintrc sockeye -E
+pylint --rcfile=pylintrc sockeye -E
 SOCKEYE_LINT_RESULT=$?
 
 # Run pylint on test package, failing on any reported errors.
-pylint --rcfile=sockeye.pylintrc test -E
+pylint --rcfile=pylintrc test -E
 TESTS_LINT_RESULT=$?
 
 # Run mypy, we are currently limiting to modules that pass

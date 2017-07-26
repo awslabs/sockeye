@@ -46,8 +46,6 @@ class ModelConfig(Config):
     :param lexical_bias: Use lexical biases.
     :param learn_lexical_bias: Learn lexical biases during training.
     """
-    yaml_tag = "!ModelConfig"
-
     def __init__(self,
                  config_data: data_io.DataConfig,
                  max_seq_len: int,

@@ -61,10 +61,19 @@ def _build_or_load_vocab(existing_vocab_path: Optional[str], data_path: str, num
     return vocabulary
 
 
+def _list_to_tuple(v):
+    """Convert v to a tuple if it is a list."""
+    if isinstance(v, list):
+        return tuple(v)
+    return v
+
+
 def _dict_difference(dict1: Dict, dict2: Dict):
     diffs = set()
     for k, v in dict1.items():
-        if k not in dict2 or dict2[k] != v:
+        # Note: A list and a tuple with the same values is considered equal
+        # (this is due to json deserializing former tuples as list).
+        if k not in dict2 or _list_to_tuple(dict2[k]) != _list_to_tuple(v):
             diffs.add(k)
     return diffs
 

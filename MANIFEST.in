@@ -2,7 +2,7 @@ include README.md
 include requirements*.txt
 include LICENSE
 include NOTICE
-include *.pylintrc
+include pylintrc
 include typechecked-files
 include sockeye/git_version.py
 exclude *.sh

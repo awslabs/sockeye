@@ -240,8 +240,10 @@ def add_model_parameters(params):
                               help='Embedding size for target tokens. Overrides --num-embed. Default: %(default)s')
 
     model_params.add_argument('--attention-type',
-                              choices=C.ATTENTION_TYPES, default=C.ATT_MLP,
-                              help='Attention model. Choices: {%(choices)s}. Default: %(default)s.')
+                              choices=C.ATT_TYPES,
+                              default=C.ATT_MLP,
+                              help='Attention model. Choices: {%(choices)s}. '
+                                   'Default: %(default)s.')
     model_params.add_argument('--attention-num-hidden',
                               default=None,
                               type=int,

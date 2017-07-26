@@ -19,8 +19,8 @@ install:
 script:
   - python3 setup.py test
   - pylint --version
-  - pylint --rcfile=sockeye.pylintrc sockeye -E
-  - pylint --rcfile=sockeye.pylintrc test -E
+  - pylint --rcfile=pylintrc sockeye -E
+  - pylint --rcfile=pylintrc test -E
   - mypy --ignore-missing-imports --follow-imports=silent @typechecked-files
   - check-manifest --ignore sockeye/git_version.py
 
