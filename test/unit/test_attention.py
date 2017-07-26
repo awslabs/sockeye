@@ -18,7 +18,7 @@ import pytest
 import sockeye.attention
 import sockeye.constants as C
 import sockeye.coverage
-from test.test_utils import gaussian_vector, integer_vector
+from test.common import gaussian_vector, integer_vector
 
 attention_types = [C.ATT_BILINEAR, C.ATT_DOT, C.ATT_DOT_SCALED, C.ATT_LOC, C.ATT_MLP]
 

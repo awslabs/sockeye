@@ -8,6 +8,7 @@ include sockeye/git_version.py
 exclude *.sh
 include pytest.ini
 recursive-include test *.py
+recursive-include test *.ini
 recursive-include docs *.bat
 recursive-include docs *.md
 recursive-include docs *.py
