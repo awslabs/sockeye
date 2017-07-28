@@ -194,13 +194,13 @@ class TransformerDecoderBlock:
 
     def __call__(self,
                  target: mx.sym.Symbol, target_lengths: mx.sym.Symbol, target_max_length: int,
-                 source: mx.sym.Symbol, source_lengths: mx.sym.Symbol, source_max_length: int,
-                 bias: mx.sym.Symbol):
+                 target_bias: mx.sym.Symbol,
+                 source: mx.sym.Symbol, source_lengths: mx.sym.Symbol, source_max_length: int):
         target = self.residual_self(target,
                                     self.self_attention(target,
                                                         target_lengths,
                                                         target_max_length,
-                                                        bias=bias),
+                                                        bias=target_bias),
                                     target_max_length)
         target = self.residual_enc(target,
                                    self.enc_attention(target,
@@ -233,6 +233,10 @@ class TransformerDecoder(Decoder):
                                            add_positional_encoding=config.positional_encodings,
                                            relative_positional_encoding=config.relative_positions,
                                            max_seq_len=config.max_seq_len)
+
+        self.bias = mx.sym.Variable(name='auto_regressive_bias',
+                                    init=initializer.AutoRegressiveBiasInitializer(config.max_seq_len),
+                                    shape=(1, config.max_seq_len, config.max_seq_len))
 
         self.cls_w = mx.sym.Variable("%scls_weight" % prefix) if not config.weight_tying else self.embedding.embed_weight
         self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
@@ -270,9 +274,10 @@ class TransformerDecoder(Decoder):
         :return: Logits of next-word predictions for target sequence.
                  Shape: (batch_size * target_max_length, vocab_size)
         """
-        auto_regressive_bias = mx.sym.Variable(name='auto_regressive_bias',
-                                               init=initializer.AutoRegressiveBiasInitializer(target_max_length),
-                                               shape=(1, target_max_length, target_max_length))
+        # (1, target_max_length, target_max_length)
+        target_bias = mx.sym.BlockGrad(mx.sym.slice(self.bias,
+                                                    begin=(0, 0, 0),
+                                                    end=(1, target_max_length, target_max_length)))
 
         # source: (batch_size, source_max_length, num_source_embed)
         source = mx.sym.swapaxes(source, dim1=0, dim2=1)
@@ -281,9 +286,8 @@ class TransformerDecoder(Decoder):
         target, target_length, target_max_length = self.embedding.encode(target, target_length, target_max_length)
 
         for layer in self.layers:
-            target = layer(target, target_length, target_max_length,
-                           source, source_length, source_max_length,
-                           auto_regressive_bias)
+            target = layer(target, target_length, target_max_length, target_bias,
+                           source, source_length, source_max_length)
 
         # target: (batch_size * target_max_length, model_size)
         target = mx.sym.reshape(data=target, shape=(-3, -1))
