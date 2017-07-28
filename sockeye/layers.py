@@ -15,6 +15,7 @@ from typing import Optional, Tuple
 
 import mxnet as mx
 
+from . import initializer
 from . import utils
 
 
@@ -29,6 +30,7 @@ class LayerNormalization:
     :param scale_init: Initial value of scale variable if scale is None. Default 1.0.
     :param shift_init: Initial value of shift variable if shift is None. Default 0.0.
     """
+
     # TODO(fhieber): this should eventually go to MXNet
 
     def __init__(self,
@@ -74,6 +76,39 @@ class LayerNormalization:
         inputs_norm = mx.sym.broadcast_mul(inputs_norm, self.scale, name='%sinp_norm_scaled' % self.prefix)
         inputs_norm = mx.sym.broadcast_add(inputs_norm, self.shift, name='%sinp_norm_scaled_shifted' % self.prefix)
         return inputs_norm
+
+
+class TransformerResidual:
+
+    def __init__(self, num_hidden: int, layer_normalization: bool, dropout: float, prefix: str) -> None:
+        self.num_hidden = num_hidden
+        self.dropout = dropout
+        self.layer_norm = None
+        self.prefix = prefix
+        if layer_normalization:
+            self.layer_norm = LayerNormalization(num_hidden=self.num_hidden, prefix=self.prefix)
+
+    def __call__(self, x: mx.sym.Symbol, y: mx.sym.Symbol, length: int) -> mx.sym.Symbol:
+        """
+        Apply residual connections with optional layer normalization and dropout.
+
+        :param x: (batch, length, num_hidden).
+        :param y: (batch, length, num_hidden).
+        :param length: maximum sequence length.
+        :return: (batch, length, num_hidden).
+        """
+        if self.dropout > 0.0:
+            y = mx.sym.Dropout(y, p=self.dropout)
+        z = x + y
+        if self.layer_norm:
+            self._reshape_and_normalize(z, length)
+        return z
+
+    def _reshape_and_normalize(self, data: mx.sym.Symbol, length: int):
+        data = mx.sym.reshape(data, shape=(-3, self.num_hidden))
+        data = self.layer_norm.normalize(data)
+        data = mx.sym.reshape(data, shape=(-4, -1, length, self.num_hidden))
+        return data
 
 
 def split_heads(x: mx.sym.Symbol, length: int, heads: int) -> mx.sym.Symbol:
@@ -127,7 +162,42 @@ def broadcast_lengths(x: mx.sym.Symbol, heads: int) -> mx.sym.Symbol:
     return x
 
 
-class MultiHeadAttention:
+def dot_attention(queries, keys, values, length: mx.sym.Symbol, dropout: float = 0.0,
+                  bias: Optional[mx.sym.Symbol] = None):
+    """
+
+    :param queries: (n, lq, d)
+    :param keys: (n, lk, d)
+    :param values: (n, lk, dv)
+    :param length: (n,)
+    :param dropout: Dropout probability.
+    :param bias: (1, lq, lk)
+    :return: (n, lq, dv)
+    """
+    # (n, lq, lk)
+    logits = mx.sym.batch_dot(lhs=queries, rhs=keys, transpose_b=True)
+
+    # mask lk dimension
+    # (lk, n, lq)
+    logits = mx.sym.transpose(data=logits, axes=(2, 0, 1))
+    logits = mx.sym.SequenceMask(data=logits,
+                                 use_sequence_length=True,
+                                 sequence_length=length,
+                                 value=-99999999.)
+    # (n, lq, lk)
+    logits = mx.sym.transpose(data=logits, axes=(1, 2, 0))
+
+    if bias is not None:
+        logits = mx.sym.broadcast_add(logits, bias)
+
+    probs = mx.sym.softmax(logits, axis=-1)
+    probs = mx.sym.Dropout(probs, p=dropout) if dropout > 0.0 else probs
+
+    # (n, lq, lk) x (n, lk, dv) -> (n, lq, dv)
+    return mx.sym.batch_dot(lhs=probs, rhs=values)
+
+
+class MultiHeadAttentionBase:
 
     def __init__(self,
                  prefix: str,
@@ -142,88 +212,170 @@ class MultiHeadAttention:
         self.heads = heads
         self.depth_out = depth_out
         self.dropout = dropout
-
         self.depth_per_head = self.depth // self.heads
-        self.w_i2h = mx.sym.Variable("%si2h_weight" % prefix)
-        self.b_i2h = mx.sym.Variable("%si2h_bias" % prefix)
 
         self.w_h2o = mx.sym.Variable("%sh2o_weight" % prefix)
         self.b_h2o = mx.sym.Variable("%sh2o_bias" % prefix)
 
-    def on(self, inputs: mx.sym.Symbol, inputs_length: mx.sym.Symbol, length: int) -> mx.sym.Symbol:
-        """
-        Returns a symbol of shape (batch, length, output_depth).
+    def _attend(self,
+                queries: mx.sym.Symbol,
+                keys: mx.sym.Symbol,
+                values: mx.sym.Symbol,
+                lengths: mx.sym.Symbol,
+                queries_max_length: int,
+                memory_max_length: int,
+                bias: Optional[mx.sym.Symbol] = None):
+        # scale by sqrt(depth_per_head)
+        queries *= self.depth_per_head ** -0.5
 
-        :param inputs: Symbol of shape (batch, length, input_depth).
-        :param inputs_length: Symbol of shape (batch, 1).
-        :param length: Size of time dimension.
-        :return: Symbol of shape (batch, length, output_depth).
-        """
-        # lets do self attention first (code is constrained to q length == k length)
-        # inputs: (batch, length, num_hidden)
+        # (batch*heads, length, depth/heads)
+        queries = split_heads(queries, queries_max_length, self.heads)
+        keys = split_heads(keys, memory_max_length, self.heads)
+        values = split_heads(values, memory_max_length, self.heads)
+        lengths = broadcast_lengths(lengths, self.heads)
 
-        # Combine batch and time dimension
-        # inputs: (batch * length, num_hidden)
+        # (batch*heads, queries_max_length, depth_per_head)
+        contexts = dot_attention(queries, keys, values, lengths, dropout=self.dropout, bias=bias)
+
+        # (batch, queries_max_length, depth)
+        contexts = combine_heads(contexts, queries_max_length, self.heads)
+
+        if self.depth_out != self.depth:
+            contexts = mx.sym.reshape(contexts, shape=(-3, -1))
+            # contexts: (batch * queries_max_length, output_depth)
+            contexts = mx.sym.FullyConnected(data=contexts,
+                                             weight=self.w_h2o,
+                                             bias=self.b_h2o,
+                                             num_hidden=self.depth_out)
+            # contexts: (batch, queries_max_length, output_depth)
+            contexts = mx.sym.reshape(contexts, shape=(-1, queries_max_length, self.depth_out))
+        return contexts
+
+
+class MultiHeadSelfAttention(MultiHeadAttentionBase):
+
+    def __init__(self,
+                 prefix: str,
+                 depth_att: int = 512,
+                 heads: int = 8,
+                 depth_out: int = 512,
+                 dropout: float = 0.0) -> None:
+        super().__init__(prefix, depth_att, heads, depth_out, dropout)
+
+        self.w_i2h = mx.sym.Variable("%si2h_weight" % prefix)
+        self.b_i2h = mx.sym.Variable("%si2h_bias" % prefix)
+
+    def __call__(self,
+                 inputs: mx.sym.Symbol,
+                 lengths: mx.sym.Symbol,
+                 max_length: int,
+                 bias: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
+        """
+        Returns a symbol of shape (batch, max_length, output_depth).
+
+        :param inputs: Symbol of shape (batch, max_length, input_depth).
+        :param lengths: Symbol of shape (batch, 1).
+        :param max_length: Size of time dimension.
+        :param bias: Symbol of shape (1, max_length, max_length).
+        :return: Symbol of shape (batch, max_length, output_depth).
+        """
+        # combine batch and time dimension
+        # inputs: (batch * max_length, num_hidden)
         inputs = mx.sym.reshape(data=inputs, shape=(-3, -1))
 
-        # project with 1 large matrix
-        # combined: (batch * length, depth * 3)
+        # combined: (batch * max_length, depth * 3)
         combined = mx.sym.FullyConnected(data=inputs,
                                          weight=self.w_i2h,
                                          bias=self.b_i2h,
                                          num_hidden=self.depth * 3,
                                          name="%sqkv_transform" % self.prefix)
-
         # split batch and time dimension
-        # combined: (batch, length, depth * 3)
-        combined = mx.sym.reshape(data=combined, shape=(-1, length, self.depth * 3))
+        # combined: (batch, max_length, depth * 3)
+        combined = mx.sym.reshape(data=combined, shape=(-1, max_length, self.depth * 3))
 
         # split into query, keys and values
-        # (batch, length, depth)
-        # NOTE: requires depth to be equal across all 3 parts.
-        q, k, v = mx.sym.split(data=combined, num_outputs=3, axis=2)
+        # (batch, max_length, depth)
+        queries, keys, values = mx.sym.split(data=combined, num_outputs=3, axis=2)
 
-        # scale by sqrt(depth_per_head)
-        q *= self.depth_per_head ** -0.5
+        return self._attend(queries,
+                            keys,
+                            values,
+                            lengths,
+                            queries_max_length=max_length,
+                            memory_max_length=max_length,
+                            bias=bias)
 
-        # separate heads
-        # (batch*heads, length, depth/heads)
-        q = split_heads(q, length, self.heads)
-        k = split_heads(k, length, self.heads)
-        v = split_heads(v, length, self.heads)
 
-        # (batch*heads, length, length)
-        logits = mx.sym.batch_dot(lhs=q, rhs=k, transpose_b=True)
+class MultiHeadAttention(MultiHeadAttentionBase):
 
-        # (masked_length, batch*heads, length)
-        logits = mx.sym.transpose(data=logits, axes=(2, 0, 1))
-        logits = mx.sym.SequenceMask(data=logits,
-                                     use_sequence_length=True,
-                                     sequence_length=broadcast_lengths(inputs_length, self.heads),
-                                     value=-99999999.)
-        # (batch*heads, length, masked_length)
-        logits = mx.sym.transpose(data=logits, axes=(1, 2, 0))
-        probs = mx.sym.softmax(logits, axis=-1)
-        if self.dropout > 0.0:
-            probs = mx.sym.Dropout(probs, p=self.dropout)
+    def __init__(self,
+                 prefix: str,
+                 depth_att: int = 512,
+                 heads: int = 8,
+                 depth_out: int = 512,
+                 dropout: float = 0.0) -> None:
+        super().__init__(prefix, depth_att, heads, depth_out, dropout)
 
-        # (batch*heads, length, masked_length) x (batch*heads, length, depth_per_head)
-        # -> (batch*heads, length, depth_per_head)
-        contexts = mx.sym.batch_dot(lhs=probs, rhs=v)
+        # TODO: query and memory depth different?
 
-        # contexts: (batch, length, depth)
-        contexts = combine_heads(contexts, length, self.heads)
+        self.w_q2h = mx.sym.Variable("%sq2h_weight" % prefix)
+        self.b_q2h = mx.sym.Variable("%sq2h_bias" % prefix)
+        self.w_kv2h = mx.sym.Variable("%skv2h_weight" % prefix)
+        self.b_kv2h = mx.sym.Variable("%skv2h_bias" % prefix)
 
-        if self.depth_out != self.depth:
-            contexts = mx.sym.reshape(contexts, shape=(-3, -1))
-            # contexts: (batch * length, output_depth)
-            contexts = mx.sym.FullyConnected(data=contexts,
-                                             weight=self.w_h2o,
-                                             bias=self.b_h2o,
-                                             num_hidden=self.depth_out)
-            # contexts: (batch, length, output_depth)
-            contexts = mx.sym.reshape(contexts, shape=(-1, length, self.depth_out))
-        return contexts
+    def __call__(self,
+                 queries: mx.sym.Symbol,
+                 queries_max_length: int,
+                 memory: mx.sym.Symbol,
+                 memory_lengths: mx.sym.Symbol,
+                 memory_max_length: int) -> mx.sym.Symbol:
+        """
+        Returns a symbol of shape (batch, max_length, output_depth).
+
+        :param queries: Symbol of shape (batch, queries_max_length, input_depth). TODO?
+        :param queries_max_length: Size of queries time dimension.
+        :param memory: Symbol of shape (batch, memory_max_length, input_depth).
+        :param memory_lengths: Symbol of shape (batch, 1).
+        :param memory_max_length: Size of memory time dimension.
+        :return: Symbol of shape (batch, queries_max_length, output_depth).
+        """
+        # Combine batch and time dimension
+        # inputs: (batch * memory_max_length, num_hidden)
+        memory = mx.sym.reshape(data=memory, shape=(-3, -1))
+
+        # (batch * memory_max_length, depth * 2)
+        combined = mx.sym.FullyConnected(data=memory,
+                                         weight=self.w_kv2h,
+                                         bias=self.b_kv2h,
+                                         num_hidden=self.depth * 2,
+                                         name="%skv_transform" % self.prefix)
+
+        # split batch and time dimension
+        # (batch, memory_max_length, depth * 2)
+        combined = mx.sym.reshape(data=combined, shape=(-1, memory_max_length, self.depth * 2))
+
+        # split into query, keys and values
+        # (batch, memory_max_length, depth)
+        # NOTE: requires depth to be equal across all 2 parts.
+        keys, values = mx.sym.split(data=combined, num_outputs=2, axis=2)
+
+        queries = mx.sym.reshape(data=queries, shape=(-3, -1))
+        # (batch * memory_max_length, depth * 2)
+        queries = mx.sym.FullyConnected(data=queries,
+                                        weight=self.w_q2h,
+                                        bias=self.b_q2h,
+                                        num_hidden=self.depth,
+                                        name="%sq_transform" % self.prefix)
+        # (batch, memory_max_length, depth)
+        queries = mx.sym.reshape(data=queries, shape=(-1, queries_max_length, self.depth))
+
+        return self._attend(queries,
+                            keys,
+                            values,
+                            memory_lengths,
+                            queries_max_length=queries_max_length,
+                            memory_max_length=memory_max_length,
+                            bias=None)
 
 
 class FFNRelu:
@@ -231,17 +383,17 @@ class FFNRelu:
     Position-wise feed-forward network with ReLU activation.
     """
 
-    def __init__(self, prefix: str, num_hidden: int = 2048, num_model: int = 512, dropout: float = 0.0):
-        self.prefix = prefix
+    def __init__(self, num_hidden: int, num_model: int, dropout: float, prefix: str):
         self.num_hidden = num_hidden
         self.num_model = num_model
         self.dropout = dropout
+        self.prefix = prefix
         self.w_i2h = mx.sym.Variable('%si2h_weight' % prefix)
         self.b_i2h = mx.sym.Variable('%si2h_bias' % prefix)
         self.w_h2o = mx.sym.Variable('%sh2o_weight' % prefix)
         self.b_h2o = mx.sym.Variable('%sh2o_bias' % prefix)
 
-    def apply(self, x, length):
+    def __call__(self, x, length):
         """
         Position-wise feed-forward network with ReLU activation.
 

@@ -97,6 +97,7 @@ class TrainingModel(model.SockeyeModel):
         source_length = mx.sym.Variable(C.SOURCE_LENGTH_NAME)
         target = mx.sym.Variable(C.TARGET_NAME)
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
+        target_length = mx.sym.sum(mx.sym.broadcast_not_equal(target, mx.sym.zeros((1,))), axis=1)
 
         model_loss = loss.get_loss(self.config.config_loss)
 
@@ -113,10 +114,9 @@ class TrainingModel(model.SockeyeModel):
             (source_encoded,
              source_encoded_length,
              source_encoded_seq_len) = self.encoder.encode(source, source_length, seq_len=source_seq_len)
-            source_lexicon = self.lexicon.lookup(source) if self.lexicon else None
 
             logits = self.decoder.decode(source_encoded, source_encoded_seq_len, source_encoded_length,
-                                         target, target_seq_len, source_lexicon)
+                                         target, target_seq_len, target_length)
 
             outputs = model_loss.get_loss(logits, labels)
 

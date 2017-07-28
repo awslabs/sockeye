@@ -20,11 +20,12 @@ from typing import Optional
 import mxnet as mx
 
 from sockeye.config import Config
-from sockeye.layers import LayerNormalization
 from sockeye.utils import check_condition
 from . import attention as attentions
 from . import constants as C
 from . import encoder
+from . import initializer
+from . import layers
 from . import lexicon as lexicons
 from . import rnn
 
@@ -75,6 +76,15 @@ def get_recurrent_decoder(config: RecurrentDecoderConfig,
                             lexicon=lexicon,
                             prefix=C.DECODER_PREFIX)
 
+def get_transformer_decoder(config: 'TransformerDecoderConfig') -> 'Decoder':
+    """
+    Returns a transformer decoder.
+
+    :param config: Configuration for RecurrentDecoder.
+    :return: Decoder instance.
+    """
+    return TransformerDecoder(config, prefix=C.DECODER_PREFIX)
+
 
 class Decoder:
     """
@@ -110,14 +120,122 @@ Decoder state.
 """
 
 
+class TransformerDecoderConfig(Config):
+    """
+    Transformer decoder configuration.
+
+    :param vocab_size: Source vocabulary size.
+    :param max_seq_len: Maximum sequence length.
+    :param num_embed: Model size.
+    :param num_layers: Number of layers.
+    :param attention_heads: Number of attention heads
+    :param feed_forward_num_hidden: Number of hidden units for feed-forward layers.
+    :param dropout: Dropout.
+    :param positional_encodings: Use positional encodings.
+    :param relative_positions: Use relative positional encodings.
+    :param layer_normalization: Use layer normalization.
+    """
+
+    def __init__(self,
+                 vocab_size: int,
+                 num_embed: int,
+                 max_seq_len: int,
+                 weight_tying: bool = False,
+                 num_layers: int = 6,
+                 attention_heads: int = 8,
+                 feed_forward_num_hidden: int = 2048,
+                 dropout: float = 0.0,
+                 positional_encodings: bool = True,
+                 relative_positions: bool = True,
+                 layer_normalization: bool = True) -> None:
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.model_size = num_embed
+        self.max_seq_len = max_seq_len
+        self.weight_tying = weight_tying
+        self.num_layers = num_layers
+        self.attention_heads = attention_heads
+        self.feed_forward_num_hidden = feed_forward_num_hidden
+        self.dropout = dropout
+        self.positional_encodings = positional_encodings
+        self.relative_positions = relative_positions
+        self.layer_normalization = layer_normalization
+
+
+class TransformerDecoderBlock:
+
+    def __init__(self, config: TransformerDecoderConfig, prefix: str):
+        self.self_attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
+                                                            heads=config.attention_heads,
+                                                            depth_out=config.model_size,
+                                                            dropout=config.dropout,
+                                                            prefix="%satt_self_" % prefix)
+        self.residual_self = layers.TransformerResidual(num_hidden=config.model_size,
+                                                        layer_normalization=config.layer_normalization,
+                                                        dropout=config.dropout,
+                                                        prefix="%satt_self_res_" % prefix)
+        self.enc_attention = layers.MultiHeadAttention(depth_att=config.model_size,
+                                                       heads=config.attention_heads,
+                                                       depth_out=config.model_size,
+                                                       dropout=config.dropout,
+                                                       prefix="%satt_enc_" % prefix)
+        self.residual_enc = layers.TransformerResidual(num_hidden=config.model_size,
+                                                       layer_normalization=config.layer_normalization,
+                                                       dropout=config.dropout,
+                                                       prefix="%satt_enc_res_" % prefix)
+        self.feed_forward = layers.FFNRelu(num_hidden=config.feed_forward_num_hidden,
+                                           num_model=config.model_size,
+                                           dropout=config.dropout,
+                                           prefix="%sff_" % prefix)
+        self.residual_ff = layers.TransformerResidual(num_hidden=config.model_size,
+                                                      layer_normalization=config.layer_normalization,
+                                                      dropout=config.dropout,
+                                                      prefix="%sff_res_" % prefix)
+
+    def __call__(self,
+                 target: mx.sym.Symbol, target_lengths: mx.sym.Symbol, target_max_length: int,
+                 source: mx.sym.Symbol, source_lengths: mx.sym.Symbol, source_max_length: int,
+                 bias: mx.sym.Symbol):
+        target = self.residual_self(target,
+                                    self.self_attention(target,
+                                                        target_lengths,
+                                                        target_max_length,
+                                                        bias=bias),
+                                    target_max_length)
+        target = self.residual_enc(target,
+                                   self.enc_attention(target,
+                                                      target_max_length,
+                                                      source,
+                                                      source_lengths,
+                                                      source_max_length),
+                                   target_max_length)
+        target = self.residual_ff(target,
+                                  self.feed_forward(target,
+                                                    target_max_length),
+                                  target_max_length)
+        return target
+
+
 class TransformerDecoder(Decoder):
     """
     TODO
     """
 
     def __init__(self,
-                 model_size: int = 512) -> None:
-        self.model_size = model_size
+                 config: TransformerDecoderConfig,
+                 prefix: str = C.TRANSFORMER_DECODER_PREFIX) -> None:
+        self.config = config
+        self.prefix = prefix
+        self.layers = [TransformerDecoderBlock(config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
+
+        self.embedding = encoder.Embedding(config.model_size, config.vocab_size,
+                                           prefix=C.TARGET_EMBEDDING_PREFIX, dropout=0.,
+                                           add_positional_encoding=config.positional_encodings,
+                                           relative_positional_encoding=config.relative_positions,
+                                           max_seq_len=config.max_seq_len)
+
+        self.cls_w = mx.sym.Variable("%scls_weight" % prefix) if not config.weight_tying else self.embedding.embed_weight
+        self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
 
     def get_num_hidden(self) -> int:
         """
@@ -125,7 +243,7 @@ class TransformerDecoder(Decoder):
 
         :raises: NotImplementedError
         """
-        return self.model_size
+        return self.config.model_size
 
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """
@@ -134,26 +252,47 @@ class TransformerDecoder(Decoder):
         return []
 
     def decode(self,
-               source_encoded: mx.sym.Symbol,
-               source_seq_len: int,
+               source: mx.sym.Symbol,
+               source_max_length: int,
                source_length: mx.sym.Symbol,
                target: mx.sym.Symbol,
-               target_seq_len: int,
-               source_lexicon: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
+               target_max_length: int,
+               target_length: mx.sym.Symbol) -> mx.sym.Symbol:
         """
         Returns decoder logits with batch size and target sequence length collapsed into a single dimension.
 
-        :param source_encoded: Concatenated encoder states. Shape: (source_seq_len, batch_size, encoder_num_hidden).
-        :param source_seq_len: Maximum source sequence length.
+        :param source: Concatenated encoder states. Shape: (source_max_length, batch_size, encoder_num_hidden).
+        :param source_max_length: Maximum source sequence length.
         :param source_length: Lengths of source sequences. Shape: (batch_size,).
-        :param target: Target sequence. Shape: (batch_size, target_seq_len).
-        :param target_seq_len: Maximum target sequence length.
-        :param source_lexicon: Lexical biases for current sentence.
-               Shape: (batch_size, target_vocab_size, source_seq_len)
+        :param target: Target sequence. Shape: (batch_size, target_max_length).
+        :param target_max_length: Maximum target sequence length.
+        :param target_length: Lengths of target sequences. Shape: (batch_size,).
         :return: Logits of next-word predictions for target sequence.
-                 Shape: (batch_size * target_seq_len, target_vocab_size)
+                 Shape: (batch_size * target_max_length, vocab_size)
         """
+        auto_regressive_bias = mx.sym.Variable(name='auto_regressive_bias',
+                                               init=initializer.AutoRegressiveBiasInitializer(target_max_length),
+                                               shape=(1, target_max_length, target_max_length))
 
+        # source: (batch_size, source_max_length, num_source_embed)
+        source = mx.sym.swapaxes(source, dim1=0, dim2=1)
+
+        # target: (batch_size, target_max_length, model_size)
+        target, target_length, target_max_length = self.embedding.encode(target, target_length, target_max_length)
+
+        for layer in self.layers:
+            target = layer(target, target_length, target_max_length,
+                           source, source_length, source_max_length,
+                           auto_regressive_bias)
+
+        # target: (batch_size * target_max_length, model_size)
+        target = mx.sym.reshape(data=target, shape=(-3, -1))
+
+        # logits: (batch_size * target_max_length, vocab_size)
+        logits = mx.sym.FullyConnected(data=target, num_hidden=self.config.vocab_size,
+                                       weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
+
+        return logits
 
 
 class RecurrentDecoder(Decoder):
@@ -201,8 +340,8 @@ class RecurrentDecoder(Decoder):
         # Hidden state parameters
         self.hidden_w = mx.sym.Variable("%shidden_weight" % prefix)
         self.hidden_b = mx.sym.Variable("%shidden_bias" % prefix)
-        self.hidden_norm = LayerNormalization(self.num_hidden,
-                                              prefix="%shidden_norm" % prefix) if self.layer_norm else None
+        self.hidden_norm = layers.LayerNormalization(self.num_hidden,
+                                                     prefix="%shidden_norm" % prefix) if self.layer_norm else None
         # Embedding & output parameters
         self.embedding = encoder.Embedding(self.num_target_embed, self.target_vocab_size,
                                            prefix=C.TARGET_EMBEDDING_PREFIX, dropout=0.)  # TODO dropout?
@@ -238,8 +377,9 @@ class RecurrentDecoder(Decoder):
             self.init_ws.append(mx.sym.Variable("%senc2decinit_%d_weight" % (self.prefix, state_idx)))
             self.init_bs.append(mx.sym.Variable("%senc2decinit_%d_bias" % (self.prefix, state_idx)))
             if self.layer_norm:
-                self.init_norms.append(LayerNormalization(num_hidden=init_num_hidden,
-                                                          prefix="%senc2decinit_%d_norm" % (self.prefix, state_idx)))
+                self.init_norms.append(layers.LayerNormalization(num_hidden=init_num_hidden,
+                                                                 prefix="%senc2decinit_%d_norm" % (
+                                                                    self.prefix, state_idx)))
 
     def create_layer_input_variables(self, batch_size: int) \
             -> Tuple[List[mx.sym.Symbol], List[mx.io.DataDesc], List[str]]:

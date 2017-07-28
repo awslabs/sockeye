@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 
 
 class EncoderConfig(Config):
-    yaml_tag = "!EncoderConfig"
 
     def __init__(self,
                  vocab_size: int,
@@ -568,6 +567,41 @@ class TransformerEncoderConfig(EncoderConfig):
         self.layer_normalization = layer_normalization
 
 
+class TransformerEncoderBlock:
+    def __init__(self,
+                 config: TransformerEncoderConfig,
+                 prefix: str):
+        self.attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
+                                                       heads=config.attention_heads,
+                                                       depth_out=config.model_size,
+                                                       dropout=config.dropout,
+                                                       prefix="%satt_" % prefix)
+        self.residual1 = layers.TransformerResidual(num_hidden=config.model_size,
+                                                    layer_normalization=config.layer_normalization,
+                                                    dropout=config.dropout,
+                                                    prefix="%satt_res_" % prefix)
+        self.feed_forward = layers.FFNRelu(num_hidden=config.feed_forward_num_hidden,
+                                           num_model=config.model_size,
+                                           dropout=config.dropout,
+                                           prefix="%sff_" % prefix)
+        self.residual2 = layers.TransformerResidual(num_hidden=config.model_size,
+                                                    layer_normalization=config.layer_normalization,
+                                                    dropout=config.dropout,
+                                                    prefix="%sff_res_" % prefix)
+
+    def __call__(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int):
+        data = self.residual1(data,
+                              self.attention(data,
+                                             data_length,
+                                             seq_len),
+                              seq_len)
+        data = self.residual2(data,
+                              self.feed_forward(data,
+                                                seq_len),
+                              seq_len)
+        return data
+
+
 class TransformerEncoder(Encoder):
     """
     Non-recurrent encoder based on the transformer architecture in:
@@ -580,55 +614,10 @@ class TransformerEncoder(Encoder):
 
     def __init__(self,
                  config: TransformerEncoderConfig,
-                 prefix=C.TRANSFORMER_ENCODER_PREFIX):
+                 prefix: str = C.TRANSFORMER_ENCODER_PREFIX):
         self.config = config
         self.prefix = prefix
-
-        # TODO: make these available to the decoder.  Borrow/update get_rnn_cells?
-        self.layers = list()
-        for i in range(config.num_layers):
-            # Self-attention sub-layer
-            attention = layers.MultiHeadAttention(depth_att=config.model_size,
-                                                  heads=config.attention_heads,
-                                                  depth_out=config.model_size,
-                                                  dropout=config.dropout,
-                                                  prefix="%sattn_%d_" % (self.prefix, i))
-
-            # Feed-forward sub-layer
-            feed_forward = layers.FFNRelu(prefix="%sffn_%d_" % (self.prefix, i),
-                                          num_hidden=config.feed_forward_num_hidden,
-                                          num_model=config.model_size,
-                                          dropout=config.dropout)
-            if config.layer_normalization:
-                # Layer normalization after attention
-                layer_norm_att = layers.LayerNormalization(num_hidden=config.model_size,
-                                                           prefix="%sattn_ln_%d" % (self.prefix, i))
-
-                # Layer normalization after feed-forward
-                layer_norm_ffn = layers.LayerNormalization(num_hidden=config.model_size,
-                                                           prefix="%sffn_ln_%d" % (self.prefix, i))
-
-            # Apply one layer of the encoder
-            def apply(data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int):
-                encoded = data + attention.on(data, data_length, seq_len)
-                if config.layer_normalization:
-                    encoded = self._reshape_and_normalize(encoded, seq_len, layer_norm_att)
-                encoded = encoded + feed_forward.apply(encoded, seq_len)
-                if config.layer_normalization:
-                    encoded = self._reshape_and_normalize(encoded, seq_len, layer_norm_ffn)
-                return encoded
-
-            self.layers.append(apply)
-
-    @staticmethod
-    def _reshape_and_normalize(data: mx.sym.Symbol,
-                               length: int,
-                               layer_norm: layers.LayerNormalization):
-        # (batch * length, num_hidden)
-        data = mx.sym.reshape(data, shape=(-3, -1))
-        data = layer_norm.normalize(data)
-        data = mx.sym.reshape(data, shape=(-4, -1, length, 0))
-        return data
+        self.layers = [TransformerEncoderBlock(config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
 
     def encode(self,
                data: mx.sym.Symbol,

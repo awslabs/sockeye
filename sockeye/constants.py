@@ -71,6 +71,7 @@ ATT_TYPES = [ATT_BILINEAR, ATT_DOT, ATT_DOT_SCALED, ATT_MH_DOT, ATT_FIXED, ATT_L
 
 # default decoder prefixes
 DECODER_PREFIX = "decoder_"
+TRANSFORMER_DECODER_PREFIX = DECODER_PREFIX + "transformer_"
 
 # default I/O variable names
 SOURCE_NAME = "source"

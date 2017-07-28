@@ -234,7 +234,8 @@ def main():
                 feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
                 dropout=args.dropout,
                 positional_encodings=not args.transformer_no_positional_encodings,
-                relative_positions=not args.transformer_absolute_positional_encodings)
+                relative_positions=not args.transformer_absolute_positional_encodings,
+                layer_normalization=args.layer_normalization)
         else:
             config_conv = None
             if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
@@ -250,13 +251,24 @@ def main():
                                                             rnn_config=config_rnn,
                                                             conv_config=config_conv)
 
-        config_decoder = decoder.RecurrentDecoderConfig(vocab_size=vocab_target_size,
-                                                        num_embed=num_embed_target,
-                                                        rnn_config=config_rnn,
-                                                        dropout=args.dropout,
-                                                        weight_tying=args.weight_tying,
-                                                        context_gating=args.context_gating,
-                                                        layer_normalization=args.layer_normalization)
+        # config_decoder = decoder.RecurrentDecoderConfig(vocab_size=vocab_target_size,
+        #                                                 num_embed=num_embed_target,
+        #                                                 rnn_config=config_rnn,
+        #                                                 dropout=args.dropout,
+        #                                                 weight_tying=args.weight_tying,
+        #                                                 context_gating=args.context_gating,
+        #                                                 layer_normalization=args.layer_normalization)
+        config_decoder = decoder.TransformerDecoderConfig(vocab_size=vocab_target_size,
+                                                          num_embed=num_embed_target,
+                                                          max_seq_len=max_seq_len_target,
+                                                          weight_tying=args.weight_tying,
+                                                          num_layers=args.transformer_num_layers,
+                                                          attention_heads=args.transformer_attention_heads,
+                                                          feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
+                                                          dropout=args.dropout,
+                                                          positional_encodings=not args.transformer_no_positional_encodings,
+                                                          relative_positions=not args.transformer_absolute_positional_encodings,
+                                                          layer_normalization=args.layer_normalization)
 
         attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
         config_coverage = None
