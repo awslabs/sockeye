@@ -21,10 +21,8 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 import mxnet as mx
 import numpy as np
 
-from . import attention
 from . import constants as C
 from . import data_io
-from . import decoder
 from . import model
 from . import utils
 from . import vocab
@@ -36,9 +34,8 @@ class InferenceModel(model.SockeyeModel):
     """
     InferenceModel is a SockeyeModel that supports three operations used for inference/decoding:
 
-    (1) Encoder forward call: encode source sentence and return initial decoder states, given a bucket_key.
+    (1) Encoder forward call: encode source sentence and return initial decoder states.
     (2) Decoder forward call: single decoder step: predict next word.
-    (3) Return decoder data shapes, given a bucket key.
 
     :param model_folder: Folder to load model from.
     :param context: MXNet context to bind modules to.
@@ -83,11 +80,13 @@ class InferenceModel(model.SockeyeModel):
         self.context = context
 
         self._build_model_components(fused)
-        self.encoder_module, self.decoder_module = self._build_modules()
+        self.encoder_module = self._get_encoder_module()
+        self.decoder_module = self._get_decoder_module()
 
         self.decoder_data_shapes_cache = dict()  # bucket_key -> shape cache
         max_encoder_data_shapes = self._get_encoder_data_shapes(self.config.max_seq_len_source)
-        max_decoder_data_shapes = self._get_decoder_data_shapes(self.config.max_seq_len_target)
+        source_encoded_max_seq_len = self.encoder.get_encoded_seq_len(self.config.max_seq_len_source)
+        max_decoder_data_shapes = self._get_decoder_data_shapes(source_encoded_max_seq_len)
         self.encoder_module.bind(data_shapes=max_encoder_data_shapes, for_training=False, grad_req="null")
         self.decoder_module.bind(data_shapes=max_decoder_data_shapes, for_training=False, grad_req="null")
 
@@ -95,146 +94,100 @@ class InferenceModel(model.SockeyeModel):
         self.encoder_module.init_params(arg_params=self.params, allow_missing=False)
         self.decoder_module.init_params(arg_params=self.params, allow_missing=False)
 
-    def _build_modules(self):
+    def _get_encoder_module(self) -> mx.mod.BucketingModule:
+        """
+        Returns a BucketingModule for the encoder. Given a source sequence, it returns
+        the initial decoder states of the model.
+        The bucket key for this module is the length of the source sequence.
 
-        # Encoder symbol & module
-        source = mx.sym.Variable(C.SOURCE_NAME)
-        source_length = mx.sym.Variable(C.SOURCE_LENGTH_NAME)
-        source_encoded_length = None
+        :return: Encoder BucketingModule.
+        """
 
-        def encoder_sym_gen(source_seq_len: int):
-            nonlocal source_encoded_length
+        def sym_gen(source_seq_len: int):
+            source = mx.sym.Variable(C.SOURCE_NAME)
+            source_length = mx.sym.Variable(C.SOURCE_LENGTH_NAME)
+
             (source_encoded,
              source_encoded_length,
              source_encoded_seq_len) = self.encoder.encode(source, source_length, source_seq_len)
-            source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
+            # TODO think of removing batch2timemajor in training symbol to simplify this
+            source_encoded = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
 
             # initial decoder states
-            decoder_hidden_init, decoder_init_states = self.decoder.compute_init_states(source_encoded,
-                                                                                        source_encoded_length)
-            # initial attention state
-            attention_state = self.decoder.attention.get_initial_state(source_encoded_length, source_encoded_seq_len)
+            decoder_init_states = self.decoder.init_states(source_encoded,
+                                                           source_encoded_length,
+                                                           source_encoded_seq_len)
 
             data_names = [C.SOURCE_NAME, C.SOURCE_LENGTH_NAME]
             label_names = []
+            return mx.sym.Group(decoder_init_states), data_names, label_names
 
-            symbol_group = [source_encoded_batch_major,
-                            attention_state.dynamic_source,
-                            decoder_hidden_init] + decoder_init_states
-            return mx.sym.Group(symbol_group), data_names, label_names
+        return mx.mod.BucketingModule(sym_gen=sym_gen,
+                                      default_bucket_key=self.config.max_seq_len_source,
+                                      context=self.context)
 
-        encoder_module = mx.mod.BucketingModule(sym_gen=encoder_sym_gen,
-                                                default_bucket_key=self.config.max_seq_len_source,
-                                                context=self.context)
+    def _get_decoder_module(self) -> mx.mod.BucketingModule:
+        """
+        Returns a BucketingModule for a single decoder step.
+        Given previously predicted word and previous decoder states, it returns
+        a distribution over the next predicted word and the next decoder states.
+        The bucket key for this module is the length of the ENCODED source sequence.
 
-        # Decoder symbol & module
-        source_encoded = mx.sym.Variable(C.SOURCE_ENCODED_NAME)
-        dynamic_source_prev = mx.sym.Variable(C.SOURCE_DYNAMIC_PREVIOUS_NAME)
-        word_id_prev = mx.sym.Variable(C.TARGET_PREVIOUS_NAME)
-        hidden_prev = mx.sym.Variable(C.HIDDEN_PREVIOUS_NAME)
-        layer_states, self.layer_shapes, layer_names = self.decoder.create_layer_input_variables(self.beam_size)
-        state = decoder.DecoderState(hidden_prev, layer_states)
-        attention_state = attention.AttentionState(context=None, probs=None, dynamic_source=dynamic_source_prev)
+        :return: Decoder BucketingModule.
+        """
 
-        def decoder_sym_gen(source_seq_len: int):
-            data_names = [C.SOURCE_ENCODED_NAME,
-                          C.SOURCE_DYNAMIC_PREVIOUS_NAME,
-                          C.SOURCE_LENGTH_NAME,
-                          C.TARGET_PREVIOUS_NAME,
-                          C.HIDDEN_PREVIOUS_NAME] + layer_names
+        def sym_gen(source_encoded_seq_len: int):
+            prev_word_id = mx.sym.Variable(C.TARGET_PREVIOUS_NAME)
+            states = self.decoder.state_variables()
+            state_names = [state.name for state in states]
+            logits, attention_probs, states = self.decoder.decode_step(prev_word_id,
+                                                                        source_encoded_seq_len,
+                                                                        *states)
+            if self.softmax_temperature is not None:
+                logits /= self.softmax_temperature
+
+            softmax = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
+
+            data_names = [C.TARGET_PREVIOUS_NAME] + state_names
             label_names = []
+            return mx.sym.Group([softmax, attention_probs, *states]), data_names, label_names
 
-            source_encoded_seq_len = self.encoder.get_encoded_seq_len(source_seq_len)
-            attention_func = self.decoder.attention.on(source_encoded, source_encoded_length, source_encoded_seq_len)
+        source_encoded_max_seq_len = self.encoder.get_encoded_seq_len(self.config.max_seq_len_source)
+        return mx.mod.BucketingModule(sym_gen=sym_gen,
+                                      default_bucket_key=source_encoded_max_seq_len,
+                                      context=self.context)
 
-            softmax_out, next_state, next_attention_state = \
-                self.decoder.predict(word_id_prev,
-                                     state,
-                                     attention_func,
-                                     attention_state,
-                                     softmax_temperature=self.softmax_temperature)
-
-            symbol_group = [softmax_out,
-                            next_attention_state.probs,
-                            next_attention_state.dynamic_source,
-                            next_state.hidden] + next_state.layer_states
-            return mx.sym.Group(symbol_group), data_names, label_names
-
-        decoder_module = mx.mod.BucketingModule(sym_gen=decoder_sym_gen,
-                                                default_bucket_key=self.config.max_seq_len_source,
-                                                context=self.context)
-
-        return encoder_module, decoder_module
-
-    @staticmethod
-    def _get_encoder_data_shapes(max_input_length: int) -> List[mx.io.DataDesc]:
+    def _get_encoder_data_shapes(self, source_max_length: int) -> List[mx.io.DataDesc]:
         """
         Returns data shapes of the encoder module.
-        Encoder batch size is always 1.
 
-        Shapes:
-        source: (1, max_input_len)
-        length: (1,)
-
-        :param max_input_length: Maximum input length.
+        :param source_max_length: Maximum input length.
         :return: List of data descriptions.
         """
-        return [mx.io.DataDesc(name=C.SOURCE_NAME, shape=(1, max_input_length), layout=C.BATCH_MAJOR),
-                mx.io.DataDesc(name=C.SOURCE_LENGTH_NAME, shape=(1,), layout=C.BATCH_MAJOR)]
+        return [mx.io.DataDesc(name=C.SOURCE_NAME,
+                               shape=(self.encoder_batch_size, source_max_length),
+                               layout=C.BATCH_MAJOR),
+                mx.io.DataDesc(name=C.SOURCE_LENGTH_NAME,
+                               shape=(self.encoder_batch_size,),
+                               layout=C.BATCH_MAJOR)]
 
-    def _get_decoder_data_shapes(self, input_length) -> List[mx.io.DataDesc]:
+    def _get_decoder_data_shapes(self, source_encoded_max_length) -> List[mx.io.DataDesc]:
         """
         Returns data shapes of the decoder module, given a bucket_key (source input length)
         Caches results for bucket_keys if called iteratively.
 
-        Shapes:
-        source_encoded: (beam_size, input_length, encoder_num_hidden)
-        source_length: (beam_size,)
-        prev_target_id: (beam_size,)
-        prev_hidden: (beam_size, decoder_num_hidden)
-
-        :param input_length: Input length.
+        :param source_encoded_max_length: Input length.
         :return: List of data descriptions.
         """
-        if input_length in self.decoder_data_shapes_cache:
-            return self.decoder_data_shapes_cache[input_length]
-
-        shapes = self._get_decoder_variable_shapes(input_length) + self.layer_shapes
-        self.decoder_data_shapes_cache[input_length] = shapes
-        return shapes
-
-    def _get_decoder_variable_shapes(self, input_length):
-        """
-        Returns only the data shapes of input variables. Auxiliary method to adjust the computation graph to the
-        presence or absence of coverage vectors.
-
-        :param input_length: The maximal source sentence length
-        :return: A list of input shapes
-        """
-        encoded_input_length = self.encoder.get_encoded_seq_len(input_length)
-        shapes = [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
-                                 (self.beam_size, encoded_input_length, self.encoder.get_num_hidden()),
-                                 layout=C.BATCH_MAJOR),
-                  mx.io.DataDesc(C.SOURCE_DYNAMIC_PREVIOUS_NAME,
-                                 (self.beam_size, encoded_input_length, self.decoder.attention.dynamic_source_num_hidden),
-                                 layout=C.BATCH_MAJOR),
-                  mx.io.DataDesc(C.SOURCE_LENGTH_NAME,
-                                 (self.beam_size,),
-                                 layout="N"),
-                  mx.io.DataDesc(C.TARGET_PREVIOUS_NAME,
-                                 (self.beam_size,),
-                                 layout="N"),
-                  mx.io.DataDesc(C.HIDDEN_PREVIOUS_NAME,
-                                 (self.beam_size, self.decoder.get_num_hidden()),
-                                 layout="NC")]
-        return shapes
+        return self.decoder_data_shapes_cache.setdefault(
+            source_encoded_max_length,
+            [mx.io.DataDesc(C.TARGET_PREVIOUS_NAME, (self.beam_size,), layout="N")] +
+            self.decoder.state_shapes(self.beam_size, source_encoded_max_length, self.encoder.get_num_hidden()))
 
     def run_encoder(self,
                     source: mx.nd.NDArray,
-                    source_length: mx.nd.NDArray,
-                    bucket_key: int) -> Tuple[mx.nd.NDArray, mx.nd.NDArray,
-                                              mx.nd.NDArray, mx.nd.NDArray,
-                                              List[mx.nd.NDArray]]:
+                    source_lengths: mx.nd.NDArray,
+                    source_max_length: int) -> List[mx.nd.NDArray]:
         """
         Runs forward pass of the encoder.
         Encodes source given source length and bucket key.
@@ -242,68 +195,35 @@ class InferenceModel(model.SockeyeModel):
         and initial decoder states tiled to beam size.
 
         :param source: Integer-coded input tokens.
-        :param source_length: Length of input sentence.
-        :param bucket_key: Bucket key.
+        :param source_lengths: Length of input sentence.
+        :param source_max_length: Bucket key.
         :return: Encoded source, source length, initial decoder hidden state, initial decoder hidden states.
         """
-        batch = mx.io.DataBatch(data=[source, source_length], label=None,
-                                bucket_key=bucket_key,
-                                provide_data=[
-                                    mx.io.DataDesc(name=C.SOURCE_NAME, shape=(self.encoder_batch_size, bucket_key),
-                                                   layout=C.BATCH_MAJOR),
-                                    mx.io.DataDesc(name=C.SOURCE_LENGTH_NAME, shape=(self.encoder_batch_size,),
-                                                   layout=C.BATCH_MAJOR)])
+        batch = mx.io.DataBatch(data=[source, source_lengths],
+                                label=None,
+                                bucket_key=source_max_length,
+                                provide_data=self._get_encoder_data_shapes(source_max_length))
 
         self.encoder_module.forward(data_batch=batch, is_train=False)
-        encoded_source, source_dynamic_init, decoder_hidden_init, *decoder_states = self.encoder_module.get_outputs()
+        decoder_states = self.encoder_module.get_outputs()
         # replicate encoder/init module results beam size times
-        encoded_source = mx.nd.tile(encoded_source, reps=(self.beam_size, 1, 1))
-        source_dynamic_init = mx.nd.tile(source_dynamic_init, reps=(self.beam_size, 1, 1))
-        decoder_hidden_init = mx.nd.tile(decoder_hidden_init, reps=(self.beam_size, 1))
-        decoder_states = [mx.nd.tile(state, reps=(self.beam_size, 1)) for state in decoder_states]
-        source_length = mx.nd.tile(source_length, reps=(self.beam_size,))
-        return encoded_source, source_dynamic_init, source_length, decoder_hidden_init, decoder_states
+        decoder_states = [mx.nd.broadcast_axis(s, axis=0, size=self.beam_size) for s in decoder_states]
+        return decoder_states
 
-    def run_decoder(self,
-                    encoded_source: mx.nd.NDArray,
-                    dynamic_source: mx.nd.NDArray,
-                    source_length: mx.nd.NDArray,
-                    previous_word_id: mx.nd.NDArray,
-                    previous_hidden: mx.nd.NDArray,
-                    decoder_states: List[mx.nd.NDArray],
-                    bucket_key: int) -> Tuple[mx.nd.NDArray, mx.nd.NDArray,
-                                              mx.nd.NDArray, mx.nd.NDArray,
-                                              List[mx.nd.NDArray]]:
+    def run_decoder(self, model_state: 'ModelState') -> Tuple[mx.nd.NDArray, mx.nd.NDArray, 'ModelState']:
         """
         Runs forward pass of the single-step decoder.
 
-        :param encoded_source: Encoded source sentence.
-        :param dynamic_source: Dynamic encoding of source sentence.
-        :param source_length: Source length.
-        :param previous_word_id: Previous predicted word id.
-        :param previous_hidden: Previous hidden decoder state.
-        :param decoder_states: Decoder states.
-        :param bucket_key: Bucket key.
-        :return: Probability distribution over next word, attention scores, dynamic source encoding,
-                 next hidden state, next decoder states.
+        :return: Probability distribution over next word, attention scores, updated model state.
         """
-
-        data = [encoded_source,
-                dynamic_source,
-                source_length,
-                previous_word_id.as_in_context(self.context),
-                previous_hidden] + decoder_states
-
-        decoder_batch = mx.io.DataBatch(
-            data=data,
-            label=None, bucket_key=bucket_key, provide_data=self._get_decoder_data_shapes(bucket_key))
-        # run forward pass
-        self.decoder_module.forward(data_batch=decoder_batch, is_train=False)
-        # collect outputs
-        softmax_out, attention_probs, dynamic_source, next_hidden, *next_layer_states = \
-            self.decoder_module.get_outputs()
-
-        return softmax_out, attention_probs, dynamic_source, next_hidden, next_layer_states
+        batch = mx.io.DataBatch(
+            data=[model_state.prev_target_word_id.as_in_context(self.context)] + model_state.decoder_states,
+            label=None,
+            bucket_key=model_state.bucket_key,
+            provide_data=self._get_decoder_data_shapes(model_state.bucket_key))
+        self.decoder_module.forward(data_batch=batch, is_train=False)
+        probs, attention_probs, *model_state.decoder_states = self.decoder_module.get_outputs()
+        return probs, attention_probs, model_state
 
 
 def load_models(context: mx.context.Context,
@@ -339,11 +259,10 @@ def load_models(context: mx.context.Context,
                                checkpoint=checkpoint)
         models.append(model)
 
-    # check vocabulary consistency
-    assert all(set(vocab.items()) == set(source_vocabs[0].items()) for vocab in
-               source_vocabs), "Source vocabulary ids do not match"
-    assert all(set(vocab.items()) == set(target_vocabs[0].items()) for vocab in
-               target_vocabs), "Target vocabulary ids do not match"
+    utils.check_condition(all(set(vocab.items()) == set(source_vocabs[0].items()) for vocab in source_vocabs),
+                          "Source vocabulary ids do not match")
+    utils.check_condition(all(set(vocab.items()) == set(target_vocabs[0].items()) for vocab in target_vocabs),
+                          "Target vocabulary ids do not match")
 
     return models, source_vocabs[0], target_vocabs[0]
 
@@ -387,26 +306,16 @@ class ModelState:
     def __init__(self,
                  bucket_key: int,
                  prev_target_word_id: mx.nd.NDArray,
-                 source_encoded: mx.nd.NDArray,
-                 source_dynamic: mx.nd.NDArray,
-                 source_length: mx.nd.NDArray,
-                 decoder_hidden: mx.nd.NDArray,
                  decoder_states: List[mx.nd.NDArray]):
         self.bucket_key = bucket_key
         self.prev_target_word_id = prev_target_word_id
-        self.source_encoded = source_encoded
-        self.source_dynamic = source_dynamic
-        self.source_length = source_length
         self.decoder_states = decoder_states
-        self.decoder_hidden = decoder_hidden
 
     def sort_state(self, best_hyp_indices: mx.nd.NDArray, best_word_indices: mx.nd.NDArray):
         """
         Sorts states according to k-best order from last step in beam search.
         """
         self.prev_target_word_id = best_word_indices
-        self.source_dynamic = mx.nd.take(self.source_dynamic, best_hyp_indices)
-        self.decoder_hidden = mx.nd.take(self.decoder_hidden, best_hyp_indices)
         self.decoder_states = [mx.nd.take(ds, best_hyp_indices) for ds in self.decoder_states]
 
 
@@ -568,9 +477,9 @@ class Translator:
         :return: List of ModelStates.
         """
         prev_target_word_id = mx.nd.full((self.beam_size,), val=self.start_id, ctx=self.context)
-        model_states = [ModelState(bucket_key,
-                                   prev_target_word_id,
-                                   *m.run_encoder(source, source_length, bucket_key))
+        model_states = [ModelState(bucket_key=m.encoder.get_encoded_seq_len(bucket_key),
+                                   prev_target_word_id=prev_target_word_id,
+                                   decoder_states=m.run_encoder(source, source_length, bucket_key))
                         for m in self.models]
         return model_states
 
@@ -581,20 +490,14 @@ class Translator:
         :param: List of model states.
         :return: (probs, attention scores, list of model states)
         """
-        model_probs, model_attention_scores = [], []
-        for m, s in zip(self.models, states):
-            probs, attention_scores, s.source_dynamic, s.decoder_hidden, s.decoder_states = m.run_decoder(
-                s.source_encoded,
-                s.source_dynamic,
-                s.source_length,
-                s.prev_target_word_id,
-                s.decoder_hidden,
-                s.decoder_states,
-                s.bucket_key)
+        model_probs, model_attention_probs, model_states = [], [], []
+        for model, state in zip(self.models, states):
+            probs, attention_probs, state = model.run_decoder(state)
             model_probs.append(probs)
-            model_attention_scores.append(attention_scores)
-        probs, attention_scores = self._combine_predictions(model_probs, model_attention_scores)
-        return probs, attention_scores, states
+            model_attention_probs.append(attention_probs)
+            model_states.append(state)
+        probs, attention_probs = self._combine_predictions(model_probs, model_attention_probs)
+        return probs, attention_probs, model_states
 
     def _combine_predictions(self,
                              probs: List[mx.nd.NDArray],
@@ -633,7 +536,8 @@ class Translator:
         """
         # Length of encoded sequence (may differ from initial input length)
         encoded_source_length = self.models[0].encoder.get_encoded_seq_len(bucket_key)
-        utils.check_condition(all(encoded_source_length == m.encoder.get_encoded_seq_len(bucket_key) for m in self.models),
+        utils.check_condition(all(encoded_source_length ==
+                                  model.encoder.get_encoded_seq_len(bucket_key) for model in self.models),
                               "Models must agree on encoded sequence length")
 
         lengths = mx.nd.zeros((self.beam_size, 1), ctx=self.context)

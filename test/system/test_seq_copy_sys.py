@@ -39,7 +39,7 @@ _LINE_MAX_LENGTH = 9
      " --transformer-feed-forward-num-hidden 64"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
-     1.001,
+     1.01,
      0.98),
 ])
 def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh):
@@ -81,7 +81,7 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
      " --transformer-feed-forward-num-hidden 64"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
-     1.001,
+     1.01,
      0.98),
 ])
 def test_seq_sort(train_params, translate_params, perplexity_thresh, bleu_thresh):

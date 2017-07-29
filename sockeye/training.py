@@ -116,9 +116,8 @@ class TrainingModel(model.SockeyeModel):
 
             source_lexicon = self.lexicon.lookup(source) if self.lexicon else None
 
-            logits = self.decoder.decode(source_encoded, source_encoded_seq_len, source_encoded_length,
-                                         target, target_seq_len, target_length,
-                                         source_lexicon)
+            logits = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len, target,
+                                                  target_length, target_seq_len, source_lexicon)
 
             outputs = model_loss.get_loss(logits, labels)
 
