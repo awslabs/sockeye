@@ -15,7 +15,6 @@ from typing import Optional, Tuple
 
 import mxnet as mx
 
-from . import initializer
 from . import utils
 
 
@@ -76,39 +75,6 @@ class LayerNormalization:
         inputs_norm = mx.sym.broadcast_mul(inputs_norm, self.scale, name='%sinp_norm_scaled' % self.prefix)
         inputs_norm = mx.sym.broadcast_add(inputs_norm, self.shift, name='%sinp_norm_scaled_shifted' % self.prefix)
         return inputs_norm
-
-
-class TransformerResidual:
-
-    def __init__(self, num_hidden: int, layer_normalization: bool, dropout: float, prefix: str) -> None:
-        self.num_hidden = num_hidden
-        self.dropout = dropout
-        self.layer_norm = None
-        self.prefix = prefix
-        if layer_normalization:
-            self.layer_norm = LayerNormalization(num_hidden=self.num_hidden, prefix=self.prefix)
-
-    def __call__(self, x: mx.sym.Symbol, y: mx.sym.Symbol, length: int) -> mx.sym.Symbol:
-        """
-        Apply residual connections with optional layer normalization and dropout.
-
-        :param x: (batch, length, num_hidden).
-        :param y: (batch, length, num_hidden).
-        :param length: maximum sequence length.
-        :return: (batch, length, num_hidden).
-        """
-        if self.dropout > 0.0:
-            y = mx.sym.Dropout(y, p=self.dropout)
-        z = x + y
-        if self.layer_norm:
-            self._reshape_and_normalize(z, length)
-        return z
-
-    def _reshape_and_normalize(self, data: mx.sym.Symbol, length: int):
-        data = mx.sym.reshape(data, shape=(-3, self.num_hidden))
-        data = self.layer_norm.normalize(data)
-        data = mx.sym.reshape(data, shape=(-4, -1, length, self.num_hidden))
-        return data
 
 
 def split_heads(x: mx.sym.Symbol, length: int, heads: int) -> mx.sym.Symbol:
@@ -198,7 +164,6 @@ def dot_attention(queries, keys, values, length: mx.sym.Symbol, dropout: float =
 
 
 class MultiHeadAttentionBase:
-
     def __init__(self,
                  prefix: str,
                  depth_att: int = 512,
@@ -253,7 +218,6 @@ class MultiHeadAttentionBase:
 
 
 class MultiHeadSelfAttention(MultiHeadAttentionBase):
-
     def __init__(self,
                  prefix: str,
                  depth_att: int = 512,
@@ -307,7 +271,6 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
 
 
 class MultiHeadAttention(MultiHeadAttentionBase):
-
     def __init__(self,
                  prefix: str,
                  depth_att: int = 512,
@@ -376,38 +339,3 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                             queries_max_length=queries_max_length,
                             memory_max_length=memory_max_length,
                             bias=None)
-
-
-class FFNRelu:
-    """
-    Position-wise feed-forward network with ReLU activation.
-    """
-
-    def __init__(self, num_hidden: int, num_model: int, dropout: float, prefix: str):
-        self.num_hidden = num_hidden
-        self.num_model = num_model
-        self.dropout = dropout
-        self.prefix = prefix
-        self.w_i2h = mx.sym.Variable('%si2h_weight' % prefix)
-        self.b_i2h = mx.sym.Variable('%si2h_bias' % prefix)
-        self.w_h2o = mx.sym.Variable('%sh2o_weight' % prefix)
-        self.b_h2o = mx.sym.Variable('%sh2o_bias' % prefix)
-
-    def __call__(self, x, length):
-        """
-        Position-wise feed-forward network with ReLU activation.
-
-        :param x: Symbol of shape (batch_size, seq_len, num_hidden)
-        :param length: sequence length
-        :return: Symbol of shape (batch_size, seq_len, num_hidden)
-        """
-        # TODO: use a convolution to avoid needing to know the sequence length and reshapes?
-        # FIXME reuse variables?
-        x = mx.sym.reshape(x, shape=(-3, -1))
-        h = mx.sym.FullyConnected(data=x, num_hidden=self.num_hidden, weight=self.w_i2h, bias=self.b_i2h)
-        h = mx.sym.Activation(h, act_type="relu")
-        if self.dropout > 0.0:
-            h = mx.sym.Dropout(h, p=self.dropout)
-        y = mx.sym.FullyConnected(data=h, num_hidden=self.num_model, weight=self.w_h2o, bias=self.b_h2o)
-        y = mx.sym.reshape(y, shape=(-1, length, self.num_model))
-        return y

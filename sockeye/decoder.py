@@ -28,39 +28,21 @@ from . import initializer
 from . import layers
 from . import lexicon as lexicons
 from . import rnn
+from . import transformer
 
 
-class RecurrentDecoderConfig(Config):
-    """
-    Recurrent decoder configuration.
-
-    :param vocab_size: Target vocabulary size.
-    :param num_embed: Target word embedding size.
-    :param rnn_config: RNN configuration.
-    :param dropout: Dropout probability for decoder RNN.
-    :param weight_tying: Whether to share embedding and prediction parameter matrices.
-    :param context_gating: Whether to use context gating.
-    :param layer_normalization: Apply layer normalization.
-    """
-    def __init__(self,
-                 vocab_size: int,
-                 num_embed: int,
-                 rnn_config: rnn.RNNConfig,
-                 dropout: float = .0,
-                 weight_tying: bool = False,
-                 context_gating: bool = False,
-                 layer_normalization: bool = False) -> None:
-        super().__init__()
-        self.vocab_size = vocab_size
-        self.num_embed = num_embed
-        self.rnn_config = rnn_config
-        self.dropout = dropout
-        self.weight_tying = weight_tying
-        self.context_gating = context_gating
-        self.layer_normalization = layer_normalization
+def get_decoder(config: Config,
+                attention: Optional[attentions.Attention] = None,
+                lexicon: Optional[lexicons.Lexicon] = None) -> 'Decoder':
+    if isinstance(config, RecurrentDecoderConfig):
+        return get_recurrent_decoder(config, attention, lexicon)
+    elif isinstance(config, transformer.TransformerConfig):
+        return get_transformer_decoder(config)
+    else:
+        raise ValueError("Unsupported decoder configuration")
 
 
-def get_recurrent_decoder(config: RecurrentDecoderConfig,
+def get_recurrent_decoder(config: 'RecurrentDecoderConfig',
                           attention: attentions.Attention,
                           lexicon: Optional[lexicons.Lexicon] = None) -> 'Decoder':
     """
@@ -76,7 +58,8 @@ def get_recurrent_decoder(config: RecurrentDecoderConfig,
                             lexicon=lexicon,
                             prefix=C.DECODER_PREFIX)
 
-def get_transformer_decoder(config: 'TransformerDecoderConfig') -> 'Decoder':
+
+def get_transformer_decoder(config: transformer.TransformerConfig) -> 'Decoder':
     """
     Returns a transformer decoder.
 
@@ -90,6 +73,30 @@ class Decoder:
     """
     Generic decoder interface.
     """
+
+    def decode(self,
+               source: mx.sym.Symbol,
+               source_max_length: int,
+               source_length: mx.sym.Symbol,
+               target: mx.sym.Symbol,
+               target_max_length: int,
+               target_length: mx.sym.Symbol,
+               source_lexicon: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
+        """
+        Returns decoder logits with batch size and target sequence length collapsed into a single dimension.
+
+        :param source: Concatenated encoder states. Shape: (source_seq_len, batch_size, encoder_num_hidden).
+        :param source_max_length: Maximum source sequence length.
+        :param source_length: Lengths of source sequences. Shape: (batch_size,).
+        :param target: Target sequence. Shape: (batch_size, target_seq_len).
+        :param target_max_length: Maximum target sequence length.
+        :param target_length: Lengths of target sequences. Shape: (batch_size,).
+        :param source_lexicon: Lexical biases for current sentence.
+               Shape: (batch_size, target_vocab_size, source_seq_len)
+        :return: Logits of next-word predictions for target sequence.
+                 Shape: (batch_size * target_seq_len, target_vocab_size)
+        """
+        raise NotImplementedError()
 
     def get_num_hidden(self) -> int:
         """
@@ -120,115 +127,17 @@ Decoder state.
 """
 
 
-class TransformerDecoderConfig(Config):
-    """
-    Transformer decoder configuration.
-
-    :param vocab_size: Source vocabulary size.
-    :param max_seq_len: Maximum sequence length.
-    :param num_embed: Model size.
-    :param num_layers: Number of layers.
-    :param attention_heads: Number of attention heads
-    :param feed_forward_num_hidden: Number of hidden units for feed-forward layers.
-    :param dropout: Dropout.
-    :param positional_encodings: Use positional encodings.
-    :param relative_positions: Use relative positional encodings.
-    :param layer_normalization: Use layer normalization.
-    """
-
-    def __init__(self,
-                 vocab_size: int,
-                 num_embed: int,
-                 max_seq_len: int,
-                 weight_tying: bool = False,
-                 num_layers: int = 6,
-                 attention_heads: int = 8,
-                 feed_forward_num_hidden: int = 2048,
-                 dropout: float = 0.0,
-                 positional_encodings: bool = True,
-                 relative_positions: bool = True,
-                 layer_normalization: bool = True) -> None:
-        super().__init__()
-        self.vocab_size = vocab_size
-        self.model_size = num_embed
-        self.max_seq_len = max_seq_len
-        self.weight_tying = weight_tying
-        self.num_layers = num_layers
-        self.attention_heads = attention_heads
-        self.feed_forward_num_hidden = feed_forward_num_hidden
-        self.dropout = dropout
-        self.positional_encodings = positional_encodings
-        self.relative_positions = relative_positions
-        self.layer_normalization = layer_normalization
-
-
-class TransformerDecoderBlock:
-
-    def __init__(self, config: TransformerDecoderConfig, prefix: str):
-        self.self_attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
-                                                            heads=config.attention_heads,
-                                                            depth_out=config.model_size,
-                                                            dropout=config.dropout,
-                                                            prefix="%satt_self_" % prefix)
-        self.residual_self = layers.TransformerResidual(num_hidden=config.model_size,
-                                                        layer_normalization=config.layer_normalization,
-                                                        dropout=config.dropout,
-                                                        prefix="%satt_self_res_" % prefix)
-        self.enc_attention = layers.MultiHeadAttention(depth_att=config.model_size,
-                                                       heads=config.attention_heads,
-                                                       depth_out=config.model_size,
-                                                       dropout=config.dropout,
-                                                       prefix="%satt_enc_" % prefix)
-        self.residual_enc = layers.TransformerResidual(num_hidden=config.model_size,
-                                                       layer_normalization=config.layer_normalization,
-                                                       dropout=config.dropout,
-                                                       prefix="%satt_enc_res_" % prefix)
-        self.feed_forward = layers.FFNRelu(num_hidden=config.feed_forward_num_hidden,
-                                           num_model=config.model_size,
-                                           dropout=config.dropout,
-                                           prefix="%sff_" % prefix)
-        self.residual_ff = layers.TransformerResidual(num_hidden=config.model_size,
-                                                      layer_normalization=config.layer_normalization,
-                                                      dropout=config.dropout,
-                                                      prefix="%sff_res_" % prefix)
-
-    def __call__(self,
-                 target: mx.sym.Symbol, target_lengths: mx.sym.Symbol, target_max_length: int,
-                 target_bias: mx.sym.Symbol,
-                 source: mx.sym.Symbol, source_lengths: mx.sym.Symbol, source_max_length: int):
-        target = self.residual_self(target,
-                                    self.self_attention(target,
-                                                        target_lengths,
-                                                        target_max_length,
-                                                        bias=target_bias),
-                                    target_max_length)
-        target = self.residual_enc(target,
-                                   self.enc_attention(target,
-                                                      target_max_length,
-                                                      source,
-                                                      source_lengths,
-                                                      source_max_length),
-                                   target_max_length)
-        target = self.residual_ff(target,
-                                  self.feed_forward(target,
-                                                    target_max_length),
-                                  target_max_length)
-        return target
-
-
 class TransformerDecoder(Decoder):
-    """
-    TODO
-    """
-
     def __init__(self,
-                 config: TransformerDecoderConfig,
+                 config: transformer.TransformerConfig,
                  prefix: str = C.TRANSFORMER_DECODER_PREFIX) -> None:
         self.config = config
         self.prefix = prefix
-        self.layers = [TransformerDecoderBlock(config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
+        self.layers = [transformer.TransformerDecoderBlock(
+            config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
 
-        self.embedding = encoder.Embedding(config.model_size, config.vocab_size,
+        self.embedding = encoder.Embedding(num_embed=config.model_size,
+                                           vocab_size=config.vocab_size,
                                            prefix=C.TARGET_EMBEDDING_PREFIX, dropout=0.,
                                            add_positional_encoding=config.positional_encodings,
                                            relative_positional_encoding=config.relative_positions,
@@ -238,7 +147,8 @@ class TransformerDecoder(Decoder):
                                     init=initializer.AutoRegressiveBiasInitializer(config.max_seq_len),
                                     shape=(1, config.max_seq_len, config.max_seq_len))
 
-        self.cls_w = mx.sym.Variable("%scls_weight" % prefix) if not config.weight_tying else self.embedding.embed_weight
+        self.cls_w = mx.sym.Variable(
+            "%scls_weight" % prefix) if not config.weight_tying else self.embedding.embed_weight
         self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
 
     def get_num_hidden(self) -> int:
@@ -261,18 +171,21 @@ class TransformerDecoder(Decoder):
                source_length: mx.sym.Symbol,
                target: mx.sym.Symbol,
                target_max_length: int,
-               target_length: mx.sym.Symbol) -> mx.sym.Symbol:
+               target_length: mx.sym.Symbol,
+               source_lexicon: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
         """
         Returns decoder logits with batch size and target sequence length collapsed into a single dimension.
 
-        :param source: Concatenated encoder states. Shape: (source_max_length, batch_size, encoder_num_hidden).
+        :param source: Concatenated encoder states. Shape: (source_seq_len, batch_size, encoder_num_hidden).
         :param source_max_length: Maximum source sequence length.
         :param source_length: Lengths of source sequences. Shape: (batch_size,).
-        :param target: Target sequence. Shape: (batch_size, target_max_length).
+        :param target: Target sequence. Shape: (batch_size, target_seq_len).
         :param target_max_length: Maximum target sequence length.
         :param target_length: Lengths of target sequences. Shape: (batch_size,).
+        :param source_lexicon: Lexical biases for current sentence.
+               Shape: (batch_size, target_vocab_size, source_seq_len)
         :return: Logits of next-word predictions for target sequence.
-                 Shape: (batch_size * target_max_length, vocab_size)
+                 Shape: (batch_size * target_seq_len, target_vocab_size)
         """
         # (1, target_max_length, target_max_length)
         target_bias = mx.sym.BlockGrad(mx.sym.slice(self.bias,
@@ -297,6 +210,37 @@ class TransformerDecoder(Decoder):
                                        weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
 
         return logits
+
+
+class RecurrentDecoderConfig(Config):
+    """
+    Recurrent decoder configuration.
+
+    :param vocab_size: Target vocabulary size.
+    :param num_embed: Target word embedding size.
+    :param rnn_config: RNN configuration.
+    :param dropout: Dropout probability for decoder RNN.
+    :param weight_tying: Whether to share embedding and prediction parameter matrices.
+    :param context_gating: Whether to use context gating.
+    :param layer_normalization: Apply layer normalization.
+    """
+
+    def __init__(self,
+                 vocab_size: int,
+                 num_embed: int,
+                 rnn_config: rnn.RNNConfig,
+                 dropout: float = .0,
+                 weight_tying: bool = False,
+                 context_gating: bool = False,
+                 layer_normalization: bool = False) -> None:
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.num_embed = num_embed
+        self.rnn_config = rnn_config
+        self.dropout = dropout
+        self.weight_tying = weight_tying
+        self.context_gating = context_gating
+        self.layer_normalization = layer_normalization
 
 
 class RecurrentDecoder(Decoder):
@@ -383,7 +327,7 @@ class RecurrentDecoder(Decoder):
             if self.layer_norm:
                 self.init_norms.append(layers.LayerNormalization(num_hidden=init_num_hidden,
                                                                  prefix="%senc2decinit_%d_norm" % (
-                                                                    self.prefix, state_idx)))
+                                                                     self.prefix, state_idx)))
 
     def create_layer_input_variables(self, batch_size: int) \
             -> Tuple[List[mx.sym.Symbol], List[mx.io.DataDesc], List[str]]:
@@ -507,42 +451,44 @@ class RecurrentDecoder(Decoder):
         return DecoderState(hidden, layer_states), attention_state
 
     def decode(self,
-               source_encoded: mx.sym.Symbol,
-               source_seq_len: int,
+               source: mx.sym.Symbol,
+               source_max_length: int,
                source_length: mx.sym.Symbol,
                target: mx.sym.Symbol,
-               target_seq_len: int,
+               target_max_length: int,
+               target_length: mx.sym.Symbol,
                source_lexicon: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
         """
         Returns decoder logits with batch size and target sequence length collapsed into a single dimension.
 
-        :param source_encoded: Concatenated encoder states. Shape: (source_seq_len, batch_size, encoder_num_hidden).
-        :param source_seq_len: Maximum source sequence length.
+        :param source: Concatenated encoder states. Shape: (source_seq_len, batch_size, encoder_num_hidden).
+        :param source_max_length: Maximum source sequence length.
         :param source_length: Lengths of source sequences. Shape: (batch_size,).
         :param target: Target sequence. Shape: (batch_size, target_seq_len).
-        :param target_seq_len: Maximum target sequence length.
+        :param target_max_length: Maximum target sequence length.
+        :param target_length: Lengths of target sequences. Shape: (batch_size,).
         :param source_lexicon: Lexical biases for current sentence.
                Shape: (batch_size, target_vocab_size, source_seq_len)
         :return: Logits of next-word predictions for target sequence.
                  Shape: (batch_size * target_seq_len, target_vocab_size)
         """
         # process encoder states
-        source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
+        source_encoded_batch_major = mx.sym.swapaxes(source, dim1=0, dim2=1, name='source_encoded_batch_major')
 
         # embed and slice target words
         # target_embed: (batch_size, target_seq_len, num_target_embed)
-        target_embed, _, _ = self.embedding.encode(target, None, target_seq_len)
+        target_embed, target_length, target_max_length = self.embedding.encode(target, target_length, target_max_length)
         # target_embed: target_seq_len * (batch_size, num_target_embed)
-        target_embed = mx.sym.split(data=target_embed, num_outputs=target_seq_len, axis=1, squeeze_axis=True)
+        target_embed = mx.sym.split(data=target_embed, num_outputs=target_max_length, axis=1, squeeze_axis=True)
 
         # get recurrent attention function conditioned on source
-        attention_func = self.attention.on(source_encoded_batch_major, source_length, source_seq_len)
-        attention_state = self.attention.get_initial_state(source_length, source_seq_len)
+        attention_func = self.attention.on(source_encoded_batch_major, source_length, source_max_length)
+        attention_state = self.attention.get_initial_state(source_length, source_max_length)
 
         # initialize decoder states
         # hidden: (batch_size, rnn_num_hidden)
         # layer_states: List[(batch_size, state_num_hidden]
-        state = self.compute_init_states(source_encoded, source_length)
+        state = self.compute_init_states(source, source_length)
 
         # hidden_all: target_seq_len * (batch_size, 1, rnn_num_hidden)
         hidden_all = []
@@ -556,7 +502,7 @@ class RecurrentDecoder(Decoder):
         for cell in self.rnn._cells:
             cell.reset()
 
-        for seq_idx in range(target_seq_len):
+        for seq_idx in range(target_max_length):
             # hidden: (batch_size, rnn_num_hidden)
             state, attention_state = self._step(target_embed[seq_idx],
                                                 state,

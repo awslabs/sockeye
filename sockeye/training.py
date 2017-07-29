@@ -94,6 +94,7 @@ class TrainingModel(model.SockeyeModel):
         Initializes model components, creates training symbol and module, and binds it.
         """
         source = mx.sym.Variable(C.SOURCE_NAME)
+        # TODO: this can be computed and thus removed from data io and inference
         source_length = mx.sym.Variable(C.SOURCE_LENGTH_NAME)
         target = mx.sym.Variable(C.TARGET_NAME)
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
@@ -115,8 +116,11 @@ class TrainingModel(model.SockeyeModel):
              source_encoded_length,
              source_encoded_seq_len) = self.encoder.encode(source, source_length, seq_len=source_seq_len)
 
+            source_lexicon = self.lexicon.lookup(source) if self.lexicon else None
+
             logits = self.decoder.decode(source_encoded, source_encoded_seq_len, source_encoded_length,
-                                         target, target_seq_len, target_length)
+                                         target, target_seq_len, target_length,
+                                         source_lexicon)
 
             outputs = model_loss.get_loss(logits, labels)
 

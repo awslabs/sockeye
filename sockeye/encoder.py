@@ -23,7 +23,7 @@ import mxnet as mx
 from sockeye.config import Config
 from . import constants as C
 from . import initializer
-from . import layers
+from . import transformer
 from . import rnn
 from . import utils
 
@@ -34,17 +34,16 @@ class EncoderConfig(Config):
 
     def __init__(self,
                  vocab_size: int,
-                 num_embed: int,
-                 ) -> None:
+                 num_embed: int) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
 
 
-def get_encoder(config: EncoderConfig, fused: bool):
+def get_encoder(config: Config, fused: bool):
     if isinstance(config, RecurrentEncoderConfig):
         return get_recurrent_encoder(config, fused)
-    elif isinstance(config, TransformerEncoderConfig):
+    elif isinstance(config, transformer.TransformerConfig):
         return get_transformer_encoder(config)
     else:
         raise ValueError("Unsupported encoder configuration")
@@ -103,7 +102,7 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool) -> 'Encod
     return EncoderSequence(encoders)
 
 
-def get_transformer_encoder(config: 'TransformerEncoderConfig') -> 'Encoder':
+def get_transformer_encoder(config: transformer.TransformerConfig) -> 'Encoder':
     """
     Returns a Transformer encoder.
 
@@ -111,7 +110,7 @@ def get_transformer_encoder(config: 'TransformerEncoderConfig') -> 'Encoder':
     :return: Encoder instance.
     """
     encoders = list()
-    encoders.append(Embedding(num_embed=config.num_embed,
+    encoders.append(Embedding(num_embed=config.model_size,
                               vocab_size=config.vocab_size,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
                               dropout=config.dropout,
@@ -119,7 +118,7 @@ def get_transformer_encoder(config: 'TransformerEncoderConfig') -> 'Encoder':
                               relative_positional_encoding=config.relative_positions,
                               max_seq_len=config.max_seq_len))
     encoders.append(TransformerEncoder(config))
-    encoders.append(BatchMajor2TimeMajor(num_hidden=config.num_embed))
+    encoders.append(BatchMajor2TimeMajor(num_hidden=config.model_size))
 
     return EncoderSequence(encoders)
 
@@ -527,81 +526,6 @@ class BiDirectionalRNNEncoder(Encoder):
         return self.forward_rnn.get_rnn_cells() + self.reverse_rnn.get_rnn_cells()
 
 
-class TransformerEncoderConfig(EncoderConfig):
-    """
-    Transformer encoder configuration.
-
-    :param vocab_size: Source vocabulary size.
-    :param max_seq_len: Maximum sequence length.
-    :param num_embed: Model size.
-    :param num_layers: Number of layers.
-    :param attention_heads: Number of attention heads
-    :param feed_forward_num_hidden: Number of hidden units for feed-forward layers.
-    :param dropout: Dropout.
-    :param positional_encodings: Use positional encodings.
-    :param relative_positions: Use relative positional encodings.
-    :param layer_normalization: Use layer normalization.
-    """
-    yaml_tag = "!TransformerEncoderConfig"
-
-    def __init__(self,
-                 vocab_size: int,
-                 max_seq_len: int,
-                 num_embed: int = 512,
-                 num_layers: int = 6,
-                 attention_heads: int = 8,
-                 feed_forward_num_hidden: int = 2048,
-                 dropout: float = 0.0,
-                 positional_encodings: bool = True,
-                 relative_positions: bool = True,
-                 layer_normalization: bool = True) -> None:
-        super().__init__(vocab_size, num_embed)
-        self.model_size = self.num_embed
-        self.max_seq_len = max_seq_len
-        self.num_layers = num_layers
-        self.attention_heads = attention_heads
-        self.feed_forward_num_hidden = feed_forward_num_hidden
-        self.dropout = dropout
-        self.positional_encodings = positional_encodings
-        self.relative_positions = relative_positions
-        self.layer_normalization = layer_normalization
-
-
-class TransformerEncoderBlock:
-    def __init__(self,
-                 config: TransformerEncoderConfig,
-                 prefix: str):
-        self.attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
-                                                       heads=config.attention_heads,
-                                                       depth_out=config.model_size,
-                                                       dropout=config.dropout,
-                                                       prefix="%satt_" % prefix)
-        self.residual1 = layers.TransformerResidual(num_hidden=config.model_size,
-                                                    layer_normalization=config.layer_normalization,
-                                                    dropout=config.dropout,
-                                                    prefix="%satt_res_" % prefix)
-        self.feed_forward = layers.FFNRelu(num_hidden=config.feed_forward_num_hidden,
-                                           num_model=config.model_size,
-                                           dropout=config.dropout,
-                                           prefix="%sff_" % prefix)
-        self.residual2 = layers.TransformerResidual(num_hidden=config.model_size,
-                                                    layer_normalization=config.layer_normalization,
-                                                    dropout=config.dropout,
-                                                    prefix="%sff_res_" % prefix)
-
-    def __call__(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int):
-        data = self.residual1(data,
-                              self.attention(data,
-                                             data_length,
-                                             seq_len),
-                              seq_len)
-        data = self.residual2(data,
-                              self.feed_forward(data,
-                                                seq_len),
-                              seq_len)
-        return data
-
-
 class TransformerEncoder(Encoder):
     """
     Non-recurrent encoder based on the transformer architecture in:
@@ -613,11 +537,12 @@ class TransformerEncoder(Encoder):
     """
 
     def __init__(self,
-                 config: TransformerEncoderConfig,
+                 config: transformer.TransformerConfig,
                  prefix: str = C.TRANSFORMER_ENCODER_PREFIX):
         self.config = config
         self.prefix = prefix
-        self.layers = [TransformerEncoderBlock(config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
+        self.layers = [transformer.TransformerEncoderBlock(
+            config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -631,12 +556,10 @@ class TransformerEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data data, data_length, seq_len.
         """
-        encoded = data
-        # Encoder layers
-        # All symbols (batch_size, seq_len, num_embed=model_size)
         for i, layer in enumerate(self.layers):
-            encoded = layer(encoded, data_length, seq_len)
-        return encoded, data_length, seq_len
+            # (batch_size, seq_len, config.model_size)
+            data = layer(data, data_length, seq_len)
+        return data, data_length, seq_len
 
     def get_num_hidden(self) -> int:
         """

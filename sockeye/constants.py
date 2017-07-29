@@ -45,6 +45,9 @@ TRANSFORMER_TYPE = "transformer"
 # available encoders
 ENCODERS = [RNN_NAME, RNN_WITH_CONV_EMBED_NAME, TRANSFORMER_TYPE]
 
+# available decoder
+DECODERS = [RNN_NAME, TRANSFORMER_TYPE]
+
 # rnn types
 LSTM_TYPE = 'lstm'
 LNLSTM_TYPE = 'lnlstm'

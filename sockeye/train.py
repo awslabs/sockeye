@@ -43,6 +43,7 @@ from . import lr_scheduler
 from . import model
 from . import rnn
 from . import training
+from . import transformer
 from . import vocab
 
 
@@ -217,25 +218,19 @@ def main():
         num_embed_source = args.num_embed if args.num_embed_source is None else args.num_embed_source
         num_embed_target = args.num_embed if args.num_embed_target is None else args.num_embed_target
 
-        config_rnn = rnn.RNNConfig(cell_type=args.rnn_cell_type,
-                                   num_hidden=args.rnn_num_hidden,
-                                   num_layers=args.rnn_num_layers,
-                                   dropout=args.dropout,
-                                   residual=args.rnn_residual_connections,
-                                   forget_bias=args.rnn_forget_bias)
-
         if args.encoder == C.TRANSFORMER_TYPE:
-            config_encoder = encoder.TransformerEncoderConfig(
-                vocab_size=vocab_source_size,
-                max_seq_len=max_seq_len_source,
-                num_embed=args.transformer_model_size,
-                num_layers=args.transformer_num_layers,
+            config_encoder = transformer.TransformerConfig(
+                model_size=args.transformer_model_size,
                 attention_heads=args.transformer_attention_heads,
                 feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
+                num_layers=args.transformer_num_layers,
+                vocab_size=vocab_source_size,
+                max_seq_len=max_seq_len_source,
                 dropout=args.dropout,
+                layer_normalization=args.layer_normalization,
+                weight_tying=args.weight_tying,
                 positional_encodings=not args.transformer_no_positional_encodings,
-                relative_positions=not args.transformer_absolute_positional_encodings,
-                layer_normalization=args.layer_normalization)
+                relative_positions=not args.transformer_absolute_positional_encodings)
         else:
             config_conv = None
             if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
@@ -246,43 +241,61 @@ def main():
                     pool_stride=args.conv_embed_pool_stride,
                     num_highway_layers=args.conv_embed_num_highway_layers,
                     dropout=args.dropout)
-            config_encoder = encoder.RecurrentEncoderConfig(vocab_size=vocab_source_size,
-                                                            num_embed=num_embed_source,
-                                                            rnn_config=config_rnn,
-                                                            conv_config=config_conv)
+            config_encoder = encoder.RecurrentEncoderConfig(
+                vocab_size=vocab_source_size,
+                num_embed=num_embed_source,
+                rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
+                                         num_hidden=args.rnn_num_hidden,
+                                         num_layers=args.rnn_num_layers,
+                                         dropout=args.dropout,
+                                         residual=args.rnn_residual_connections,
+                                         forget_bias=args.rnn_forget_bias),
+                conv_config=config_conv)
 
-        # config_decoder = decoder.RecurrentDecoderConfig(vocab_size=vocab_target_size,
-        #                                                 num_embed=num_embed_target,
-        #                                                 rnn_config=config_rnn,
-        #                                                 dropout=args.dropout,
-        #                                                 weight_tying=args.weight_tying,
-        #                                                 context_gating=args.context_gating,
-        #                                                 layer_normalization=args.layer_normalization)
-        config_decoder = decoder.TransformerDecoderConfig(vocab_size=vocab_target_size,
-                                                          num_embed=num_embed_target,
-                                                          max_seq_len=max_seq_len_target,
-                                                          weight_tying=args.weight_tying,
-                                                          num_layers=args.transformer_num_layers,
-                                                          attention_heads=args.transformer_attention_heads,
-                                                          feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
-                                                          dropout=args.dropout,
-                                                          positional_encodings=not args.transformer_no_positional_encodings,
-                                                          relative_positions=not args.transformer_absolute_positional_encodings,
+        if args.decoder == C.TRANSFORMER_TYPE:
+            config_decoder = transformer.TransformerConfig(
+                model_size=args.transformer_model_size,
+                attention_heads=args.transformer_attention_heads,
+                feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
+                num_layers=args.transformer_num_layers,
+                vocab_size=vocab_target_size,
+                max_seq_len=max_seq_len_target,
+                dropout=args.dropout,
+                layer_normalization=args.layer_normalization,
+                weight_tying=args.weight_tying,
+                positional_encodings=not args.transformer_no_positional_encodings,
+                relative_positions=not args.transformer_absolute_positional_encodings)
+
+            config_attention = None
+
+        else:
+            config_decoder = decoder.RecurrentDecoderConfig(
+                vocab_size=vocab_target_size,
+                num_embed=num_embed_target,
+                rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
+                                         num_hidden=args.rnn_num_hidden,
+                                         num_layers=args.rnn_num_layers,
+                                         dropout=args.dropout,
+                                         residual=args.rnn_residual_connections,
+                                         forget_bias=args.rnn_forget_bias),
+                dropout=args.dropout,
+                weight_tying=args.weight_tying,
+                context_gating=args.context_gating,
+                layer_normalization=args.layer_normalization)
+
+            attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
+            config_coverage = None
+            if args.attention_type == "coverage":
+                config_coverage = coverage.CoverageConfig(type=args.attention_coverage_type,
+                                                          num_hidden=args.attention_coverage_num_hidden,
                                                           layer_normalization=args.layer_normalization)
-
-        attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
-        config_coverage = None
-        if args.attention_type == "coverage":
-            config_coverage = coverage.CoverageConfig(type=args.attention_coverage_type,
-                                                      num_hidden=args.attention_coverage_num_hidden,
-                                                      layer_normalization=args.layer_normalization)
-        config_attention = attention.AttentionConfig(type=args.attention_type,
-                                                     num_hidden=attention_num_hidden,
-                                                     input_previous_word=args.attention_use_prev_word,
-                                                     rnn_num_hidden=config_rnn.num_hidden,
-                                                     layer_normalization=args.layer_normalization,
-                                                     config_coverage=config_coverage,
-                                                     num_heads=args.transformer_attention_heads)
+            config_attention = attention.AttentionConfig(type=args.attention_type,
+                                                         num_hidden=attention_num_hidden,
+                                                         input_previous_word=args.attention_use_prev_word,
+                                                         rnn_num_hidden=args.rnn_num_hidden,
+                                                         layer_normalization=args.layer_normalization,
+                                                         config_coverage=config_coverage,
+                                                         num_heads=args.transformer_attention_heads)
 
         config_loss = loss.LossConfig(type=args.loss,
                                       vocab_size=vocab_target_size,

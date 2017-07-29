@@ -165,6 +165,10 @@ def add_model_parameters(params):
                               choices=C.ENCODERS,
                               default=C.RNN_NAME,
                               help="Type of encoder. Default: %(default)s.")
+    model_params.add_argument('--decoder',
+                              choices=C.DECODERS,
+                              default=C.RNN_NAME,
+                              help="Type of encoder. Default: %(default)s.")
 
     model_params.add_argument('--conv-embed-max-filter-width',
                               type=int_greater_or_equal(1),

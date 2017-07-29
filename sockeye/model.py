@@ -159,16 +159,15 @@ class SockeyeModel:
         """
         self.encoder = encoder.get_encoder(self.config.config_encoder, fused_encoder)
 
-        self.attention = attention.get_attention(self.config.config_attention, max_seq_len)
+        self.attention = None
+        if self.config.config_attention:
+            self.attention = attention.get_attention(self.config.config_attention, max_seq_len)
 
         self.lexicon = lexicon.Lexicon(self.config.vocab_source_size,
                                        self.config.vocab_target_size,
                                        self.config.learn_lexical_bias) if self.config.lexical_bias else None
 
-        # self.decoder = decoder.get_recurrent_decoder(self.config.config_decoder,
-        #                                              self.attention,
-        #                                              self.lexicon)
-        self.decoder = decoder.get_transformer_decoder(self.config.config_decoder)
+        self.decoder = decoder.get_decoder(self.config.config_decoder, self.attention, self.lexicon)
 
         self.rnn_cells = self.encoder.get_rnn_cells() + self.decoder.get_rnn_cells()
 
