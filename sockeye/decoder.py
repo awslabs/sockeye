@@ -32,10 +32,9 @@ from . import transformer
 
 
 def get_decoder(config: Config,
-                attention: Optional[attentions.Attention] = None,
                 lexicon: Optional[lexicons.Lexicon] = None) -> 'Decoder':
     if isinstance(config, RecurrentDecoderConfig):
-        return get_recurrent_decoder(config, attention, lexicon)
+        return get_recurrent_decoder(config, lexicon)
     elif isinstance(config, transformer.TransformerConfig):
         return get_transformer_decoder(config)
     else:
@@ -43,8 +42,7 @@ def get_decoder(config: Config,
 
 
 def get_recurrent_decoder(config: 'RecurrentDecoderConfig',
-                          attention: attentions.Attention,
-                          lexicon: Optional[lexicons.Lexicon] = None) -> 'Decoder':
+                          lexicon: Optional[lexicons.Lexicon] = None) -> 'RecurrentDecoder':
     """
     Returns a recurrent decoder.
 
@@ -53,20 +51,20 @@ def get_recurrent_decoder(config: 'RecurrentDecoderConfig',
     :param lexicon: Optional Lexicon.
     :return: Decoder instance.
     """
-    return RecurrentDecoder(config,
-                            attention=attention,
+    return RecurrentDecoder(config=config,
                             lexicon=lexicon,
                             prefix=C.DECODER_PREFIX)
 
 
-def get_transformer_decoder(config: transformer.TransformerConfig) -> 'Decoder':
+def get_transformer_decoder(config: transformer.TransformerConfig) -> 'TransformerDecoder':
     """
     Returns a transformer decoder.
 
     :param config: Configuration for RecurrentDecoder.
     :return: Decoder instance.
     """
-    return TransformerDecoder(config, prefix=C.DECODER_PREFIX)
+    return TransformerDecoder(config=config,
+                              prefix=C.DECODER_PREFIX)
 
 
 class Decoder:
@@ -128,6 +126,7 @@ Decoder state.
 
 
 class TransformerDecoder(Decoder):
+
     def __init__(self,
                  config: transformer.TransformerConfig,
                  prefix: str = C.TRANSFORMER_DECODER_PREFIX) -> None:
@@ -217,8 +216,10 @@ class RecurrentDecoderConfig(Config):
     Recurrent decoder configuration.
 
     :param vocab_size: Target vocabulary size.
+    :param max_seq_len_source: Maximum source sequence length
     :param num_embed: Target word embedding size.
     :param rnn_config: RNN configuration.
+    :param attention_config: Attention configuration.
     :param dropout: Dropout probability for decoder RNN.
     :param weight_tying: Whether to share embedding and prediction parameter matrices.
     :param context_gating: Whether to use context gating.
@@ -227,16 +228,20 @@ class RecurrentDecoderConfig(Config):
 
     def __init__(self,
                  vocab_size: int,
+                 max_seq_len_source: int,
                  num_embed: int,
                  rnn_config: rnn.RNNConfig,
+                 attention_config: attentions.AttentionConfig,
                  dropout: float = .0,
                  weight_tying: bool = False,
                  context_gating: bool = False,
                  layer_normalization: bool = False) -> None:
         super().__init__()
         self.vocab_size = vocab_size
+        self.max_seq_len_source = max_seq_len_source
         self.num_embed = num_embed
         self.rnn_config = rnn_config
+        self.attention_config = attention_config
         self.dropout = dropout
         self.weight_tying = weight_tying
         self.context_gating = context_gating
@@ -249,21 +254,19 @@ class RecurrentDecoder(Decoder):
     The architecture is based on Luong et al, 2015: Effective Approaches to Attention-based Neural Machine Translation.
 
     :param config: Configuration for recurrent decoder.
-    :param attention: Attention model.
     :param lexicon: Optional Lexicon.
     :param prefix: Decoder symbol prefix.
     """
 
     def __init__(self,
                  config: RecurrentDecoderConfig,
-                 attention: attentions.Attention,
                  lexicon: Optional[lexicons.Lexicon] = None,
-                 prefix=C.DECODER_PREFIX) -> None:
+                 prefix: str = C.DECODER_PREFIX) -> None:
         # TODO: implement variant without input feeding
         self.rnn_config = config.rnn_config
         self.target_vocab_size = config.vocab_size
         self.num_target_embed = config.num_embed
-        self.attention = attention
+        self.attention = attentions.get_attention(config.attention_config, config.max_seq_len_source)
         self.weight_tying = config.weight_tying
         self.context_gating = config.context_gating
         self.layer_norm = config.layer_normalization

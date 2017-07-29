@@ -36,9 +36,9 @@ class InferenceModel(model.SockeyeModel):
     """
     InferenceModel is a SockeyeModel that supports three operations used for inference/decoding:
 
-        (1) Encoder forward call: encode source sentence and return initial decoder states, given a bucket_key.
-        (2) Decoder forward call: single decoder step: predict next word.
-        (3) Return decoder data shapes, given a bucket key.
+    (1) Encoder forward call: encode source sentence and return initial decoder states, given a bucket_key.
+    (2) Decoder forward call: single decoder step: predict next word.
+    (3) Return decoder data shapes, given a bucket key.
 
     :param model_folder: Folder to load model from.
     :param context: MXNet context to bind modules to.
@@ -58,20 +58,21 @@ class InferenceModel(model.SockeyeModel):
                  checkpoint: Optional[int] = None,
                  softmax_temperature: Optional[float] = None):
         # load config & determine parameter file
-        super().__init__(model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME)))
+        config = model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
+        if max_input_len is None:
+            max_input_len = config.max_seq_len_source
+        else:
+            if max_input_len != config.max_seq_len_source:
+                logger.warning("Model was trained with max_seq_len_source=%d, but using max_input_len=%d.",
+                               config.max_seq_len_source, max_input_len)
+        config.max_seq_len_source = max_input_len
+        super().__init__(config)
+
         fname_params = os.path.join(model_folder, C.PARAMS_NAME % checkpoint if checkpoint else C.PARAMS_BEST_NAME)
 
         self.model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
         logger.info("Model version: %s", self.model_version)
         utils.check_version(self.model_version)
-
-        if max_input_len is None:
-            max_input_len = self.config.max_seq_len
-        else:
-            if max_input_len != self.config.max_seq_len:
-                logger.warning("Model was trained with max_seq_len=%d, but using max_input_len=%d.",
-                               self.config.max_seq_len, max_input_len)
-        self.max_input_len = max_input_len
 
         utils.check_condition(beam_size < self.config.vocab_target_size,
                               'The beam size must be smaller than the target vocabulary size.')
@@ -81,12 +82,12 @@ class InferenceModel(model.SockeyeModel):
         self.encoder_batch_size = 1
         self.context = context
 
-        self._build_model_components(self.max_input_len, fused)
+        self._build_model_components(fused)
         self.encoder_module, self.decoder_module = self._build_modules()
 
         self.decoder_data_shapes_cache = dict()  # bucket_key -> shape cache
-        max_encoder_data_shapes = self._get_encoder_data_shapes(self.max_input_len)
-        max_decoder_data_shapes = self._get_decoder_data_shapes(self.max_input_len)
+        max_encoder_data_shapes = self._get_encoder_data_shapes(self.config.max_seq_len_source)
+        max_decoder_data_shapes = self._get_decoder_data_shapes(self.config.max_seq_len_target)
         self.encoder_module.bind(data_shapes=max_encoder_data_shapes, for_training=False, grad_req="null")
         self.decoder_module.bind(data_shapes=max_decoder_data_shapes, for_training=False, grad_req="null")
 
@@ -112,7 +113,7 @@ class InferenceModel(model.SockeyeModel):
             decoder_hidden_init, decoder_init_states = self.decoder.compute_init_states(source_encoded,
                                                                                         source_encoded_length)
             # initial attention state
-            attention_state = self.attention.get_initial_state(source_encoded_length, source_encoded_seq_len)
+            attention_state = self.decoder.attention.get_initial_state(source_encoded_length, source_encoded_seq_len)
 
             data_names = [C.SOURCE_NAME, C.SOURCE_LENGTH_NAME]
             label_names = []
@@ -123,7 +124,7 @@ class InferenceModel(model.SockeyeModel):
             return mx.sym.Group(symbol_group), data_names, label_names
 
         encoder_module = mx.mod.BucketingModule(sym_gen=encoder_sym_gen,
-                                                default_bucket_key=self.max_input_len,
+                                                default_bucket_key=self.config.max_seq_len_source,
                                                 context=self.context)
 
         # Decoder symbol & module
@@ -144,7 +145,7 @@ class InferenceModel(model.SockeyeModel):
             label_names = []
 
             source_encoded_seq_len = self.encoder.get_encoded_seq_len(source_seq_len)
-            attention_func = self.attention.on(source_encoded, source_encoded_length, source_encoded_seq_len)
+            attention_func = self.decoder.attention.on(source_encoded, source_encoded_length, source_encoded_seq_len)
 
             softmax_out, next_state, next_attention_state = \
                 self.decoder.predict(word_id_prev,
@@ -160,7 +161,7 @@ class InferenceModel(model.SockeyeModel):
             return mx.sym.Group(symbol_group), data_names, label_names
 
         decoder_module = mx.mod.BucketingModule(sym_gen=decoder_sym_gen,
-                                                default_bucket_key=self.max_input_len,
+                                                default_bucket_key=self.config.max_seq_len_source,
                                                 context=self.context)
 
         return encoder_module, decoder_module
@@ -215,7 +216,7 @@ class InferenceModel(model.SockeyeModel):
                                  (self.beam_size, encoded_input_length, self.encoder.get_num_hidden()),
                                  layout=C.BATCH_MAJOR),
                   mx.io.DataDesc(C.SOURCE_DYNAMIC_PREVIOUS_NAME,
-                                 (self.beam_size, encoded_input_length, self.attention.dynamic_source_num_hidden),
+                                 (self.beam_size, encoded_input_length, self.decoder.attention.dynamic_source_num_hidden),
                                  layout=C.BATCH_MAJOR),
                   mx.io.DataDesc(C.SOURCE_LENGTH_NAME,
                                  (self.beam_size,),
@@ -437,7 +438,7 @@ class Translator:
         self.models = models
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
-        self.buckets = data_io.define_buckets(self.models[0].max_input_len)
+        self.buckets = data_io.define_buckets(self.models[0].config.max_seq_len_source)
         self.pad_dist = mx.nd.full((self.beam_size, len(self.vocab_target)), val=np.inf, ctx=self.context)
         logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s)",
                     len(self.models), self.beam_size, "None" if len(self.models) == 1 else ensemble_mode)

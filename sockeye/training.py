@@ -83,13 +83,11 @@ class TrainingModel(model.SockeyeModel):
         self.context = context
         self.lr_scheduler = lr_scheduler
         self.bucketing = bucketing
-        self._build_model_components(self.config.max_seq_len, fused)
-        self.module = self._build_module(train_iter, self.config.max_seq_len)
+        self._build_model_components(fused)
+        self.module = self._build_module(train_iter)
         self.training_monitor = None
 
-    def _build_module(self,
-                      train_iter: data_io.ParallelBucketSentenceIter,
-                      max_seq_len: int):
+    def _build_module(self, train_iter: data_io.ParallelBucketSentenceIter):
         """
         Initializes model components, creates training symbol and module, and binds it.
         """
@@ -133,7 +131,8 @@ class TrainingModel(model.SockeyeModel):
                                           default_bucket_key=train_iter.default_bucket_key,
                                           context=self.context)
         else:
-            logger.info("No bucketing. Unrolled to max_seq_len=%s", max_seq_len)
+            logger.info("No bucketing. Unrolled to (%d,%d)",
+                        self.config.max_seq_len_source, self.config.max_seq_len_target)
             symbol, _, __ = sym_gen(train_iter.buckets[0])
             return mx.mod.Module(symbol=symbol,
                                  data_names=data_names,
@@ -211,7 +210,7 @@ class TrainingModel(model.SockeyeModel):
         cp_decoder = checkpoint_decoder.CheckpointDecoder(self.context[-1],
                                                           self.config.config_data.validation_source,
                                                           self.config.config_data.validation_target,
-                                                          output_folder, self.config.max_seq_len,
+                                                          output_folder, self.config.max_seq_len_source,
                                                           limit=monitor_bleu) \
             if monitor_bleu else None
 

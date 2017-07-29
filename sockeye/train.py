@@ -266,23 +266,7 @@ def main():
                 positional_encodings=not args.transformer_no_positional_encodings,
                 relative_positions=not args.transformer_absolute_positional_encodings)
 
-            config_attention = None
-
         else:
-            config_decoder = decoder.RecurrentDecoderConfig(
-                vocab_size=vocab_target_size,
-                num_embed=num_embed_target,
-                rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
-                                         num_hidden=args.rnn_num_hidden,
-                                         num_layers=args.rnn_num_layers,
-                                         dropout=args.dropout,
-                                         residual=args.rnn_residual_connections,
-                                         forget_bias=args.rnn_forget_bias),
-                dropout=args.dropout,
-                weight_tying=args.weight_tying,
-                context_gating=args.context_gating,
-                layer_normalization=args.layer_normalization)
-
             attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
             config_coverage = None
             if args.attention_type == "coverage":
@@ -297,18 +281,34 @@ def main():
                                                          config_coverage=config_coverage,
                                                          num_heads=args.transformer_attention_heads)
 
+            config_decoder = decoder.RecurrentDecoderConfig(
+                vocab_size=vocab_target_size,
+                max_seq_len_source=max_seq_len_source,
+                num_embed=num_embed_target,
+                rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
+                                         num_hidden=args.rnn_num_hidden,
+                                         num_layers=args.rnn_num_layers,
+                                         dropout=args.dropout,
+                                         residual=args.rnn_residual_connections,
+                                         forget_bias=args.rnn_forget_bias),
+                attention_config=config_attention,
+                dropout=args.dropout,
+                weight_tying=args.weight_tying,
+                context_gating=args.context_gating,
+                layer_normalization=args.layer_normalization)
+
         config_loss = loss.LossConfig(type=args.loss,
                                       vocab_size=vocab_target_size,
                                       normalize=args.normalize_loss,
                                       smoothed_cross_entropy_alpha=args.smoothed_cross_entropy_alpha)
 
         model_config = model.ModelConfig(config_data=config_data,
-                                         max_seq_len=max_seq_len_source,
+                                         max_seq_len_source=max_seq_len_source,
+                                         max_seq_len_target=max_seq_len_target,
                                          vocab_source_size=vocab_source_size,
                                          vocab_target_size=vocab_target_size,
                                          config_encoder=config_encoder,
                                          config_decoder=config_decoder,
-                                         config_attention=config_attention,
                                          config_loss=config_loss,
                                          lexical_bias=args.lexical_bias,
                                          learn_lexical_bias=args.learn_lexical_bias)
