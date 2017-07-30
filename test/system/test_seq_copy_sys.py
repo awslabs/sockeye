@@ -91,7 +91,7 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
      " --attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity --max-updates 10000"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
-     1.01,
+     1.03,
      0.98),
     # 1-layer transformer encoder, LSTM decoder with attention
     ("--encoder transformer --rnn-num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
@@ -106,7 +106,7 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
     # LSTM encoder, 1-layer transformer decoder
     ("--encoder rnn --rnn-num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
      " --decoder transformer --batch-size 16"
-     " --loss cross-entropy --optimized-metric perplexity --max-updates 3000"
+     " --loss cross-entropy --optimized-metric perplexity --max-updates 6000"
      " --transformer-num-layers 1 --transformer-attention-heads 4 --transformer-model-size 32"
      " --transformer-feed-forward-num-hidden 64"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
