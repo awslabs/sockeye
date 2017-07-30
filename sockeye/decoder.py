@@ -262,7 +262,7 @@ class TransformerDecoder(Decoder):
 
         # no attention for now
         # TODO FIX THIS FIXME
-        attention_probs = mx.sym.zeros((5, source_encoded_max_length), name='attention_probs')
+        attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
         # next states
         states = [source_encoded, source_encoded_lengths, sequences, lengths + 1]
         return logits, attention_probs, states

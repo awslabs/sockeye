@@ -73,7 +73,6 @@ def test_device_args(test_params, expected_params):
               transformer_feed_forward_num_hidden=2048, transformer_model_size=512,
               transformer_num_layers=6,
               transformer_no_positional_encodings=False,
-              transformer_absolute_positional_encodings=False,
               max_seq_len_source=None, max_seq_len_target=None,
               attention_use_prev_word=False, context_gating=False, layer_normalization=False,
               encoder=C.RNN_NAME, conv_embed_max_filter_width=8,
@@ -91,7 +90,7 @@ def test_device_args(test_params, expected_params):
      '--conv-embed-num-highway-layers 2 --conv-embed-pool-stride 2 --attention-mhdot-heads 2 --encoder transformer '
      '--decoder transformer '
      '--transformer-attention-heads 2 --transformer-feed-forward-num-hidden 12 --transformer-model-size 6 '
-     '--transformer-num-layers 3 --transformer-no-positional-encodings --transformer-absolute-positional-encodings',
+     '--transformer-num-layers 3 --transformer-no-positional-encodings ',
      dict(params='test_params', num_words=10, num_words_source=11, num_words_target=12,
           word_min_count=10, rnn_num_layers=10, rnn_cell_type=C.GRU_TYPE,
           rnn_num_hidden=512,
@@ -105,7 +104,6 @@ def test_device_args(test_params, expected_params):
           transformer_feed_forward_num_hidden=12, transformer_model_size=6,
           transformer_num_layers=3,
           transformer_no_positional_encodings=True,
-          transformer_absolute_positional_encodings=True,
           max_seq_len_source=11, max_seq_len_target=12,
           conv_embed_max_filter_width=2, conv_embed_num_filters=[100, 100],
           conv_embed_num_highway_layers=2, conv_embed_pool_stride=2))
