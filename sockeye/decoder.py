@@ -242,6 +242,7 @@ class TransformerDecoder(Decoder):
         # 'append' prev_word_id to sequences
         # (batch_size, target_max_length)
         sequences = sequences + prev_word_id
+        lengths += 1
 
         # (1, target_max_length, target_max_length)
         target_bias = transformer.get_autoregressive_bias(target_max_length, name="%sbias" % self.prefix)
@@ -252,8 +253,11 @@ class TransformerDecoder(Decoder):
         for layer in self.layers:
             target = layer(target, target_lengths, target_max_length, target_bias,
                            source_encoded, source_encoded_lengths, source_encoded_max_length)
+
+        # set all target positions to zero except for current time-step
         # target: (batch_size, target_max_length, model_size)
         target = mx.sym.broadcast_mul(target, mx.sym.expand_dims(mask, axis=2))
+        # reduce to single prediction
         # target: (batch_size, model_size)
         target = mx.sym.sum(target, axis=1, keepdims=False)
         # logits: (batch_size, vocab_size)
@@ -264,7 +268,7 @@ class TransformerDecoder(Decoder):
         attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
 
         # next states
-        states = [source_encoded, source_encoded_lengths, sequences, lengths + 1]
+        states = [source_encoded, source_encoded_lengths, sequences, lengths]
         return logits, attention_probs, states
 
     def init_states(self,
@@ -281,10 +285,11 @@ class TransformerDecoder(Decoder):
         :return: List of symbolic initial states.
         """
         target_max_length = self._get_target_max_length(source_encoded_max_length)
-        # (batch_size, target_max_length)
+        # 0s: (batch_size, target_max_length)
         sequences = mx.sym.broadcast_axis(mx.sym.expand_dims(mx.sym.zeros_like(source_encoded_lengths), axis=1),
                                           axis=1,
                                           size=target_max_length)
+        # 0s: (batch_size, source_encoded_max_length, encoder_depth)
         lengths = mx.sym.zeros_like(source_encoded_lengths)
         return [source_encoded, source_encoded_lengths, sequences, lengths]
 
