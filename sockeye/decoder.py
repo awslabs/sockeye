@@ -268,8 +268,8 @@ class TransformerDecoder(Decoder):
         attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
 
         # next states
-        states = [source_encoded, source_encoded_lengths, sequences, lengths]
-        return logits, attention_probs, states
+        new_states = [source_encoded, source_encoded_lengths, sequences, lengths]
+        return logits, attention_probs, new_states
 
     def init_states(self,
                     source_encoded: mx.sym.Symbol,
@@ -483,7 +483,8 @@ class RecurrentDecoder(Decoder):
 
         # embed and slice target words
         # target_embed: (batch_size, target_seq_len, num_target_embed)
-        target_embed, target_lengths, target_max_length = self.embedding.encode(target, target_lengths, target_max_length)
+        target_embed, target_lengths, target_max_length = self.embedding.encode(target, target_lengths,
+                                                                                target_max_length)
         # target_embed: target_seq_len * (batch_size, num_target_embed)
         target_embed = mx.sym.split(data=target_embed, num_outputs=target_max_length, axis=1, squeeze_axis=True)
 
@@ -579,13 +580,13 @@ class RecurrentDecoder(Decoder):
         logits = mx.sym.FullyConnected(data=state.hidden, num_hidden=self.config.vocab_size,
                                        weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
 
-        states = [source_encoded,
-                  attention_state.dynamic_source,
-                  source_encoded_length,
-                  state.hidden,
-                  *state.layer_states]
+        new_states = [source_encoded,
+                      attention_state.dynamic_source,
+                      source_encoded_length,
+                      state.hidden,
+                      *state.layer_states]
 
-        return logits, attention_state.probs, states
+        return logits, attention_state.probs, new_states
 
     def init_states(self,
                     source_encoded: mx.sym.Symbol,
