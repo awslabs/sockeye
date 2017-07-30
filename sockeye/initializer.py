@@ -149,32 +149,3 @@ class PositionalEncodingInitializer(mx.initializer.Initializer):
     def _init_weight(self, name: str, arr: mx.nd.NDArray):
         assert arr.shape == (1, self.max_seq_len, self.num_embed)
         arr[:] = self.get_encodings()
-
-
-@mx.init.register
-class AutoRegressiveBiasInitializer(mx.initializer.Initializer):
-    """
-    Initializes weights of shape (1, length, length) with cells above the main diagonal
-    set to a large negative value, e.g.
-    length=4
-    0 1 1 1
-    0 0 1 1   * -99999
-    0 0 0 1
-    0 0 0 0
-    """
-
-    def __init__(self, length: int):
-        super().__init__(length=length)
-        self.length = length
-
-    def _init_weight(self, name: str, arr: mx.nd.NDArray):
-        assert arr.shape == (1, self.length, self.length)
-        arr[:] = self.get_bias()
-
-    def get_bias(self):
-        # matrix with lower triangle and main diagonal set to 0, upper triangle set to 1
-        upper_triangle = np.triu(np.ones((self.length, self.length)), k=1)
-        # (1, length_query, length_key)
-        bias = -99999999. * np.reshape(upper_triangle, (1, self.length, self.length))
-        return bias
-

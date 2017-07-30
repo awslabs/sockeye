@@ -269,7 +269,8 @@ class Embedding(Encoder):
                                         self.max_seq_len,
                                         self.num_embed,
                                         relative=self.relative_positional_encoding))
-        encodings = mx.sym.BlockGrad(mx.sym.slice_axis(encodings, axis=1, begin=0, end=seq_len))
+        encodings = mx.sym.BlockGrad(mx.sym.slice_axis(encodings, axis=1, begin=0, end=seq_len,
+                                                       name='positional_encoding_slice'))
         return encodings
 
     def get_num_hidden(self) -> int:

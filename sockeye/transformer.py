@@ -11,10 +11,11 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 import mxnet as mx
+import numpy as np
 
 from sockeye.layers import LayerNormalization
-from . import layers
 from . import config
+from . import layers
 
 
 class TransformerConfig(config.Config):
@@ -224,3 +225,68 @@ class TransformerFeedForward:
         y = mx.sym.FullyConnected(data=h, num_hidden=self.num_model, weight=self.w_h2o, bias=self.b_h2o)
         y = mx.sym.reshape(y, shape=(-1, length, self.num_model))
         return y
+
+
+def get_autoregressive_bias(max_length: int) -> mx.sym.Symbol:
+    """
+    Returns bias/mask to ensure auto-regressiveness of transformer decoder.
+
+    :param max_length: Sequence length.
+    :return: Bias symbol of shape (1, max_length, max_length).
+    """
+    return mx.sym.BlockGrad(mx.symbol.Custom(length=max_length,
+                                             name='bias',
+                                             op_type='auto_regressive_bias'))
+
+
+class AutoRegressiveBias(mx.operator.CustomOp):
+    """
+    Returns a symbol of shape (1, length, length) with cells above the main diagonal
+    set to a large negative value, e.g.
+    length=4
+    0 1 1 1
+    0 0 1 1   * -99999
+    0 0 0 1
+    0 0 0 0
+    """
+
+    def __init__(self, length: int):
+        super().__init__()
+        self.bias = self.get_bias(length)
+
+    @staticmethod
+    def get_bias(length: int):
+        # matrix with lower triangle and main diagonal set to 0, upper triangle set to 1
+        upper_triangle = np.triu(np.ones((length, length)), k=1)
+        # (1, length, length)
+        bias = -99999999. * np.reshape(upper_triangle, (1, length, length))
+        return mx.nd.array(bias)
+
+    def forward(self, is_train, req, in_data, out_data, aux):
+        self.assign(out_data[0], req[0], self.bias)
+
+    def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
+        pass
+
+
+@mx.operator.register("auto_regressive_bias")
+class AutoRegressiveBiasProp(mx.operator.CustomOpProp):
+
+    def __init__(self, length: str):
+        super().__init__()
+        self.length = int(length)
+
+    def list_arguments(self):
+        return []
+
+    def list_outputs(self):
+        return ['output']
+
+    def infer_shape(self, in_shape):
+        return [], [(1, self.length, self.length)], []
+
+    def infer_type(self, in_type):
+        return [], [np.float32], []
+
+    def create_operator(self, ctx, shapes, dtypes):
+        return AutoRegressiveBias(length=self.length)

@@ -24,7 +24,6 @@ from sockeye.utils import check_condition
 from . import attention as attentions
 from . import constants as C
 from . import encoder
-from . import initializer
 from . import layers
 from . import lexicon as lexicons
 from . import rnn
@@ -101,7 +100,7 @@ class Decoder:
         Returns a list of symbolic states that represent the initial states of this decoder.
         Used for inference.
 
-        :param source_encoded: Encoded source: (source_encoded_max_length, batch_size, encoder_depth).
+        :param source_encoded: Encoded source: (batch_size, source_encoded_max_length, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
@@ -140,10 +139,16 @@ class Decoder:
         raise NotImplementedError()
 
 
-
-
-
 class TransformerDecoder(Decoder):
+    """
+    Transformer decoder as in Vaswani et al, 2017: Attention is all you need.
+    For training, we compute all attention scores for each target position in parallel
+    as described in the paper.
+    Inference is implemented as follows:
+    Given a maximum output length, we always compute all layers over the full length but
+    use an attention bias/mask that is updated at each time step.
+    """
+
     def __init__(self,
                  config: transformer.TransformerConfig,
                  prefix: str = C.TRANSFORMER_DECODER_PREFIX) -> None:
@@ -157,53 +162,40 @@ class TransformerDecoder(Decoder):
                                            prefix=C.TARGET_EMBEDDING_PREFIX, dropout=0.,
                                            add_positional_encoding=config.positional_encodings,
                                            relative_positional_encoding=config.relative_positions,
-                                           max_seq_len=config.max_seq_len)
-
-        self.bias = mx.sym.Variable(name='auto_regressive_bias',
-                                    init=initializer.AutoRegressiveBiasInitializer(config.max_seq_len),
-                                    shape=(1, config.max_seq_len, config.max_seq_len))
+                                           max_seq_len=config.max_seq_len*2)  # TODO FIXME
 
         self.cls_w = mx.sym.Variable(
             "%scls_weight" % prefix) if not config.weight_tying else self.embedding.embed_weight
         self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
 
-    def get_num_hidden(self) -> int:
+    def decode_sequence(self,
+                        source_encoded: mx.sym.Symbol,
+                        source_encoded_lengths: mx.sym.Symbol,
+                        source_encoded_max_length: int,
+                        target: mx.sym.Symbol,
+                        target_lengths: mx.sym.Symbol,
+                        target_max_length: int,
+                        source_lexicon: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
         """
-        Returns the representation size of this decoder.
+        Decodes given a known target sequence and returns logits
+        with batch size and target length dimensions collapsed.
+        Used for training.
 
-        :raises: NotImplementedError
-        """
-        return self.config.model_size
-
-    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
-        """
-        Returns a list of RNNCells used by this decoder.
-        """
-        return []
-
-    def decode_sequence(self, source_encoded: mx.sym.Symbol, source_encoded_lengths: mx.sym.Symbol,
-                        source_encoded_max_length: int, target: mx.sym.Symbol, target_lengths: mx.sym.Symbol,
-                        target_max_length: int, source_lexicon: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
-        """
-        Returns decoder logits with batch size and target sequence length collapsed into a single dimension.
-
-        :param source_encoded: Concatenated encoder states. Shape: (source_seq_len, batch_size, encoder_num_hidden).
-        :param source_encoded_max_length: Maximum source sequence length.
-        :param source_encoded_lengths: Lengths of source sequences. Shape: (batch_size,).
-        :param target: Target sequence. Shape: (batch_size, target_seq_len).
-        :param target_max_length: Maximum target sequence length.
+        :param source_encoded: Encoded source: (source_encoded_max_length, batch_size, encoder_depth).
+        :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
+        :param source_encoded_max_length: Size of encoder time dimension.
+        :param target: Target sequence. Shape: (batch_size, target_max_length).
         :param target_lengths: Lengths of target sequences. Shape: (batch_size,).
+        :param target_max_length: Size of target sequence dimension.
         :param source_lexicon: Lexical biases for current sentence.
                Shape: (batch_size, target_vocab_size, source_seq_len)
         :return: Logits of next-word predictions for target sequence.
-                 Shape: (batch_size * target_seq_len, target_vocab_size)
+                 Shape: (batch_size * target_max_length, target_vocab_size)
         """
         # (1, target_max_length, target_max_length)
-        target_bias = mx.sym.BlockGrad(mx.sym.slice(self.bias,
-                                                    begin=(0, 0, 0),
-                                                    end=(1, target_max_length, target_max_length)))
+        target_bias = transformer.get_autoregressive_bias(target_max_length)
 
-        # source: (batch_size, source_max_length, num_source_embed)
+        # (batch_size, source_max_length, num_source_embed)
         source_encoded = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
 
         # target: (batch_size, target_max_length, model_size)
@@ -219,8 +211,122 @@ class TransformerDecoder(Decoder):
         # logits: (batch_size * target_max_length, vocab_size)
         logits = mx.sym.FullyConnected(data=target, num_hidden=self.config.vocab_size,
                                        weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
-
         return logits
+
+    def decode_step(self,
+                    prev_word_id: mx.sym.Symbol,
+                    source_encoded_max_length: int,
+                    *states: mx.sym.Symbol) \
+            -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
+        """
+        Decodes a single time step given the previous word id and previous decoder states.
+        Returns logits, attention probabilities, and next decoder states.
+        Implementations can maintain an arbitrary number of states.
+
+        :param prev_word_id: Previous word id: (batch_size,)
+        :param source_encoded_max_length: Length of encoded source time dimension.
+        :param states: Arbitrary list of decoder states.
+        :return: logits, attention probabilities, next decoder states.
+        """
+        target_max_length = source_encoded_max_length * 2
+
+        # sequences: (batch_size, target_max_length)
+        source_encoded, source_encoded_lengths, sequences, lengths = states
+
+        # t=0: prev_word_id is <bos>
+        # (batch_size, target_max_length)
+        mask = mx.sym.one_hot(indices=lengths, depth=target_max_length, on_value=1, off_value=0)
+
+        # all zeros but length position is set to prev_word_id
+        # (batch_size, target_max_length)
+        prev_word_id = mx.sym.broadcast_mul(mx.sym.expand_dims(prev_word_id, axis=1), mask)
+
+        # 'append' prev_word_id to sequences
+        # (batch_size, target_max_length)
+        sequences = sequences + prev_word_id
+
+        # (1, target_max_length, target_max_length)
+        target_bias = transformer.get_autoregressive_bias(target_max_length)
+
+        # (batch_size, target_max_length, model_size)
+        target, target_lengths, target_max_length = self.embedding.encode(sequences, lengths, target_max_length)
+
+        for layer in self.layers:
+            target = layer(target, target_lengths, target_max_length, target_bias,
+                           source_encoded, source_encoded_lengths, source_encoded_max_length)
+        # target: (batch_size, target_max_length, model_size)
+        target = mx.sym.broadcast_mul(target, mx.sym.expand_dims(mask, axis=2))
+        # target: (batch_size, model_size)
+        target = mx.sym.sum(target, axis=1, keepdims=False)
+        # logits: (batch_size, vocab_size)
+        logits = mx.sym.FullyConnected(data=target, num_hidden=self.config.vocab_size,
+                                       weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
+
+        # no attention for now
+        # TODO FIX THIS FIXME
+        attention_probs = mx.sym.zeros((5, source_encoded_max_length), name='attention_probs')
+        # next states
+        states = [source_encoded, source_encoded_lengths, sequences, lengths + 1]
+        return logits, attention_probs, states
+
+    def init_states(self,
+                    source_encoded: mx.sym.Symbol,
+                    source_encoded_lengths: mx.sym.Symbol,
+                    source_encoded_max_length: int) -> List[mx.sym.Symbol]:
+        """
+        Returns a list of symbolic states that represent the initial states of this decoder.
+        Used for inference.
+
+        :param source_encoded: Encoded source: (batch_size, source_encoded_max_length, encoder_depth).
+        :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
+        :param source_encoded_max_length: Size of encoder time dimension.
+        :return: List of symbolic initial states.
+        """
+        target_max_length = source_encoded_max_length * 2
+        # (batch_size, target_max_length)
+        sequences = mx.sym.broadcast_axis(mx.sym.expand_dims(mx.sym.zeros_like(source_encoded_lengths), axis=1),
+                                          axis=1,
+                                          size=target_max_length)
+        lengths = mx.sym.zeros_like(source_encoded_lengths)
+        return [source_encoded, source_encoded_lengths, sequences, lengths]
+
+    def state_variables(self) -> List[mx.sym.Symbol]:
+        """
+        Returns the list of symbolic variables for this decoder to be used during inference.
+
+        :return: List of symbolic variables.
+        """
+        return [mx.sym.Variable(C.SOURCE_ENCODED_NAME),
+                mx.sym.Variable(C.SOURCE_LENGTH_NAME),
+                mx.sym.Variable('sequences'),
+                mx.sym.Variable('lengths')]
+
+    def state_shapes(self,
+                     batch_size: int,
+                     source_encoded_max_length: int,
+                     source_encoded_depth: int) -> List[mx.io.DataDesc]:
+        """
+        Returns a list of shape descriptions given batch size, encoded source max length and encoded source depth.
+        Used for inference.
+
+        :param batch_size: Batch size during inference.
+        :param source_encoded_max_length: Size of encoder time dimension.
+        :param source_encoded_depth: Depth of encoded source.
+        :return: List of shape descriptions.
+        """
+        target_max_length = source_encoded_max_length * 2
+        return [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
+                               (batch_size, source_encoded_max_length, source_encoded_depth),
+                               layout=C.BATCH_MAJOR),
+                mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N"),
+                mx.io.DataDesc('sequences', (batch_size, target_max_length), layout="NC"),
+                mx.io.DataDesc('lengths', (batch_size,), layout="N")]
+
+    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
+        """
+        Returns a list of RNNCells used by this decoder.
+        """
+        return []
 
 
 RecurrentDecoderState = NamedTuple('RecurrentDecoderState', [
@@ -480,7 +586,7 @@ class RecurrentDecoder(Decoder):
         Returns a list of symbolic states that represent the initial states of this decoder.
         Used for inference.
 
-        :param source_encoded: Encoded source: (source_encoded_max_length, batch_size, encoder_depth).
+        :param source_encoded: Encoded source: (batch_size, source_encoded_max_length, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
