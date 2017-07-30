@@ -160,9 +160,7 @@ class TransformerDecoder(Decoder):
         self.embedding = encoder.Embedding(num_embed=config.model_size,
                                            vocab_size=config.vocab_size,
                                            prefix=C.TARGET_EMBEDDING_PREFIX, dropout=0.,
-                                           add_positional_encoding=config.positional_encodings,
-                                           relative_positional_encoding=config.relative_positions,
-                                           max_seq_len=config.max_seq_len*2)  # TODO FIXME
+                                           add_positional_encoding=config.positional_encodings)
 
         self.cls_w = mx.sym.Variable(
             "%scls_weight" % prefix) if not config.weight_tying else self.embedding.embed_weight
@@ -193,7 +191,7 @@ class TransformerDecoder(Decoder):
                  Shape: (batch_size * target_max_length, target_vocab_size)
         """
         # (1, target_max_length, target_max_length)
-        target_bias = transformer.get_autoregressive_bias(target_max_length)
+        target_bias = transformer.get_autoregressive_bias(target_max_length, name="%sbias" % self.prefix)
 
         # (batch_size, source_max_length, num_source_embed)
         source_encoded = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
@@ -246,7 +244,7 @@ class TransformerDecoder(Decoder):
         sequences = sequences + prev_word_id
 
         # (1, target_max_length, target_max_length)
-        target_bias = transformer.get_autoregressive_bias(target_max_length)
+        target_bias = transformer.get_autoregressive_bias(target_max_length, name="%sbias" % self.prefix)
 
         # (batch_size, target_max_length, model_size)
         target, target_lengths, target_max_length = self.embedding.encode(sequences, lengths, target_max_length)

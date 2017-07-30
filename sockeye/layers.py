@@ -14,6 +14,7 @@
 from typing import Optional, Tuple
 
 import mxnet as mx
+import numpy as np
 
 from . import utils
 
@@ -339,3 +340,65 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                             queries_max_length=queries_max_length,
                             memory_max_length=memory_max_length,
                             bias=None)
+
+
+class PositionalEncodings(mx.operator.CustomOp):
+    """
+    Returns a symbol of shape (1, max_seq_len, num_embed)
+    with positional encodings as in Vaswani et al, 2017.
+
+    :param length: Maximum sequence length.
+    :param depth: Embedding size.
+    """
+
+    def __init__(self, length: int, depth: int):
+        super().__init__()
+        self.encodings = self.get_encodings(length, depth)
+
+    @staticmethod
+    def get_encodings(length, depth):
+        actual_length = length
+        length += 1 if length % 2 != 0 else 0
+        # (1, depth)
+        channels = np.arange(depth).reshape((1, -1))
+        # (length/2, 1)
+        positions_even = np.arange(0, length, 2).reshape((-1, 1))
+        # (length/2, 1)
+        positions_odd = np.arange(1, length, 2).reshape((-1, 1))
+        # sinusoids for even positions: (length/2, depth)
+        sin = np.sin(positions_even / np.power(10000, (2 * channels) / depth))
+        # cosines for odd positions: (length/2, depth)
+        cos = np.cos(positions_odd / np.power(10000, (2 * channels) / depth))
+        # interleave: (1, length, num_embed)
+        encodings = np.hstack([sin, cos]).reshape(1, length, depth)
+        return encodings[:, :actual_length, :]
+
+    def forward(self, is_train, req, in_data, out_data, aux):
+        self.assign(out_data[0], req[0], self.encodings)
+
+    def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
+        pass
+
+
+@mx.operator.register("positional_encodings")
+class PositionalEncodingsProp(mx.operator.CustomOpProp):
+
+    def __init__(self, length: str, depth: str):
+        super().__init__()
+        self.length = int(length)
+        self.depth = int(depth)
+
+    def list_arguments(self):
+        return []
+
+    def list_outputs(self):
+        return ['output']
+
+    def infer_shape(self, in_shape):
+        return [], [(1, self.length, self.depth)], []
+
+    def infer_type(self, in_type):
+        return [], [np.float32], []
+
+    def create_operator(self, ctx, shapes, dtypes):
+        return PositionalEncodings(length=self.length, depth=self.depth)

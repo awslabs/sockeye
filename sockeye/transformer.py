@@ -26,24 +26,20 @@ class TransformerConfig(config.Config):
                  feed_forward_num_hidden: int,
                  num_layers: int,
                  vocab_size: int,
-                 max_seq_len: int,
                  dropout: float,
                  layer_normalization: bool,
                  weight_tying: bool,
-                 positional_encodings: bool,
-                 relative_positions: bool) -> None:
+                 positional_encodings: bool) -> None:
         super().__init__()
         self.model_size = model_size
         self.attention_heads = attention_heads
         self.feed_forward_num_hidden = feed_forward_num_hidden
         self.num_layers = num_layers
         self.vocab_size = vocab_size
-        self.max_seq_len = max_seq_len
         self.dropout = dropout
         self.layer_normalization = layer_normalization
         self.weight_tying = weight_tying
         self.positional_encodings = positional_encodings
-        self.relative_positions = relative_positions
 
 
 class TransformerEncoderBlock:
@@ -227,15 +223,16 @@ class TransformerFeedForward:
         return y
 
 
-def get_autoregressive_bias(max_length: int) -> mx.sym.Symbol:
+def get_autoregressive_bias(max_length: int, name: str) -> mx.sym.Symbol:
     """
-    Returns bias/mask to ensure auto-regressiveness of transformer decoder.
+    Returns bias/mask to ensure position i can only attend to positions <i.
 
     :param max_length: Sequence length.
+    :param name: Name of symbol.
     :return: Bias symbol of shape (1, max_length, max_length).
     """
     return mx.sym.BlockGrad(mx.symbol.Custom(length=max_length,
-                                             name='bias',
+                                             name=name,
                                              op_type='auto_regressive_bias'))
 
 

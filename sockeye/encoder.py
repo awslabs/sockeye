@@ -114,9 +114,7 @@ def get_transformer_encoder(config: transformer.TransformerConfig) -> 'Encoder':
                               vocab_size=config.vocab_size,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
                               dropout=config.dropout,
-                              add_positional_encoding=config.positional_encodings,
-                              relative_positional_encoding=config.relative_positions,
-                              max_seq_len=config.max_seq_len))
+                              add_positional_encoding=config.positional_encodings))
     encoders.append(TransformerEncoder(config))
     encoders.append(BatchMajor2TimeMajor(num_hidden=config.model_size))
 
@@ -217,19 +215,13 @@ class Embedding(Encoder):
                  vocab_size: int,
                  prefix: str,
                  dropout: float,
-                 add_positional_encoding: bool = False,
-                 relative_positional_encoding: bool = True,
-                 max_seq_len: Optional[int] = None):
+                 add_positional_encoding: bool = False):
         self.num_embed = num_embed
         self.vocab_size = vocab_size
         self.prefix = prefix
         self.dropout = dropout
         self.embed_weight = mx.sym.Variable(prefix + "weight")
         self.add_positional_encoding = add_positional_encoding
-        self.relative_positional_encoding = relative_positional_encoding
-        self.max_seq_len = max_seq_len
-        if self.add_positional_encoding:
-            utils.check_condition(max_seq_len is not None, "Positional encodings require maximum sequence length.")
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -250,28 +242,26 @@ class Embedding(Encoder):
                                      name=self.prefix + "embed")
         if self.add_positional_encoding:
             embedding = mx.sym.broadcast_add(embedding,
-                                             self._get_positional_encoding(seq_len),
-                                             name='%sadd_encoding' % self.prefix)
+                                             self._get_positional_encoding(length=seq_len,
+                                                                           depth=self.num_embed,
+                                                                           name="%spositional_encodings" % self.prefix),
+                                             name='%sadd_positional_encodings' % self.prefix)
         if self.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.dropout, name="source_embed_dropout")
         return embedding, data_length, seq_len
 
-    def _get_positional_encoding(self, seq_len: int) -> mx.sym.Symbol:
+    @staticmethod
+    def _get_positional_encoding(length: int, depth: int, name: str) -> mx.sym.Symbol:
         """
-        Returns a variable initialized with positional encodings as in Vaswani et al.
+        Returns symbol initialized with positional encodings as in Vaswani et al.
 
-        :param seq_len: Maximum sequence length
-        :return: Symbol(1, max_seq_len, self.num_embed)
+        :param length: Maximum sequence length
+        :param depth: Depth.
+        :param name: Symbol name.
+        :return: Symbol(1, length, depth)
         """
-        encodings = mx.sym.Variable("%spositional_encodings" % self.prefix,
-                                    shape=(1, self.max_seq_len, self.num_embed),
-                                    init=initializer.PositionalEncodingInitializer(
-                                        self.max_seq_len,
-                                        self.num_embed,
-                                        relative=self.relative_positional_encoding))
-        encodings = mx.sym.BlockGrad(mx.sym.slice_axis(encodings, axis=1, begin=0, end=seq_len,
-                                                       name='positional_encoding_slice'))
-        return encodings
+        return mx.sym.BlockGrad(mx.symbol.Custom(length=length, depth=depth, name=name,
+                                                 op_type='positional_encodings'))
 
     def get_num_hidden(self) -> int:
         """

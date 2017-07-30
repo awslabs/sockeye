@@ -225,12 +225,10 @@ def main():
                 feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
                 num_layers=args.transformer_num_layers,
                 vocab_size=vocab_source_size,
-                max_seq_len=max_seq_len_source,
                 dropout=args.dropout,
                 layer_normalization=args.layer_normalization,
                 weight_tying=args.weight_tying,
-                positional_encodings=not args.transformer_no_positional_encodings,
-                relative_positions=not args.transformer_absolute_positional_encodings)
+                positional_encodings=not args.transformer_no_positional_encodings)
         else:
             config_conv = None
             if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
@@ -259,12 +257,10 @@ def main():
                 feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
                 num_layers=args.transformer_num_layers,
                 vocab_size=vocab_target_size,
-                max_seq_len=max_seq_len_target,
                 dropout=args.dropout,
                 layer_normalization=args.layer_normalization,
                 weight_tying=args.weight_tying,
-                positional_encodings=not args.transformer_no_positional_encodings,
-                relative_positions=not args.transformer_absolute_positional_encodings)
+                positional_encodings=not args.transformer_no_positional_encodings)
 
         else:
             attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
