@@ -226,7 +226,7 @@ class TransformerDecoder(Decoder):
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
         """
-        target_max_length = source_encoded_max_length * 2
+        target_max_length = self._get_target_max_length(source_encoded_max_length)
 
         # sequences: (batch_size, target_max_length)
         source_encoded, source_encoded_lengths, sequences, lengths = states
@@ -260,9 +260,9 @@ class TransformerDecoder(Decoder):
         logits = mx.sym.FullyConnected(data=target, num_hidden=self.config.vocab_size,
                                        weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
 
-        # no attention for now
-        # TODO FIX THIS FIXME
+        # TODO(fhieber): no attention for now
         attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
+
         # next states
         states = [source_encoded, source_encoded_lengths, sequences, lengths + 1]
         return logits, attention_probs, states
@@ -280,7 +280,7 @@ class TransformerDecoder(Decoder):
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
         """
-        target_max_length = source_encoded_max_length * 2
+        target_max_length = self._get_target_max_length(source_encoded_max_length)
         # (batch_size, target_max_length)
         sequences = mx.sym.broadcast_axis(mx.sym.expand_dims(mx.sym.zeros_like(source_encoded_lengths), axis=1),
                                           axis=1,
@@ -312,7 +312,7 @@ class TransformerDecoder(Decoder):
         :param source_encoded_depth: Depth of encoded source.
         :return: List of shape descriptions.
         """
-        target_max_length = source_encoded_max_length * 2
+        target_max_length = self._get_target_max_length(source_encoded_max_length)
         return [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
                                (batch_size, source_encoded_max_length, source_encoded_depth),
                                layout=C.BATCH_MAJOR),
@@ -325,6 +325,12 @@ class TransformerDecoder(Decoder):
         Returns a list of RNNCells used by this decoder.
         """
         return []
+
+    @staticmethod
+    def _get_target_max_length(source_encoded_max_length: int):
+        # TODO(fhieber): we need to hardcode this for the inference algorithm to work.
+        # This is currently in line with the beam_search algorithm but not ideal.
+        return source_encoded_max_length * 2
 
 
 RecurrentDecoderState = NamedTuple('RecurrentDecoderState', [
