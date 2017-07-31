@@ -188,6 +188,11 @@ def add_model_parameters(params):
                               type=int_greater_or_equal(0),
                               default=4,
                               help="Number of highway layers for ConvolutionalEmbeddingEncoder. Default: %(default)s.")
+    model_params.add_argument('--conv-embed-add-positional-encodings',
+                              action='store_true',
+                              default=False,
+                              help="Add positonal encodings to final segment embeddings for"
+                                   " ConvolutionalEmbeddingEncoder. Default: %(default)s.")
 
     model_params.add_argument('--rnn-num-layers',
                               type=int_greater_or_equal(1),

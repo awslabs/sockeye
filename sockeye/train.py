@@ -218,7 +218,18 @@ def main():
         num_embed_source = args.num_embed if args.num_embed_source is None else args.num_embed_source
         num_embed_target = args.num_embed if args.num_embed_target is None else args.num_embed_target
 
-        if args.encoder == C.TRANSFORMER_TYPE:
+        config_conv = None
+        if args.encoder in (C.RNN_WITH_CONV_EMBED_NAME, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
+            config_conv = encoder.ConvolutionalEmbeddingConfig(
+                    num_embed=num_embed_source,
+                    max_filter_width=args.conv_embed_max_filter_width,
+                    num_filters=args.conv_embed_num_filters,
+                    pool_stride=args.conv_embed_pool_stride,
+                    num_highway_layers=args.conv_embed_num_highway_layers,
+                    dropout=args.dropout,
+                    add_positional_encoding=args.conv_embed_add_positional_encodings)
+
+        if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
             config_encoder = transformer.TransformerConfig(
                 model_size=args.transformer_model_size,
                 attention_heads=args.transformer_attention_heads,
@@ -228,17 +239,9 @@ def main():
                 dropout=args.dropout,
                 layer_normalization=args.layer_normalization,
                 weight_tying=args.weight_tying,
-                positional_encodings=not args.transformer_no_positional_encodings)
+                positional_encodings=not args.transformer_no_positional_encodings,
+                conv_config=config_conv)
         else:
-            config_conv = None
-            if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
-                config_conv = encoder.ConvolutionalEmbeddingConfig(
-                    num_embed=num_embed_source,
-                    max_filter_width=args.conv_embed_max_filter_width,
-                    num_filters=args.conv_embed_num_filters,
-                    pool_stride=args.conv_embed_pool_stride,
-                    num_highway_layers=args.conv_embed_num_highway_layers,
-                    dropout=args.dropout)
             config_encoder = encoder.RecurrentEncoderConfig(
                 vocab_size=vocab_source_size,
                 num_embed=num_embed_source,

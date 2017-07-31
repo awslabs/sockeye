@@ -115,6 +115,9 @@ def get_transformer_encoder(config: transformer.TransformerConfig) -> 'Encoder':
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
                               dropout=config.dropout,
                               add_positional_encoding=config.positional_encodings))
+    if config.conv_config is not None:
+        encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
+
     encoders.append(TransformerEncoder(config))
     encoders.append(BatchMajor2TimeMajor(num_hidden=config.model_size))
 
@@ -242,16 +245,16 @@ class Embedding(Encoder):
                                      name=self.prefix + "embed")
         if self.add_positional_encoding:
             embedding = mx.sym.broadcast_add(embedding,
-                                             self._get_positional_encoding(length=seq_len,
-                                                                           depth=self.num_embed,
-                                                                           name="%spositional_encodings" % self.prefix),
+                                             self.get_positional_encoding(length=seq_len,
+                                                                          depth=self.num_embed,
+                                                                          name="%spositional_encodings" % self.prefix),
                                              name='%sadd_positional_encodings' % self.prefix)
         if self.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.dropout, name="source_embed_dropout")
         return embedding, data_length, seq_len
 
     @staticmethod
-    def _get_positional_encoding(length: int, depth: int, name: str) -> mx.sym.Symbol:
+    def get_positional_encoding(length: int, depth: int, name: str) -> mx.sym.Symbol:
         """
         Returns symbol initialized with positional encodings as in Vaswani et al.
 
@@ -588,7 +591,8 @@ class ConvolutionalEmbeddingConfig(Config):
                  num_filters: Tuple[int] = (200, 200, 250, 250, 300, 300, 300, 300),
                  pool_stride: int = 5,
                  num_highway_layers: int = 4,
-                 dropout: float = 0.0) -> None:
+                 dropout: float = 0.0,
+                 add_positional_encoding: bool = False) -> None:
         super().__init__()
         self.num_embed = num_embed
         self.max_filter_width = max_filter_width
@@ -596,6 +600,7 @@ class ConvolutionalEmbeddingConfig(Config):
         self.pool_stride = pool_stride
         self.num_highway_layers = num_highway_layers
         self.dropout = dropout
+        self.add_positional_encoding = add_positional_encoding
 
 
 class ConvolutionalEmbeddingEncoder(Encoder):
@@ -622,6 +627,7 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         self.num_highway_layers = config.num_highway_layers
         self.prefix = prefix
         self.dropout = config.dropout
+        self.add_positional_encoding = config.add_positional_encoding
 
         self.conv_weight = {filter_width: mx.sym.Variable("%s%s%d%s" % (self.prefix, "conv_", filter_width, "_weight"))
                             for filter_width in range(1, self.max_filter_width + 1)}
@@ -727,6 +733,19 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         # (batch_size, encoded_seq_len, num_segment_emded)
         seg_embedding = mx.sym.Reshape(data=seg_embedding,
                                        shape=(-1, encoded_seq_len, total_num_filters))
+
+        # If specified, add positional encodings to segment embeddings (used for TransformerEncoder)
+        if self.add_positional_encoding:
+            seg_embedding = mx.sym.broadcast_add(seg_embedding,
+                                                 Embedding.get_positional_encoding(
+                                                         length=encoded_seq_len,
+                                                         depth=total_num_filters,
+                                                         name="%spositional_encodings" % self.prefix),
+                                                 name='%sadd_positional_encodings' % self.prefix)
+
+        # Dropout on final segment embeddings
+        if self.dropout > 0:
+            seg_embedding = mx.sym.Dropout(data=seg_embedding, p=self.dropout)
 
         # Ceiling function isn't differentiable so this will throw errors if we
         # attempt to compute gradients.  Fortunately we aren't updating inputs

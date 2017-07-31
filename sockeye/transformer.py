@@ -10,6 +10,9 @@
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
+
+from typing import Optional
+
 import mxnet as mx
 import numpy as np
 
@@ -29,7 +32,8 @@ class TransformerConfig(config.Config):
                  dropout: float,
                  layer_normalization: bool,
                  weight_tying: bool,
-                 positional_encodings: bool) -> None:
+                 positional_encodings: bool,
+                 conv_config: Optional['ConvolutionalEmbeddingConfig'] = None) -> None:
         super().__init__()
         self.model_size = model_size
         self.attention_heads = attention_heads
@@ -40,6 +44,7 @@ class TransformerConfig(config.Config):
         self.layer_normalization = layer_normalization
         self.weight_tying = weight_tying
         self.positional_encodings = positional_encodings
+        self.conv_config = conv_config
 
 
 class TransformerEncoderBlock:

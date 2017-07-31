@@ -78,7 +78,8 @@ def test_device_args(test_params, expected_params):
               encoder=C.RNN_NAME, conv_embed_max_filter_width=8,
               decoder=C.RNN_NAME,
               conv_embed_num_filters=(200, 200, 250, 250, 300, 300, 300, 300),
-              conv_embed_num_highway_layers=4, conv_embed_pool_stride=5)),
+              conv_embed_num_highway_layers=4, conv_embed_pool_stride=5,
+              conv_embed_add_positional_encodings=False)),
     ('--params test_params --num-words 10 --num-words-source 11 --num-words-target 12 --word-min-count 10 '
      '--rnn-num-layers 10 --rnn-cell-type gru '
      '--rnn-num-hidden 512 --rnn-residual-connections --num-embed 1024 --num-embed-source 10 --num-embed-target 10 '
@@ -87,8 +88,8 @@ def test_device_args(test_params, expected_params):
      '--max-seq-len 10 --max-seq-len-source 11 --max-seq-len-target 12 --attention-use-prev-word --context-gating '
      '--layer-normalization '
      '--conv-embed-max-filter-width 2 --conv-embed-num-filters 100 100 '
-     '--conv-embed-num-highway-layers 2 --conv-embed-pool-stride 2 --attention-mhdot-heads 2 --encoder transformer '
-     '--decoder transformer '
+     '--conv-embed-num-highway-layers 2 --conv-embed-pool-stride 2 --conv-embed-add-positional-encodings '
+     '--attention-mhdot-heads 2 --encoder transformer --decoder transformer '
      '--transformer-attention-heads 2 --transformer-feed-forward-num-hidden 12 --transformer-model-size 6 '
      '--transformer-num-layers 3 --transformer-no-positional-encodings ',
      dict(params='test_params', num_words=10, num_words_source=11, num_words_target=12,
@@ -106,7 +107,8 @@ def test_device_args(test_params, expected_params):
           transformer_no_positional_encodings=True,
           max_seq_len_source=11, max_seq_len_target=12,
           conv_embed_max_filter_width=2, conv_embed_num_filters=[100, 100],
-          conv_embed_num_highway_layers=2, conv_embed_pool_stride=2))
+          conv_embed_num_highway_layers=2, conv_embed_pool_stride=2,
+          conv_embed_add_positional_encodings=True))
 ])
 def test_model_parameters(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_model_parameters)

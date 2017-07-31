@@ -27,12 +27,14 @@ def test_convolutional_embedding_encoder():
     pool_stride = 5
     num_highway_layers = 2
     dropout = 0.1
+    add_positional_encoding = True
     config = sockeye.encoder.ConvolutionalEmbeddingConfig(num_embed=num_embed,
                                                           max_filter_width=max_filter_width,
                                                           num_filters=num_filters,
                                                           pool_stride=pool_stride,
                                                           num_highway_layers=num_highway_layers,
-                                                          dropout=dropout)
+                                                          dropout=dropout,
+                                                          add_positional_encoding=add_positional_encoding)
 
     conv_embed = sockeye.encoder.ConvolutionalEmbeddingEncoder(config)
 
