@@ -54,8 +54,15 @@ LNGGRU_TYPE = 'lnggru'
 CELL_TYPES = [LSTM_TYPE, LNLSTM_TYPE, LNGLSTM_TYPE, GRU_TYPE, LNGRU_TYPE, LNGGRU_TYPE]
 
 # init types
+INIT_XAVIER='xavier'
+INIT_UNIFORM='uniform'
+INIT_TYPES=[INIT_XAVIER, INIT_UNIFORM]
+
+# RNN init types
 RNN_INIT_ORTHOGONAL = 'orthogonal'
 RNN_INIT_ORTHOGONAL_STACKED = 'orthogonal_stacked'
+# use the default initializer used also for all other weights
+RNN_INIT_DEFAULT = 'default'
 
 # attention types
 ATT_BILINEAR = 'bilinear'
