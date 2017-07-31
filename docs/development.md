@@ -86,7 +86,7 @@ corresponding `~/.pypirc` set up.
    ```
 1. Upload to PyPITest: 
    ```bash
-   > twine upload dist/sockeye-${VERSION}.tar.gz sockeye-${VERSION}-py3-none-any.whl -r pypitest
+   > twine upload dist/sockeye-${VERSION}.tar.gz dist/sockeye-${VERSION}-py3-none-any.whl -r pypitest
    ```
 1. In a new python environment check that the package is installable
    ```bash
@@ -94,7 +94,7 @@ corresponding `~/.pypirc` set up.
    ```
 1. Upload to PyPI
    ```bash
-   > twine upload dist/sockeye-${VERSION}.tar.gz sockeye-${VERSION}-py3-none-any.whl
+   > twine upload dist/sockeye-${VERSION}.tar.gz dist/sockeye-${VERSION}-py3-none-any.whl
    ```
 
  
