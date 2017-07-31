@@ -67,7 +67,7 @@ class TransformerEncoderBlock:
         self.residual1 = TransformerResidual(num_hidden=config.model_size,
                                              layer_normalization=config.layer_normalization,
                                              dropout=config.dropout,
-                                             prefix="%satt_res_" % prefix)
+                                             prefix="%satt_res" % prefix)
         self.feed_forward = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
                                                    num_model=config.model_size,
                                                    dropout=config.dropout,
@@ -75,7 +75,7 @@ class TransformerEncoderBlock:
         self.residual2 = TransformerResidual(num_hidden=config.model_size,
                                              layer_normalization=config.layer_normalization,
                                              dropout=config.dropout,
-                                             prefix="%sff_res_" % prefix)
+                                             prefix="%sff_res" % prefix)
 
     def __call__(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
         data = self.residual1(data,
@@ -109,7 +109,7 @@ class TransformerDecoderBlock:
         self.residual_self = TransformerResidual(num_hidden=config.model_size,
                                                  layer_normalization=config.layer_normalization,
                                                  dropout=config.dropout,
-                                                 prefix="%satt_self_res_" % prefix)
+                                                 prefix="%satt_self_res" % prefix)
         self.enc_attention = layers.MultiHeadAttention(depth_att=config.model_size,
                                                        heads=config.attention_heads,
                                                        depth_out=config.model_size,
@@ -118,7 +118,7 @@ class TransformerDecoderBlock:
         self.residual_enc = TransformerResidual(num_hidden=config.model_size,
                                                 layer_normalization=config.layer_normalization,
                                                 dropout=config.dropout,
-                                                prefix="%satt_enc_res_" % prefix)
+                                                prefix="%satt_enc_res" % prefix)
         self.feed_forward = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
                                                    num_model=config.model_size,
                                                    dropout=config.dropout,
@@ -126,7 +126,7 @@ class TransformerDecoderBlock:
         self.residual_ff = TransformerResidual(num_hidden=config.model_size,
                                                layer_normalization=config.layer_normalization,
                                                dropout=config.dropout,
-                                               prefix="%sff_res_" % prefix)
+                                               prefix="%sff_res" % prefix)
 
     def __call__(self,
                  target: mx.sym.Symbol,
@@ -179,8 +179,8 @@ class TransformerResidual:
         if self.dropout > 0.0:
             y = mx.sym.Dropout(y, p=self.dropout)
         z = x + y
-        if self.layer_norm:
-            self._reshape_and_normalize(z, length)
+        if self.layer_norm is not None:
+            z = self._reshape_and_normalize(z, length)
         return z
 
     def _reshape_and_normalize(self, data: mx.sym.Symbol, length: int) -> mx.sym.Symbol:
