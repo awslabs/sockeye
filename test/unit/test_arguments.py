@@ -62,7 +62,8 @@ def test_device_args(test_params, expected_params):
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('', dict(params=None, num_words=50000, num_words_source=None, num_words_target=None, word_min_count=1,
+    ('', dict(params=None, num_words=50000, num_words_source=None, num_words_target=None,
+              word_min_count=1, joint_vocab=False,
               rnn_num_layers=1, rnn_cell_type=C.LSTM_TYPE, rnn_num_hidden=1024,
               rnn_residual_connections=False, num_embed=512, num_embed_source=None, num_embed_target=None,
               attention_type='mlp', attention_num_hidden=None, attention_coverage_type='count',
@@ -74,14 +75,14 @@ def test_device_args(test_params, expected_params):
               conv_embed_num_filters=(200, 200, 250, 250, 300, 300, 300, 300),
               conv_embed_num_highway_layers=4, conv_embed_pool_stride=5)),
     ('--params test_params --num-words 10 --num-words-source 11 --num-words-target 12 --word-min-count 10 '
-     '--rnn-num-layers 10 --rnn-cell-type gru '
+     '--rnn-num-layers 10 --rnn-cell-type gru --joint-vocab '
      '--rnn-num-hidden 512 --rnn-residual-connections --num-embed 1024 --num-embed-source 10 --num-embed-target 10 '
      '--attention-type dot --attention-num-hidden 10 --attention-coverage-type tanh '
      '--attention-coverage-num-hidden 10 --lexical-bias test_bias --learn-lexical-bias --weight-tying '
      '--max-seq-len 10 --max-seq-len-source 11 --max-seq-len-target 12 --attention-use-prev-word --context-gating --layer-normalization '
      '--encoder rnn-with-conv-embed --conv-embed-max-filter-width 2 --conv-embed-num-filters 100 100 '
      '--conv-embed-num-highway-layers 2 --conv-embed-pool-stride 2',
-     dict(params='test_params', num_words=10, num_words_source=11, num_words_target=12,
+     dict(params='test_params', num_words=10, num_words_source=11, num_words_target=12, joint_vocab=True,
           word_min_count=10, rnn_num_layers=10, rnn_cell_type=C.GRU_TYPE,
           rnn_num_hidden=512,
           rnn_residual_connections=True, num_embed=1024, num_embed_source=10, num_embed_target=10,

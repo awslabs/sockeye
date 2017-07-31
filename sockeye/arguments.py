@@ -160,6 +160,10 @@ def add_model_parameters(params):
                               type=int_greater_or_equal(1),
                               default=1,
                               help='Minimum frequency of words to be included in vocabularies. Default: %(default)s.')
+    model_params.add_argument('--joint-vocab',
+                              action='store_true',
+                              help='Create a joint vocabulary for source and target to allow sharing '
+                                   'of source & target embedding parameters.')
 
     model_params.add_argument('--encoder',
                               choices=C.ENCODERS,
