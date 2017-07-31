@@ -23,10 +23,13 @@ from sockeye.lexicon import LexiconInitializer
 logger = logging.getLogger(__name__)
 
 
-def get_initializer(rnn_init_type, lexicon: Optional[mx.nd.NDArray] = None) -> mx.initializer.Initializer:
+def get_initializer(init_type: str, init_scale: float, rnn_init_type: str,
+                    lexicon: Optional[mx.nd.NDArray] = None) -> mx.initializer.Initializer:
     """
     Returns a mixed MXNet initializer given rnn_init_type and optional lexicon.
 
+    :param init_type: The weight initializer type.
+    :param init_scale: The scale used for weight initialization (only used with uniform initialization).
     :param rnn_init_type: Initialization type.
     :param lexicon: Optional lexicon.
     :return: Mixed initializer.
@@ -34,19 +37,28 @@ def get_initializer(rnn_init_type, lexicon: Optional[mx.nd.NDArray] = None) -> m
 
     if rnn_init_type == C.RNN_INIT_ORTHOGONAL:
         logger.info("Orthogonal RNN initializer")
-        h2h_init = mx.initializer.Orthogonal()
+        h2h_init = [(".*h2h.*", mx.initializer.Orthogonal())]
     elif rnn_init_type == C.RNN_INIT_ORTHOGONAL_STACKED:
         logger.info("Stacked orthogonal RNN initializer")
-        h2h_init = StackedOrthogonalInit(scale=1.0, rand_type="eye")
+        h2h_init = [(".*h2h.*", StackedOrthogonalInit(scale=1.0, rand_type="eye"))]
+    elif rnn_init_type == C.RNN_INIT_DEFAULT:
+        # do not use a special initializer for RNN weights (but rather just use the default)
+        h2h_init = []
     else:
         raise ValueError('unknown rnn initialization type: %s' % rnn_init_type)
 
     lexicon_init = LexiconInitializer(lexicon) if lexicon is not None else None
 
-    params_init_pairs = [
-        (".*h2h.*", h2h_init),
+    if init_type == C.INIT_XAVIER:
+        default_init = mx.init.Xavier(factor_type="in", magnitude=2.34)
+    elif init_type == C.INIT_UNIFORM:
+        default_init = mx.init.Uniform(scale=init_scale)
+    else:
+        raise ValueError("Unknown initializer type %s." % init_type)
+
+    params_init_pairs = h2h_init + [
         (C.LEXICON_NAME, lexicon_init),
-        (".*", mx.init.Xavier(factor_type="in", magnitude=2.34))
+        (".*", default_init)
     ]
     return mx.initializer.Mixed(*zip(*params_init_pairs))
 
