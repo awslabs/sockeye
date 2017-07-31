@@ -14,6 +14,8 @@
 import copy
 import logging
 import os
+from typing import Optional
+import mxnet as mx
 
 from sockeye import __version__
 from sockeye.config import Config
@@ -45,6 +47,8 @@ class ModelConfig(Config):
     :param config_loss: Loss configuration.
     :param lexical_bias: Use lexical biases.
     :param learn_lexical_bias: Learn lexical biases during training.
+    :param weight_tying: Enables weight tying if True.
+    :param weight_tying_type: Determines which weights get tied. Must be set if weight_tying is enabled.
     """
     def __init__(self,
                  config_data: data_io.DataConfig,
@@ -56,7 +60,9 @@ class ModelConfig(Config):
                  config_attention: attention.AttentionConfig,
                  config_loss: loss.LossConfig,
                  lexical_bias: bool = False,
-                 learn_lexical_bias: bool = False):
+                 learn_lexical_bias: bool = False,
+                 weight_tying: bool = False,
+                 weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX):
         super().__init__()
         self.config_data = config_data
         self.max_seq_len = max_seq_len
@@ -68,6 +74,10 @@ class ModelConfig(Config):
         self.config_loss = config_loss
         self.lexical_bias = lexical_bias
         self.learn_lexical_bias = learn_lexical_bias
+        self.weight_tying = weight_tying
+        if weight_tying and weight_tying_type is None:
+            raise RuntimeError("weight_tying_type must be specified when using weight_tying.")
+        self.weight_tying_type = weight_tying_type
 
 
 class SockeyeModel:
@@ -157,7 +167,14 @@ class SockeyeModel:
         :param max_seq_len: Maximum sequence length supported by the model.
         :param fused_encoder: Use FusedRNNCells in encoder.
         """
-        self.encoder = encoder.get_recurrent_encoder(self.config.config_encoder, fused_encoder)
+        # we tie the source and target embeddings if both appear in the type
+        if self.config.weight_tying and C.WEIGHT_TYING_SRC in self.config.weight_tying_type \
+                and C.WEIGHT_TYING_TRG in self.config.weight_tying_type:
+            logger.debug("Tying the source and target embeddings.")
+            embed_weight = mx.sym.Variable(C.SHARED_EMBEDDING_PREFIX + "weight")
+        else:
+            embed_weight = None
+        self.encoder = encoder.get_recurrent_encoder(self.config.config_encoder, fused_encoder, embed_weight)
 
         self.attention = attention.get_attention(self.config.config_attention, max_seq_len)
 
@@ -167,7 +184,8 @@ class SockeyeModel:
 
         self.decoder = decoder.get_recurrent_decoder(self.config.config_decoder,
                                                      self.attention,
-                                                     self.lexicon)
+                                                     self.lexicon,
+                                                     embed_weight)
 
         self.rnn_cells = self.encoder.get_rnn_cells() + self.decoder.get_rnn_cells()
 
