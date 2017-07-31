@@ -392,6 +392,16 @@ def add_training_args(params):
                               default='adam',
                               choices=['adam', 'sgd', 'rmsprop'],
                               help='SGD update rule. Default: %(default)s.')
+    train_params.add_argument('--weight-init',
+                              type=str,
+                              default=C.INIT_XAVIER,
+                              choices=C.INIT_TYPES,
+                              help='Type of weight initialization. Default: %(default)s.')
+    train_params.add_argument('--weight-init-scale',
+                              type=float,
+                              default=0.04,
+                              help='Weight initialization scale (currently only applies to uniform initialization). '
+                                   'Default: %(default)s.')
     train_params.add_argument('--initial-learning-rate',
                               type=float,
                               default=0.0003,
@@ -440,7 +450,7 @@ def add_training_args(params):
                               type=float,
                               help='Initial value of RNN forget biases.')
     train_params.add_argument('--rnn-h2h-init', type=str, default=C.RNN_INIT_ORTHOGONAL,
-                              choices=[C.RNN_INIT_ORTHOGONAL, C.RNN_INIT_ORTHOGONAL_STACKED],
+                              choices=[C.RNN_INIT_ORTHOGONAL, C.RNN_INIT_ORTHOGONAL_STACKED, C.RNN_INIT_DEFAULT],
                               help="Initialization method for RNN parameters. Default: %(default)s.")
 
     train_params.add_argument('--monitor-bleu',

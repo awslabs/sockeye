@@ -337,7 +337,8 @@ def main():
         lexicon_array = lexicon.initialize_lexicon(args.lexical_bias,
                                                    vocab_source, vocab_target) if args.lexical_bias else None
 
-        weight_initializer = initializer.get_initializer(args.rnn_h2h_init, lexicon=lexicon_array)
+        weight_initializer = initializer.get_initializer(args.weight_init, args.weight_init_scale,
+                                                         args.rnn_h2h_init, lexicon=lexicon_array)
 
         optimizer = args.optimizer
         optimizer_params = {'wd': args.weight_decay,
