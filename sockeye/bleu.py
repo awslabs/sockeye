@@ -30,6 +30,18 @@ def zipngram(words, n):
     return zip(*(islice(it, pos, None) for pos, it in enumerate(tee(words, n + 1))))
 
 
+def bleu1_from_counts(count_triple):
+    counts, hyp_count, ref_count = count_triple
+    bleu = 0.0
+    effective_order = 0
+    for n in range(ORDER):
+        count = counts.common[n] + 1
+        total = counts.total[n] + 1
+        bleu += log(count / total)
+    brevity = min(0.0, 1.0 - ref_count / hyp_count) if hyp_count > 0 else 0.0
+    return exp(bleu / ORDER + brevity)
+
+
 def bleu_from_counts(count_triple, offset=0.01):
     counts, hyp_count, ref_count = count_triple
     bleu = 0.0
@@ -52,8 +64,8 @@ def bleu_from_counts(count_triple, offset=0.01):
 def bleu_counts(hyp, ref):
     counts = Statistics([0, 0, 0, 0], [0, 0, 0, 0])
 
-    hyp_words = hyp.split()
-    ref_words = ref.split()
+    hyp_words = hyp
+    ref_words = ref
 
     hyp_wcount = len(hyp_words)
     ref_wcount = len(ref_words)
@@ -83,7 +95,7 @@ def corpus_bleu_counts(hyps, refs):
         logger.error("Hyps and refs lengths are not the same")
 
     for hyp, ref in zip(hyps, refs):
-        sent_counts, hyp_wcount, ref_wcount = bleu_counts(hyp, ref)
+        sent_counts, hyp_wcount, ref_wcount = bleu_counts(hyp.split(), ref.split())
 
         add_counts_in_place(counts, sent_counts)
         hyp_total_wcount += hyp_wcount

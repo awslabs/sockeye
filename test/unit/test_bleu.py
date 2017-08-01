@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -51,7 +51,7 @@ def test_bleu(hypotheses, references, expected_bleu):
 
 @pytest.mark.parametrize("hypothesis, reference, expected_stat", test_case_statistics)
 def test_statistics(hypothesis, reference, expected_stat):
-    stat = sockeye.bleu.bleu_counts(hypothesis, reference)[0]
+    stat = sockeye.bleu.bleu_counts(hypothesis.split(), reference.split())[0]
     assert stat == expected_stat
 
 
@@ -64,12 +64,12 @@ def test_scoring(statistics, expected_score):
 @pytest.mark.parametrize("hypothesis, reference, expected_with_offset, expected_without_offset",
                          test_case_offset)
 def test_offset(hypothesis, reference, expected_with_offset, expected_without_offset):
-    score_without_offset = sockeye.bleu.bleu_from_counts(sockeye.bleu.bleu_counts(hypothesis, reference),
+    score_without_offset = sockeye.bleu.bleu_from_counts(sockeye.bleu.bleu_counts(hypothesis.split(), reference.split()),
                                                          offset = 0.0)
-    print(sockeye.bleu.bleu_counts(hypothesis, reference))
+    print(sockeye.bleu.bleu_counts(hypothesis.split(), reference.split()))
     assert abs(expected_without_offset - score_without_offset) < EPSILON
 
-    score_with_offset = sockeye.bleu.bleu_from_counts(sockeye.bleu.bleu_counts(hypothesis, reference),
+    score_with_offset = sockeye.bleu.bleu_from_counts(sockeye.bleu.bleu_counts(hypothesis.split(), reference.split()),
                                                       offset = 0.1)
     assert abs(expected_with_offset - score_with_offset) < EPSILON
 
