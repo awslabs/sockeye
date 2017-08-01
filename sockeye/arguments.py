@@ -104,6 +104,18 @@ def add_io_args(params):
                              action='store_true',
                              help='Track metrics through tensorboard. Requires installed tensorboard.')
 
+    data_params.add_argument('--monitor-pattern',
+                             default=None,
+                             type=str,
+                             help="Pattern to match outputs/weights/gradients to monitor. '.*' monitors everything. "
+                                  "Default: %(default)s.")
+
+    data_params.add_argument('--monitor-stat-func',
+                             default=C.STAT_FUNC_DEFAULT,
+                             choices=list(C.MONITOR_STAT_FUNCS.keys()),
+                             help="Statistics function to run on monitored outputs/weights/gradients. "
+                                  "Default: %(default)s.")
+
     data_params.add_argument('--quiet', '-q',
                              default=False,
                              action="store_true",
