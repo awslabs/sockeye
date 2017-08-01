@@ -377,7 +377,9 @@ def main():
                            max_num_not_improved=args.max_num_checkpoint_not_improved,
                            min_num_epochs=args.min_num_epochs,
                            monitor_bleu=args.monitor_bleu,
-                           use_tensorboard=args.use_tensorboard)
+                           use_tensorboard=args.use_tensorboard,
+                           mxmonitor_pattern=args.monitor_pattern,
+                           mxmonitor_stat_func=args.monitor_stat_func)
 
 
 if __name__ == "__main__":
