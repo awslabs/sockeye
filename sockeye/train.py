@@ -209,7 +209,8 @@ def main():
                                                                   args.checkpoint_frequency,
                                                                   learning_rate_half_life,
                                                                   args.learning_rate_reduce_factor,
-                                                                  args.learning_rate_reduce_num_not_improved)
+                                                                  args.learning_rate_reduce_num_not_improved,
+                                                                  args.learning_rate_warmup)
         else:
             with open(os.path.join(training_state_dir, C.SCHEDULER_STATE_NAME), "rb") as fp:
                 lr_scheduler_instance = pickle.load(fp)
