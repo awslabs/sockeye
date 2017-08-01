@@ -722,7 +722,7 @@ class ConvolutionalEmbeddingEncoder(Encoder):
 
         # Projection layer if requested output dimension is different from total number of filters
         # (TransformerEncoder compatibility, not in original paper)
-        if self.output_dim != self.num_embed:
+        if self.output_dim != total_num_filters:
             # (batch_size * seq_len/stride, outut_dim)
             seg_embedding = mx.sym.FullyConnected(data=seg_embedding,
                                                   num_hidden=self.output_dim,
