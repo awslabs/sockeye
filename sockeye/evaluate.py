@@ -59,7 +59,7 @@ def main():
         print(bleu, file=sys.stdout)
     else:
         for h, r in zip(hypotheses, references):
-            bleu = bleu_from_counts(bleu_counts(h, r), args.offset)
+            bleu = bleu_from_counts(bleu_counts(h.split(), r.split()), args.offset)
             print(bleu, file=sys.stdout)
 
 

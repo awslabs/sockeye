@@ -52,7 +52,15 @@ class RecurrentDecoderConfig(Config):
                  dropout: float = .0,
                  weight_tying: bool = False,
                  context_gating: bool = False,
-                 layer_normalization: bool = False) -> None:
+                 layer_normalization: bool = False,
+                 scheduled_sampling_type: Optional[str] = None,
+                 scheduled_sampling_decay_params: Optional[List[float]] = None,
+                 use_mrt: bool = False,
+                 mrt_num_samples: int = 0,
+                 mrt_sup_grad_scale: float = 1.0,
+                 mrt_entropy_reg: float = 0.0,
+                 mrt_max_target_len_ratio: float = 1.0,
+                 mrt_metric: str = C.BLEU) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
@@ -61,6 +69,14 @@ class RecurrentDecoderConfig(Config):
         self.weight_tying = weight_tying
         self.context_gating = context_gating
         self.layer_normalization = layer_normalization
+        self.scheduled_sampling_type = scheduled_sampling_type
+        self.scheduled_sampling_decay_params = scheduled_sampling_decay_params
+        self.use_mrt = use_mrt
+        self.mrt_num_samples = mrt_num_samples
+        self.mrt_sup_grad_scale = mrt_sup_grad_scale
+        self.mrt_entropy_reg = mrt_entropy_reg
+        self.mrt_max_target_len_ratio = mrt_max_target_len_ratio
+        self.mrt_metric = mrt_metric
 
 
 def get_recurrent_decoder(config: RecurrentDecoderConfig,
@@ -181,6 +197,56 @@ class RecurrentDecoder(Decoder):
         else:
             self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
         self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
+
+        self.scheduled_sampling_type = config.scheduled_sampling_type
+        self.scheduled_sampling_decay_params = config.scheduled_sampling_decay_params
+        self._get_sampling_threshold = self._link_sampling_scheduler()
+
+    def _link_sampling_scheduler(self):
+         i = mx.sym.Variable('updates')
+
+         def _check_params(params):
+             if self.scheduled_sampling_type == 'inv-sigmoid-decay':
+                 assert len(params) == 2, \
+                     ('The inverse sigmoid decaying option for scheduled sampling requires 2 parameter,'
+                     ' but given {}').format(len(params))
+
+                 k, lower_bound = params
+                 assert k >= 1, 'Offset should be greater than or equal to 1'
+                 assert lower_bound >= 0 and lower_bound < 1
+
+             elif self.scheduled_sampling_type == 'exponential-decay':
+                 assert len(params) == 1, \
+                     ('The exponential decaying option for scheduled sampling requires 1 parameter,'
+                     ' but given {}').format(len(params))
+                 k = params[0]
+                 assert k < 1, 'Offset for the exponential decay should be less than 1.'
+
+             elif self.scheduled_sampling_type == 'linear-decay':
+                 assert len(params) == 3, \
+                     ('The linear decaying option for scheduled sampling requires 3 parameter,'
+                     ' but given {}').format(len(params))
+
+                 k, epsilon, slope = params
+
+                 assert k <= 1, 'Offset for the linear decay should be less than 1.'
+                 assert epsilon >= 0, 'Epsilonfor the linear decay should be greather than or equal to 0.'
+
+         _check_params(self.scheduled_sampling_decay_params)
+
+         if self.scheduled_sampling_type == 'inv-sigmoid-decay':
+             k, lower_bound = self.scheduled_sampling_decay_params
+             sampling_scheduler = lambda: (k /(k + mx.sym.exp(i / k) -1)) * (1-lower_bound) + lower_bound
+         elif self.scheduled_sampling_type == 'exponential-decay':
+             k = self.scheduled_sampling_decay_params[0]
+             sampling_scheduler = lambda: pow(k, i)
+         elif self.scheduled_sampling_type == 'linear-decay':
+             k, epsilon, slope = self.scheduled_sampling_decay_params
+             sampling_scheduler = lambda: mx.sym.clip(k - slope * i, epsilon, k)
+         else:
+             sampling_scheduler = lambda: 1
+
+         return sampling_scheduler
 
     def get_num_hidden(self) -> int:
         """
@@ -414,6 +480,224 @@ class RecurrentDecoder(Decoder):
                                           name='%s_plus_lex_bias' % C.LOGITS_NAME)
 
         return logits
+
+    def decode_iter(self,
+                    source_encoded: mx.sym.Symbol,
+                    source_seq_len: int,
+                    source_length: mx.sym.Symbol,
+                    target: mx.sym.Symbol,
+                    target_seq_len: int,
+                    source_lexicon: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
+        """
+        Returns sampled sequences of words and associated probabilities for those words.
+
+        :param source_encoded: Concatenated encoder states. Shape: (source_seq_len, batch_size, encoder_num_hidden).
+        :param source_seq_len: Maximum source sequence length.
+        :param source_length: Lengths of source sequences. Shape: (batch_size,).
+        :param target: Target sequence. Shape: (batch_size, target_seq_len).
+        :param target_seq_len: Maximum target sequence length.
+        :return: Probabilities of next-word predictions for target sequence.
+                 Shape: (batch_size * target_seq_len, target_vocab_size)
+
+                 Threshold that determines to use the ground truth words or previous model predictions as inputs.
+                 Shape: (1,)
+
+        """
+
+        # process encoder states
+        source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
+
+        # slice target words
+        # target: target_seq_len * (batch_size,)
+        target = mx.sym.split(data=target, num_outputs=target_seq_len, axis=1, squeeze_axis=True)
+
+        # get recurrent attention function conditioned on source
+        attention_func = self.attention.on(source_encoded_batch_major, source_length, source_seq_len)
+        attention_state = self.attention.get_initial_state(source_length, source_seq_len)
+
+        # initialize decoder states
+        # hidden: (batch_size, rnn_num_hidden)
+        # layer_states: List[(batch_size, state_num_hidden]
+        state = self.compute_init_states(source_encoded, source_length)
+
+        self.rnn.reset()
+
+        probs_all = []
+
+        threshold = self._get_sampling_threshold()
+        rnd_val = mx.sym.random_uniform(low=0, high=1.0, shape=1)[0]
+
+        for seq_idx in range(target_seq_len):
+            if seq_idx == 0:
+                input_words = target[seq_idx]
+            else:
+                # choose input words depending on tossing a biased coin (p = rnd_val)
+                # if rnd_val < threshold, then use ground truth
+                # otherwise we use model predictions made at the previous time step.
+                # XXX threshold decreases over time
+                input_words = mx.sym.where(rnd_val < threshold,
+                                           mx.sym.cast(target[seq_idx], dtype='int32'), sampled_words)
+
+            trg_emb, _, _ = self.embedding.encode(input_words, None, 1)
+            state, attention_state = self._step(trg_emb,
+                                                state,
+                                                attention_func,
+                                                attention_state,
+                                                seq_idx)
+
+            # (batch_size, target_vocab_size)
+            logit = mx.sym.FullyConnected(data=state.hidden, num_hidden=self.target_vocab_size,
+                                          weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
+
+            prob = mx.sym.softmax(logit)
+            sampled_words = mx.sym.sample_multinomial(prob)
+            sampled_words = mx.sym.BlockGrad(sampled_words)
+
+            probs_all.append(prob)
+
+        # probs: (batch_size, target_seq_len, target_vocab_size)
+        probs = mx.sym.concat(*probs_all, dim=1, name='probs')
+        # probs: (batch_size * target_seq_len, target_vocab_size)
+        probs = mx.sym.reshape(data=probs, shape=(-1, self.target_vocab_size))
+
+        return [probs, threshold]
+
+    def decode_mrt(self,
+                   source_encoded: mx.sym.Symbol,
+                   source_seq_len: int,
+                   source_length: mx.sym.Symbol,
+                   labels: mx.sym.Symbol,
+                   target_seq_len: int,
+                   max_target_seq_len_ratio: int,
+                   is_sample: mx.sym.Symbol,
+                   entropy_reg: float=0.0001,
+                   grad_scale: float=1.0,
+                   source_lexicon: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
+        """
+        Returns sampled sequences of words and associated probabilities for those words.
+
+        :param source_encoded: Concatenated encoder states. Shape: (source_seq_len, batch_size, encoder_num_hidden).
+        :param source_seq_len: Maximum source sequence length.
+        :param source_length: Lengths of source sequences. Shape: (batch_size,).
+        :param labels: Target sequence. Shape: (batch_size, target_seq_len).
+        :param target_seq_len: Maximum target sequence length.
+        :param max_target_seq_len_ratio: Ratio of the generated sequences' maximum length w.r.t. the original maximum target sequence length.
+        :param is_sample: An RNN chooses sampled words as next inputs if is_sample == 1, otherwise true targets.
+        :param source_lexicon: Lexical biases for current sentence.
+               Shape: (batch_size, target_vocab_size, source_seq_len)
+        :return: sampled words
+                 Shape: (batch_size, max_target_seq_len)
+
+                 sampling distribution of the sampled words
+                 Shape: (batch_size, max_target_seq_len, target_vocab_size)
+
+        """
+
+        # process encoder states
+        source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
+
+        # get recurrent attention function conditioned on source
+        attention_func = self.attention.on(source_encoded_batch_major, source_length, source_seq_len)
+        attention_state = self.attention.get_initial_state(source_length, source_seq_len)
+
+        # initialize decoder states
+        # hidden: (batch_size, rnn_num_hidden)
+        # layer_states: List[(batch_size, state_num_hidden]
+        state = self.compute_init_states(source_encoded, source_length)
+
+        self.rnn.reset()
+
+        sampled_words = []
+        sample_probs = []
+        sample_masks = []
+
+        # The decoder is allowed to generate longer sentences
+        # than the ground truths.
+        max_target_seq_len = int(target_seq_len * max_target_seq_len_ratio)
+        eos_pos_init = max_target_seq_len-1     # initial position of EOS
+
+        # padding the label matrix
+        pad_matrix = mx.sym.tile(mx.sym.expand_dims(mx.sym.ones_like(source_length), axis=1),
+                                 reps=(1, max_target_seq_len - target_seq_len))
+        labels = mx.sym.concat(*[labels, C.PAD_ID * pad_matrix], dim=1)
+
+        split_labels = mx.sym.split(labels, num_outputs=max_target_seq_len, axis=1,
+                                    squeeze_axis=True, name='split_labels')
+
+        # The position of the EOS token in sampled sentences
+        # intialized by the last position and the positions are updated once EOS
+        # tokens generated.
+        eos_pos = mx.sym.cast(eos_pos_init*mx.sym.ones_like(source_length), dtype='int32')
+
+        # aux variable containing all 1s; not changed over time.
+        all_ones = mx.sym.cast(mx.sym.ones_like(source_length), dtype='int32')
+
+        # input words are initialized by BOS
+        input_words = C.BOS_ID*mx.sym.cast(mx.sym.ones_like(source_length), dtype='int32')
+
+        for seq_idx in range(max_target_seq_len):
+            embedded, _, _ = self.embedding.encode(input_words, None, 1)
+            state, attention_state = self._step(embedded,
+                                                state,
+                                                attention_func,
+                                                attention_state,
+                                                seq_idx)
+
+            logit = mx.sym.FullyConnected(data=state.hidden, num_hidden=self.target_vocab_size,
+                                          weight=self.cls_w, bias=self.cls_b)
+
+            prob = mx.sym.softmax(logit)
+            next_words = mx.sym.where(is_sample > 0,
+                                      mx.sym.sample_multinomial(prob),
+                                      mx.sym.cast(split_labels_[seq_idx], dtype='int32'))
+
+            is_eos = (next_words == C.EOS_ID)       # check if the generated tokens are EOS or not.
+            cond = eos_pos == eos_pos_init          # check whether the EOS token's positions are updated or not
+            eos_pos = mx.sym.where(is_eos * cond,
+                                   seq_idx * all_ones,      # true: updating 'eos_pos' with the current time step
+                                   eos_pos)                 # false: keeping 'eos_pos' previously generated
+
+            # if EOS tokens are generated at previous time steps, we don't care
+            # what the decoder RNN generates afterwards.
+            mask = eos_pos >= seq_idx
+
+            sampled_words.append(next_words)
+            sample_probs.append(prob)
+            sample_masks.append(mask)
+
+            input_words = next_words
+
+        # sampled_words: (max_target_seq_len * batch_size,)
+        sampled_words = mx.sym.concat(*sampled_words, dim=0, name='sampled_words')
+        # sample_probs: ((max_target_seq_len * batch_size), target_vocab_size)
+        sample_probs = mx.sym.concat(*sample_probs, dim=0, name='sample_probs')
+        # sample_masks: (max_target_seq_len * batch_size,)
+        sample_masks = mx.sym.concat(*sample_masks, dim=0, name='sample_masks')
+
+        # apply masking not to propagate errors unnecessarily
+        # TODO modifiy LogPolicy to take the mask matrix as an input argument.
+        sample_probs = mx.sym.broadcast_mul(sample_probs,
+                                            mx.sym.cast(mx.sym.reshape(sample_masks,
+                                                                        shape=(-1, 1)),
+                                                        dtype='float32'),
+                                            out=sample_probs)
+
+        sampled_words = mx.sym.Custom(action=sampled_words, prob=sample_probs, is_sampled=is_sample,
+                                      name='log_policy', op_type='LogPolicy',
+                                      entropy_reg=entropy_reg, scale=grad_scale)
+
+        # reshape the outcomes
+        sampled_words = mx.sym.reshape(sampled_words, shape=(max_target_seq_len, -1))
+        sample_probs = mx.sym.reshape(sample_probs,
+                                      shape=(max_target_seq_len, -1, self.target_vocab_size))
+
+        # batch_size * target_seq_len
+        sampled_words = mx.sym.swapaxes(mx.sym.cast(sampled_words,
+                                                    dtype='float32'), dim1=0, dim2=1)
+        # batch_size * target_seq_len * target_vocab_size
+        sample_probs = mx.sym.swapaxes(sample_probs, dim1=0, dim2=1)
+
+        return mx.sym.Group([sampled_words, sample_probs])
 
     def predict(self,
                 word_id_prev: mx.sym.Symbol,

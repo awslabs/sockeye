@@ -335,7 +335,7 @@ def add_training_args(params):
     train_params.add_argument('--metrics',
                               nargs='+',
                               default=[C.PERPLEXITY],
-                              choices=[C.PERPLEXITY, C.ACCURACY],
+                              choices=[C.PERPLEXITY, C.ACCURACY, C.sBLEU],
                               help='Names of metrics to track on training and validation data. Default: %(default)s.')
     train_params.add_argument('--optimized-metric',
                               default='perplexity',
@@ -445,6 +445,47 @@ def add_training_args(params):
                               type=int,
                               default=13,
                               help='Random seed. Default: %(default)s.')
+    train_params.add_argument('--use-mrt',
+                              default=False,
+                              action="store_true",
+                              help="Use minimum risk training. Default: %(default)s.")
+    train_params.add_argument('--mrt-num-samples',
+                              default=10,
+                              type=int,
+                              help="Number of samples to estimate baseline in minimum risk training. Default: %(default)s.")
+    train_params.add_argument('--mrt-entropy-reg',
+                              default=0.0001,
+                              type=float,
+                              help="Regularization in minimum risk training. Default: %(default)s.")
+    train_params.add_argument('--mrt-sup-grad-scale',
+                              default=1.,
+                              type=float,
+                              help="Scale of the gradients computed w.r.t. the true targets in MRT.")
+    train_params.add_argument('--mrt-max-target-len-ratio',
+                              default=1.5,
+                              type=float,
+                              help="Maximum length ratio of a generated target sentence compared to its ground truth.")
+    train_params.add_argument('--mrt-metric',
+                              type=str,
+                              default=C.BLEU,
+                              choices=[C.BLEU],
+                              help="Evaluation metric to calculate the risk in MRT. Default: %(default)s.")
+
+    train_params.add_argument('--scheduled-sampling-type',
+                              choices=['linear-decay', 'exponential-decay', 'inv-sigmoid-decay'],
+                              default=None,
+                              help="Determine whether ground truth targets or model predictions are used as inputs.")
+    train_params.add_argument('--scheduled-sampling-decay-params',
+                              nargs='+',
+                              type=float,
+                              default=None,
+                              help="Parameters of the scheduled sampling (Bengio NIPS '15). "
+                                   "For the linear-decay scheduler we need to specify three hyperparameters: "
+                                   "offset (k), the minimum probability of taking ground truth (epsilon) and "
+                                   "slope of the decay function (c). The exponential-decay function accepts "
+                                   "the expected speed of convergence (k). The inv-sigmoid-decay function requires "
+                                   "two hyperparameters: the expected speed of convergence (k) and "
+                                   "the minimum probability of taking ground truth (eposilon).")
 
     train_params.add_argument('--keep-last-params',
                               type=int,

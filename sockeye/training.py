@@ -21,7 +21,7 @@ import pickle
 import random
 import shutil
 import time
-from typing import AnyStr, List, Optional
+from typing import AnyStr, List, Optional, Tuple
 
 import mxnet as mx
 import numpy as np
@@ -56,7 +56,7 @@ class _TrainingState:
         self.samples = samples
 
 
-class TrainingModel(model.SockeyeModel):
+class BaseTrainingModel(model.SockeyeModel):
     """
     Defines an Encoder/Decoder model (with attention).
     RNN configuration (number of hidden units, number of layers, cell type)
@@ -78,11 +78,16 @@ class TrainingModel(model.SockeyeModel):
                  train_iter: data_io.ParallelBucketSentenceIter,
                  fused: bool,
                  bucketing: bool,
-                 lr_scheduler) -> None:
+                 lr_scheduler,
+                 state_names: Optional[List[str]] = None,
+                 grad_req: Optional[str] = 'write') -> None:
         super().__init__(config)
         self.context = context
         self.lr_scheduler = lr_scheduler
         self.bucketing = bucketing
+        self.state_names = state_names if state_names is not None else []
+        self.grad_req = grad_req
+
         self._build_model_components(self.config.max_seq_len, fused)
         self.module = self._build_module(train_iter, self.config.max_seq_len)
         self.training_monitor = None
@@ -93,39 +98,15 @@ class TrainingModel(model.SockeyeModel):
         """
         Initializes model components, creates training symbol and module, and binds it.
         """
-        utils.check_condition(train_iter.pad_id == C.PAD_ID == 0, "pad id should be 0")
-        source = mx.sym.Variable(C.SOURCE_NAME)
-        source_length = mx.sym.sum(mx.sym.broadcast_not_equal(source, mx.sym.zeros((1,))), axis=1)
-        target = mx.sym.Variable(C.TARGET_NAME)
-        labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
-
-        model_loss = loss.get_loss(self.config.config_loss)
-
-        data_names = [x[0] for x in train_iter.provide_data]
-        label_names = [x[0] for x in train_iter.provide_label]
-
-        def sym_gen(seq_lens):
-            """
-            Returns a (grouped) loss symbol given source & target input lengths.
-            Also returns data and label names for the BucketingModule.
-            """
-            source_seq_len, target_seq_len = seq_lens
-
-            (source_encoded,
-             source_encoded_length,
-             source_encoded_seq_len) = self.encoder.encode(source, source_length, seq_len=source_seq_len)
-            source_lexicon = self.lexicon.lookup(source) if self.lexicon else None
-
-            logits = self.decoder.decode(source_encoded, source_encoded_seq_len, source_encoded_length,
-                                         target, target_seq_len, source_lexicon)
-
-            outputs = model_loss.get_loss(logits, labels)
-
-            return mx.sym.Group(outputs), data_names, label_names
+        default_bucket_key = train_iter.default_bucket_key
+        model_symbols = self._define_symbols()
+        in_out_names = self._define_names(train_iter)
+        sym_gen = self._create_computation_graph(model_symbols, in_out_names)
 
         if self.bucketing:
             logger.info("Using bucketing. Default max_seq_len=%s", train_iter.default_bucket_key)
             return mx.mod.BucketingModule(sym_gen=sym_gen,
+                                          state_names=self.state_names,
                                           logger=logger,
                                           default_bucket_key=train_iter.default_bucket_key,
                                           context=self.context)
@@ -135,8 +116,34 @@ class TrainingModel(model.SockeyeModel):
             return mx.mod.Module(symbol=symbol,
                                  data_names=data_names,
                                  label_names=label_names,
+                                 state_names=self.state_names,
                                  logger=logger,
                                  context=self.context)
+
+    def _define_symbols(self):
+        raise NotImplementedError()
+
+    def _define_names(self, train_iter):
+        raise NotImplementedError()
+
+    def _create_computation_graph(self, model_symbols, in_out_names):
+        raise NotImplementedError()
+
+    def _get_shapes(self, train_iter: data_io.ParallelBucketSentenceIter):
+        raise NotImplementedError()
+
+    def _get_data_batch(self, data_iter):
+        raise NotImplementedError()
+
+    def _prepare_metric_update(self, batch):
+        raise NotImplementedError()
+
+    def _compute_gradients(self, batch: mx.io.DataBatch, train_state):
+        raise NotImplementedError()
+
+    def _clear_gradients(self):
+        for grad in self.module._curr_module._exec_group.grad_arrays:
+            grad[0][:] = 0
 
     @staticmethod
     def _create_eval_metric(metric_names: List[AnyStr]) -> mx.metric.CompositeEvalMetric:
@@ -148,11 +155,19 @@ class TrainingModel(model.SockeyeModel):
         for metric_name in metric_names:
             if metric_name == C.ACCURACY:
                 metrics.append(utils.Accuracy(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME]))
+            elif metric_name == C.sBLEU:
+                metrics.append(utils.SentenceBleu(output_names=[C.GEN_WORDS_OUTPUT_NAME]))
             elif metric_name == C.PERPLEXITY:
                 metrics.append(mx.metric.Perplexity(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME]))
             else:
                 raise ValueError("unknown metric name")
         return mx.metric.create(metrics)
+
+    def _set_states(self, state_names, values):
+        states = self.module.get_states(merge_multi_context=False)
+        for state_name, state, value in zip(state_names, states, values):
+            for state_per_dev in state:
+                state_per_dev[:] = value
 
     def fit(self,
             train_iter: data_io.ParallelBucketSentenceIter,
@@ -202,8 +217,10 @@ class TrainingModel(model.SockeyeModel):
         self.save_version(output_folder)
         self.save_config(output_folder)
 
-        self.module.bind(data_shapes=train_iter.provide_data, label_shapes=train_iter.provide_label,
-                         for_training=True, force_rebind=True, grad_req='write')
+        data_shapes, label_shapes = self._get_shapes(train_iter)
+
+        self.module.bind(data_shapes=data_shapes, label_shapes=label_shapes,
+                         for_training=True, force_rebind=True, grad_req=self.grad_req)
         self.module.symbol.save(os.path.join(output_folder, C.SYMBOL_NAME))
 
         self.module.init_params(initializer=initializer, arg_params=self.params, aux_params=None,
@@ -291,7 +308,7 @@ class TrainingModel(model.SockeyeModel):
                 samples=0
             )
 
-        next_data_batch = train_iter.next()
+        next_data_batch = self._get_data_batch(train_iter)
 
         while max_updates == -1 or train_state.updates < max_updates:
             if not train_iter.iter_next():
@@ -304,7 +321,10 @@ class TrainingModel(model.SockeyeModel):
             if mxmonitor is not None:
                 mxmonitor.tic()
 
-            self.module.forward_backward(batch)
+            # compute the gradients
+            self._compute_gradients(batch, train_state)
+
+            # update the model parameters usinge the gradients
             self.module.update()
 
             if mxmonitor is not None:
@@ -313,11 +333,16 @@ class TrainingModel(model.SockeyeModel):
                     for _, k, v in results:
                         logger.info('Monitor: Batch [{:d}] {:s} {:s}'.format(train_state.updates, k, v))
 
+            # clear the gradients if necessary
+            if self.grad_req == 'add':
+                self._clear_gradients()
+
             if train_iter.iter_next():
                 # pre-fetch next batch
-                next_data_batch = train_iter.next()
+                next_data_batch = self._get_data_batch(train_iter)
                 self.module.prepare(next_data_batch)
 
+            batch = self._prepare_metric_update(batch)
             self.module.update_metric(metric_train, batch.label)
 
             self.training_monitor.batch_end_callback(train_state.epoch, train_state.updates, metric_train)
@@ -390,6 +415,9 @@ class TrainingModel(model.SockeyeModel):
         params_base_fname = C.PARAMS_NAME % checkpoint
         self.save_params_to_file(os.path.join(output_folder, params_base_fname))
 
+    def _toggle_states(self, is_train=False):
+        raise NotImplementedError()
+
     def _evaluate(self, training_state, val_iter, val_metric):
         """
         Computes val_metric on val_iter. Returns whether model improved or not.
@@ -397,9 +425,18 @@ class TrainingModel(model.SockeyeModel):
         val_iter.reset()
         val_metric.reset()
 
-        for nbatch, eval_batch in enumerate(val_iter):
+        # set the internal states for making predictions
+        self._toggle_states(is_train=False)
+
+        while val_iter.iter_next():
+            eval_batch = self._get_data_batch(val_iter)
             self.module.forward(eval_batch, is_train=False)
+
+            eval_batch = self._prepare_metric_update(eval_batch)
             self.module.update_metric(val_metric, eval_batch.label)
+
+        # restore the states back
+        self._toggle_states(is_train=True)
 
         for name, val in val_metric.get_name_value():
             logger.info('Checkpoint [%d]\tValidation-%s=%f', training_state.checkpoint, name, val)
@@ -519,6 +556,263 @@ class TrainingModel(model.SockeyeModel):
 
         # And our own state
         return self.load_state(os.path.join(directory, C.TRAINING_STATE_NAME))
+
+
+class MLETrainingModel(BaseTrainingModel):
+    def __init__(self,
+                 config: model.ModelConfig,
+                 context: List[mx.context.Context],
+                 train_iter: data_io.ParallelBucketSentenceIter,
+                 fused: bool,
+                 bucketing: bool,
+                 lr_scheduler,
+                 state_names: Optional[List[str]] = None,
+                 grad_req: Optional[str]='write') -> None:
+        super().__init__(config, context, train_iter, fused, bucketing, lr_scheduler, state_names, grad_req)
+
+    def _define_symbols(self) -> List[mx.sym.Symbol]:
+        source = mx.sym.Variable(C.SOURCE_NAME)
+        source_length = mx.sym.Variable(C.SOURCE_LENGTH_NAME)
+        target = mx.sym.Variable(C.TARGET_NAME)
+        labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
+
+        model_loss = loss.get_loss(self.config.config_loss)
+
+        return [source, source_length, target, labels, model_loss]
+
+    def _define_names(self, train_iter) -> Tuple[List['str'], List['str']]:
+        data_names = [x[0] for x in train_iter.provide_data]
+        label_names = [x[0] for x in train_iter.provide_label]
+
+        return (data_names, label_names)
+
+    def _create_computation_graph(self, model_symbols, in_out_names) -> Tuple[mx.sym.Symbol, List['str'], List['str']]:
+        source, source_length, target, labels, model_loss = model_symbols
+        data_names, label_names = in_out_names
+
+        def sym_gen(seq_lens):
+            """
+            Returns a (grouped) loss symbol given source & target input lengths.
+            Also returns data and label names for the BucketingModule.
+            """
+            source_seq_len, target_seq_len = seq_lens
+
+            (source_encoded,
+             source_encoded_length,
+             source_encoded_seq_len) = self.encoder.encode(source, source_length, seq_len=source_seq_len)
+            source_lexicon = self.lexicon.lookup(source) if self.lexicon else None
+
+            if self.config.config_decoder.scheduled_sampling_type is not None:
+                # scheduled sampling
+                probs, threshold = self.decoder.decode_iter(source_encoded, source_encoded_seq_len, source_encoded_length,
+                                                            target, target_seq_len, source_lexicon)
+
+                cross_entropy = mx.sym.one_hot(indices=mx.sym.cast(data=labels, dtype='int32'),
+                                               depth=self.config.vocab_target_size)
+
+                # zero out pad symbols (0)
+                cross_entropy = mx.sym.where(labels,
+                                             cross_entropy, mx.sym.zeros((0, self.config.vocab_target_size)))
+
+                # compute cross_entropy
+                cross_entropy = - mx.sym.log(data=probs + 1e-10) * cross_entropy
+                cross_entropy = mx.sym.sum(data=cross_entropy, axis=1)
+
+                cross_entropy = mx.sym.MakeLoss(cross_entropy, name=C.CROSS_ENTROPY)
+
+                probs = mx.sym.BlockGrad(probs, name=C.SOFTMAX_NAME)
+                threshold = mx.sym.BlockGrad(threshold)
+
+                outputs = [cross_entropy, probs, threshold]
+            else:
+                logits = self.decoder.decode(source_encoded, source_encoded_seq_len, source_encoded_length,
+                                            target, target_seq_len, source_lexicon)
+
+                outputs = model_loss.get_loss(logits, labels)
+
+            return mx.sym.Group(outputs), data_names, label_names
+
+        return sym_gen
+
+    def _get_shapes(self, train_iter) -> Tuple[mx.io.DataDesc, mx.io.DataDesc]:
+        data_shapes = train_iter.provide_data
+        label_shapes = train_iter.provide_label
+
+        return (data_shapes, label_shapes)
+
+    def _get_data_batch(self, data_iter) -> mx.io.DataBatch:
+        next_data_batch = data_iter.next()
+
+        return next_data_batch
+
+    def _prepare_metric_update(self, batch) -> mx.io.DataBatch:
+        return batch
+
+    def _compute_gradients(self, batch: mx.io.DataBatch, train_state):
+        if self.state_names is not None:
+            # XXX update the internal states which are used for the scheduled sampling
+            self._set_states(self.state_names, [eval('train_state.updates')])
+
+        self.module.forward_backward(batch)
+
+    def _toggle_states(self, is_train=False):
+        # if prediction is requested by setting 'is_train = False', the model's internal states are all zero (initial values).
+        self._set_states(self.state_names, [int(is_train)])
+
+
+class MRTrainingModel(BaseTrainingModel):
+    def __init__(self,
+                 config: model.ModelConfig,
+                 context: List[mx.context.Context],
+                 train_iter: data_io.ParallelBucketSentenceIter,
+                 fused: bool,
+                 bucketing: bool,
+                 lr_scheduler,
+                 state_names,
+                 grad_req) -> None:
+        self.mrt_metric = config.config_decoder.mrt_metric
+        self.mrt_entropy_reg = config.config_decoder.mrt_entropy_reg
+        self.mrt_num_samples = config.config_decoder.mrt_num_samples
+        self.mrt_sup_grad_scale = config.config_decoder.mrt_sup_grad_scale
+        self.mrt_max_target_seq_ratio = config.config_decoder.mrt_max_target_len_ratio
+
+        super().__init__(config, context, train_iter, fused, bucketing, lr_scheduler, state_names, grad_req)
+
+    def _define_symbols(self) -> List[mx.sym.Symbol]:
+        source = mx.sym.Variable(C.SOURCE_NAME)
+        source_length = mx.sym.Variable(C.SOURCE_LENGTH_NAME)
+        target = mx.sym.Variable(C.TARGET_NAME)
+        labels = mx.sym.Variable(C.TARGET_LABEL_NAME)
+        baseline = mx.sym.Variable('baseline')
+        is_sample = mx.sym.Variable('is_sample', shape=(1,), dtype='int32')
+
+        return [source, source_length, target, labels, baseline, is_sample]
+
+    def _define_names(self, train_iter) -> Tuple[List['str'], List['str']]:
+        batch_size = train_iter.batch_size
+        data_shapes = train_iter.provide_data + [mx.io.DataDesc(name='baseline', shape=(batch_size,), layout=C.BATCH_MAJOR)]
+        label_shapes = train_iter.provide_label
+
+        data_names = [x[0] for x in data_shapes]
+        label_names = [x[0] for x in label_shapes]
+
+        return data_names, label_names
+
+    def _create_computation_graph(self, model_symbols, in_out_names) -> Tuple[mx.sym.Symbol, List['str'], List['str']]:
+        source, source_length, target, labels, baseline, is_sample = model_symbols
+        data_names, label_names = in_out_names
+
+        def sym_gen(seq_lens):
+            """
+            Returns a (grouped) loss symbol given source & target input lengths.
+            Also returns data and label names for the BucketingModule.
+            """
+            source_seq_len, target_seq_len = seq_lens
+
+            (source_encoded,
+             source_encoded_length,
+             source_encoded_seq_len) = self.encoder.encode(source, source_length, seq_len=source_seq_len)
+            source_lexicon = self.lexicon.lookup(source) if self.lexicon else None
+
+            outputs = self.decoder.decode_mrt(source_encoded, source_seq_len, source_length,
+                                              labels, target_seq_len, self.mrt_max_target_seq_ratio, is_sample,
+                                              self.mrt_entropy_reg, self.mrt_sup_grad_scale, source_lexicon)
+            sampled_words, sample_probs = outputs
+
+            mrt_loss = mx.sym.Custom(data=sampled_words, label=labels,
+                                     baseline=baseline, is_sampled=is_sample,
+                                     metric=self.mrt_metric,
+                                     ignore_ids=[C.PAD_ID],
+                                     eos_id=C.EOS_ID,
+                                     name=C.TARGET_NAME, op_type='Risk')
+
+            softmax_output = mx.sym.reshape(sample_probs,
+                                            shape=(-1, self.config.vocab_target_size))
+
+            losses = mx.sym.Group([mrt_loss,
+                                   mx.sym.BlockGrad(sampled_words, name=C.GEN_WORDS_NAME),
+                                   mx.sym.BlockGrad(softmax_output, name=C.SOFTMAX_NAME),
+                                   mx.sym.BlockGrad(target)])
+
+
+            return losses, data_names, label_names
+
+        return sym_gen
+
+    def _get_shapes(self, train_iter) -> Tuple[mx.io.DataDesc, mx.io.DataDesc]:
+        data_shapes = self._create_mrt_data_shapes(train_iter.provide_data, train_iter.batch_size)
+        label_shapes = train_iter.provide_label
+
+        return (data_shapes, label_shapes)
+
+    def _get_data_batch(self, data_iter) -> mx.io.DataBatch:
+        next_data_batch = data_iter.next()
+        next_data_batch = self._create_mrt_batch(next_data_batch)
+
+        return next_data_batch
+
+    def _prepare_metric_update(self, batch) -> mx.io.DataBatch:
+        batch.label = self._expand_label_seq(batch.label, max_target_seq_len_ratio=self.mrt_max_target_seq_ratio)
+
+        return batch
+
+    def _compute_gradients(self, batch: mx.io.DataBatch, train_state):
+        self.module.forward_backward(batch)
+
+        # XXX run multiple forward passes to collect the average reward
+        self._set_states(self.state_names, [1]) # is_sample = 1
+
+        if self.mrt_num_samples > 0:
+            baseline = batch.data[-1]
+            for i in range(self.mrt_num_samples):
+                self.module.forward(batch, is_train=False)
+                risk_output = self.module.get_outputs()[0].as_in_context(baseline.context)
+                baseline[:] += risk_output
+            baseline[:] += 1
+            baseline[:] /= (self.mrt_num_samples + 1)
+
+        self.module.forward_backward(batch)
+
+        self._set_states(self.state_names, [0]) # is_sample = 0
+
+    def _toggle_states(self, is_train=False):
+        # if prediction is requested by setting 'is_train = False', the model will generate sample sequences.
+        # That is, the model generates a sequence of words following word distribution (, or the policy).
+
+        self._set_states(self.state_names, [1-int(is_train)])
+
+
+    @staticmethod
+    def _create_mrt_data_shapes(data_shapes, batch_size):
+        new_data_shapes = data_shapes + \
+            [mx.io.DataDesc(name='baseline', shape=(batch_size,),
+                            layout=C.BATCH_MAJOR)]
+
+        return new_data_shapes
+
+    @staticmethod
+    def _create_mrt_batch(data_batch: mx.io.DataBatch):
+        batch_size = data_batch.label[0].shape[0]
+
+        data_batch.data = data_batch.data + [mx.nd.zeros((batch_size,))]
+        data_batch.provide_data = data_batch.provide_data + \
+            [mx.io.DataDesc(name='baseline', shape=(batch_size,),
+                            layout=C.BATCH_MAJOR)]
+
+        return data_batch
+
+    @staticmethod
+    def _expand_label_seq(labels: List[mx.nd.NDArray],
+                          max_target_seq_len_ratio: float=1.5):
+
+        for label_idx in range(len(labels)):
+            batch_size, target_seq_len = labels[label_idx].shape
+            diff_target_seq_len = int(target_seq_len*max_target_seq_len_ratio) - target_seq_len
+            labels[label_idx] = mx.nd.concat(*[labels[label_idx],
+                                               mx.nd.zeros((batch_size, diff_target_seq_len))],
+                                             dim=1)
+
+        return labels
 
 
 def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int):

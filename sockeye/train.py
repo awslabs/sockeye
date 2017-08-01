@@ -256,7 +256,15 @@ def main():
                                                         dropout=args.dropout,
                                                         weight_tying=decoder_weight_tying,
                                                         context_gating=args.context_gating,
-                                                        layer_normalization=args.layer_normalization)
+                                                        layer_normalization=args.layer_normalization,
+                                                        scheduled_sampling_type=args.scheduled_sampling_type,
+                                                        scheduled_sampling_decay_params=args.scheduled_sampling_decay_params,
+                                                        use_mrt=args.use_mrt,
+                                                        mrt_num_samples=args.mrt_num_samples,
+                                                        mrt_sup_grad_scale=args.mrt_sup_grad_scale,
+                                                        mrt_entropy_reg=args.mrt_entropy_reg,
+                                                        mrt_max_target_len_ratio=args.mrt_max_target_len_ratio,
+                                                        mrt_metric=args.mrt_metric)
 
         attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
         config_coverage = None
@@ -291,12 +299,26 @@ def main():
         model_config.freeze()
 
         # create training model
-        training_model = training.TrainingModel(config=model_config,
-                                                context=context,
-                                                train_iter=train_iter,
-                                                fused=args.use_fused_rnn,
-                                                bucketing=not args.no_bucketing,
-                                                lr_scheduler=lr_scheduler_instance)
+        if args.use_mrt:
+            logger.info("Minimum Risk Training")
+            training_model = training.MRTrainingModel(config=model_config,
+                                                      context=context,
+                                                      train_iter=train_iter,
+                                                      fused=args.use_fused_rnn,
+                                                      bucketing=not args.no_bucketing,
+                                                      lr_scheduler=lr_scheduler_instance,
+                                                      state_names=['is_sample'],
+                                                      grad_req='add')
+        else:
+            logger.info("Maximum Likelihood Estimation Training")
+            state_names = ['updates'] if args.scheduled_sampling_type is not None else []
+            training_model = training.MLETrainingModel(config=model_config,
+                                                       context=context,
+                                                       train_iter=train_iter,
+                                                       fused=args.use_fused_rnn,
+                                                       bucketing=not args.no_bucketing,
+                                                       lr_scheduler=lr_scheduler_instance,
+                                                       state_names=state_names)
 
         # We may consider loading the params in TrainingModule, for consistency
         # with the training state saving
@@ -306,6 +328,9 @@ def main():
         elif args.params:
             logger.info("Training will initialize from parameters loaded from '%s'", args.params)
             training_model.load_params_from_file(args.params)
+
+        if args.use_mrt:
+            assert args.params is not None
 
         lexicon_array = lexicon.initialize_lexicon(args.lexical_bias,
                                                    vocab_source, vocab_target) if args.lexical_bias else None

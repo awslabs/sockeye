@@ -20,9 +20,12 @@ BOS_SYMBOL = "<s>"
 EOS_SYMBOL = "</s>"
 UNK_SYMBOL = "<unk>"
 PAD_SYMBOL = "<pad>"
-PAD_ID = 0
 TOKEN_SEPARATOR = " "
 VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
+
+PAD_ID = VOCAB_SYMBOLS.index(PAD_SYMBOL)
+BOS_ID = VOCAB_SYMBOLS.index(BOS_SYMBOL)
+EOS_ID = VOCAB_SYMBOLS.index(EOS_SYMBOL)
 
 # default encoder prefixes
 ENCODER_PREFIX = "encoder_"
@@ -166,6 +169,7 @@ TIME_MAJOR = "TNC"
 ACCURACY = 'accuracy'
 PERPLEXITY = 'perplexity'
 BLEU = 'bleu'
+sBLEU = 'sentence_bleu'
 
 # loss names
 CROSS_ENTROPY = 'cross-entropy'
