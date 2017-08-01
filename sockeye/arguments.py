@@ -170,6 +170,12 @@ def add_model_parameters(params):
                               default=C.RNN_NAME,
                               help="Type of encoder. Default: %(default)s.")
 
+    model_params.add_argument('--conv-embed-output-dim',
+                              type=int_greater_or_equal(1),
+                              default=None,
+                              help="Project segment embeddings to this size for ConvolutionalEmbeddingEncoder. Omit to"
+                                   " avoid projection, leaving segment embeddings total size of all filters. Default:"
+                                   " %(default)s.")
     model_params.add_argument('--conv-embed-max-filter-width',
                               type=int_greater_or_equal(1),
                               default=8,

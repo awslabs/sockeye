@@ -220,8 +220,12 @@ def main():
 
         config_conv = None
         if args.encoder in (C.RNN_WITH_CONV_EMBED_NAME, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
+            conv_embed_output_dim = args.conv_embed_output_dim
+            if args.encoder == C.TRANSFORMER_WITH_CONV_EMBED_TYPE:
+                conv_embed_output_dim = args.transformer_model_size
             config_conv = encoder.ConvolutionalEmbeddingConfig(
                     num_embed=num_embed_source,
+                    output_dim=conv_embed_output_dim,
                     max_filter_width=args.conv_embed_max_filter_width,
                     num_filters=args.conv_embed_num_filters,
                     pool_stride=args.conv_embed_pool_stride,

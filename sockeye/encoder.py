@@ -579,6 +579,7 @@ class ConvolutionalEmbeddingConfig(Config):
     Convolutional embedding encoder configuration.
 
     :param num_embed: Input embedding size.
+    :param output_dim: Output segment embedding size.
     :param max_filter_width: Maximum filter width for convolutions.
     :param num_filters: Number of filters of each width.
     :param pool_stride: Stride for pooling layer after convolutions.
@@ -587,6 +588,7 @@ class ConvolutionalEmbeddingConfig(Config):
     """
     def __init__(self,
                  num_embed: int,
+                 output_dim: int = None,
                  max_filter_width: int = 8,
                  num_filters: Tuple[int] = (200, 200, 250, 250, 300, 300, 300, 300),
                  pool_stride: int = 5,
@@ -595,12 +597,15 @@ class ConvolutionalEmbeddingConfig(Config):
                  add_positional_encoding: bool = False) -> None:
         super().__init__()
         self.num_embed = num_embed
+        self.output_dim = output_dim
         self.max_filter_width = max_filter_width
         self.num_filters = num_filters
         self.pool_stride = pool_stride
         self.num_highway_layers = num_highway_layers
         self.dropout = dropout
         self.add_positional_encoding = add_positional_encoding
+        if self.output_dim is None:
+            self.output_dim = sum(self.num_filters)
 
 
 class ConvolutionalEmbeddingEncoder(Encoder):
@@ -621,6 +626,7 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         utils.check_condition(len(config.num_filters) == config.max_filter_width,
                               "num_filters must have max_filter_width elements.")
         self.num_embed = config.num_embed
+        self.output_dim = config.output_dim
         self.max_filter_width = config.max_filter_width
         self.num_filters = config.num_filters[:]
         self.pool_stride = config.pool_stride
@@ -633,6 +639,9 @@ class ConvolutionalEmbeddingEncoder(Encoder):
                             for filter_width in range(1, self.max_filter_width + 1)}
         self.conv_bias = {filter_width: mx.sym.Variable("%s%s%d%s" % (self.prefix, "conv_", filter_width, "_bias"))
                           for filter_width in range(1, self.max_filter_width + 1)}
+
+        self.project_weight = mx.sym.Variable(self.prefix + "project_weight")
+        self.project_bias = mx.sym.Variable(self.prefix + "project_bias")
 
         self.gate_weight = [mx.sym.Variable("%s%s%d%s" % (self.prefix, "gate_", i, "_weight"))
                             for i in range(self.num_highway_layers)]
@@ -707,13 +716,27 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         if self.dropout > 0:
             pool = mx.sym.Dropout(data=pool, p=self.dropout)
 
-        # Highway network
+        # Raw segment embeddings reshaped for highway network
         # (batch_size * seq_len/stride, total_num_filters)
         seg_embedding = mx.sym.Reshape(data=pool, shape=(-3, total_num_filters))
+
+        # Projection layer if requested output dimension is different from total number of filters
+        # (TransformerEncoder compatibility, not in original paper)
+        if self.output_dim != self.num_embed:
+            # (batch_size * seq_len/stride, outut_dim)
+            seg_embedding = mx.sym.FullyConnected(data=seg_embedding,
+                                                  num_hidden=self.output_dim,
+                                                  weight=self.project_weight,
+                                                  bias=self.project_bias)
+            seg_embedding = mx.sym.Activation(data=seg_embedding, act_type="relu")
+            if self.dropout > 0:
+                seg_embedding = mx.sym.Dropout(data=seg_embedding, p=self.dropout)
+
+        # Highway network
         for i in range(self.num_highway_layers):
             # Gate
             gate = mx.sym.FullyConnected(data=seg_embedding,
-                                         num_hidden=total_num_filters,
+                                         num_hidden=self.output_dim,
                                          weight=self.gate_weight[i],
                                          bias=self.gate_bias[i])
             gate = mx.sym.Activation(data=gate, act_type="sigmoid")
@@ -721,7 +744,7 @@ class ConvolutionalEmbeddingEncoder(Encoder):
                 gate = mx.sym.Dropout(data=gate, p=self.dropout)
             # Transform
             transform = mx.sym.FullyConnected(data=seg_embedding,
-                                              num_hidden=total_num_filters,
+                                              num_hidden=self.output_dim,
                                               weight=self.transform_weight[i],
                                               bias=self.transform_bias[i])
             transform = mx.sym.Activation(data=transform, act_type="relu")
@@ -729,17 +752,18 @@ class ConvolutionalEmbeddingEncoder(Encoder):
                 transform = mx.sym.Dropout(data=transform, p=self.dropout)
             # Connection
             seg_embedding = gate * transform + (1 - gate) * seg_embedding
-        # (batch_size, seq_len/stride, total_num_filters) aka
+        # (batch_size, seq_len/stride, outut_dim) aka
         # (batch_size, encoded_seq_len, num_segment_emded)
         seg_embedding = mx.sym.Reshape(data=seg_embedding,
-                                       shape=(-1, encoded_seq_len, total_num_filters))
+                                       shape=(-1, encoded_seq_len, self.output_dim))
 
-        # If specified, add positional encodings to segment embeddings (used for TransformerEncoder)
+        # If specified, add positional encodings to segment embeddings
+        # (TransformerEncoder compatibility, not in original paper)
         if self.add_positional_encoding:
             seg_embedding = mx.sym.broadcast_add(seg_embedding,
                                                  Embedding.get_positional_encoding(
                                                          length=encoded_seq_len,
-                                                         depth=total_num_filters,
+                                                         depth=self.output_dim,
                                                          name="%spositional_encodings" % self.prefix),
                                                  name='%sadd_positional_encodings' % self.prefix)
 
@@ -758,7 +782,7 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         """
         Return the representation size of this encoder.
         """
-        return sum(self.num_filters)
+        return self.output_dim
 
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """
