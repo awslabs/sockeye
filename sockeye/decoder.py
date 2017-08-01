@@ -159,7 +159,7 @@ class TransformerDecoder(Decoder):
 
         self.embedding = encoder.Embedding(num_embed=config.model_size,
                                            vocab_size=config.vocab_size,
-                                           prefix=C.TARGET_EMBEDDING_PREFIX, dropout=0.,
+                                           prefix=C.TARGET_EMBEDDING_PREFIX, dropout=config.dropout_residual,
                                            add_positional_encoding=config.positional_encodings)
 
         self.cls_w = mx.sym.Variable(

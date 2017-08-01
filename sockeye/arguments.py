@@ -185,7 +185,7 @@ def add_model_parameters(params):
                               type=int,
                               default=(200, 200, 250, 250, 300, 300, 300, 300),
                               help="List of number of filters of each width 1..max for ConvolutionalEmbeddingEncoder. "
-                              "Default: %(default)s.")
+                                   "Default: %(default)s.")
     model_params.add_argument('--conv-embed-pool-stride',
                               type=int_greater_or_equal(1),
                               default=5,
@@ -218,6 +218,7 @@ def add_model_parameters(params):
                               help="Add residual connections to stacked RNNs if --rnn-num-layers > 3. "
                                    "(see Wu ETAL'16). Default: %(default)s.")
 
+    # transformer arguments
     model_params.add_argument('--transformer-model-size',
                               type=int_greater_or_equal(1),
                               default=512,
@@ -233,7 +234,8 @@ def add_model_parameters(params):
     model_params.add_argument('--transformer-feed-forward-num-hidden',
                               type=int_greater_or_equal(1),
                               default=2048,
-                              help='Number of hidden units in feed forward layers when using transformer. Default: %(default)s.')
+                              help='Number of hidden units in feed forward layers when using transformer. '
+                                   'Default: %(default)s.')
     model_params.add_argument('--transformer-no-positional-encodings',
                               action='store_true',
                               help='Do not use positional encodings.')
@@ -387,6 +389,18 @@ def add_training_args(params):
                               default=0.,
                               help='Dropout probability for source embedding and source and target RNNs. '
                                    'Default: %(default)s.')
+    train_params.add_argument('--transformer-dropout-attention',
+                              type=float,
+                              default=0.,
+                              help='Dropout probability for multi-head attention. Default: %(default)s.')
+    train_params.add_argument('--transformer-dropout-relu',
+                              type=float,
+                              default=0.,
+                              help='Dropout probability before relu in feed-forward block. Default: %(default)s.')
+    train_params.add_argument('--transformer-dropout-residual',
+                              type=float,
+                              default=0.,
+                              help='Dropout probability for residual connections. Default: %(default)s.')
 
     train_params.add_argument('--optimizer',
                               default='adam',

@@ -117,6 +117,9 @@ def test_model_parameters(test_params, expected_params):
               smoothed_cross_entropy_alpha=0.3, normalize_loss=False, metrics=[C.PERPLEXITY],
               optimized_metric=C.PERPLEXITY,
               max_updates=-1, checkpoint_frequency=1000, max_num_checkpoint_not_improved=8, dropout=0.0,
+              transformer_dropout_attention=0.0,
+              transformer_dropout_relu=0.0,
+              transformer_dropout_residual=0.0,
               optimizer='adam', min_num_epochs=0,
               initial_learning_rate=0.0003, weight_decay=0.0, momentum=None, clip_gradient=1.0,
               learning_rate_scheduler_type='plateau-reduce', learning_rate_reduce_factor=0.5,
@@ -130,12 +133,17 @@ def test_model_parameters(test_params, expected_params):
      '--weight-decay 1.0 --momentum 1.0 --clip-gradient 2.0 --learning-rate-scheduler-type fixed-rate-inv-t '
      '--learning-rate-reduce-factor 1.0 --learning-rate-reduce-num-not-improved 10 --learning-rate-half-life 20 '
      '--use-fused-rnn --weight-init xavier --weight-init-scale 0.08 --rnn-forget-bias 1.0 '
+     '--transformer-dropout-attention 0.1 --transformer-dropout-relu 0.2 --transformer-dropout-residual 0.3 '
      '--rnn-h2h-init orthogonal_stacked --monitor-bleu 10 --seed 10 --keep-last-params 50'
      ,
     dict(batch_size=128, fill_up='test_fill_up', no_bucketing=True, bucket_width=20, loss=C.SMOOTHED_CROSS_ENTROPY,
          smoothed_cross_entropy_alpha=1.0, normalize_loss=True, metrics=[C.PERPLEXITY, C.ACCURACY],
          optimized_metric=C.BLEU, min_num_epochs=10,
-         max_updates=10, checkpoint_frequency=10, max_num_checkpoint_not_improved=16, dropout=1.0, optimizer='sgd',
+         max_updates=10, checkpoint_frequency=10, max_num_checkpoint_not_improved=16, dropout=1.0,
+         transformer_dropout_attention=0.1,
+         transformer_dropout_relu=0.2,
+         transformer_dropout_residual=0.3,
+         optimizer='sgd',
          initial_learning_rate=1.0, weight_decay=1.0, momentum=1.0, clip_gradient=2.0,
          learning_rate_scheduler_type='fixed-rate-inv-t', learning_rate_reduce_factor=1.0,
          learning_rate_reduce_num_not_improved=10, learning_rate_half_life=20.0, weight_init=C.INIT_XAVIER,

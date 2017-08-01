@@ -22,9 +22,8 @@ import mxnet as mx
 
 from sockeye.config import Config
 from . import constants as C
-from . import initializer
-from . import transformer
 from . import rnn
+from . import transformer
 from . import utils
 
 logger = logging.getLogger(__name__)
@@ -113,7 +112,7 @@ def get_transformer_encoder(config: transformer.TransformerConfig) -> 'Encoder':
     encoders.append(Embedding(num_embed=config.model_size,
                               vocab_size=config.vocab_size,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
-                              dropout=config.dropout,
+                              dropout=config.dropout_residual,
                               add_positional_encoding=config.positional_encodings))
     if config.conv_config is not None:
         encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))

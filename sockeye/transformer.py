@@ -29,7 +29,9 @@ class TransformerConfig(config.Config):
                  feed_forward_num_hidden: int,
                  num_layers: int,
                  vocab_size: int,
-                 dropout: float,
+                 dropout_attention: float,
+                 dropout_relu: float,
+                 dropout_residual: float,
                  layer_normalization: bool,
                  weight_tying: bool,
                  positional_encodings: bool,
@@ -40,7 +42,9 @@ class TransformerConfig(config.Config):
         self.feed_forward_num_hidden = feed_forward_num_hidden
         self.num_layers = num_layers
         self.vocab_size = vocab_size
-        self.dropout = dropout
+        self.dropout_attention = dropout_attention
+        self.dropout_relu = dropout_relu
+        self.dropout_residual = dropout_residual
         self.layer_normalization = layer_normalization
         self.weight_tying = weight_tying
         self.positional_encodings = positional_encodings
@@ -62,19 +66,19 @@ class TransformerEncoderBlock:
         self.attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
                                                        heads=config.attention_heads,
                                                        depth_out=config.model_size,
-                                                       dropout=config.dropout,
+                                                       dropout=config.dropout_attention,
                                                        prefix="%satt_" % prefix)
         self.residual1 = TransformerResidual(num_hidden=config.model_size,
                                              layer_normalization=config.layer_normalization,
-                                             dropout=config.dropout,
+                                             dropout=config.dropout_residual,
                                              prefix="%satt_res" % prefix)
         self.feed_forward = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
                                                    num_model=config.model_size,
-                                                   dropout=config.dropout,
+                                                   dropout=config.dropout_relu,
                                                    prefix="%sff_" % prefix)
         self.residual2 = TransformerResidual(num_hidden=config.model_size,
                                              layer_normalization=config.layer_normalization,
-                                             dropout=config.dropout,
+                                             dropout=config.dropout_residual,
                                              prefix="%sff_res" % prefix)
 
     def __call__(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
@@ -104,28 +108,28 @@ class TransformerDecoderBlock:
         self.self_attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
                                                             heads=config.attention_heads,
                                                             depth_out=config.model_size,
-                                                            dropout=config.dropout,
+                                                            dropout=config.dropout_attention,
                                                             prefix="%satt_self_" % prefix)
         self.residual_self = TransformerResidual(num_hidden=config.model_size,
                                                  layer_normalization=config.layer_normalization,
-                                                 dropout=config.dropout,
+                                                 dropout=config.dropout_residual,
                                                  prefix="%satt_self_res" % prefix)
         self.enc_attention = layers.MultiHeadAttention(depth_att=config.model_size,
                                                        heads=config.attention_heads,
                                                        depth_out=config.model_size,
-                                                       dropout=config.dropout,
+                                                       dropout=config.dropout_attention,
                                                        prefix="%satt_enc_" % prefix)
         self.residual_enc = TransformerResidual(num_hidden=config.model_size,
                                                 layer_normalization=config.layer_normalization,
-                                                dropout=config.dropout,
+                                                dropout=config.dropout_residual,
                                                 prefix="%satt_enc_res" % prefix)
         self.feed_forward = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
                                                    num_model=config.model_size,
-                                                   dropout=config.dropout,
+                                                   dropout=config.dropout_relu,
                                                    prefix="%sff_" % prefix)
         self.residual_ff = TransformerResidual(num_hidden=config.model_size,
                                                layer_normalization=config.layer_normalization,
-                                               dropout=config.dropout,
+                                               dropout=config.dropout_residual,
                                                prefix="%sff_res" % prefix)
 
     def __call__(self,
