@@ -61,7 +61,7 @@ class LayerNormalization:
         var = mx.sym.mean(mx.sym.square(mx.sym.broadcast_minus(inputs, mean)), axis=1, keepdims=True)
         return mean, var
 
-    def normalize(self, inputs: mx.sym.Symbol, eps: float = 0.00001) -> mx.sym.Symbol:
+    def normalize(self, inputs: mx.sym.Symbol, eps: float = 0.000001) -> mx.sym.Symbol:
         """
         Normalizes hidden units of inputs.
         inputs = scale * (inputs - mean) / sqrt(var + eps) + shift
