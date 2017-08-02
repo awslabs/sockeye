@@ -55,6 +55,7 @@ class RecurrentEncoderConfig(EncoderConfig):
     :param vocab_size: Source vocabulary size.
     :param num_embed: Size of embedding layer.
     :param rnn_config: RNN configuration.
+    :param conv_config: Optional configuration for convolutional embedding.
     """
     def __init__(self,
                  vocab_size: int,
@@ -103,7 +104,8 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool) -> 'Encod
 
 def get_transformer_encoder(config: transformer.TransformerConfig) -> 'Encoder':
     """
-    Returns a Transformer encoder.
+    Returns a Transformer encoder, consisting of an embedding layer with
+    positional encodings and a TransformerEncoder instance.
 
     :param config: Configuration for transformer encoder.
     :return: Encoder instance.

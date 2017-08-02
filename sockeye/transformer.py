@@ -221,7 +221,7 @@ class TransformerFeedForward:
         :param length: sequence length
         :return: Symbol of shape (batch_size, seq_len, num_hidden)
         """
-        # TODO: use a convolution to avoid needing to know the sequence length and reshapes?
+        # TODO: use a convolution?
         x = mx.sym.reshape(x, shape=(-3, -1))
         h = mx.sym.FullyConnected(data=x, num_hidden=self.num_hidden, weight=self.w_i2h, bias=self.b_i2h)
         h = mx.sym.Activation(h, act_type="relu")

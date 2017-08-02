@@ -110,7 +110,7 @@ class InferenceModel(model.SockeyeModel):
             (source_encoded,
              source_encoded_length,
              source_encoded_seq_len) = self.encoder.encode(source, source_length, source_seq_len)
-            # TODO think of removing batch2timemajor in training symbol to simplify this
+            # TODO(fhieber): Consider standardizing encoders to return batch-major data to avoid this line.
             source_encoded = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
 
             # initial decoder states

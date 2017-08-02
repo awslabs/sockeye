@@ -347,21 +347,24 @@ class DotAttention(Attention):
 
 class MultiHeadDotAttention(Attention):
     """
-    TODO
+    Dot product attention with multiple heads as proposed in Vaswani et al, Attention is all you need.
+    Can be used with a RecurrentDecoder.
+
+    :param input_previous_word: Feed the previous target embedding into the attention mechanism.
+    :param depth: Number of hidden units.
+    :param heads: Number of attention heads / independently computed attention scores.
     """
 
     def __init__(self,
                  input_previous_word: bool,
                  depth: int,
-                 heads: int,
-                 prefix="att_") -> None:
+                 heads: int) -> None:
         super().__init__(input_previous_word)
         utils.check_condition(depth % heads == 0,
                               "Number of heads (%d) must divide attention depth (%d)" % (heads, depth))
         self.depth = depth
         self.heads = heads
         self.depth_per_head = self.depth // self.heads
-        self.prefix = prefix
         self.s2h_weight = mx.sym.Variable("%ss2h_weight" % self.prefix)
         self.s2h_bias = mx.sym.Variable("%ss2h_bias" % self.prefix)
         self.t2h_weight = mx.sym.Variable("%st2h_weight" % self.prefix)

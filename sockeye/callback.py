@@ -79,7 +79,7 @@ class TrainingMonitor(object):
         # TODO(fhieber): MXNet Speedometer uses root logger. How to fix this?
         self.speedometer = mx.callback.Speedometer(batch_size=batch_size,
                                                    frequent=C.MEASURE_SPEED_EVERY,
-                                                   auto_reset=True)
+                                                   auto_reset=False)
         self.optimized_metric = optimized_metric
         if self.optimized_metric == C.PERPLEXITY:
             self.minimize = True

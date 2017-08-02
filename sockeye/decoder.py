@@ -85,7 +85,7 @@ class Decoder:
         Returns logits, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param prev_word_id: Previous word id: (batch_size,)
+        :param prev_word_id: Previous word id. Shape: (batch_size,).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
@@ -100,7 +100,7 @@ class Decoder:
         Returns a list of symbolic states that represent the initial states of this decoder.
         Used for inference.
 
-        :param source_encoded: Encoded source: (batch_size, source_encoded_max_length, encoder_depth).
+        :param source_encoded: Encoded source. Shape: (batch_size, source_encoded_max_length, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
@@ -142,11 +142,11 @@ class Decoder:
 class TransformerDecoder(Decoder):
     """
     Transformer decoder as in Vaswani et al, 2017: Attention is all you need.
-    For training, we compute all attention scores for each target position in parallel
-    as described in the paper.
-    Inference is implemented as follows:
-    Given a maximum output length, we always compute all layers over the full length but
-    use an attention bias/mask that is updated at each time step.
+    In training, computation scores for each position of the known target sequence are compouted in parallel,
+    yielding most of the speedup.
+    At inference time, the decoder block is evaluated again and again over a maximum length input sequence that is
+    initially filled with zeros and grows during beam search with predicted tokens. Appropriate masking at every
+    time-step ensures correct self-attention scores and is updated with every step.
     """
 
     def __init__(self,
@@ -221,7 +221,7 @@ class TransformerDecoder(Decoder):
         Returns logits, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param prev_word_id: Previous word id: (batch_size,)
+        :param prev_word_id: Previous word id. Shape: (batch_size,).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
@@ -231,7 +231,6 @@ class TransformerDecoder(Decoder):
         # sequences: (batch_size, target_max_length)
         source_encoded, source_encoded_lengths, sequences, lengths = states
 
-        # t=0: prev_word_id is <bos>
         # (batch_size, target_max_length)
         mask = mx.sym.one_hot(indices=lengths, depth=target_max_length, on_value=1, off_value=0)
 
@@ -239,7 +238,7 @@ class TransformerDecoder(Decoder):
         # (batch_size, target_max_length)
         prev_word_id = mx.sym.broadcast_mul(mx.sym.expand_dims(prev_word_id, axis=1), mask)
 
-        # 'append' prev_word_id to sequences
+        # append/insert prev_word_id to sequences
         # (batch_size, target_max_length)
         sequences = sequences + prev_word_id
         lengths += 1
@@ -264,7 +263,7 @@ class TransformerDecoder(Decoder):
         logits = mx.sym.FullyConnected(data=target, num_hidden=self.config.vocab_size,
                                        weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
 
-        # TODO(fhieber): no attention for now
+        # TODO(fhieber): no attention probs for now
         attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
 
         # next states
@@ -279,7 +278,7 @@ class TransformerDecoder(Decoder):
         Returns a list of symbolic states that represent the initial states of this decoder.
         Used for inference.
 
-        :param source_encoded: Encoded source: (batch_size, source_encoded_max_length, encoder_depth).
+        :param source_encoded: Encoded source. Shape: (batch_size, source_encoded_max_length, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
@@ -389,7 +388,7 @@ class RecurrentDecoderConfig(Config):
 
 class RecurrentDecoder(Decoder):
     """
-    Class to generate the decoder part of the computation graph in sequence-to-sequence models.
+    RNN Decoder with attention.
     The architecture is based on Luong et al, 2015: Effective Approaches to Attention-based Neural Machine Translation.
 
     :param config: Configuration for recurrent decoder.
@@ -554,7 +553,7 @@ class RecurrentDecoder(Decoder):
         Returns logits, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param prev_word_id: Previous word id: (batch_size,)
+        :param prev_word_id: Previous word id. Shape: (batch_size,).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
@@ -596,7 +595,7 @@ class RecurrentDecoder(Decoder):
         Returns a list of symbolic states that represent the initial states of this decoder.
         Used for inference.
 
-        :param source_encoded: Encoded source: (batch_size, source_encoded_max_length, encoder_depth).
+        :param source_encoded: Encoded source. Shape: (batch_size, source_encoded_max_length, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
@@ -655,7 +654,6 @@ class RecurrentDecoder(Decoder):
         """
         return [self.rnn]
 
-    # TODO TRAINING
     def get_initial_state(self,
                           source_encoded: mx.sym.Symbol,
                           source_encoded_length: mx.sym.Symbol) -> RecurrentDecoderState:

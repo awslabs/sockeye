@@ -92,7 +92,7 @@ class TrainingModel(model.SockeyeModel):
         Initializes model components, creates training symbol and module, and binds it.
         """
         source = mx.sym.Variable(C.SOURCE_NAME)
-        # TODO: this can be computed and thus removed from data io and inference
+        # TODO(fhieber): this can be computed easily as for target below and could simplify iterator quite a bit.
         source_length = mx.sym.Variable(C.SOURCE_LENGTH_NAME)
         target = mx.sym.Variable(C.TARGET_NAME)
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))

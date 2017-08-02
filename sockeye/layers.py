@@ -129,17 +129,22 @@ def broadcast_lengths(x: mx.sym.Symbol, heads: int) -> mx.sym.Symbol:
     return x
 
 
-def dot_attention(queries, keys, values, length: mx.sym.Symbol, dropout: float = 0.0,
+def dot_attention(queries: mx.sym.Symbol,
+                  keys: mx.sym.Symbol,
+                  values: mx.sym.Symbol,
+                  length: mx.sym.Symbol,
+                  dropout: float = 0.0,
                   bias: Optional[mx.sym.Symbol] = None):
     """
+    Computes dot attention for a set of queries, keys, and values.
 
-    :param queries: (n, lq, d)
-    :param keys: (n, lk, d)
-    :param values: (n, lk, dv)
-    :param length: (n,)
+    :param queries: Attention queries. Shape: (n, lq, d).
+    :param keys: Attention keys. Shape: (n, lk, d).
+    :param values: Attention values. Shape: (n, lk, dv).
+    :param length: Sequence lengths. Shape: (n,).
     :param dropout: Dropout probability.
-    :param bias: (1, lq, lk)
-    :return: (n, lq, dv)
+    :param bias: Optional bias tensor. Shape: (1, lq, lk).
+    :return: 'Context' vectors for each query. Shape: (n, lq, dv).
     """
     # (n, lq, lk)
     logits = mx.sym.batch_dot(lhs=queries, rhs=keys, transpose_b=True)
@@ -165,6 +170,15 @@ def dot_attention(queries, keys, values, length: mx.sym.Symbol, dropout: float =
 
 
 class MultiHeadAttentionBase:
+    """
+    Base class for Multi-head attention.
+
+    :param prefix: Attention prefix.
+    :param depth_att: Attention depth / number of hidden units.
+    :param heads: Number of attention heads.
+    :param depth_out: Output depth / number of output units.
+    :param dropout: Dropout probability on attention scores
+    """
     def __init__(self,
                  prefix: str,
                  depth_att: int = 512,
@@ -190,7 +204,7 @@ class MultiHeadAttentionBase:
                 lengths: mx.sym.Symbol,
                 queries_max_length: int,
                 memory_max_length: int,
-                bias: Optional[mx.sym.Symbol] = None):
+                bias: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
         # scale by sqrt(depth_per_head)
         queries *= self.depth_per_head ** -0.5
 
@@ -219,6 +233,16 @@ class MultiHeadAttentionBase:
 
 
 class MultiHeadSelfAttention(MultiHeadAttentionBase):
+    """
+    Multi-head self-attention. Independent linear projections of inputs serve as
+    queries, keys, and values for the attention.
+
+    :param prefix: Attention prefix.
+    :param depth_att: Attention depth / number of hidden units.
+    :param heads: Number of attention heads.
+    :param depth_out: Output depth / number of output units.
+    :param dropout: Dropout probability on attention scores
+    """
     def __init__(self,
                  prefix: str,
                  depth_att: int = 512,
@@ -272,6 +296,16 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
 
 
 class MultiHeadAttention(MultiHeadAttentionBase):
+    """
+    Multi-head attention layer for queries independent from keys/values.
+
+    :param prefix: Attention prefix.
+    :param depth_att: Attention depth / number of hidden units.
+    :param heads: Number of attention heads.
+    :param depth_out: Output depth / number of output units.
+    :param dropout: Dropout probability on attention scores
+    """
+
     def __init__(self,
                  prefix: str,
                  depth_att: int = 512,
@@ -279,9 +313,6 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                  depth_out: int = 512,
                  dropout: float = 0.0) -> None:
         super().__init__(prefix, depth_att, heads, depth_out, dropout)
-
-        # TODO: query and memory depth different?
-
         self.w_q2h = mx.sym.Variable("%sq2h_weight" % prefix)
         self.b_q2h = mx.sym.Variable("%sq2h_bias" % prefix)
         self.w_kv2h = mx.sym.Variable("%skv2h_weight" % prefix)
@@ -351,12 +382,12 @@ class PositionalEncodings(mx.operator.CustomOp):
     :param depth: Embedding size.
     """
 
-    def __init__(self, length: int, depth: int):
+    def __init__(self, length: int, depth: int) -> None:
         super().__init__()
         self.encodings = self.get_encodings(length, depth)
 
     @staticmethod
-    def get_encodings(length, depth):
+    def get_encodings(length, depth) -> np.ndarray:
         actual_length = length
         length += 1 if length % 2 != 0 else 0
         # (1, depth)
@@ -383,7 +414,7 @@ class PositionalEncodings(mx.operator.CustomOp):
 @mx.operator.register("positional_encodings")
 class PositionalEncodingsProp(mx.operator.CustomOpProp):
 
-    def __init__(self, length: str, depth: str):
+    def __init__(self, length: str, depth: str) -> None:
         super().__init__()
         self.length = int(length)
         self.depth = int(depth)
