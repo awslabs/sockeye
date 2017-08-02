@@ -83,20 +83,20 @@ class TrainingModel(model.SockeyeModel):
         self.context = context
         self.lr_scheduler = lr_scheduler
         self.bucketing = bucketing
-        self._build_model_components(self.config.max_seq_len, fused)
-        self.module = self._build_module(train_iter, self.config.max_seq_len)
+        self._build_model_components(fused)
+        self.module = self._build_module(train_iter)
         self.training_monitor = None
 
-    def _build_module(self,
-                      train_iter: data_io.ParallelBucketSentenceIter,
-                      max_seq_len: int):
+    def _build_module(self, train_iter: data_io.ParallelBucketSentenceIter):
         """
         Initializes model components, creates training symbol and module, and binds it.
         """
         source = mx.sym.Variable(C.SOURCE_NAME)
+        # TODO(fhieber): this can be computed easily as for target below and could simplify iterator quite a bit.
         source_length = mx.sym.Variable(C.SOURCE_LENGTH_NAME)
         target = mx.sym.Variable(C.TARGET_NAME)
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
+        target_length = mx.sym.sum(mx.sym.broadcast_not_equal(target, mx.sym.zeros((1,))), axis=1)
 
         model_loss = loss.get_loss(self.config.config_loss)
 
@@ -113,10 +113,11 @@ class TrainingModel(model.SockeyeModel):
             (source_encoded,
              source_encoded_length,
              source_encoded_seq_len) = self.encoder.encode(source, source_length, seq_len=source_seq_len)
+
             source_lexicon = self.lexicon.lookup(source) if self.lexicon else None
 
-            logits = self.decoder.decode(source_encoded, source_encoded_seq_len, source_encoded_length,
-                                         target, target_seq_len, source_lexicon)
+            logits = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len, target,
+                                                  target_length, target_seq_len, source_lexicon)
 
             outputs = model_loss.get_loss(logits, labels)
 
@@ -129,7 +130,8 @@ class TrainingModel(model.SockeyeModel):
                                           default_bucket_key=train_iter.default_bucket_key,
                                           context=self.context)
         else:
-            logger.info("No bucketing. Unrolled to max_seq_len=%s", max_seq_len)
+            logger.info("No bucketing. Unrolled to (%d,%d)",
+                        self.config.max_seq_len_source, self.config.max_seq_len_target)
             symbol, _, __ = sym_gen(train_iter.buckets[0])
             return mx.mod.Module(symbol=symbol,
                                  data_names=data_names,
@@ -213,7 +215,7 @@ class TrainingModel(model.SockeyeModel):
         cp_decoder = checkpoint_decoder.CheckpointDecoder(self.context[-1],
                                                           self.config.config_data.validation_source,
                                                           self.config.config_data.validation_target,
-                                                          output_folder, self.config.max_seq_len,
+                                                          output_folder, self.config.max_seq_len_source,
                                                           limit=monitor_bleu) \
             if monitor_bleu else None
 

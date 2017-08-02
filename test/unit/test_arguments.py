@@ -11,11 +11,12 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import argparse
+
 import pytest
 
-import sockeye.constants as C
 import sockeye.arguments as arguments
-import argparse
+import sockeye.constants as C
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
@@ -71,19 +72,28 @@ def test_device_args(test_params, expected_params):
               attention_type='mlp', attention_num_hidden=None, attention_coverage_type='count',
               attention_coverage_num_hidden=1,
               lexical_bias=None, learn_lexical_bias=False, weight_tying=False, max_seq_len=100,
+              attention_mhdot_heads=8, transformer_attention_heads=8,
+              transformer_feed_forward_num_hidden=2048, transformer_model_size=512,
+              transformer_num_layers=6,
+              transformer_no_positional_encodings=False,
               max_seq_len_source=None, max_seq_len_target=None,
               attention_use_prev_word=False, context_gating=False, layer_normalization=False,
               encoder=C.RNN_NAME, conv_embed_max_filter_width=8,
-              conv_embed_num_filters=(200, 200, 250, 250, 300, 300, 300, 300),
-              conv_embed_num_highway_layers=4, conv_embed_pool_stride=5)),
+              decoder=C.RNN_NAME,
+              conv_embed_output_dim=None, conv_embed_num_filters=(200, 200, 250, 250, 300, 300, 300, 300),
+              conv_embed_num_highway_layers=4, conv_embed_pool_stride=5, conv_embed_add_positional_encodings=False)),
     ('--params test_params --num-words 10 --num-words-source 11 --num-words-target 12 --word-min-count 10 '
      '--rnn-num-layers 10 --rnn-cell-type gru '
      '--rnn-num-hidden 512 --rnn-residual-connections --num-embed 1024 --num-embed-source 10 --num-embed-target 10 '
      '--attention-type dot --attention-num-hidden 10 --attention-coverage-type tanh '
      '--attention-coverage-num-hidden 10 --lexical-bias test_bias --learn-lexical-bias --weight-tying '
-     '--max-seq-len 10 --max-seq-len-source 11 --max-seq-len-target 12 --attention-use-prev-word --context-gating --layer-normalization '
-     '--encoder rnn-with-conv-embed --conv-embed-max-filter-width 2 --conv-embed-num-filters 100 100 '
-     '--conv-embed-num-highway-layers 2 --conv-embed-pool-stride 2',
+     '--max-seq-len 10 --max-seq-len-source 11 --max-seq-len-target 12 --attention-use-prev-word --context-gating '
+     '--layer-normalization '
+     '--conv-embed-output-dim 512 --conv-embed-max-filter-width 2 --conv-embed-num-filters 100 100 '
+     '--conv-embed-num-highway-layers 2 --conv-embed-pool-stride 2 --conv-embed-add-positional-encodings '
+     '--attention-mhdot-heads 2 --encoder transformer --decoder transformer '
+     '--transformer-attention-heads 2 --transformer-feed-forward-num-hidden 12 --transformer-model-size 6 '
+     '--transformer-num-layers 3 --transformer-no-positional-encodings ',
      dict(params='test_params', num_words=10, num_words_source=11, num_words_target=12,
           word_min_count=10, rnn_num_layers=10, rnn_cell_type=C.GRU_TYPE,
           rnn_num_hidden=512,
@@ -91,10 +101,15 @@ def test_device_args(test_params, expected_params):
           attention_type='dot', attention_num_hidden=10, attention_coverage_type='tanh',
           attention_coverage_num_hidden=10,
           lexical_bias='test_bias', learn_lexical_bias=True, weight_tying=True, max_seq_len=10,
-          max_seq_len_source=11, max_seq_len_target=12,
           attention_use_prev_word=True, context_gating=True, layer_normalization=True,
-          encoder=C.RNN_WITH_CONV_EMBED_NAME, conv_embed_max_filter_width=2, conv_embed_num_filters=[100, 100],
-          conv_embed_num_highway_layers=2, conv_embed_pool_stride=2))
+          attention_mhdot_heads=2, encoder='transformer', transformer_attention_heads=2,
+          decoder='transformer',
+          transformer_feed_forward_num_hidden=12, transformer_model_size=6,
+          transformer_num_layers=3,
+          transformer_no_positional_encodings=True,
+          max_seq_len_source=11, max_seq_len_target=12,
+          conv_embed_output_dim=512, conv_embed_max_filter_width=2, conv_embed_num_filters=[100, 100],
+          conv_embed_num_highway_layers=2, conv_embed_pool_stride=2, conv_embed_add_positional_encodings=True)),
 ])
 def test_model_parameters(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_model_parameters)
@@ -105,10 +120,14 @@ def test_model_parameters(test_params, expected_params):
               smoothed_cross_entropy_alpha=0.3, normalize_loss=False, metrics=[C.PERPLEXITY],
               optimized_metric=C.PERPLEXITY,
               max_updates=-1, checkpoint_frequency=1000, max_num_checkpoint_not_improved=8, dropout=0.0,
+              transformer_dropout_attention=0.0,
+              transformer_dropout_relu=0.0,
+              transformer_dropout_residual=0.0,
               optimizer='adam', min_num_epochs=0,
               initial_learning_rate=0.0003, weight_decay=0.0, momentum=None, clip_gradient=1.0,
               learning_rate_scheduler_type='plateau-reduce', learning_rate_reduce_factor=0.5,
-              learning_rate_reduce_num_not_improved=3, learning_rate_half_life=10, use_fused_rnn=False,
+              learning_rate_reduce_num_not_improved=3, learning_rate_half_life=10,
+              learning_rate_warmup=0, use_fused_rnn=False,
               weight_init='xavier', weight_init_scale=0.04, rnn_forget_bias=0.0, rnn_h2h_init=C.RNN_INIT_ORTHOGONAL,
               monitor_bleu=0, seed=13, keep_last_params=-1)),
     ('--batch-size 128 --fill-up test_fill_up --no-bucketing --bucket-width 20 --loss smoothed-cross-entropy '
@@ -118,15 +137,21 @@ def test_model_parameters(test_params, expected_params):
      '--weight-decay 1.0 --momentum 1.0 --clip-gradient 2.0 --learning-rate-scheduler-type fixed-rate-inv-t '
      '--learning-rate-reduce-factor 1.0 --learning-rate-reduce-num-not-improved 10 --learning-rate-half-life 20 '
      '--use-fused-rnn --weight-init xavier --weight-init-scale 0.08 --rnn-forget-bias 1.0 '
+     '--transformer-dropout-attention 0.1 --transformer-dropout-relu 0.2 --transformer-dropout-residual 0.3 '
      '--rnn-h2h-init orthogonal_stacked --monitor-bleu 10 --seed 10 --keep-last-params 50'
      ,
     dict(batch_size=128, fill_up='test_fill_up', no_bucketing=True, bucket_width=20, loss=C.SMOOTHED_CROSS_ENTROPY,
          smoothed_cross_entropy_alpha=1.0, normalize_loss=True, metrics=[C.PERPLEXITY, C.ACCURACY],
          optimized_metric=C.BLEU, min_num_epochs=10,
-         max_updates=10, checkpoint_frequency=10, max_num_checkpoint_not_improved=16, dropout=1.0, optimizer='sgd',
+         max_updates=10, checkpoint_frequency=10, max_num_checkpoint_not_improved=16, dropout=1.0,
+         transformer_dropout_attention=0.1,
+         transformer_dropout_relu=0.2,
+         transformer_dropout_residual=0.3,
+         optimizer='sgd',
          initial_learning_rate=1.0, weight_decay=1.0, momentum=1.0, clip_gradient=2.0,
          learning_rate_scheduler_type='fixed-rate-inv-t', learning_rate_reduce_factor=1.0,
-         learning_rate_reduce_num_not_improved=10, learning_rate_half_life=20.0, weight_init=C.INIT_XAVIER,
+         learning_rate_reduce_num_not_improved=10, learning_rate_half_life=20.0,
+         learning_rate_warmup=0, weight_init=C.INIT_XAVIER,
          weight_init_scale=0.08, use_fused_rnn=True, rnn_forget_bias=1.0, rnn_h2h_init=C.RNN_INIT_ORTHOGONAL_STACKED,
          monitor_bleu=10, seed=10, keep_last_params=50)),
 ])

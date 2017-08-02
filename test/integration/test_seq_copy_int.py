@@ -22,6 +22,7 @@ _TRAIN_LINE_COUNT = 100
 _DEV_LINE_COUNT = 10
 _LINE_MAX_LENGTH = 9
 
+
 @pytest.mark.parametrize("train_params, translate_params", [
     # "Vanilla" LSTM encoder-decoder with attention
     ("--encoder rnn --rnn-num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 16 --num-embed 8 --attention-type mlp"
@@ -42,8 +43,28 @@ _LINE_MAX_LENGTH = 9
      " --optimized-metric perplexity --max-updates 10 --checkpoint-frequency 10 --optimizer adam"
      " --initial-learning-rate 0.01",
      "--beam-size 2"),
+    # Transformer encoder, GRU decoder, mhdot attention
+    ("--encoder transformer --rnn-num-layers 1 --rnn-cell-type gru --rnn-num-hidden 16 --num-embed 8"
+     " --transformer-num-layers 2 --transformer-attention-heads 2 --transformer-model-size 16"
+     " --transformer-feed-forward-num-hidden 32"
+     " --attention-type mhdot --attention-num-hidden 16 --batch-size 8 --max-updates 10"
+     " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
+     "--beam-size 2"),
+    # LSTM encoder, Transformer decoder
+    ("--encoder rnn --rnn-num-layers 2 --rnn-cell-type lstm --rnn-num-hidden 16 --num-embed 8"
+     " --transformer-num-layers 2 --transformer-attention-heads 2 --transformer-model-size 16"
+     " --transformer-feed-forward-num-hidden 32"
+     " --batch-size 8 --max-updates 10"
+     " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
+     "--beam-size 3"),
+    # Full transformerLSTM encoder, Transformer decoder
+    ("--encoder transformer --decoder transformer"
+     " --transformer-num-layers 3 --transformer-attention-heads 2 --transformer-model-size 16"
+     " --transformer-feed-forward-num-hidden 32"
+     " --batch-size 8 --max-updates 10"
+     " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
+     "--beam-size 2"),
 ])
-
 def test_seq_copy(train_params, translate_params):
     """Task: copy short sequences of digits"""
     with TemporaryDirectory(prefix="test_seq_copy") as work_dir:

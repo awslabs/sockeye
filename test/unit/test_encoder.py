@@ -22,17 +22,21 @@ def test_convolutional_embedding_encoder():
     seq_len = 10
 
     num_embed = 8
+    output_dim = 32
     max_filter_width = 3
     num_filters = [8, 16, 16]
     pool_stride = 5
     num_highway_layers = 2
     dropout = 0.1
+    add_positional_encoding = True
     config = sockeye.encoder.ConvolutionalEmbeddingConfig(num_embed=num_embed,
+                                                          output_dim=output_dim,
                                                           max_filter_width=max_filter_width,
                                                           num_filters=num_filters,
                                                           pool_stride=pool_stride,
                                                           num_highway_layers=num_highway_layers,
-                                                          dropout=dropout)
+                                                          dropout=dropout,
+                                                          add_positional_encoding=add_positional_encoding)
 
     conv_embed = sockeye.encoder.ConvolutionalEmbeddingEncoder(config)
 
@@ -48,7 +52,7 @@ def test_convolutional_embedding_encoder():
 
     exe = encoded_data.simple_bind(mx.cpu(), data=data_nd.shape)
     exe.forward(data=data_nd)
-    assert exe.outputs[0].shape == (8, 2, 40)
+    assert exe.outputs[0].shape == (8, 2, 32)
 
     exe = encoded_data_length.simple_bind(mx.cpu(), data_length=data_length_nd.shape)
     exe.forward(data_length=data_length_nd)

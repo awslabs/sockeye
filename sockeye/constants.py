@@ -24,7 +24,6 @@ PAD_ID = 0
 TOKEN_SEPARATOR = " "
 VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
 
-# default encoder prefixes
 ENCODER_PREFIX = "encoder_"
 EMBEDDING_PREFIX = "embed_"
 ATTENTION_PREFIX = "att_"
@@ -33,6 +32,7 @@ BIDIRECTIONALRNN_PREFIX = ENCODER_PREFIX + "birnn_"
 STACKEDRNN_PREFIX = ENCODER_PREFIX + "rnn_"
 FORWARD_PREFIX = "forward_"
 REVERSE_PREFIX = "reverse_"
+TRANSFORMER_ENCODER_PREFIX = ENCODER_PREFIX + "transformer_"
 CHAR_SEQ_ENCODER_PREFIX = ENCODER_PREFIX + "char_"
 
 # embedding prefixes
@@ -42,8 +42,14 @@ TARGET_EMBEDDING_PREFIX = "target_embed_"
 # encoder names (arguments)
 RNN_NAME = "rnn"
 RNN_WITH_CONV_EMBED_NAME = "rnn-with-conv-embed"
+TRANSFORMER_TYPE = "transformer"
+TRANSFORMER_WITH_CONV_EMBED_TYPE = "transformer-with-conv-embed"
+
 # available encoders
-ENCODERS = [RNN_NAME, RNN_WITH_CONV_EMBED_NAME]
+ENCODERS = [RNN_NAME, RNN_WITH_CONV_EMBED_NAME, TRANSFORMER_TYPE, TRANSFORMER_WITH_CONV_EMBED_TYPE]
+
+# available decoder
+DECODERS = [RNN_NAME, TRANSFORMER_TYPE]
 
 # rnn types
 LSTM_TYPE = 'lstm'
@@ -69,14 +75,16 @@ RNN_INIT_DEFAULT = 'default'
 ATT_BILINEAR = 'bilinear'
 ATT_DOT = 'dot'
 ATT_DOT_SCALED = 'dot_scaled'
+ATT_MH_DOT = 'mhdot'
 ATT_FIXED = 'fixed'
 ATT_LOC = 'location'
 ATT_MLP = 'mlp'
 ATT_COV = "coverage"
-ATT_TYPES = [ATT_BILINEAR, ATT_DOT, ATT_DOT_SCALED, ATT_FIXED, ATT_LOC, ATT_MLP, ATT_COV]
+ATT_TYPES = [ATT_BILINEAR, ATT_DOT, ATT_DOT_SCALED, ATT_MH_DOT, ATT_FIXED, ATT_LOC, ATT_MLP, ATT_COV]
 
 # default decoder prefixes
 DECODER_PREFIX = "decoder_"
+TRANSFORMER_DECODER_PREFIX = DECODER_PREFIX + "transformer_"
 
 # default I/O variable names
 SOURCE_NAME = "source"
