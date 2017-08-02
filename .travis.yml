@@ -8,6 +8,7 @@ before_install:
   - docker pull ubuntu:16.04
 
 python:
+  - "3.4"
   - "3.5"
   - "3.6"
 

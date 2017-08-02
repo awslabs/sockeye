@@ -19,7 +19,10 @@ import yaml
 class TaggedYamlObjectMetaclass(yaml.YAMLObjectMetaclass):
     def __init__(cls, name, bases, kwds):
         cls.yaml_tag = "!" + name
-        super().__init__(name, bases, {**kwds, **{'yaml_tag': "!" + name}})
+        new_kwds = {}
+        new_kwds.update(kwds)
+        new_kwds['yaml_tag'] = "!" + name
+        super().__init__(name, bases, new_kwds)
 
 
 class Config(yaml.YAMLObject, metaclass=TaggedYamlObjectMetaclass):
