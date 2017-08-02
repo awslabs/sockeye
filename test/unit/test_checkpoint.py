@@ -11,12 +11,12 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-from math import isclose
 import tempfile
 from test.common import generate_random_sentence
 
 import sockeye.data_io
 import mxnet as mx
+import numpy as np
 
 
 def create_parallel_sentence_iter(source_sentences, target_sentences, max_len):
@@ -37,9 +37,7 @@ def data_batches_equal(db1, db2):
     # We just compare the data, should probably be enough
     equal = True
     for data1, data2 in zip(db1.data, db2.data):
-        equal = equal \
-                and (data1.shape == data2.shape) \
-                and isclose(mx.nd.prod(data1.reshape((-1,)) == data2.reshape((-1,))).asnumpy()[0], 1.0)
+        equal = equal and np.allclose(data1.asnumpy(), data2.asnumpy())
     return equal
 
 
