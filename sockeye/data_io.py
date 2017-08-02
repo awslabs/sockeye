@@ -351,7 +351,6 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
                  unk_id: int,
                  fill_up: Optional[str] = None,
                  source_data_name=C.SOURCE_NAME,
-                 source_data_length_name=C.SOURCE_LENGTH_NAME,
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
                  dtype='float32'):
@@ -366,7 +365,6 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         self.unk_id = unk_id
         self.dtype = dtype
         self.source_data_name = source_data_name
-        self.source_data_length_name = source_data_length_name
         self.target_data_name = target_data_name
         self.label_name = label_name
         self.fill_up = fill_up
@@ -384,12 +382,11 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
 
         self.provide_data = [
             mx.io.DataDesc(name=source_data_name, shape=(batch_size, self.default_bucket_key[0]), layout=C.BATCH_MAJOR),
-            mx.io.DataDesc(name=source_data_length_name, shape=(batch_size,), layout=C.BATCH_MAJOR),
             mx.io.DataDesc(name=target_data_name, shape=(batch_size, self.default_bucket_key[1]), layout=C.BATCH_MAJOR)]
         self.provide_label = [
             mx.io.DataDesc(name=label_name, shape=(self.batch_size, self.default_bucket_key[1]), layout=C.BATCH_MAJOR)]
 
-        self.data_names = [self.source_data_name, self.source_data_length_name, self.target_data_name]
+        self.data_names = [self.source_data_name, self.target_data_name]
         self.label_names = [self.label_name]
 
         # create index tuples (i,j) into buckets: i := bucket index ; j := row index of bucket array
@@ -525,9 +522,8 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         self.curr_idx += 1
 
         source = self.nd_source[i][j:j + self.batch_size]
-        length = mx.nd.sum(mx.nd.broadcast_not_equal(source, mx.nd.full((1,), C.PAD_ID)), axis=1)
         target = self.nd_target[i][j:j + self.batch_size]
-        data = [source, length, target]
+        data = [source, target]
         label = [self.nd_label[i][j:j + self.batch_size]]
 
         provide_data = [mx.io.DataDesc(name=n, shape=x.shape, layout=C.BATCH_MAJOR) for n, x in
