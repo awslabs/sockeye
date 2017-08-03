@@ -93,10 +93,10 @@ class TrainingModel(model.SockeyeModel):
         """
         utils.check_condition(train_iter.pad_id == C.PAD_ID == 0, "pad id should be 0")
         source = mx.sym.Variable(C.SOURCE_NAME)
-        source_length = mx.sym.sum(mx.sym.broadcast_not_equal(source, mx.sym.zeros((1,))), axis=1)
+        source_length = utils.compute_lengths(source)
         target = mx.sym.Variable(C.TARGET_NAME)
+        target_length = utils.compute_lengths(target)
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
-        target_length = mx.sym.sum(mx.sym.broadcast_not_equal(target, mx.sym.zeros((1,))), axis=1)
 
         model_loss = loss.get_loss(self.config.config_loss)
 

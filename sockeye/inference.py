@@ -105,7 +105,7 @@ class InferenceModel(model.SockeyeModel):
 
         def sym_gen(source_seq_len: int):
             source = mx.sym.Variable(C.SOURCE_NAME)
-            source_length = mx.sym.Variable(C.SOURCE_LENGTH_NAME)
+            source_length = utils.compute_lengths(source)
 
             (source_encoded,
              source_encoded_length,
@@ -118,7 +118,7 @@ class InferenceModel(model.SockeyeModel):
                                                            source_encoded_length,
                                                            source_encoded_seq_len)
 
-            data_names = [C.SOURCE_NAME, C.SOURCE_LENGTH_NAME]
+            data_names = [C.SOURCE_NAME]
             label_names = []
             return mx.sym.Group(decoder_init_states), data_names, label_names
 
@@ -166,9 +166,6 @@ class InferenceModel(model.SockeyeModel):
         """
         return [mx.io.DataDesc(name=C.SOURCE_NAME,
                                shape=(self.encoder_batch_size, source_max_length),
-                               layout=C.BATCH_MAJOR),
-                mx.io.DataDesc(name=C.SOURCE_LENGTH_NAME,
-                               shape=(self.encoder_batch_size,),
                                layout=C.BATCH_MAJOR)]
 
     def _get_decoder_data_shapes(self, source_encoded_max_length) -> List[mx.io.DataDesc]:
@@ -186,7 +183,6 @@ class InferenceModel(model.SockeyeModel):
 
     def run_encoder(self,
                     source: mx.nd.NDArray,
-                    source_lengths: mx.nd.NDArray,
                     source_max_length: int) -> List[mx.nd.NDArray]:
         """
         Runs forward pass of the encoder.
@@ -195,11 +191,10 @@ class InferenceModel(model.SockeyeModel):
         and initial decoder states tiled to beam size.
 
         :param source: Integer-coded input tokens.
-        :param source_lengths: Length of input sentence.
         :param source_max_length: Bucket key.
         :return: Encoded source, source length, initial decoder hidden state, initial decoder hidden states.
         """
-        batch = mx.io.DataBatch(data=[source, source_lengths],
+        batch = mx.io.DataBatch(data=[source],
                                 label=None,
                                 bucket_key=source_max_length,
                                 provide_data=self._get_encoder_data_shapes(source_max_length))
@@ -401,13 +396,12 @@ class Translator:
 
         return self._make_result(trans_input, *self.translate_nd(*self._get_inference_input(trans_input.tokens)))
 
-    def _get_inference_input(self, tokens: List[str]) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, Optional[int]]:
+    def _get_inference_input(self, tokens: List[str]) -> Tuple[mx.nd.NDArray, int]:
         """
-        Returns NDArray of source ids (shape=(1, bucket_key)),
-        NDArray of sentence length (shape=(1,)), and corresponding bucket_key.
+        Returns NDArray of source ids (shape=(1, bucket_key)) and corresponding bucket_key.
 
         :param tokens: List of input tokens.
-        :return NDArray of source ids, NDArray of sentence length, and bucket key.
+        :return NDArray of source ids and bucket key.
         """
         bucket_key = data_io.get_bucket(len(tokens), self.buckets)
         if bucket_key is None:
@@ -415,12 +409,12 @@ class Translator:
             bucket_key = self.buckets[-1]
             tokens = tokens[:bucket_key]
 
+        utils.check_condition(C.PAD_ID == 0, "pad id should be 0")
         source = mx.nd.zeros((1, bucket_key))
         ids = data_io.tokens2ids(tokens, self.vocab_source)
         for i, wid in enumerate(ids):
             source[0, i] = wid
-        length = mx.nd.array([len(ids)])
-        return source, length, bucket_key
+        return source, bucket_key
 
     def _make_result(self,
                      trans_input: TranslatorInput,
@@ -450,13 +444,11 @@ class Translator:
 
     def translate_nd(self,
                      source: mx.nd.NDArray,
-                     source_length: mx.nd.NDArray,
                      bucket_key: int) -> Tuple[np.ndarray, np.ndarray, float]:
         """
         Translates source of source_length, given a bucket_key.
 
         :param source: Source ids. Shape: (1, bucket_key).
-        :param source_length: Source length. Shape: (1,).
         :param bucket_key: Bucket key.
 
         :return: Sequence of translated ids, attention matrix, length-normalized negative log probability.
@@ -465,21 +457,20 @@ class Translator:
         # TODO: max_output_length adaptive to source_length
         max_output_length = bucket_key * 2
 
-        return self._get_best_from_beam(*self._beam_search(source, source_length, bucket_key, max_output_length))
+        return self._get_best_from_beam(*self._beam_search(source, bucket_key, max_output_length))
 
-    def _encode(self, source: mx.nd.NDArray, source_length: mx.nd.NDArray, bucket_key: int) -> List[ModelState]:
+    def _encode(self, source: mx.nd.NDArray, bucket_key: int) -> List[ModelState]:
         """
         Returns a ModelState for each model representing the state of the model after encoding the source.
 
         :param source: Source ids. Shape: (1, bucket_key).
-        :param source_length: Source length. Shape: (1,).
         :param bucket_key: Bucket key.
         :return: List of ModelStates.
         """
         prev_target_word_id = mx.nd.full((self.beam_size,), val=self.start_id, ctx=self.context)
         model_states = [ModelState(bucket_key=m.encoder.get_encoded_seq_len(bucket_key),
                                    prev_target_word_id=prev_target_word_id,
-                                   decoder_states=m.run_encoder(source, source_length, bucket_key))
+                                   decoder_states=m.run_encoder(source, bucket_key))
                         for m in self.models]
         return model_states
 
@@ -521,14 +512,12 @@ class Translator:
 
     def _beam_search(self,
                      source: mx.nd.NDArray,
-                     source_length: mx.nd.NDArray,
                      bucket_key: int,
                      max_output_length: int) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
         """
         Translates a single sentence using beam search.
 
         :param source: Source ids. Shape: (1, bucket_key).
-        :param source_length: Source length. Shape: (1,).
         :param bucket_key: Bucket key.
         :param max_output_length: Cap the output at this maximum length.
         :return List of lists of word ids, list of attentions, array of accumulated length-normalized
@@ -558,7 +547,7 @@ class Translator:
         self.pad_dist[:] = np.inf
 
         # (0) encode source sentence
-        model_states = self._encode(source, source_length, bucket_key)
+        model_states = self._encode(source, bucket_key)
 
         for t in range(0, max_output_length):
 
