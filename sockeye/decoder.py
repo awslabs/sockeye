@@ -605,8 +605,7 @@ class RecurrentDecoder(Decoder):
         new_states = [source_encoded,
                       attention_state.dynamic_source,
                       source_encoded_length,
-                      state.hidden,
-                      *state.layer_states]
+                      state.hidden] + state.layer_states
 
         return logits, attention_state.probs, new_states
 

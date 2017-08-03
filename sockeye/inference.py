@@ -150,7 +150,7 @@ class InferenceModel(model.SockeyeModel):
 
             data_names = [C.TARGET_PREVIOUS_NAME] + state_names
             label_names = []
-            return mx.sym.Group([softmax, attention_probs, *states]), data_names, label_names
+            return mx.sym.Group([softmax, attention_probs] + states), data_names, label_names
 
         source_encoded_max_seq_len = self.encoder.get_encoded_seq_len(self.config.max_seq_len_source)
         return mx.mod.BucketingModule(sym_gen=sym_gen,

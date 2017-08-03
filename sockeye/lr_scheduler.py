@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 class LearningRateScheduler:
 
-    def __init__(self, warmup: int = 0):
+    def __init__(self, warmup: int = 0) -> None:
         self.base_lr = None  # Note: will be overwritten by MXNet optimizer
         check_condition(warmup >= 0, "warmup needs to be >= 0.")
         self.warmup = warmup
