@@ -51,7 +51,7 @@ def define_buckets(max_seq_len: int, step=10) -> List[int]:
 def define_parallel_buckets(max_seq_len_source: int,
                             max_seq_len_target: int,
                             bucket_width: int = 10,
-                            length_ratio:float = 1.0) -> List[Tuple[int, int]]:
+                            length_ratio: float = 1.0) -> List[Tuple[int, int]]:
     """
     Returns (source, target) buckets up to (max_seq_len_source, max_seq_len_target).  The longer side of the data uses
     steps of bucket_width while the shorter side uses steps scaled down by the average target/source length ratio.  If
