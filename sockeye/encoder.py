@@ -30,7 +30,6 @@ logger = logging.getLogger(__name__)
 
 
 class EncoderConfig(Config):
-
     def __init__(self,
                  vocab_size: int,
                  num_embed: int) -> None:
@@ -39,11 +38,11 @@ class EncoderConfig(Config):
         self.num_embed = num_embed
 
 
-def get_encoder(config: Config, fused: bool):
+def get_encoder(config: Config, fused: bool, embed_weight: Optional[mx.sym.Symbol] = None):
     if isinstance(config, RecurrentEncoderConfig):
-        return get_recurrent_encoder(config, fused)
+        return get_recurrent_encoder(config, fused, embed_weight)
     elif isinstance(config, transformer.TransformerConfig):
-        return get_transformer_encoder(config)
+        return get_transformer_encoder(config, embed_weight)
     else:
         raise ValueError("Unsupported encoder configuration")
 
@@ -57,6 +56,7 @@ class RecurrentEncoderConfig(EncoderConfig):
     :param rnn_config: RNN configuration.
     :param conv_config: Optional configuration for convolutional embedding.
     """
+
     def __init__(self,
                  vocab_size: int,
                  num_embed: int,
@@ -67,13 +67,15 @@ class RecurrentEncoderConfig(EncoderConfig):
         self.conv_config = conv_config
 
 
-def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool) -> 'Encoder':
+def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
+                          embed_weight: Optional[mx.sym.Symbol] = None) -> 'Encoder':
     """
     Returns a recurrent encoder with embedding, batch2time-major conversion, and bidirectional RNN.
     If num_layers > 1, adds additional uni-directional RNNs.
 
     :param config: Configuration for recurrent encoder.
     :param fused: Whether to use FusedRNNCell (CuDNN). Only works with GPU context.
+    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
     :return: Encoder instance.
     """
     # TODO give more control on encoder architecture
@@ -82,7 +84,8 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool) -> 'Encod
     encoders.append(Embedding(num_embed=config.num_embed,
                               vocab_size=config.vocab_size,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
-                              dropout=config.rnn_config.dropout))
+                              dropout=config.rnn_config.dropout,
+                              embed_weight=embed_weight))
     if config.conv_config is not None:
         encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
 
@@ -102,12 +105,14 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool) -> 'Encod
     return EncoderSequence(encoders)
 
 
-def get_transformer_encoder(config: transformer.TransformerConfig) -> 'Encoder':
+def get_transformer_encoder(config: transformer.TransformerConfig,
+                            embed_weight: Optional[mx.sym.Symbol] = None) -> 'Encoder':
     """
     Returns a Transformer encoder, consisting of an embedding layer with
     positional encodings and a TransformerEncoder instance.
 
     :param config: Configuration for transformer encoder.
+    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
     :return: Encoder instance.
     """
     encoders = list()
@@ -115,6 +120,7 @@ def get_transformer_encoder(config: transformer.TransformerConfig) -> 'Encoder':
                               vocab_size=config.vocab_size,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
                               dropout=config.dropout_residual,
+                              embed_weight=embed_weight,
                               add_positional_encoding=config.positional_encodings))
     if config.conv_config is not None:
         encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
@@ -212,6 +218,8 @@ class Embedding(Encoder):
     :param vocab_size: Source vocabulary size.
     :param prefix: Name prefix for symbols of this encoder.
     :param dropout: Dropout probability.
+    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
+    :param add_positional_encoding: If true, adds positional encodings to embedding.
     """
 
     def __init__(self,
@@ -219,12 +227,16 @@ class Embedding(Encoder):
                  vocab_size: int,
                  prefix: str,
                  dropout: float,
+                 embed_weight: Optional[mx.sym.Symbol] = None,
                  add_positional_encoding: bool = False):
         self.num_embed = num_embed
         self.vocab_size = vocab_size
         self.prefix = prefix
         self.dropout = dropout
-        self.embed_weight = mx.sym.Variable(prefix + "weight")
+        if embed_weight is not None:
+            self.embed_weight = embed_weight
+        else:
+            self.embed_weight = mx.sym.Variable(prefix + "weight")
         self.add_positional_encoding = add_positional_encoding
 
     def encode(self,
@@ -587,6 +599,7 @@ class ConvolutionalEmbeddingConfig(Config):
     :param num_highway_layers: Number of highway layers for segment embeddings.
     :param dropout: Dropout probability.
     """
+
     def __init__(self,
                  num_embed: int,
                  output_dim: int = None,
@@ -763,9 +776,9 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         if self.add_positional_encoding:
             seg_embedding = mx.sym.broadcast_add(seg_embedding,
                                                  Embedding.get_positional_encoding(
-                                                         length=encoded_seq_len,
-                                                         depth=self.output_dim,
-                                                         name="%spositional_encodings" % self.prefix),
+                                                     length=encoded_seq_len,
+                                                     depth=self.output_dim,
+                                                     name="%spositional_encodings" % self.prefix),
                                                  name='%sadd_positional_encodings' % self.prefix)
 
         # Dropout on final segment embeddings

@@ -4,6 +4,7 @@ include LICENSE
 include NOTICE
 include pylintrc
 include typechecked-files
+include test/data/config_with_missing_attributes.yaml
 include sockeye/git_version.py
 exclude *.sh
 include pytest.ini

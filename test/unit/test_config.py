@@ -126,3 +126,18 @@ def test_copy():
     assert c1 != mod_copy_c1
 
 
+class ConfigWithMissingAttributes(config.Config):
+    def __init__(self, existing_attribute, new_attribute="new_attribute"):
+        super().__init__()
+        self.existing_attribute = existing_attribute
+        self.new_attribute = new_attribute
+
+
+def test_missing_attributes_filled_with_default():
+    # when we load a configuration object that does not contain all attributes as the current version of the
+    # configuration object we expect the missing attributes to be filled with the default values taken from the
+    # __init__ method.
+
+    config_obj = config.Config.load("test/data/config_with_missing_attributes.yaml")
+    assert config_obj.new_attribute == "new_attribute"
+

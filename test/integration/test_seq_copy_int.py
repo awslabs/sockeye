@@ -57,10 +57,11 @@ _LINE_MAX_LENGTH = 9
      " --batch-size 8 --max-updates 10"
      " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 3"),
-    # Full transformerLSTM encoder, Transformer decoder
+    # Full transformer
     ("--encoder transformer --decoder transformer"
      " --transformer-num-layers 3 --transformer-attention-heads 2 --transformer-model-size 16"
      " --transformer-feed-forward-num-hidden 32"
+     " --weight-tying --weight-tying-type src_trg_softmax"
      " --batch-size 8 --max-updates 10"
      " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 2"),

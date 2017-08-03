@@ -14,6 +14,7 @@
 """
 Decoders for sequence-to-sequence models.
 """
+import logging
 from typing import Callable, List, NamedTuple, Tuple
 from typing import Optional
 
@@ -29,13 +30,16 @@ from . import lexicon as lexicons
 from . import rnn
 from . import transformer
 
+logger = logging.getLogger(__name__)
+
 
 def get_decoder(config: Config,
-                lexicon: Optional[lexicons.Lexicon] = None) -> 'Decoder':
+                lexicon: Optional[lexicons.Lexicon] = None,
+                embed_weight: Optional[mx.sym.Symbol] = None) -> 'Decoder':
     if isinstance(config, RecurrentDecoderConfig):
-        return RecurrentDecoder(config=config, lexicon=lexicon, prefix=C.DECODER_PREFIX)
+        return RecurrentDecoder(config=config, lexicon=lexicon, embed_weight=embed_weight, prefix=C.DECODER_PREFIX)
     elif isinstance(config, transformer.TransformerConfig):
-        return TransformerDecoder(config=config, prefix=C.DECODER_PREFIX)
+        return TransformerDecoder(config=config, embed_weight=embed_weight, prefix=C.DECODER_PREFIX)
     else:
         raise ValueError("Unsupported decoder configuration")
 
@@ -147,23 +151,35 @@ class TransformerDecoder(Decoder):
     At inference time, the decoder block is evaluated again and again over a maximum length input sequence that is
     initially filled with zeros and grows during beam search with predicted tokens. Appropriate masking at every
     time-step ensures correct self-attention scores and is updated with every step.
+
+    :param config: Transformer configuration.
+    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new target embedding.
     """
 
     def __init__(self,
                  config: transformer.TransformerConfig,
+                 embed_weight: Optional[mx.sym.Symbol] = None,
                  prefix: str = C.TRANSFORMER_DECODER_PREFIX) -> None:
         self.config = config
         self.prefix = prefix
         self.layers = [transformer.TransformerDecoderBlock(
             config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
 
+        # Embedding & output parameters
+        if embed_weight is None:
+            embed_weight = mx.sym.Variable(C.TARGET_EMBEDDING_PREFIX + "weight")
+
         self.embedding = encoder.Embedding(num_embed=config.model_size,
                                            vocab_size=config.vocab_size,
-                                           prefix=C.TARGET_EMBEDDING_PREFIX, dropout=config.dropout_residual,
+                                           prefix=C.TARGET_EMBEDDING_PREFIX,
+                                           dropout=config.dropout_residual,
+                                           embed_weight=embed_weight,
                                            add_positional_encoding=config.positional_encodings)
-
-        self.cls_w = mx.sym.Variable(
-            "%scls_weight" % prefix) if not config.weight_tying else self.embedding.embed_weight
+        if self.config.weight_tying:
+            logger.info("Tying the target embeddings and prediction matrix.")
+            self.cls_w = embed_weight
+        else:
+            self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
         self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
 
     def decode_sequence(self,
@@ -393,12 +409,14 @@ class RecurrentDecoder(Decoder):
 
     :param config: Configuration for recurrent decoder.
     :param lexicon: Optional Lexicon.
+    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new target embedding.
     :param prefix: Decoder symbol prefix.
     """
 
     def __init__(self,
                  config: RecurrentDecoderConfig,
                  lexicon: Optional[lexicons.Lexicon] = None,
+                 embed_weight: Optional[mx.sym.Symbol] = None,
                  prefix: str = C.DECODER_PREFIX) -> None:
         # TODO: implement variant without input feeding
         self.config = config
@@ -428,13 +446,18 @@ class RecurrentDecoder(Decoder):
         self.hidden_norm = layers.LayerNormalization(self.num_hidden,
                                                      prefix="%shidden_norm" % prefix) \
             if self.config.layer_normalization else None
+
         # Embedding & output parameters
+        if embed_weight is None:
+            embed_weight = mx.sym.Variable(C.TARGET_EMBEDDING_PREFIX + "weight")
         self.embedding = encoder.Embedding(self.config.num_embed, self.config.vocab_size,
-                                           prefix=C.TARGET_EMBEDDING_PREFIX, dropout=0.)  # TODO dropout?
+                                           prefix=C.TARGET_EMBEDDING_PREFIX, dropout=0.,
+                                           embed_weight=embed_weight)  # TODO dropout?
         if self.config.weight_tying:
             check_condition(self.num_hidden == self.config.num_embed,
                             "Weight tying requires target embedding size and rnn_num_hidden to be equal")
-            self.cls_w = self.embedding.embed_weight
+            logger.info("Tying the target embeddings and prediction matrix.")
+            self.cls_w = embed_weight
         else:
             self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
         self.cls_b = mx.sym.Variable("%scls_bias" % prefix)

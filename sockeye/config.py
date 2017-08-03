@@ -12,6 +12,7 @@
 # permissions and limitations under the License.
 
 import copy
+import inspect
 
 import yaml
 
@@ -39,6 +40,18 @@ class Config(yaml.YAMLObject, metaclass=TaggedYamlObjectMetaclass):
         if value == self:
             raise AttributeError("Cannot set self as attribute")
         object.__setattr__(self, key, value)
+
+    def __setstate__(self, state):
+        """Pickle protocol implementation."""
+        # We first take the serialized state:
+        self.__dict__.update(state)
+        # Then we take the constructors default values for missing arguments in order to stay backwards compatible
+        # This way we can add parameters to Config objects and still load old models.
+        init_signature = inspect.signature(self.__init__)
+        for param_name, param in init_signature.parameters.items():
+            if param.default is not param.empty:
+                if not hasattr(self, param_name):
+                    object.__setattr__(self, param_name, param.default)
 
     def freeze(self):
         """

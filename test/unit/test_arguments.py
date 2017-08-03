@@ -66,12 +66,14 @@ def test_device_args(test_params, expected_params):
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('', dict(params=None, num_words=50000, num_words_source=None, num_words_target=None, word_min_count=1,
+    ('', dict(params=None, num_words=50000, num_words_source=None, num_words_target=None,
+              word_min_count=1,
               rnn_num_layers=1, rnn_cell_type=C.LSTM_TYPE, rnn_num_hidden=1024,
               rnn_residual_connections=False, num_embed=512, num_embed_source=None, num_embed_target=None,
               attention_type='mlp', attention_num_hidden=None, attention_coverage_type='count',
               attention_coverage_num_hidden=1,
-              lexical_bias=None, learn_lexical_bias=False, weight_tying=False, max_seq_len=100,
+              lexical_bias=None, learn_lexical_bias=False,
+              weight_tying=False, weight_tying_type="trg_softmax",max_seq_len=100,
               attention_mhdot_heads=8, transformer_attention_heads=8,
               transformer_feed_forward_num_hidden=2048, transformer_model_size=512,
               transformer_num_layers=6,
@@ -87,6 +89,7 @@ def test_device_args(test_params, expected_params):
      '--rnn-num-hidden 512 --rnn-residual-connections --num-embed 1024 --num-embed-source 10 --num-embed-target 10 '
      '--attention-type dot --attention-num-hidden 10 --attention-coverage-type tanh '
      '--attention-coverage-num-hidden 10 --lexical-bias test_bias --learn-lexical-bias --weight-tying '
+     '--weight-tying-type src_trg_softmax '
      '--max-seq-len 10 --max-seq-len-source 11 --max-seq-len-target 12 --attention-use-prev-word --context-gating '
      '--layer-normalization '
      '--conv-embed-output-dim 512 --conv-embed-max-filter-width 2 --conv-embed-num-filters 100 100 '
@@ -100,7 +103,8 @@ def test_device_args(test_params, expected_params):
           rnn_residual_connections=True, num_embed=1024, num_embed_source=10, num_embed_target=10,
           attention_type='dot', attention_num_hidden=10, attention_coverage_type='tanh',
           attention_coverage_num_hidden=10,
-          lexical_bias='test_bias', learn_lexical_bias=True, weight_tying=True, max_seq_len=10,
+          lexical_bias='test_bias', learn_lexical_bias=True, weight_tying=True,
+          weight_tying_type="src_trg_softmax", max_seq_len=10,
           attention_use_prev_word=True, context_gating=True, layer_normalization=True,
           attention_mhdot_heads=2, encoder='transformer', transformer_attention_heads=2,
           decoder='transformer',

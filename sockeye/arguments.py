@@ -301,7 +301,15 @@ def add_model_parameters(params):
 
     model_params.add_argument('--weight-tying',
                               action='store_true',
-                              help='Share target embedding and output layer parameter matrix. Default: %(default)s.')
+                              help='Turn on weight tying. The type of weight sharing is determined through '
+                                   '--weight-tying-type. Default: %(default)s.')
+    model_params.add_argument('--weight-tying-type',
+                              default=C.WEIGHT_TYING_TRG_SOFTMAX,
+                              choices=[C.WEIGHT_TYING_SRC_TRG_SOFTMAX,
+                                       C.WEIGHT_TYING_SRC_TRG,
+                                       C.WEIGHT_TYING_TRG_SOFTMAX],
+                              help='The type of weight tying. source embeddings=src, target embeddings=trg, '
+                                   'target softmax weight matrix=softmax. Default: %(default)s.')
 
     model_params.add_argument('--max-seq-len',
                               type=int_greater_or_equal(1),
