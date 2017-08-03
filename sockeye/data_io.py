@@ -50,8 +50,8 @@ def define_buckets(max_seq_len: int, step=10) -> List[int]:
 
 def define_parallel_buckets(max_seq_len_source: int,
                             max_seq_len_target: int,
-                            bucket_width=10,
-                            length_ratio=1.0) -> List[Tuple[int, int]]:
+                            bucket_width: int = 10,
+                            length_ratio: float = 1.0) -> List[Tuple[int, int]]:
     """
     Returns (source, target) buckets up to (max_seq_len_source, max_seq_len_target).  The longer side of the data uses
     steps of bucket_width while the shorter side uses steps scaled down by the average target/source length ratio.  If
@@ -351,7 +351,6 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
                  unk_id: int,
                  fill_up: Optional[str] = None,
                  source_data_name=C.SOURCE_NAME,
-                 source_data_length_name=C.SOURCE_LENGTH_NAME,
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
                  dtype='float32'):
@@ -366,14 +365,12 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         self.unk_id = unk_id
         self.dtype = dtype
         self.source_data_name = source_data_name
-        self.source_data_length_name = source_data_length_name
         self.target_data_name = target_data_name
         self.label_name = label_name
         self.fill_up = fill_up
 
-        # TODO: consider avoiding explicitly creating length and label arrays to save host memory
+        # TODO: consider avoiding explicitly creating label arrays to save host memory
         self.data_source = [[] for _ in self.buckets]
-        self.data_length = [[] for _ in self.buckets]
         self.data_target = [[] for _ in self.buckets]
         self.data_label = [[] for _ in self.buckets]
 
@@ -385,12 +382,11 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
 
         self.provide_data = [
             mx.io.DataDesc(name=source_data_name, shape=(batch_size, self.default_bucket_key[0]), layout=C.BATCH_MAJOR),
-            mx.io.DataDesc(name=source_data_length_name, shape=(batch_size,), layout=C.BATCH_MAJOR),
             mx.io.DataDesc(name=target_data_name, shape=(batch_size, self.default_bucket_key[1]), layout=C.BATCH_MAJOR)]
         self.provide_label = [
             mx.io.DataDesc(name=label_name, shape=(self.batch_size, self.default_bucket_key[1]), layout=C.BATCH_MAJOR)]
 
-        self.data_names = [self.source_data_name, self.source_data_length_name, self.target_data_name]
+        self.data_names = [self.source_data_name, self.target_data_name]
         self.label_names = [self.label_name]
 
         # create index tuples (i,j) into buckets: i := bucket index ; j := row index of bucket array
@@ -406,7 +402,6 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         # holds NDArrays
         self.indices = []  # This will define how the data arrays will be organized
         self.nd_source = []
-        self.nd_length = []
         self.nd_target = []
         self.nd_label = []
 
@@ -436,7 +431,6 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
             buff_target[:len(target)] = target
             buff_label[:len(target)] = target[1:] + [self.eos_id]
             self.data_source[buck_idx].append(buff_source)
-            self.data_length[buck_idx].append(len(source))
             self.data_target[buck_idx].append(buff_target)
             self.data_label[buck_idx].append(buff_label)
 
@@ -446,7 +440,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         logger.info("Vocab coverage target: %.0f%%", (1 - num_of_unks_target / tokens_target) * 100)
         logger.info('Total: {0} samples in {1} buckets'.format(len(self.data_source), len(self.buckets)))
         nsamples = 0
-        for bkt, buck in zip(self.buckets, self.data_length):
+        for bkt, buck in zip(self.buckets, self.data_source):
             logger.info("bucket of {0} : {1} samples".format(bkt, len(buck)))
             nsamples += len(buck)
         check_condition(nsamples > 0, "0 data points available in the data iterator. "
@@ -460,7 +454,6 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
     def _convert_to_array(self):
         for i in range(len(self.data_source)):
             self.data_source[i] = np.asarray(self.data_source[i], dtype=self.dtype)
-            self.data_length[i] = np.asarray(self.data_length[i], dtype=self.dtype)
             self.data_target[i] = np.asarray(self.data_target[i], dtype=self.dtype)
             self.data_label[i] = np.asarray(self.data_label[i], dtype=self.dtype)
 
@@ -478,8 +471,6 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
 
                     self.data_source[i] = np.concatenate((self.data_source[i], self.data_source[i][random_indices, :]),
                                                          axis=0)
-                    self.data_length[i] = np.concatenate((self.data_length[i], self.data_length[i][random_indices]),
-                                                         axis=0)
                     self.data_target[i] = np.concatenate((self.data_target[i], self.data_target[i][random_indices, :]),
                                                          axis=0)
                     self.data_label[i] = np.concatenate((self.data_label[i], self.data_label[i][random_indices, :]),
@@ -494,7 +485,6 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         random.shuffle(self.idx)
 
         self.nd_source = []
-        self.nd_length = []
         self.nd_target = []
         self.nd_label = []
         self.indices = []
@@ -512,7 +502,6 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         :param shuffled_indices: Indices indicating which data to select.
         """
         self.nd_source.append(mx.nd.array(self.data_source[bucket].take(shuffled_indices, axis=0), dtype=self.dtype))
-        self.nd_length.append(mx.nd.array(self.data_length[bucket].take(shuffled_indices, axis=0), dtype=self.dtype))
         self.nd_target.append(mx.nd.array(self.data_target[bucket].take(shuffled_indices, axis=0), dtype=self.dtype))
         self.nd_label.append(mx.nd.array(self.data_label[bucket].take(shuffled_indices, axis=0), dtype=self.dtype))
 
@@ -533,9 +522,8 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         self.curr_idx += 1
 
         source = self.nd_source[i][j:j + self.batch_size]
-        length = self.nd_length[i][j:j + self.batch_size]
         target = self.nd_target[i][j:j + self.batch_size]
-        data = [source, length, target]
+        data = [source, target]
         label = [self.nd_label[i][j:j + self.batch_size]]
 
         provide_data = [mx.io.DataDesc(name=n, shape=x.shape, layout=C.BATCH_MAJOR) for n, x in
@@ -579,7 +567,6 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         self.curr_idx -= 1
 
         self.nd_source = []
-        self.nd_length = []
         self.nd_target = []
         self.nd_label = []
         for i in range(len(self.data_source)):
