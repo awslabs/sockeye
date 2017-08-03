@@ -20,11 +20,32 @@ logger = logging.getLogger(__name__)
 
 
 class LearningRateScheduler:
+
+    def __init__(self, warmup: int = 0):
+        self.base_lr = None  # Note: will be overwritten by MXNet optimizer
+        check_condition(warmup >= 0, "warmup needs to be >= 0.")
+        self.warmup = warmup
+        self.log_warmup_every_t = self.warmup // 10
+        self.last_warmup_log = -1
+
     def new_evaluation_result(self, has_improved: bool):
         pass
 
     def __call__(self, num_updates):
         pass
+
+    def _warmup(self, num_updates):
+        """
+        Returns linearly increasing fraction of base_lr.
+        """
+        assert self.base_lr is not None
+        if not self.warmup:
+            return self.base_lr
+        fraction = (num_updates + 1) * self.base_lr / (self.warmup + 1)
+        if num_updates > self.last_warmup_log and num_updates % self.log_warmup_every_t == 0:
+            self.last_warmup_log = num_updates
+            logger.info("Learning rate %.0f%% warmed up", fraction * 100)
+        return fraction
 
 
 class LearningRateSchedulerInvSqrtT(LearningRateScheduler):
@@ -38,11 +59,9 @@ class LearningRateSchedulerInvSqrtT(LearningRateScheduler):
     """
 
     def __init__(self, updates_per_checkpoint: int, half_life: int, warmup: int = 0) -> None:
+        super().__init__(warmup)
         check_condition(updates_per_checkpoint > 0, "updates_per_checkpoint needs to be > 0.")
         check_condition(half_life > 0, "half_life needs to be > 0.")
-        check_condition(warmup >= 0, "warmup needs to be >= 0.")
-        # Note: will be overwritten by optimizer  in mxnet
-        self.base_lr = None
         # 0.5 base_lr = base_lr * sqrt(1 + T * factor)
         # then factor = 3 ./ T, with T = half_life * updates_per_checkpoint
         self.factor = 3. / (half_life * updates_per_checkpoint)
@@ -51,10 +70,7 @@ class LearningRateSchedulerInvSqrtT(LearningRateScheduler):
         self.log_every_t = int(half_life * updates_per_checkpoint)
 
     def __call__(self, num_updates: int):
-        if self.warmup > 0:
-            change = min((num_updates + 1) * self.base_lr / self.warmup, 1.0 / sqrt(1 + num_updates * self.factor))
-        else:
-            change = 1.0 / sqrt(1 + num_updates * self.factor)
+        change = min(1.0 / sqrt(1 + num_updates * self.factor), self._warmup(num_updates) if self.warmup > 0 else 99999)
         lr = self.base_lr * change
 
         # Note: this method is called once per parameter for the same t. Making sure to just log once.
@@ -74,11 +90,11 @@ class LearningRateSchedulerInvT(LearningRateScheduler):
     :param half_life: Half life of the learning rate in number of checkpoints.
     """
 
-    def __init__(self, updates_per_checkpoint: int, half_life: int) -> None:
+    def __init__(self, updates_per_checkpoint: int, half_life: int, warmup: int = 0) -> None:
+        super().__init__(warmup)
         check_condition(updates_per_checkpoint > 0, "updates_per_checkpoint needs to be > 0.")
         check_condition(half_life > 0, "half_life needs to be > 0.")
-        # Note: will be overwritten by optimizer
-        self.base_lr = None
+
         # 0.5 base_lr = base_lr * (1 + T * factor)
         # then factor = 1 ./ T, with T = half_life * updates_per_checkpoint
         self.factor = 1. / (half_life * updates_per_checkpoint)
@@ -86,7 +102,8 @@ class LearningRateSchedulerInvT(LearningRateScheduler):
         self.log_every_t = int(half_life * updates_per_checkpoint)
 
     def __call__(self, num_updates: int):
-        lr = self.base_lr / (1 + num_updates * self.factor)
+        change = min(1.0 / (1 + num_updates * self.factor), self._warmup(num_updates) if self.warmup > 0 else 99999)
+        lr = self.base_lr * change
 
         # Note: this method is called once per parameter for the same t. Making sure to just log once.
         if num_updates > self.t_last_log and num_updates % self.log_every_t == 0:
@@ -104,14 +121,16 @@ class LearningRateSchedulerPlateauReduce(LearningRateScheduler):
     :param reduce_num_not_improved: Number of checkpoints with no improvement after which learning rate is reduced.
     """
 
-    def __init__(self, reduce_factor: float, reduce_num_not_improved: int) -> None:
+    def __init__(self, reduce_factor: float, reduce_num_not_improved: int, warmup: int = 0) -> None:
+        super().__init__(warmup)
         check_condition(0.0 < reduce_factor <= 1, "reduce_factor should be in ]0,1].")
         self.reduce_factor = reduce_factor
         self.reduce_num_not_improved = reduce_num_not_improved
         self.num_not_improved = 0
-        # Note: will be overwritten by optimizer in mxnet
-        self.base_lr = None  # type: float
+
         self.lr = None  # type: float
+        self.t_last_log = -1
+        self.log_every_t = self.warmup // 10
         logger.info("Will reduce the learning rate by a factor of %.2f whenever"
                     " the validation score doesn't improve %d times.",
                     reduce_factor, reduce_num_not_improved)
@@ -135,7 +154,8 @@ class LearningRateSchedulerPlateauReduce(LearningRateScheduler):
         if self.lr is None:
             assert self.base_lr is not None
             self.lr = self.base_lr
-        return self.lr
+        lr = self._warmup(t) if self.warmup > 0 and t <= self.warmup else self.lr
+        return lr
 
     def __repr__(self):
         return "LearningRateSchedulerPlateauReduce(reduce_factor=%.2f, " \
@@ -175,6 +195,7 @@ def get_lr_scheduler(scheduler_type: str,
         if learning_rate_reduce_factor >= 1.0:
             logger.warning("Not using plateau-reduce learning rate scheduling: learning_rate_reduce_factor == 1.0")
             return None
-        return LearningRateSchedulerPlateauReduce(learning_rate_reduce_factor, learning_rate_reduce_num_not_improved)
+        return LearningRateSchedulerPlateauReduce(learning_rate_reduce_factor, learning_rate_reduce_num_not_improved,
+                                                  learning_rate_warmup)
     else:
         raise ValueError("Unknown learning rate scheduler type %s." % scheduler_type)
