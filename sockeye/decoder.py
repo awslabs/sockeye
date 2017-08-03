@@ -16,6 +16,7 @@ Decoders for sequence-to-sequence models.
 """
 from typing import Callable, List, NamedTuple, Tuple
 from typing import Optional
+import logging
 
 import mxnet as mx
 
@@ -27,6 +28,9 @@ from . import constants as C
 from . import encoder
 from . import lexicon as lexicons
 from . import rnn
+
+
+logger = logging.getLogger(__name__)
 
 
 class RecurrentDecoderConfig(Config):
@@ -61,19 +65,22 @@ class RecurrentDecoderConfig(Config):
 
 def get_recurrent_decoder(config: RecurrentDecoderConfig,
                           attention: attentions.Attention,
-                          lexicon: Optional[lexicons.Lexicon] = None) -> 'Decoder':
+                          lexicon: Optional[lexicons.Lexicon] = None,
+                          embed_weight: Optional[mx.sym.Symbol] = None) -> 'Decoder':
     """
     Returns a recurrent decoder.
 
     :param config: Configuration for RecurrentDecoder.
     :param attention: Attention model.
     :param lexicon: Optional Lexicon.
+    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
     :return: Decoder instance.
     """
     return RecurrentDecoder(config,
                             attention=attention,
                             lexicon=lexicon,
-                            prefix=C.DECODER_PREFIX)
+                            prefix=C.DECODER_PREFIX,
+                            embed_weight=embed_weight)
 
 
 class Decoder:
@@ -120,13 +127,15 @@ class RecurrentDecoder(Decoder):
     :param attention: Attention model.
     :param lexicon: Optional Lexicon.
     :param prefix: Decoder symbol prefix.
+    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new target embedding.
     """
 
     def __init__(self,
                  config: RecurrentDecoderConfig,
                  attention: attentions.Attention,
                  lexicon: Optional[lexicons.Lexicon] = None,
-                 prefix=C.DECODER_PREFIX) -> None:
+                 prefix=C.DECODER_PREFIX,
+                 embed_weight: Optional[mx.sym.Symbol]=None) -> None:
         # TODO: implement variant without input feeding
         self.rnn_config = config.rnn_config
         self.target_vocab_size = config.vocab_size
@@ -159,12 +168,16 @@ class RecurrentDecoder(Decoder):
         self.hidden_norm = LayerNormalization(self.num_hidden,
                                               prefix="%shidden_norm" % prefix) if self.layer_norm else None
         # Embedding & output parameters
+        if embed_weight is None:
+            embed_weight = mx.sym.Variable(C.TARGET_EMBEDDING_PREFIX + "weight")
         self.embedding = encoder.Embedding(self.num_target_embed, self.target_vocab_size,
-                                           prefix=C.TARGET_EMBEDDING_PREFIX, dropout=0.)  # TODO dropout?
+                                           prefix=C.TARGET_EMBEDDING_PREFIX, dropout=0.,
+                                           embed_weight=embed_weight)  # TODO dropout?
         if self.weight_tying:
             check_condition(self.num_hidden == self.num_target_embed,
                             "Weight tying requires target embedding size and rnn_num_hidden to be equal")
-            self.cls_w = self.embedding.embed_weight
+            logger.debug("Tying the target embeddings and prediction matrix.")
+            self.cls_w = embed_weight
         else:
             self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
         self.cls_b = mx.sym.Variable("%scls_bias" % prefix)

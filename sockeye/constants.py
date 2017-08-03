@@ -38,6 +38,7 @@ CHAR_SEQ_ENCODER_PREFIX = ENCODER_PREFIX + "char_"
 # embedding prefixes
 SOURCE_EMBEDDING_PREFIX = "source_embed_"
 TARGET_EMBEDDING_PREFIX = "target_embed_"
+SHARED_EMBEDDING_PREFIX = "source_target_embed_"
 
 # encoder names (arguments)
 RNN_NAME = "rnn"
@@ -74,6 +75,15 @@ ATT_LOC = 'location'
 ATT_MLP = 'mlp'
 ATT_COV = "coverage"
 ATT_TYPES = [ATT_BILINEAR, ATT_DOT, ATT_DOT_SCALED, ATT_FIXED, ATT_LOC, ATT_MLP, ATT_COV]
+
+# weight tying components
+WEIGHT_TYING_SRC='src'
+WEIGHT_TYING_TRG='trg'
+WEIGHT_TYING_SOFTMAX='softmax'
+# weight tying types (combinations of above components):
+WEIGHT_TYING_TRG_SOFTMAX='trg_softmax'
+WEIGHT_TYING_SRC_TRG='src_trg'
+WEIGHT_TYING_SRC_TRG_SOFTMAX='src_trg_softmax'
 
 # default decoder prefixes
 DECODER_PREFIX = "decoder_"

@@ -49,13 +49,15 @@ class RecurrentEncoderConfig(Config):
         self.conv_config = conv_config
 
 
-def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool) -> 'Encoder':
+def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
+                          embed_weight: Optional[mx.sym.Symbol]=None) -> 'Encoder':
     """
     Returns a recurrent encoder with embedding, batch2time-major conversion, and bidirectional RNN.
     If num_layers > 1, adds additional uni-directional RNNs.
 
     :param config: Configuration for recurrent encoder.
     :param fused: Whether to use FusedRNNCell (CuDNN). Only works with GPU context.
+    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
     :return: Encoder instance.
     """
     # TODO give more control on encoder architecture
@@ -64,7 +66,8 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool) -> 'Encod
     encoders.append(Embedding(num_embed=config.num_embed,
                               vocab_size=config.vocab_size,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
-                              dropout=config.rnn_config.dropout))
+                              dropout=config.rnn_config.dropout,
+                              embed_weight=embed_weight))
     if config.conv_config is not None:
         encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
 
@@ -166,14 +169,19 @@ class Embedding(Encoder):
     :param vocab_size: Source vocabulary size.
     :param prefix: Name prefix for symbols of this encoder.
     :param dropout: Dropout probability.
+    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
     """
 
-    def __init__(self, num_embed: int, vocab_size: int, prefix: str, dropout: float):
+    def __init__(self, num_embed: int, vocab_size: int, prefix: str, dropout: float,
+                 embed_weight: Optional[mx.sym.Symbol]=None):
         self.num_embed = num_embed
         self.vocab_size = vocab_size
         self.prefix = prefix
         self.dropout = dropout
-        self.embed_weight = mx.sym.Variable(prefix + "weight")
+        if embed_weight is not None:
+            self.embed_weight = embed_weight
+        else:
+            self.embed_weight = mx.sym.Variable(prefix + "weight")
 
     def encode(self,
                data: mx.sym.Symbol,

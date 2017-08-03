@@ -22,7 +22,7 @@ import random
 import shutil
 import sys
 from contextlib import ExitStack
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 
 import mxnet as mx
 import numpy as np
@@ -50,12 +50,12 @@ def none_if_negative(val):
     return None if val < 0 else val
 
 
-def _build_or_load_vocab(existing_vocab_path: Optional[str], data_path: str, num_words: int,
+def _build_or_load_vocab(existing_vocab_path: Optional[str], data_paths: List[str], num_words: int,
                          word_min_count: int) -> Dict:
     if existing_vocab_path is None:
-        vocabulary = vocab.build_from_path(data_path,
-                                           num_words=num_words,
-                                           min_count=word_min_count)
+        vocabulary = vocab.build_from_paths(paths=data_paths,
+                                            num_words=num_words,
+                                            min_count=word_min_count)
     else:
         vocabulary = vocab.vocab_from_json(existing_vocab_path)
     return vocabulary
@@ -166,11 +166,21 @@ def main():
             vocab_target = vocab.vocab_from_json_or_pickle(os.path.join(output_folder, C.VOCAB_TRG_NAME))
         else:
             num_words_source = args.num_words if args.num_words_source is None else args.num_words_source
-            vocab_source = _build_or_load_vocab(args.source_vocab, args.source, num_words_source, args.word_min_count)
-            vocab.vocab_to_json(vocab_source, os.path.join(output_folder, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
-
             num_words_target = args.num_words if args.num_words_target is None else args.num_words_target
-            vocab_target = _build_or_load_vocab(args.target_vocab, args.target, num_words_target, args.word_min_count)
+
+            # if the source and target embeddings are tied we build a joint vocabulary:
+            if args.weight_tying and C.WEIGHT_TYING_SRC in args.weight_tying_type \
+                    and C.WEIGHT_TYING_TRG in args.weight_tying_type:
+                vocab_source = vocab_target = _build_or_load_vocab(args.source_vocab,
+                                                                   [args.source, args.target],
+                                                                   args.num_words,
+                                                                   args.word_min_count)
+            else:
+                vocab_source = _build_or_load_vocab(args.source_vocab, [args.source], num_words_source, args.word_min_count)
+                vocab_target = _build_or_load_vocab(args.target_vocab, [args.target], num_words_target, args.word_min_count)
+
+            # write vocabularies
+            vocab.vocab_to_json(vocab_source, os.path.join(output_folder, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
             vocab.vocab_to_json(vocab_target, os.path.join(output_folder, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX)
 
         vocab_source_size = len(vocab_source)
@@ -238,11 +248,13 @@ def main():
                                                         rnn_config=config_rnn,
                                                         conv_config=config_conv)
 
+        decoder_weight_tying = args.weight_tying and C.WEIGHT_TYING_TRG in args.weight_tying_type \
+                               and C.WEIGHT_TYING_SOFTMAX in args.weight_tying_type
         config_decoder = decoder.RecurrentDecoderConfig(vocab_size=vocab_target_size,
                                                         num_embed=num_embed_target,
                                                         rnn_config=config_rnn,
                                                         dropout=args.dropout,
-                                                        weight_tying=args.weight_tying,
+                                                        weight_tying=decoder_weight_tying,
                                                         context_gating=args.context_gating,
                                                         layer_normalization=args.layer_normalization)
 
@@ -273,7 +285,9 @@ def main():
                                          config_attention=config_attention,
                                          config_loss=config_loss,
                                          lexical_bias=args.lexical_bias,
-                                         learn_lexical_bias=args.learn_lexical_bias)
+                                         learn_lexical_bias=args.learn_lexical_bias,
+                                         weight_tying=args.weight_tying,
+                                         weight_tying_type=args.weight_tying_type if args.weight_tying else None)
         model_config.freeze()
 
         # create training model
