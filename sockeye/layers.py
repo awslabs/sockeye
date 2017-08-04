@@ -63,7 +63,8 @@ class LayerNormalization:
 
     def normalize(self, inputs: mx.sym.Symbol, eps: float = 0.000001) -> mx.sym.Symbol:
         """
-        Normalizes hidden units of inputs.
+        Normalizes hidden units of inputs as follows::
+        
         inputs = scale * (inputs - mean) / sqrt(var + eps) + shift
 
         :param inputs: Inputs to normalize. Shape(batch_size, num_hidden).

@@ -16,7 +16,6 @@ from typing import Optional
 import mxnet as mx
 import numpy as np
 
-from sockeye.layers import LayerNormalization
 from . import config
 from . import layers
 
@@ -53,11 +52,11 @@ class TransformerConfig(config.Config):
 
 class TransformerEncoderBlock:
     """
-    Transformer encoder block consisting of
-    - self-attention
-    - residual connection (w/ optional layer normalization)
-    - feed-forward network
-    - residual connection (w/ optional layer normalization)
+    A transformer encoder block consists of the 4 following sublayers:
+     1. self-attention
+     2. residual connection (w/ optional layer normalization)
+     3. feed-forward network
+     4. residual connection (w/ optional layer normalization)
     """
 
     def __init__(self,
@@ -93,13 +92,13 @@ class TransformerEncoderBlock:
 
 class TransformerDecoderBlock:
     """
-    Transformer decoder block consisting of
-    - self-attention
-    - residual connection (w/ optional layer normalization)
-    - source-attention
-    - residual connection (w/ optional layer normalization)
-    - feed-forward network
-    - residual connection (w/ optional layer normalization)
+    A transformer decoder block consists of the following sublayers:
+     1. self-attention
+     2. residual connection (w/ optional layer normalization)
+     3. source-attention
+     4. residual connection (w/ optional layer normalization)
+     5. feed-forward network
+     6. residual connection (w/ optional layer normalization)
     """
 
     def __init__(self,
@@ -156,7 +155,7 @@ class TransformerDecoderBlock:
 
 class TransformerResidual:
     """
-    Residual connection with optional layer normalization
+    Residual connection with optional layer normalization.
     """
 
     def __init__(self,
@@ -169,7 +168,7 @@ class TransformerResidual:
         self.layer_norm = None
         self.prefix = prefix
         if layer_normalization:
-            self.layer_norm = LayerNormalization(num_hidden=self.num_hidden, prefix=self.prefix)
+            self.layer_norm = layers.LayerNormalization(num_hidden=self.num_hidden, prefix=self.prefix)
 
     def __call__(self, x: mx.sym.Symbol, y: mx.sym.Symbol, length: int) -> mx.sym.Symbol:
         """
@@ -250,6 +249,7 @@ class AutoRegressiveBias(mx.operator.CustomOp):
     Returns a symbol of shape (1, length, length) with cells above the main diagonal
     set to a large negative value, e.g.
     length=4
+
     0 1 1 1
     0 0 1 1   * -99999
     0 0 0 1
