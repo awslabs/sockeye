@@ -317,7 +317,7 @@ def average_arrays(arrays: List[mx.nd.NDArray]) -> mx.nd.NDArray:
     """
     if len(arrays) == 1:
         return arrays[0]
-    assert all(arrays[0].shape == a.shape for a in arrays), "nd array shapes do not match"
+    check_condition(all(arrays[0].shape == a.shape for a in arrays), "nd array shapes do not match")
     new_array = mx.nd.zeros(arrays[0].shape, dtype=arrays[0].dtype, ctx=arrays[0].context)
     for a in arrays:
         new_array += a.as_in_context(new_array.context)
