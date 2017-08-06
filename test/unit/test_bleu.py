@@ -29,7 +29,7 @@ test_case_offset = [("am I am a character sequence", "I am a symbol string seque
 # - ref_count
 
 test_case_statistics = [("am I am a character sequence", "I am a symbol string sequence a a",
-                        sockeye.bleu.Statistics([4, 2, 1, 0], [6, 5, 4, 3]))]
+                         sockeye.bleu.Statistics([4, 2, 1, 0], [6, 5, 4, 3]))]
 
 test_case_scoring = [((sockeye.bleu.Statistics([9, 7, 5, 3], [10, 8, 6, 4]), 11, 11), 0.8375922397)]
 
@@ -57,7 +57,7 @@ def test_statistics(hypothesis, reference, expected_stat):
 
 @pytest.mark.parametrize("statistics, expected_score", test_case_scoring)
 def test_scoring(statistics, expected_score):
-    score = sockeye.bleu.bleu_from_counts(statistics);
+    score = sockeye.bleu.bleu_from_counts(statistics)
     assert abs(score - expected_score) < EPSILON
 
 
@@ -65,16 +65,15 @@ def test_scoring(statistics, expected_score):
                          test_case_offset)
 def test_offset(hypothesis, reference, expected_with_offset, expected_without_offset):
     score_without_offset = sockeye.bleu.bleu_from_counts(sockeye.bleu.bleu_counts(hypothesis, reference),
-                                                         offset = 0.0)
-    print(sockeye.bleu.bleu_counts(hypothesis, reference))
+                                                         offset=0.0)
     assert abs(expected_without_offset - score_without_offset) < EPSILON
 
     score_with_offset = sockeye.bleu.bleu_from_counts(sockeye.bleu.bleu_counts(hypothesis, reference),
-                                                      offset = 0.1)
+                                                      offset=0.1)
     assert abs(expected_with_offset - score_with_offset) < EPSILON
 
 
 @pytest.mark.parametrize("statistics, offset, expected_score", test_case_degenerate_stats)
 def test_degenerate_statistics(statistics, offset, expected_score):
-    score = sockeye.bleu.bleu_from_counts(statistics, offset = offset)
+    score = sockeye.bleu.bleu_from_counts(statistics, offset=offset)
     assert score == expected_score
