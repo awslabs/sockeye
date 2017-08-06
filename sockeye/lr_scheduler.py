@@ -167,7 +167,7 @@ def get_lr_scheduler(scheduler_type: str,
                      learning_rate_half_life: int,
                      learning_rate_reduce_factor: float,
                      learning_rate_reduce_num_not_improved: int,
-                     learning_rate_warmup: Optional[int] = None) -> Optional[LearningRateScheduler]:
+                     learning_rate_warmup: Optional[int] = 0) -> Optional[LearningRateScheduler]:
     """
     Returns a learning rate scheduler.
 
@@ -186,7 +186,7 @@ def get_lr_scheduler(scheduler_type: str,
     if scheduler_type == "fixed-rate-inv-sqrt-t":
         return LearningRateSchedulerInvSqrtT(updates_per_checkpoint, learning_rate_half_life, learning_rate_warmup)
     elif scheduler_type == "fixed-rate-inv-t":
-        return LearningRateSchedulerInvT(updates_per_checkpoint, learning_rate_half_life)
+        return LearningRateSchedulerInvT(updates_per_checkpoint, learning_rate_half_life, learning_rate_warmup)
     elif scheduler_type == "plateau-reduce":
         check_condition(learning_rate_reduce_factor is not None,
                         "learning_rate_reduce_factor needed for plateau-reduce scheduler")
