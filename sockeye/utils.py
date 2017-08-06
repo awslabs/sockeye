@@ -537,13 +537,46 @@ def namedtuple_with_defaults(typename, field_names, default_values: Mapping[str,
     return T
 
 
+def read_metrics_file(path: str) -> Dict[str, List]:
+    """
+    Reads lines metrics file and returns dictionary of metrics to value list.
+
+    :param path: File to read metric values from.
+    :return: Dictionary of metric names (e.g. perplexity-train) mapping to a list of values.
+    """
+    metrics = collections.defaultdict(list)
+    with open(path) as fin:
+        for line in fin:
+            fields = line.strip().split('\t')
+            checkpoint = int(fields[0])
+            metrics['checkpoint'].append(checkpoint)
+            for field in fields[1:]:
+                key, value = field.split("=", 1)
+                metrics[key].append(float(value))
+    return dict(metrics)
+
+
+def get_validation_metric_points(model_path: str, metric: str):
+    """
+    Returns tuples of value and checkpoint for given metric from metrics file at model_path.
+    :param model_path: Model path containing .metrics file.
+    :param metric: Metric values to extract.
+    :return: List of tuples (value, checkpoint).
+    """
+    metrics_path = os.path.join(model_path, C.METRICS_NAME)
+    data = read_metrics_file(metrics_path)
+    checkpoints = data.get('checkpoint', [])
+    metric_values = data.get(metric + '-val', [])
+    return [(value, cp) for value, cp in zip(metric_values, checkpoints)]
+
+
 def read_metrics_points(path: str, model_path: str, metric: str) -> List[Tuple[float, int]]:
     """
     Reads lines from .metrics file and return list of elements [val, checkpoint]
 
-    :param metric: Metric according to which checkpoints are selected.  Corresponds to columns in model/metrics file.
     :param path: File to read metric values from.
     :param model_path: path where the params files reside.
+    :param metric: Metric according to which checkpoints are selected.  Corresponds to columns in model/metrics file.
     :return: List of pairs (metric value, checkpoint).
     """
     points = []
