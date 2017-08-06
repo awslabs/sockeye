@@ -568,32 +568,3 @@ def get_validation_metric_points(model_path: str, metric: str):
     checkpoints = data.get('checkpoint', [])
     metric_values = data.get(metric + '-val', [])
     return [(value, cp) for value, cp in zip(metric_values, checkpoints)]
-
-
-def read_metrics_points(path: str, model_path: str, metric: str) -> List[Tuple[float, int]]:
-    """
-    Reads lines from .metrics file and return list of elements [val, checkpoint]
-
-    :param path: File to read metric values from.
-    :param model_path: path where the params files reside.
-    :param metric: Metric according to which checkpoints are selected.  Corresponds to columns in model/metrics file.
-    :return: List of pairs (metric value, checkpoint).
-    """
-    points = []
-    # First field is checkpoint id
-    # Metric on validation (dev) set looks like this: METRIC-val=N
-    with open(path, "r") as metrics_in:
-        for line in metrics_in:
-            fields = line.split()
-            checkpoint = int(fields[0])
-            # Check that the corresponding params files exists
-            if not os.path.exists(os.path.join(model_path, C.PARAMS_NAME % checkpoint)):
-                continue
-            for field in fields[1:]:
-                key_value = field.split("=")
-                if len(key_value) == 2:
-                    metric_set = key_value[0].split("-")
-                    if len(metric_set) == 2 and metric_set[0] == metric and metric_set[1] == "val":
-                        metric_value = float(key_value[1])
-                        points.append([metric_value, checkpoint])
-    return points
