@@ -474,10 +474,10 @@ def add_training_args(params):
                               help="Half-life of learning rate in checkpoints. For 'fixed-rate-*' "
                                    "learning rate schedulers. Default: %(default)s.")
     train_params.add_argument('--learning-rate-warmup',
-                              type=float,
+                              type=int,
                               default=0,
-                              help="Number of warmup steps. For 'fixed-rate-*' "
-                                   "learning rate schedulers. Default: %(default)s.")
+                              help="Number of warmup steps. If set to x, linearly increases learning rate from 10%% "
+                                   "to 100%% of the initial learning rate. Default: %(default)s.")
 
     train_params.add_argument('--use-fused-rnn',
                               default=False,
