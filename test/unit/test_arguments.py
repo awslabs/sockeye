@@ -68,48 +68,49 @@ def test_device_args(test_params, expected_params):
 @pytest.mark.parametrize("test_params, expected_params", [
     ('', dict(params=None, num_words=50000, num_words_source=None, num_words_target=None,
               word_min_count=1,
-              rnn_num_layers=1, rnn_cell_type=C.LSTM_TYPE, rnn_num_hidden=1024,
+              num_layers=1, encoder_num_layers=None, decoder_num_layers=None,
+              rnn_cell_type=C.LSTM_TYPE, rnn_num_hidden=1024,
               rnn_residual_connections=False, num_embed=512, num_embed_source=None, num_embed_target=None,
               attention_type='mlp', attention_num_hidden=None, attention_coverage_type='count',
               attention_coverage_num_hidden=1,
               lexical_bias=None, learn_lexical_bias=False,
-              weight_tying=False, weight_tying_type="trg_softmax",max_seq_len=100,
+              weight_tying=False, weight_tying_type="trg_softmax", max_seq_len=100,
               attention_mhdot_heads=8, transformer_attention_heads=8,
               transformer_feed_forward_num_hidden=2048, transformer_model_size=512,
-              transformer_num_layers=6,
               transformer_no_positional_encodings=False,
               max_seq_len_source=None, max_seq_len_target=None,
-              attention_use_prev_word=False, context_gating=False, layer_normalization=False,
+              attention_use_prev_word=False, rnn_context_gating=False, layer_normalization=False,
               encoder=C.RNN_NAME, conv_embed_max_filter_width=8,
               decoder=C.RNN_NAME,
               conv_embed_output_dim=None, conv_embed_num_filters=(200, 200, 250, 250, 300, 300, 300, 300),
               conv_embed_num_highway_layers=4, conv_embed_pool_stride=5, conv_embed_add_positional_encodings=False)),
     ('--params test_params --num-words 10 --num-words-source 11 --num-words-target 12 --word-min-count 10 '
-     '--rnn-num-layers 10 --rnn-cell-type gru '
+     '--encoder-num-layers 10 --rnn-cell-type gru '
      '--rnn-num-hidden 512 --rnn-residual-connections --num-embed 1024 --num-embed-source 10 --num-embed-target 10 '
      '--attention-type dot --attention-num-hidden 10 --attention-coverage-type tanh '
      '--attention-coverage-num-hidden 10 --lexical-bias test_bias --learn-lexical-bias --weight-tying '
      '--weight-tying-type src_trg_softmax '
-     '--max-seq-len 10 --max-seq-len-source 11 --max-seq-len-target 12 --attention-use-prev-word --context-gating '
+     '--max-seq-len 10 --max-seq-len-source 11 --max-seq-len-target 12 --attention-use-prev-word --rnn-context-gating '
      '--layer-normalization '
      '--conv-embed-output-dim 512 --conv-embed-max-filter-width 2 --conv-embed-num-filters 100 100 '
      '--conv-embed-num-highway-layers 2 --conv-embed-pool-stride 2 --conv-embed-add-positional-encodings '
      '--attention-mhdot-heads 2 --encoder transformer --decoder transformer '
      '--transformer-attention-heads 2 --transformer-feed-forward-num-hidden 12 --transformer-model-size 6 '
-     '--transformer-num-layers 3 --transformer-no-positional-encodings ',
+     '--decoder-num-layers 3 --transformer-no-positional-encodings ',
      dict(params='test_params', num_words=10, num_words_source=11, num_words_target=12,
-          word_min_count=10, rnn_num_layers=10, rnn_cell_type=C.GRU_TYPE,
+          word_min_count=10, encoder_num_layers=10, rnn_cell_type=C.GRU_TYPE,
           rnn_num_hidden=512,
+          num_layers=1,
           rnn_residual_connections=True, num_embed=1024, num_embed_source=10, num_embed_target=10,
           attention_type='dot', attention_num_hidden=10, attention_coverage_type='tanh',
           attention_coverage_num_hidden=10,
           lexical_bias='test_bias', learn_lexical_bias=True, weight_tying=True,
           weight_tying_type="src_trg_softmax", max_seq_len=10,
-          attention_use_prev_word=True, context_gating=True, layer_normalization=True,
+          attention_use_prev_word=True, rnn_context_gating=True, layer_normalization=True,
           attention_mhdot_heads=2, encoder='transformer', transformer_attention_heads=2,
           decoder='transformer',
           transformer_feed_forward_num_hidden=12, transformer_model_size=6,
-          transformer_num_layers=3,
+          decoder_num_layers=3,
           transformer_no_positional_encodings=True,
           max_seq_len_source=11, max_seq_len_target=12,
           conv_embed_output_dim=512, conv_embed_max_filter_width=2, conv_embed_num_filters=[100, 100],

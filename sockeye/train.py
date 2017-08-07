@@ -95,9 +95,6 @@ def main():
     if args.use_fused_rnn:
         check_condition(not args.use_cpu, "GPU required for FusedRNN cells")
 
-    if args.rnn_residual_connections:
-        check_condition(args.rnn_num_layers > 2, "Residual connections require at least 3 RNN layers")
-
     check_condition(args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics,
                     "Must optimize either BLEU or one of tracked metrics (--metrics)")
 
@@ -228,6 +225,8 @@ def main():
         # model configuration
         num_embed_source = args.num_embed if args.num_embed_source is None else args.num_embed_source
         num_embed_target = args.num_embed if args.num_embed_target is None else args.num_embed_target
+        encoder_num_layers = args.num_layers if args.encoder_num_layers is None else args.encoder_num_layers
+        decoder_num_layers = args.num_layers if args.decoder_num_layers is None else args.decoder_num_layers
 
         config_conv = None
         if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
@@ -243,7 +242,7 @@ def main():
                 model_size=args.transformer_model_size,
                 attention_heads=args.transformer_attention_heads,
                 feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
-                num_layers=args.transformer_num_layers,
+                num_layers=encoder_num_layers,
                 vocab_size=vocab_source_size,
                 dropout_attention=args.transformer_dropout_attention,
                 dropout_relu=args.transformer_dropout_relu,
@@ -258,7 +257,7 @@ def main():
                 num_embed=num_embed_source,
                 rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
                                          num_hidden=args.rnn_num_hidden,
-                                         num_layers=args.rnn_num_layers,
+                                         num_layers=encoder_num_layers,
                                          dropout=args.dropout,
                                          residual=args.rnn_residual_connections,
                                          forget_bias=args.rnn_forget_bias),
@@ -269,7 +268,7 @@ def main():
                 model_size=args.transformer_model_size,
                 attention_heads=args.transformer_attention_heads,
                 feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
-                num_layers=args.transformer_num_layers,
+                num_layers=decoder_num_layers,
                 vocab_size=vocab_target_size,
                 dropout_attention=args.transformer_dropout_attention,
                 dropout_relu=args.transformer_dropout_relu,
@@ -300,14 +299,14 @@ def main():
                 num_embed=num_embed_target,
                 rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
                                          num_hidden=args.rnn_num_hidden,
-                                         num_layers=args.rnn_num_layers,
+                                         num_layers=decoder_num_layers,
                                          dropout=args.dropout,
                                          residual=args.rnn_residual_connections,
                                          forget_bias=args.rnn_forget_bias),
                 attention_config=config_attention,
                 dropout=args.dropout,
                 weight_tying=decoder_weight_tying,
-                context_gating=args.context_gating,
+                context_gating=args.rnn_context_gating,
                 layer_normalization=args.layer_normalization)
 
         config_loss = loss.LossConfig(type=args.loss,

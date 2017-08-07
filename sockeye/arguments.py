@@ -182,6 +182,21 @@ def add_model_parameters(params):
                               default=C.RNN_NAME,
                               help="Type of encoder. Default: %(default)s.")
 
+    model_params.add_argument('--num-layers',
+                              type=int_greater_or_equal(1),
+                              default=1,
+                              help='Number of layers for encoder & decoder architectures. Default: %(default)s.')
+    model_params.add_argument('--encoder-num-layers',
+                              type=int,
+                              default=None,
+                              help='Number of layers for encoder architectures. Overrides --num-layers. '
+                                   'Default: %(default)s.')
+    model_params.add_argument('--decoder-num-layers',
+                              type=int,
+                              default=None,
+                              help='Number of layers for decoder architectures. Overrides --num-layers. '
+                                   'Default: %(default)s.')
+
     model_params.add_argument('--conv-embed-output-dim',
                               type=int_greater_or_equal(1),
                               default=None,
@@ -212,10 +227,7 @@ def add_model_parameters(params):
                               help="Add positonal encodings to final segment embeddings for"
                                    " ConvolutionalEmbeddingEncoder. Default: %(default)s.")
 
-    model_params.add_argument('--rnn-num-layers',
-                              type=int_greater_or_equal(1),
-                              default=1,
-                              help='Number of layers for encoder and decoder. Default: %(default)s.')
+    # rnn arguments
     model_params.add_argument('--rnn-cell-type',
                               choices=C.CELL_TYPES,
                               default=C.LSTM_TYPE,
@@ -229,20 +241,20 @@ def add_model_parameters(params):
                               default=False,
                               help="Add residual connections to stacked RNNs if --rnn-num-layers > 3. "
                                    "(see Wu ETAL'16). Default: %(default)s.")
+    model_params.add_argument('--rnn-context-gating', action="store_true",
+                              help="Enables a context gate which adaptively weighs the RNN decoder input against the"
+                                   "source context vector before each update of the decoder hidden state.")
 
     # transformer arguments
     model_params.add_argument('--transformer-model-size',
                               type=int_greater_or_equal(1),
                               default=512,
                               help='Size of all layers and embeddings when using transformer. Default: %(default)s.')
-    model_params.add_argument('--transformer-num-layers',
-                              type=int_greater_or_equal(1),
-                              default=6,
-                              help='Number of encoder and decoder layers when using transformer. Default: %(default)s.')
     model_params.add_argument('--transformer-attention-heads',
                               type=int_greater_or_equal(1),
                               default=8,
-                              help='Number of heads for all attention when using transformer. Default: %(default)s.')
+                              help='Number of heads for all self-attention when using transformer layers. '
+                                   'Default: %(default)s.')
     model_params.add_argument('--transformer-feed-forward-num-hidden',
                               type=int_greater_or_equal(1),
                               default=2048,
@@ -252,6 +264,7 @@ def add_model_parameters(params):
                               action='store_true',
                               help='Do not use positional encodings.')
 
+    # embedding arguments
     model_params.add_argument('--num-embed',
                               type=int_greater_or_equal(1),
                               default=512,
@@ -265,15 +278,18 @@ def add_model_parameters(params):
                               default=None,
                               help='Embedding size for target tokens. Overrides --num-embed. Default: %(default)s')
 
+    # attention arguments
     model_params.add_argument('--attention-type',
                               choices=C.ATT_TYPES,
                               default=C.ATT_MLP,
-                              help='Attention model. Choices: {%(choices)s}. '
+                              help='Attention model for RNN decoders. Choices: {%(choices)s}. '
                                    'Default: %(default)s.')
     model_params.add_argument('--attention-num-hidden',
                               default=None,
                               type=int,
                               help='Number of hidden units for attention layers. Default: equal to --rnn-num-hidden.')
+    model_params.add_argument('--attention-use-prev-word', action="store_true",
+                              help="Feed the previous target embedding into the attention mechanism.")
 
     model_params.add_argument('--attention-coverage-type',
                               choices=["tanh", "sigmoid", "relu", "softrelu", "gru", "count"],
@@ -318,22 +334,18 @@ def add_model_parameters(params):
     model_params.add_argument('--max-seq-len-source',
                               type=int_greater_or_equal(1),
                               default=None,
-                              help='Maximum source sequence length in tokens. Overrides --max-seq-len. Default: %(default)s')
+                              help='Maximum source sequence length in tokens. '
+                                   'Overrides --max-seq-len. Default: %(default)s')
     model_params.add_argument('--max-seq-len-target',
                               type=int_greater_or_equal(1),
                               default=None,
-                              help='Maximum target sequence length in tokens. Overrides --max-seq-len. Default: %(default)s')
-
-    model_params.add_argument('--attention-use-prev-word', action="store_true",
-                              help="Feed the previous target embedding into the attention mechanism.")
-
-    model_params.add_argument('--context-gating', action="store_true",
-                              help="Enables a context gate which adaptively weighs the decoder input against the"
-                                   "source context vector before each update of the decoder hidden state.")
+                              help='Maximum target sequence length in tokens. '
+                                   'Overrides --max-seq-len. Default: %(default)s')
 
     model_params.add_argument('--layer-normalization', action="store_true",
-                              help="Adds layer normalization before non-linear activations of 1) MLP attention, "
-                                   "2) decoder RNN state initialization, and 3) RNN hidden state. "
+                              help="Adds layer normalization before non-linear activations. "
+                                   "This includes MLP attention, RNN decoder state initialization, "
+                                   "RNN decoder hidden state, transformer layers."
                                    "It does not normalize RNN cell activations "
                                    "(this can be done using the '%s' or '%s' rnn-cell-type." % (C.LNLSTM_TYPE,
                                                                                                 C.LNGLSTM_TYPE))

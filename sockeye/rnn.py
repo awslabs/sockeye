@@ -77,6 +77,7 @@ def get_stacked_rnn(config: RNNConfig, prefix: str) -> mx.rnn.SequentialRNNCell:
             cell = LayerNormPerGateGRUCell(num_hidden=config.num_hidden, prefix=cell_prefix)
         else:
             raise NotImplementedError()
+
         if config.residual and layer > 0:
             cell = mx.rnn.ResidualCell(cell)
         rnn.add(cell)
