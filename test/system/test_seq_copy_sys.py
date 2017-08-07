@@ -45,7 +45,7 @@ _LINE_MAX_LENGTH = 9
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
      " --decoder transformer --batch-size 16"
      " --loss cross-entropy --optimized-metric perplexity --max-updates 3000"
-     " --transformer-num-layers 1 --transformer-attention-heads 4 --transformer-model-size 32"
+     " --transformer-attention-heads 4 --transformer-model-size 32"
      " --transformer-feed-forward-num-hidden 64"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",

@@ -323,7 +323,6 @@ class DotAttention(Attention):
                                               weight=self.t2h_weight,
                                               num_hidden=self.num_hidden,
                                               no_bias=True, name="%squery_hidden_fc" % self.prefix)
-            query *= self.num_hidden ** -0.5
 
             # scale down dot product by sqrt(num_hidden) [Vaswani et al, 17]
             if self.scale is not None:
