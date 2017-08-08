@@ -500,9 +500,6 @@ class RecurrentDecoder(Decoder):
         :return: Logits of next-word predictions for target sequence.
                  Shape: (batch_size * target_max_length, target_vocab_size)
         """
-        # (batch_size, source_encoded_max_length, encoder_depth)
-        source_encoded = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
-
         # embed and slice target words
         # target_embed: (batch_size, target_seq_len, num_target_embed)
         target_embed, target_lengths, target_max_length = self.embedding.encode(target, target_lengths,
@@ -511,7 +508,8 @@ class RecurrentDecoder(Decoder):
         target_embed = mx.sym.split(data=target_embed, num_outputs=target_max_length, axis=1, squeeze_axis=True)
 
         # get recurrent attention function conditioned on source
-        attention_func = self.attention.on(source_encoded, source_encoded_lengths, source_encoded_max_length)
+        source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
+        attention_func = self.attention.on(source_encoded_batch_major, source_encoded_lengths, source_encoded_max_length)
         attention_state = self.attention.get_initial_state(source_encoded_lengths, source_encoded_max_length)
 
         # initialize decoder states
@@ -692,7 +690,7 @@ class RecurrentDecoder(Decoder):
         # initial states for each layer
         layer_states = []
         for state_idx, (_, init_num_hidden) in enumerate(self.rnn.state_shape):
-            init = mx.sym.FullyConnected(data=mx.sym.SequenceLast(data=mx.sym.swapaxes(source_encoded, dim1=0, dim2=1),
+            init = mx.sym.FullyConnected(data=mx.sym.SequenceLast(data=source_encoded,
                                                                   sequence_length=source_encoded_length,
                                                                   use_sequence_length=True),
                                          num_hidden=init_num_hidden,
