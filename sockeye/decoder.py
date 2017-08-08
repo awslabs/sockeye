@@ -620,7 +620,8 @@ class RecurrentDecoder(Decoder):
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
         """
-        hidden, layer_states = self.get_initial_state(source_encoded, source_encoded_lengths)
+        source_encoded_time_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
+        hidden, layer_states = self.get_initial_state(source_encoded_time_major, source_encoded_lengths)
         context, attention_probs, dynamic_source = self.attention.get_initial_state(source_encoded_lengths,
                                                                                     source_encoded_max_length)
         states = [source_encoded, dynamic_source, source_encoded_lengths, hidden] + layer_states
