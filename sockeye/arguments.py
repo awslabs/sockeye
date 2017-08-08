@@ -303,7 +303,7 @@ def add_model_parameters(params):
                               default=1,
                               help="Number of hidden units for coverage vectors. Default: %(default)s.")
     model_params.add_argument('--attention-mhdot-heads',
-                              type=int, default=8,
+                              type=int, default=1,
                               help='Number of heads for Multi-head dot attention. Default: %(default)s.')
 
     model_params.add_argument('--lexical-bias',
