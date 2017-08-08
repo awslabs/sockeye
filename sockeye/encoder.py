@@ -126,7 +126,7 @@ def get_transformer_encoder(config: transformer.TransformerConfig,
         encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
 
     encoders.append(TransformerEncoder(config))
-    encoders.append(BatchMajor2TimeMajor(num_hidden=config.model_size))
+    encoders.append(BatchMajor2TimeMajor())
 
     return EncoderSequence(encoders)
 
@@ -174,11 +174,6 @@ class BatchMajor2TimeMajor(Encoder):
     Converts batch major data to time major
     """
 
-    def __init__(self, num_hidden: int = 0):
-        # TODO(fhieber): lets allow BatchMajor2TimeMajor to pass on number of hidden units if used as last encoder.
-        # we need a better strategy for this though.
-        self.num_hidden = num_hidden
-
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
@@ -201,7 +196,7 @@ class BatchMajor2TimeMajor(Encoder):
         """
         Return the representation size of this encoder.
         """
-        return self.num_hidden
+        raise NotImplementedError()
 
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """
@@ -322,7 +317,12 @@ class EncoderSequence(Encoder):
         """
         Return the representation size of this encoder.
         """
-        return self.encoders[-1].get_num_hidden()
+        if isinstance(self.encoders[-1], BatchMajor2TimeMajor):
+            utils.check_condition(len(self.encoders) > 1,
+                                  "Cannot return num_hidden from a BatchMajor2TimeMajor encoder only")
+            return self.encoders[-2].get_num_hidden()
+        else:
+            return self.encoders[-1].get_num_hidden()
 
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """
