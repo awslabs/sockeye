@@ -65,14 +65,14 @@ class LearningRateSchedulerInvSqrtT(LearningRateScheduler):
         # 0.5 base_lr = base_lr * sqrt(1 + T * factor)
         # then factor = 3 ./ T, with T = half_life * updates_per_checkpoint
         self.factor = 3. / (half_life * updates_per_checkpoint)
-        self.warmup = warmup
         self.t_last_log = -1
         self.log_every_t = int(half_life * updates_per_checkpoint)
 
-    def __call__(self, num_updates: int):
-        change = min(1.0 / sqrt(1 + num_updates * self.factor), self._warmup(num_updates) if self.warmup > 0 else 99999)
-        lr = self.base_lr * change
+    def _update_rate(self, num_updates):
+        return self.base_lr / sqrt(1 + num_updates * self.factor)
 
+    def __call__(self, num_updates: int):
+        lr = min(self.base_lr / sqrt(1 + num_updates * self.factor), self._warmup(num_updates) if self.warmup > 0 else 99999)
         # Note: this method is called once per parameter for the same t. Making sure to just log once.
         if num_updates > self.t_last_log and num_updates % self.log_every_t == 0:
             logger.info("Learning rate currently at %1.2e", lr)
@@ -102,9 +102,7 @@ class LearningRateSchedulerInvT(LearningRateScheduler):
         self.log_every_t = int(half_life * updates_per_checkpoint)
 
     def __call__(self, num_updates: int):
-        change = min(1.0 / (1 + num_updates * self.factor), self._warmup(num_updates) if self.warmup > 0 else 99999)
-        lr = self.base_lr * change
-
+        lr = min(self.base_lr / (1 + num_updates * self.factor), self._warmup(num_updates) if self.warmup > 0 else 99999)
         # Note: this method is called once per parameter for the same t. Making sure to just log once.
         if num_updates > self.t_last_log and num_updates % self.log_every_t == 0:
             logger.info("Learning rate currently at %1.2e", lr)
@@ -130,7 +128,7 @@ class LearningRateSchedulerPlateauReduce(LearningRateScheduler):
 
         self.lr = None  # type: float
         self.t_last_log = -1
-        self.log_every_t = self.warmup // 10
+        self.warmed_up = not self.warmup > 0
         logger.info("Will reduce the learning rate by a factor of %.2f whenever"
                     " the validation score doesn't improve %d times.",
                     reduce_factor, reduce_num_not_improved)
@@ -143,7 +141,7 @@ class LearningRateSchedulerPlateauReduce(LearningRateScheduler):
             self.num_not_improved = 0
         else:
             self.num_not_improved += 1
-            if self.num_not_improved >= self.reduce_num_not_improved and self.reduce_factor < 1.0:
+            if self.num_not_improved >= self.reduce_num_not_improved and self.reduce_factor < 1.0 and self.warmed_up:
                 old_lr = self.lr
                 self.lr *= self.reduce_factor
                 logger.info("%d checkpoints since improvement or rate scaling, "
@@ -155,6 +153,8 @@ class LearningRateSchedulerPlateauReduce(LearningRateScheduler):
             assert self.base_lr is not None
             self.lr = self.base_lr
         lr = self._warmup(t) if self.warmup > 0 and t <= self.warmup else self.lr
+        if t == self.warmup:
+            self.warmed_up = True
         return lr
 
     def __repr__(self):
