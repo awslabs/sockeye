@@ -242,7 +242,7 @@ def add_model_parameters(params):
                               help="Add residual connections to stacked RNNs if --rnn-num-layers > 3. "
                                    "(see Wu ETAL'16). Default: %(default)s.")
     model_params.add_argument('--rnn-context-gating', action="store_true",
-                              help="Enables a context gate which adaptively weighs the RNN decoder input against the"
+                              help="Enables a context gate which adaptively weighs the RNN decoder input against the "
                                    "source context vector before each update of the decoder hidden state.")
 
     # transformer arguments
@@ -303,7 +303,7 @@ def add_model_parameters(params):
                               default=1,
                               help="Number of hidden units for coverage vectors. Default: %(default)s.")
     model_params.add_argument('--attention-mhdot-heads',
-                              type=int, default=1,
+                              type=int, default=None,
                               help='Number of heads for Multi-head dot attention. Default: %(default)s.')
 
     model_params.add_argument('--lexical-bias',

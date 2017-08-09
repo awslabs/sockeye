@@ -75,7 +75,7 @@ def test_device_args(test_params, expected_params):
               attention_coverage_num_hidden=1,
               lexical_bias=None, learn_lexical_bias=False,
               weight_tying=False, weight_tying_type="trg_softmax", max_seq_len=100,
-              attention_mhdot_heads=1, transformer_attention_heads=8,
+              attention_mhdot_heads=None, transformer_attention_heads=8,
               transformer_feed_forward_num_hidden=2048, transformer_model_size=512,
               transformer_no_positional_encodings=False,
               max_seq_len_source=None, max_seq_len_target=None,

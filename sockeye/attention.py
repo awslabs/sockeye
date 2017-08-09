@@ -47,7 +47,7 @@ class AttentionConfig(config.Config):
                  rnn_num_hidden: int,
                  layer_normalization: bool,
                  config_coverage: Optional[coverage.CoverageConfig] = None,
-                 num_heads: int = 1) -> None:
+                 num_heads: Optional[int] = None) -> None:
         super().__init__()
         self.type = type
         self.num_hidden = num_hidden
@@ -73,8 +73,9 @@ def get_attention(config: AttentionConfig, max_seq_len: int) -> 'Attention':
     elif config.type == C.ATT_DOT:
         return DotAttention(config.input_previous_word, config.rnn_num_hidden, config.num_hidden)
     elif config.type == C.ATT_MH_DOT:
+        utils.check_condition(config.num_heads is not None, "%s requires setting num-heads." % C.ATT_MH_DOT)
         return MultiHeadDotAttention(config.input_previous_word,
-                                     depth=config.num_hidden,
+                                     num_hidden=config.num_hidden,
                                      heads=config.num_heads)
     elif config.type == C.ATT_DOT_SCALED:
         return DotAttention(config.input_previous_word, config.rnn_num_hidden, config.num_hidden,
@@ -350,20 +351,20 @@ class MultiHeadDotAttention(Attention):
     Can be used with a RecurrentDecoder.
 
     :param input_previous_word: Feed the previous target embedding into the attention mechanism.
-    :param depth: Number of hidden units.
+    :param num_hidden: Number of hidden units.
     :param heads: Number of attention heads / independently computed attention scores.
     """
 
     def __init__(self,
                  input_previous_word: bool,
-                 depth: int,
+                 num_hidden: int,
                  heads: int) -> None:
         super().__init__(input_previous_word)
-        utils.check_condition(depth % heads == 0,
-                              "Number of heads (%d) must divide attention depth (%d)" % (heads, depth))
-        self.depth = depth
+        utils.check_condition(num_hidden % heads == 0,
+                              "Number of heads (%d) must divide attention depth (%d)" % (heads, num_hidden))
+        self.num_hidden = num_hidden
         self.heads = heads
-        self.depth_per_head = self.depth // self.heads
+        self.num_hidden_per_head = self.num_hidden // self.heads
         self.s2h_weight = mx.sym.Variable("%ss2h_weight" % self.prefix)
         self.s2h_bias = mx.sym.Variable("%ss2h_bias" % self.prefix)
         self.t2h_weight = mx.sym.Variable("%st2h_weight" % self.prefix)
@@ -387,18 +388,18 @@ class MultiHeadDotAttention(Attention):
         # (batch * length, input_depth)
         source = mx.sym.reshape(data=source, shape=(-3, -1))
 
-        # (batch * length, depth * 2)
+        # (batch * length, num_hidden * 2)
         source_hidden = mx.sym.FullyConnected(data=source,
                                               weight=self.s2h_weight, bias=self.s2h_bias,
-                                              num_hidden=self.depth * 2,
+                                              num_hidden=self.num_hidden * 2,
                                               name="%ssource_hidden_fc" % self.prefix)
-        # (batch, length, depth * 2)
-        source_hidden = mx.sym.reshape(data=source_hidden, shape=(-1, source_seq_len, self.depth * 2))
+        # (batch, length, num_hidden * 2)
+        source_hidden = mx.sym.reshape(data=source_hidden, shape=(-1, source_seq_len, self.num_hidden * 2))
         # split keys and values
-        # (batch, length, depth)
+        # (batch, length, num_hidden)
         keys, values = mx.sym.split(data=source_hidden, num_outputs=2, axis=2)
 
-        # (batch*heads, length, depth/heads)
+        # (batch*heads, length, num_hidden/head)
         keys = layers.split_heads(keys, source_seq_len, self.heads)
         values = layers.split_heads(values, source_seq_len, self.heads)
 
@@ -410,37 +411,37 @@ class MultiHeadDotAttention(Attention):
             :param att_state: Current attention state
             :return: Updated attention state.
             """
-            # (batch, depth)
+            # (batch, num_hidden)
             query = mx.sym.FullyConnected(data=att_input.query,
                                           weight=self.t2h_weight, bias=self.t2h_bias,
-                                          num_hidden=self.depth, name="%squery_hidden_fc" % self.prefix)
-            # (batch, length, heads, depth_per_head)
-            query = mx.sym.reshape(query, shape=(0, 1, self.heads, self.depth_per_head))
-            # (batch, heads, depth_per_head, length)
+                                          num_hidden=self.num_hidden, name="%squery_hidden_fc" % self.prefix)
+            # (batch, length, heads, num_hidden/head)
+            query = mx.sym.reshape(query, shape=(0, 1, self.heads, self.num_hidden_per_head))
+            # (batch, heads, num_hidden/head, length)
             query = mx.sym.transpose(query, axes=(0, 2, 3, 1))
-            # (batch * heads, depth/heads, 1)
-            query = mx.sym.reshape(query, shape=(-3, self.depth_per_head, 1))
+            # (batch * heads, num_hidden/head, 1)
+            query = mx.sym.reshape(query, shape=(-3, self.num_hidden_per_head, 1))
 
             # scale dot product
-            query *= self.depth_per_head ** -0.5
+            query *= self.num_hidden_per_head ** -0.5
 
-            # (batch*heads, length, depth_per_head) X (batch*heads, depth_per_head, 1)
+            # (batch*heads, length, num_hidden/head) X (batch*heads, num_hidden/head, 1)
             #   -> (batch*heads, length, 1)
             attention_scores = mx.sym.batch_dot(lhs=keys, rhs=query, name="%sdot" % self.prefix)
 
             # (batch*heads, 1)
-            lengths = layers.broadcast_lengths(source_length, self.heads)
+            lengths = layers.broadcast_to_heads(source_length, self.heads)
 
-            # context: (batch*heads, depth_per_head)
+            # context: (batch*heads, num_hidden/head)
             # attention_probs: (batch*heads, length)
             context, attention_probs = get_context_and_attention_probs(values, lengths, attention_scores)
 
             # combine heads
-            # (batch*heads, 1, depth_per_head
+            # (batch*heads, 1, num_hidden/head)
             context = mx.sym.expand_dims(context, axis=1)
-            # (batch, 1, depth)
+            # (batch, 1, num_hidden)
             context = layers.combine_heads(context, length=1, heads=self.heads)
-            # (batch, depth)
+            # (batch, num_hidden)
             context = mx.sym.reshape(context, shape=(-3, -1))
 
             # (batch, heads, length)

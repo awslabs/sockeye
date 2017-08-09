@@ -113,11 +113,11 @@ def combine_heads(x: mx.sym.Symbol, length: int, heads: int) -> mx.sym.Symbol:
     return mx.sym.reshape(x, shape=(-1, length, -3))
 
 
-def broadcast_lengths(x: mx.sym.Symbol, heads: int) -> mx.sym.Symbol:
+def broadcast_to_heads(x: mx.sym.Symbol, heads: int) -> mx.sym.Symbol:
     """
-    Broadcasts the length information of each sequence to multiple heads.
+    Broadcasts a 1d vector of shape (batch,) to (batch*heads, 1).
 
-    :param x: Symbol(batch, 1)
+    :param x: Symbol(batch,)
     :param heads: Number of heads.
     :return: Symbol(batch * heads, 1)
     """
@@ -213,7 +213,7 @@ class MultiHeadAttentionBase:
         queries = split_heads(queries, queries_max_length, self.heads)
         keys = split_heads(keys, memory_max_length, self.heads)
         values = split_heads(values, memory_max_length, self.heads)
-        lengths = broadcast_lengths(lengths, self.heads)
+        lengths = broadcast_to_heads(lengths, self.heads)
 
         # (batch*heads, queries_max_length, depth_per_head)
         contexts = dot_attention(queries, keys, values, lengths, dropout=self.dropout, bias=bias)
