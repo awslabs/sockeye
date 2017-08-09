@@ -82,6 +82,6 @@ def test_bleu_requires_checkpoint_decoder():
         callback.TrainingMonitor(batch_size=1,
                                  output_folder=tmpdir,
                                  optimized_metric='bleu',
-                                 checkpoint_decoder=None)
+                                 cp_decoder=None)
 
 

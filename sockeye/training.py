@@ -223,7 +223,7 @@ class TrainingModel(model.SockeyeModel):
         self.training_monitor = callback.TrainingMonitor(train_iter.batch_size, output_folder,
                                                          optimized_metric=optimized_metric,
                                                          use_tensorboard=use_tensorboard,
-                                                         checkpoint_decoder=cp_decoder)
+                                                         cp_decoder=cp_decoder)
 
         monitor = None
         if mxmonitor_pattern is not None:

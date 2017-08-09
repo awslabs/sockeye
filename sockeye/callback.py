@@ -46,7 +46,7 @@ class TrainingMonitor(object):
     :param output_folder: Folder where model files are written to.
     :param optimized_metric: Name of the metric that controls early stopping.
     :param use_tensorboard: Whether to use Tensorboard logging of metrics.
-    :param checkpoint_decoder: Optional CheckpointDecoder instance for BLEU monitoring.
+    :param cp_decoder: Optional CheckpointDecoder instance for BLEU monitoring.
     :param num_concurrent_decodes: Number of concurrent subprocesses to decode validation data.
     """
 
@@ -55,7 +55,7 @@ class TrainingMonitor(object):
                  output_folder: str,
                  optimized_metric: str = C.PERPLEXITY,
                  use_tensorboard: bool = False,
-                 checkpoint_decoder: Optional[checkpoint_decoder.CheckpointDecoder] = None,
+                 cp_decoder: Optional[checkpoint_decoder.CheckpointDecoder] = None,
                  num_concurrent_decodes: int = 1) -> None:
         self.metrics = []  # stores dicts of metric names & values for each checkpoint
         self.metrics_filename = os.path.join(output_folder, C.METRICS_NAME)
@@ -70,7 +70,7 @@ class TrainingMonitor(object):
                 shutil.rmtree(log_dir)
             logger.info("Logging training events for Tensorboard at '%s'", log_dir)
             self.summary_writer = tensorboard.FileWriter(log_dir)
-        self.checkpoint_decoder = checkpoint_decoder
+        self.cp_decoder = cp_decoder
         self.ctx = mp.get_context('spawn')
         self.num_concurrent_decodes = num_concurrent_decodes
         self.decoder_metric_queue = self.ctx.Queue()
@@ -87,7 +87,7 @@ class TrainingMonitor(object):
             self.minimize = False
             self.validation_best = -np.inf
         elif self.optimized_metric == C.BLEU:
-            assert self.checkpoint_decoder is not None, "BLEU requires CheckpointDecoder"
+            assert self.cp_decoder is not None, "BLEU requires CheckpointDecoder"
             self.minimize = False
             self.validation_best = -np.inf
         else:
@@ -159,7 +159,7 @@ class TrainingMonitor(object):
         if self.summary_writer:
             write_tensorboard(self.summary_writer, metrics, checkpoint)
 
-        if self.checkpoint_decoder:
+        if self.cp_decoder:
             self._empty_decoder_metric_queue()
             self._start_decode_process(checkpoint)
 
@@ -195,7 +195,7 @@ class TrainingMonitor(object):
         self._wait_for_decode_slot()
         process = self.ctx.Process(
             target=_decode_and_evaluate,
-            args=(self.checkpoint_decoder, checkpoint,
+            args=(self.cp_decoder, checkpoint,
                   self.decoder_metric_queue))
         process.name = 'Decoder-%d' % checkpoint
         logger.info("Starting process: %s", process.name)
