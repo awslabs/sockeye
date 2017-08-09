@@ -537,23 +537,39 @@ def namedtuple_with_defaults(typename, field_names, default_values: Mapping[str,
     return T
 
 
-def read_metrics_file(path: str) -> Dict[str, List]:
+def read_metrics_file(path: str) -> List[Dict[str, Any]]:
     """
-    Reads lines metrics file and returns dictionary of metrics to value list.
+    Reads lines metrics file and returns list of mappings of key and values.
 
     :param path: File to read metric values from.
     :return: Dictionary of metric names (e.g. perplexity-train) mapping to a list of values.
     """
-    metrics = collections.defaultdict(list)
+    metrics = []
     with open(path) as fin:
-        for line in fin:
+        for i, line in enumerate(fin, 1):
             fields = line.strip().split('\t')
             checkpoint = int(fields[0])
-            metrics['checkpoint'].append(checkpoint)
+            check_condition(i == checkpoint,
+                            "Line (%d) and loaded checkpoint (%d) do not align." % (i, checkpoint))
+            metric = dict()
             for field in fields[1:]:
                 key, value = field.split("=", 1)
-                metrics[key].append(float(value))
-    return dict(metrics)
+                metric[key] = float(value)
+            metrics.append(metric)
+    return metrics
+
+
+def write_metrics_file(metrics: List[Dict[str, Any]], path: str):
+    """
+    Write metrics data to tab-separated file.
+
+    :param metrics: metrics data.
+    :param path: Path to write to.
+    """
+    with open(path, 'w') as metrics_out:
+        for checkpoint, metric_dict in enumerate(metrics, 1):
+            metrics_str = "\t".join(["%s=%.6f" % (name, value) for name, value in sorted(metric_dict.items())])
+            metrics_out.write("%d\t%s\n" % (checkpoint, metrics_str))
 
 
 def get_validation_metric_points(model_path: str, metric: str):
@@ -565,6 +581,4 @@ def get_validation_metric_points(model_path: str, metric: str):
     """
     metrics_path = os.path.join(model_path, C.METRICS_NAME)
     data = read_metrics_file(metrics_path)
-    checkpoints = data.get('checkpoint', [])
-    metric_values = data.get(metric + '-val', [])
-    return [(value, cp) for value, cp in zip(metric_values, checkpoints)]
+    return [(cp, ['%s-val' % metric]) for cp, d in enumerate(data, 1)]

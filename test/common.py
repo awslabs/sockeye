@@ -148,7 +148,7 @@ def run_train_translate(train_params: str,
 
         # get last validation perplexity
         metrics = sockeye.utils.read_metrics_file(path=os.path.join(model_path, C.METRICS_NAME))
-        perplexity = metrics[C.PERPLEXITY + '-val'][-1]
+        perplexity = metrics[-1][C.PERPLEXITY + '-val']
 
         # Measure BLEU
         bleu = sockeye.bleu.corpus_bleu(open(out_path, "r").readlines(),

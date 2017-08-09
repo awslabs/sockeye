@@ -26,9 +26,9 @@ from typing import Optional, Tuple, Dict
 import mxnet as mx
 import numpy as np
 
-import sockeye.checkpoint_decoder
-import sockeye.constants as C
-import sockeye.inference
+from . import checkpoint_decoder
+from . import constants as C
+from . import utils
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +55,10 @@ class TrainingMonitor(object):
                  output_folder: str,
                  optimized_metric: str = C.PERPLEXITY,
                  use_tensorboard: bool = False,
-                 checkpoint_decoder: Optional[sockeye.checkpoint_decoder.CheckpointDecoder] = None,
+                 checkpoint_decoder: Optional[checkpoint_decoder.CheckpointDecoder] = None,
                  num_concurrent_decodes: int = 1) -> None:
         self.metrics = []  # stores dicts of metric names & values for each checkpoint
         self.metrics_filename = os.path.join(output_folder, C.METRICS_NAME)
-        open(self.metrics_filename, 'w').close()  # clear metrics file
         self.best_checkpoint = 0
         self.start_tic = time.time()
         self.summary_writer = None
@@ -165,7 +164,7 @@ class TrainingMonitor(object):
             self._start_decode_process(checkpoint)
 
         self.metrics[-1].update(metrics)
-        self._write_scores()
+        utils.write_metrics_file(self.metrics, self.metrics_filename)
 
         has_improved, best_checkpoint = self._find_best_checkpoint()
         return has_improved, best_checkpoint
@@ -191,17 +190,6 @@ class TrainingMonitor(object):
             logger.info("Validation-%s has not improved, best so far: %f",
                         self.optimized_metric, self.validation_best)
         return has_improved, self.best_checkpoint
-
-    def _write_scores(self):
-        """
-        Overwrite metrics_filename with latest metrics results.
-        """
-        with open(self.metrics_filename, 'w') as metrics_out:
-            for checkpoint, metric_dict in enumerate(self.metrics, 1):
-                metrics_out.write("%d\t" % checkpoint)
-                metrics_out.write("\t".join(["%s=%.6f" % (name, value)
-                                             for name, value in sorted(
-                        metric_dict.items())]) + "\n")
 
     def _start_decode_process(self, checkpoint):
         self._wait_for_decode_slot()
@@ -242,7 +230,7 @@ class TrainingMonitor(object):
                 logger.info("Waiting for %s process to finish." % process.name)
             process.join()
         self._empty_decoder_metric_queue()
-        self._write_scores()
+        utils.write_metrics_file(self.metrics, self.metrics_filename)
 
     def save_state(self, fname: str):
         """
@@ -265,7 +253,7 @@ class TrainingMonitor(object):
             self.best_checkpoint = pickle.load(fp)
 
 
-def _decode_and_evaluate(checkpoint_decoder: sockeye.checkpoint_decoder.CheckpointDecoder,
+def _decode_and_evaluate(checkpoint_decoder: checkpoint_decoder.CheckpointDecoder,
                          checkpoint: int,
                          queue: mp.Queue):
     """
