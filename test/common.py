@@ -23,6 +23,7 @@ import numpy as np
 
 import sockeye.bleu
 import sockeye.constants as C
+import sockeye.average
 import sockeye.train
 import sockeye.translate
 import sockeye.utils
@@ -145,6 +146,16 @@ def run_train_translate(train_params: str,
                                    translate_params)
         with patch.object(sys, "argv", params.split()):
             sockeye.translate.main()
+
+        # test averaging
+        points = sockeye.average.find_checkpoints(model_path=model_path,
+                                                  size=1,
+                                                  strategy='best',
+                                                  maximize=False,
+                                                  metric=C.PERPLEXITY)
+        assert len(points) > 0
+        averaged_params = sockeye.average.average(points)
+        assert averaged_params
 
         # get last validation perplexity
         metrics = sockeye.utils.read_metrics_file(path=os.path.join(model_path, C.METRICS_NAME))

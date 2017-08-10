@@ -79,11 +79,10 @@ def find_checkpoints(model_path: str, size=4, strategy="best", maximize=False, m
     :param maximize: Whether the value of the metric should be maximized.
     :return: List of paths corresponding to chosen checkpoints.
     """
-    metrics_path = os.path.join(model_path, C.METRICS_NAME)
     points = utils.get_validation_metric_points(model_path=model_path, metric=metric)
     # keep only points for which .param files exist
     param_path = os.path.join(model_path, C.PARAMS_NAME)
-    points = [(value, checkpoint) for value, checkpoint in points if os.path.exists(param_path)]
+    points = [(value, checkpoint) for value, checkpoint in points if os.path.exists(param_path % checkpoint)]
 
     if strategy == "best":
         # N best scoring points

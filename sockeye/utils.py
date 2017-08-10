@@ -581,4 +581,4 @@ def get_validation_metric_points(model_path: str, metric: str):
     """
     metrics_path = os.path.join(model_path, C.METRICS_NAME)
     data = read_metrics_file(metrics_path)
-    return [(cp, ['%s-val' % metric]) for cp, d in enumerate(data, 1)]
+    return [(d['%s-val' % metric], cp) for cp, d in enumerate(data, 1)]
