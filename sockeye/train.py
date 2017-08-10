@@ -249,14 +249,15 @@ def main():
                                                         conv_config=config_conv)
 
         decoder_weight_tying = args.weight_tying and C.WEIGHT_TYING_TRG in args.weight_tying_type \
-                               and C.WEIGHT_TYING_SOFTMAX in args.weight_tying_type
+            and C.WEIGHT_TYING_SOFTMAX in args.weight_tying_type
         config_decoder = decoder.RecurrentDecoderConfig(vocab_size=vocab_target_size,
                                                         num_embed=num_embed_target,
                                                         rnn_config=config_rnn,
                                                         dropout=args.dropout,
                                                         weight_tying=decoder_weight_tying,
                                                         context_gating=args.context_gating,
-                                                        layer_normalization=args.layer_normalization)
+                                                        layer_normalization=args.layer_normalization,
+                                                        attention_in_upper_layers=args.attention_in_upper_layers)
 
         attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
         config_coverage = None

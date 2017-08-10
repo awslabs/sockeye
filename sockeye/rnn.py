@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 # List is needed for mypy, but not used in the code, only in special comments
-from typing import Optional, List
+from typing import Optional, List, Iterable # NOQA pylint: disable=unused-import
 
 import mxnet as mx
 
@@ -48,20 +48,54 @@ class RNNConfig(Config):
         self.forget_bias = forget_bias
 
 
-def get_stacked_rnn(config: RNNConfig, prefix: str) -> mx.rnn.SequentialRNNCell:
+class SequentialRNNCellParallelInput(mx.rnn.SequentialRNNCell):
+    """
+    A SequentialRNNCell, where an additional "parallel" input can be given at
+    call time and it will be added to the input of each layer
+    """
+    def __init__(self, params=None):
+        super().__init__(params)
+    
+    def __call__(self, inputs, parallel_inputs, states):
+        # Adapted copy of mx.rnn.SequentialRNNCell.__call__()
+        self._counter += 1
+        next_states = []
+        pos = 0
+        for cell in self._cells:
+            assert not isinstance(cell, mx.rnn.BidirectionalCell)
+            length = len(cell.state_info)
+            state = states[pos:pos+length]
+            pos += length
+            concat_inputs = mx.sym.concat(inputs, parallel_inputs)
+            inputs, state = cell(concat_inputs, state)
+            next_states.append(state)
+        return inputs, sum(next_states, [])
+
+    def add(self, cell):
+        super().add(cell)
+        print(self._cells)
+
+
+def get_stacked_rnn(config: RNNConfig, prefix: str,
+                    parallel_inputs: bool = False, layers: Optional[Iterable[int]] = None) -> mx.rnn.SequentialRNNCell:
     """
     Returns (stacked) RNN cell given parameters.
 
     :param config: rnn configuration.
     :param prefix: Symbol prefix for RNN.
+    :param parallel_inputs: Support parallel inputs for the stacked RNN cells
+
     :return: RNN cell.
     """
 
-    rnn = mx.rnn.SequentialRNNCell()
-    for layer in range(config.num_layers):
+    rnn = mx.rnn.SequentialRNNCell() if not parallel_inputs else SequentialRNNCellParallelInput()
+    if not layers:
+        layers = range(config.num_layers)
+    for layer in layers:
         # fhieber: the 'l' in the prefix does NOT stand for 'layer' but for the direction 'l' as in mx.rnn.rnn_cell::517
         # this ensures parameter name compatibility of training w/ FusedRNN and decoding with 'unfused' RNN.
         cell_prefix = "%sl%d_" % (prefix, layer)
+        print(">>>>> cell_prefix:", cell_prefix)
         if config.cell_type == C.LSTM_TYPE:
             cell = mx.rnn.LSTMCell(num_hidden=config.num_hidden, prefix=cell_prefix, forget_bias=config.forget_bias)
         elif config.cell_type == C.LNLSTM_TYPE:

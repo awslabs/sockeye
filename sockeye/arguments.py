@@ -249,6 +249,10 @@ def add_model_parameters(params):
                               type=int,
                               default=1,
                               help="Number of hidden units for coverage vectors. Default: %(default)s")
+    model_params.add_argument('--attention-in-upper-layers',
+                              action="store_true",
+                              help="Pass the attention to the upper layers of the RNN decoder, similar "
+                                   "to GNMT paper. Only applicable if more than one layer is used.")
 
     model_params.add_argument('--lexical-bias',
                               default=None,
