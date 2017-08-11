@@ -15,6 +15,7 @@
 Decoders for sequence-to-sequence models.
 """
 import logging
+from abc import ABC, abstractmethod
 from typing import Callable, List, NamedTuple, Tuple
 from typing import Optional
 
@@ -44,15 +45,17 @@ def get_decoder(config: Config,
         raise ValueError("Unsupported decoder configuration")
 
 
-class Decoder:
+class Decoder(ABC):
     """
     Generic decoder interface.
-    A decoder needs to provide methods to provide training (decode) and inference symbols (predict).
-    The inference symbol represents a single time-step in the decoder, i.e. predicting the next word
-    given all required states. For the inference module to be able to keep track of decoder's states
+    A decoder needs to implement code to decode a target sequence known in advance (decode_sequence),
+    and code to decode a single word given its decoder state (decode_step).
+    The latter is typically used for inference graphs in beam search.
+    For the inference module to be able to keep track of decoder's states
     a decoder provides methods to return initial states (init_states), state variables and their shapes.
     """
 
+    @abstractmethod
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
                         source_encoded_lengths: mx.sym.Symbol,
@@ -79,6 +82,7 @@ class Decoder:
         """
         raise NotImplementedError()
 
+    @abstractmethod
     def decode_step(self,
                     prev_word_id: mx.sym.Symbol,
                     source_encoded_max_length: int,
@@ -96,6 +100,7 @@ class Decoder:
         """
         raise NotImplementedError()
 
+    @abstractmethod
     def init_states(self,
                     source_encoded: mx.sym.Symbol,
                     source_encoded_lengths: mx.sym.Symbol,
@@ -111,6 +116,7 @@ class Decoder:
         """
         raise NotImplementedError()
 
+    @abstractmethod
     def state_variables(self) -> List[mx.sym.Symbol]:
         """
         Returns the list of symbolic variables for this decoder to be used during inference.
@@ -119,6 +125,7 @@ class Decoder:
         """
         raise NotImplementedError()
 
+    @abstractmethod
     def state_shapes(self,
                      batch_size: int,
                      source_encoded_max_length: int,
@@ -134,6 +141,7 @@ class Decoder:
         """
         raise NotImplementedError()
 
+    @abstractmethod
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """
         Returns a list of RNNCells used by this decoder.

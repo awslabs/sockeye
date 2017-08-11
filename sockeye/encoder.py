@@ -538,9 +538,10 @@ class TransformerEncoder(Encoder):
     Non-recurrent encoder based on the transformer architecture in:
 
     Attention Is All You Need, Figure 1 (left)
-    Vaswani et al. (https://arxiv.org/pdf/1706.03762.pdf)
+    Vaswani et al. (https://arxiv.org/pdf/1706.03762.pdf).
 
-    :param config: TransformerEncoderConfig
+    :param config: Configuration for transformer encoder.
+    :param prefix: Name prefix for operations in this encoder.
     """
 
     def __init__(self,
