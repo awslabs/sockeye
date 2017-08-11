@@ -21,16 +21,14 @@ works well in practice.
 import argparse
 import itertools
 import os
-from typing import Dict, Iterable, Tuple, List
+from typing import Dict, Iterable
 
 import mxnet as mx
 
-import sockeye.constants as C
-import sockeye.utils
-import sockeye.arguments
+from . import arguments
+from . import constants as C
+from . import utils
 from sockeye.log import setup_main_logger, log_sockeye_version
-from sockeye.utils import check_condition
-
 
 logger = setup_main_logger(__name__, console=True, file_logging=False)
 
@@ -46,33 +44,32 @@ def average(param_paths: Iterable[str]) -> Dict[str, mx.nd.NDArray]:
     all_aux_params = []
     for path in param_paths:
         logger.info("Loading parameters from '%s'", path)
-        arg_params, aux_params = sockeye.utils.load_params(path)
+        arg_params, aux_params = utils.load_params(path)
         all_arg_params.append(arg_params)
         all_aux_params.append(aux_params)
 
     logger.info("%d models loaded", len(all_arg_params))
-    check_condition(all(all_arg_params[0].keys() == p.keys() for p in all_arg_params),
-                    "arg_param names do not match across models")
-    check_condition(all(all_aux_params[0].keys() == p.keys() for p in all_aux_params),
-                    "aux_param names do not match across models")
+    utils.check_condition(all(all_arg_params[0].keys() == p.keys() for p in all_arg_params),
+                          "arg_param names do not match across models")
+    utils.check_condition(all(all_aux_params[0].keys() == p.keys() for p in all_aux_params),
+                          "aux_param names do not match across models")
 
     avg_params = {}
     # average arg_params
     for k in all_arg_params[0]:
         arrays = [p[k] for p in all_arg_params]
-        avg_params["arg:" + k] = sockeye.utils.average_arrays(arrays)
+        avg_params["arg:" + k] = utils.average_arrays(arrays)
     # average aux_params
     for k in all_aux_params[0]:
         arrays = [p[k] for p in all_aux_params]
-        avg_params["aux:" + k] = sockeye.utils.average_arrays(arrays)
+        avg_params["aux:" + k] = utils.average_arrays(arrays)
 
     return avg_params
 
 
-def find_checkpoints(model_path: str, size=4, strategy="best", maximize=False, metric: str = C.PERPLEXITY) \
-        -> Iterable[str]:
+def find_checkpoints(model_path: str, size=4, strategy="best", metric: str = C.PERPLEXITY) -> Iterable[str]:
     """
-    Finds N best points from .metrics file according to strategy
+    Finds N best points from .metrics file according to strategy.
 
     :param metric: Metric according to which checkpoints are selected.  Corresponds to columns in model/metrics file.
     :param model_path: Path to model.
@@ -81,8 +78,9 @@ def find_checkpoints(model_path: str, size=4, strategy="best", maximize=False, m
     :param maximize: Whether the value of the metric should be maximized.
     :return: List of paths corresponding to chosen checkpoints.
     """
+    maximize = C.METRIC_MAXIMIZE[metric]
     metrics_path = os.path.join(model_path, C.METRICS_NAME)
-    points = sockeye.utils.read_metrics_points(metrics_path, model_path, metric=metric)
+    points = utils.read_metrics_points(metrics_path, model_path, metric=metric)
 
     if strategy == "best":
         # N best scoring points
@@ -151,14 +149,16 @@ def main():
     """
     log_sockeye_version(logger)
     params = argparse.ArgumentParser(description="Averages parameters from multiple models.")
-    sockeye.arguments.add_average_args(params)
+    arguments.add_average_args(params)
     args = params.parse_args()
 
     if len(args.inputs) > 1:
         avg_params = average(args.inputs)
     else:
-        param_paths = find_checkpoints(args.inputs[0], args.n, args.strategy,
-                                       args.max, args.metric)
+        param_paths = find_checkpoints(model_path=args.inputs[0],
+                                       size=args.n,
+                                       strategy=args.strategy,
+                                       metric=args.metric)
         avg_params = average(param_paths)
 
     mx.nd.save(args.output, avg_params)
