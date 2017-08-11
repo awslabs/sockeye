@@ -29,6 +29,7 @@ import numpy as np
 import sockeye.checkpoint_decoder
 import sockeye.constants as C
 import sockeye.inference
+import sockeye.utils
 
 logger = logging.getLogger(__name__)
 
@@ -80,21 +81,12 @@ class TrainingMonitor(object):
         self.speedometer = mx.callback.Speedometer(batch_size=batch_size,
                                                    frequent=C.MEASURE_SPEED_EVERY,
                                                    auto_reset=False)
+        sockeye.utils.check_condition(optimized_metric in C.METRICS, "Unsupported metric: %s" % optimized_metric)
+        if optimized_metric == C.BLEU:
+            sockeye.utils.check_condition(self.checkpoint_decoder is not None, "%s requires CheckpointDecoder" % C.BLEU)
         self.optimized_metric = optimized_metric
-        if self.optimized_metric == C.PERPLEXITY:
-            self.minimize = True
-            self.validation_best = np.inf
-        elif self.optimized_metric == C.ACCURACY:
-            self.minimize = False
-            self.validation_best = -np.inf
-        elif self.optimized_metric == C.BLEU:
-            assert self.checkpoint_decoder is not None, "BLEU requires CheckpointDecoder"
-            self.minimize = False
-            self.validation_best = -np.inf
-        else:
-            raise ValueError("No other metrics supported")
-        logger.info("Early stopping by optimizing '%s' (minimize=%s)",
-                    self.optimized_metric, self.minimize)
+        self.validation_best = C.METRIC_WORST[self.optimized_metric]
+        logger.info("Early stopping by optimizing '%s'", self.optimized_metric)
         self.tic = 0
 
     def get_best_checkpoint(self) -> int:
@@ -109,8 +101,11 @@ class TrainingMonitor(object):
         """
         return self.validation_best
 
-    def _is_better(self, value):
-        return value < self.validation_best if self.minimize else value > self.validation_best
+    def _is_better(self, value: float) -> bool:
+        if C.METRIC_MAXIMIZE[self.optimized_metric]:
+            return value > self.validation_best
+        else:
+            return value < self.validation_best
 
     def batch_end_callback(self, epoch: int, nbatch: int, metric: mx.metric.EvalMetric):
         """

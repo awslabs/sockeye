@@ -47,24 +47,22 @@ def add_average_args(params):
         help="either a single model directory (automatic checkpoint selection) "
              "or multiple .params files (manual checkpoint selection)")
     average_params.add_argument(
-        "--max", action="store_true", help="Maximize metric.")
-    average_params.add_argument(
         "--metric",
-        help="Name of the metric to choose n-best checkpoints from. (default: {})".format(C.PERPLEXITY),
+        help="Name of the metric to choose n-best checkpoints from. Default: %(default)s.",
         default=C.PERPLEXITY,
-        choices=[C.PERPLEXITY, C.BLEU])
+        choices=C.METRICS)
     average_params.add_argument(
         "-n",
         type=int,
         default=4,
-        help="number of checkpoints to find (default: 4)")
+        help="number of checkpoints to find. Default: %(default)s.")
     average_params.add_argument(
-        "--output", "-o", required=True, type=str, help="output param file")
+        "--output", "-o", required=True, type=str, help="File to write averaged parameters to.")
     average_params.add_argument(
         "--strategy",
         choices=["best", "last", "lifespan"],
         default="best",
-        help="selection method (default: best)")
+        help="selection method. Default: %(default)s.")
 
 
 def add_io_args(params):
@@ -338,8 +336,8 @@ def add_training_args(params):
                               choices=[C.PERPLEXITY, C.ACCURACY],
                               help='Names of metrics to track on training and validation data. Default: %(default)s.')
     train_params.add_argument('--optimized-metric',
-                              default='perplexity',
-                              choices=[C.PERPLEXITY, C.ACCURACY, C.BLEU],
+                              default=C.PERPLEXITY,
+                              choices=C.METRICS,
                               help='Metric to optimize with early stopping {%(choices)s}. '
                                    'Default: %(default)s.')
 
