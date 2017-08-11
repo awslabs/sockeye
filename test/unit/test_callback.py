@@ -24,11 +24,11 @@ from sockeye import callback
 from sockeye import constants as C
 from sockeye import utils
 
-test_constants = [('perplexity', np.inf, True,
+test_constants = [('perplexity', np.inf,
                    [{'perplexity': 100.0, '_': 42}, {'perplexity': 50.0}, {'perplexity': 60.0}, {'perplexity': 80.0}],
                    [{'perplexity': 200.0}, {'perplexity': 100.0}, {'perplexity': 100.001}, {'perplexity': 99.99}],
                    [True, True, False, True]),
-                  ('accuracy', -np.inf, False,
+                  ('accuracy', 0.0,
                    [{'accuracy': 100.0}, {'accuracy': 50.0}, {'accuracy': 60.0}, {'accuracy': 80.0}],
                    [{'accuracy': 200.0}, {'accuracy': 100.0}, {'accuracy': 100.001}, {'accuracy': 99.99}],
                    [True, False, False, False])]
@@ -43,9 +43,9 @@ class DummyMetric(object):
             yield metric_name, value
 
 
-@pytest.mark.parametrize("optimized_metric, initial_best, minimize, train_metrics, eval_metrics, improved_seq",
+@pytest.mark.parametrize("optimized_metric, initial_best, train_metrics, eval_metrics, improved_seq",
                          test_constants)
-def test_callback(optimized_metric, initial_best, minimize, train_metrics, eval_metrics, improved_seq):
+def test_callback(optimized_metric, initial_best, train_metrics, eval_metrics, improved_seq):
     with tempfile.TemporaryDirectory() as tmpdir:
         batch_size = 32
         monitor = callback.TrainingMonitor(batch_size=batch_size,
@@ -53,7 +53,6 @@ def test_callback(optimized_metric, initial_best, minimize, train_metrics, eval_
                                            optimized_metric=optimized_metric)
         assert monitor.optimized_metric == optimized_metric
         assert monitor.get_best_validation_score() == initial_best
-        assert monitor.minimize == minimize
         metrics_fname = os.path.join(tmpdir, C.METRICS_NAME)
 
         for checkpoint, (train_metric, eval_metric, expected_improved) in enumerate(
@@ -78,10 +77,9 @@ def _compare_metrics(a, b):
 
 
 def test_bleu_requires_checkpoint_decoder():
-    with pytest.raises(AssertionError), tempfile.TemporaryDirectory() as tmpdir:
+    with pytest.raises(utils.SockeyeError) as e, tempfile.TemporaryDirectory() as tmpdir:
         callback.TrainingMonitor(batch_size=1,
                                  output_folder=tmpdir,
                                  optimized_metric='bleu',
                                  cp_decoder=None)
-
-
+    assert "bleu requires CheckpointDecoder" == str(e.value)

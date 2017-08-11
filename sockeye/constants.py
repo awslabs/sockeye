@@ -15,6 +15,7 @@
 Defines various constants used througout the project
 """
 import mxnet as mx
+import numpy as np
 
 BOS_SYMBOL = "<s>"
 EOS_SYMBOL = "</s>"
@@ -170,10 +171,13 @@ INFERENCE_ARG_OUTPUT_SHORT = "-o"
 BATCH_MAJOR = "NTC"
 TIME_MAJOR = "TNC"
 
-# metric names
+# metrics
 ACCURACY = 'accuracy'
 PERPLEXITY = 'perplexity'
 BLEU = 'bleu'
+METRICS = [PERPLEXITY, ACCURACY, BLEU]
+METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, PERPLEXITY: False}
+METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, PERPLEXITY: np.inf}
 
 # loss names
 CROSS_ENTROPY = 'cross-entropy'

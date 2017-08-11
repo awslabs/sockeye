@@ -151,7 +151,6 @@ def run_train_translate(train_params: str,
         points = sockeye.average.find_checkpoints(model_path=model_path,
                                                   size=1,
                                                   strategy='best',
-                                                  maximize=False,
                                                   metric=C.PERPLEXITY)
         assert len(points) > 0
         averaged_params = sockeye.average.average(points)

@@ -67,10 +67,9 @@ def average(param_paths: Iterable[str]) -> Dict[str, mx.nd.NDArray]:
     return avg_params
 
 
-def find_checkpoints(model_path: str, size=4, strategy="best", maximize=False, metric: str = C.PERPLEXITY) \
-        -> Iterable[str]:
+def find_checkpoints(model_path: str, size=4, strategy="best", metric: str = C.PERPLEXITY) -> Iterable[str]:
     """
-    Finds N best points from .metrics file according to strategy
+    Finds N best points from .metrics file according to strategy.
 
     :param metric: Metric according to which checkpoints are selected.  Corresponds to columns in model/metrics file.
     :param model_path: Path to model.
@@ -79,6 +78,7 @@ def find_checkpoints(model_path: str, size=4, strategy="best", maximize=False, m
     :param maximize: Whether the value of the metric should be maximized.
     :return: List of paths corresponding to chosen checkpoints.
     """
+    maximize = C.METRIC_MAXIMIZE[metric]
     points = utils.get_validation_metric_points(model_path=model_path, metric=metric)
     # keep only points for which .param files exist
     param_path = os.path.join(model_path, C.PARAMS_NAME)
@@ -157,8 +157,10 @@ def main():
     if len(args.inputs) > 1:
         avg_params = average(args.inputs)
     else:
-        param_paths = find_checkpoints(args.inputs[0], args.n, args.strategy,
-                                       args.max, args.metric)
+        param_paths = find_checkpoints(model_path=args.inputs[0],
+                                       size=args.n,
+                                       strategy=args.strategy,
+                                       metric=args.metric)
         avg_params = average(param_paths)
 
     mx.nd.save(args.output, avg_params)
