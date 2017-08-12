@@ -80,7 +80,6 @@ class Decoder(ABC):
         :return: Logits of next-word predictions for target sequence.
                  Shape: (batch_size * target_max_length, target_vocab_size)
         """
-        raise NotImplementedError()
 
     @abstractmethod
     def decode_step(self,
@@ -98,7 +97,6 @@ class Decoder(ABC):
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
         """
-        raise NotImplementedError()
 
     @abstractmethod
     def init_states(self,
@@ -114,7 +112,7 @@ class Decoder(ABC):
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
         """
-        raise NotImplementedError()
+        return []
 
     @abstractmethod
     def state_variables(self) -> List[mx.sym.Symbol]:
@@ -123,7 +121,7 @@ class Decoder(ABC):
 
         :return: List of symbolic variables.
         """
-        raise NotImplementedError()
+        return []
 
     @abstractmethod
     def state_shapes(self,
@@ -139,7 +137,7 @@ class Decoder(ABC):
         :param source_encoded_depth: Depth of encoded source.
         :return: List of shape descriptions.
         """
-        raise NotImplementedError()
+        return []
 
     @abstractmethod
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
@@ -148,7 +146,7 @@ class Decoder(ABC):
 
         :raises: NotImplementedError
         """
-        raise NotImplementedError()
+        return []
 
 
 class TransformerDecoder(Decoder):
@@ -352,7 +350,7 @@ class TransformerDecoder(Decoder):
         """
         Returns a list of RNNCells used by this decoder.
         """
-        return []
+        return super().get_rnn_cells()
 
     @staticmethod
     def _get_target_max_length(source_encoded_max_length: int):
