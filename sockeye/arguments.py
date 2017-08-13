@@ -18,6 +18,7 @@ import argparse
 from typing import Callable
 
 import sockeye.constants as C
+from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
 
 
 def int_greater_or_equal(threshold: int) -> Callable:
@@ -35,6 +36,23 @@ def int_greater_or_equal(threshold: int) -> Callable:
         return value_to_check
 
     return check_greater_equal
+
+
+def learning_schedule() -> Callable:
+    """
+    Returns a method that can be used in argument parsing to check that the argument is a valid learning rate schedule
+    string.
+
+    :return: A method that can be used as a type in argparse.
+    """
+
+    def parse(schedule_str):
+        try:
+            schedule = LearningRateSchedulerFixedStep.parse_schedule_str(schedule_str)
+        except ValueError:
+            raise argparse.ArgumentTypeError("Learning rate schedule string should have form rate1:num_updates1[,rate2:num_updates2,...]")
+        return schedule
+    return parse
 
 
 def add_average_args(params):
@@ -465,8 +483,8 @@ def add_training_args(params):
                                    'Set to negative to disable. Default: %(default)s.')
 
     train_params.add_argument('--learning-rate-scheduler-type',
-                              default='plateau-reduce',
-                              choices=["fixed-rate-inv-sqrt-t", "fixed-rate-inv-t", "plateau-reduce"],
+                              default=C.LR_SCHEDULER_PLATEAU_REDUCE,
+                              choices=C.LR_SCHEDULERS,
                               help='Learning rate scheduler type. Default: %(default)s.')
     train_params.add_argument('--learning-rate-reduce-factor',
                               type=float,
@@ -478,6 +496,12 @@ def add_training_args(params):
                               default=3,
                               help="For 'plateau-reduce' learning rate scheduler. Adjust learning rate "
                                    "if <optimized-metric> did not improve for x checkpoints. Default: %(default)s.")
+    train_params.add_argument('--learning-rate-schedule',
+                              type=learning_schedule(),
+                              default=None,
+                              help="For 'fixed-step' scheduler. Fully specified learning schedule in the form"
+                              " rate1:num_updates1[,rate2:num_updates2,...]. Overrides all other args related to"
+                              " learning rate and stopping conditions. Default: %(default)s.")
     train_params.add_argument('--learning-rate-half-life',
                               type=float,
                               default=10,

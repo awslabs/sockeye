@@ -217,6 +217,7 @@ def main():
                                                                   learning_rate_half_life,
                                                                   args.learning_rate_reduce_factor,
                                                                   args.learning_rate_reduce_num_not_improved,
+                                                                  args.learning_rate_schedule,
                                                                   args.learning_rate_warmup)
         else:
             with open(os.path.join(training_state_dir, C.SCHEDULER_STATE_NAME), "rb") as fp:
@@ -371,17 +372,27 @@ def main():
         logger.info("Optimizer: %s", optimizer)
         logger.info("Optimizer Parameters: %s", optimizer_params)
 
+        # Handle options that override training settings
+        max_updates = args.max_updates
+        max_num_checkpoint_not_improved = args.max_num_checkpoint_not_improved
+        min_num_epochs = args.min_num_epochs
+        # Fixed training schedule always runs for a set number of updates
+        if args.learning_rate_schedule:
+            max_updates = sum(num_updates for (_, num_updates) in args.learning_rate_schedule)
+            max_num_checkpoint_not_improved = -1
+            min_num_epochs = 0
+
         training_model.fit(train_iter, eval_iter,
                            output_folder=output_folder,
                            max_params_files_to_keep=args.keep_last_params,
                            metrics=args.metrics,
                            initializer=weight_initializer,
-                           max_updates=args.max_updates,
+                           max_updates=max_updates,
                            checkpoint_frequency=args.checkpoint_frequency,
                            optimizer=optimizer, optimizer_params=optimizer_params,
                            optimized_metric=args.optimized_metric,
-                           max_num_not_improved=args.max_num_checkpoint_not_improved,
-                           min_num_epochs=args.min_num_epochs,
+                           max_num_not_improved=max_num_checkpoint_not_improved,
+                           min_num_epochs=min_num_epochs,
                            monitor_bleu=args.monitor_bleu,
                            use_tensorboard=args.use_tensorboard,
                            mxmonitor_pattern=args.monitor_pattern,

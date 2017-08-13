@@ -188,7 +188,8 @@ class TrainingModel(model.SockeyeModel):
         :param optimizer: The MXNet optimizer that will update the parameters.
         :param optimizer_params: The parameters for the optimizer.
         :param optimized_metric: The metric that is tracked for early stopping.
-        :param max_num_not_improved: Stop training if the optimized_metric does not improve for this many checkpoints.
+        :param max_num_not_improved: Stop training if the optimized_metric does not improve for this many checkpoints,
+               -1: do not use early stopping.
         :param min_num_epochs: Minimum number of epochs to train, even if validation scores did not improve.
         :param monitor_bleu: Monitor BLEU during training (0: off, >=0: the number of sentences to decode for BLEU
                evaluation, -1: decode the full validation set.).
@@ -271,7 +272,8 @@ class TrainingModel(model.SockeyeModel):
         :param metrics: List of metric names to track on training and validation data.
         :param max_updates: Maximum number of batches to process.
         :param checkpoint_frequency: Frequency of checkpointing.
-        :param max_num_not_improved: Maximum number of checkpoints until fitting is stopped if model does not improve.
+        :param max_num_not_improved: Maximum number of checkpoints until fitting is stopped if model does not improve,
+               -1 for no early stopping.
         :param min_num_epochs: Minimum number of epochs to train, even if validation scores did not improve.
         :param mxmonitor: Optional MXNet monitor instance.
         """
@@ -358,7 +360,7 @@ class TrainingModel(model.SockeyeModel):
                     train_state.num_not_improved += 1
                     logger.info("Model has not improved for %d checkpoints", train_state.num_not_improved)
 
-                if train_state.num_not_improved >= max_num_not_improved:
+                if max_num_not_improved >= 0 and train_state.num_not_improved >= max_num_not_improved:
                     logger.info("Maximum number of not improved checkpoints (%d) reached: %d",
                                 max_num_not_improved, train_state.num_not_improved)
                     stop_fit = True

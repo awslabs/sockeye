@@ -14,7 +14,7 @@
 import pytest
 
 from sockeye import lr_scheduler
-from sockeye.lr_scheduler import LearningRateSchedulerInvSqrtT, LearningRateSchedulerInvT
+from sockeye.lr_scheduler import LearningRateSchedulerFixedStep, LearningRateSchedulerInvSqrtT, LearningRateSchedulerInvT
 
 
 def test_lr_scheduler():
@@ -27,6 +27,28 @@ def test_lr_scheduler():
         scheduler.base_lr = 1.0
         # test correct half-life:
         assert scheduler(updates_per_checkpoint * half_life_num_checkpoints) == pytest.approx(0.5)
+
+
+def test_fixed_step_lr_scheduler():
+    # Parse schedule string
+    schedule_str = "0.5:16,0.25:8"
+    schedule = LearningRateSchedulerFixedStep.parse_schedule_str(schedule_str)
+    assert schedule == [(0.5, 16), (0.25, 8)]
+    # Check learning rate steps
+    updates_per_checkpoint = 2
+    scheduler = LearningRateSchedulerFixedStep(schedule, updates_per_checkpoint)
+    t = 0
+    for _ in range(16):
+        t += 1
+        assert scheduler(t) == 0.5
+        if t % 2 == 0:
+            scheduler.new_evaluation_result(False)
+    assert scheduler(t) == 0.25
+    for _ in range(8):
+        t += 1
+        assert scheduler(t) == 0.25
+        if t % 2 == 0:
+            scheduler.new_evaluation_result(False)
 
 
 @pytest.mark.parametrize("scheduler_type, reduce_factor, expected_instance",

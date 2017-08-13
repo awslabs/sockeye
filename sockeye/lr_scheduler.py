@@ -13,7 +13,8 @@
 
 import logging
 from math import sqrt
-from typing import Optional
+from typing import List, Optional, Tuple
+import sockeye.constants as C
 from sockeye.utils import check_condition
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,65 @@ class LearningRateScheduler:
             self.last_warmup_log = num_updates
             logger.info("Learning rate %.0f%% warmed up", fraction * 100)
         return fraction
+
+
+class LearningRateSchedulerFixedStep(LearningRateScheduler):
+    """
+    Use a fixed schedule of learning rate steps: lr_1 for N steps, lr_2 for M steps, etc.
+
+    :param steps: List of learning rate step tuples in the form (rate, num_updates).
+    """
+
+    def __init__(self, schedule: List[Tuple[float, int]], updates_per_checkpoint: int) -> None:
+        super().__init__()
+        check_condition(all(num_updates > 0 for (_, num_updates) in schedule),
+                        "num_updates for each step should be > 0.")
+        check_condition(all(num_updates % updates_per_checkpoint == 0 for (_, num_updates) in schedule),
+                        "num_updates for each step should be divisible by updates_per_checkpoint.")
+        self.schedule = schedule
+        self.current_step = 0
+        self.current_rate = 0.
+        self.current_step_num_updates = 0
+        self.current_step_started_at = 0
+        self.next_step_at = 0
+        self.latest_t = 0
+        self._update_rate(self.current_step)
+
+    def new_evaluation_result(self, has_improved: bool):
+        logger.info("Checkpoint learning rate: %1.2e (%d/%d updates)",
+                    self.current_rate,
+                    self.latest_t - self.current_step_started_at,
+                    self.current_step_num_updates)
+        if self.latest_t >= self.next_step_at:
+            self.current_step += 1
+            self._update_rate(self.current_step)
+
+    def _update_rate(self, step: int):
+        if self.current_step < len(self.schedule):
+            self.current_rate, self.current_step_num_updates = self.schedule[step]
+            self.current_step_started_at = self.latest_t
+            self.next_step_at += self.current_step_num_updates
+            logger.info("Changing learning rate to %1.2e for %d updates",
+                        self.current_rate,
+                        self.current_step_num_updates)
+
+    def __call__(self, t: int):
+        self.latest_t = max(t, self.latest_t)
+        return self.current_rate
+
+    @staticmethod
+    def parse_schedule_str(schedule_str: str) -> List[Tuple[float, int]]:
+        """
+        Parse learning schedule string.
+
+        :param schedule_str: String in form rate1:num_updates1[,rate2:num_updates2,...]
+        :return: List of tuples (learning_rate, num_updates).
+        """
+        schedule = list()
+        for step in schedule_str.split(","):
+            rate, num_updates = step.split(":")
+            schedule.append((float(rate), int(num_updates)))
+        return schedule
 
 
 class LearningRateSchedulerInvSqrtT(LearningRateScheduler):
@@ -164,6 +224,7 @@ def get_lr_scheduler(scheduler_type: str,
                      learning_rate_half_life: int,
                      learning_rate_reduce_factor: float,
                      learning_rate_reduce_num_not_improved: int,
+                     learning_rate_schedule: Optional[List[Tuple[float, int]]] = None,
                      learning_rate_warmup: Optional[int] = 0) -> Optional[LearningRateScheduler]:
     """
     Returns a learning rate scheduler.
@@ -178,19 +239,27 @@ def get_lr_scheduler(scheduler_type: str,
     :raises: ValueError if unknown scheduler_type
     :return: Learning rate scheduler.
     """
+    check_condition(learning_rate_schedule is None or scheduler_type == C.LR_SCHEDULER_FIXED_STEP,
+                    "Learning rate schedule can only be used with '%s' learning rate scheduler."
+                    % C.LR_SCHEDULER_FIXED_STEP)
     if scheduler_type is None:
         return None
-    if scheduler_type == "fixed-rate-inv-sqrt-t":
+    if scheduler_type == C.LR_SCHEDULER_FIXED_RATE_INV_SQRT_T:
         return LearningRateSchedulerInvSqrtT(updates_per_checkpoint, learning_rate_half_life, learning_rate_warmup)
-    elif scheduler_type == "fixed-rate-inv-t":
+    elif scheduler_type == C.LR_SCHEDULER_FIXED_RATE_INV_T:
         return LearningRateSchedulerInvT(updates_per_checkpoint, learning_rate_half_life, learning_rate_warmup)
-    elif scheduler_type == "plateau-reduce":
+    elif scheduler_type == C.LR_SCHEDULER_FIXED_STEP:
+        check_condition(learning_rate_schedule is not None,
+                        "learning_rate_schedule needed for %s scheduler" % C.LR_SCHEDULER_FIXED_STEP)
+        return LearningRateSchedulerFixedStep(learning_rate_schedule, updates_per_checkpoint)
+    elif scheduler_type == C.LR_SCHEDULER_PLATEAU_REDUCE:
         check_condition(learning_rate_reduce_factor is not None,
-                        "learning_rate_reduce_factor needed for plateau-reduce scheduler")
+                        "learning_rate_reduce_factor needed for %s scheduler" % C.LR_SCHEDULER_PLATEAU_REDUCE)
         check_condition(learning_rate_reduce_num_not_improved is not None,
-                        "learning_rate_reduce_num_not_improved needed for plateau-reduce scheduler")
+                        "learning_rate_reduce_num_not_improved needed for %s scheduler" % C.LR_SCHEDULER_PLATEAU_REDUCE)
         if learning_rate_reduce_factor >= 1.0:
-            logger.warning("Not using plateau-reduce learning rate scheduling: learning_rate_reduce_factor == 1.0")
+            logger.warning("Not using %s learning rate scheduling: learning_rate_reduce_factor == 1.0"
+                           % C.LR_SCHEDULER_PLATEAU_REDUCE)
             return None
         return LearningRateSchedulerPlateauReduce(learning_rate_reduce_factor, learning_rate_reduce_num_not_improved,
                                                   learning_rate_warmup)
