@@ -16,7 +16,7 @@ Command-line tool to inspect model embeddings.
 """
 import argparse
 import sys
-from typing import List, Tuple
+from typing import Iterable, Tuple
 
 import mxnet as mx
 import numpy as np
@@ -54,7 +54,7 @@ def compute_sims(inputs: mx.nd.NDArray, normalize: bool) -> mx.nd.NDArray:
 def nearest_k(similarity_matrix: mx.nd.NDArray,
               query_word_id: int,
               k: int,
-              gamma: float = 1.0) -> List[Tuple[int, float]]:
+              gamma: float = 1.0) -> Iterable[Tuple[int, float]]:
     """
     Returns values and indices of k items with largest similarity.
 
@@ -83,7 +83,7 @@ def main():
 
     logger.info("Arguments: %s", args)
 
-    vocab = sockeye.vocab.vocab_from_pickle(args.vocab)
+    vocab = sockeye.vocab.vocab_from_json_or_pickle(args.vocab)
     vocab_inv = sockeye.vocab.reverse_vocab(vocab)
 
     params, _ = sockeye.utils.load_params(args.params)

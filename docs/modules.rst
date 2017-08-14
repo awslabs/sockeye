@@ -134,11 +134,17 @@ sockeye.rnn module
     :members:
     :show-inheritance:
 
-
 sockeye.training module
 -----------------------
 
 .. automodule:: sockeye.training
+    :members:
+    :show-inheritance:
+
+sockeye.transformer module
+--------------------------
+
+.. automodule:: sockeye.transformer
     :members:
     :show-inheritance:
 

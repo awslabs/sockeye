@@ -15,11 +15,11 @@ import copy
 import logging
 import os
 from typing import Optional
+
 import mxnet as mx
 
 from sockeye import __version__
 from sockeye.config import Config
-from . import attention
 from . import constants as C
 from . import data_io
 from . import decoder
@@ -38,12 +38,12 @@ class ModelConfig(Config):
     contain these parameters, provide a reasonable default under default_values.
 
     :param config_data: Used training data.
-    :param max_seq_len: Maximum sequence length to unroll during training.
+    :param max_seq_len_source: Maximum source sequence length to unroll during training.
+    :param max_seq_len_target: Maximum target sequence length to unroll during training.
     :param vocab_source_size: Source vocabulary size.
     :param vocab_target_size: Target vocabulary size.
     :param config_encoder: Encoder configuration.
     :param config_decoder: Decoder configuration.
-    :param config_attention: Attention configuration.
     :param config_loss: Loss configuration.
     :param lexical_bias: Use lexical biases.
     :param learn_lexical_bias: Learn lexical biases during training.
@@ -52,12 +52,12 @@ class ModelConfig(Config):
     """
     def __init__(self,
                  config_data: data_io.DataConfig,
-                 max_seq_len: int,
+                 max_seq_len_source: int,
+                 max_seq_len_target: int,
                  vocab_source_size: int,
                  vocab_target_size: int,
-                 config_encoder: encoder.RecurrentEncoderConfig,
+                 config_encoder: encoder.EncoderConfig,
                  config_decoder: decoder.RecurrentDecoderConfig,
-                 config_attention: attention.AttentionConfig,
                  config_loss: loss.LossConfig,
                  lexical_bias: bool = False,
                  learn_lexical_bias: bool = False,
@@ -65,12 +65,12 @@ class ModelConfig(Config):
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX):
         super().__init__()
         self.config_data = config_data
-        self.max_seq_len = max_seq_len
+        self.max_seq_len_source = max_seq_len_source
+        self.max_seq_len_target = max_seq_len_target
         self.vocab_source_size = vocab_source_size
         self.vocab_target_size = vocab_target_size
         self.config_encoder = config_encoder
         self.config_decoder = config_decoder
-        self.config_attention = config_attention
         self.config_loss = config_loss
         self.lexical_bias = lexical_bias
         self.learn_lexical_bias = learn_lexical_bias
@@ -94,7 +94,6 @@ class SockeyeModel:
         self.config.freeze()
         logger.info("%s", self.config)
         self.encoder = None
-        self.attention = None
         self.decoder = None
         self.rnn_cells = []
         self.built = False
@@ -160,32 +159,27 @@ class SockeyeModel:
         with open(fname, "w") as out:
             out.write(__version__)
 
-    def _build_model_components(self, max_seq_len: int, fused_encoder: bool):
+    def _build_model_components(self, fused_encoder: bool):
         """
-        Builds and sets model components given maximum sequence length.
+        Instantiates model components.
 
-        :param max_seq_len: Maximum sequence length supported by the model.
         :param fused_encoder: Use FusedRNNCells in encoder.
         """
         # we tie the source and target embeddings if both appear in the type
         if self.config.weight_tying and C.WEIGHT_TYING_SRC in self.config.weight_tying_type \
                 and C.WEIGHT_TYING_TRG in self.config.weight_tying_type:
-            logger.debug("Tying the source and target embeddings.")
+            logger.info("Tying the source and target embeddings.")
             embed_weight = mx.sym.Variable(C.SHARED_EMBEDDING_PREFIX + "weight")
         else:
             embed_weight = None
-        self.encoder = encoder.get_recurrent_encoder(self.config.config_encoder, fused_encoder, embed_weight)
 
-        self.attention = attention.get_attention(self.config.config_attention, max_seq_len)
+        self.encoder = encoder.get_encoder(self.config.config_encoder, fused_encoder, embed_weight)
 
         self.lexicon = lexicon.Lexicon(self.config.vocab_source_size,
                                        self.config.vocab_target_size,
                                        self.config.learn_lexical_bias) if self.config.lexical_bias else None
 
-        self.decoder = decoder.get_recurrent_decoder(self.config.config_decoder,
-                                                     self.attention,
-                                                     self.lexicon,
-                                                     embed_weight)
+        self.decoder = decoder.get_decoder(self.config.config_decoder, self.lexicon, embed_weight)
 
         self.rnn_cells = self.encoder.get_rnn_cells() + self.decoder.get_rnn_cells()
 

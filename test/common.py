@@ -23,6 +23,7 @@ import numpy as np
 
 import sockeye.bleu
 import sockeye.constants as C
+import sockeye.average
 import sockeye.train
 import sockeye.translate
 import sockeye.utils
@@ -113,7 +114,7 @@ def run_train_translate(train_params: str,
                         max_seq_len: int = 10,
                         work_dir: Optional[str] = None) -> Tuple[float, float]:
     """
-    Train a model and translate a dev set.  Report perplexity and BLEU.
+    Train a model and translate a dev set.  Report validation perplexity and BLEU.
 
     :param train_params: Command line args for model training.
     :param translate_params: Command line args for translation.
@@ -146,11 +147,18 @@ def run_train_translate(train_params: str,
         with patch.object(sys, "argv", params.split()):
             sockeye.translate.main()
 
-        # Measure perplexity
-        checkpoints = sockeye.utils.read_metrics_points(path=os.path.join(model_path, C.METRICS_NAME),
-                                                        model_path=model_path,
-                                                        metric=C.PERPLEXITY)
-        perplexity = checkpoints[-1][0]
+        # test averaging
+        points = sockeye.average.find_checkpoints(model_path=model_path,
+                                                  size=1,
+                                                  strategy='best',
+                                                  metric=C.PERPLEXITY)
+        assert len(points) > 0
+        averaged_params = sockeye.average.average(points)
+        assert averaged_params
+
+        # get last validation perplexity
+        metrics = sockeye.utils.read_metrics_file(path=os.path.join(model_path, C.METRICS_NAME))
+        perplexity = metrics[-1][C.PERPLEXITY + '-val']
 
         # Measure BLEU
         bleu = sockeye.bleu.corpus_bleu(open(out_path, "r").readlines(),

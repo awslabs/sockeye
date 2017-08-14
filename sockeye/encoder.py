@@ -15,7 +15,6 @@
 Encoders for sequence-to-sequence models.
 """
 import logging
-
 from math import ceil, floor
 from typing import Callable, List, Optional, Tuple
 
@@ -24,33 +23,52 @@ import mxnet as mx
 from sockeye.config import Config
 from . import constants as C
 from . import rnn
+from . import transformer
 from . import utils
 
 logger = logging.getLogger(__name__)
 
 
-class RecurrentEncoderConfig(Config):
+class EncoderConfig(Config):
+    def __init__(self,
+                 vocab_size: int,
+                 num_embed: int) -> None:
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.num_embed = num_embed
+
+
+def get_encoder(config: Config, fused: bool, embed_weight: Optional[mx.sym.Symbol] = None):
+    if isinstance(config, RecurrentEncoderConfig):
+        return get_recurrent_encoder(config, fused, embed_weight)
+    elif isinstance(config, transformer.TransformerConfig):
+        return get_transformer_encoder(config, embed_weight)
+    else:
+        raise ValueError("Unsupported encoder configuration")
+
+
+class RecurrentEncoderConfig(EncoderConfig):
     """
     Recurrent encoder configuration.
 
     :param vocab_size: Source vocabulary size.
     :param num_embed: Size of embedding layer.
     :param rnn_config: RNN configuration.
+    :param conv_config: Optional configuration for convolutional embedding.
     """
+
     def __init__(self,
                  vocab_size: int,
                  num_embed: int,
                  rnn_config: rnn.RNNConfig,
                  conv_config: Optional['ConvolutionalEmbeddingConfig'] = None) -> None:
-        super().__init__()
-        self.vocab_size = vocab_size
-        self.num_embed = num_embed
+        super().__init__(vocab_size, num_embed)
         self.rnn_config = rnn_config
         self.conv_config = conv_config
 
 
 def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
-                          embed_weight: Optional[mx.sym.Symbol]=None) -> 'Encoder':
+                          embed_weight: Optional[mx.sym.Symbol] = None) -> 'Encoder':
     """
     Returns a recurrent encoder with embedding, batch2time-major conversion, and bidirectional RNN.
     If num_layers > 1, adds additional uni-directional RNNs.
@@ -83,6 +101,32 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
         encoders.append(encoder_class(rnn_config=remaining_rnn_config,
                                       prefix=C.STACKEDRNN_PREFIX,
                                       layout=C.TIME_MAJOR))
+
+    return EncoderSequence(encoders)
+
+
+def get_transformer_encoder(config: transformer.TransformerConfig,
+                            embed_weight: Optional[mx.sym.Symbol] = None) -> 'Encoder':
+    """
+    Returns a Transformer encoder, consisting of an embedding layer with
+    positional encodings and a TransformerEncoder instance.
+
+    :param config: Configuration for transformer encoder.
+    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
+    :return: Encoder instance.
+    """
+    encoders = list()
+    encoders.append(Embedding(num_embed=config.model_size,
+                              vocab_size=config.vocab_size,
+                              prefix=C.SOURCE_EMBEDDING_PREFIX,
+                              dropout=config.dropout_residual,
+                              embed_weight=embed_weight,
+                              add_positional_encoding=config.positional_encodings))
+    if config.conv_config is not None:
+        encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
+
+    encoders.append(TransformerEncoder(config))
+    encoders.append(BatchMajor2TimeMajor())
 
     return EncoderSequence(encoders)
 
@@ -152,7 +196,7 @@ class BatchMajor2TimeMajor(Encoder):
         """
         Return the representation size of this encoder.
         """
-        return 0
+        raise NotImplementedError()
 
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """
@@ -170,10 +214,16 @@ class Embedding(Encoder):
     :param prefix: Name prefix for symbols of this encoder.
     :param dropout: Dropout probability.
     :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
+    :param add_positional_encoding: If true, adds positional encodings to embedding.
     """
 
-    def __init__(self, num_embed: int, vocab_size: int, prefix: str, dropout: float,
-                 embed_weight: Optional[mx.sym.Symbol]=None):
+    def __init__(self,
+                 num_embed: int,
+                 vocab_size: int,
+                 prefix: str,
+                 dropout: float,
+                 embed_weight: Optional[mx.sym.Symbol] = None,
+                 add_positional_encoding: bool = False):
         self.num_embed = num_embed
         self.vocab_size = vocab_size
         self.prefix = prefix
@@ -182,6 +232,7 @@ class Embedding(Encoder):
             self.embed_weight = embed_weight
         else:
             self.embed_weight = mx.sym.Variable(prefix + "weight")
+        self.add_positional_encoding = add_positional_encoding
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -199,10 +250,29 @@ class Embedding(Encoder):
                                      input_dim=self.vocab_size,
                                      weight=self.embed_weight,
                                      output_dim=self.num_embed,
-                                     name=self.prefix + 'embed')
+                                     name=self.prefix + "embed")
+        if self.add_positional_encoding:
+            embedding = mx.sym.broadcast_add(embedding,
+                                             self.get_positional_encoding(length=seq_len,
+                                                                          depth=self.num_embed,
+                                                                          name="%spositional_encodings" % self.prefix),
+                                             name='%sadd_positional_encodings' % self.prefix)
         if self.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.dropout, name="source_embed_dropout")
         return embedding, data_length, seq_len
+
+    @staticmethod
+    def get_positional_encoding(length: int, depth: int, name: str) -> mx.sym.Symbol:
+        """
+        Returns symbol initialized with positional encodings as in Vaswani et al.
+
+        :param length: Maximum sequence length
+        :param depth: Depth.
+        :param name: Symbol name.
+        :return: Symbol(1, length, depth)
+        """
+        return mx.sym.BlockGrad(mx.symbol.Custom(length=length, depth=depth, name=name,
+                                                 op_type='positional_encodings'))
 
     def get_num_hidden(self) -> int:
         """
@@ -247,7 +317,12 @@ class EncoderSequence(Encoder):
         """
         Return the representation size of this encoder.
         """
-        return self.encoders[-1].get_num_hidden()
+        if isinstance(self.encoders[-1], BatchMajor2TimeMajor):
+            utils.check_condition(len(self.encoders) > 1,
+                                  "Cannot return num_hidden from a BatchMajor2TimeMajor encoder only")
+            return self.encoders[-2].get_num_hidden()
+        else:
+            return self.encoders[-1].get_num_hidden()
 
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """
@@ -458,31 +533,94 @@ class BiDirectionalRNNEncoder(Encoder):
         return self.forward_rnn.get_rnn_cells() + self.reverse_rnn.get_rnn_cells()
 
 
+class TransformerEncoder(Encoder):
+    """
+    Non-recurrent encoder based on the transformer architecture in:
+
+    Attention Is All You Need, Figure 1 (left)
+    Vaswani et al. (https://arxiv.org/pdf/1706.03762.pdf).
+
+    :param config: Configuration for transformer encoder.
+    :param prefix: Name prefix for operations in this encoder.
+    """
+
+    def __init__(self,
+                 config: transformer.TransformerConfig,
+                 prefix: str = C.TRANSFORMER_ENCODER_PREFIX):
+        self.config = config
+        self.prefix = prefix
+        self.layers = [transformer.TransformerEncoderBlock(
+            config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
+
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: mx.sym.Symbol,
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+        """
+        Encodes data given sequence lengths of individual examples and maximum sequence length.
+
+        :param data: Input data.
+        :param data_length: Vector with sequence lengths.
+        :param seq_len: Maximum sequence length.
+        :return: Encoded versions of input data data, data_length, seq_len.
+        """
+        for i, layer in enumerate(self.layers):
+            # (batch_size, seq_len, config.model_size)
+            data = layer(data, data_length, seq_len)
+        return data, data_length, seq_len
+
+    def get_num_hidden(self) -> int:
+        """
+        Return the representation size of this encoder.
+        """
+        return self.config.model_size
+
+    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
+        """
+        Returns a list of RNNCells used by this encoder.
+        """
+        return []
+
+    def get_encoded_seq_len(self, seq_len: int) -> int:
+        """
+        Returns the size of the encoded sequence.
+        """
+        return seq_len
+
+
 class ConvolutionalEmbeddingConfig(Config):
     """
     Convolutional embedding encoder configuration.
 
     :param num_embed: Input embedding size.
+    :param output_dim: Output segment embedding size.
     :param max_filter_width: Maximum filter width for convolutions.
     :param num_filters: Number of filters of each width.
     :param pool_stride: Stride for pooling layer after convolutions.
     :param num_highway_layers: Number of highway layers for segment embeddings.
     :param dropout: Dropout probability.
     """
+
     def __init__(self,
                  num_embed: int,
+                 output_dim: int = None,
                  max_filter_width: int = 8,
                  num_filters: Tuple[int] = (200, 200, 250, 250, 300, 300, 300, 300),
                  pool_stride: int = 5,
                  num_highway_layers: int = 4,
-                 dropout: float = 0.0) -> None:
+                 dropout: float = 0.0,
+                 add_positional_encoding: bool = False) -> None:
         super().__init__()
         self.num_embed = num_embed
+        self.output_dim = output_dim
         self.max_filter_width = max_filter_width
         self.num_filters = num_filters
         self.pool_stride = pool_stride
         self.num_highway_layers = num_highway_layers
         self.dropout = dropout
+        self.add_positional_encoding = add_positional_encoding
+        if self.output_dim is None:
+            self.output_dim = sum(self.num_filters)
 
 
 class ConvolutionalEmbeddingEncoder(Encoder):
@@ -503,17 +641,22 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         utils.check_condition(len(config.num_filters) == config.max_filter_width,
                               "num_filters must have max_filter_width elements.")
         self.num_embed = config.num_embed
+        self.output_dim = config.output_dim
         self.max_filter_width = config.max_filter_width
         self.num_filters = config.num_filters[:]
         self.pool_stride = config.pool_stride
         self.num_highway_layers = config.num_highway_layers
         self.prefix = prefix
         self.dropout = config.dropout
+        self.add_positional_encoding = config.add_positional_encoding
 
         self.conv_weight = {filter_width: mx.sym.Variable("%s%s%d%s" % (self.prefix, "conv_", filter_width, "_weight"))
                             for filter_width in range(1, self.max_filter_width + 1)}
         self.conv_bias = {filter_width: mx.sym.Variable("%s%s%d%s" % (self.prefix, "conv_", filter_width, "_bias"))
                           for filter_width in range(1, self.max_filter_width + 1)}
+
+        self.project_weight = mx.sym.Variable(self.prefix + "project_weight")
+        self.project_bias = mx.sym.Variable(self.prefix + "project_bias")
 
         self.gate_weight = [mx.sym.Variable("%s%s%d%s" % (self.prefix, "gate_", i, "_weight"))
                             for i in range(self.num_highway_layers)]
@@ -535,7 +678,7 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         :param data: Input data.
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
-        :return: Encoded versions of input data (data, data_length, seq_len).
+        :return: Encoded versions of input data data, data_length, seq_len.
         """
         total_num_filters = sum(self.num_filters)
         encoded_seq_len = self.get_encoded_seq_len(seq_len)
@@ -556,7 +699,7 @@ class ConvolutionalEmbeddingEncoder(Encoder):
                                 pad_width=(0, 0, 0, 0, pad_before, pad_after, 0, 0))
             # (batch_size, num_filter, seq_len, num_scores=1)
             conv = mx.sym.Convolution(data=padded,
-                                      #cudnn_tune="off",
+                                      # cudnn_tune="off",
                                       kernel=(filter_width, self.num_embed),
                                       num_filter=num_filter,
                                       weight=self.conv_weight[filter_width],
@@ -588,13 +731,27 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         if self.dropout > 0:
             pool = mx.sym.Dropout(data=pool, p=self.dropout)
 
-        # Highway network
+        # Raw segment embeddings reshaped for highway network
         # (batch_size * seq_len/stride, total_num_filters)
         seg_embedding = mx.sym.Reshape(data=pool, shape=(-3, total_num_filters))
+
+        # Projection layer if requested output dimension is different from total number of filters
+        # (TransformerEncoder compatibility, not in original paper)
+        if self.output_dim != total_num_filters:
+            # (batch_size * seq_len/stride, outut_dim)
+            seg_embedding = mx.sym.FullyConnected(data=seg_embedding,
+                                                  num_hidden=self.output_dim,
+                                                  weight=self.project_weight,
+                                                  bias=self.project_bias)
+            seg_embedding = mx.sym.Activation(data=seg_embedding, act_type="relu")
+            if self.dropout > 0:
+                seg_embedding = mx.sym.Dropout(data=seg_embedding, p=self.dropout)
+
+        # Highway network
         for i in range(self.num_highway_layers):
             # Gate
             gate = mx.sym.FullyConnected(data=seg_embedding,
-                                         num_hidden=total_num_filters,
+                                         num_hidden=self.output_dim,
                                          weight=self.gate_weight[i],
                                          bias=self.gate_bias[i])
             gate = mx.sym.Activation(data=gate, act_type="sigmoid")
@@ -602,7 +759,7 @@ class ConvolutionalEmbeddingEncoder(Encoder):
                 gate = mx.sym.Dropout(data=gate, p=self.dropout)
             # Transform
             transform = mx.sym.FullyConnected(data=seg_embedding,
-                                              num_hidden=total_num_filters,
+                                              num_hidden=self.output_dim,
                                               weight=self.transform_weight[i],
                                               bias=self.transform_bias[i])
             transform = mx.sym.Activation(data=transform, act_type="relu")
@@ -610,10 +767,24 @@ class ConvolutionalEmbeddingEncoder(Encoder):
                 transform = mx.sym.Dropout(data=transform, p=self.dropout)
             # Connection
             seg_embedding = gate * transform + (1 - gate) * seg_embedding
-        # (batch_size, seq_len/stride, total_num_filters) aka
+        # (batch_size, seq_len/stride, outut_dim) aka
         # (batch_size, encoded_seq_len, num_segment_emded)
         seg_embedding = mx.sym.Reshape(data=seg_embedding,
-                                       shape=(-1, encoded_seq_len, total_num_filters))
+                                       shape=(-1, encoded_seq_len, self.output_dim))
+
+        # If specified, add positional encodings to segment embeddings
+        # (TransformerEncoder compatibility, not in original paper)
+        if self.add_positional_encoding:
+            seg_embedding = mx.sym.broadcast_add(seg_embedding,
+                                                 Embedding.get_positional_encoding(
+                                                     length=encoded_seq_len,
+                                                     depth=self.output_dim,
+                                                     name="%spositional_encodings" % self.prefix),
+                                                 name='%sadd_positional_encodings' % self.prefix)
+
+        # Dropout on final segment embeddings
+        if self.dropout > 0:
+            seg_embedding = mx.sym.Dropout(data=seg_embedding, p=self.dropout)
 
         # Ceiling function isn't differentiable so this will throw errors if we
         # attempt to compute gradients.  Fortunately we aren't updating inputs
@@ -626,7 +797,7 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         """
         Return the representation size of this encoder.
         """
-        return sum(self.num_filters)
+        return self.output_dim
 
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """
@@ -638,4 +809,4 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         """
         Returns the size of the encoded sequence.
         """
-        return ceil(seq_len / self.pool_stride)
+        return int(ceil(seq_len / self.pool_stride))

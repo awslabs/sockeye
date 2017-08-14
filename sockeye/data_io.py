@@ -20,7 +20,7 @@ import logging
 import pickle
 import random
 from collections import OrderedDict
-from typing import Dict, Iterator, Iterable, List, NamedTuple, Optional, Tuple
+from typing import Dict, Iterator, Iterable, List, Optional, Tuple
 
 import mxnet as mx
 import numpy as np

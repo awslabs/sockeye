@@ -14,11 +14,15 @@
 """
 Tests sockeye.callback.TrainingMonitor optimization logic
 """
-import pytest
-import numpy as np
-import sockeye.callback
-import sockeye.utils
+import os
 import tempfile
+
+import numpy as np
+import pytest
+
+from sockeye import callback
+from sockeye import constants as C
+from sockeye import utils
 
 test_constants = [('perplexity', np.inf,
                    [{'perplexity': 100.0, '_': 42}, {'perplexity': 50.0}, {'perplexity': 60.0}, {'perplexity': 80.0}],
@@ -44,11 +48,12 @@ class DummyMetric(object):
 def test_callback(optimized_metric, initial_best, train_metrics, eval_metrics, improved_seq):
     with tempfile.TemporaryDirectory() as tmpdir:
         batch_size = 32
-        monitor = sockeye.callback.TrainingMonitor(batch_size=batch_size,
-                                                   output_folder=tmpdir,
-                                                   optimized_metric=optimized_metric)
+        monitor = callback.TrainingMonitor(batch_size=batch_size,
+                                           output_folder=tmpdir,
+                                           optimized_metric=optimized_metric)
         assert monitor.optimized_metric == optimized_metric
         assert monitor.get_best_validation_score() == initial_best
+        metrics_fname = os.path.join(tmpdir, C.METRICS_NAME)
 
         for checkpoint, (train_metric, eval_metric, expected_improved) in enumerate(
                 zip(train_metrics, eval_metrics, improved_seq), 1):
@@ -58,12 +63,24 @@ def test_callback(optimized_metric, initial_best, train_metrics, eval_metrics, i
             improved, best_checkpoint = monitor.eval_end_callback(checkpoint, DummyMetric(eval_metric))
             assert {k + "-val" for k in eval_metric.keys()} <= monitor.metrics[-1].keys()
             assert improved == expected_improved
-            
+            assert os.path.exists(metrics_fname)
+            metrics = utils.read_metrics_file(metrics_fname)
+            _compare_metrics(metrics, monitor.metrics)
+
+
+def _compare_metrics(a, b):
+    assert len(a) == len(b)
+    for x, y in zip(a, b):
+        assert len(x.items()) == len(y.items())
+        for (xk, xv), (yk, yv) in zip(sorted(x.items()), sorted(y.items())):
+            assert xk == yk
+            assert pytest.approx(xv, yv)
+
 
 def test_bleu_requires_checkpoint_decoder():
-    with pytest.raises(sockeye.utils.SockeyeError) as e, tempfile.TemporaryDirectory() as tmpdir:
-        sockeye.callback.TrainingMonitor(batch_size=1,
-                                         output_folder=tmpdir,
-                                         optimized_metric='bleu',
-                                         checkpoint_decoder=None)
+    with pytest.raises(utils.SockeyeError) as e, tempfile.TemporaryDirectory() as tmpdir:
+        callback.TrainingMonitor(batch_size=1,
+                                 output_folder=tmpdir,
+                                 optimized_metric='bleu',
+                                 cp_decoder=None)
     assert "bleu requires CheckpointDecoder" == str(e.value)

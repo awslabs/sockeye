@@ -25,10 +25,10 @@ from typing import Dict, Iterable
 
 import mxnet as mx
 
+from sockeye.log import setup_main_logger, log_sockeye_version
 from . import arguments
 from . import constants as C
 from . import utils
-from sockeye.log import setup_main_logger, log_sockeye_version
 
 logger = setup_main_logger(__name__, console=True, file_logging=False)
 
@@ -79,8 +79,10 @@ def find_checkpoints(model_path: str, size=4, strategy="best", metric: str = C.P
     :return: List of paths corresponding to chosen checkpoints.
     """
     maximize = C.METRIC_MAXIMIZE[metric]
-    metrics_path = os.path.join(model_path, C.METRICS_NAME)
-    points = utils.read_metrics_points(metrics_path, model_path, metric=metric)
+    points = utils.get_validation_metric_points(model_path=model_path, metric=metric)
+    # keep only points for which .param files exist
+    param_path = os.path.join(model_path, C.PARAMS_NAME)
+    points = [(value, checkpoint) for value, checkpoint in points if os.path.exists(param_path % checkpoint)]
 
     if strategy == "best":
         # N best scoring points

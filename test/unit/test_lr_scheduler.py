@@ -18,16 +18,15 @@ from sockeye.lr_scheduler import LearningRateSchedulerInvSqrtT, LearningRateSche
 
 
 def test_lr_scheduler():
-    updates_per_epoch = 13
-    half_life_num_epochs = 3
+    updates_per_checkpoint = 13
+    half_life_num_checkpoints = 3
 
-    schedulers = [LearningRateSchedulerInvT(updates_per_epoch, half_life_num_epochs),
-                  LearningRateSchedulerInvSqrtT(updates_per_epoch, half_life_num_epochs)]
+    schedulers = [LearningRateSchedulerInvT(updates_per_checkpoint, half_life_num_checkpoints),
+                  LearningRateSchedulerInvSqrtT(updates_per_checkpoint, half_life_num_checkpoints)]
     for scheduler in schedulers:
         scheduler.base_lr = 1.0
         # test correct half-life:
-
-        assert scheduler(updates_per_epoch * half_life_num_epochs) == pytest.approx(0.5)
+        assert scheduler(updates_per_checkpoint * half_life_num_checkpoints) == pytest.approx(0.5)
 
 
 @pytest.mark.parametrize("scheduler_type, reduce_factor, expected_instance",
