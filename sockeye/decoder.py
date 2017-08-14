@@ -39,9 +39,9 @@ def get_decoder(config: Config,
                 lexicon: Optional[lexicons.Lexicon] = None,
                 embed_weight: Optional[mx.sym.Symbol] = None) -> 'Decoder':
     if isinstance(config, RecurrentDecoderConfig):
-        return RecurrentDecoder(config=config, lexicon=lexicon, embed_weight=embed_weight, prefix=C.DECODER_PREFIX)
+        return RecurrentDecoder(config=config, lexicon=lexicon, embed_weight=embed_weight, prefix=C.RNN_DECODER_PREFIX)
     elif isinstance(config, transformer.TransformerConfig):
-        return TransformerDecoder(config=config, embed_weight=embed_weight, prefix=C.DECODER_PREFIX)
+        return TransformerDecoder(config=config, embed_weight=embed_weight, prefix=C.TRANSFORMER_DECODER_PREFIX)
     else:
         raise ValueError("Unsupported decoder configuration")
 
@@ -181,6 +181,10 @@ class TransformerDecoder(Decoder):
         self.prefix = prefix
         self.layers = [transformer.TransformerDecoderBlock(
             config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
+        self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                                 num_hidden=config.model_size,
+                                                                 dropout=config.dropout_prepost,
+                                                                 prefix="%sfinal_process" % prefix)
 
         # Embedding & output parameters
         if embed_weight is None:
@@ -189,7 +193,7 @@ class TransformerDecoder(Decoder):
         self.embedding = encoder.Embedding(num_embed=config.model_size,
                                            vocab_size=config.vocab_size,
                                            prefix=C.TARGET_EMBEDDING_PREFIX,
-                                           dropout=config.dropout_residual,
+                                           dropout=config.dropout_prepost,
                                            embed_weight=embed_weight,
                                            add_positional_encoding=config.positional_encodings)
         if self.config.weight_tying:
@@ -235,6 +239,7 @@ class TransformerDecoder(Decoder):
         for layer in self.layers:
             target = layer(target, target_lengths, target_max_length, target_bias,
                            source_encoded, source_encoded_lengths, source_encoded_max_length)
+        target = self.final_process(data=target, prev=None, length=target_max_length)
 
         # target: (batch_size * target_max_length, model_size)
         target = mx.sym.reshape(data=target, shape=(-3, -1))
@@ -283,6 +288,7 @@ class TransformerDecoder(Decoder):
         for layer in self.layers:
             target = layer(target, target_lengths, target_max_length, target_bias,
                            source_encoded, source_encoded_lengths, source_encoded_max_length)
+        target = self.final_process(data=target, prev=None, length=target_max_length)
 
         # set all target positions to zero except for current time-step
         # target: (batch_size, target_max_length, model_size)
@@ -419,7 +425,7 @@ class RecurrentDecoder(Decoder):
                  config: RecurrentDecoderConfig,
                  lexicon: Optional[lexicons.Lexicon] = None,
                  embed_weight: Optional[mx.sym.Symbol] = None,
-                 prefix: str = C.DECODER_PREFIX) -> None:
+                 prefix: str = C.RNN_DECODER_PREFIX) -> None:
         # TODO: implement variant without input feeding
         self.config = config
         self.rnn_config = config.rnn_config

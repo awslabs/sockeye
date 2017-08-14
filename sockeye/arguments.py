@@ -317,6 +317,26 @@ def add_model_parameters(params):
     model_params.add_argument('--transformer-no-positional-encodings',
                               action='store_true',
                               help='Do not use positional encodings.')
+    model_params.add_argument('--transformer-preprocess',
+                              type=multiple_values(num_values=2, greater_or_equal=None, data_type=str),
+                              default=('', ''),
+                              help='Transformer preprocess sequence for encoder and decoder. Supports three types of '
+                                   'operations: d=dropout, r=residual connection, n=layer normalization. You can '
+                                   'combine in any order, for example: "ndr". '
+                                   'Leave empty to not use any of these operations. '
+                                   'You can specify separate sequences for encoder and decoder by separating with ":" '
+                                   'For example: n:drn '
+                                   'Default: %(default)s.')
+    model_params.add_argument('--transformer-postprocess',
+                              type=multiple_values(num_values=2, greater_or_equal=None, data_type=str),
+                              default=('drn', 'drn'),
+                              help='Transformer postprocess sequence for encoder and decoder. Supports three types of '
+                                   'operations: d=dropout, r=residual connection, n=layer normalization. You can '
+                                   'combine in any order, for example: "ndr". '
+                                   'Leave empty to not use any of these operations. '
+                                   'You can specify separate sequences for encoder and decoder by separating with ":" '
+                                   'For example: n:drn '
+                                   'Default: %(default)s.')
 
     # embedding arguments
     model_params.add_argument('--num-embed',
@@ -493,10 +513,10 @@ def add_training_args(params):
                               type=float,
                               default=0.,
                               help='Dropout probability before relu in feed-forward block. Default: %(default)s.')
-    train_params.add_argument('--transformer-dropout-residual',
+    train_params.add_argument('--transformer-dropout-prepost',
                               type=float,
                               default=0.,
-                              help='Dropout probability for residual connections. Default: %(default)s.')
+                              help='Dropout probability for pre/postprocessing blocks. Default: %(default)s.')
     train_params.add_argument('--conv-embed-dropout',
                               type=float,
                               default=.0,
