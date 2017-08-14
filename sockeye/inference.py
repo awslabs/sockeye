@@ -455,7 +455,7 @@ class Translator:
         """
         # allow output sentence to be at most 2 times the current bucket_key
         # TODO: max_output_length adaptive to source_length
-        max_output_length = bucket_key * 2
+        max_output_length = bucket_key * C.TARGET_MAX_LENGTH_FACTOR
 
         return self._get_best_from_beam(*self._beam_search(source, bucket_key, max_output_length))
 

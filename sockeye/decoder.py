@@ -80,6 +80,7 @@ class Decoder(ABC):
         :return: Logits of next-word predictions for target sequence.
                  Shape: (batch_size * target_max_length, target_vocab_size)
         """
+        pass
 
     @abstractmethod
     def decode_step(self,
@@ -97,6 +98,7 @@ class Decoder(ABC):
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
         """
+        pass
 
     @abstractmethod
     def init_states(self,
@@ -356,7 +358,7 @@ class TransformerDecoder(Decoder):
     def _get_target_max_length(source_encoded_max_length: int):
         # TODO(fhieber): we need to hardcode this for the inference algorithm to work.
         # This is currently in line with the beam_search algorithm but not ideal.
-        return source_encoded_max_length * 2
+        return source_encoded_max_length * C.TARGET_MAX_LENGTH_FACTOR
 
 
 RecurrentDecoderState = NamedTuple('RecurrentDecoderState', [

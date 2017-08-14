@@ -71,6 +71,7 @@ def test_callback(optimized_metric, initial_best, train_metrics, eval_metrics, i
 def _compare_metrics(a, b):
     assert len(a) == len(b)
     for x, y in zip(a, b):
+        assert len(x.items()) == len(y.items())
         for (xk, xv), (yk, yv) in zip(sorted(x.items()), sorted(y.items())):
             assert xk == yk
             assert pytest.approx(xv, yv)

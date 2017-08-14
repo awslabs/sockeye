@@ -182,3 +182,5 @@ METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, PERPLEXITY: np.inf}
 # loss names
 CROSS_ENTROPY = 'cross-entropy'
 SMOOTHED_CROSS_ENTROPY = 'smoothed-cross-entropy'
+
+TARGET_MAX_LENGTH_FACTOR = 2

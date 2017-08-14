@@ -68,9 +68,6 @@ class LearningRateSchedulerInvSqrtT(LearningRateScheduler):
         self.t_last_log = -1
         self.log_every_t = int(half_life * updates_per_checkpoint)
 
-    def _update_rate(self, num_updates):
-        return self.base_lr / sqrt(1 + num_updates * self.factor)
-
     def __call__(self, num_updates: int):
         lr = min(self.base_lr / sqrt(1 + num_updates * self.factor), self._warmup(num_updates) if self.warmup > 0 else 99999)
         # Note: this method is called once per parameter for the same t. Making sure to just log once.
