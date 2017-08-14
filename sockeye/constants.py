@@ -171,6 +171,16 @@ INFERENCE_ARG_OUTPUT_SHORT = "-o"
 BATCH_MAJOR = "NTC"
 TIME_MAJOR = "TNC"
 
+# Training constants
+LR_SCHEDULER_FIXED_RATE_INV_SQRT_T = "fixed-rate-inv-sqrt-t"
+LR_SCHEDULER_FIXED_RATE_INV_T = "fixed-rate-inv-t"
+LR_SCHEDULER_FIXED_STEP = "fixed-step"
+LR_SCHEDULER_PLATEAU_REDUCE = "plateau-reduce"
+LR_SCHEDULERS = [LR_SCHEDULER_FIXED_RATE_INV_SQRT_T,
+                 LR_SCHEDULER_FIXED_RATE_INV_T,
+                 LR_SCHEDULER_FIXED_STEP,
+                 LR_SCHEDULER_PLATEAU_REDUCE]
+
 # metrics
 ACCURACY = 'accuracy'
 PERPLEXITY = 'perplexity'
