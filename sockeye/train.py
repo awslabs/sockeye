@@ -163,19 +163,21 @@ def main():
             vocab_source = vocab.vocab_from_json_or_pickle(os.path.join(output_folder, C.VOCAB_SRC_NAME))
             vocab_target = vocab.vocab_from_json_or_pickle(os.path.join(output_folder, C.VOCAB_TRG_NAME))
         else:
-            num_words_source = args.num_words if args.num_words_source is None else args.num_words_source
-            num_words_target = args.num_words if args.num_words_target is None else args.num_words_target
+            num_words_source, num_words_target = args.num_words
+            word_min_count_source, word_min_count_target = args.word_min_count
 
             # if the source and target embeddings are tied we build a joint vocabulary:
             if args.weight_tying and C.WEIGHT_TYING_SRC in args.weight_tying_type \
                     and C.WEIGHT_TYING_TRG in args.weight_tying_type:
                 vocab_source = vocab_target = _build_or_load_vocab(args.source_vocab,
                                                                    [args.source, args.target],
-                                                                   args.num_words,
-                                                                   args.word_min_count)
+                                                                   num_words_source,
+                                                                   word_min_count_source)
             else:
-                vocab_source = _build_or_load_vocab(args.source_vocab, [args.source], num_words_source, args.word_min_count)
-                vocab_target = _build_or_load_vocab(args.target_vocab, [args.target], num_words_target, args.word_min_count)
+                vocab_source = _build_or_load_vocab(args.source_vocab, [args.source],
+                                                    num_words_source, word_min_count_source)
+                vocab_target = _build_or_load_vocab(args.target_vocab, [args.target],
+                                                    num_words_target, word_min_count_target)
 
             # write vocabularies
             vocab.vocab_to_json(vocab_source, os.path.join(output_folder, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
@@ -193,8 +195,7 @@ def main():
                                          args.target_vocab)
 
         # create data iterators
-        max_seq_len_source = args.max_seq_len if args.max_seq_len_source is None else args.max_seq_len_source
-        max_seq_len_target = args.max_seq_len if args.max_seq_len_target is None else args.max_seq_len_target
+        max_seq_len_source, max_seq_len_target = args.max_seq_len
         train_iter, eval_iter = data_io.get_training_data_iters(source=config_data.source,
                                                                 target=config_data.target,
                                                                 validation_source=config_data.validation_source,
@@ -224,10 +225,8 @@ def main():
                 lr_scheduler_instance = pickle.load(fp)
 
         # model configuration
-        num_embed_source = args.num_embed if args.num_embed_source is None else args.num_embed_source
-        num_embed_target = args.num_embed if args.num_embed_target is None else args.num_embed_target
-        encoder_num_layers = args.num_layers if args.encoder_num_layers is None else args.encoder_num_layers
-        decoder_num_layers = args.num_layers if args.decoder_num_layers is None else args.decoder_num_layers
+        num_embed_source, num_embed_target = args.num_embed
+        encoder_num_layers, decoder_num_layers = args.num_layers
 
         config_conv = None
         if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
