@@ -578,11 +578,11 @@ class Translator:
             best_word_indices[:] = best_word_indices_np
 
             # (4) get hypotheses and their properties for beam_size winning hypotheses (ascending)
-            mx.nd.take(sequences, best_hyp_indices, out=sequences)
-            mx.nd.take(lengths, best_hyp_indices, out=lengths)
-            mx.nd.take(finished, best_hyp_indices, out=finished)
-            mx.nd.take(attention_scores, best_hyp_indices, out=attention_scores)
-            mx.nd.take(attentions, best_hyp_indices, out=attentions)
+            sequences = mx.nd.take(sequences, best_hyp_indices)
+            lengths = mx.nd.take(lengths, best_hyp_indices)
+            finished = mx.nd.take(finished, best_hyp_indices)
+            attention_scores = mx.nd.take(attention_scores, best_hyp_indices)
+            attentions = mx.nd.take(attentions, best_hyp_indices)
 
             # (5) update best hypotheses, their attention lists and lengths (only for non-finished hyps)
             sequences[:, t] = mx.nd.expand_dims(best_word_indices, axis=1)
