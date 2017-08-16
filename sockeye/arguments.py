@@ -455,6 +455,10 @@ def add_training_args(params):
                               type=float,
                               default=0.,
                               help='Dropout probability for residual connections. Default: %(default)s.')
+    train_params.add_argument('--conv-embed-dropout',
+                              type=float,
+                              default=.0,
+                              help="Dropout probability for ConvolutionalEmbeddingEncoder. Default: %(default)s.")
 
     train_params.add_argument('--optimizer',
                               default='adam',

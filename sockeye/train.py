@@ -237,7 +237,7 @@ def main():
                                                                num_filters=args.conv_embed_num_filters,
                                                                pool_stride=args.conv_embed_pool_stride,
                                                                num_highway_layers=args.conv_embed_num_highway_layers,
-                                                               dropout=args.dropout)
+                                                               dropout=args.conv_embed_dropout)
 
         if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
             config_encoder = transformer.TransformerConfig(

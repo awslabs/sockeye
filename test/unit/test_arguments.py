@@ -119,6 +119,7 @@ def test_model_parameters(test_params, expected_params):
               transformer_dropout_attention=0.0,
               transformer_dropout_relu=0.0,
               transformer_dropout_residual=0.0,
+              conv_embed_dropout=0.0,
               optimizer='adam', min_num_epochs=0,
               initial_learning_rate=0.0003,
               weight_decay=0.0,
