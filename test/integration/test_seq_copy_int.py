@@ -38,7 +38,7 @@ _LINE_MAX_LENGTH = 9
      " --checkpoint-frequency 10 --dropout 0.1 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 2"),
     # Convolutional embedding encoder + LSTM encoder-decoder with attention
-    ("--encoder rnn-with-conv-embed --conv-embed-max-filter-width 3 --conv-embed-num-filters 4 4 8"
+    ("--encoder rnn-with-conv-embed --conv-embed-max-filter-width 3 --conv-embed-num-filters 4:4:8"
      " --conv-embed-pool-stride 2 --conv-embed-num-highway-layers 1 --num-layers 1 --rnn-cell-type lstm"
      " --rnn-num-hidden 16 --num-embed 8 --attention-num-hidden 16 --batch-size 8 --loss cross-entropy"
      " --optimized-metric perplexity --max-updates 10 --checkpoint-frequency 10 --optimizer adam"

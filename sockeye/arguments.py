@@ -56,17 +56,32 @@ def learning_schedule() -> Callable:
     return parse
 
 
-def two_ints(greater_or_equal: Optional[int] = None) -> Callable:
+def multiple_values(num_values: int = 0,
+                    greater_or_equal: Optional[float] = None,
+                    data_type: Callable = int) -> Callable:
+    """
+    Returns a method to be used in argument parsing to parse a string of the form "<val>:<val>[:<val>...]" into
+    a tuple of values of type data_type.
+
+    :param num_values: Optional number of ints required.
+    :param greater_or_equal: Optional constraint that all values should be greater or equal to this value.
+    :param data_type: Type of values. Default: int.
+    :return: Method for parsing.
+    """
 
     def parse(value_to_check):
         if ':' in value_to_check:
-            value1, value2 = map(int, value_to_check.split(C.ARG_SEPARATOR, 1))
+            expected_num_separators = num_values - 1 if num_values else 0
+            if expected_num_separators > 0 and (value_to_check.count(':') != expected_num_separators):
+                raise argparse.ArgumentTypeError("Expected either a single value or %d values separated by %s" %
+                                                 (num_values, C.ARG_SEPARATOR))
+            values = tuple(map(data_type, value_to_check.split(C.ARG_SEPARATOR, num_values - 1)))
         else:
-            value1 = value2 = int(value_to_check)
+            values = tuple([data_type(value_to_check)] * num_values)
         if greater_or_equal is not None:
-            if value1 < greater_or_equal or value2 < greater_or_equal:
-                raise argparse.ArgumentTypeError("Must provide int greater or equal to %d" % greater_or_equal)
-        return value1, value2
+            if any((value < greater_or_equal for value in values)):
+                raise argparse.ArgumentTypeError("Must provide value greater or equal to %d" % greater_or_equal)
+        return values
 
     return parse
 
@@ -189,12 +204,12 @@ def add_model_parameters(params):
                               help='Initialize model parameters from file. Overrides random initializations.')
 
     model_params.add_argument('--num-words',
-                              type=two_ints(greater_or_equal=0),
+                              type=multiple_values(num_values=2, greater_or_equal=0),
                               default=(50000, 50000),
                               help='Maximum vocabulary size. Use "x:x" to specify separate values for src&tgt. '
                                    'Default: %(default)s.')
     model_params.add_argument('--word-min-count',
-                              type=two_ints(1),
+                              type=multiple_values(num_values=2, greater_or_equal=1),
                               default=(1, 1),
                               help='Minimum frequency of words to be included in vocabularies. Default: %(default)s.')
 
@@ -208,7 +223,7 @@ def add_model_parameters(params):
                               help="Type of encoder. Default: %(default)s.")
 
     model_params.add_argument('--num-layers',
-                              type=two_ints(1),
+                              type=multiple_values(num_values=2, greater_or_equal=1),
                               default=(1, 1),
                               help='Number of layers for encoder & decoder. '
                                    'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
@@ -224,8 +239,7 @@ def add_model_parameters(params):
                               default=8,
                               help="Maximum filter width for ConvolutionalEmbeddingEncoder. Default: %(default)s.")
     model_params.add_argument('--conv-embed-num-filters',
-                              nargs='+',
-                              type=int,
+                              type=multiple_values(greater_or_equal=1),
                               default=(200, 200, 250, 250, 300, 300, 300, 300),
                               help="List of number of filters of each width 1..max for ConvolutionalEmbeddingEncoder. "
                                    "Default: %(default)s.")
@@ -282,7 +296,7 @@ def add_model_parameters(params):
 
     # embedding arguments
     model_params.add_argument('--num-embed',
-                              type=two_ints(1),
+                              type=multiple_values(num_values=2, greater_or_equal=1),
                               default=(512, 512),
                               help='Embedding size for source and target tokens. '
                                    'Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
@@ -337,7 +351,7 @@ def add_model_parameters(params):
                                    'target softmax weight matrix=softmax. Default: %(default)s.')
 
     model_params.add_argument('--max-seq-len',
-                              type=two_ints(1),
+                              type=multiple_values(num_values=2, greater_or_equal=1),
                               default=(100, 100),
                               help='Maximum sequence length in tokens. '
                                    'Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
