@@ -370,26 +370,37 @@ class LayerNormPerGateGRUCell(mx.rnn.GRUCell):
 
 class VariationalDropoutCell(mx.rnn.DropoutCell):
     """
-    Apply Bayesian Dropout on input. The dropout mask does not change when applied sequentially.
+    Apply Bayesian Dropout on input and states separately. The dropout mask does not change when applied sequentially.
 
-    :param dropout: Bernoulli prior on input cells. (1-dropout)% cells will be retained on average.
+    :param dropout_inputs: The dropout rate for inputs. Won't apply dropout if it equals 0.
+    :param dropout_states: The dropout rate for state inputs.
     """
 
     def __init__(self,
-                 dropout: float,
+                 dropout_inputs: float,
+                 dropout_states: float,
                  prefix: str = 'bayes_dropout_',
                  params=None) -> None:
-        super().__init__(dropout, prefix, params)
-        self.mask = None
+        super().__init__(.0, prefix, params)
+        self.dropout_inputs = dropout_inputs
+        self.dropout_states = dropout_states
+        self.mask_inputs = None
+        self.mask_states = None
 
     def __call__(self, inputs, states):
-        if self.dropout > 0:
-            if self.mask is None:
-                self.mask = mx.sym.Dropout(data=inputs, p=self.dropout) != 0
-            inputs = self.mask * inputs
+        if self.dropout_inputs > 0:
+            if self.mask_inputs is None:
+                self.mask_inputs = mx.sym.Dropout(data=inputs, p=self.dropout_inputs) != 0
+            inputs = inputs * self.mask_inputs
+
+        if self.dropout_states > 0:
+            if self.mask_states is None:
+                self.mask_states = mx.sym.Dropout(data=states[0], p=self.dropout_states) != 0
+            states[0] = states[0] * self.mask_states
 
         return inputs, states
 
     def reset(self):
         super(VariationalDropoutCell, self).reset()
-        self.mask = None
+        self.mask_inputs = None
+        self.mask_states = None

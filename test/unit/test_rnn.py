@@ -77,12 +77,13 @@ def test_get_stacked_rnn(config, expected_cell):
 
 
 def test_bayesian_dropout_cell():
-    cell = rnn.VariationalDropoutCell(dropout=0.5)
+    cell = rnn.VariationalDropoutCell(dropout_inputs=0.5, dropout_states=0)
 
     # test shape
     inputs = mx.sym.Variable('x')
+    states = [mx.sym.Variable('state')]
     input_shape = (5, 10)
-    outputs, _ = cell(inputs, None)
+    outputs, _ = cell(inputs, states)
     shapes = outputs.infer_shape(x=input_shape)
     assert shapes[1][0] == input_shape
 
@@ -90,19 +91,21 @@ def test_bayesian_dropout_cell():
     outputs = []
     out = inputs
     for i in range(10):
-        out, _ = cell(out, None)
+        out, states = cell(out, states)
         outputs.append(out)
     outputs = mx.sym.Group(outputs)
     ex = outputs.bind(ctx=mx.cpu(), args={'x': mx.nd.ones(input_shape)})
     outputs_nd = ex.forward(is_train=True)
     out_nd_0 = outputs_nd[0].asnumpy()
+    for x in outputs_nd:
+        print(x.asnumpy())
     assert all(np.array_equal(out_nd.asnumpy(), out_nd_0) for out_nd in outputs_nd)
 
     # test new mask after reset
     outputs = []
     out = inputs
     for i in range(10):
-        out, _ = cell(out, None)
+        out, states = cell(out, states)
         cell.reset()
         outputs.append(out)
     outputs = mx.sym.Group(outputs)

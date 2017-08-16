@@ -442,7 +442,7 @@ def add_training_args(params):
                                    'separate values. Default: %(default)s.')
     train_params.add_argument('--rnn-variational-dropout',
                               action='store_true',
-                              help='Use variational dropout for RNN cells. Default: %(default)s.')
+                              help='Use variational dropout on inputs and states of RNN cells. Default: %(default)s.')
     train_params.add_argument('--transformer-dropout-attention',
                               type=float,
                               default=0.,
