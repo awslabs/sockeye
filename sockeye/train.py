@@ -228,6 +228,8 @@ def main():
         num_embed_source, num_embed_target = args.num_embed
         encoder_num_layers, decoder_num_layers = args.num_layers
 
+        encoder_rnn_dropout, decoder_rnn_dropout = args.rnn_dropout
+
         config_conv = None
         if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
             config_conv = encoder.ConvolutionalEmbeddingConfig(num_embed=num_embed_source,
@@ -258,7 +260,8 @@ def main():
                 rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
                                          num_hidden=args.rnn_num_hidden,
                                          num_layers=encoder_num_layers,
-                                         dropout=args.dropout,
+                                         dropout=encoder_rnn_dropout,
+                                         variational_dropout=args.rnn_variational_dropout,
                                          residual=args.rnn_residual_connections,
                                          forget_bias=args.rnn_forget_bias),
                 conv_config=config_conv)
@@ -300,7 +303,8 @@ def main():
                 rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
                                          num_hidden=args.rnn_num_hidden,
                                          num_layers=decoder_num_layers,
-                                         dropout=args.dropout,
+                                         dropout=decoder_rnn_dropout,
+                                         variational_dropout=args.rnn_variational_dropout,
                                          residual=args.rnn_residual_connections,
                                          forget_bias=args.rnn_forget_bias),
                 attention_config=config_attention,

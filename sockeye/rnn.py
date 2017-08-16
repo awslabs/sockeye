@@ -37,6 +37,7 @@ class RNNConfig(Config):
                  num_hidden: int,
                  num_layers: int,
                  dropout: float,
+                 variational_dropout: bool = False,
                  residual: bool = False,
                  forget_bias: float = 0.0) -> None:
         super().__init__()
@@ -46,6 +47,7 @@ class RNNConfig(Config):
         self.dropout = dropout
         self.residual = residual
         self.forget_bias = forget_bias
+        self.variational_dropout = variational_dropout
 
 
 def get_stacked_rnn(config: RNNConfig, prefix: str) -> mx.rnn.SequentialRNNCell:
@@ -83,8 +85,10 @@ def get_stacked_rnn(config: RNNConfig, prefix: str) -> mx.rnn.SequentialRNNCell:
         rnn.add(cell)
 
         if config.dropout > 0.:
-            # TODO(fhieber): add pervasive dropout?
-            rnn.add(mx.rnn.DropoutCell(config.dropout, prefix=cell_prefix + "_dropout"))
+            if config.variational_dropout:
+                rnn.add(VariationalDropoutCell(config.dropout, prefix=cell_prefix + "_variational_dropout"))
+            else:
+                rnn.add(mx.rnn.DropoutCell(config.dropout, prefix=cell_prefix + "_dropout"))
     return rnn
 
 
@@ -364,7 +368,7 @@ class LayerNormPerGateGRUCell(mx.rnn.GRUCell):
         return next_h, [next_h]
 
 
-class BayesianDropoutCell(mx.rnn.DropoutCell):
+class VariationalDropoutCell(mx.rnn.DropoutCell):
     """
     Apply Bayesian Dropout on input. The dropout mask does not change when applied sequentially.
 
@@ -387,5 +391,5 @@ class BayesianDropoutCell(mx.rnn.DropoutCell):
         return inputs, states
 
     def reset(self):
-        super(BayesianDropoutCell, self).reset()
+        super(VariationalDropoutCell, self).reset()
         self.mask = None

@@ -435,6 +435,14 @@ def add_training_args(params):
                               default=0.,
                               help='Dropout probability for source embedding and source and target RNNs. '
                                    'Default: %(default)s.')
+    train_params.add_argument('--rnn-dropout',
+                              type=multiple_values(2),
+                              default=(.0, .0),
+                              help='RNN dropout probability for encoder & decoder RNNs. Use <val>:<val> to specify '
+                                   'separate values. Default: %(default)s.')
+    train_params.add_argument('--rnn-variational-dropout',
+                              action='store_true',
+                              help='Use variational dropout for RNN cells. Default: %(default)s.')
     train_params.add_argument('--transformer-dropout-attention',
                               type=float,
                               default=0.,

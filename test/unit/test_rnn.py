@@ -77,7 +77,7 @@ def test_get_stacked_rnn(config, expected_cell):
 
 
 def test_bayesian_dropout_cell():
-    cell = rnn.BayesianDropoutCell(dropout=0.5)
+    cell = rnn.VariationalDropoutCell(dropout=0.5)
 
     # test shape
     inputs = mx.sym.Variable('x')

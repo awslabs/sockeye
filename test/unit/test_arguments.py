@@ -133,6 +133,8 @@ def test_model_parameters(test_params, expected_params):
               use_fused_rnn=False,
               weight_init='xavier',
               weight_init_scale=0.04,
+              rnn_dropout=(.0, .0),
+              rnn_variational_dropout=False,
               rnn_forget_bias=0.0,
               rnn_h2h_init=C.RNN_INIT_ORTHOGONAL,
               monitor_bleu=0,
