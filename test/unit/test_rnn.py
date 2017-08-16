@@ -11,6 +11,7 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 import mxnet as mx
+import numpy as np
 import pytest
 
 from sockeye import constants as C
@@ -73,3 +74,39 @@ def test_get_stacked_rnn(config, expected_cell):
     if config.dropout > 0.0:
         assert isinstance(cell._cells[-1], mx.rnn.DropoutCell)
         assert cell._cells[-1].dropout == config.dropout
+
+
+def test_bayesian_dropout_cell():
+    cell = rnn.BayesianDropoutCell(dropout=0.5)
+
+    # test shape
+    inputs = mx.sym.Variable('x')
+    input_shape = (5, 10)
+    outputs, _ = cell(inputs, None)
+    shapes = outputs.infer_shape(x=input_shape)
+    assert shapes[1][0] == input_shape
+
+    # test same mask across time-steps
+    outputs = []
+    out = inputs
+    for i in range(10):
+        out, _ = cell(out, None)
+        outputs.append(out)
+    outputs = mx.sym.Group(outputs)
+    ex = outputs.bind(ctx=mx.cpu(), args={'x': mx.nd.ones(input_shape)})
+    outputs_nd = ex.forward(is_train=True)
+    out_nd_0 = outputs_nd[0].asnumpy()
+    assert all(np.array_equal(out_nd.asnumpy(), out_nd_0) for out_nd in outputs_nd)
+
+    # test new mask after reset
+    outputs = []
+    out = inputs
+    for i in range(10):
+        out, _ = cell(out, None)
+        cell.reset()
+        outputs.append(out)
+    outputs = mx.sym.Group(outputs)
+    ex = outputs.bind(ctx=mx.cpu(), args={'x': mx.nd.ones(input_shape)})
+    outputs_nd = ex.forward(is_train=True)
+    out_nd_0 = outputs_nd[0].asnumpy()
+    assert not all(np.array_equal(out_nd.asnumpy(), out_nd_0) for out_nd in outputs_nd)
