@@ -15,10 +15,10 @@
 Defines commandline arguments for the main CLIs with reasonable defaults.
 """
 import argparse
-from typing import Callable
+from typing import Callable, Optional
 
-import sockeye.constants as C
 from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
+from . import constants as C
 
 
 def int_greater_or_equal(threshold: int) -> Callable:
@@ -52,6 +52,37 @@ def learning_schedule() -> Callable:
         except ValueError:
             raise argparse.ArgumentTypeError("Learning rate schedule string should have form rate1:num_updates1[,rate2:num_updates2,...]")
         return schedule
+
+    return parse
+
+
+def multiple_values(num_values: int = 0,
+                    greater_or_equal: Optional[float] = None,
+                    data_type: Callable = int) -> Callable:
+    """
+    Returns a method to be used in argument parsing to parse a string of the form "<val>:<val>[:<val>...]" into
+    a tuple of values of type data_type.
+
+    :param num_values: Optional number of ints required.
+    :param greater_or_equal: Optional constraint that all values should be greater or equal to this value.
+    :param data_type: Type of values. Default: int.
+    :return: Method for parsing.
+    """
+
+    def parse(value_to_check):
+        if ':' in value_to_check:
+            expected_num_separators = num_values - 1 if num_values else 0
+            if expected_num_separators > 0 and (value_to_check.count(':') != expected_num_separators):
+                raise argparse.ArgumentTypeError("Expected either a single value or %d values separated by %s" %
+                                                 (num_values, C.ARG_SEPARATOR))
+            values = tuple(map(data_type, value_to_check.split(C.ARG_SEPARATOR, num_values - 1)))
+        else:
+            values = tuple([data_type(value_to_check)] * num_values)
+        if greater_or_equal is not None:
+            if any((value < greater_or_equal for value in values)):
+                raise argparse.ArgumentTypeError("Must provide value greater or equal to %d" % greater_or_equal)
+        return values
+
     return parse
 
 
@@ -173,20 +204,13 @@ def add_model_parameters(params):
                               help='Initialize model parameters from file. Overrides random initializations.')
 
     model_params.add_argument('--num-words',
-                              type=int_greater_or_equal(0),
-                              default=50000,
-                              help='Maximum vocabulary size. Default: %(default)s.')
-    model_params.add_argument('--num-words-source',
-                              type=int_greater_or_equal(0),
-                              default=None,
-                              help='Maximum source vocabulary size. Overrides --num-words. Default: %(default)s')
-    model_params.add_argument('--num-words-target',
-                              type=int_greater_or_equal(0),
-                              default=None,
-                              help='Maximum target vocabulary size. Overrides --num-words. Default: %(default)s')
+                              type=multiple_values(num_values=2, greater_or_equal=0),
+                              default=(50000, 50000),
+                              help='Maximum vocabulary size. Use "x:x" to specify separate values for src&tgt. '
+                                   'Default: %(default)s.')
     model_params.add_argument('--word-min-count',
-                              type=int_greater_or_equal(1),
-                              default=1,
+                              type=multiple_values(num_values=2, greater_or_equal=1),
+                              default=(1, 1),
                               help='Minimum frequency of words to be included in vocabularies. Default: %(default)s.')
 
     model_params.add_argument('--encoder',
@@ -199,19 +223,10 @@ def add_model_parameters(params):
                               help="Type of encoder. Default: %(default)s.")
 
     model_params.add_argument('--num-layers',
-                              type=int_greater_or_equal(1),
-                              default=1,
-                              help='Number of layers for encoder & decoder architectures. Default: %(default)s.')
-    model_params.add_argument('--encoder-num-layers',
-                              type=int,
-                              default=None,
-                              help='Number of layers for encoder architectures. Overrides --num-layers. '
-                                   'Default: %(default)s.')
-    model_params.add_argument('--decoder-num-layers',
-                              type=int,
-                              default=None,
-                              help='Number of layers for decoder architectures. Overrides --num-layers. '
-                                   'Default: %(default)s.')
+                              type=multiple_values(num_values=2, greater_or_equal=1),
+                              default=(1, 1),
+                              help='Number of layers for encoder & decoder. '
+                                   'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
 
     model_params.add_argument('--conv-embed-output-dim',
                               type=int_greater_or_equal(1),
@@ -224,8 +239,7 @@ def add_model_parameters(params):
                               default=8,
                               help="Maximum filter width for ConvolutionalEmbeddingEncoder. Default: %(default)s.")
     model_params.add_argument('--conv-embed-num-filters',
-                              nargs='+',
-                              type=int,
+                              type=multiple_values(greater_or_equal=1),
                               default=(200, 200, 250, 250, 300, 300, 300, 300),
                               help="List of number of filters of each width 1..max for ConvolutionalEmbeddingEncoder. "
                                    "Default: %(default)s.")
@@ -240,7 +254,7 @@ def add_model_parameters(params):
     model_params.add_argument('--conv-embed-add-positional-encodings',
                               action='store_true',
                               default=False,
-                              help="Add positonal encodings to final segment embeddings for"
+                              help="Add positional encodings to final segment embeddings for"
                                    " ConvolutionalEmbeddingEncoder. Default: %(default)s.")
 
     # rnn arguments
@@ -282,17 +296,10 @@ def add_model_parameters(params):
 
     # embedding arguments
     model_params.add_argument('--num-embed',
-                              type=int_greater_or_equal(1),
-                              default=512,
-                              help='Embedding size for source and target tokens. Default: %(default)s.')
-    model_params.add_argument('--num-embed-source',
-                              type=int_greater_or_equal(1),
-                              default=None,
-                              help='Embedding size for source tokens. Overrides --num-embed. Default: %(default)s')
-    model_params.add_argument('--num-embed-target',
-                              type=int_greater_or_equal(1),
-                              default=None,
-                              help='Embedding size for target tokens. Overrides --num-embed. Default: %(default)s')
+                              type=multiple_values(num_values=2, greater_or_equal=1),
+                              default=(512, 512),
+                              help='Embedding size for source and target tokens. '
+                                   'Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
 
     # attention arguments
     model_params.add_argument('--attention-type',
@@ -344,19 +351,10 @@ def add_model_parameters(params):
                                    'target softmax weight matrix=softmax. Default: %(default)s.')
 
     model_params.add_argument('--max-seq-len',
-                              type=int_greater_or_equal(1),
-                              default=100,
-                              help='Maximum sequence length in tokens. Default: %(default)s')
-    model_params.add_argument('--max-seq-len-source',
-                              type=int_greater_or_equal(1),
-                              default=None,
-                              help='Maximum source sequence length in tokens. '
-                                   'Overrides --max-seq-len. Default: %(default)s')
-    model_params.add_argument('--max-seq-len-target',
-                              type=int_greater_or_equal(1),
-                              default=None,
-                              help='Maximum target sequence length in tokens. '
-                                   'Overrides --max-seq-len. Default: %(default)s')
+                              type=multiple_values(num_values=2, greater_or_equal=1),
+                              default=(100, 100),
+                              help='Maximum sequence length in tokens. '
+                                   'Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
 
     model_params.add_argument('--layer-normalization', action="store_true",
                               help="Adds layer normalization before non-linear activations. "

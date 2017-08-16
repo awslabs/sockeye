@@ -32,10 +32,10 @@ _LINE_MAX_LENGTH = 9
      1.01,
      0.98),
     # 2-layer transformer encoder, LSTM decoder with attention
-    ("--encoder transformer --decoder-num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
-     " --attention-type mhdot --attention-num-hidden 32 --batch-size 16"
-     " --loss cross-entropy --optimized-metric perplexity --max-updates 3000"
-     " --encoder-num-layers 2 --transformer-attention-heads 4 --transformer-model-size 64"
+    ("--encoder transformer --num-layers 2:1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
+     " --attention-type mhdot --attention-num-hidden 32 --batch-size 16 --attention-mhdot-heads 1"
+     " --loss cross-entropy --optimized-metric perplexity --max-updates 10000"
+     " --transformer-attention-heads 4 --transformer-model-size 64"
      " --transformer-feed-forward-num-hidden 64"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
@@ -95,8 +95,8 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
      0.98),
     # 1-layer transformer encoder, LSTM decoder with attention
     ("--encoder transformer --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
-     " --attention-type mhdot --attention-num-hidden 32 --batch-size 16"
-     " --loss cross-entropy --optimized-metric perplexity --max-updates 6000"
+     " --attention-type mhdot --attention-num-hidden 32 --batch-size 16 --attention-mhdot-heads 2"
+     " --loss cross-entropy --optimized-metric perplexity --max-updates 8000"
      " --transformer-attention-heads 4 --transformer-model-size 64"
      " --transformer-feed-forward-num-hidden 64"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
