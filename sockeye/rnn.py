@@ -362,3 +362,30 @@ class LayerNormPerGateGRUCell(mx.rnn.GRUCell):
                                         name='%sout' % name)
 
         return next_h, [next_h]
+
+
+class BayesianDropoutCell(mx.rnn.DropoutCell):
+    """
+    Apply Bayesian Dropout on input. The dropout mask does not change when applied sequentially.
+
+    :param dropout: Bernoulli prior on input cells. (1-dropout)% cells will be retained on average.
+    """
+
+    def __init__(self,
+                 dropout: float,
+                 prefix: str = 'bayes_dropout_',
+                 params=None) -> None:
+        super().__init__(dropout, prefix, params)
+        self.mask = None
+
+    def __call__(self, inputs, states):
+        if self.dropout > 0:
+            if self.mask is None:
+                self.mask = mx.sym.Dropout(data=inputs, p=self.dropout) != 0
+            inputs = self.mask * inputs
+
+        return inputs, states
+
+    def reset(self):
+        super(BayesianDropoutCell, self).reset()
+        self.mask = None
