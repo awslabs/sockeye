@@ -115,7 +115,7 @@ def translate_lines(output_handler: sockeye.output_handler.OutputHandler, source
         total_time += trans_wall_time
         logger.debug("OUT: %s", trans_output)
         logger.debug("OUT: time=%.2f", trans_wall_time)
-        output_handler.handle(trans_input, trans_output)
+        output_handler.handle(trans_input, trans_output, trans_wall_time)
     return i, total_time
 
 

@@ -587,7 +587,11 @@ def add_inference_args(params):
 
     decode_params.add_argument('--output-type',
                                default='translation',
-                               choices=["translation", "translation_with_alignments", "align_plot", "align_text"],
+                               choices=["translation",
+                                        "translation_with_alignments",
+                                        "benchmark",
+                                        "align_plot",
+                                        "align_text"],
                                help='Output type. Choices: [translation, translation_with_alignments, '
                                     'align_plot, align_text]. Default: %(default)s.')
     decode_params.add_argument('--sure-align-threshold',
