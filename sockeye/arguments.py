@@ -589,7 +589,7 @@ def add_inference_args(params):
                                type=str,
                                default='linear',
                                choices=['linear', 'log_linear'],
-                               help='Ensemble mode: [linear, log-linear]. Default: %(default)s.')
+                               help='Ensemble mode. Default: %(default)s.')
     decode_params.add_argument('--max-input-len', '-n',
                                type=int,
                                default=None,
@@ -602,9 +602,8 @@ def add_inference_args(params):
 
     decode_params.add_argument('--output-type',
                                default='translation',
-                               choices=["translation", "translation_with_alignments", "align_plot", "align_text"],
-                               help='Output type. Choices: [translation, translation_with_alignments, '
-                                    'align_plot, align_text]. Default: %(default)s.')
+                               choices=C.OUTPUT_HANDLERS,
+                               help='Output type. Default: %(default)s.')
     decode_params.add_argument('--sure-align-threshold',
                                default=0.9,
                                type=float,
