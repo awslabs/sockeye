@@ -107,9 +107,9 @@ def translate_lines(output_handler: sockeye.output_handler.OutputHandler, source
     i = 0
     total_time = 0.0
     for i, line in enumerate(source_data, 1):
+        tic = time.time()
         trans_input = translator.make_input(i, line)
         logger.debug(" IN: %s", trans_input)
-        tic = time.time()
         trans_output = translator.translate(trans_input)
         trans_wall_time = time.time() - tic
         total_time += trans_wall_time
