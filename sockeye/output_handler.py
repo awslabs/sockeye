@@ -11,9 +11,11 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+from abc import ABC, abstractmethod
 import sys
 from typing import Optional
 
+import sockeye.constants as C
 import sockeye.data_io
 import sockeye.inference
 from sockeye.utils import plot_attention, print_attention_text, get_alignments
@@ -31,36 +33,36 @@ def get_output_handler(output_type: str,
     :return: Output handler.
     """
     output_stream = sys.stdout if output_fname is None else sockeye.data_io.smart_open(output_fname, mode='w')
-    if output_type == "translation":
+    if output_type == C.OUTPUT_HANDLER_TRANSLATION:
         return StringOutputHandler(output_stream)
-    elif output_type == "translation_with_alignments":
+    elif output_type == C.OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENTS:
         return StringWithAlignmentsOutputHandler(output_stream, sure_align_threshold)
-    elif output_type == "benchmark":
+    elif output_type == C.OUTPUT_HANDLER_BENCHMARK:
         return BenchmarkOutputHandler(output_stream)
-    elif output_type == "align_plot":
+    elif output_type == C.OUTPUT_HANDLER_ALIGN_PLOT:
         return AlignPlotHandler(plot_prefix="align" if output_fname is None else output_fname)
-    elif output_type == "align_text":
+    elif output_type == C.OUTPUT_HANDLER_ALIGN_TEXT:
         return AlignTextHandler(sure_align_threshold)
     else:
         raise ValueError("unknown output type")
 
 
-class OutputHandler:
+class OutputHandler(ABC):
     """
     Abstract output handler interface
     """
 
+    @abstractmethod
     def handle(self,
                t_input: sockeye.inference.TranslatorInput,
                t_output: sockeye.inference.TranslatorOutput,
                t_walltime: float = 0.):
         """
-        :raises: NotImplementedError
         :param t_input: Translator input.
         :param t_output: Translator output.
         :param t_walltime: Total wall-clock time for translation.
         """
-        raise NotImplementedError()
+        pass
 
 
 class StringOutputHandler(OutputHandler):
@@ -157,7 +159,6 @@ class AlignPlotHandler(OutputHandler):
                t_output: sockeye.inference.TranslatorOutput,
                t_walltime: float = 0.):
         """
-        :raises: NotImplementedError
         :param t_input: Translator input.
         :param t_output: Translator output.
         :param t_walltime: Total wall-clock time for translation.
@@ -183,7 +184,6 @@ class AlignTextHandler(OutputHandler):
                t_output: sockeye.inference.TranslatorOutput,
                t_walltime: float = 0.):
         """
-        :raises: NotImplementedError
         :param t_input: Translator input.
         :param t_output: Translator output.
         :param t_walltime: Total wall-clock time for translation.
