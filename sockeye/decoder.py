@@ -767,28 +767,28 @@ class RecurrentDecoder(Decoder):
         attention_input = self.attention.make_input(seq_idx, word_vec_prev, rnn_output)
         attention_state = attention_func(attention_input, attention_state)
 
-        # (3) Combine context with hidden state
+        # (3) Combine previous word vector, rnn output, and context
+        hidden_concat = mx.sym.concat(rnn_output, attention_state.context,
+                                      dim=1, name='%shidden_concat_t%d' % (self.prefix, seq_idx))
+        if self.config.hidden_dropout > 0:
+            hidden_concat = mx.sym.Dropout(data=hidden_concat, p=self.config.hidden_dropout,
+                                           name='%shidden_concat_dropout_t%d' % (self.prefix, seq_idx))
+
         if self.config.context_gating:
-            hidden = self._context_gate(word_vec_prev, rnn_output, attention_state, seq_idx)
+            hidden = self._context_gate(hidden_concat, rnn_output, attention_state, seq_idx)
         else:
-            hidden = self._hidden_mlp(attention_state, rnn_output, seq_idx)
+            hidden = self._hidden_mlp(hidden_concat, seq_idx)
 
         return RecurrentDecoderState(hidden, layer_states), attention_state
 
-    def _hidden_mlp(self,
-                    attention_state: attentions.AttentionState,
-                    rnn_output: mx.sym.Symbol,
-                    seq_idx: int) -> mx.sym.Symbol:
-        # hidden: (batch_size, rnn_num_hidden)
-        hidden = mx.sym.FullyConnected(data=mx.sym.concat(rnn_output, attention_state.context, dim=1),
-                                       # use same number of hidden states as RNN
-                                       num_hidden=self.num_hidden,
+    def _hidden_mlp(self, hidden_concat: mx.sym.Symbol, seq_idx: int) -> mx.sym.Symbol:
+        hidden = mx.sym.FullyConnected(data=hidden_concat,
+                                       num_hidden=self.num_hidden,  # to state size of RNN
                                        weight=self.hidden_w,
-                                       bias=self.hidden_b)
+                                       bias=self.hidden_b,
+                                       name='%shidden_fc_t%d' % (self.prefix, seq_idx))
         if self.config.layer_normalization:
             hidden = self.hidden_norm.normalize(hidden)
-        if self.config.hidden_dropout > 0:
-            hidden = mx.sym.Dropout(data=hidden, p=self.config.hidden_dropout)
 
         # hidden: (batch_size, rnn_num_hidden)
         hidden = mx.sym.Activation(data=hidden, act_type="tanh",
@@ -796,24 +796,23 @@ class RecurrentDecoder(Decoder):
         return hidden
 
     def _context_gate(self,
-                      word_vec_prev: mx.sym.Symbol,
+                      hidden_concat: mx.sym.Symbol,
                       rnn_output: mx.sym.Symbol,
                       attention_state: attentions.AttentionState,
                       seq_idx: int) -> mx.sym.Symbol:
-        # context: (batch_size, encoder_num_hidden)
-        # gate: (batch_size, rnn_num_hidden)
-        gate = mx.sym.FullyConnected(data=mx.sym.concat(word_vec_prev, rnn_output, attention_state.context, dim=1),
-                                     num_hidden=self.num_hidden, weight=self.gate_w, bias=self.gate_b)
+        gate = mx.sym.FullyConnected(data=hidden_concat,
+                                     num_hidden=self.num_hidden,
+                                     weight=self.gate_w,
+                                     bias=self.gate_b,
+                                     name = '%shidden_gate_t%d' % (self.prefix, seq_idx))
         gate = mx.sym.Activation(data=gate, act_type="sigmoid",
-                                 name="%sgate_activation_t%d" % (self.prefix, seq_idx))
+                                 name='%shidden_gate_act_t%d' % (self.prefix, seq_idx))
 
-        # mapped_rnn_output: (batch_size, rnn_num_hidden)
         mapped_rnn_output = mx.sym.FullyConnected(data=rnn_output,
                                                   num_hidden=self.num_hidden,
                                                   weight=self.mapped_rnn_output_w,
                                                   bias=self.mapped_rnn_output_b,
                                                   name="%smapped_rnn_output_fc_t%d" % (self.prefix, seq_idx))
-        # mapped_context: (batch_size, rnn_num_hidden)
         mapped_context = mx.sym.FullyConnected(data=attention_state.context,
                                                num_hidden=self.num_hidden,
                                                weight=self.mapped_context_w,
@@ -822,12 +821,10 @@ class RecurrentDecoder(Decoder):
 
         hidden = gate * mapped_rnn_output + (1 - gate) * mapped_context
 
-        if self.config.hidden_dropout > 0:
-            hidden = mx.sym.Dropout(data=hidden, p=self.config.hidden_dropout)
+        if self.config.layer_normalization:
+            hidden = self.hidden_norm.normalize(hidden)
 
         # hidden: (batch_size, rnn_num_hidden)
-        hidden = mx.sym.Activation(data=hidden,
-                                   act_type="tanh",
+        hidden = mx.sym.Activation(data=hidden, act_type="tanh",
                                    name="%snext_hidden_t%d" % (self.prefix, seq_idx))
-
         return hidden

@@ -231,11 +231,11 @@ def main():
         encoder_embed_dropout, decoder_embed_dropout = args.embed_dropout
         encoder_rnn_dropout, decoder_rnn_dropout = args.rnn_dropout
         if encoder_embed_dropout > 0 and encoder_rnn_dropout > 0:
-            logger.warning("Strange encoder dropout configuration: "
-                           "RNN and embedding dropout masks might 'stack' on first layer")
+            logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
+                           "two dropout layers on top of each other.")
         if decoder_embed_dropout > 0 and decoder_rnn_dropout > 0:
-            logger.warning("Strange decoder dropout configuration: "
-                           "RNN and embedding dropout masks might 'stack' on first layer")
+            logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
+                           "two dropout layers on top of each other.")
 
         config_conv = None
         if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:

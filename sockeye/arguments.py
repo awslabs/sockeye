@@ -444,7 +444,8 @@ def add_training_args(params):
     train_params.add_argument('--rnn-decoder-hidden-dropout',
                               type=float,
                               default=.0,
-                              help='Dropout probability for hidden state in RNN decoder. Default: %(default)s.')
+                              help='Dropout probability for hidden state that combines the context with the '
+                                   'RNN hidden state in the decoder. Default: %(default)s.')
     train_params.add_argument('--transformer-dropout-attention',
                               type=float,
                               default=0.,

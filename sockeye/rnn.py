@@ -371,6 +371,7 @@ class VariationalDropoutCell(mx.rnn.ModifierCell):
     """
     Apply Bayesian Dropout on input and states separately. The dropout mask does not change when applied sequentially.
 
+    :param base_cell: Base cell to be modified.
     :param dropout_inputs: Dropout probability for inputs.
     :param dropout_states: Dropout probability for state inputs.
     """
