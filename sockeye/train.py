@@ -228,7 +228,14 @@ def main():
         num_embed_source, num_embed_target = args.num_embed
         encoder_num_layers, decoder_num_layers = args.num_layers
 
+        encoder_embed_dropout, decoder_embed_dropout = args.embed_dropout
         encoder_rnn_dropout, decoder_rnn_dropout = args.rnn_dropout
+        if encoder_embed_dropout > 0 and encoder_rnn_dropout > 0:
+            logger.warning("Strange encoder dropout configuration: "
+                           "RNN and embedding dropout masks might 'stack' on first layer")
+        if decoder_embed_dropout > 0 and decoder_rnn_dropout > 0:
+            logger.warning("Strange decoder dropout configuration: "
+                           "RNN and embedding dropout masks might 'stack' on first layer")
 
         config_conv = None
         if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
@@ -257,11 +264,11 @@ def main():
             config_encoder = encoder.RecurrentEncoderConfig(
                 vocab_size=vocab_source_size,
                 num_embed=num_embed_source,
+                embed_dropout=encoder_embed_dropout,
                 rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
                                          num_hidden=args.rnn_num_hidden,
                                          num_layers=encoder_num_layers,
                                          dropout=encoder_rnn_dropout,
-                                         variational_dropout=args.rnn_variational_dropout,
                                          residual=args.rnn_residual_connections,
                                          forget_bias=args.rnn_forget_bias),
                 conv_config=config_conv)
@@ -304,11 +311,10 @@ def main():
                                          num_hidden=args.rnn_num_hidden,
                                          num_layers=decoder_num_layers,
                                          dropout=decoder_rnn_dropout,
-                                         variational_dropout=args.rnn_variational_dropout,
                                          residual=args.rnn_residual_connections,
                                          forget_bias=args.rnn_forget_bias),
                 attention_config=config_attention,
-                dropout=args.dropout,
+                embed_dropout=decoder_embed_dropout,
                 weight_tying=decoder_weight_tying,
                 context_gating=args.rnn_context_gating,
                 layer_normalization=args.layer_normalization)

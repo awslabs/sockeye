@@ -37,7 +37,6 @@ class RNNConfig(Config):
                  num_hidden: int,
                  num_layers: int,
                  dropout: float,
-                 variational_dropout: bool = False,
                  residual: bool = False,
                  forget_bias: float = 0.0) -> None:
         super().__init__()
@@ -47,7 +46,6 @@ class RNNConfig(Config):
         self.dropout = dropout
         self.residual = residual
         self.forget_bias = forget_bias
-        self.variational_dropout = variational_dropout
 
 
 def get_stacked_rnn(config: RNNConfig, prefix: str) -> mx.rnn.SequentialRNNCell:
@@ -80,15 +78,16 @@ def get_stacked_rnn(config: RNNConfig, prefix: str) -> mx.rnn.SequentialRNNCell:
         else:
             raise NotImplementedError()
 
+        if config.dropout > 0:
+            cell = VariationalDropoutCell(cell,
+                                          dropout_inputs=config.dropout,
+                                          dropout_states=config.dropout)
+
         if config.residual and layer > 0:
             cell = mx.rnn.ResidualCell(cell)
+
         rnn.add(cell)
 
-        if config.dropout > 0.:
-            if config.variational_dropout:
-                rnn.add(VariationalDropoutCell(config.dropout, prefix=cell_prefix + "_variational_dropout"))
-            else:
-                rnn.add(mx.rnn.DropoutCell(config.dropout, prefix=cell_prefix + "_dropout"))
     return rnn
 
 
@@ -368,20 +367,19 @@ class LayerNormPerGateGRUCell(mx.rnn.GRUCell):
         return next_h, [next_h]
 
 
-class VariationalDropoutCell(mx.rnn.DropoutCell):
+class VariationalDropoutCell(mx.rnn.ModifierCell):
     """
     Apply Bayesian Dropout on input and states separately. The dropout mask does not change when applied sequentially.
 
-    :param dropout_inputs: The dropout rate for inputs. Won't apply dropout if it equals 0.
-    :param dropout_states: The dropout rate for state inputs.
+    :param dropout_inputs: Dropout probability for inputs.
+    :param dropout_states: Dropout probability for state inputs.
     """
 
     def __init__(self,
+                 base_cell: mx.rnn.BaseRNNCell,
                  dropout_inputs: float,
-                 dropout_states: float,
-                 prefix: str = 'bayes_dropout_',
-                 params=None) -> None:
-        super().__init__(.0, prefix, params)
+                 dropout_states: float) -> None:
+        super().__init__(base_cell)
         self.dropout_inputs = dropout_inputs
         self.dropout_states = dropout_states
         self.mask_inputs = None
@@ -390,7 +388,7 @@ class VariationalDropoutCell(mx.rnn.DropoutCell):
     def __call__(self, inputs, states):
         if self.dropout_inputs > 0:
             if self.mask_inputs is None:
-                self.mask_inputs = mx.sym.Dropout(data=inputs, p=self.dropout_inputs) != 0
+                self.mask_inputs = mx.sym.Dropout(data=inputs, p=self.dropout_inputs, ) != 0
             inputs = inputs * self.mask_inputs
 
         if self.dropout_states > 0:
@@ -398,7 +396,9 @@ class VariationalDropoutCell(mx.rnn.DropoutCell):
                 self.mask_states = mx.sym.Dropout(data=states[0], p=self.dropout_states) != 0
             states[0] = states[0] * self.mask_states
 
-        return inputs, states
+        output, states = self.base_cell(inputs, states)
+
+        return output, states
 
     def reset(self):
         super(VariationalDropoutCell, self).reset()

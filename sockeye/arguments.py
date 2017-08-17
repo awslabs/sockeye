@@ -430,19 +430,16 @@ def add_training_args(params):
                               help='Minimum number of epochs (passes through the training data) '
                                    'before fitting is stopped. Default: %(default)s.')
 
-    train_params.add_argument('--dropout',
-                              type=float,
-                              default=0.,
-                              help='Dropout probability for source embedding and source and target RNNs. '
-                                   'Default: %(default)s.')
-    train_params.add_argument('--rnn-dropout',
-                              type=multiple_values(2),
+    train_params.add_argument('--embed-dropout',
+                              type=multiple_values(2, data_type=float),
                               default=(.0, .0),
-                              help='RNN dropout probability for encoder & decoder RNNs. Use <val>:<val> to specify '
+                              help='Dropout probability for source & target embeddings. Use <val>:<val> to specify '
                                    'separate values. Default: %(default)s.')
-    train_params.add_argument('--rnn-variational-dropout',
-                              action='store_true',
-                              help='Use variational dropout on inputs and states of RNN cells. Default: %(default)s.')
+    train_params.add_argument('--rnn-dropout',
+                              type=multiple_values(2, data_type=float),
+                              default=(.0, .0),
+                              help='RNN variational dropout probability for encoder & decoder RNNs.'
+                                   'Use <val>:<val> to specify separate values. Default: %(default)s.')
     train_params.add_argument('--transformer-dropout-attention',
                               type=float,
                               default=0.,

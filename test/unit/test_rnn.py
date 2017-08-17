@@ -68,48 +68,12 @@ get_rnn_test_cases = [
 def test_get_stacked_rnn(config, expected_cell):
     cell = rnn.get_stacked_rnn(config, prefix=config.cell_type)
     assert isinstance(cell, mx.rnn.SequentialRNNCell)
-    assert isinstance(cell._cells[0], expected_cell)
-    assert cell._cells[0]._num_hidden, config.num_hidden
-    assert cell._cells[0]._num_hidden == config.num_hidden
-    if config.dropout > 0.0:
-        assert isinstance(cell._cells[-1], mx.rnn.DropoutCell)
-        assert cell._cells[-1].dropout == config.dropout
-
-
-def test_bayesian_dropout_cell():
-    cell = rnn.VariationalDropoutCell(dropout_inputs=0.5, dropout_states=0)
-
-    # test shape
-    inputs = mx.sym.Variable('x')
-    states = [mx.sym.Variable('state')]
-    input_shape = (5, 10)
-    outputs, _ = cell(inputs, states)
-    shapes = outputs.infer_shape(x=input_shape)
-    assert shapes[1][0] == input_shape
-
-    # test same mask across time-steps
-    outputs = []
-    out = inputs
-    for i in range(10):
-        out, states = cell(out, states)
-        outputs.append(out)
-    outputs = mx.sym.Group(outputs)
-    ex = outputs.bind(ctx=mx.cpu(), args={'x': mx.nd.ones(input_shape)})
-    outputs_nd = ex.forward(is_train=True)
-    out_nd_0 = outputs_nd[0].asnumpy()
-    for x in outputs_nd:
-        print(x.asnumpy())
-    assert all(np.array_equal(out_nd.asnumpy(), out_nd_0) for out_nd in outputs_nd)
-
-    # test new mask after reset
-    outputs = []
-    out = inputs
-    for i in range(10):
-        out, states = cell(out, states)
-        cell.reset()
-        outputs.append(out)
-    outputs = mx.sym.Group(outputs)
-    ex = outputs.bind(ctx=mx.cpu(), args={'x': mx.nd.ones(input_shape)})
-    outputs_nd = ex.forward(is_train=True)
-    out_nd_0 = outputs_nd[0].asnumpy()
-    assert not all(np.array_equal(out_nd.asnumpy(), out_nd_0) for out_nd in outputs_nd)
+    cell = cell._cells[0]
+    if config.residual:
+        assert isinstance(cell, mx.rnn.ResidualCell)
+        cell = cell.base_cell
+    if config.dropout > 0:
+        assert isinstance(cell, rnn.VariationalDropoutCell)
+        cell = cell.base_cell
+    assert isinstance(cell, expected_cell)
+    assert cell._num_hidden, config.num_hidden

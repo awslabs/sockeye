@@ -29,15 +29,6 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
-class EncoderConfig(Config):
-    def __init__(self,
-                 vocab_size: int,
-                 num_embed: int) -> None:
-        super().__init__()
-        self.vocab_size = vocab_size
-        self.num_embed = num_embed
-
-
 def get_encoder(config: Config, fused: bool, embed_weight: Optional[mx.sym.Symbol] = None):
     if isinstance(config, RecurrentEncoderConfig):
         return get_recurrent_encoder(config, fused, embed_weight)
@@ -47,12 +38,13 @@ def get_encoder(config: Config, fused: bool, embed_weight: Optional[mx.sym.Symbo
         raise ValueError("Unsupported encoder configuration")
 
 
-class RecurrentEncoderConfig(EncoderConfig):
+class RecurrentEncoderConfig:
     """
     Recurrent encoder configuration.
 
     :param vocab_size: Source vocabulary size.
     :param num_embed: Size of embedding layer.
+    :param embed_dropout: Dropout probability on embedding layer.
     :param rnn_config: RNN configuration.
     :param conv_config: Optional configuration for convolutional embedding.
     """
@@ -60,9 +52,12 @@ class RecurrentEncoderConfig(EncoderConfig):
     def __init__(self,
                  vocab_size: int,
                  num_embed: int,
+                 embed_dropout: float,
                  rnn_config: rnn.RNNConfig,
                  conv_config: Optional['ConvolutionalEmbeddingConfig'] = None) -> None:
-        super().__init__(vocab_size, num_embed)
+        self.vocab_size = vocab_size
+        self.num_embed = num_embed
+        self.embed_dropout = embed_dropout
         self.rnn_config = rnn_config
         self.conv_config = conv_config
 
@@ -84,7 +79,7 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
     encoders.append(Embedding(num_embed=config.num_embed,
                               vocab_size=config.vocab_size,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
-                              dropout=config.rnn_config.dropout,
+                              dropout=config.embed_dropout,
                               embed_weight=embed_weight))
     if config.conv_config is not None:
         encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))

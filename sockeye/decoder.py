@@ -101,6 +101,13 @@ class Decoder(ABC):
         pass
 
     @abstractmethod
+    def reset(self):
+        """
+        Reset decoder method. Used for inference.
+        """
+        pass
+
+    @abstractmethod
     def init_states(self,
                     source_encoded: mx.sym.Symbol,
                     source_encoded_lengths: mx.sym.Symbol,
@@ -294,6 +301,9 @@ class TransformerDecoder(Decoder):
         new_states = [source_encoded, source_encoded_lengths, sequences, lengths]
         return logits, attention_probs, new_states
 
+    def reset(self):
+        pass
+
     def init_states(self,
                     source_encoded: mx.sym.Symbol,
                     source_encoded_lengths: mx.sym.Symbol,
@@ -382,7 +392,7 @@ class RecurrentDecoderConfig(Config):
     :param num_embed: Target word embedding size.
     :param rnn_config: RNN configuration.
     :param attention_config: Attention configuration.
-    :param dropout: Dropout probability for decoder RNN.
+    :param embed_dropout: Dropout probability for target embeddings.
     :param weight_tying: Whether to share embedding and prediction parameter matrices.
     :param context_gating: Whether to use context gating.
     :param layer_normalization: Apply layer normalization.
@@ -394,7 +404,7 @@ class RecurrentDecoderConfig(Config):
                  num_embed: int,
                  rnn_config: rnn.RNNConfig,
                  attention_config: attentions.AttentionConfig,
-                 dropout: float = .0,
+                 embed_dropout: float = .0,
                  weight_tying: bool = False,
                  context_gating: bool = False,
                  layer_normalization: bool = False) -> None:
@@ -404,7 +414,7 @@ class RecurrentDecoderConfig(Config):
         self.num_embed = num_embed
         self.rnn_config = rnn_config
         self.attention_config = attention_config
-        self.dropout = dropout
+        self.embed_dropout = embed_dropout
         self.weight_tying = weight_tying
         self.context_gating = context_gating
         self.layer_normalization = layer_normalization
@@ -458,9 +468,11 @@ class RecurrentDecoder(Decoder):
         # Embedding & output parameters
         if embed_weight is None:
             embed_weight = mx.sym.Variable(C.TARGET_EMBEDDING_PREFIX + "weight")
-        self.embedding = encoder.Embedding(self.config.num_embed, self.config.vocab_size,
-                                           prefix=C.TARGET_EMBEDDING_PREFIX, dropout=0.,
-                                           embed_weight=embed_weight)  # TODO dropout?
+        self.embedding = encoder.Embedding(self.config.num_embed,
+                                           self.config.vocab_size,
+                                           prefix=C.TARGET_EMBEDDING_PREFIX,
+                                           dropout=config.embed_dropout,
+                                           embed_weight=embed_weight)
         if self.config.weight_tying:
             check_condition(self.num_hidden == self.config.num_embed,
                             "Weight tying requires target embedding size and rnn_num_hidden to be equal")
@@ -532,10 +544,7 @@ class RecurrentDecoder(Decoder):
 
         lexical_biases = []
 
-        self.rnn.reset()
-        # TODO remove this once mxnet.rnn.SequentialRNNCell.reset() invokes recursive calls on layer cells
-        for cell in self.rnn._cells:
-            cell.reset()
+        self.reset()
 
         for seq_idx in range(target_max_length):
             # hidden: (batch_size, rnn_num_hidden)
@@ -614,6 +623,18 @@ class RecurrentDecoder(Decoder):
                       state.hidden] + state.layer_states
 
         return logits, attention_state.probs, new_states
+
+    def reset(self):
+        """
+        Calls reset on the RNN cell.
+        """
+        self.rnn.reset()
+        # TODO remove this once mxnet.rnn.SequentialRNNCell.reset() invokes recursive calls on layer cells
+        for cell in self.rnn._cells:
+            # TODO remove this once mxnet.rnn.ModifierCell.reset() invokes reset() of base_cell
+            if isinstance(cell, mx.rnn.ModifierCell):
+                cell.base_cell.reset()
+            cell.reset()
 
     def init_states(self,
                     source_encoded: mx.sym.Symbol,
