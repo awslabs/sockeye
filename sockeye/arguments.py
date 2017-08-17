@@ -440,6 +440,11 @@ def add_training_args(params):
                               default=(.0, .0),
                               help='RNN variational dropout probability for encoder & decoder RNNs.'
                                    'Use <val>:<val> to specify separate values. Default: %(default)s.')
+
+    train_params.add_argument('--rnn-decoder-hidden-dropout',
+                              type=float,
+                              default=.0,
+                              help='Dropout probability for hidden state in RNN decoder. Default: %(default)s.')
     train_params.add_argument('--transformer-dropout-attention',
                               type=float,
                               default=0.,

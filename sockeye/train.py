@@ -315,6 +315,7 @@ def main():
                                          forget_bias=args.rnn_forget_bias),
                 attention_config=config_attention,
                 embed_dropout=decoder_embed_dropout,
+                hidden_dropout=args.rnn_decoder_hidden_dropout,
                 weight_tying=decoder_weight_tying,
                 context_gating=args.rnn_context_gating,
                 layer_normalization=args.layer_normalization)
