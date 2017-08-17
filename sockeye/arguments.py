@@ -430,11 +430,22 @@ def add_training_args(params):
                               help='Minimum number of epochs (passes through the training data) '
                                    'before fitting is stopped. Default: %(default)s.')
 
-    train_params.add_argument('--dropout',
+    train_params.add_argument('--embed-dropout',
+                              type=multiple_values(2, data_type=float),
+                              default=(.0, .0),
+                              help='Dropout probability for source & target embeddings. Use <val>:<val> to specify '
+                                   'separate values. Default: %(default)s.')
+    train_params.add_argument('--rnn-dropout',
+                              type=multiple_values(2, data_type=float),
+                              default=(.0, .0),
+                              help='RNN variational dropout probability for encoder & decoder RNNs.'
+                                   'Use <val>:<val> to specify separate values. Default: %(default)s.')
+
+    train_params.add_argument('--rnn-decoder-hidden-dropout',
                               type=float,
-                              default=0.,
-                              help='Dropout probability for source embedding and source and target RNNs. '
-                                   'Default: %(default)s.')
+                              default=.0,
+                              help='Dropout probability for hidden state that combines the context with the '
+                                   'RNN hidden state in the decoder. Default: %(default)s.')
     train_params.add_argument('--transformer-dropout-attention',
                               type=float,
                               default=0.,
@@ -447,6 +458,10 @@ def add_training_args(params):
                               type=float,
                               default=0.,
                               help='Dropout probability for residual connections. Default: %(default)s.')
+    train_params.add_argument('--conv-embed-dropout',
+                              type=float,
+                              default=.0,
+                              help="Dropout probability for ConvolutionalEmbeddingEncoder. Default: %(default)s.")
 
     train_params.add_argument('--optimizer',
                               default='adam',

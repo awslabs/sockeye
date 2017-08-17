@@ -228,6 +228,15 @@ def main():
         num_embed_source, num_embed_target = args.num_embed
         encoder_num_layers, decoder_num_layers = args.num_layers
 
+        encoder_embed_dropout, decoder_embed_dropout = args.embed_dropout
+        encoder_rnn_dropout, decoder_rnn_dropout = args.rnn_dropout
+        if encoder_embed_dropout > 0 and encoder_rnn_dropout > 0:
+            logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
+                           "two dropout layers on top of each other.")
+        if decoder_embed_dropout > 0 and decoder_rnn_dropout > 0:
+            logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
+                           "two dropout layers on top of each other.")
+
         config_conv = None
         if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
             config_conv = encoder.ConvolutionalEmbeddingConfig(num_embed=num_embed_source,
@@ -235,7 +244,7 @@ def main():
                                                                num_filters=args.conv_embed_num_filters,
                                                                pool_stride=args.conv_embed_pool_stride,
                                                                num_highway_layers=args.conv_embed_num_highway_layers,
-                                                               dropout=args.dropout)
+                                                               dropout=args.conv_embed_dropout)
 
         if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
             config_encoder = transformer.TransformerConfig(
@@ -255,10 +264,11 @@ def main():
             config_encoder = encoder.RecurrentEncoderConfig(
                 vocab_size=vocab_source_size,
                 num_embed=num_embed_source,
+                embed_dropout=encoder_embed_dropout,
                 rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
                                          num_hidden=args.rnn_num_hidden,
                                          num_layers=encoder_num_layers,
-                                         dropout=args.dropout,
+                                         dropout=encoder_rnn_dropout,
                                          residual=args.rnn_residual_connections,
                                          forget_bias=args.rnn_forget_bias),
                 conv_config=config_conv)
@@ -300,11 +310,12 @@ def main():
                 rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
                                          num_hidden=args.rnn_num_hidden,
                                          num_layers=decoder_num_layers,
-                                         dropout=args.dropout,
+                                         dropout=decoder_rnn_dropout,
                                          residual=args.rnn_residual_connections,
                                          forget_bias=args.rnn_forget_bias),
                 attention_config=config_attention,
-                dropout=args.dropout,
+                embed_dropout=decoder_embed_dropout,
+                hidden_dropout=args.rnn_decoder_hidden_dropout,
                 weight_tying=decoder_weight_tying,
                 context_gating=args.rnn_context_gating,
                 layer_normalization=args.layer_normalization)

@@ -11,6 +11,7 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 import mxnet as mx
+import numpy as np
 import pytest
 
 from sockeye import constants as C
@@ -67,9 +68,12 @@ get_rnn_test_cases = [
 def test_get_stacked_rnn(config, expected_cell):
     cell = rnn.get_stacked_rnn(config, prefix=config.cell_type)
     assert isinstance(cell, mx.rnn.SequentialRNNCell)
-    assert isinstance(cell._cells[0], expected_cell)
-    assert cell._cells[0]._num_hidden, config.num_hidden
-    assert cell._cells[0]._num_hidden == config.num_hidden
-    if config.dropout > 0.0:
-        assert isinstance(cell._cells[-1], mx.rnn.DropoutCell)
-        assert cell._cells[-1].dropout == config.dropout
+    cell = cell._cells[0]
+    if config.residual:
+        assert isinstance(cell, mx.rnn.ResidualCell)
+        cell = cell.base_cell
+    if config.dropout > 0:
+        assert isinstance(cell, rnn.VariationalDropoutCell)
+        cell = cell.base_cell
+    assert isinstance(cell, expected_cell)
+    assert cell._num_hidden, config.num_hidden
