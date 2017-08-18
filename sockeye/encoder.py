@@ -38,7 +38,7 @@ def get_encoder(config: Config, fused: bool, embed_weight: Optional[mx.sym.Symbo
         raise ValueError("Unsupported encoder configuration")
 
 
-class RecurrentEncoderConfig:
+class RecurrentEncoderConfig(Config):
     """
     Recurrent encoder configuration.
 
@@ -55,6 +55,7 @@ class RecurrentEncoderConfig:
                  embed_dropout: float,
                  rnn_config: rnn.RNNConfig,
                  conv_config: Optional['ConvolutionalEmbeddingConfig'] = None) -> None:
+        super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
         self.embed_dropout = embed_dropout
