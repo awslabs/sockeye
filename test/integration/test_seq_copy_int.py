@@ -36,7 +36,7 @@ _LINE_MAX_LENGTH = 9
      " --rnn-context-gating --layer-normalization --batch-size 8 --loss smoothed-cross-entropy"
      " --smoothed-cross-entropy-alpha 0.1 --normalize-loss --optimized-metric perplexity --max-updates 10"
      " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01"
-     " --rnn-dropout 0.5:0.1 --embed-dropout 0.1 --rnn-decoder-hidden-dropout 0.01",
+     " --rnn-dropout 0.5:0.1 --embed-dropout 0.1 --rnn-decoder-hidden-dropout 0.01 --rnn-decoder-mlp-init",
      "--beam-size 2"),
     # Convolutional embedding encoder + LSTM encoder-decoder with attention
     ("--encoder rnn-with-conv-embed --conv-embed-max-filter-width 3 --conv-embed-num-filters 4:4:8"

@@ -395,6 +395,7 @@ class RecurrentDecoderConfig(Config):
     :param embed_dropout: Dropout probability for target embeddings.
     :param hidden_dropout: Dropout probability on next decoder hidden state.
     :param weight_tying: Whether to share embedding and prediction parameter matrices.
+    :param mlp_state_init: If true, initialize RNN states with non-linear transformation of last encoder states.
     :param context_gating: Whether to use context gating.
     :param layer_normalization: Apply layer normalization.
     """
@@ -408,6 +409,7 @@ class RecurrentDecoderConfig(Config):
                  embed_dropout: float = .0,
                  hidden_dropout: float = .0,
                  weight_tying: bool = False,
+                 mlp_state_init: bool = False,
                  context_gating: bool = False,
                  layer_normalization: bool = False) -> None:
         super().__init__()
@@ -419,6 +421,7 @@ class RecurrentDecoderConfig(Config):
         self.embed_dropout = embed_dropout
         self.hidden_dropout = hidden_dropout
         self.weight_tying = weight_tying
+        self.mlp_state_init = mlp_state_init
         self.context_gating = context_gating
         self.layer_normalization = layer_normalization
 
@@ -456,9 +459,8 @@ class RecurrentDecoder(Decoder):
             self.mapped_context_w = mx.sym.Variable("%smapped_context_weight" % prefix)
             self.mapped_context_b = mx.sym.Variable("%smapped_context_bias" % prefix)
 
-        # Stacked RNN
         self.rnn = rnn.get_stacked_rnn(self.rnn_config, self.prefix)
-        # RNN init state parameters
+
         self._create_layer_parameters()
 
         # Hidden state parameters
@@ -489,15 +491,15 @@ class RecurrentDecoder(Decoder):
         """
         Creates parameters for encoder last state transformation into decoder layer initial states.
         """
-        self.init_ws, self.init_bs = [], []
-        self.init_norms = []
-        for state_idx, (_, init_num_hidden) in enumerate(self.rnn.state_shape):
-            self.init_ws.append(mx.sym.Variable("%senc2decinit_%d_weight" % (self.prefix, state_idx)))
-            self.init_bs.append(mx.sym.Variable("%senc2decinit_%d_bias" % (self.prefix, state_idx)))
-            if self.config.layer_normalization:
-                self.init_norms.append(layers.LayerNormalization(num_hidden=init_num_hidden,
-                                                                 prefix="%senc2decinit_%d_norm" % (
-                                                                     self.prefix, state_idx)))
+        self.init_ws, self.init_bs, self.init_norms = [], [], []
+        if self.config.mlp_state_init:
+            for state_idx, (_, init_num_hidden) in enumerate(self.rnn.state_shape):
+                self.init_ws.append(mx.sym.Variable("%senc2decinit_%d_weight" % (self.prefix, state_idx)))
+                self.init_bs.append(mx.sym.Variable("%senc2decinit_%d_bias" % (self.prefix, state_idx)))
+                if self.config.layer_normalization:
+                    self.init_norms.append(layers.LayerNormalization(num_hidden=init_num_hidden,
+                                                                     prefix="%senc2decinit_%d_norm" % (
+                                                                         self.prefix, state_idx)))
 
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
@@ -712,29 +714,42 @@ class RecurrentDecoder(Decoder):
                           source_encoded_length: mx.sym.Symbol) -> RecurrentDecoderState:
         """
         Computes initial states of the decoder, hidden state, and one for each RNN layer.
-        Init states for RNN layers are computed using 1 non-linear FC with the last state of the encoder as input.
+        Optionally, init states for RNN layers are computed using 1 non-linear FC
+        with the last state of the encoder as input.
 
         :param source_encoded: Concatenated encoder states. Shape: (batch_size, source_seq_len, encoder_num_hidden).
         :param source_encoded_length: Lengths of source sequences. Shape: (batch_size,).
         :return: Decoder state.
         """
-        # initial decoder hidden state
-        hidden = mx.sym.tile(data=mx.sym.expand_dims(data=source_encoded_length * 0, axis=1), reps=(1, self.num_hidden))
+        # we derive the shape of hidden and layer_states from some input to enable
+        # shape inference for the batch dimension during inference.
+        # (batch_size, 1)
+        zeros = mx.sym.expand_dims(mx.sym.zeros_like(source_encoded_length), axis=1)
+        # last encoder state
+        source_encoded_last = mx.sym.SequenceLast(data=source_encoded,
+                                                  sequence_length=source_encoded_length,
+                                                  use_sequence_length=True)
+
+        # decoder hidden state
+        hidden = mx.sym.tile(data=zeros, reps=(1, self.num_hidden))
+
         # initial states for each layer
         layer_states = []
         for state_idx, (_, init_num_hidden) in enumerate(self.rnn.state_shape):
-            init = mx.sym.FullyConnected(data=mx.sym.SequenceLast(data=source_encoded,
-                                                                  sequence_length=source_encoded_length,
-                                                                  use_sequence_length=True),
-                                         num_hidden=init_num_hidden,
-                                         weight=self.init_ws[state_idx],
-                                         bias=self.init_bs[state_idx],
-                                         name="%senc2decinit_%d" % (self.prefix, state_idx))
-            if self.config.layer_normalization:
-                init = self.init_norms[state_idx].normalize(init)
-            init = mx.sym.Activation(data=init, act_type="tanh",
-                                     name="%senc2dec_inittanh_%d" % (self.prefix, state_idx))
+            if self.config.mlp_state_init:
+                init = mx.sym.FullyConnected(data=source_encoded_last,
+                                             num_hidden=init_num_hidden,
+                                             weight=self.init_ws[state_idx],
+                                             bias=self.init_bs[state_idx],
+                                             name="%senc2decinit_%d" % (self.prefix, state_idx))
+                if self.config.layer_normalization:
+                    init = self.init_norms[state_idx].normalize(init)
+                init = mx.sym.Activation(data=init, act_type="tanh",
+                                         name="%senc2dec_inittanh_%d" % (self.prefix, state_idx))
+            else:
+                init = mx.sym.tile(data=zeros, reps=(1, init_num_hidden))
             layer_states.append(init)
+
         return RecurrentDecoderState(hidden, layer_states)
 
     def _step(self,
