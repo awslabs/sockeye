@@ -87,7 +87,7 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
     encoders.append(BatchMajor2TimeMajor())
 
     encoder_class = FusedRecurrentEncoder if fused else RecurrentEncoder
-    encoders.append(BiDirectionalRNNEncoder(rnn_config=config.rnn_config,
+    encoders.append(BiDirectionalRNNEncoder(rnn_config=config.rnn_config.copy(num_layers=1),
                                             prefix=C.BIDIRECTIONALRNN_PREFIX,
                                             layout=C.TIME_MAJOR))
 
