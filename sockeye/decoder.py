@@ -30,6 +30,7 @@ from . import layers
 from . import lexicon as lexicons
 from . import rnn
 from . import transformer
+from . import utils
 
 logger = logging.getLogger(__name__)
 
@@ -458,6 +459,10 @@ class RecurrentDecoder(Decoder):
             self.mapped_rnn_output_b = mx.sym.Variable("%smapped_rnn_output_bias" % prefix)
             self.mapped_context_w = mx.sym.Variable("%smapped_context_weight" % prefix)
             self.mapped_context_b = mx.sym.Variable("%smapped_context_bias" % prefix)
+        if self.rnn_config.residual:
+            utils.check_condition(self.config.rnn_config.first_residual_layer >= 2,
+                                  "Residual connections on the first decoder layer are not supported as input and "
+                                  "output dimensions do not match.")
 
         self.rnn = rnn.get_stacked_rnn(self.rnn_config, self.prefix)
 

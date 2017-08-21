@@ -276,8 +276,11 @@ def add_model_parameters(params):
     model_params.add_argument('--rnn-residual-connections',
                               action="store_true",
                               default=False,
-                              help="Add residual connections to stacked RNNs if --rnn-num-layers > 3. "
-                                   "(see Wu ETAL'16). Default: %(default)s.")
+                              help="Add residual connections to stacked RNNs. (see Wu ETAL'16). Default: %(default)s.")
+    model_params.add_argument('--rnn-first-residual-layer',
+                              type=int_greater_or_equal(2),
+                              default=2,
+                              help='First RNN layer to have a residual connection. Default: %(default)s.')
     model_params.add_argument('--rnn-context-gating', action="store_true",
                               help="Enables a context gate which adaptively weighs the RNN decoder input against the "
                                    "source context vector before each update of the decoder hidden state.")

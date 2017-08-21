@@ -30,6 +30,8 @@ class RNNConfig(Config):
     :param num_layers: Number of RNN layers.
     :param dropout: Dropout probability on RNN outputs.
     :param residual: Whether to add residual connections between multi-layered RNNs.
+    :param first_residual_layer: First layer with a residual connection (1-based indexes).
+           Default is to start at the second layer.
     :param forget_bias: Initial value of forget biases.
     """
     def __init__(self,
@@ -38,6 +40,7 @@ class RNNConfig(Config):
                  num_layers: int,
                  dropout: float,
                  residual: bool = False,
+                 first_residual_layer: int = 2,
                  forget_bias: float = 0.0) -> None:
         super().__init__()
         self.cell_type = cell_type
@@ -45,6 +48,7 @@ class RNNConfig(Config):
         self.num_layers = num_layers
         self.dropout = dropout
         self.residual = residual
+        self.first_residual_layer = first_residual_layer
         self.forget_bias = forget_bias
 
 
@@ -58,10 +62,10 @@ def get_stacked_rnn(config: RNNConfig, prefix: str) -> mx.rnn.SequentialRNNCell:
     """
 
     rnn = mx.rnn.SequentialRNNCell()
-    for layer in range(config.num_layers):
+    for layer_idx in range(config.num_layers):
         # fhieber: the 'l' in the prefix does NOT stand for 'layer' but for the direction 'l' as in mx.rnn.rnn_cell::517
         # this ensures parameter name compatibility of training w/ FusedRNN and decoding with 'unfused' RNN.
-        cell_prefix = "%sl%d_" % (prefix, layer)
+        cell_prefix = "%sl%d_" % (prefix, layer_idx)
         if config.cell_type == C.LSTM_TYPE:
             cell = mx.rnn.LSTMCell(num_hidden=config.num_hidden, prefix=cell_prefix, forget_bias=config.forget_bias)
         elif config.cell_type == C.LNLSTM_TYPE:
@@ -83,7 +87,8 @@ def get_stacked_rnn(config: RNNConfig, prefix: str) -> mx.rnn.SequentialRNNCell:
                                           dropout_inputs=config.dropout,
                                           dropout_states=config.dropout)
 
-        if config.residual and layer > 0:
+        # layer_idx is 0 based, whereas first_residual_layer is 1-based
+        if config.residual and layer_idx + 1 >= config.first_residual_layer:
             cell = mx.rnn.ResidualCell(cell)
 
         rnn.add(cell)
