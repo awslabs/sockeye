@@ -229,11 +229,12 @@ def main():
         encoder_num_layers, decoder_num_layers = args.num_layers
 
         encoder_embed_dropout, decoder_embed_dropout = args.embed_dropout
-        encoder_rnn_dropout, decoder_rnn_dropout = args.rnn_dropout
-        if encoder_embed_dropout > 0 and encoder_rnn_dropout > 0:
+        encoder_rnn_dropout_inputs, decoder_rnn_dropout_inputs = args.rnn_dropout_inputs
+        encoder_rnn_dropout_states, decoder_rnn_dropout_states = args.rnn_dropout_inputs
+        if encoder_embed_dropout > 0 and encoder_rnn_dropout_inputs > 0:
             logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
                            "two dropout layers on top of each other.")
-        if decoder_embed_dropout > 0 and decoder_rnn_dropout > 0:
+        if decoder_embed_dropout > 0 and decoder_rnn_dropout_inputs > 0:
             logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
                            "two dropout layers on top of each other.")
 
@@ -268,7 +269,8 @@ def main():
                 rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
                                          num_hidden=args.rnn_num_hidden,
                                          num_layers=encoder_num_layers,
-                                         dropout=encoder_rnn_dropout,
+                                         dropout_inputs=encoder_rnn_dropout_inputs,
+                                         dropout_states=encoder_rnn_dropout_states,
                                          residual=args.rnn_residual_connections,
                                          first_residual_layer=args.rnn_first_residual_layer,
                                          forget_bias=args.rnn_forget_bias),
@@ -312,7 +314,8 @@ def main():
                 rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
                                          num_hidden=args.rnn_num_hidden,
                                          num_layers=decoder_num_layers,
-                                         dropout=decoder_rnn_dropout,
+                                         dropout_inputs=decoder_rnn_dropout_inputs,
+                                         dropout_states=decoder_rnn_dropout_states,
                                          residual=args.rnn_residual_connections,
                                          first_residual_layer=args.rnn_first_residual_layer,
                                          forget_bias=args.rnn_forget_bias),

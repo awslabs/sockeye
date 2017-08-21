@@ -63,7 +63,8 @@ def test_step(cell_type, context_gating,
     config_rnn = sockeye.rnn.RNNConfig(cell_type=cell_type,
                                        num_hidden=decoder_num_hidden,
                                        num_layers=1,
-                                       dropout=0.,
+                                       dropout_inputs=0.,
+                                       dropout_states=0.,
                                        residual=False,
                                        forget_bias=0.)
 

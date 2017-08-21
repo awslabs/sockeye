@@ -459,10 +459,15 @@ def add_training_args(params):
                               default=(.0, .0),
                               help='Dropout probability for source & target embeddings. Use <val>:<val> to specify '
                                    'separate values. Default: %(default)s.')
-    train_params.add_argument('--rnn-dropout',
+    train_params.add_argument('--rnn-dropout-inputs',
                               type=multiple_values(2, data_type=float),
                               default=(.0, .0),
-                              help='RNN variational dropout probability for encoder & decoder RNNs.'
+                              help='RNN variational dropout probability for encoder & decoder RNN inputs.'
+                                   'Use <val>:<val> to specify separate values. Default: %(default)s.')
+    train_params.add_argument('--rnn-dropout-states',
+                              type=multiple_values(2, data_type=float),
+                              default=(.0, .0),
+                              help='RNN variational dropout probability for encoder & decoder RNN states.'
                                    'Use <val>:<val> to specify separate values. Default: %(default)s.')
 
     train_params.add_argument('--rnn-decoder-hidden-dropout',
