@@ -320,7 +320,7 @@ def main():
                 embed_dropout=decoder_embed_dropout,
                 hidden_dropout=args.rnn_decoder_hidden_dropout,
                 weight_tying=decoder_weight_tying,
-                mlp_state_init=args.rnn_decoder_mlp_init,
+                zero_state_init=args.rnn_decoder_zero_init,
                 context_gating=args.rnn_context_gating,
                 layer_normalization=args.layer_normalization)
 
