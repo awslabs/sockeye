@@ -271,7 +271,8 @@ def main():
                                          dropout=encoder_rnn_dropout,
                                          residual=args.rnn_residual_connections,
                                          forget_bias=args.rnn_forget_bias),
-                conv_config=config_conv)
+                conv_config=config_conv,
+                reverse_input=args.rnn_encoder_reverse_input)
 
         if args.decoder == C.TRANSFORMER_TYPE:
             config_decoder = transformer.TransformerConfig(

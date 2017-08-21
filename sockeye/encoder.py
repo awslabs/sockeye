@@ -16,6 +16,7 @@ Encoders for sequence-to-sequence models.
 """
 import logging
 from math import ceil, floor
+from abc import ABC, abstractmethod
 from typing import Callable, List, Optional, Tuple
 
 import mxnet as mx
@@ -47,6 +48,7 @@ class RecurrentEncoderConfig(Config):
     :param embed_dropout: Dropout probability on embedding layer.
     :param rnn_config: RNN configuration.
     :param conv_config: Optional configuration for convolutional embedding.
+    :param reverse_input: Reverse embedding sequence before feeding into RNN.
     """
 
     def __init__(self,
@@ -54,13 +56,15 @@ class RecurrentEncoderConfig(Config):
                  num_embed: int,
                  embed_dropout: float,
                  rnn_config: rnn.RNNConfig,
-                 conv_config: Optional['ConvolutionalEmbeddingConfig'] = None) -> None:
+                 conv_config: Optional['ConvolutionalEmbeddingConfig'] = None,
+                 reverse_input: bool = False) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
         self.embed_dropout = embed_dropout
         self.rnn_config = rnn_config
         self.conv_config = conv_config
+        self.reverse_input = reverse_input
 
 
 def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
@@ -82,6 +86,10 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
                               dropout=config.embed_dropout,
                               embed_weight=embed_weight))
+
+    if config.reverse_input:
+        encoders.append(ReverseSequence())
+
     if config.conv_config is not None:
         encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
 
@@ -127,11 +135,12 @@ def get_transformer_encoder(config: transformer.TransformerConfig,
     return EncoderSequence(encoders)
 
 
-class Encoder:
+class Encoder(ABC):
     """
     Generic encoder interface.
     """
 
+    @abstractmethod
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
@@ -144,49 +153,7 @@ class Encoder:
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
-        raise NotImplementedError()
-
-    def get_num_hidden(self) -> int:
-        """
-        Return the representation size of this encoder.
-        """
-        raise NotImplementedError()
-
-    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
-        """
-        Returns a list of RNNCells used by this encoder.
-        """
-        raise NotImplementedError()
-
-    def get_encoded_seq_len(self, seq_len: int) -> int:
-        """
-        Returns the size of the encoded sequence.
-        """
-        return seq_len
-
-
-class BatchMajor2TimeMajor(Encoder):
-    """
-    Converts batch major data to time major
-    """
-
-    def encode(self,
-               data: mx.sym.Symbol,
-               data_length: mx.sym.Symbol,
-               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
-        """
-        Encodes data given sequence lengths of individual examples and maximum sequence length.
-
-        :param data: Input data.
-        :param data_length: Vector with sequence lengths.
-        :param seq_len: Maximum sequence length.
-        :return: Encoded versions of input data (data, data_length, seq_len).
-        """
-        return self._encode(data), data_length, seq_len
-
-    def _encode(self, data: mx.sym.Symbol) -> mx.sym.Symbol:
-        with mx.AttrScope(__layout__=C.TIME_MAJOR):
-            return mx.sym.swapaxes(data=data, dim1=0, dim2=1)
+        pass
 
     def get_num_hidden(self) -> int:
         """
@@ -199,6 +166,48 @@ class BatchMajor2TimeMajor(Encoder):
         Returns a list of RNNCells used by this encoder.
         """
         return []
+
+    def get_encoded_seq_len(self, seq_len: int) -> int:
+        """
+        Returns the size of the encoded sequence.
+        """
+        return seq_len
+
+
+class BatchMajor2TimeMajor(Encoder):
+    """
+    Converts batch major data to time major.
+    """
+
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: mx.sym.Symbol,
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+        """
+        Encodes data given sequence lengths of individual examples and maximum sequence length.
+
+        :param data: Input data.
+        :param data_length: Vector with sequence lengths.
+        :param seq_len: Maximum sequence length.
+        :return: Encoded versions of input data (data, data_length, seq_len).
+        """
+        with mx.AttrScope(__layout__=C.TIME_MAJOR):
+            return mx.sym.swapaxes(data=data, dim1=0, dim2=1), data_length, seq_len
+
+
+class ReverseSequence(Encoder):
+    """
+    Reverses the input sequence.
+    """
+
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: mx.sym.Symbol,
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+        data = mx.sym.swapaxes(data=data, dim1=0, dim2=1)
+        data = mx.sym.SequenceReverse(data=data, sequence_length=data_length, use_sequence_length=True)
+        data = mx.sym.swapaxes(data=data, dim1=0, dim2=1)
+        return data, data_length, seq_len
 
 
 class Embedding(Encoder):
@@ -275,12 +284,6 @@ class Embedding(Encoder):
         Return the representation size of this encoder.
         """
         return self.num_embed
-
-    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
-        """
-        Returns a list of RNNCells used by this encoder.
-        """
-        return []
 
 
 class EncoderSequence(Encoder):
@@ -385,7 +388,7 @@ class RecurrentEncoder(Encoder):
         return self.rnn_config.num_hidden
 
 
-class FusedRecurrentEncoder(Encoder):
+class FusedRecurrentEncoder(RecurrentEncoder):
     """
     Uni-directional (multi-layered) recurrent encoder.
 
@@ -398,46 +401,15 @@ class FusedRecurrentEncoder(Encoder):
                  rnn_config: rnn.RNNConfig,
                  prefix: str = C.STACKEDRNN_PREFIX,
                  layout: str = C.TIME_MAJOR):
-        self.rnn_config = rnn_config
-        self.layout = layout
+        super().__init__(rnn_config, prefix, layout)
         logger.warning("%s: FusedRNNCell uses standard MXNet Orthogonal initializer w/ rand_type=uniform", prefix)
-        self.rnn = [mx.rnn.FusedRNNCell(self.rnn_config.num_hidden,
-                                        num_layers=self.rnn_config.num_layers,
-                                        mode=self.rnn_config.cell_type,
-                                        bidirectional=False,
-                                        dropout=self.rnn_config.dropout,
-                                        forget_bias=self.rnn_config.forget_bias,
-                                        prefix=prefix)]
-
-    def encode(self,
-               data: mx.sym.Symbol,
-               data_length: mx.sym.Symbol,
-               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
-        """
-        Encodes data given sequence lengths of individual examples and maximum sequence length.
-
-        :param data: Input data.
-        :param data_length: Vector with sequence lengths.
-        :param seq_len: Maximum sequence length.
-        :return: Encoded versions of input data (data, data_length, seq_len).
-        """
-        outputs = data
-        for cell in self.rnn:
-            outputs, _ = cell.unroll(seq_len, inputs=outputs, merge_outputs=True, layout=self.layout)
-
-        return outputs, data_length, seq_len
-
-    def get_rnn_cells(self):
-        """
-        Returns RNNCells used in this encoder.
-        """
-        return self.rnn
-
-    def get_num_hidden(self):
-        """
-        Return the representation size of this encoder.
-        """
-        return self.rnn_config.num_hidden
+        self.rnn = mx.rnn.FusedRNNCell(self.rnn_config.num_hidden,
+                                       num_layers=self.rnn_config.num_layers,
+                                       mode=self.rnn_config.cell_type,
+                                       bidirectional=False,
+                                       dropout=self.rnn_config.dropout,
+                                       forget_bias=self.rnn_config.forget_bias,
+                                       prefix=prefix)
 
 
 class BiDirectionalRNNEncoder(Encoder):
@@ -570,18 +542,6 @@ class TransformerEncoder(Encoder):
         Return the representation size of this encoder.
         """
         return self.config.model_size
-
-    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
-        """
-        Returns a list of RNNCells used by this encoder.
-        """
-        return []
-
-    def get_encoded_seq_len(self, seq_len: int) -> int:
-        """
-        Returns the size of the encoded sequence.
-        """
-        return seq_len
 
 
 class ConvolutionalEmbeddingConfig(Config):
@@ -794,12 +754,6 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         Return the representation size of this encoder.
         """
         return self.output_dim
-
-    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
-        """
-        Returns a list of RNNCells used by this encoder.
-        """
-        return []
 
     def get_encoded_seq_len(self, seq_len: int) -> int:
         """

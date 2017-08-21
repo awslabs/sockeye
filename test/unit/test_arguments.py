@@ -90,6 +90,7 @@ def test_device_args(test_params, expected_params):
               transformer_no_positional_encodings=False,
               attention_use_prev_word=False,
               rnn_decoder_mlp_init=False,
+              rnn_encoder_reverse_input=False,
               rnn_context_gating=False,
               layer_normalization=False,
               encoder=C.RNN_NAME,

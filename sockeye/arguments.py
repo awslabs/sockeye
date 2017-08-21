@@ -266,6 +266,9 @@ def add_model_parameters(params):
                               type=int_greater_or_equal(1),
                               default=1024,
                               help='Number of RNN hidden units for encoder and decoder. Default: %(default)s.')
+    model_params.add_argument('--rnn-encoder-reverse-input',
+                              action='store_true',
+                              help='Reverse input sequence for RNN encoder. Default: %(default)s.')
     model_params.add_argument('--rnn-decoder-mlp-init',
                               action='store_true',
                               help='Use an MLP to initialize decoder RNN states from last encoder RNN states.'
