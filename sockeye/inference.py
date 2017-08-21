@@ -16,7 +16,7 @@ Code for inference/translation
 """
 import logging
 import os
-from typing import Dict, List, NamedTuple, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple, Callable
 
 import mxnet as mx
 import numpy as np
@@ -54,6 +54,10 @@ class InferenceModel(model.SockeyeModel):
                  beam_size: int,
                  checkpoint: Optional[int] = None,
                  softmax_temperature: Optional[float] = None):
+        self.model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
+        logger.info("Model version: %s", self.model_version)
+        utils.check_version(self.model_version)
+
         # load config & determine parameter file
         config = model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
         if max_input_len is None:
@@ -66,10 +70,6 @@ class InferenceModel(model.SockeyeModel):
         super().__init__(config)
 
         fname_params = os.path.join(model_folder, C.PARAMS_NAME % checkpoint if checkpoint else C.PARAMS_BEST_NAME)
-
-        self.model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
-        logger.info("Model version: %s", self.model_version)
-        utils.check_version(self.model_version)
 
         utils.check_condition(beam_size < self.config.vocab_target_size,
                               'The beam size must be smaller than the target vocabulary size.')
@@ -315,6 +315,39 @@ class ModelState:
         self.decoder_states = [mx.nd.take(ds, best_hyp_indices) for ds in self.decoder_states]
 
 
+class LengthPenalty:
+    """
+    Calculates the length penalty as:
+    (beta + len(Y))**alpha / (beta + 1)**alpha
+
+    See Wu et al. 2016.
+
+    :param alpha: The alpha factor for the length penalty (see above).
+    :param beta: The beta factor for the length penalty (see above).
+    """
+
+    def __init__(self, alpha: float=1.0, beta: float=0.0):
+        self.alpha = alpha
+        self.beta = beta
+        self.denominator = (self.beta + 1)**self.alpha
+
+    def __call__(self, lengths: mx.nd.NDArray):
+        """
+        Calculate the length penalty for the given vector of lengths:.
+
+        :param lengths: A matrix of sentence lengths of dimensionality (batch_size, 1).
+        :return: The length penalty (batch_size, 1).
+        """
+        if self.alpha == 0.0:
+            # no length penalty:
+            return mx.nd.ones_like(lengths)
+        else:
+            # note: we avoid unnecessary addition or pow operations
+            numerator = self.beta + lengths if self.beta != 0.0 else lengths
+            numerator = numerator**self.alpha if self.alpha != 1.0 else numerator
+            return numerator / self.denominator
+
+
 class Translator:
     """
     Translator uses one or several models to translate input.
@@ -331,10 +364,12 @@ class Translator:
     def __init__(self,
                  context: mx.context.Context,
                  ensemble_mode: str,
+                 length_penalty: Callable,
                  models: List[InferenceModel],
                  vocab_source: Dict[str, int],
                  vocab_target: Dict[str, int]):
         self.context = context
+        self.length_penalty = length_penalty
         self.vocab_source = vocab_source
         self.vocab_target = vocab_target
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
@@ -559,10 +594,10 @@ class Translator:
 
             # (2) compute length-normalized accumulated scores in place
             if t == 0:  # only one hypothesis at t==0
-                scores = scores[:1]
+                scores = scores[:1] / self.length_penalty(lengths[:1] + 1)
             else:
                 # renormalize scores by length+1 ...
-                scores = (scores + scores_accumulated * lengths) / (lengths + 1)
+                scores = (scores + scores_accumulated * self.length_penalty(lengths)) / self.length_penalty(lengths + 1)
                 # ... but not for finished hyps.
                 # their predicted distribution is set to their accumulated scores at C.PAD_ID.
                 self.pad_dist[:, C.PAD_ID] = scores_accumulated
