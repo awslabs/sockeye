@@ -269,10 +269,10 @@ def add_model_parameters(params):
     model_params.add_argument('--rnn-encoder-reverse-input',
                               action='store_true',
                               help='Reverse input sequence for RNN encoder. Default: %(default)s.')
-    model_params.add_argument('--rnn-decoder-mlp-init',
+    model_params.add_argument('--rnn-decoder-zero-init',
                               action='store_true',
-                              help='Use an MLP to initialize decoder RNN states from last encoder RNN states.'
-                                   'Default: %(default)s.')
+                              help='Initialize decoder RNN states with zeros instead from last & highest encoder '
+                                   'RNN state. Default: %(default)s.')
     model_params.add_argument('--rnn-residual-connections',
                               action="store_true",
                               default=False,
