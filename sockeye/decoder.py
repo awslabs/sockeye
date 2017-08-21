@@ -461,7 +461,8 @@ class RecurrentDecoder(Decoder):
 
         self.rnn = rnn.get_stacked_rnn(self.rnn_config, self.prefix)
 
-        self._create_layer_parameters()
+        if not self.config.zero_state_init:
+            self._create_state_init_parameters()
 
         # Hidden state parameters
         self.hidden_w = mx.sym.Variable("%shidden_weight" % prefix)
@@ -487,12 +488,10 @@ class RecurrentDecoder(Decoder):
             self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
         self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
 
-    def _create_layer_parameters(self):
+    def _create_state_init_parameters(self):
         """
         Creates parameters for encoder last state transformation into decoder layer initial states.
         """
-        if self.config.zero_state_init:
-            return
         self.init_ws, self.init_bs, self.init_norms = [], [], []
         for state_idx, (_, init_num_hidden) in enumerate(self.rnn.state_shape):
             self.init_ws.append(mx.sym.Variable("%senc2decinit_%d_weight" % (self.prefix, state_idx)))
