@@ -270,6 +270,7 @@ def main():
                                          num_layers=encoder_num_layers,
                                          dropout=encoder_rnn_dropout,
                                          residual=args.rnn_residual_connections,
+                                         first_residual_layer=args.rnn_first_residual_layer,
                                          forget_bias=args.rnn_forget_bias),
                 conv_config=config_conv,
                 reverse_input=args.rnn_encoder_reverse_input)
@@ -313,6 +314,7 @@ def main():
                                          num_layers=decoder_num_layers,
                                          dropout=decoder_rnn_dropout,
                                          residual=args.rnn_residual_connections,
+                                         first_residual_layer=args.rnn_first_residual_layer,
                                          forget_bias=args.rnn_forget_bias),
                 attention_config=config_attention,
                 embed_dropout=decoder_embed_dropout,

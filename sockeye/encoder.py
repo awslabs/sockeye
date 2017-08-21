@@ -95,13 +95,22 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
 
     encoders.append(BatchMajor2TimeMajor())
 
+    if config.rnn_config.residual:
+        utils.check_condition(config.rnn_config.first_residual_layer >= 2,
+                              "Residual connections on the first encoder layer are not supported")
+
+
     encoder_class = FusedRecurrentEncoder if fused else RecurrentEncoder
+    # One layer bi-directional RNN:
     encoders.append(BiDirectionalRNNEncoder(rnn_config=config.rnn_config.copy(num_layers=1),
                                             prefix=C.BIDIRECTIONALRNN_PREFIX,
                                             layout=C.TIME_MAJOR))
 
     if config.rnn_config.num_layers > 1:
-        remaining_rnn_config = config.rnn_config.copy(num_layers=config.rnn_config.num_layers - 1)
+        # Stacked uni-directional RNN:
+        # Because we already have a one layer bi-rnn we reduce the num_layers as well as the first_residual_layer.
+        remaining_rnn_config = config.rnn_config.copy(num_layers=config.rnn_config.num_layers - 1,
+                                                      first_residual_layer=config.rnn_config.first_residual_layer - 1)
         encoders.append(encoder_class(rnn_config=remaining_rnn_config,
                                       prefix=C.STACKEDRNN_PREFIX,
                                       layout=C.TIME_MAJOR))
@@ -431,12 +440,7 @@ class BiDirectionalRNNEncoder(Encoder):
         utils.check_condition(rnn_config.num_hidden % 2 == 0,
                               "num_hidden must be a multiple of 2 for BiDirectionalRNNEncoders.")
         self.rnn_config = rnn_config
-        self.internal_rnn_config = rnn.RNNConfig(cell_type=rnn_config.cell_type,
-                                                 num_hidden=rnn_config.num_hidden // 2,
-                                                 num_layers=rnn_config.num_layers,
-                                                 dropout=rnn_config.dropout,
-                                                 residual=rnn_config.residual,
-                                                 forget_bias=rnn_config.forget_bias)
+        self.internal_rnn_config = rnn_config.copy(num_hidden=rnn_config.num_hidden // 2)
         if layout[0] == 'N':
             logger.warning("Batch-major layout for encoder input. Consider using time-major layout for faster speed")
 
