@@ -87,13 +87,13 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
                               dropout=config.embed_dropout,
                               embed_weight=embed_weight))
 
-    if config.reverse_input:
-        encoders.append(ReverseSequence())
-
     if config.conv_config is not None:
         encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
 
     encoders.append(BatchMajor2TimeMajor())
+
+    if config.reverse_input:
+        encoders.append(ReverseSequence())
 
     encoder_class = FusedRecurrentEncoder if fused else RecurrentEncoder
     encoders.append(BiDirectionalRNNEncoder(rnn_config=config.rnn_config.copy(num_layers=1),
@@ -197,16 +197,14 @@ class BatchMajor2TimeMajor(Encoder):
 
 class ReverseSequence(Encoder):
     """
-    Reverses the input sequence.
+    Reverses the input sequence. Requires time-major layout.
     """
 
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
                seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
-        data = mx.sym.swapaxes(data=data, dim1=0, dim2=1)
         data = mx.sym.SequenceReverse(data=data, sequence_length=data_length, use_sequence_length=True)
-        data = mx.sym.swapaxes(data=data, dim1=0, dim2=1)
         return data, data_length, seq_len
 
 
