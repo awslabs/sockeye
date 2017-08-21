@@ -728,7 +728,7 @@ class RecurrentDecoder(Decoder):
         # last encoder state
         source_encoded_last = mx.sym.SequenceLast(data=source_encoded,
                                                   sequence_length=source_encoded_length,
-                                                  use_sequence_length=True)
+                                                  use_sequence_length=True) if not self.config.zero_state_init else None
 
         # decoder hidden state
         hidden = mx.sym.tile(data=zeros, reps=(1, self.num_hidden))
