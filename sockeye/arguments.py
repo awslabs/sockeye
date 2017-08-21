@@ -266,11 +266,21 @@ def add_model_parameters(params):
                               type=int_greater_or_equal(1),
                               default=1024,
                               help='Number of RNN hidden units for encoder and decoder. Default: %(default)s.')
+    model_params.add_argument('--rnn-encoder-reverse-input',
+                              action='store_true',
+                              help='Reverse input sequence for RNN encoder. Default: %(default)s.')
+    model_params.add_argument('--rnn-decoder-zero-init',
+                              action='store_true',
+                              help='Initialize decoder RNN states with zeros instead from last & highest encoder '
+                                   'RNN state. Default: %(default)s.')
     model_params.add_argument('--rnn-residual-connections',
                               action="store_true",
                               default=False,
-                              help="Add residual connections to stacked RNNs if --rnn-num-layers > 3. "
-                                   "(see Wu ETAL'16). Default: %(default)s.")
+                              help="Add residual connections to stacked RNNs. (see Wu ETAL'16). Default: %(default)s.")
+    model_params.add_argument('--rnn-first-residual-layer',
+                              type=int_greater_or_equal(2),
+                              default=2,
+                              help='First RNN layer to have a residual connection. Default: %(default)s.')
     model_params.add_argument('--rnn-context-gating', action="store_true",
                               help="Enables a context gate which adaptively weighs the RNN decoder input against the "
                                    "source context vector before each update of the decoder hidden state.")

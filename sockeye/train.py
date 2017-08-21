@@ -270,8 +270,10 @@ def main():
                                          num_layers=encoder_num_layers,
                                          dropout=encoder_rnn_dropout,
                                          residual=args.rnn_residual_connections,
+                                         first_residual_layer=args.rnn_first_residual_layer,
                                          forget_bias=args.rnn_forget_bias),
-                conv_config=config_conv)
+                conv_config=config_conv,
+                reverse_input=args.rnn_encoder_reverse_input)
 
         if args.decoder == C.TRANSFORMER_TYPE:
             config_decoder = transformer.TransformerConfig(
@@ -312,11 +314,13 @@ def main():
                                          num_layers=decoder_num_layers,
                                          dropout=decoder_rnn_dropout,
                                          residual=args.rnn_residual_connections,
+                                         first_residual_layer=args.rnn_first_residual_layer,
                                          forget_bias=args.rnn_forget_bias),
                 attention_config=config_attention,
                 embed_dropout=decoder_embed_dropout,
                 hidden_dropout=args.rnn_decoder_hidden_dropout,
                 weight_tying=decoder_weight_tying,
+                zero_state_init=args.rnn_decoder_zero_init,
                 context_gating=args.rnn_context_gating,
                 layer_normalization=args.layer_normalization)
 

@@ -34,7 +34,7 @@ class TransformerConfig(config.Config):
                  layer_normalization: bool,
                  weight_tying: bool,
                  positional_encodings: bool,
-                 conv_config: Optional['ConvolutionalEmbeddingConfig'] = None) -> None:
+                 conv_config: Optional['ConvolutionalEmbeddingConfig'] = None) -> None:  # type: ignore
         super().__init__()
         self.model_size = model_size
         self.attention_heads = attention_heads
@@ -256,7 +256,7 @@ class AutoRegressiveBias(mx.operator.CustomOp):
     0 0 0 0
     """
 
-    def __init__(self, length: int):
+    def __init__(self, length: int) -> None:
         super().__init__()
         self.bias = self.get_bias(length)
 
@@ -278,7 +278,7 @@ class AutoRegressiveBias(mx.operator.CustomOp):
 @mx.operator.register("auto_regressive_bias")
 class AutoRegressiveBiasProp(mx.operator.CustomOpProp):
 
-    def __init__(self, length: str):
+    def __init__(self, length: str) -> None:
         super().__init__()
         self.length = int(length)
 
