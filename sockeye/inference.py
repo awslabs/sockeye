@@ -326,14 +326,14 @@ class LengthPenalty:
     :param beta: The beta factor for the length penalty (see above).
     """
 
-    def __init__(self, alpha: float=1.0, beta: float=0.0):
+    def __init__(self, alpha: float=1.0, beta: float=0.0) -> None:
         self.alpha = alpha
         self.beta = beta
         self.denominator = (self.beta + 1)**self.alpha
 
-    def __call__(self, lengths: mx.nd.NDArray):
+    def __call__(self, lengths: mx.nd.NDArray) -> mx.nd.NDArray:
         """
-        Calculate the length penalty for the given vector of lengths:.
+        Calculate the length penalty for the given vector of lengths.
 
         :param lengths: A matrix of sentence lengths of dimensionality (batch_size, 1).
         :return: The length penalty (batch_size, 1).
@@ -364,7 +364,7 @@ class Translator:
     def __init__(self,
                  context: mx.context.Context,
                  ensemble_mode: str,
-                 length_penalty: Callable,
+                 length_penalty: LengthPenalty,
                  models: List[InferenceModel],
                  vocab_source: Dict[str, int],
                  vocab_target: Dict[str, int]):
