@@ -79,7 +79,7 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
     :return: Encoder instance.
     """
     # TODO give more control on encoder architecture
-    encoders = list()
+    encoders = list()  # type: List[Encoder]
 
     encoders.append(Embedding(num_embed=config.num_embed,
                               vocab_size=config.vocab_size,
@@ -119,7 +119,7 @@ def get_transformer_encoder(config: transformer.TransformerConfig,
     :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
     :return: Encoder instance.
     """
-    encoders = list()
+    encoders = list()  # type: List[Encoder]
     encoders.append(Embedding(num_embed=config.model_size,
                               vocab_size=config.vocab_size,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
@@ -228,7 +228,7 @@ class Embedding(Encoder):
                  prefix: str,
                  dropout: float,
                  embed_weight: Optional[mx.sym.Symbol] = None,
-                 add_positional_encoding: bool = False):
+                 add_positional_encoding: bool = False) -> None:
         self.num_embed = num_embed
         self.vocab_size = vocab_size
         self.prefix = prefix
@@ -293,7 +293,7 @@ class EncoderSequence(Encoder):
     :param encoders: List of encoders.
     """
 
-    def __init__(self, encoders: List[Encoder]):
+    def __init__(self, encoders: List[Encoder]) -> None:
         self.encoders = encoders
 
     def encode(self,
@@ -354,7 +354,7 @@ class RecurrentEncoder(Encoder):
     def __init__(self,
                  rnn_config: rnn.RNNConfig,
                  prefix: str = C.STACKEDRNN_PREFIX,
-                 layout: str = C.TIME_MAJOR):
+                 layout: str = C.TIME_MAJOR) -> None:
         self.rnn_config = rnn_config
         self.layout = layout
         self.rnn = rnn.get_stacked_rnn(rnn_config, prefix)
@@ -400,7 +400,7 @@ class FusedRecurrentEncoder(RecurrentEncoder):
     def __init__(self,
                  rnn_config: rnn.RNNConfig,
                  prefix: str = C.STACKEDRNN_PREFIX,
-                 layout: str = C.TIME_MAJOR):
+                 layout: str = C.TIME_MAJOR) -> None:
         super().__init__(rnn_config, prefix, layout)
         logger.warning("%s: FusedRNNCell uses standard MXNet Orthogonal initializer w/ rand_type=uniform", prefix)
         self.rnn = mx.rnn.FusedRNNCell(self.rnn_config.num_hidden,
@@ -427,7 +427,7 @@ class BiDirectionalRNNEncoder(Encoder):
                  rnn_config: rnn.RNNConfig,
                  prefix=C.BIDIRECTIONALRNN_PREFIX,
                  layout=C.TIME_MAJOR,
-                 encoder_class: Callable = RecurrentEncoder):
+                 encoder_class: Callable = RecurrentEncoder) -> None:
         utils.check_condition(rnn_config.num_hidden % 2 == 0,
                               "num_hidden must be a multiple of 2 for BiDirectionalRNNEncoders.")
         self.rnn_config = rnn_config
@@ -514,7 +514,7 @@ class TransformerEncoder(Encoder):
 
     def __init__(self,
                  config: transformer.TransformerConfig,
-                 prefix: str = C.TRANSFORMER_ENCODER_PREFIX):
+                 prefix: str = C.TRANSFORMER_ENCODER_PREFIX) -> None:
         self.config = config
         self.prefix = prefix
         self.layers = [transformer.TransformerEncoderBlock(
@@ -561,7 +561,7 @@ class ConvolutionalEmbeddingConfig(Config):
                  num_embed: int,
                  output_dim: int = None,
                  max_filter_width: int = 8,
-                 num_filters: Tuple[int] = (200, 200, 250, 250, 300, 300, 300, 300),
+                 num_filters: Tuple[int, ...] = (200, 200, 250, 250, 300, 300, 300, 300),
                  pool_stride: int = 5,
                  num_highway_layers: int = 4,
                  dropout: float = 0.0,
@@ -593,7 +593,7 @@ class ConvolutionalEmbeddingEncoder(Encoder):
 
     def __init__(self,
                  config: ConvolutionalEmbeddingConfig,
-                 prefix: str = C.CHAR_SEQ_ENCODER_PREFIX):
+                 prefix: str = C.CHAR_SEQ_ENCODER_PREFIX) -> None:
         utils.check_condition(len(config.num_filters) == config.max_filter_width,
                               "num_filters must have max_filter_width elements.")
         self.num_embed = config.num_embed
