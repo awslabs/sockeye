@@ -63,6 +63,7 @@ def main():
                                                   args.ensemble_mode,
                                                   sockeye.inference.LengthPenalty(args.length_penalty_alpha,
                                                                                   args.length_penalty_beta),
+                                                  args.max_output_length_num_stds,
                                                   *sockeye.inference.load_models(context,
                                                                                  args.max_input_len,
                                                                                  args.beam_size,

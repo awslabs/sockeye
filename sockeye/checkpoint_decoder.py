@@ -50,10 +50,12 @@ class CheckpointDecoder:
                  references: str,
                  model: str,
                  max_input_len: int,
-                 beam_size=C.DEFAULT_BEAM_SIZE,
+                 beam_size: int = C.DEFAULT_BEAM_SIZE,
+                 max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  limit: int = -1) -> None:
         self.context = context
         self.max_input_len = max_input_len
+        self.max_output_length_num_stds = max_output_length_num_stds
         self.beam_size = beam_size
         self.model = model
         with smart_open(inputs) as inputs_fin, smart_open(references) as references_fin:
@@ -89,6 +91,7 @@ class CheckpointDecoder:
         """
         translator = sockeye.inference.Translator(self.context, 'linear',
                                                   sockeye.inference.LengthPenalty(),
+                                                  self.max_output_length_num_stds,
                                                   *sockeye.inference.load_models(self.context,
                                                                                  self.max_input_len,
                                                                                  self.beam_size,

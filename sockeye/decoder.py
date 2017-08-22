@@ -122,7 +122,7 @@ class Decoder(ABC):
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
         """
-        return []
+        pass
 
     @abstractmethod
     def state_variables(self) -> List[mx.sym.Symbol]:
@@ -131,7 +131,7 @@ class Decoder(ABC):
 
         :return: List of symbolic variables.
         """
-        return []
+        pass
 
     @abstractmethod
     def state_shapes(self,
@@ -147,9 +147,8 @@ class Decoder(ABC):
         :param source_encoded_depth: Depth of encoded source.
         :return: List of shape descriptions.
         """
-        return []
+        pass
 
-    @abstractmethod
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """
         Returns a list of RNNCells used by this decoder.
@@ -358,12 +357,6 @@ class TransformerDecoder(Decoder):
                 mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N"),
                 mx.io.DataDesc('sequences', (batch_size, target_max_length), layout="NC"),
                 mx.io.DataDesc('lengths', (batch_size,), layout="N")]
-
-    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
-        """
-        Returns a list of RNNCells used by this decoder.
-        """
-        return super().get_rnn_cells()
 
     @staticmethod
     def _get_target_max_length(source_encoded_max_length: int):

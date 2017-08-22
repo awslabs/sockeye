@@ -221,6 +221,30 @@ class InferenceModel(model.SockeyeModel):
         probs, attention_probs, *model_state.decoder_states = self.decoder_module.get_outputs()
         return probs, attention_probs, model_state
 
+    def max_output_length(self, input_length: int, num_stds: int) -> int:
+        """
+        Returns a reasonable maximum output length for beam search with this model, based on
+        a mean target-to-source length ratio plus x standard deviations.
+        Mean and standard deviations were estimated from the training data for this model.
+        For models that do not have this information the returned output length is
+        input_length * 2
+
+        :param input_length: Input length.
+        :param num_stds: Number of standard deviations to add as a safety margin.
+        :return: Maximum output length.
+        """
+        # get target-to-source length ratio statistics from model training time
+        if hasattr(self.config.config_data, 'length_ratio_mean') or num_stds == -1:
+            lr_mean = self.config.config_data.length_ratio_mean
+            lr_std = self.config.config_data.length_ratio_std
+        else:
+            lr_mean = C.TARGET_MAX_LENGTH_FACTOR / 1.0
+            lr_std = 0.0
+
+        # maximum output length is ceil(mean_lr * input_length + num_stds * std_lr)
+        max_output_len = np.ceil(lr_mean * input_length + num_stds * lr_std)
+        return int(max_output_len)
+
 
 def load_models(context: mx.context.Context,
                 max_input_len: int,
@@ -365,6 +389,7 @@ class Translator:
                  context: mx.context.Context,
                  ensemble_mode: str,
                  length_penalty: LengthPenalty,
+                 max_output_length_num_stds: int,
                  models: List[InferenceModel],
                  vocab_source: Dict[str, int],
                  vocab_target: Dict[str, int]):
@@ -373,6 +398,7 @@ class Translator:
         self.vocab_source = vocab_source
         self.vocab_target = vocab_target
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
+        self.max_output_length_num_stds = max_output_length_num_stds
         self.start_id = self.vocab_target[C.BOS_SYMBOL]
         self.stop_ids = {self.vocab_target[C.EOS_SYMBOL], C.PAD_ID}
         self.models = models
@@ -380,8 +406,11 @@ class Translator:
         self.beam_size = self.models[0].beam_size
         self.buckets = data_io.define_buckets(self.models[0].config.max_seq_len_source)
         self.pad_dist = mx.nd.full((self.beam_size, len(self.vocab_target)), val=np.inf, ctx=self.context)
-        logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s)",
-                    len(self.models), self.beam_size, "None" if len(self.models) == 1 else ensemble_mode)
+        logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s num_stds=%s)",
+                    len(self.models),
+                    self.beam_size,
+                    "None" if len(self.models) == 1 else ensemble_mode,
+                    max_output_length_num_stds)
 
     @staticmethod
     def _get_interpolation_func(ensemble_mode):
@@ -467,6 +496,7 @@ class Translator:
         :return: TranslatorOutput.
         """
         target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
+
         target_string = C.TOKEN_SEPARATOR.join(
             target_token for target_id, target_token in zip(target_ids, target_tokens) if
             target_id not in self.stop_ids)
@@ -489,10 +519,7 @@ class Translator:
 
         :return: Sequence of translated ids, attention matrix, length-normalized negative log probability.
         """
-        # allow output sentence to be at most 2 times the current bucket_key
-        # TODO: max_output_length adaptive to source_length
-        max_output_length = bucket_key * C.TARGET_MAX_LENGTH_FACTOR
-
+        max_output_length = max(m.max_output_length(bucket_key, self.max_output_length_num_stds) for m in self.models)
         return self._get_best_from_beam(*self._beam_search(source, bucket_key, max_output_length))
 
     def _encode(self, source: mx.nd.NDArray, bucket_key: int) -> List[ModelState]:

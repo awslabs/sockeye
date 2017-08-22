@@ -154,18 +154,19 @@ def test_training_arg(test_params, expected_params):
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('--models m1 m2 m3', dict(input=None,
-                               output=None,
-                               models=['m1', 'm2', 'm3'],
-                               checkpoints=None,
-                               beam_size=5,
-                               ensemble_mode='linear',
-                               max_input_len=None,
-                               softmax_temperature=None,
-                               output_type='translation',
-                               sure_align_threshold=0.9,
-                               length_penalty_alpha=1.0,
-                               length_penalty_beta=0.0)),
+    ('-m model', dict(input=None,
+                      output=None,
+                      checkpoints=None,
+                      models=['model'],
+                      beam_size=5,
+                      ensemble_mode='linear',
+                      max_input_len=None,
+                      softmax_temperature=None,
+                      output_type='translation',
+                      sure_align_threshold=0.9,
+                      max_output_length_num_stds=2,
+                      length_penalty_alpha=1.0,
+                      length_penalty_beta=0.0)),
 ])
 def test_inference_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_inference_args)

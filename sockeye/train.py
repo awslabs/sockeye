@@ -187,27 +187,24 @@ def main():
         vocab_target_size = len(vocab_target)
         logger.info("Vocabulary sizes: source=%d target=%d", vocab_source_size, vocab_target_size)
 
-        config_data = data_io.DataConfig(os.path.abspath(args.source),
-                                         os.path.abspath(args.target),
-                                         os.path.abspath(args.validation_source),
-                                         os.path.abspath(args.validation_target),
-                                         args.source_vocab,
-                                         args.target_vocab)
-
         # create data iterators
         max_seq_len_source, max_seq_len_target = args.max_seq_len
-        train_iter, eval_iter = data_io.get_training_data_iters(source=config_data.source,
-                                                                target=config_data.target,
-                                                                validation_source=config_data.validation_source,
-                                                                validation_target=config_data.validation_target,
-                                                                vocab_source=vocab_source,
-                                                                vocab_target=vocab_target,
-                                                                batch_size=args.batch_size,
-                                                                fill_up=args.fill_up,
-                                                                max_seq_len_source=max_seq_len_source,
-                                                                max_seq_len_target=max_seq_len_target,
-                                                                bucketing=not args.no_bucketing,
-                                                                bucket_width=args.bucket_width)
+        train_iter, eval_iter, config_data = data_io.get_training_data_iters(source=os.path.abspath(args.source),
+                                                                             target=os.path.abspath(args.target),
+                                                                             validation_source=os.path.abspath(
+                                                                                 args.validation_source),
+                                                                             validation_target=os.path.abspath(
+                                                                                 args.validation_target),
+                                                                             vocab_source=vocab_source,
+                                                                             vocab_target=vocab_target,
+                                                                             vocab_source_path=args.source_vocab,
+                                                                             vocab_target_path=args.target_vocab,
+                                                                             batch_size=args.batch_size,
+                                                                             fill_up=args.fill_up,
+                                                                             max_seq_len_source=max_seq_len_source,
+                                                                             max_seq_len_target=max_seq_len_target,
+                                                                             bucketing=not args.no_bucketing,
+                                                                             bucket_width=args.bucket_width)
 
         # learning rate scheduling
         learning_rate_half_life = none_if_negative(args.learning_rate_half_life)

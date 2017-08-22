@@ -638,6 +638,12 @@ def add_inference_args(params):
                                default=None,
                                help='Controls peakiness of model predictions. Values < 1.0 produce '
                                     'peaked predictions, values > 1.0 produce smoothed distributions.')
+    decode_params.add_argument('--max-output-length-num-stds',
+                               type=int,
+                               default=C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
+                               help='Number of target-to-source length ratio standard deviations from training to add '
+                                    'to calculate maximum output length for beam search for each sentence. '
+                                    'Default: %(default)s.')
 
     decode_params.add_argument('--output-type',
                                default='translation',
