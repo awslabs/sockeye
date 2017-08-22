@@ -151,21 +151,18 @@ def test_training_arg(test_params, expected_params):
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('--models m1 m2 m3', dict(input=None, output=None, models=['m1', 'm2', 'm3'],
-                               checkpoints=None, beam_size=5, ensemble_mode='linear',
-                               max_input_len=None, softmax_temperature=None, output_type='translation',
-                               sure_align_threshold=0.9)),
-    ('--input test_input --output test_output --models m1 m2 m3 --checkpoints 1 2 3 --beam-size 10 '
-     '--ensemble-mode log_linear --max-input-len 10 --softmax-temperature 1.0 '
-     '--output-type translation_with_alignments --sure-align-threshold 1.0',
-     dict(input='test_input', output='test_output', models=['m1', 'm2', 'm3'],
-          checkpoints=[1, 2, 3], beam_size=10, ensemble_mode='log_linear',
-          max_input_len=10, softmax_temperature=1.0,
-          output_type='translation_with_alignments', sure_align_threshold=1.0)),
-    ('-i test_input -o test_output -m m1 m2 m3 -c 1 2 3 -b 10 -n 10',
-     dict(input='test_input', output='test_output', models=['m1', 'm2', 'm3'],
-          checkpoints=[1, 2, 3], beam_size=10, ensemble_mode='linear',
-          max_input_len=10, softmax_temperature=None, output_type='translation', sure_align_threshold=0.9))
+    ('--models m1 m2 m3', dict(input=None,
+                               output=None,
+                               models=['m1', 'm2', 'm3'],
+                               checkpoints=None,
+                               beam_size=5,
+                               ensemble_mode='linear',
+                               max_input_len=None,
+                               softmax_temperature=None,
+                               output_type='translation',
+                               sure_align_threshold=0.9,
+                               length_penalty_alpha=1.0,
+                               length_penalty_beta=0.0)),
 ])
 def test_inference_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_inference_args)

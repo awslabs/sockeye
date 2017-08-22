@@ -618,3 +618,14 @@ def add_inference_args(params):
                                default=0.9,
                                type=float,
                                help='Threshold to consider a soft alignment a sure alignment. Default: %(default)s')
+    decode_params.add_argument('--length-penalty-alpha',
+                               default=1.0,
+                               type=float,
+                               help='Alpha factor for the length penalty used in beam search: '
+                                    '(beta + len(Y))**alpha/(beta + 1)**alpha. A value of 0.0 will therefore turn off '
+                                    'length normalization. Default: %(default)s')
+    decode_params.add_argument('--length-penalty-beta',
+                               default=0.0,
+                               type=float,
+                               help='Beta factor for the length penalty used in beam search: '
+                                    '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
