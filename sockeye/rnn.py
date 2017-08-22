@@ -53,9 +53,10 @@ class SequentialRNNCellParallelInput(mx.rnn.SequentialRNNCell):
     A SequentialRNNCell, where an additional "parallel" input can be given at
     call time and it will be added to the input of each layer
     """
-    def __init__(self, params=None):
+    def __init__(self, concat_inputs, params=None):
         super().__init__(params)
-    
+        self.concat_inputs = concat_inputs
+  
     def __call__(self, inputs, parallel_inputs, states):
         # Adapted copy of mx.rnn.SequentialRNNCell.__call__()
         self._counter += 1
@@ -66,14 +67,26 @@ class SequentialRNNCellParallelInput(mx.rnn.SequentialRNNCell):
             length = len(cell.state_info)
             state = states[pos:pos+length]
             pos += length
-            concat_inputs = mx.sym.concat(inputs, parallel_inputs)
-            inputs, state = cell(concat_inputs, state)
+            if self.concat_inputs:
+                concat_inputs = mx.sym.concat(inputs, parallel_inputs)
+                inputs, state = cell(concat_inputs, state)
+            else:
+                inputs, state = cell(inputs, parallel_inputs, state)
             next_states.append(state)
         return inputs, sum(next_states, [])
 
-    def add(self, cell):
-        super().add(cell)
-        print(self._cells)
+
+class ResidualCellParallelInput(mx.rnn.ResidualCell):
+    """
+    A ResidualCell, where an additional "parallel" input can be given at call
+    time and it will be added to the input of each layer, but not considered
+    for the residual connection itself.
+    """
+    def __call__(self, inputs, parallel_inputs, states):
+        concat_inputs = mx.sym.concat(inputs, parallel_inputs)
+        output, states = self.base_cell(concat_inputs, states)
+        output = mx.symbol.elemwise_add(output, inputs, name="%s_plus_residual" % output.name)
+        return output, states
 
 
 def get_stacked_rnn(config: RNNConfig, prefix: str,
@@ -88,14 +101,14 @@ def get_stacked_rnn(config: RNNConfig, prefix: str,
     :return: RNN cell.
     """
 
-    rnn = mx.rnn.SequentialRNNCell() if not parallel_inputs else SequentialRNNCellParallelInput()
+    rnn = mx.rnn.SequentialRNNCell() if not parallel_inputs \
+        else SequentialRNNCellParallelInput(concat_inputs=not config.residual)
     if not layers:
         layers = range(config.num_layers)
     for layer in layers:
         # fhieber: the 'l' in the prefix does NOT stand for 'layer' but for the direction 'l' as in mx.rnn.rnn_cell::517
         # this ensures parameter name compatibility of training w/ FusedRNN and decoding with 'unfused' RNN.
         cell_prefix = "%sl%d_" % (prefix, layer)
-        print(">>>>> cell_prefix:", cell_prefix)
         if config.cell_type == C.LSTM_TYPE:
             cell = mx.rnn.LSTMCell(num_hidden=config.num_hidden, prefix=cell_prefix, forget_bias=config.forget_bias)
         elif config.cell_type == C.LNLSTM_TYPE:
@@ -112,7 +125,10 @@ def get_stacked_rnn(config: RNNConfig, prefix: str,
         else:
             raise NotImplementedError()
         if config.residual and layer > 0:
-            cell = mx.rnn.ResidualCell(cell)
+            if not parallel_inputs:
+                cell = mx.rnn.ResidualCell(cell)
+            else:
+                cell = ResidualCellParallelInput(cell)
         rnn.add(cell)
 
         if config.dropout > 0.:
