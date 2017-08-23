@@ -138,10 +138,12 @@ class InferenceModel(model.SockeyeModel):
 
         def sym_gen(source_encoded_seq_len: int):
             self.decoder.reset()
-            prev_word_id = mx.sym.Variable(C.TARGET_PREVIOUS_NAME)
+            prev_word_ids = mx.sym.Variable(C.TARGET_PREVIOUS_NAME) # TODO name
+            target_max_length = 1
             states = self.decoder.state_variables()
             state_names = [state.name for state in states]
-            logits, attention_probs, states = self.decoder.decode_step(prev_word_id,
+            logits, attention_probs, states = self.decoder.decode_step(prev_word_ids,
+                                                                       target_max_length,
                                                                        source_encoded_seq_len,
                                                                        *states)
             if self.softmax_temperature is not None:

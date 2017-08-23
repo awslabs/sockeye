@@ -85,16 +85,18 @@ class Decoder(ABC):
 
     @abstractmethod
     def decode_step(self,
-                    prev_word_id: mx.sym.Symbol,
+                    prev_word_ids: mx.sym.Symbol,
+                    target_max_length: int,
                     source_encoded_max_length: int,
                     *states: mx.sym.Symbol) \
             -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
-        Decodes a single time step given the previous word id and previous decoder states.
+        Decodes a single time step given the previous word ids and previous decoder states.
         Returns logits, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param prev_word_id: Previous word id. Shape: (batch_size,).
+        :param prev_word_ids: Previous word id. Shape: (batch_size, target_max_length).
+        :param target_max_length: Size of time dimension in prev_word_ids.
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
@@ -243,16 +245,18 @@ class TransformerDecoder(Decoder):
         return logits
 
     def decode_step(self,
-                    prev_word_id: mx.sym.Symbol,
+                    prev_word_ids: mx.sym.Symbol,
+                    target_max_length: int,
                     source_encoded_max_length: int,
                     *states: mx.sym.Symbol) \
             -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
-        Decodes a single time step given the previous word id and previous decoder states.
+        Decodes a single time step given the previous word ids and previous decoder states.
         Returns logits, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param prev_word_id: Previous word id. Shape: (batch_size,).
+        :param prev_word_ids: Previous word id. Shape: (batch_size, target_max_length).
+        :param target_max_length: Size of time dimension in prev_word_ids.
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
@@ -267,11 +271,11 @@ class TransformerDecoder(Decoder):
 
         # all zeros but length position is set to prev_word_id
         # (batch_size, target_max_length)
-        prev_word_id = mx.sym.broadcast_mul(mx.sym.expand_dims(prev_word_id, axis=1), mask)
+        prev_word_ids = mx.sym.broadcast_mul(mx.sym.expand_dims(prev_word_ids, axis=1), mask)
 
         # append/insert prev_word_id to sequences
         # (batch_size, target_max_length)
-        sequences = sequences + prev_word_id
+        sequences = sequences + prev_word_ids
         lengths += 1
 
         # (1, target_max_length, target_max_length)
@@ -602,23 +606,25 @@ class RecurrentDecoder(Decoder):
         return logits
 
     def decode_step(self,
-                    prev_word_id: mx.sym.Symbol,
+                    prev_word_ids: mx.sym.Symbol,
+                    target_max_length: int,
                     source_encoded_max_length: int,
                     *states: mx.sym.Symbol) \
             -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
-        Decodes a single time step given the previous word id and previous decoder states.
+        Decodes a single time step given the previous word ids and previous decoder states.
         Returns logits, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param prev_word_id: Previous word id. Shape: (batch_size,).
+        :param prev_word_ids: Previous word id. Shape: (batch_size, target_max_length).
+        :param target_max_length: Size of time dimension in prev_word_ids.
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
         """
         source_encoded, prev_dynamic_source, source_encoded_length, prev_hidden, *layer_states = states
 
-        word_vec_prev, _, _ = self.embedding.encode(prev_word_id, None, 1)
+        word_vec_prev, _, _ = self.embedding.encode(prev_word_ids, None, 1)
 
         attention_func = self.attention.on(source_encoded, source_encoded_length, source_encoded_max_length)
 
