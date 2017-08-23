@@ -136,14 +136,16 @@ class InferenceModel(model.SockeyeModel):
         :return: Decoder BucketingModule.
         """
 
-        def sym_gen(source_encoded_seq_len: int):
+        def sym_gen(bucket_key: Tuple[int, int]):
+            source_encoded_seq_len, target_max_len = bucket_key
+
             self.decoder.reset()
-            prev_word_ids = mx.sym.Variable(C.TARGET_PREVIOUS_NAME) # TODO name
-            target_max_length = 1
+            prev_word_ids = mx.sym.Variable(C.TARGET_NAME)
             states = self.decoder.state_variables()
             state_names = [state.name for state in states]
+
             logits, attention_probs, states = self.decoder.decode_step(prev_word_ids,
-                                                                       target_max_length,
+                                                                       target_max_len,
                                                                        source_encoded_seq_len,
                                                                        *states)
             if self.softmax_temperature is not None:
@@ -151,13 +153,13 @@ class InferenceModel(model.SockeyeModel):
 
             softmax = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
 
-            data_names = [C.TARGET_PREVIOUS_NAME] + state_names
+            data_names = [C.TARGET_NAME] + state_names
             label_names = []
             return mx.sym.Group([softmax, attention_probs] + states), data_names, label_names
 
-        source_encoded_max_seq_len = self.encoder.get_encoded_seq_len(self.config.max_seq_len_source)
+        default_bucket_key = (self.encoder.get_encoded_seq_len(self.config.max_seq_len_source), 1)
         return mx.mod.BucketingModule(sym_gen=sym_gen,
-                                      default_bucket_key=source_encoded_max_seq_len,
+                                      default_bucket_key=default_bucket_key,
                                       context=self.context)
 
     def _get_encoder_data_shapes(self, source_max_length: int) -> List[mx.io.DataDesc]:
@@ -181,7 +183,7 @@ class InferenceModel(model.SockeyeModel):
         """
         return self.decoder_data_shapes_cache.setdefault(
             source_encoded_max_length,
-            [mx.io.DataDesc(C.TARGET_PREVIOUS_NAME, (self.beam_size,), layout="N")] +
+            [mx.io.DataDesc(C.TARGET_NAME, (self.beam_size,), layout="N")] +
             self.decoder.state_shapes(self.beam_size, source_encoded_max_length, self.encoder.get_num_hidden()))
 
     def run_encoder(self,
@@ -214,10 +216,11 @@ class InferenceModel(model.SockeyeModel):
 
         :return: Probability distribution over next word, attention scores, updated model state.
         """
+        bucket_key = (model_state.bucket_key, 1)
         batch = mx.io.DataBatch(
             data=[model_state.prev_target_word_id.as_in_context(self.context)] + model_state.decoder_states,
             label=None,
-            bucket_key=model_state.bucket_key,
+            bucket_key=bucket_key,
             provide_data=self._get_decoder_data_shapes(model_state.bucket_key))
         self.decoder_module.forward(data_batch=batch, is_train=False)
         probs, attention_probs, *model_state.decoder_states = self.decoder_module.get_outputs()
