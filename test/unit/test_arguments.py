@@ -207,6 +207,18 @@ def test_tutorial_args(test_params, expected_params):
     _test_args_subset(test_params, expected_params, arguments.add_train_cli_args)
 
 
+@pytest.mark.parametrize("test_params, expected_params", [
+    # seqcopy tutorial
+    ('-m seqcopy_model '
+     '--use-cpu',
+     dict(models=["seqcopy_model"],
+          use_cpu=True)),
+    # IWSLT tutorial (TODO)
+])
+def test_tutorial_args(test_params, expected_params):
+    _test_args_subset(test_params, expected_params, arguments.add_translate_cli_args)
+
+
 def _test_args(test_params, expected_params, args_func):
     test_parser = argparse.ArgumentParser()
     args_func(test_parser)

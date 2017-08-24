@@ -5,7 +5,7 @@ The task is then to learn a model that copies the sequence from the source to th
 This task is on the one hand difficult enough to be interesting and on the other allows for quickly training a model.
 
 ## Setup
-For this tutorial we assume that you have successfully [installed](../README.md#installation) Sockeye.
+For this tutorial we assume that you have successfully [installed](../../README.md#installation) Sockeye.
 Other than that there are no additional dependencies.
 We will be using scripts from the Sockeye repository, so you should either clone the repository or manually download 
 the scripts.
@@ -93,7 +93,7 @@ The folder contains everything necessary to run the model after training.
 Most importantly `params.best` contains the parameters with the best validation score.
 During training `param.best` will continously be updated to point to the currently best parameters.
 This means that even while the model is still training you can use the model folder for translation, as described in
-the [next section](#3.-Translation).
+the [next section](#3-translation).
 
 All other parameters can be found in files named `param.$NUM_CHECKPOINT`.
 The `config` contains all model parameters as well as a reference to the data sets used during training.
@@ -112,16 +112,24 @@ sentence boundaries, unknown words and padding symbols.
 > echo "7 6 7 7 10 2 0 8 0 5 7 3 5 6 4 0 0 2 10 0" | \
   python -m sockeye.translate -m seqcopy_model --use-cpu
   
-7 6 7 7 10 2 0 8 0 5 7 3 5 6 4 0 0 2 10 0
+        7 6 7 7 10 2 0 8 0 5 7 3 5 6 4 0 0 2 10 0
 
 ```
 
 Note that the model was trained on sequences consisting of between 10 and 30 characters.
 Therefore, the model will most likely have some difficulties with sequences shorter than 10 characters.
+By default Sockeye will read sentence from stdin and print the translations on stdout.
 
+Internally Sockeye will run a beam search in order to (approximately) find the translation  with the highest
+probability.
 
-* How to translate with the trained model
-* Translate earlier checkpoints (to see how the model improved over time)
-* beam search
-
+Instead of using the parameters with the best validation score we can also use other checkpoints using the `-c`
+parameter to use a checkpoint earlier in the training before the model converged:
+```bash
+> echo "7 6 7 7 10 2 0 8 0 5 7 3 5 6 4 0 0 2 10 0" | \
+  python -m sockeye.translate -m seqcopy_model --use-cpu -c 3
+  
+        7 6 7 7 10 2 0 8 0 5 7 0 7 3 5 6 0 0 2 0 10
+```
+As the model has not converged yet it is still making a few mistakes when copying the sequence.
 

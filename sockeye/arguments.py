@@ -602,6 +602,11 @@ def add_train_cli_args(params):
     add_device_args(params)
 
 
+def add_translate_cli_args(params):
+    add_inference_args(params)
+    add_device_args(params)
+
+
 def add_inference_args(params):
     decode_params = params.add_argument_group("Inference parameters")
 
