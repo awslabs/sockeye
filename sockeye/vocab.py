@@ -95,7 +95,7 @@ def vocab_to_json(vocab: Mapping, path: str):
     :param path: Output file path.
     """
     with open(path, "w") as out:
-        json.dump(vocab, out, indent=4)
+        json.dump(vocab, out, indent=4, ensure_ascii=False)
         logger.info('Vocabulary saved to "%s"', path)
 
 
