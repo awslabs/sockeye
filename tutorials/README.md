@@ -9,7 +9,8 @@ tools used or use the Dockerfile we provide, which comes with all batteries incl
 
 Coming soon...
 
-<!--we provide a docker file that already includes all prerequisites for running the tutorials.-->
+<!--we provide a docker file that already includes all prerequisites for running the tutorials.
+If you're using the provided Dockerfile simply skip the `Setup` sections in the tutorials below.-->
 
 ### Or: Manual installation
 If you do not use the provided Dockerfile you can follow the [installation instructions](../README.md#installation)
@@ -22,4 +23,4 @@ Below is the full list of tutorials we provide. We recommend going through them 
 introduce the different concepts and parameters used for training and translation.
 
 1. [Sequence copy task](seqcopy)
-1. [ISWLT English German model](iswlt)
+1. [WMT German to English news translation](iswlt)
