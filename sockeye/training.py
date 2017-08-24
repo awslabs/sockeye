@@ -21,6 +21,7 @@ import pickle
 import random
 import shutil
 import time
+from functools import reduce
 from typing import AnyStr, List, Optional
 
 import mxnet as mx
@@ -210,6 +211,7 @@ class TrainingModel(model.SockeyeModel):
 
         self.module.init_params(initializer=initializer, arg_params=self.params, aux_params=None,
                                 allow_missing=False, force_init=False)
+        self._log_params()
 
         self.module.init_optimizer(kvstore='device', optimizer=optimizer, optimizer_params=optimizer_params)
 
@@ -382,6 +384,20 @@ class TrainingModel(model.SockeyeModel):
                 self._checkpoint(train_state, output_folder, train_iter)
         cleanup_params_files(output_folder, max_params_files_to_keep,
                              train_state.checkpoint, self.training_monitor.get_best_checkpoint())
+
+    def _log_params(self):
+        """
+        Logs information about model parameters.
+        """
+        arg_params, aux_params = self.module.get_params()
+        total_parameters = 0
+        info = []
+        for name, array in sorted(arg_params.items()):
+            info.append("%s: %s" % (name, array.shape))
+            total_parameters += reduce(lambda x, y: x*y, array.shape)
+        logger.info("Model parameters: %s", ", ".join(info))
+        logger.info("Total # of parameters: %d", total_parameters)
+
 
     def _save_params(self, output_folder: str, checkpoint: int):
         """
