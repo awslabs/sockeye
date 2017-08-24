@@ -59,8 +59,11 @@ def main():
     with ExitStack() as exit_stack:
         context = _setup_context(args, exit_stack)
 
+        bucket_source_width, bucket_target_width = args.bucket_width
         translator = sockeye.inference.Translator(context,
                                                   args.ensemble_mode,
+                                                  bucket_source_width,
+                                                  bucket_target_width,
                                                   sockeye.inference.LengthPenalty(args.length_penalty_alpha,
                                                                                   args.length_penalty_beta),
                                                   *sockeye.inference.load_models(context,

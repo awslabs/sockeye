@@ -83,12 +83,12 @@ class InferenceModel(model.SockeyeModel):
         self.get_max_output_length = None  # type: Optional[Callable]
 
     def initialize(self):
-        self.encoder_module = self._get_encoder_module()
-        self.decoder_module = self._get_decoder_module()
+        self._get_encoder_module()
+        self._get_decoder_module()
 
         self.decoder_data_shapes_cache = dict()  # bucket_key -> shape cache
-        max_encoder_data_shapes = self._get_encoder_data_shapes(self.config.max_seq_len_source)
-        max_decoder_data_shapes = self._get_decoder_data_shapes(self.config.max_seq_len_source)
+        max_encoder_data_shapes = self._get_encoder_data_shapes(self.encoder_default_bucket_key)
+        max_decoder_data_shapes = self._get_decoder_data_shapes(self.decoder_default_bucket_key)
         self.encoder_module.bind(data_shapes=max_encoder_data_shapes, for_training=False, grad_req="null")
         self.decoder_module.bind(data_shapes=max_decoder_data_shapes, for_training=False, grad_req="null")
 
@@ -96,7 +96,7 @@ class InferenceModel(model.SockeyeModel):
         self.encoder_module.init_params(arg_params=self.params, allow_missing=False)
         self.decoder_module.init_params(arg_params=self.params, allow_missing=False)
 
-    def _get_encoder_module(self) -> mx.mod.BucketingModule:
+    def _get_encoder_module(self):
         """
         Returns a BucketingModule for the encoder. Given a source sequence, it returns
         the initial decoder states of the model.
@@ -124,11 +124,12 @@ class InferenceModel(model.SockeyeModel):
             label_names = []
             return mx.sym.Group(decoder_init_states), data_names, label_names
 
-        return mx.mod.BucketingModule(sym_gen=sym_gen,
-                                      default_bucket_key=self.config.max_seq_len_source,
-                                      context=self.context)
+        self.encoder_default_bucket_key = self.config.max_seq_len_source
+        self.encoder_module = mx.mod.BucketingModule(sym_gen=sym_gen,
+                                                     default_bucket_key=self.encoder_default_bucket_key,
+                                                     context=self.context)
 
-    def _get_decoder_module(self) -> mx.mod.BucketingModule:
+    def _get_decoder_module(self):
         """
         Returns a BucketingModule for a single decoder step.
         Given previously predicted word and previous decoder states, it returns
@@ -161,24 +162,24 @@ class InferenceModel(model.SockeyeModel):
             label_names = []
             return mx.sym.Group([softmax, attention_probs] + states), data_names, label_names
 
-        default_bucket_key = (self.config.max_seq_len_source,
-                              self.get_max_output_length(self.config.max_seq_len_source))
-        return mx.mod.BucketingModule(sym_gen=sym_gen,
-                                      default_bucket_key=default_bucket_key,
-                                      context=self.context)
+        self.decoder_default_bucket_key = (self.config.max_seq_len_source,
+                                           self.get_max_output_length(self.config.max_seq_len_source))
+        self.decoder_module = mx.mod.BucketingModule(sym_gen=sym_gen,
+                                                     default_bucket_key=self.decoder_default_bucket_key,
+                                                     context=self.context)
 
-    def _get_encoder_data_shapes(self, source_max_length: int) -> List[mx.io.DataDesc]:
+    def _get_encoder_data_shapes(self, bucket_key: int) -> List[mx.io.DataDesc]:
         """
         Returns data shapes of the encoder module.
 
-        :param source_max_length: Maximum input length.
+        :param bucket_key: Maximum input length.
         :return: List of data descriptions.
         """
         return [mx.io.DataDesc(name=C.SOURCE_NAME,
-                               shape=(self.encoder_batch_size, source_max_length),
+                               shape=(self.encoder_batch_size, bucket_key),
                                layout=C.BATCH_MAJOR)]
 
-    def _get_decoder_data_shapes(self, source_length) -> List[mx.io.DataDesc]:
+    def _get_decoder_data_shapes(self, bucket_key: Tuple[int, int]) -> List[mx.io.DataDesc]:
         """
         Returns data shapes of the decoder module, given a bucket_key (source input length)
         Caches results for bucket_keys if called iteratively.
@@ -186,12 +187,12 @@ class InferenceModel(model.SockeyeModel):
         :param source_length: Input length.
         :return: List of data descriptions.
         """
-        target_max_length = self.get_max_output_length(source_length)
+        source_max_length, target_max_length = bucket_key
         return self.decoder_data_shapes_cache.setdefault(
-            source_length,
+            bucket_key,
             [mx.io.DataDesc(C.TARGET_NAME, (self.beam_size, target_max_length), layout="NT")] +
             self.decoder.state_shapes(self.beam_size,
-                                      self.encoder.get_encoded_seq_len(source_length),
+                                      self.encoder.get_encoded_seq_len(source_max_length),
                                       self.encoder.get_num_hidden()))
 
     def run_encoder(self,
@@ -218,18 +219,17 @@ class InferenceModel(model.SockeyeModel):
         decoder_states = [mx.nd.broadcast_axis(s, axis=0, size=self.beam_size) for s in decoder_states]
         return decoder_states
 
-    def run_decoder(self, sequences: mx.nd.NDArray, model_state: 'ModelState') -> Tuple[mx.nd.NDArray, mx.nd.NDArray, 'ModelState']:
+    def run_decoder(self, sequences: mx.nd.NDArray, bucket_key: Tuple[int, int], model_state: 'ModelState') -> Tuple[mx.nd.NDArray, mx.nd.NDArray, 'ModelState']:
         """
         Runs forward pass of the single-step decoder.
 
         :return: Probability distribution over next word, attention scores, updated model state.
         """
-        bucket_key = (model_state.source_length, self.get_max_output_length(model_state.source_length))
         batch = mx.io.DataBatch(
             data=[sequences.as_in_context(self.context)] + model_state.decoder_states,
             label=None,
             bucket_key=bucket_key,
-            provide_data=self._get_decoder_data_shapes(model_state.source_length))
+            provide_data=self._get_decoder_data_shapes(bucket_key))
         self.decoder_module.forward(data_batch=batch, is_train=False)
         probs, attention_probs, *model_state.decoder_states = self.decoder_module.get_outputs()
         return probs, attention_probs, model_state
@@ -350,10 +350,7 @@ class ModelState:
     A ModelState encapsulates information about the decoder state of an InferenceModel.
     """
 
-    def __init__(self,
-                 source_length: int,
-                 decoder_states: List[mx.nd.NDArray]):
-        self.source_length = source_length
+    def __init__(self, decoder_states: List[mx.nd.NDArray]):
         self.decoder_states = decoder_states
 
     def sort_state(self, best_hyp_indices: mx.nd.NDArray):
@@ -413,6 +410,8 @@ class Translator:
     def __init__(self,
                  context: mx.context.Context,
                  ensemble_mode: str,
+                 bucket_source_width: int,
+                 bucket_target_width: int,
                  length_penalty: LengthPenalty,
                  models: List[InferenceModel],
                  vocab_source: Dict[str, int],
@@ -427,12 +426,25 @@ class Translator:
         self.models = models
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
-        self.buckets = data_io.define_buckets(self.models[0].config.max_seq_len_source)
+        # TODO(fhieber) what if models differ max_seq_len_source?
+        max_input_length = self.models[0].config.max_seq_len_source
+        max_output_length = self.models[0].get_max_output_length(max_input_length)
+        if bucket_source_width > 0:
+            self.buckets_source = data_io.define_buckets(max_input_length, step=bucket_source_width)
+        else:
+            self.buckets_source = [max_input_length]
+        if bucket_target_width > 0:
+            self.buckets_target = data_io.define_buckets(max_output_length, step=bucket_target_width)
+        else:
+            self.buckets_target = [max_output_length]
         self.pad_dist = mx.nd.full((self.beam_size, len(self.vocab_target)), val=np.inf, ctx=self.context)
-        logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s)",
+        logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s "
+                    "buckets_source=%s buckets_target=%s)",
                     len(self.models),
                     self.beam_size,
-                    "None" if len(self.models) == 1 else ensemble_mode)
+                    "None" if len(self.models) == 1 else ensemble_mode,
+                    self.buckets_source,
+                    self.buckets_target)
 
     @staticmethod
     def _get_interpolation_func(ensemble_mode):
@@ -490,17 +502,15 @@ class Translator:
         :param tokens: List of input tokens.
         :return NDArray of source ids and bucket key.
         """
-        bucket_key = data_io.get_bucket(len(tokens), self.buckets)
+        bucket_key = data_io.get_bucket(len(tokens), self.buckets_source)
         if bucket_key is None:
-            logger.warning("Input (%d) exceeds max bucket size (%d). Stripping", len(tokens), self.buckets[-1])
-            bucket_key = self.buckets[-1]
+            logger.warning("Input (%d) exceeds max bucket size (%d). Stripping", len(tokens), self.buckets_source[-1])
+            bucket_key = self.buckets_source[-1]
             tokens = tokens[:bucket_key]
 
         utils.check_condition(C.PAD_ID == 0, "pad id should be 0")
         source = mx.nd.zeros((1, bucket_key))
         ids = data_io.tokens2ids(tokens, self.vocab_source)
-        #logger.info("Source tokens:     %s", " ".join(tokens))
-        #logger.info("Source ids:      %s", " ".join(map(str, ids)))
         for i, wid in enumerate(ids):
             source[0, i] = wid
         return source, bucket_key
@@ -520,9 +530,6 @@ class Translator:
         :return: TranslatorOutput.
         """
         target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
-        #logger.info("Target ids:    %s", " ".join(map(str,target_ids)))
-        #logger.info("Target tokens: %s", " ".join(target_tokens))
-
         target_string = C.TOKEN_SEPARATOR.join(
             target_token for target_id, target_token in zip(target_ids[1:], target_tokens[1:]) if
             target_id not in self.stop_ids)
@@ -537,17 +544,17 @@ class Translator:
 
     def translate_nd(self,
                      source: mx.nd.NDArray,
-                     bucket_key: int) -> Tuple[np.ndarray, np.ndarray, float]:
+                     source_length: int) -> Tuple[np.ndarray, np.ndarray, float]:
         """
         Translates source of source_length, given a bucket_key.
 
         :param source: Source ids. Shape: (1, bucket_key).
-        :param bucket_key: Bucket key.
+        :param source_length: Bucket key.
 
         :return: Sequence of translated ids, attention matrix, length-normalized negative log probability.
         """
-        max_output_length = self.models[0].get_max_output_length(bucket_key)
-        return self._get_best_from_beam(*self._beam_search(source, bucket_key, max_output_length))
+        max_output_length = self.models[0].get_max_output_length(source_length)
+        return self._get_best_from_beam(*self._beam_search(source, source_length, max_output_length))
 
     def _encode(self, source: mx.nd.NDArray, source_length: int) -> List[ModelState]:
         """
@@ -557,19 +564,30 @@ class Translator:
         :param source_length: Bucket key.
         :return: List of ModelStates.
         """
-        states = [ModelState(source_length, decoder_states=m.run_encoder(source, source_length)) for m in self.models]
+        states = [ModelState(decoder_states=m.run_encoder(source, source_length)) for m in self.models]
         return states
 
-    def _decode_step(self, sequences: mx.nd.NDArray, states: List[ModelState]) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, List[ModelState]]:
+    def _decode_step(self,
+                     sequences: mx.nd.NDArray,
+                     t: int,
+                     bucket_key: Tuple[int, int],
+                     states: List[ModelState]) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, List[ModelState]]:
         """
         Returns decoder predictions (combined from all models), attention scores, and updated states.
 
         :param: List of model states.
         :return: (probs, attention scores, list of model states)
         """
+        # bucket target max length based on beam_search progress
+        if len(self.buckets_target) > 1:
+            target_max_length = data_io.get_bucket(t, self.buckets_target)
+            if target_max_length != bucket_key[1]:
+                bucket_key = bucket_key[0], target_max_length
+                sequences = mx.nd.slice_axis(sequences, axis=1, begin=0, end=target_max_length)
+
         model_probs, model_attention_probs, model_states = [], [], []
         for model, state in zip(self.models, states):
-            probs, attention_probs, state = model.run_decoder(sequences, state)
+            probs, attention_probs, state = model.run_decoder(sequences, bucket_key, state)
             model_probs.append(probs)
             model_attention_probs.append(attention_probs)
             model_states.append(state)
@@ -598,21 +616,21 @@ class Translator:
 
     def _beam_search(self,
                      source: mx.nd.NDArray,
-                     bucket_key: int,
+                     source_length: int,
                      max_output_length: int) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
         """
         Translates a single sentence using beam search.
 
         :param source: Source ids. Shape: (1, bucket_key).
-        :param bucket_key: Bucket key.
-        :param max_output_length: Cap the output at this maximum length.
+        :param source_length: Source length.
+        :param max_output_length: Run beam search up to this number of iterations.
         :return List of lists of word ids, list of attentions, array of accumulated length-normalized
                 negative log-probs.
         """
         # Length of encoded sequence (may differ from initial input length)
-        encoded_source_length = self.models[0].encoder.get_encoded_seq_len(bucket_key)
+        encoded_source_length = self.models[0].encoder.get_encoded_seq_len(source_length)
         utils.check_condition(all(encoded_source_length ==
-                                  model.encoder.get_encoded_seq_len(bucket_key) for model in self.models),
+                                  model.encoder.get_encoded_seq_len(source_length) for model in self.models),
                               "Models must agree on encoded sequence length")
 
         # sequences: (beam_size, output_length), pre-filled with <s> symbols on index 0
@@ -636,13 +654,15 @@ class Translator:
         self.pad_dist[:] = np.inf
 
         # (0) encode source sentence
-        model_states = self._encode(source, bucket_key)
+        model_states = self._encode(source, source_length)
 
         for t in range(1, max_output_length):
+
             # (1) obtain next predictions and advance models' state
             # scores: (beam_size, target_vocab_size)
             # attention_scores: (beam_size, bucket_key)
-            scores, attention_scores, model_states = self._decode_step(sequences, model_states)
+            bucket_key = (source_length, max_output_length)
+            scores, attention_scores, model_states = self._decode_step(sequences, t, bucket_key, model_states)
 
             # (2) compute length-normalized accumulated scores in place
             if t == 1:  # only one hypothesis at t==1

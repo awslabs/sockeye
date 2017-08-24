@@ -629,10 +629,14 @@ def add_inference_args(params):
                                default='linear',
                                choices=['linear', 'log_linear'],
                                help='Ensemble mode. Default: %(default)s.')
+    decode_params.add_argument('--bucket-width',
+                               type=multiple_values(2, greater_or_equal=0, data_type=int),
+                               default=(0, 0),
+                               help='Bucket width for decoder steps. 0 means no bucketing. Default: %(default)s.')
     decode_params.add_argument('--max-input-len', '-n',
                                type=int,
                                default=None,
-                               help='Maximum sequence length. Default: value from model(s).')
+                               help='Maximum input sequence length. Default: value from model(s).')
     decode_params.add_argument('--softmax-temperature',
                                type=float,
                                default=None,
