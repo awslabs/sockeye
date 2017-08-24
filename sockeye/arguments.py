@@ -595,6 +595,13 @@ def add_training_args(params):
                               help='Keep only the last n params files, use -1 to keep all files. Default: %(default)s')
 
 
+def add_train_cli_args(params):
+    add_io_args(params)
+    add_model_parameters(params)
+    add_training_args(params)
+    add_device_args(params)
+
+
 def add_inference_args(params):
     decode_params = params.add_argument_group("Inference parameters")
 

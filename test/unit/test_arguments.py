@@ -171,8 +171,53 @@ def test_inference_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_inference_args)
 
 
+# Make sure that the parameter names and default values used in the tutorials do not change without the tutorials
+# being updated accordingly.
+@pytest.mark.parametrize("test_params, expected_params", [
+    # seqcopy tutorial
+    ('-s train.source '
+     '-t train.target '
+     '-vs dev.source '
+     '-vt dev.target '
+     '--num-embed 32 '
+     '--rnn-num-hidden 64 '
+     '--attention-type dot '
+     '--use-cpu '
+     '--metrics perplexity accuracy '
+     '--max-num-checkpoint-not-improved 3 '
+     '-o seqcopy_model',
+     dict(source="train.source",
+          target="train.target",
+          validation_source="dev.source",
+          validation_target="dev.target",
+          num_embed=(32, 32),
+          rnn_num_hidden=64,
+          use_cpu=True,
+          metrics=['perplexity', 'accuracy'],
+          max_num_checkpoint_not_improved=3,
+          output="seqcopy_model",
+          # The tutorial text mentions that we train a RNN model:
+          encoder="rnn",
+          decoder="rnn",
+          # Additionally we mention the checkpoint_frequency
+          checkpoint_frequency=1000)),
+    # IWSLT tutorial (TODO)
+])
+def test_tutorial_args(test_params, expected_params):
+    _test_args_subset(test_params, expected_params, arguments.add_train_cli_args)
+
+
 def _test_args(test_params, expected_params, args_func):
     test_parser = argparse.ArgumentParser()
     args_func(test_parser)
     parsed_params = test_parser.parse_args(test_params.split())
     assert dict(vars(parsed_params)) == expected_params
+
+
+def _test_args_subset(test_params, expected_params, args_func):
+    """Only checks the subset of the parameters present in `expected_params`."""
+    test_parser = argparse.ArgumentParser()
+    args_func(test_parser)
+    parsed_params = test_parser.parse_args(test_params.split())
+    parsed_params_subset = {k: v for k, v in dict(vars(parsed_params)).items() if k in expected_params}
+    assert parsed_params_subset == expected_params

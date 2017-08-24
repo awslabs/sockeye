@@ -81,10 +81,7 @@ def _dict_difference(dict1: Dict, dict2: Dict):
 
 def main():
     params = argparse.ArgumentParser(description='CLI to train sockeye sequence-to-sequence models.')
-    arguments.add_io_args(params)
-    arguments.add_model_parameters(params)
-    arguments.add_training_args(params)
-    arguments.add_device_args(params)
+    arguments.add_train_cli_args(params)
     args = params.parse_args()
 
     # seed the RNGs
