@@ -261,28 +261,24 @@ class TransformerDecoder(Decoder):
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
         """
-        target_max_length = self._get_target_max_length(source_encoded_max_length)
+        source_encoded, source_encoded_lengths = states
 
-        # sequences: (batch_size, target_max_length)
-        source_encoded, source_encoded_lengths, sequences, lengths = states
+        # lengths: (batch_size,)
+        target_lengths = utils.compute_lengths(prev_word_ids)
+        indices = target_lengths - 1
 
-        # (batch_size, target_max_length)
-        mask = mx.sym.one_hot(indices=lengths, depth=target_max_length, on_value=1, off_value=0)
-
-        # all zeros but length position is set to prev_word_id
-        # (batch_size, target_max_length)
-        prev_word_ids = mx.sym.broadcast_mul(mx.sym.expand_dims(prev_word_ids, axis=1), mask)
-
-        # append/insert prev_word_id to sequences
-        # (batch_size, target_max_length)
-        sequences = sequences + prev_word_ids
-        lengths += 1
+        # (batch_size, target_max_length, 1)
+        mask = mx.sym.expand_dims(mx.sym.one_hot(indices=indices,
+                                                 depth=target_max_length,
+                                                 on_value=1, off_value=0), axis=2)
 
         # (1, target_max_length, target_max_length)
         target_bias = transformer.get_autoregressive_bias(target_max_length, name="%sbias" % self.prefix)
 
         # (batch_size, target_max_length, model_size)
-        target, target_lengths, target_max_length = self.embedding.encode(sequences, lengths, target_max_length)
+        target, target_lengths, target_max_length = self.embedding.encode(prev_word_ids,
+                                                                          target_lengths,
+                                                                          target_max_length)
 
         for layer in self.layers:
             target = layer(target, target_lengths, target_max_length, target_bias,
@@ -290,7 +286,7 @@ class TransformerDecoder(Decoder):
 
         # set all target positions to zero except for current time-step
         # target: (batch_size, target_max_length, model_size)
-        target = mx.sym.broadcast_mul(target, mx.sym.expand_dims(mask, axis=2))
+        target = mx.sym.broadcast_mul(target, mask)
         # reduce to single prediction
         # target: (batch_size, model_size)
         target = mx.sym.sum(target, axis=1, keepdims=False)
@@ -301,8 +297,7 @@ class TransformerDecoder(Decoder):
         # TODO(fhieber): no attention probs for now
         attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
 
-        # next states
-        new_states = [source_encoded, source_encoded_lengths, sequences, lengths]
+        new_states = [source_encoded, source_encoded_lengths]
         return logits, attention_probs, new_states
 
     def reset(self):
@@ -321,14 +316,7 @@ class TransformerDecoder(Decoder):
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
         """
-        target_max_length = self._get_target_max_length(source_encoded_max_length)
-        # 0s: (batch_size, target_max_length)
-        sequences = mx.sym.broadcast_axis(mx.sym.expand_dims(mx.sym.zeros_like(source_encoded_lengths), axis=1),
-                                          axis=1,
-                                          size=target_max_length)
-        # 0s: (batch_size, source_encoded_max_length, encoder_depth)
-        lengths = mx.sym.zeros_like(source_encoded_lengths)
-        return [source_encoded, source_encoded_lengths, sequences, lengths]
+        return [source_encoded, source_encoded_lengths]
 
     def state_variables(self) -> List[mx.sym.Symbol]:
         """
@@ -337,9 +325,7 @@ class TransformerDecoder(Decoder):
         :return: List of symbolic variables.
         """
         return [mx.sym.Variable(C.SOURCE_ENCODED_NAME),
-                mx.sym.Variable(C.SOURCE_LENGTH_NAME),
-                mx.sym.Variable('sequences'),
-                mx.sym.Variable('lengths')]
+                mx.sym.Variable(C.SOURCE_LENGTH_NAME)]
 
     def state_shapes(self,
                      batch_size: int,
@@ -354,19 +340,10 @@ class TransformerDecoder(Decoder):
         :param source_encoded_depth: Depth of encoded source.
         :return: List of shape descriptions.
         """
-        target_max_length = self._get_target_max_length(source_encoded_max_length)
         return [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
                                (batch_size, source_encoded_max_length, source_encoded_depth),
                                layout=C.BATCH_MAJOR),
-                mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N"),
-                mx.io.DataDesc('sequences', (batch_size, target_max_length), layout="NC"),
-                mx.io.DataDesc('lengths', (batch_size,), layout="N")]
-
-    @staticmethod
-    def _get_target_max_length(source_encoded_max_length: int):
-        # TODO(fhieber): we need to hardcode this for the inference algorithm to work.
-        # This is currently in line with the beam_search algorithm but not ideal.
-        return source_encoded_max_length * C.TARGET_MAX_LENGTH_FACTOR
+                mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")]
 
 
 RecurrentDecoderState = NamedTuple('RecurrentDecoderState', [
@@ -624,7 +601,11 @@ class RecurrentDecoder(Decoder):
         """
         source_encoded, prev_dynamic_source, source_encoded_length, prev_hidden, *layer_states = states
 
-        word_vec_prev, _, _ = self.embedding.encode(prev_word_ids, None, 1)
+        # lengths: (batch_size,)
+        target_lengths = utils.compute_lengths(prev_word_ids)
+        prev_word_id = mx.sym.pick(prev_word_ids, target_lengths, axis=1)
+
+        word_vec_prev, _, _ = self.embedding.encode(prev_word_id, None, 1)
 
         attention_func = self.attention.on(source_encoded, source_encoded_length, source_encoded_max_length)
 
