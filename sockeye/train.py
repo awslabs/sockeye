@@ -43,6 +43,7 @@ from . import lr_scheduler
 from . import model
 from . import rnn
 from . import training
+from . import transformer
 from . import vocab
 
 
@@ -93,9 +94,6 @@ def main():
 
     if args.use_fused_rnn:
         check_condition(not args.use_cpu, "GPU required for FusedRNN cells")
-
-    if args.rnn_residual_connections:
-        check_condition(args.rnn_num_layers > 2, "Residual connections require at least 3 RNN layers")
 
     check_condition(args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics,
                     "Must optimize either BLEU or one of tracked metrics (--metrics)")
@@ -165,19 +163,21 @@ def main():
             vocab_source = vocab.vocab_from_json_or_pickle(os.path.join(output_folder, C.VOCAB_SRC_NAME))
             vocab_target = vocab.vocab_from_json_or_pickle(os.path.join(output_folder, C.VOCAB_TRG_NAME))
         else:
-            num_words_source = args.num_words if args.num_words_source is None else args.num_words_source
-            num_words_target = args.num_words if args.num_words_target is None else args.num_words_target
+            num_words_source, num_words_target = args.num_words
+            word_min_count_source, word_min_count_target = args.word_min_count
 
             # if the source and target embeddings are tied we build a joint vocabulary:
             if args.weight_tying and C.WEIGHT_TYING_SRC in args.weight_tying_type \
                     and C.WEIGHT_TYING_TRG in args.weight_tying_type:
                 vocab_source = vocab_target = _build_or_load_vocab(args.source_vocab,
                                                                    [args.source, args.target],
-                                                                   args.num_words,
-                                                                   args.word_min_count)
+                                                                   num_words_source,
+                                                                   word_min_count_source)
             else:
-                vocab_source = _build_or_load_vocab(args.source_vocab, [args.source], num_words_source, args.word_min_count)
-                vocab_target = _build_or_load_vocab(args.target_vocab, [args.target], num_words_target, args.word_min_count)
+                vocab_source = _build_or_load_vocab(args.source_vocab, [args.source],
+                                                    num_words_source, word_min_count_source)
+                vocab_target = _build_or_load_vocab(args.target_vocab, [args.target],
+                                                    num_words_target, word_min_count_target)
 
             # write vocabularies
             vocab.vocab_to_json(vocab_source, os.path.join(output_folder, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
@@ -195,8 +195,7 @@ def main():
                                          args.target_vocab)
 
         # create data iterators
-        max_seq_len_source = args.max_seq_len if args.max_seq_len_source is None else args.max_seq_len_source
-        max_seq_len_target = args.max_seq_len if args.max_seq_len_target is None else args.max_seq_len_target
+        max_seq_len_source, max_seq_len_target = args.max_seq_len
         train_iter, eval_iter = data_io.get_training_data_iters(source=config_data.source,
                                                                 target=config_data.target,
                                                                 validation_source=config_data.validation_source,
@@ -218,21 +217,25 @@ def main():
                                                                   args.checkpoint_frequency,
                                                                   learning_rate_half_life,
                                                                   args.learning_rate_reduce_factor,
-                                                                  args.learning_rate_reduce_num_not_improved)
+                                                                  args.learning_rate_reduce_num_not_improved,
+                                                                  args.learning_rate_schedule,
+                                                                  args.learning_rate_warmup)
         else:
             with open(os.path.join(training_state_dir, C.SCHEDULER_STATE_NAME), "rb") as fp:
                 lr_scheduler_instance = pickle.load(fp)
 
         # model configuration
-        num_embed_source = args.num_embed if args.num_embed_source is None else args.num_embed_source
-        num_embed_target = args.num_embed if args.num_embed_target is None else args.num_embed_target
+        num_embed_source, num_embed_target = args.num_embed
+        encoder_num_layers, decoder_num_layers = args.num_layers
 
-        config_rnn = rnn.RNNConfig(cell_type=args.rnn_cell_type,
-                                   num_hidden=args.rnn_num_hidden,
-                                   num_layers=args.rnn_num_layers,
-                                   dropout=args.dropout,
-                                   residual=args.rnn_residual_connections,
-                                   forget_bias=args.rnn_forget_bias)
+        encoder_embed_dropout, decoder_embed_dropout = args.embed_dropout
+        encoder_rnn_dropout, decoder_rnn_dropout = args.rnn_dropout
+        if encoder_embed_dropout > 0 and encoder_rnn_dropout > 0:
+            logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
+                           "two dropout layers on top of each other.")
+        if decoder_embed_dropout > 0 and decoder_rnn_dropout > 0:
+            logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
+                           "two dropout layers on top of each other.")
 
         config_conv = None
         if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
@@ -241,36 +244,86 @@ def main():
                                                                num_filters=args.conv_embed_num_filters,
                                                                pool_stride=args.conv_embed_pool_stride,
                                                                num_highway_layers=args.conv_embed_num_highway_layers,
-                                                               dropout=args.dropout)
+                                                               dropout=args.conv_embed_dropout)
 
-        config_encoder = encoder.RecurrentEncoderConfig(vocab_size=vocab_source_size,
-                                                        num_embed=num_embed_source,
-                                                        rnn_config=config_rnn,
-                                                        conv_config=config_conv)
+        if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
+            config_encoder = transformer.TransformerConfig(
+                model_size=args.transformer_model_size,
+                attention_heads=args.transformer_attention_heads,
+                feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
+                num_layers=encoder_num_layers,
+                vocab_size=vocab_source_size,
+                dropout_attention=args.transformer_dropout_attention,
+                dropout_relu=args.transformer_dropout_relu,
+                dropout_residual=args.transformer_dropout_residual,
+                layer_normalization=args.layer_normalization,
+                weight_tying=args.weight_tying,
+                positional_encodings=not args.transformer_no_positional_encodings,
+                conv_config=config_conv)
+        else:
+            config_encoder = encoder.RecurrentEncoderConfig(
+                vocab_size=vocab_source_size,
+                num_embed=num_embed_source,
+                embed_dropout=encoder_embed_dropout,
+                rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
+                                         num_hidden=args.rnn_num_hidden,
+                                         num_layers=encoder_num_layers,
+                                         dropout=encoder_rnn_dropout,
+                                         residual=args.rnn_residual_connections,
+                                         first_residual_layer=args.rnn_first_residual_layer,
+                                         forget_bias=args.rnn_forget_bias),
+                conv_config=config_conv,
+                reverse_input=args.rnn_encoder_reverse_input)
 
-        decoder_weight_tying = args.weight_tying and C.WEIGHT_TYING_TRG in args.weight_tying_type \
-            and C.WEIGHT_TYING_SOFTMAX in args.weight_tying_type
-        config_decoder = decoder.RecurrentDecoderConfig(vocab_size=vocab_target_size,
-                                                        num_embed=num_embed_target,
-                                                        rnn_config=config_rnn,
-                                                        dropout=args.dropout,
-                                                        weight_tying=decoder_weight_tying,
-                                                        context_gating=args.context_gating,
-                                                        layer_normalization=args.layer_normalization,
-                                                        attention_in_upper_layers=args.attention_in_upper_layers)
+        if args.decoder == C.TRANSFORMER_TYPE:
+            config_decoder = transformer.TransformerConfig(
+                model_size=args.transformer_model_size,
+                attention_heads=args.transformer_attention_heads,
+                feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
+                num_layers=decoder_num_layers,
+                vocab_size=vocab_target_size,
+                dropout_attention=args.transformer_dropout_attention,
+                dropout_relu=args.transformer_dropout_relu,
+                dropout_residual=args.transformer_dropout_residual,
+                layer_normalization=args.layer_normalization,
+                weight_tying=args.weight_tying,
+                positional_encodings=not args.transformer_no_positional_encodings)
 
-        attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
-        config_coverage = None
-        if args.attention_type == "coverage":
-            config_coverage = coverage.CoverageConfig(type=args.attention_coverage_type,
-                                                      num_hidden=args.attention_coverage_num_hidden,
-                                                      layer_normalization=args.layer_normalization)
-        config_attention = attention.AttentionConfig(type=args.attention_type,
-                                                     num_hidden=attention_num_hidden,
-                                                     input_previous_word=args.attention_use_prev_word,
-                                                     rnn_num_hidden=config_rnn.num_hidden,
-                                                     layer_normalization=args.layer_normalization,
-                                                     config_coverage=config_coverage)
+        else:
+            attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
+            config_coverage = None
+            if args.attention_type == "coverage":
+                config_coverage = coverage.CoverageConfig(type=args.attention_coverage_type,
+                                                          num_hidden=args.attention_coverage_num_hidden,
+                                                          layer_normalization=args.layer_normalization)
+            config_attention = attention.AttentionConfig(type=args.attention_type,
+                                                         num_hidden=attention_num_hidden,
+                                                         input_previous_word=args.attention_use_prev_word,
+                                                         rnn_num_hidden=args.rnn_num_hidden,
+                                                         layer_normalization=args.layer_normalization,
+                                                         config_coverage=config_coverage,
+                                                         num_heads=args.attention_mhdot_heads)
+            decoder_weight_tying = args.weight_tying and C.WEIGHT_TYING_TRG in args.weight_tying_type \
+                                   and C.WEIGHT_TYING_SOFTMAX in args.weight_tying_type
+            config_decoder = decoder.RecurrentDecoderConfig(
+                vocab_size=vocab_target_size,
+                max_seq_len_source=max_seq_len_source,
+                num_embed=num_embed_target,
+                rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
+                                         num_hidden=args.rnn_num_hidden,
+                                         num_layers=decoder_num_layers,
+                                         dropout=decoder_rnn_dropout,
+                                         residual=args.rnn_residual_connections,
+                                         first_residual_layer=args.rnn_first_residual_layer,
+                                         forget_bias=args.rnn_forget_bias),
+                attention_config=config_attention,
+                embed_dropout=decoder_embed_dropout,
+                hidden_dropout=args.rnn_decoder_hidden_dropout,
+                weight_tying=decoder_weight_tying,
+                zero_state_init=args.rnn_decoder_zero_init,
+                context_gating=args.rnn_context_gating,
+                layer_normalization=args.layer_normalization,
+                attention_in_upper_layers=args.attention_in_upper_layers)
 
         config_loss = loss.LossConfig(type=args.loss,
                                       vocab_size=vocab_target_size,
@@ -278,12 +331,12 @@ def main():
                                       smoothed_cross_entropy_alpha=args.smoothed_cross_entropy_alpha)
 
         model_config = model.ModelConfig(config_data=config_data,
-                                         max_seq_len=max_seq_len_source,
+                                         max_seq_len_source=max_seq_len_source,
+                                         max_seq_len_target=max_seq_len_target,
                                          vocab_source_size=vocab_source_size,
                                          vocab_target_size=vocab_target_size,
                                          config_encoder=config_encoder,
                                          config_decoder=config_decoder,
-                                         config_attention=config_attention,
                                          config_loss=config_loss,
                                          lexical_bias=args.lexical_bias,
                                          learn_lexical_bias=args.learn_lexical_bias,
@@ -334,17 +387,27 @@ def main():
         logger.info("Optimizer: %s", optimizer)
         logger.info("Optimizer Parameters: %s", optimizer_params)
 
+        # Handle options that override training settings
+        max_updates = args.max_updates
+        max_num_checkpoint_not_improved = args.max_num_checkpoint_not_improved
+        min_num_epochs = args.min_num_epochs
+        # Fixed training schedule always runs for a set number of updates
+        if args.learning_rate_schedule:
+            max_updates = sum(num_updates for (_, num_updates) in args.learning_rate_schedule)
+            max_num_checkpoint_not_improved = -1
+            min_num_epochs = 0
+
         training_model.fit(train_iter, eval_iter,
                            output_folder=output_folder,
                            max_params_files_to_keep=args.keep_last_params,
                            metrics=args.metrics,
                            initializer=weight_initializer,
-                           max_updates=args.max_updates,
+                           max_updates=max_updates,
                            checkpoint_frequency=args.checkpoint_frequency,
                            optimizer=optimizer, optimizer_params=optimizer_params,
                            optimized_metric=args.optimized_metric,
-                           max_num_not_improved=args.max_num_checkpoint_not_improved,
-                           min_num_epochs=args.min_num_epochs,
+                           max_num_not_improved=max_num_checkpoint_not_improved,
+                           min_num_epochs=min_num_epochs,
                            monitor_bleu=args.monitor_bleu,
                            use_tensorboard=args.use_tensorboard,
                            mxmonitor_pattern=args.monitor_pattern,

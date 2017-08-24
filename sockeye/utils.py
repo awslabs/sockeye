@@ -87,7 +87,6 @@ def check_condition(condition: bool, error_message: str):
 
     :param condition: Condition to check.
     :param error_message: Error message to show to the user.
-    :param error_code: Error code to return to the system.
     """
     if not condition:
         raise SockeyeError(error_message)
@@ -103,6 +102,16 @@ def save_graph(symbol: mx.sym.Symbol, filename: str, hide_weights: bool = True):
     """
     dot = mx.viz.plot_network(symbol, hide_weights=hide_weights)
     dot.render(filename=filename)
+
+
+def compute_lengths(sequence_data: mx.sym.Symbol) -> mx.sym.Symbol:
+    """
+    Computes sequence lenghts of PAD_ID-padded data in sequence_data.
+
+    :param sequence_data: Input data. Shape: (batch_size, seq_len).
+    :return: Length data. Shape: (batch_size,).
+    """
+    return mx.sym.sum(mx.sym.broadcast_not_equal(sequence_data, mx.sym.zeros((1,))), axis=1)
 
 
 def save_params(arg_params: Mapping[str, mx.nd.NDArray], fname: str,
@@ -528,30 +537,48 @@ def namedtuple_with_defaults(typename, field_names, default_values: Mapping[str,
     return T
 
 
-def read_metrics_points(path: str, model_path: str, metric: str) -> List[Tuple[float, int]]:
+def read_metrics_file(path: str) -> List[Dict[str, Any]]:
     """
-    Reads lines from .metrics file and return list of elements [val, checkpoint]
+    Reads lines metrics file and returns list of mappings of key and values.
 
-    :param metric: Metric according to which checkpoints are selected.  Corresponds to columns in model/metrics file.
     :param path: File to read metric values from.
-    :param model_path: path where the params files reside.
-    :return: List of pairs (metric value, checkpoint).
+    :return: Dictionary of metric names (e.g. perplexity-train) mapping to a list of values.
     """
-    points = []
-    # First field is checkpoint id
-    # Metric on validation (dev) set looks like this: METRIC-val=N
-    with open(path, "r") as metrics_in:
-        for line in metrics_in:
-            fields = line.split()
+    metrics = []
+    with open(path) as fin:
+        for i, line in enumerate(fin, 1):
+            fields = line.strip().split('\t')
             checkpoint = int(fields[0])
-            # Check that the corresponding params files exists
-            if not os.path.exists(os.path.join(model_path, C.PARAMS_NAME % checkpoint)):
-                continue
+            check_condition(i == checkpoint,
+                            "Line (%d) and loaded checkpoint (%d) do not align." % (i, checkpoint))
+            metric = dict()
             for field in fields[1:]:
-                key_value = field.split("=")
-                if len(key_value) == 2:
-                    metric_set = key_value[0].split("-")
-                    if len(metric_set) == 2 and metric_set[0] == metric and metric_set[1] == "val":
-                        metric_value = float(key_value[1])
-                        points.append([metric_value, checkpoint])
-    return points
+                key, value = field.split("=", 1)
+                metric[key] = float(value)
+            metrics.append(metric)
+    return metrics
+
+
+def write_metrics_file(metrics: List[Dict[str, Any]], path: str):
+    """
+    Write metrics data to tab-separated file.
+
+    :param metrics: metrics data.
+    :param path: Path to write to.
+    """
+    with open(path, 'w') as metrics_out:
+        for checkpoint, metric_dict in enumerate(metrics, 1):
+            metrics_str = "\t".join(["%s=%.6f" % (name, value) for name, value in sorted(metric_dict.items())])
+            metrics_out.write("%d\t%s\n" % (checkpoint, metrics_str))
+
+
+def get_validation_metric_points(model_path: str, metric: str):
+    """
+    Returns tuples of value and checkpoint for given metric from metrics file at model_path.
+    :param model_path: Model path containing .metrics file.
+    :param metric: Metric values to extract.
+    :return: List of tuples (value, checkpoint).
+    """
+    metrics_path = os.path.join(model_path, C.METRICS_NAME)
+    data = read_metrics_file(metrics_path)
+    return [(d['%s-val' % metric], cp) for cp, d in enumerate(data, 1)]

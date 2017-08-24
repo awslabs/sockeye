@@ -88,6 +88,7 @@ class CheckpointDecoder:
         :return: Mapping of metric names to scores.
         """
         translator = sockeye.inference.Translator(self.context, 'linear',
+                                                  sockeye.inference.LengthPenalty(),
                                                   *sockeye.inference.load_models(self.context,
                                                                                  self.max_input_len,
                                                                                  self.beam_size,

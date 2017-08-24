@@ -30,6 +30,8 @@ class RNNConfig(Config):
     :param num_layers: Number of RNN layers.
     :param dropout: Dropout probability on RNN outputs.
     :param residual: Whether to add residual connections between multi-layered RNNs.
+    :param first_residual_layer: First layer with a residual connection (1-based indexes).
+           Default is to start at the second layer.
     :param forget_bias: Initial value of forget biases.
     """
     def __init__(self,
@@ -38,14 +40,18 @@ class RNNConfig(Config):
                  num_layers: int,
                  dropout: float,
                  residual: bool = False,
-                 forget_bias: float = 0.0) -> None:
+                 first_residual_layer: int = 2,
+                 forget_bias: float = 0.0,
+                 attention_in_upper_layers: bool = False) -> None:
         super().__init__()
         self.cell_type = cell_type
         self.num_hidden = num_hidden
         self.num_layers = num_layers
         self.dropout = dropout
         self.residual = residual
+        self.first_residual_layer = first_residual_layer
         self.forget_bias = forget_bias
+        self.attention_in_upper_layers = attention_in_upper_layers
 
 
 class SequentialRNNCellParallelInput(mx.rnn.SequentialRNNCell):
@@ -105,10 +111,10 @@ def get_stacked_rnn(config: RNNConfig, prefix: str,
         else SequentialRNNCellParallelInput(concat_inputs=not config.residual)
     if not layers:
         layers = range(config.num_layers)
-    for layer in layers:
+    for layer_idx in layers:
         # fhieber: the 'l' in the prefix does NOT stand for 'layer' but for the direction 'l' as in mx.rnn.rnn_cell::517
         # this ensures parameter name compatibility of training w/ FusedRNN and decoding with 'unfused' RNN.
-        cell_prefix = "%sl%d_" % (prefix, layer)
+        cell_prefix = "%sl%d_" % (prefix, layer_idx)
         if config.cell_type == C.LSTM_TYPE:
             cell = mx.rnn.LSTMCell(num_hidden=config.num_hidden, prefix=cell_prefix, forget_bias=config.forget_bias)
         elif config.cell_type == C.LNLSTM_TYPE:
@@ -124,16 +130,23 @@ def get_stacked_rnn(config: RNNConfig, prefix: str,
             cell = LayerNormPerGateGRUCell(num_hidden=config.num_hidden, prefix=cell_prefix)
         else:
             raise NotImplementedError()
-        if config.residual and layer > 0:
+
+        if config.dropout > 0:
+            cell = VariationalDropoutCell(cell,
+                                          dropout_inputs=config.dropout,
+                                          dropout_states=config.dropout)
+
+        # layer_idx is 0 based, whereas first_residual_layer is 1-based
+        assert not (parallel_inputs and config.residual and config.first_residual_layer > 2), \
+            "Parallel inputs with first residual layer > 2 not implemented yet"
+        if config.residual and layer_idx + 1 >= config.first_residual_layer:
             if not parallel_inputs:
                 cell = mx.rnn.ResidualCell(cell)
             else:
                 cell = ResidualCellParallelInput(cell)
+
         rnn.add(cell)
 
-        if config.dropout > 0.:
-            # TODO(fhieber): add pervasive dropout?
-            rnn.add(mx.rnn.DropoutCell(config.dropout, prefix=cell_prefix + "_dropout"))
     return rnn
 
 
@@ -411,3 +424,43 @@ class LayerNormPerGateGRUCell(mx.rnn.GRUCell):
                                         name='%sout' % name)
 
         return next_h, [next_h]
+
+
+class VariationalDropoutCell(mx.rnn.ModifierCell):
+    """
+    Apply Bayesian Dropout on input and states separately. The dropout mask does not change when applied sequentially.
+
+    :param base_cell: Base cell to be modified.
+    :param dropout_inputs: Dropout probability for inputs.
+    :param dropout_states: Dropout probability for state inputs.
+    """
+
+    def __init__(self,
+                 base_cell: mx.rnn.BaseRNNCell,
+                 dropout_inputs: float,
+                 dropout_states: float) -> None:
+        super().__init__(base_cell)
+        self.dropout_inputs = dropout_inputs
+        self.dropout_states = dropout_states
+        self.mask_inputs = None
+        self.mask_states = None
+
+    def __call__(self, inputs, states):
+        if self.dropout_inputs > 0:
+            if self.mask_inputs is None:
+                self.mask_inputs = mx.sym.Dropout(data=inputs, p=self.dropout_inputs, ) != 0
+            inputs = inputs * self.mask_inputs
+
+        if self.dropout_states > 0:
+            if self.mask_states is None:
+                self.mask_states = mx.sym.Dropout(data=states[0], p=self.dropout_states) != 0
+            states[0] = states[0] * self.mask_states
+
+        output, states = self.base_cell(inputs, states)
+
+        return output, states
+
+    def reset(self):
+        super(VariationalDropoutCell, self).reset()
+        self.mask_inputs = None
+        self.mask_states = None

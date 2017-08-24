@@ -63,6 +63,7 @@ def get_initializer(init_type: str, init_scale: float, rnn_init_type: str,
     return mx.initializer.Mixed(*zip(*params_init_pairs))
 
 
+@mx.init.register
 class StackedOrthogonalInit(mx.initializer.Initializer):
     """
     Initializes weight as Orthogonal matrix. Here we assume that the weight consists of stacked square matrices of

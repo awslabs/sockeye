@@ -15,6 +15,7 @@
 Defines various constants used througout the project
 """
 import mxnet as mx
+import numpy as np
 
 BOS_SYMBOL = "<s>"
 EOS_SYMBOL = "</s>"
@@ -24,7 +25,9 @@ PAD_ID = 0
 TOKEN_SEPARATOR = " "
 VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
 
-# default encoder prefixes
+
+ARG_SEPARATOR = ":"
+
 ENCODER_PREFIX = "encoder_"
 EMBEDDING_PREFIX = "embed_"
 ATTENTION_PREFIX = "att_"
@@ -33,6 +36,7 @@ BIDIRECTIONALRNN_PREFIX = ENCODER_PREFIX + "birnn_"
 STACKEDRNN_PREFIX = ENCODER_PREFIX + "rnn_"
 FORWARD_PREFIX = "forward_"
 REVERSE_PREFIX = "reverse_"
+TRANSFORMER_ENCODER_PREFIX = ENCODER_PREFIX + "transformer_"
 CHAR_SEQ_ENCODER_PREFIX = ENCODER_PREFIX + "char_"
 
 # embedding prefixes
@@ -43,8 +47,14 @@ SHARED_EMBEDDING_PREFIX = "source_target_embed_"
 # encoder names (arguments)
 RNN_NAME = "rnn"
 RNN_WITH_CONV_EMBED_NAME = "rnn-with-conv-embed"
+TRANSFORMER_TYPE = "transformer"
+TRANSFORMER_WITH_CONV_EMBED_TYPE = "transformer-with-conv-embed"
+
 # available encoders
-ENCODERS = [RNN_NAME, RNN_WITH_CONV_EMBED_NAME]
+ENCODERS = [RNN_NAME, RNN_WITH_CONV_EMBED_NAME, TRANSFORMER_TYPE, TRANSFORMER_WITH_CONV_EMBED_TYPE]
+
+# available decoder
+DECODERS = [RNN_NAME, TRANSFORMER_TYPE]
 
 # rnn types
 LSTM_TYPE = 'lstm'
@@ -70,11 +80,12 @@ RNN_INIT_DEFAULT = 'default'
 ATT_BILINEAR = 'bilinear'
 ATT_DOT = 'dot'
 ATT_DOT_SCALED = 'dot_scaled'
+ATT_MH_DOT = 'mhdot'
 ATT_FIXED = 'fixed'
 ATT_LOC = 'location'
 ATT_MLP = 'mlp'
 ATT_COV = "coverage"
-ATT_TYPES = [ATT_BILINEAR, ATT_DOT, ATT_DOT_SCALED, ATT_FIXED, ATT_LOC, ATT_MLP, ATT_COV]
+ATT_TYPES = [ATT_BILINEAR, ATT_DOT, ATT_DOT_SCALED, ATT_MH_DOT, ATT_FIXED, ATT_LOC, ATT_MLP, ATT_COV]
 
 # weight tying components
 WEIGHT_TYING_SRC='src'
@@ -87,6 +98,7 @@ WEIGHT_TYING_SRC_TRG_SOFTMAX='src_trg_softmax'
 
 # default decoder prefixes
 DECODER_PREFIX = "decoder_"
+TRANSFORMER_DECODER_PREFIX = DECODER_PREFIX + "transformer_"
 
 # default I/O variable names
 SOURCE_NAME = "source"
@@ -162,11 +174,37 @@ INFERENCE_ARG_OUTPUT_SHORT = "-o"
 BATCH_MAJOR = "NTC"
 TIME_MAJOR = "TNC"
 
-# metric names
+# Training constants
+LR_SCHEDULER_FIXED_RATE_INV_SQRT_T = "fixed-rate-inv-sqrt-t"
+LR_SCHEDULER_FIXED_RATE_INV_T = "fixed-rate-inv-t"
+LR_SCHEDULER_FIXED_STEP = "fixed-step"
+LR_SCHEDULER_PLATEAU_REDUCE = "plateau-reduce"
+LR_SCHEDULERS = [LR_SCHEDULER_FIXED_RATE_INV_SQRT_T,
+                 LR_SCHEDULER_FIXED_RATE_INV_T,
+                 LR_SCHEDULER_FIXED_STEP,
+                 LR_SCHEDULER_PLATEAU_REDUCE]
+
+OUTPUT_HANDLER_TRANSLATION = "translation"
+OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENTS = "translation_with_alignments"
+OUTPUT_HANDLER_BENCHMARK = "benchmark"
+OUTPUT_HANDLER_ALIGN_PLOT = "align_plot"
+OUTPUT_HANDLER_ALIGN_TEXT = "align_text"
+OUTPUT_HANDLERS = [OUTPUT_HANDLER_TRANSLATION,
+                   OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENTS,
+                   OUTPUT_HANDLER_BENCHMARK,
+                   OUTPUT_HANDLER_ALIGN_PLOT,
+                   OUTPUT_HANDLER_ALIGN_TEXT]
+
+# metrics
 ACCURACY = 'accuracy'
 PERPLEXITY = 'perplexity'
 BLEU = 'bleu'
+METRICS = [PERPLEXITY, ACCURACY, BLEU]
+METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, PERPLEXITY: False}
+METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, PERPLEXITY: np.inf}
 
 # loss names
 CROSS_ENTROPY = 'cross-entropy'
 SMOOTHED_CROSS_ENTROPY = 'smoothed-cross-entropy'
+
+TARGET_MAX_LENGTH_FACTOR = 2

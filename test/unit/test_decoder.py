@@ -68,11 +68,13 @@ def test_step(cell_type, context_gating,
                                        forget_bias=0.)
 
     config_decoder = sockeye.decoder.RecurrentDecoderConfig(vocab_size=vocab_size,
+                                                            max_seq_len_source=source_seq_len,
                                                             num_embed=num_embed,
                                                             rnn_config=config_rnn,
+                                                            attention_config=config_attention,
                                                             context_gating=context_gating)
 
-    decoder = sockeye.decoder.get_recurrent_decoder(config_decoder, attention)
+    decoder = sockeye.decoder.RecurrentDecoder(config=config_decoder)
 
     if cell_type == C.GRU_TYPE:
         layer_states = [gaussian_vector(shape=states_shape, return_symbol=True) for _ in range(config_rnn.num_layers)]
@@ -80,7 +82,7 @@ def test_step(cell_type, context_gating,
         layer_states = [gaussian_vector(shape=states_shape, return_symbol=True) for _ in range(config_rnn.num_layers*2)]
 
     state, attention_state = decoder._step(word_vec_prev=word_vec_prev,
-                                           state=sockeye.decoder.DecoderState(hidden_prev, layer_states),
+                                           state=sockeye.decoder.RecurrentDecoderState(hidden_prev, layer_states),
                                            attention_func=attention_func,
                                            attention_state=attention_state)
     sym = mx.sym.Group([state.hidden, attention_state.probs, attention_state.dynamic_source])
