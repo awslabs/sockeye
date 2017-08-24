@@ -15,44 +15,43 @@
 Evaluation CLI. Prints corpus BLEU
 """
 import argparse
-import sys
 import logging
+import sys
 
-from sockeye.log import setup_main_logger, log_sockeye_version
 from sockeye.bleu import corpus_bleu, bleu_from_counts, bleu_counts
-from sockeye.data_io import read_content
-from sockeye.utils import check_condition
+from sockeye.log import setup_main_logger, log_sockeye_version
+from . import arguments
+from . import data_io
+from . import utils
+
+logger = setup_main_logger(__name__, file_logging=False)
 
 
 def main():
     params = argparse.ArgumentParser(description='Evaluate translations by calculating 4-BLEU '
-                                                 'score with respect to a reference set')
-    params.add_argument('--references', '-r', required=True, type=str, help="File with references")
-    params.add_argument('--hypotheses', '-i', required=True, type=str, help="File with references")
-    params.add_argument('--quiet', '-q', action="store_true", help="Do not print logging information")
-    params.add_argument('--sentence', '-s', action="store_true", help="Show sentence-BLEU")
-    params.add_argument('--offset', type=float, default=0.01,
-                        help="Numerical value of the offset of zero n-gram counts")
+                                                 'score with respect to a reference set.')
+    arguments.add_evaluate_args(params)
     args = params.parse_args()
-
-    check_condition(args.offset >= 0, "Offset should be non-negative.")
-
-    logger = setup_main_logger(__name__, file_logging=False)
-    log_sockeye_version(logger)
 
     if args.quiet:
         logger.setLevel(logging.ERROR)
 
+    utils.check_condition(args.offset >= 0, "Offset should be non-negative.")
+    log_sockeye_version(logger)
+
     logger.info("Command: %s", " ".join(sys.argv))
     logger.info("Arguments: %s", args)
 
-    hypotheses = [' '.join(e) for e in read_content(args.hypotheses)]
-    references = [' '.join(e) for e in read_content(args.references)]
+    references = [' '.join(e) for e in data_io.read_content(args.references)]
+    logger.info("Read %d references", len(references))
+    hypotheses = [h.strip() for h in args.hypotheses]
+    logger.info("Read %d hypotheses", len(references))
 
-    logger.info("Loaded %d hypotheses", len(hypotheses))
-    logger.info("Loaded %d references", len(references))
+    if len(hypotheses) != len(references):
+        logger.warning("Different number of hypotheses (%d) than references (%d). Only scoring %d.",
+                       len(hypotheses), len(references), min(len(hypotheses), len(references)))
 
-    check_condition(len(hypotheses) == len(references), "Hypotheses and references have different number of lines.")
+    hypotheses, references = zip(*zip(hypotheses, references))
 
     if not args.sentence:
         bleu = corpus_bleu(hypotheses, references, args.offset)
