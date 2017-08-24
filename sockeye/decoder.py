@@ -601,9 +601,9 @@ class RecurrentDecoder(Decoder):
         """
         source_encoded, prev_dynamic_source, source_encoded_length, prev_hidden, *layer_states = states
 
-        # lengths: (batch_size,)
-        target_lengths = utils.compute_lengths(prev_word_ids)
-        prev_word_id = mx.sym.pick(prev_word_ids, target_lengths, axis=1)
+        # indices: (batch_size,)
+        indices = utils.compute_lengths(prev_word_ids) - 1
+        prev_word_id = mx.sym.pick(prev_word_ids, indices, axis=1)
 
         word_vec_prev, _, _ = self.embedding.encode(prev_word_id, None, 1)
 

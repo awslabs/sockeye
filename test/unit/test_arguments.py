@@ -160,6 +160,7 @@ def test_training_arg(test_params, expected_params):
                       models=['model'],
                       beam_size=5,
                       ensemble_mode='linear',
+                      bucket_width=(10, 0),
                       max_input_len=None,
                       softmax_temperature=None,
                       output_type='translation',

@@ -299,17 +299,21 @@ def load_models(context: mx.context.Context,
 
 def get_max_output_length_function(models: List[InferenceModel], num_stds: int) -> Callable:
     """
-    TODO
+    Returns a function to compute maximum output length given a fixed number of standard deviations as a
+    safety margin, and the current input length.
+    Mean and std are taken from the model with the largest values to allow proper ensembling of models
+    trained on different data sets.
 
-    :param models:
-    :param num_stds:
-    :return:
+    :param models: List of models.
+    :param num_stds: Number of standard deviations to add as a safety margin.
+    :return: Callable.
     """
     max_mean = max(model.length_ratio_mean for model in models)
     max_std = max(model.length_ratio_std for model in models)
 
     def get_max_output_length(input_length: int):
-        return int(np.ceil(max_mean * input_length + max_std * num_stds))
+        factor = max_mean + (max_std * num_stds)
+        return int(np.ceil(factor * input_length))
 
     return get_max_output_length
 
