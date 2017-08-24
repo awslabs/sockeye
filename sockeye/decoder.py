@@ -470,13 +470,14 @@ class RecurrentDecoder(Decoder):
 
         # Stacked RNN
         if self.rnn_config.num_layers == 1 or not self.rnn_config.attention_in_upper_layers:
-            self.attention_rnn = rnn.get_stacked_rnn(self.rnn_config, self.prefix, False)
-            self.upper_layers_rnn = None
+            self.rnn_pre_attention = rnn.get_stacked_rnn(self.rnn_config, self.prefix, parallel_inputs=False)
+            self.rnn_post_attention = None
         else:
-            self.attention_rnn = rnn.get_stacked_rnn(self.rnn_config, self.prefix, False, layers=[0])
-            self.upper_layers_rnn = rnn.get_stacked_rnn(self.rnn_config, self.prefix, True,
-                                                        layers=range(1, self.rnn_config.num_layers))
-        self.attention_rnn_n_states = len(self.attention_rnn.state_shape)
+            self.rnn_pre_attention = rnn.get_stacked_rnn(self.rnn_config, self.prefix, parallel_inputs=False,
+                                                         layers=[0])
+            self.rnn_post_attention = rnn.get_stacked_rnn(self.rnn_config, self.prefix, parallel_inputs=True,
+                                                          layers=range(1, self.rnn_config.num_layers))
+        self.rnn_pre_attention_n_states = len(self.rnn_pre_attention.state_shape)
 
 
         if not self.config.zero_state_init:
@@ -511,9 +512,9 @@ class RecurrentDecoder(Decoder):
         Creates parameters for encoder last state transformation into decoder layer initial states.
         """
         self.init_ws, self.init_bs, self.init_norms = [], [], []
-        state_shapes = self.attention_rnn.state_shape
-        if self.upper_layers_rnn:
-            state_shapes += self.upper_layers_rnn.state_shape
+        state_shapes = self.rnn_pre_attention.state_shape
+        if self.rnn_post_attention:
+            state_shapes += self.rnn_post_attention.state_shape
         for state_idx, (_, init_num_hidden) in enumerate(state_shapes):
             self.init_ws.append(mx.sym.Variable("%senc2decinit_%d_weight" % (self.prefix, state_idx)))
             self.init_bs.append(mx.sym.Variable("%senc2decinit_%d_bias" % (self.prefix, state_idx)))
@@ -654,12 +655,11 @@ class RecurrentDecoder(Decoder):
         """
         Calls reset on the RNN cell.
         """
-        self.attention_rnn.reset()
-        cells_to_reset = self.attention_rnn._cells
-        if self.upper_layers_rnn:
-            self.upper_layers_rnn.reset()
-            cells_to_reset += self.upper_layers_rnn._cells
-        # TODO remove this once mxnet.rnn.SequentialRNNCell.reset() invokes recursive calls on layer cells
+        self.rnn_pre_attention.reset()
+        cells_to_reset = self.rnn_pre_attention._cells
+        if self.rnn_post_attention:
+            self.rnn_post_attention.reset()
+            cells_to_reset += self.rnn_post_attention._cells
         for cell in cells_to_reset:
             # TODO remove this once mxnet.rnn.ModifierCell.reset() invokes reset() of base_cell
             if isinstance(cell, mx.rnn.ModifierCell):
@@ -734,9 +734,9 @@ class RecurrentDecoder(Decoder):
         """
         Returns a list of RNNCells used by this decoder.
         """
-        cells = [self.attention_rnn]
-        if self.upper_layers_rnn:
-            cells.append(self.upper_layers_rnn)
+        cells = [self.rnn_pre_attention]
+        if self.rnn_post_attention:
+            cells.append(self.rnn_post_attention)
         return cells
 
     def get_initial_state(self,
@@ -804,38 +804,38 @@ class RecurrentDecoder(Decoder):
         # concat previous word embedding and previous hidden state
         rnn_input = mx.sym.concat(word_vec_prev, state.hidden, dim=1,
                                   name="%sconcat_target_context_t%d" % (self.prefix, seq_idx))
-        # attention_rnn_output: (batch_size, rnn_num_hidden)
+        # rnn_pre_attention_output: (batch_size, rnn_num_hidden)
         # next_layer_states: num_layers * [batch_size, rnn_num_hidden]
-        attention_rnn_output, attention_rnn_layer_states = \
-            self.attention_rnn(rnn_input, state.layer_states[:self.attention_rnn_n_states])
+        rnn_pre_attention_output, rnn_pre_attention_layer_states = \
+            self.rnn_pre_attention(rnn_input, state.layer_states[:self.rnn_pre_attention_n_states])
 
         # (2) Attention step
-        attention_input = self.attention.make_input(seq_idx, word_vec_prev, attention_rnn_output)
+        attention_input = self.attention.make_input(seq_idx, word_vec_prev, rnn_pre_attention_output)
         attention_state = attention_func(attention_input, attention_state)
 
         # (3) Attention handling (and possibly context gating)
-        if self.upper_layers_rnn:
+        if self.rnn_post_attention:
             upper_rnn_output, upper_rnn_layer_states = \
-                self.upper_layers_rnn(attention_rnn_output, attention_state.context,
-                                      state.layer_states[self.attention_rnn_n_states:])
+                self.rnn_post_attention(rnn_pre_attention_output, attention_state.context,
+                                        state.layer_states[self.rnn_pre_attention_n_states:])
             hidden_concat = mx.sym.concat(upper_rnn_output, attention_state.context,
                                           dim=1, name='%shidden_concat_t%d' % (self.prefix, seq_idx))
             hidden = self._hidden_mlp(hidden_concat, seq_idx)
             # TODO: add context gating?
         else:
             upper_rnn_layer_states = []
-            hidden_concat = mx.sym.concat(attention_rnn_output, attention_state.context,
+            hidden_concat = mx.sym.concat(rnn_pre_attention_output, attention_state.context,
                                           dim=1, name='%shidden_concat_t%d' % (self.prefix, seq_idx))
             if self.config.hidden_dropout > 0:
                 hidden_concat = mx.sym.Dropout(data=hidden_concat, p=self.config.hidden_dropout,
                                                name='%shidden_concat_dropout_t%d' % (self.prefix, seq_idx))
 
             if self.config.context_gating:
-                hidden = self._context_gate(hidden_concat, attention_rnn_output, attention_state, seq_idx)
+                hidden = self._context_gate(hidden_concat, rnn_pre_attention_output, attention_state, seq_idx)
             else:
                 hidden = self._hidden_mlp(hidden_concat, seq_idx)
 
-        return RecurrentDecoderState(hidden, attention_rnn_layer_states + upper_rnn_layer_states), attention_state
+        return RecurrentDecoderState(hidden, rnn_pre_attention_layer_states + upper_rnn_layer_states), attention_state
 
     def _hidden_mlp(self, hidden_concat: mx.sym.Symbol, seq_idx: int) -> mx.sym.Symbol:
         hidden = mx.sym.FullyConnected(data=hidden_concat,
