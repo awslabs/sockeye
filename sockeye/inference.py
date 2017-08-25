@@ -582,7 +582,7 @@ class Translator:
         # bucket target max length based on beam_search progress
         if len(self.buckets_target) > 1:
             target_max_length = data_io.get_bucket(t, self.buckets_target)
-            if target_max_length != bucket_key[1]:
+            if target_max_length < bucket_key[1]:
                 bucket_key = bucket_key[0], target_max_length
                 sequences = mx.nd.slice_axis(sequences, axis=1, begin=0, end=target_max_length)
 
