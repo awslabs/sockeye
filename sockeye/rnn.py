@@ -58,6 +58,8 @@ class SequentialRNNCellParallelInput(mx.rnn.SequentialRNNCell):
     """
     A SequentialRNNCell, where an additional "parallel" input can be given at
     call time and it will be added to the input of each layer
+
+    :param concat_inputs: Should the inputs be concatenated or passed as an additional argument.
     """
     def __init__(self, concat_inputs, params=None):
         super().__init__(params)
@@ -102,7 +104,8 @@ def get_stacked_rnn(config: RNNConfig, prefix: str,
 
     :param config: rnn configuration.
     :param prefix: Symbol prefix for RNN.
-    :param parallel_inputs: Support parallel inputs for the stacked RNN cells
+    :param parallel_inputs: Support parallel inputs for the stacked RNN cells.
+    :param layers: Specify which layers to create as a list of layer indexes.
 
     :return: RNN cell.
     """
@@ -140,10 +143,7 @@ def get_stacked_rnn(config: RNNConfig, prefix: str,
         assert not (parallel_inputs and config.residual and config.first_residual_layer > 2), \
             "Parallel inputs with first residual layer > 2 not implemented yet"
         if config.residual and layer_idx + 1 >= config.first_residual_layer:
-            if not parallel_inputs:
-                cell = mx.rnn.ResidualCell(cell)
-            else:
-                cell = ResidualCellParallelInput(cell)
+            cell = mx.rnn.ResidualCell(cell) if not parallel_inputs else ResidualCellParallelInput(cell)
 
         rnn.add(cell)
 

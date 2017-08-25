@@ -77,3 +77,96 @@ def test_get_stacked_rnn(config, expected_cell):
         cell = cell.base_cell
     assert isinstance(cell, expected_cell)
     assert cell._num_hidden, config.num_hidden
+
+def test_residual_cell_parallel_input():
+    num_hidden = 128
+    batch_size = 256
+    parallel_size = 64
+
+    input_shape = (batch_size, num_hidden)
+    states_shape = (batch_size, num_hidden)
+    parallel_shape = (batch_size, parallel_size)
+
+    input = mx.sym.Variable("input")
+    parallel_input = mx.sym.Variable("parallel")
+    params = mx.rnn.RNNParams("params_")
+    states = mx.sym.Variable("states")
+
+    default_cell = mx.rnn.RNNCell(num_hidden, params=params)
+    default_cell_output, _ = default_cell(mx.sym.concat(input, parallel_input), states)
+    default_residual_output = mx.sym.elemwise_add(default_cell_output, input)
+
+    inner_rnn_cell = mx.rnn.RNNCell(num_hidden, params=params)
+    parallel_cell = rnn.ResidualCellParallelInput(inner_rnn_cell)
+    parallel_cell_output, _ = parallel_cell(input, parallel_input, states)
+
+    input_nd = mx.nd.random_uniform(shape=input_shape)
+    states_nd = mx.nd.random_uniform(shape=states_shape)
+    parallel_nd = mx.nd.random_uniform(shape=parallel_shape)
+    arg_shapes, _, _ = default_residual_output.infer_shape(input=input_shape, states=states_shape, parallel=parallel_shape)
+    params_with_shapes = filter(lambda a: a[0].startswith("params_"),
+                                [x for x in zip(default_residual_output.list_arguments(), arg_shapes)]
+                                )
+    params_nd = {}
+    for name, shape in params_with_shapes:
+        params_nd[name] = mx.nd.random_uniform(shape=shape)
+
+    out_default_residual = default_residual_output.eval(input=input_nd,
+                                                        states=states_nd,
+                                                        parallel=parallel_nd,
+                                                        **params_nd)[0]
+    out_parallel = parallel_cell_output.eval(input=input_nd,
+                                             states=states_nd,
+                                             parallel=parallel_nd,
+                                             **params_nd)[0]
+
+    assert np.isclose(out_default_residual.asnumpy(), out_parallel.asnumpy()).all()
+
+def test_sequential_rnn_cell_parallel_input():
+    num_hidden = 128
+    batch_size = 256
+    parallel_size = 64
+    n_layers = 3
+
+    input_shape = (batch_size, num_hidden)
+    states_shape = (batch_size, num_hidden)
+    parallel_shape = (batch_size, parallel_size)
+
+    input = mx.sym.Variable("input")
+    parallel_input = mx.sym.Variable("parallel")
+    params = mx.rnn.RNNParams("params_")  # To simplify, we will share the parameters across all layers
+    states = mx.sym.Variable("states")    # ...and also the previous states
+
+    last_output = input
+    for _ in range(n_layers):
+        cell = mx.rnn.RNNCell(num_hidden, params=params)
+        last_output, _ = cell(mx.sym.concat(last_output, parallel_input), states)
+    manual_stacking_output = last_output
+
+    sequential_cell = rnn.SequentialRNNCellParallelInput(concat_inputs=True)
+    for _ in range(n_layers):
+        cell = mx.rnn.RNNCell(num_hidden, params=params)
+        sequential_cell.add(cell)
+    sequential_output, _ = sequential_cell(input, parallel_input, [states]*n_layers)
+
+    input_nd = mx.nd.random_uniform(shape=input_shape)
+    states_nd = mx.nd.random_uniform(shape=states_shape)
+    parallel_nd = mx.nd.random_uniform(shape=parallel_shape)
+    arg_shapes, _, _ = manual_stacking_output.infer_shape(input=input_shape, states=states_shape, parallel=parallel_shape)
+    params_with_shapes = filter(lambda a: a[0].startswith("params_"),
+                                [x for x in zip(manual_stacking_output.list_arguments(), arg_shapes)]
+                                )
+    params_nd = {}
+    for name, shape in params_with_shapes:
+        params_nd[name] = mx.nd.random_uniform(shape=shape)
+
+    out_manual = manual_stacking_output.eval(input=input_nd,
+                                             states=states_nd,
+                                             parallel=parallel_nd,
+                                             **params_nd)[0]
+    out_sequential = sequential_output.eval(input=input_nd,
+                                            states=states_nd,
+                                            parallel=parallel_nd,
+                                            **params_nd)[0]
+
+    assert np.isclose(out_manual.asnumpy(), out_sequential.asnumpy()).all()

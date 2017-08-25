@@ -16,7 +16,6 @@ Decoders for sequence-to-sequence models.
 """
 import logging
 from abc import ABC, abstractmethod
-import itertools
 from typing import Callable, List, NamedTuple, Tuple
 from typing import Optional
 
@@ -697,7 +696,7 @@ class RecurrentDecoder(Decoder):
                 mx.sym.Variable(C.SOURCE_LENGTH_NAME),
                 mx.sym.Variable(C.HIDDEN_PREVIOUS_NAME)] + \
                [mx.sym.Variable("%senc2decinit_%d" % (self.prefix, i)) for i in
-                range(len(list(itertools.chain(*[rnn.state_info for rnn in self.get_rnn_cells()]))))]
+                range(len(sum([rnn.state_info for rnn in self.get_rnn_cells()], [])))]
 
     def state_shapes(self,
                      batch_size: int,
@@ -727,7 +726,7 @@ class RecurrentDecoder(Decoder):
                [mx.io.DataDesc("%senc2decinit_%d" % (self.prefix, i),
                                (batch_size, num_hidden),
                                layout=C.BATCH_MAJOR) for i, (_, num_hidden) in enumerate(
-                                   itertools.chain(*[rnn.state_shape for rnn in self.get_rnn_cells()])
+                                   sum([rnn.state_shape for rnn in self.get_rnn_cells()], [])
                                )]
 
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
@@ -765,8 +764,7 @@ class RecurrentDecoder(Decoder):
 
         # initial states for each layer
         layer_states = []
-        for state_idx, (_, init_num_hidden) in enumerate(itertools.chain(
-                *[rnn.state_shape for rnn in self.get_rnn_cells()])):
+        for state_idx, (_, init_num_hidden) in enumerate(sum([rnn.state_shape for rnn in self.get_rnn_cells()], [])):
             if self.config.zero_state_init:
                 init = mx.sym.tile(data=zeros, reps=(1, init_num_hidden))
             else:
