@@ -109,14 +109,20 @@ Unless you specify a different optimizer (`--optimizer`) [Adam](https://arxiv.or
 Additionally, you can control the batch size (`--batch-size`), the learning rate schedule (`--learning-rate-schedule`)
 and other parameters relevant for training.
 
-()
+Training will run until the validation perplexity stops improving.
+Alternatively, you can track BLEU on the validation set (`--optimized-metric bleu`).
+Sockeye will then at every checkpoint start a decoder in a separate process running on the same device as training.
+To make sure the decoder finishes before the next checkpoint one can subsample the validation set for
+BLEU score calculation.
+For example `--monitor-bleu 500` will calculate BLEU on a random subset of 500 sentences.
+Perplexity will not be affected by this and still be calculated on the full validation set.
 
-Parameters to discuss:
-* early stopping (also: how to change the metric used for early stopping)
+Training a model on this data set is going to take a while.
+In the next section we discuss how you can monitor the training progress.
 
-* changing the optimized metric to BLEU
+### Monitoring training progress
 
-### Monitoring training with tensorboard
+log/metrics file and tensorboard
 
 * training is going to take a while...
 * show how we can use tensorboard for tracking progress
