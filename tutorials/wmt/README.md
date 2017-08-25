@@ -189,7 +189,8 @@ This will create a file `align_1.png` that looks similar this:
 
 ![Alignment plot](align.png "Alignment plot")
 
-Note that the alignment plot shows the subword units instead of tokens.
+Note that the alignment plot shows the subword units instead of tokens, as this is the representation used by Sockeye 
+during translation.
 Additionally you can see the special end-of-sentence symbol `</s>` being added to the target sentence.
 
 
@@ -228,10 +229,23 @@ multiple times. However, the point is mainly to show how one would run an ensemb
 
 ## Checkpoint averaging
 
-After training has finished 
+An alternative to model ensembling that does not require training multiple models is to average parameters from
+different checkpoints.
+While unlike ensembling basically coming at no cost, this usually leads to smaller gains.
+Of course you could also create an ensemble of checkpoint averaged models.
+Sockeye provides a CLI that combines the parameter files of a trained model.
+In the following we create a copy of the model directory and then replace the link to the best parameters
+with an checkpointed averaged parameter file:
 
 ```bash
 cp -r wmt_model wmt_model_avg
 python -m sockeye.average -i wmt_model -o wmt_model_avg/param.best
 ```
+
+## Summary
+
+Congratulations! You have successfully trained your first real Sockeye translation model.
+On top of that you know how to track training progress, how to translate, how to combine models through checkpointing
+or ensembling and more.
+
 

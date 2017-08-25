@@ -133,3 +133,8 @@ parameter to use a checkpoint earlier in the training before the model converged
 ```
 As the model has not converged yet it is still making a few mistakes when copying the sequence.
 
+
+## Summary
+
+In the [next tutorial](../wmt) you will learn how to build a translation model, how to track training progress, how to create
+ensemble models and more.
