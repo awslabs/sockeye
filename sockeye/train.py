@@ -98,6 +98,7 @@ def main():
     # Checking status of output folder, resumption, etc.
     # Create temporary logger to console only
     logger = setup_main_logger(__name__, file_logging=False, console=not args.quiet)
+
     output_folder = os.path.abspath(args.output)
     resume_training = False
     training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
@@ -403,6 +404,14 @@ def main():
             max_num_checkpoint_not_improved = -1
             min_num_epochs = 0
 
+        monitor_bleu = args.monitor_bleu
+        # Turn on BLEU monitoring when the optimized metric is BLEU and it hasn't been enabled yet
+        if args.optimized_metric == C.BLEU and monitor_bleu == 0:
+            logger.info("You chose BLEU as the optimized metric, will turn on BLEU monitoring during training. "
+                        "To control how many validation sentences are used for calculating bleu use "
+                        "the --monitor-bleu argument.")
+            monitor_bleu = -1
+
         training_model.fit(train_iter, eval_iter,
                            output_folder=output_folder,
                            max_params_files_to_keep=args.keep_last_params,
@@ -414,7 +423,7 @@ def main():
                            optimized_metric=args.optimized_metric,
                            max_num_not_improved=max_num_checkpoint_not_improved,
                            min_num_epochs=min_num_epochs,
-                           monitor_bleu=args.monitor_bleu,
+                           monitor_bleu=monitor_bleu,
                            use_tensorboard=args.use_tensorboard,
                            mxmonitor_pattern=args.monitor_pattern,
                            mxmonitor_stat_func=args.monitor_stat_func)

@@ -23,4 +23,4 @@ Below is the full list of tutorials we provide. We recommend going through them 
 introduce the different concepts and parameters used for training and translation.
 
 1. [Sequence copy task](seqcopy)
-1. [WMT German to English news translation](iswlt)
+1. [WMT German to English news translation](wmt)

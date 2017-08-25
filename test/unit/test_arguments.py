@@ -173,7 +173,7 @@ def test_inference_args(test_params, expected_params):
 
 # Make sure that the parameter names and default values used in the tutorials do not change without the tutorials
 # being updated accordingly.
-@pytest.mark.parametrize("test_params, expected_params", [
+@pytest.mark.parametrize("test_params, expected_params, expected_params_present", [
     # seqcopy tutorial
     ('-s train.source '
      '-t train.target '
@@ -198,13 +198,46 @@ def test_inference_args(test_params, expected_params):
           output="seqcopy_model",
           # The tutorial text mentions that we train a RNN model:
           encoder="rnn",
-          decoder="rnn",
-          # Additionally we mention the checkpoint_frequency
-          checkpoint_frequency=1000)),
-    # IWSLT tutorial (TODO)
+          decoder="rnn"),
+     # Additionally we mention the checkpoint_frequency
+     ['checkpoint_frequency']),
+    # WMT tutorial
+    ('-s corpus.tc.BPE.de'
+     '-t corpus.tc.BPE.en'
+     '-vs newstest2016.tc.BPE.de'
+     '-vt newstest2016.tc.BPE.en'
+     '--num-embed 256'
+     '--rnn-num-hidden 512'
+     '--attention-type dot'
+     '--max-seq-len 60'
+     '--monitor-bleu 500'
+     '--use-tensorboard'
+     '--use-cpu'
+     '-o wmt_mode',
+    dict(
+        source="corpus.tc.BPE.de",
+        target="corpus.tc.BPE.en",
+        validation_source="newstest2016.tc.BPE.de",
+        validation_target="newstest2016.tc.BPE.en",
+        num_embed=(256, 256),
+        rnn_num_hidden=256,
+        attention_type='dot',
+        max_seq_len=60,
+        monitor_bleu=500,
+        use_tensorboard=True,
+        use_cpu=True,
+        # Arguments mentioned in the text, should be renamed in the tutorial if they change:
+        rnn_cell_type="lstm",
+        encoder="rnn",
+        decoder="rnn",
+        optimizer="adam"),
+    ["num_layers",
+     "rnn_residual_connections",
+     "batch_size",
+     "learning_rate_schedule"])
 ])
-def test_tutorial_args(test_params, expected_params):
-    _test_args_subset(test_params, expected_params, arguments.add_train_cli_args)
+def test_tutorial_args(test_params, expected_params, expected_params_present):
+    _test_args_subset(test_params, expected_params, expected_params_present, arguments.add_train_cli_args)
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
@@ -216,8 +249,10 @@ def test_tutorial_args(test_params, expected_params):
     # IWSLT tutorial (TODO)
 ])
 def test_tutorial_args(test_params, expected_params):
-    _test_args_subset(test_params, expected_params, arguments.add_translate_cli_args)
+    _test_args_subset(test_params, expected_params, [], arguments.add_translate_cli_args)
 
+
+# TODO: test for WMT parameter averaging...
 
 def _test_args(test_params, expected_params, args_func):
     test_parser = argparse.ArgumentParser()
@@ -226,10 +261,19 @@ def _test_args(test_params, expected_params, args_func):
     assert dict(vars(parsed_params)) == expected_params
 
 
-def _test_args_subset(test_params, expected_params, args_func):
-    """Only checks the subset of the parameters present in `expected_params`."""
+def _test_args_subset(test_params, expected_params, expected_params_present, args_func):
+    """
+    Only checks the subset of the parameters given in `expected_params`.
+
+    :param test_params: A string of test parameters.
+    :param expected_params: A dict of parameters to test for the exact value.
+    :param expected_params_present: A dict of parameters to test for presence.
+    :param args_func: The function correctly setting up the parameters for ArgumentParser.
+    """
     test_parser = argparse.ArgumentParser()
     args_func(test_parser)
-    parsed_params = test_parser.parse_args(test_params.split())
-    parsed_params_subset = {k: v for k, v in dict(vars(parsed_params)).items() if k in expected_params}
+    parsed_params = dict(vars(test_parser.parse_args(test_params.split())))
+    parsed_params_subset = {k: v for k, v in parsed_params.items() if k in expected_params}
     assert parsed_params_subset == expected_params
+    for expected_param_present in expected_params_present:
+        assert expected_param_present in parsed_params, "Expected param %s to be present." % expected_param_present

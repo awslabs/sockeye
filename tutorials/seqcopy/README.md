@@ -1,15 +1,15 @@
 # Sequence copy model
 This tutorial will show you the basic usage of Sockeye on a task simpler than Machine Translation: copying a sequence.
 We will generate sequences consisting of digits of variable lengths.
-The task is then to learn a model that copies the sequence from the source to the target.
-This task is on the one hand difficult enough to be interesting and on the other allows for quickly training a model.
+The task is then to train a model that copies the sequence from the source to the target.
+This task is on the one hand difficult enough to be interesting and on the other and allows for quickly training a model.
 
 ## Setup
 For this tutorial we assume that you have successfully [installed](../../README.md#installation) Sockeye.
 Other than that there are no additional dependencies.
 We will be using scripts from the Sockeye repository, so you should either clone the repository or manually download 
 the scripts.
-Just as a reminder: Everything is run using Python 3, so depending on your setup you have to replace `python` with
+Just as a reminder: Everything is run using Python 3, so depending on your setup you may have to replace `python` with
 `python3` below.
 All of the commands below assume you're running on a CPU.
 If you have a GPU available you can simply remove `--use-cpu`.
