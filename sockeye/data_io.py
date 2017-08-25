@@ -221,8 +221,8 @@ class DataConfig(config.Config):
                  validation_target: str,
                  vocab_source: Optional[str],
                  vocab_target: Optional[str],
-                 length_ratio_mean: float,
-                 length_ratio_std: float) -> None:
+                 length_ratio_mean: float = C.TARGET_MAX_LENGTH_FACTOR,
+                 length_ratio_std: float = 0.0) -> None:
         super().__init__()
         self.source = source
         self.target = target

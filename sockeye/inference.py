@@ -236,17 +236,11 @@ class InferenceModel(model.SockeyeModel):
 
     @property
     def length_ratio_mean(self):
-        if hasattr(self.config.config_data, 'length_ratio_mean'):
-            return self.config.config_data.length_ratio_mean
-        else:
-            return C.TARGET_MAX_LENGTH_FACTOR
+        return self.config.config_data.length_ratio_mean
 
     @property
     def length_ratio_std(self):
-        if hasattr(self.config.config_data, 'length_ratio_std'):
-            return self.config.config_data.length_ratio_std
-        else:
-            return 0.0
+        return self.config.config_data.length_ratio_std
 
 
 def load_models(context: mx.context.Context,
@@ -305,13 +299,16 @@ def get_max_output_length_function(models: List[InferenceModel], num_stds: int) 
     trained on different data sets.
 
     :param models: List of models.
-    :param num_stds: Number of standard deviations to add as a safety margin.
+    :param num_stds: Number of standard deviations to add as a safety margin. If -1, returned maximum output lengths
+                     will always be 2 * input_length.
     :return: Callable.
     """
     max_mean = max(model.length_ratio_mean for model in models)
     max_std = max(model.length_ratio_std for model in models)
 
     def get_max_output_length(input_length: int):
+        if num_stds < 0:
+            return input_length * C.TARGET_MAX_LENGTH_FACTOR
         factor = max_mean + (max_std * num_stds)
         return int(np.ceil(factor * input_length))
 
