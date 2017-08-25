@@ -195,7 +195,35 @@ Additionally you can see the special end-of-sentence symbol `</s>` being added t
 
 ### Model ensembling
 
-* maybe just use the same model three times ?
+Deep learning models usually profit from model ensembling.
+In model ensembling we train multiple models with different seeds (`--seed`).
+After that we can just provide these models to the Sockeye translation CLI:
+
+```bash
+echo "er ist so ein toller Kerl und ein Familienvater ." | \
+  python -m apply_bpe -c bpe.codes --vocabulary bpe.vocab.en \
+                                   --vocabulary-threshold 50 | \
+  python -m sockeye.translate -m wmt_model wmt_model_seed2 wmt_model_seed3 2>/dev/null | \
+  sed -r 's/@@( |$)//g'
+  
+he is a great guy and a family father .
+```
+
+As we haven't trained multiple models yet we can simply feed in the same model multiple times:
+```bash
+echo "er ist so ein toller Kerl und ein Familienvater ." | \
+  python -m apply_bpe -c bpe.codes --vocabulary bpe.vocab.en \
+                                   --vocabulary-threshold 50 | \
+  python -m sockeye.translate -m wmt_model wmt_model wmt_model 2>/dev/null | \
+  sed -r 's/@@( |$)//g'
+  
+he is a great guy and a family father .
+```
+
+Internally Sockeye will run each one of the models and combine the predictions.
+If all the models are the same you will of course get the some predictions at the expense of running the same model
+multiple times. However, the point is mainly to show how one would run an ensemble model.
+
 
 
 ## Checkpoint averaging

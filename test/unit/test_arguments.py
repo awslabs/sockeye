@@ -236,7 +236,8 @@ def test_inference_args(test_params, expected_params):
       "batch_size",
       "learning_rate_schedule",
       "optimized_metric",
-      "monitor_bleu"])
+      "monitor_bleu",
+      "seed"])
 ])
 def test_tutorial_train_args(test_params, expected_params, expected_params_present):
     _test_args_subset(test_params, expected_params, expected_params_present, arguments.add_train_cli_args)
@@ -250,10 +251,10 @@ def test_tutorial_train_args(test_params, expected_params, expected_params_prese
           use_cpu=True),
      []),
     # WMT tutorial
-    ('-m wmt_model '
+    ('-m wmt_model wmt_model_seed2 '
      '--use-cpu '
      '--output_type align_plot',
-     dict(models=["seqcopy_model"],
+     dict(models=["wmt_model", "wmt_model_seed2"],
           use_cpu=True,
           output_type="align_plot"),
      # Other parameters mentioned in the WMT tutorial
