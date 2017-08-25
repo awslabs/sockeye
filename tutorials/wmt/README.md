@@ -141,24 +141,69 @@ opening [http://localhost:6006](http://localhost:6006).
 
 ![screenshot of tensorboard](tb_screenshot.png "Screenshot of tensorboard")
 
-### Checkpoint averaging
+Now even before training finishes you can already start translating with the model if at least one checkpoint has been
+written to disk.
 
-* run this after training has finished
+## Translation
+
+When translating with Sockeye it is important to keep in mind that it expects the same types of input as seen during
+training. For this tutorial we fed in subword units that were obtained through a Byte Pair Encoding.
+Therefore, we need to apply the same type of preprocessing before feeding a sentence into Sockeye.
+All symbols that have not been seen during training will be replaced by an `<unk>` symbol.
+When the `<unk>` symbol was observed during training one can that the model will also produce this symbol on the output.
+Note though that bcause of the wy we do the preprocessing with BPE above, the model will not actually observe any
+`<unk>` symbols.
+In the following example we will use a sentence from the development set that is already tokenized and byte pair
+encode it.
+After translation we merge consecutive byte pairs, resulting in a tokenized translated sentence.
+This can be done by the following command:
 
 ```bash
-cp -r wmt_model wmt_model_avg
-python -m sockeye.average -i wmt_model -o wmt_model_avg/param.best
+echo "er ist so ein toller Kerl und ein Familienvater ." | \
+  python -m apply_bpe -c bpe.codes --vocabulary bpe.vocab.en \
+                                   --vocabulary-threshold 50 | \
+  python -m sockeye.translate -m wmt_model 2>/dev/null | \
+  sed -r 's/@@( |$)//g'
+  
+he is a great guy and a family father .
 ```
+
+At decoding time Sockeye will run a beam search.
+You can set the size of the beam (`--beam-size`) or change other decoding parameters such as `--softmax-temperature`
+and `--length-penalty-alpha`.
+
+### Alignment visualization
+
+Sockeye not only supports text output, but also other output types.
+The following command for example will plot the alignment matrix:
+
+
+```bash
+echo "er ist so ein toller Kerl und ein Familienvater ." | \
+  python -m apply_bpe -c bpe.codes --vocabulary bpe.vocab.en \
+                                   --vocabulary-threshold 50 | \
+  python -m sockeye.translate -m wmt_model --output-type align_plot
+```
+
+This will create a file `align_1.png` that looks similar this:
+
+![Alignment plot](align.png "Alignment plot")
+
+Note that the alignment plot shows the subword units instead of tokens.
+Additionally you can see the special end-of-sentence symbol `</s>` being added to the target sentence.
+
 
 ### Model ensembling
 
 * maybe just use the same model three times ?
 
-## Translation
 
-* Discuss the different beam search parameters...
+## Checkpoint averaging
 
-## Alignment visualization
+After training has finished 
 
-
+```bash
+cp -r wmt_model wmt_model_avg
+python -m sockeye.average -i wmt_model -o wmt_model_avg/param.best
+```
 

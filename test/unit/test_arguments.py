@@ -67,10 +67,10 @@ def test_device_args(test_params, expected_params):
 
 @pytest.mark.parametrize("test_params, expected_params", [
     ('', dict(params=None,
-              num_words=(50000,50000),
-              word_min_count=(1,1),
-              num_layers=(1,1),
-              num_embed=(512,512),
+              num_words=(50000, 50000),
+              word_min_count=(1, 1),
+              num_layers=(1, 1),
+              num_embed=(512, 512),
               attention_type='mlp',
               attention_num_hidden=None,
               attention_coverage_type='count',
@@ -79,7 +79,7 @@ def test_device_args(test_params, expected_params):
               learn_lexical_bias=False,
               weight_tying=False,
               weight_tying_type="trg_softmax",
-              max_seq_len=(100,100),
+              max_seq_len=(100, 100),
               attention_mhdot_heads=None,
               transformer_attention_heads=8,
               transformer_feed_forward_num_hidden=2048,
@@ -214,44 +214,55 @@ def test_inference_args(test_params, expected_params):
      '--use-tensorboard '
      '--use-cpu '
      '-o wmt_mode',
-    dict(
-        source="corpus.tc.BPE.de",
-        target="corpus.tc.BPE.en",
-        validation_source="newstest2016.tc.BPE.de",
-        validation_target="newstest2016.tc.BPE.en",
-        num_embed=(256, 256),
-        rnn_num_hidden=512,
-        attention_type='dot',
-        max_seq_len=(60, 60),
-        monitor_bleu=500,
-        use_tensorboard=True,
-        use_cpu=True,
-        # Arguments mentioned in the text, should be renamed in the tutorial if they change:
-        rnn_cell_type="lstm",
-        encoder="rnn",
-        decoder="rnn",
-        optimizer="adam"),
-    ["num_layers",
-     "rnn_residual_connections",
-     "batch_size",
-     "learning_rate_schedule",
-     "optimized_metric",
-     "monitor_bleu"])
+     dict(
+         source="corpus.tc.BPE.de",
+         target="corpus.tc.BPE.en",
+         validation_source="newstest2016.tc.BPE.de",
+         validation_target="newstest2016.tc.BPE.en",
+         num_embed=(256, 256),
+         rnn_num_hidden=512,
+         attention_type='dot',
+         max_seq_len=(60, 60),
+         monitor_bleu=500,
+         use_tensorboard=True,
+         use_cpu=True,
+         # Arguments mentioned in the text, should be renamed in the tutorial if they change:
+         rnn_cell_type="lstm",
+         encoder="rnn",
+         decoder="rnn",
+         optimizer="adam"),
+     ["num_layers",
+      "rnn_residual_connections",
+      "batch_size",
+      "learning_rate_schedule",
+      "optimized_metric",
+      "monitor_bleu"])
 ])
 def test_tutorial_train_args(test_params, expected_params, expected_params_present):
     _test_args_subset(test_params, expected_params, expected_params_present, arguments.add_train_cli_args)
 
 
-@pytest.mark.parametrize("test_params, expected_params", [
+@pytest.mark.parametrize("test_params, expected_params, expected_params_present", [
     # seqcopy tutorial
     ('-m seqcopy_model '
      '--use-cpu',
      dict(models=["seqcopy_model"],
-          use_cpu=True)),
-    # IWSLT tutorial (TODO)
+          use_cpu=True),
+     []),
+    # WMT tutorial
+    ('-m wmt_model '
+     '--use-cpu '
+     '--output_type align_plot',
+     dict(models=["seqcopy_model"],
+          use_cpu=True,
+          output_type="align_plot"),
+     # Other parameters mentioned in the WMT tutorial
+     ["beam_size",
+      "softmax_temperature",
+      "length_penalty_alpha"]),
 ])
-def test_tutorial_translate_args(test_params, expected_params):
-    _test_args_subset(test_params, expected_params, [], arguments.add_translate_cli_args)
+def test_tutorial_translate_args(test_params, expected_params, expected_params_present):
+    _test_args_subset(test_params, expected_params, expected_params_present, arguments.add_translate_cli_args)
 
 
 # TODO: test for WMT parameter averaging...
