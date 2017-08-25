@@ -122,17 +122,24 @@ In the next section we discuss how you can monitor the training progress.
 
 ### Monitoring training progress
 
-log/metrics file and tensorboard
+There are basically three ways of tracking the training progress: the training log and log file,
+the metrics file and tensorboard.
+In addition to printing training and validation metrics on stdout Sockeye also keeps track of them in
+the file `wmt_model/metrics`. Here you find all relevant metrics that were calculated during checkpointing.
 
-* training is going to take a while...
-* show how we can use tensorboard for tracking progress
-* add a screenshot of how this looks like
+[tensorboard](https://github.com/dmlc/tensorboard) allows for monitoring training and validation metrics in a browser.
+In the training command above we enabled tracking of metrics in a tensorboard compatible way
+by specifying `--use-tensboard`. With this we can simply point tensorboard to the model directory or any of it's parent
+directories:
 
 ```bash
 tensorboard --logdir .
 ```
 
-[http://localhost:6006](http://localhost:6006)
+Once tensorboard is up and running you can check out the learning curves by
+opening [http://localhost:6006](http://localhost:6006).
+
+![screenshot of tensorboard](tb_screenshot.png "Screenshot of tensorboard")
 
 ### Checkpoint averaging
 
