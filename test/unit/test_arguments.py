@@ -202,17 +202,17 @@ def test_inference_args(test_params, expected_params):
      # Additionally we mention the checkpoint_frequency
      ['checkpoint_frequency']),
     # WMT tutorial
-    ('-s corpus.tc.BPE.de'
-     '-t corpus.tc.BPE.en'
-     '-vs newstest2016.tc.BPE.de'
-     '-vt newstest2016.tc.BPE.en'
-     '--num-embed 256'
-     '--rnn-num-hidden 512'
-     '--attention-type dot'
-     '--max-seq-len 60'
-     '--monitor-bleu 500'
-     '--use-tensorboard'
-     '--use-cpu'
+    ('-s corpus.tc.BPE.de '
+     '-t corpus.tc.BPE.en '
+     '-vs newstest2016.tc.BPE.de '
+     '-vt newstest2016.tc.BPE.en '
+     '--num-embed 256 '
+     '--rnn-num-hidden 512 '
+     '--attention-type dot '
+     '--max-seq-len 60 '
+     '--monitor-bleu 500 '
+     '--use-tensorboard '
+     '--use-cpu '
      '-o wmt_mode',
     dict(
         source="corpus.tc.BPE.de",
@@ -220,9 +220,9 @@ def test_inference_args(test_params, expected_params):
         validation_source="newstest2016.tc.BPE.de",
         validation_target="newstest2016.tc.BPE.en",
         num_embed=(256, 256),
-        rnn_num_hidden=256,
+        rnn_num_hidden=512,
         attention_type='dot',
-        max_seq_len=60,
+        max_seq_len=(60, 60),
         monitor_bleu=500,
         use_tensorboard=True,
         use_cpu=True,
@@ -234,9 +234,11 @@ def test_inference_args(test_params, expected_params):
     ["num_layers",
      "rnn_residual_connections",
      "batch_size",
-     "learning_rate_schedule"])
+     "learning_rate_schedule",
+     "optimized_metric",
+     "monitor_bleu"])
 ])
-def test_tutorial_args(test_params, expected_params, expected_params_present):
+def test_tutorial_train_args(test_params, expected_params, expected_params_present):
     _test_args_subset(test_params, expected_params, expected_params_present, arguments.add_train_cli_args)
 
 
@@ -248,7 +250,7 @@ def test_tutorial_args(test_params, expected_params, expected_params_present):
           use_cpu=True)),
     # IWSLT tutorial (TODO)
 ])
-def test_tutorial_args(test_params, expected_params):
+def test_tutorial_translate_args(test_params, expected_params):
     _test_args_subset(test_params, expected_params, [], arguments.add_translate_cli_args)
 
 

@@ -109,6 +109,8 @@ Unless you specify a different optimizer (`--optimizer`) [Adam](https://arxiv.or
 Additionally, you can control the batch size (`--batch-size`), the learning rate schedule (`--learning-rate-schedule`)
 and other parameters relevant for training.
 
+()
+
 Parameters to discuss:
 * early stopping (also: how to change the metric used for early stopping)
 
