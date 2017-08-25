@@ -43,15 +43,13 @@ def main():
     logger.info("Arguments: %s", args)
 
     references = [' '.join(e) for e in data_io.read_content(args.references)]
-    logger.info("Read %d references", len(references))
     hypotheses = [h.strip() for h in args.hypotheses]
-    logger.info("Read %d hypotheses", len(references))
+    logger.info("%d hypotheses | %d references", len(hypotheses), len(references))
 
-    if len(hypotheses) != len(references):
-        logger.warning("Different number of hypotheses (%d) than references (%d). Only scoring %d.",
-                       len(hypotheses), len(references), min(len(hypotheses), len(references)))
-
-    hypotheses, references = zip(*zip(hypotheses, references))
+    if not args.not_strict:
+        utils.check_condition(len(hypotheses) == len(references),
+                              "Number of hypotheses (%d) and references (%d) does not match." % (len(hypotheses),
+                                                                                                 len(references)))
 
     if not args.sentence:
         bleu = corpus_bleu(hypotheses, references, args.offset)

@@ -665,3 +665,7 @@ def add_evaluate_args(params):
                              type=float,
                              default=0.01,
                              help="Numerical value of the offset of zero n-gram counts. Default: %(default)s.")
+    eval_params.add_argument('--not-strict', '-n',
+                             action="store_true",
+                             help="Do not fail if number of hypotheses does not match number of references. "
+                                  "Default: %(default)s.")
