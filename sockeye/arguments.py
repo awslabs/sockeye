@@ -382,6 +382,11 @@ def add_training_args(params):
                               type=int_greater_or_equal(1),
                               default=64,
                               help='Mini-batch size. Default: %(default)s.')
+    train_params.add_argument('--batch-by-words',
+                              action="store_true",
+                              default=False,
+                              help='Each batch will contain <batch_size> words instead of sentences. Default:'
+                              ' %(default)s.')
     train_params.add_argument('--fill-up',
                               type=str,
                               default='replicate',

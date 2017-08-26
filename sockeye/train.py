@@ -203,6 +203,7 @@ def main():
                                                                 vocab_source=vocab_source,
                                                                 vocab_target=vocab_target,
                                                                 batch_size=args.batch_size,
+                                                                batch_by_words=args.batch_by_words,
                                                                 fill_up=args.fill_up,
                                                                 max_seq_len_source=max_seq_len_source,
                                                                 max_seq_len_target=max_seq_len_target,

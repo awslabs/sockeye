@@ -14,14 +14,14 @@
 import tempfile
 from test.common import generate_random_sentence
 
+import pytest
+
 import sockeye.data_io
-import mxnet as mx
 import numpy as np
 
 
-def create_parallel_sentence_iter(source_sentences, target_sentences, max_len):
+def create_parallel_sentence_iter(source_sentences, target_sentences, max_len, batch_size, batch_by_words):
     buckets = sockeye.data_io.define_parallel_buckets(max_len, max_len, 10)
-    batch_size = 50
     eos = 0
     pad = 1
     unk = 2
@@ -29,6 +29,7 @@ def create_parallel_sentence_iter(source_sentences, target_sentences, max_len):
                                                                  target_sentences,
                                                                  buckets,
                                                                  batch_size,
+                                                                 batch_by_words,
                                                                  eos, pad, unk)
     return bucket_iterator
 
@@ -40,8 +41,11 @@ def data_batches_equal(db1, db2):
         equal = equal and np.allclose(data1.asnumpy(), data2.asnumpy())
     return equal
 
-
-def test_parallel_sentence_iter():
+@pytest.mark.parametrize("batch_size, batch_by_words", [
+    (50, False),
+    (123, True),
+])
+def test_parallel_sentence_iter(batch_size, batch_by_words):
     # Create random sentences
     vocab_size = 100
     max_len = 100
@@ -51,7 +55,7 @@ def test_parallel_sentence_iter():
         source_sentences.append(generate_random_sentence(vocab_size, max_len))
         target_sentences.append(generate_random_sentence(vocab_size, max_len))
 
-    ori_iterator = create_parallel_sentence_iter(source_sentences, target_sentences, max_len)
+    ori_iterator = create_parallel_sentence_iter(source_sentences, target_sentences, max_len, batch_size, batch_by_words)
     ori_iterator.reset()  # Random order
     # Simulate some iterations
     ori_iterator.next()
@@ -66,7 +70,7 @@ def test_parallel_sentence_iter():
     ori_iterator.save_state(tmp_file.name)
 
     # Load the state in a new iterator
-    load_iterator = create_parallel_sentence_iter(source_sentences, target_sentences, max_len)
+    load_iterator = create_parallel_sentence_iter(source_sentences, target_sentences, max_len, batch_size, batch_by_words)
     load_iterator.reset()  # Random order
     load_iterator.load_state(tmp_file.name)
 
