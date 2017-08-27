@@ -389,7 +389,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         self.data_target = [[] for _ in self.buckets]
         self.data_label = [[] for _ in self.buckets]
 
-        # Per-bucket batch sizes
+        # Per-bucket batch sizes [num seq, num word]
         self.bucket_batch_sizes = [[] for _ in self.buckets]
         self._populate_bucket_batch_sizes()
 
@@ -399,11 +399,12 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         # convert to single numpy array for each bucket
         self._convert_to_array()
 
+        largest_batch_size = max(size[0] for size in self.bucket_batch_sizes)
         self.provide_data = [
-            mx.io.DataDesc(name=source_data_name, shape=(batch_size, self.default_bucket_key[0]), layout=C.BATCH_MAJOR),
-            mx.io.DataDesc(name=target_data_name, shape=(batch_size, self.default_bucket_key[1]), layout=C.BATCH_MAJOR)]
+            mx.io.DataDesc(name=source_data_name, shape=(largest_batch_size, self.default_bucket_key[0]), layout=C.BATCH_MAJOR),
+            mx.io.DataDesc(name=target_data_name, shape=(largest_batch_size, self.default_bucket_key[1]), layout=C.BATCH_MAJOR)]
         self.provide_label = [
-            mx.io.DataDesc(name=label_name, shape=(self.batch_size, self.default_bucket_key[1]), layout=C.BATCH_MAJOR)]
+            mx.io.DataDesc(name=label_name, shape=(largest_batch_size, self.default_bucket_key[1]), layout=C.BATCH_MAJOR)]
 
         self.data_names = [self.source_data_name, self.target_data_name]
         self.label_names = [self.label_name]
