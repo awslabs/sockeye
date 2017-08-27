@@ -108,7 +108,7 @@ def test_model_parameters(test_params, expected_params):
 
 @pytest.mark.parametrize("test_params, expected_params", [
     ('', dict(batch_size=64,
-              batch_by_words=False,
+              batch_type="sentence",
               fill_up='replicate',
               no_bucketing=False,
               bucket_width=10,

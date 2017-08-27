@@ -204,7 +204,7 @@ def main():
                                                                 vocab_source=vocab_source,
                                                                 vocab_target=vocab_target,
                                                                 batch_size=args.batch_size,
-                                                                batch_by_words=args.batch_by_words,
+                                                                batch_by_words=args.batch_type == C.BATCH_TYPE_WORD,
                                                                 batch_num_devices=batch_num_devices,
                                                                 fill_up=args.fill_up,
                                                                 max_seq_len_source=max_seq_len_source,
