@@ -22,6 +22,7 @@ import numpy as np
 
 def create_parallel_sentence_iter(source_sentences, target_sentences, max_len, batch_size, batch_by_words):
     buckets = sockeye.data_io.define_parallel_buckets(max_len, max_len, 10)
+    batch_num_devices = 1
     eos = 0
     pad = 1
     unk = 2
@@ -30,6 +31,7 @@ def create_parallel_sentence_iter(source_sentences, target_sentences, max_len, b
                                                                  buckets,
                                                                  batch_size,
                                                                  batch_by_words,
+                                                                 batch_num_devices,
                                                                  eos, pad, unk)
     return bucket_iterator
 

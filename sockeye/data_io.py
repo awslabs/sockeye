@@ -125,6 +125,7 @@ def get_training_data_iters(source: str, target: str,
                             vocab_source: Dict[str, int], vocab_target: Dict[str, int],
                             batch_size: int,
                             batch_by_words: bool,
+                            batch_num_devices: int,
                             fill_up: str,
                             max_seq_len_source: int,
                             max_seq_len_target: int,
@@ -140,6 +141,7 @@ def get_training_data_iters(source: str, target: str,
     :param vocab_source: Source vocabulary.
     :param vocab_target: Target vocabulary.
     :param batch_size: Batch size.
+    :param batch_num_devices: Number of devices batches will be parallelized across.
     :param batch_by_words: Size batches by words rather than sentences.
     :param fill_up: Fill-up strategy for buckets.
     :param max_seq_len_source: Maximum source sequence length.
@@ -169,6 +171,7 @@ def get_training_data_iters(source: str, target: str,
                                             buckets,
                                             batch_size,
                                             batch_by_words,
+                                            batch_num_devices,
                                             vocab_target[C.EOS_SYMBOL],
                                             C.PAD_ID,
                                             vocab_target[C.UNK_SYMBOL],
@@ -184,6 +187,7 @@ def get_training_data_iters(source: str, target: str,
                                           buckets,
                                           batch_size,
                                           batch_by_words,
+                                          batch_num_devices,
                                           vocab_target[C.EOS_SYMBOL],
                                           C.PAD_ID,
                                           vocab_target[C.UNK_SYMBOL],
@@ -339,6 +343,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
     :param batch_size: Batch_size of generated data batches.
            Incomplete batches are discarded if fill_up == None, or filled up according to the fill_up strategy.
     :param batch_by_words: Size batches by words rather than sentences.
+    :param batch_num_devices: Number of devices batches will be parallelized across.
     :param fill_up: If not None, fill up bucket data to a multiple of batch_size to avoid discarding incomplete batches.
            for each bucket. If set to 'replicate', sample examples from the bucket and use them to fill up.
     :param eos_id: Word id for end-of-sentence.
@@ -353,6 +358,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
                  buckets: List[Tuple[int, int]],
                  batch_size: int,
                  batch_by_words: bool,
+                 batch_num_devices: int,
                  eos_id: int,
                  pad_id: int,
                  unk_id: int,
@@ -368,6 +374,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         self.default_bucket_key = get_default_bucket_key(self.buckets)
         self.batch_size = batch_size
         self.batch_by_words = batch_by_words
+        self.batch_num_devices = batch_num_devices
         self.eos_id = eos_id
         self.pad_id = pad_id
         self.unk_id = unk_id
@@ -430,12 +437,17 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
             if self.batch_by_words:
                 check_condition(seq_len <= self.batch_size, "Word batch size must cover sequence lengths for all"
                                 " buckets: (%d > %d)" % (seq_len, self.batch_size))
-            # Sentence-based: num sentences determines num words
             # Word-based: num words determines num sentences
+            # Sentence-based: num sentences determines num words
             if self.batch_by_words:
                 # Largest size evenly divisible by seq len that does not exceed desired batch size
                 batch_size_word = self.batch_size - self.batch_size % seq_len
                 batch_size_seq = batch_size_word // seq_len
+                # Increase to next multiple of number of devices
+                rest = batch_size_seq % self.batch_num_devices
+                if rest > 0:
+                    batch_size_seq += self.batch_num_devices - rest
+                batch_size_word = batch_size_seq * seq_len
             else:
                 batch_size_seq = self.batch_size
                 batch_size_word = batch_size_seq * seq_len

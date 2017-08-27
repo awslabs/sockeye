@@ -196,6 +196,7 @@ def main():
 
         # create data iterators
         max_seq_len_source, max_seq_len_target = args.max_seq_len
+        batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
         train_iter, eval_iter = data_io.get_training_data_iters(source=config_data.source,
                                                                 target=config_data.target,
                                                                 validation_source=config_data.validation_source,
@@ -204,6 +205,7 @@ def main():
                                                                 vocab_target=vocab_target,
                                                                 batch_size=args.batch_size,
                                                                 batch_by_words=args.batch_by_words,
+                                                                batch_num_devices=batch_num_devices,
                                                                 fill_up=args.fill_up,
                                                                 max_seq_len_source=max_seq_len_source,
                                                                 max_seq_len_target=max_seq_len_target,
