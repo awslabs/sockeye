@@ -80,10 +80,11 @@ def corpus_bleu_counts(hyps, refs):
     hyp_total_wcount, ref_total_wcount = 0, 0
 
     if len(hyps) != len(refs):
-        logger.error("Hyps and refs lengths are not the same")
+        logger.warning("# of hypotheses (%d) and references (%d) does not match.", len(hyps), len(refs))
+    n = min(len(hyps), len(refs))
 
-    for hyp, ref in zip(hyps, refs):
-        sent_counts, hyp_wcount, ref_wcount = bleu_counts(hyp, ref)
+    for i in range(n):
+        sent_counts, hyp_wcount, ref_wcount = bleu_counts(hyps[i], refs[i])
 
         add_counts_in_place(counts, sent_counts)
         hyp_total_wcount += hyp_wcount

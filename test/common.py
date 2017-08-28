@@ -21,9 +21,10 @@ from unittest.mock import patch
 import mxnet as mx
 import numpy as np
 
+import sockeye.average
 import sockeye.bleu
 import sockeye.constants as C
-import sockeye.average
+import sockeye.evaluate
 import sockeye.train
 import sockeye.translate
 import sockeye.utils
@@ -101,8 +102,9 @@ def generate_digits_file(source_path: str,
 _TRAIN_PARAMS_COMMON = "--use-cpu --max-seq-len {max_len} --source {train_source} --target {train_target}" \
                        " --validation-source {dev_source} --validation-target {dev_target} --output {model}"
 
-
 _TRANSLATE_PARAMS_COMMON = "--use-cpu --models {model} --input {input} --output {output}"
+
+_EVAL_PARAMS_COMMON = "--hypotheses {hypotheses} --references {references}"
 
 
 def run_train_translate(train_params: str,
@@ -123,7 +125,6 @@ def run_train_translate(train_params: str,
     :return: (perplexity, bleu)
     """
     with TemporaryDirectory(dir=work_dir, prefix="test_train_translate.") as work_dir:
-
         # Train model
         model_path = os.path.join(work_dir, "model")
         params = "{} {} {}".format(sockeye.train.__file__,
@@ -163,5 +164,11 @@ def run_train_translate(train_params: str,
         # Measure BLEU
         bleu = sockeye.bleu.corpus_bleu(open(out_path, "r").readlines(),
                                         open(dev_target_path, "r").readlines())
+
+        # Run BLEU cli
+        eval_params = "{} {} ".format(sockeye.evaluate.__file__,
+                                      _EVAL_PARAMS_COMMON.format(hypotheses=out_path, references=dev_target_path), )
+        with patch.object(sys, "argv", eval_params.split()):
+            sockeye.evaluate.main()
 
         return perplexity, bleu

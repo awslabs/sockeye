@@ -15,10 +15,12 @@
 Defines commandline arguments for the main CLIs with reasonable defaults.
 """
 import argparse
+import sys
 from typing import Callable, Optional
 
 from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
 from . import constants as C
+from . import data_io
 
 
 def int_greater_or_equal(threshold: int) -> Callable:
@@ -83,6 +85,18 @@ def multiple_values(num_values: int = 0,
                 raise argparse.ArgumentTypeError("Must provide value greater or equal to %d" % greater_or_equal)
         return values
 
+    return parse
+
+
+def file_or_stdin() -> Callable:
+    """
+    Returns a file descriptor from stdin or opening a file from a given path.
+    """
+    def parse(path):
+        if path is None or path == "-":
+            return sys.stdin
+        else:
+            return data_io.smart_open(path)
     return parse
 
 
@@ -629,3 +643,29 @@ def add_inference_args(params):
                                type=float,
                                help='Beta factor for the length penalty used in beam search: '
                                     '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
+
+
+def add_evaluate_args(params):
+    eval_params = params.add_argument_group("Evaluate parameters")
+    eval_params.add_argument('--references', '-r',
+                             required=True,
+                             type=str,
+                             help="File with references.")
+    eval_params.add_argument('--hypotheses', '-i',
+                             type=file_or_stdin(),
+                             default=sys.stdin,
+                             help="File with hypotheses. If none will read from stdin. Default: %(default)s.")
+    eval_params.add_argument('--quiet', '-q',
+                             action="store_true",
+                             help="Do not print logging information.")
+    eval_params.add_argument('--sentence', '-s',
+                             action="store_true",
+                             help="Show sentence-BLEU. Default: %(default)s.")
+    eval_params.add_argument('--offset',
+                             type=float,
+                             default=0.01,
+                             help="Numerical value of the offset of zero n-gram counts. Default: %(default)s.")
+    eval_params.add_argument('--not-strict', '-n',
+                             action="store_true",
+                             help="Do not fail if number of hypotheses does not match number of references. "
+                                  "Default: %(default)s.")
