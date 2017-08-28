@@ -83,6 +83,10 @@ class InferenceModel(model.SockeyeModel):
         self.get_max_output_length = None  # type: Optional[Callable]
 
     def initialize(self):
+        """
+        Delayed construction of modules to ensure multiple Inference models can agree on computing a common
+        maximum output length.
+        """
         self._get_encoder_module()
         self._get_decoder_module()
 
@@ -181,10 +185,10 @@ class InferenceModel(model.SockeyeModel):
 
     def _get_decoder_data_shapes(self, bucket_key: Tuple[int, int]) -> List[mx.io.DataDesc]:
         """
-        Returns data shapes of the decoder module, given a bucket_key (source input length)
+        Returns data shapes of the decoder module.
         Caches results for bucket_keys if called iteratively.
 
-        :param source_length: Input length.
+        :param bucket_key: Tuple of (maximum input length, maximum target length).
         :return: List of data descriptions.
         """
         source_max_length, target_max_length = bucket_key
@@ -219,7 +223,10 @@ class InferenceModel(model.SockeyeModel):
         decoder_states = [mx.nd.broadcast_axis(s, axis=0, size=self.beam_size) for s in decoder_states]
         return decoder_states
 
-    def run_decoder(self, sequences: mx.nd.NDArray, bucket_key: Tuple[int, int], model_state: 'ModelState') -> Tuple[mx.nd.NDArray, mx.nd.NDArray, 'ModelState']:
+    def run_decoder(self,
+                    sequences: mx.nd.NDArray,
+                    bucket_key: Tuple[int, int],
+                    model_state: 'ModelState') -> Tuple[mx.nd.NDArray, mx.nd.NDArray, 'ModelState']:
         """
         Runs forward pass of the single-step decoder.
 
@@ -429,7 +436,7 @@ class Translator:
         self.models = models
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
-        # TODO(fhieber) what if models differ max_seq_len_source?
+        # TODO(fhieber): consider edge case if models differ in max_seq_len_source?
         max_input_length = self.models[0].config.max_seq_len_source
         max_output_length = self.models[0].get_max_output_length(max_input_length)
         if bucket_source_width > 0:
