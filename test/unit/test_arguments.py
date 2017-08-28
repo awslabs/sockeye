@@ -141,6 +141,7 @@ def test_model_parameters(test_params, expected_params):
               weight_init_scale=0.04,
               rnn_dropout_inputs=(.0, .0),
               rnn_dropout_states=(.0, .0),
+              rnn_dropout_recurrent=(.0, .0),
               rnn_decoder_hidden_dropout=.0,
               rnn_forget_bias=0.0,
               rnn_h2h_init=C.RNN_INIT_ORTHOGONAL,

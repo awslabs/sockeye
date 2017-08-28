@@ -368,7 +368,8 @@ def add_model_parameters(params):
 
     model_params.add_argument('--weight-tying',
                               action='store_true',
-                              help='Turn on weight tying (see arxiv.org/abs/1608.05859). The type of weight sharing is determined through '
+                              help='Turn on weight tying (see arxiv.org/abs/1608.05859). '
+                                   'The type of weight sharing is determined through '
                                    '--weight-tying-type. Default: %(default)s.')
     model_params.add_argument('--weight-tying-type',
                               default=C.WEIGHT_TYING_TRG_SOFTMAX,
@@ -466,13 +467,18 @@ def add_training_args(params):
     train_params.add_argument('--rnn-dropout-inputs',
                               type=multiple_values(2, data_type=float),
                               default=(.0, .0),
-                              help='RNN variational dropout probability for encoder & decoder RNN inputs.'
+                              help='RNN variational dropout probability for encoder & decoder RNN inputs. (Gal, 2015)'
                                    'Use <val>:<val> to specify separate values. Default: %(default)s.')
     train_params.add_argument('--rnn-dropout-states',
                               type=multiple_values(2, data_type=float),
                               default=(.0, .0),
-                              help='RNN variational dropout probability for encoder & decoder RNN states.'
+                              help='RNN variational dropout probability for encoder & decoder RNN states. (Gal, 2015)'
                                    'Use <val>:<val> to specify separate values. Default: %(default)s.')
+    train_params.add_argument('--rnn-dropout-recurrent',
+                              type=multiple_values(2, data_type=float),
+                              default=(.0, .0),
+                              help='Recurrent dropout without memory loss (Semeniuta, 2016) for encoder & decoder '
+                                   'LSTMs. Use <val>:<val> to specify separate values. Default: %(default)s.')
 
     train_params.add_argument('--rnn-decoder-hidden-dropout',
                               type=float,

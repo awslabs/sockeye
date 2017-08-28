@@ -58,6 +58,8 @@ def test_ln_cell(cell, expected_param_keys):
 get_rnn_test_cases = [
     (rnn.RNNConfig(cell_type=C.LSTM_TYPE, num_hidden=100, num_layers=2, dropout_inputs=0.5, dropout_states=0.5,
                    residual=False, forget_bias=0.0), mx.rnn.LSTMCell),
+    (rnn.RNNConfig(cell_type=C.LSTM_TYPE, num_hidden=100, num_layers=2, dropout_inputs=0.0, dropout_states=0.0,
+                   dropout_recurrent=0.5, residual=False, forget_bias=0.0), rnn.RecurrentDropoutLSTMCell),
     (rnn.RNNConfig(cell_type=C.LNLSTM_TYPE, num_hidden=12, num_layers=2, dropout_inputs=0.5, dropout_states=0.5,
                    residual=False, forget_bias=1.0), rnn.LayerNormLSTMCell),
     (rnn.RNNConfig(cell_type=C.LNGLSTM_TYPE, num_hidden=55, num_layers=2, dropout_inputs=0.5, dropout_states=0.5,
@@ -67,14 +69,16 @@ get_rnn_test_cases = [
     (rnn.RNNConfig(cell_type=C.LNGRU_TYPE, num_hidden=100, num_layers=2, dropout_inputs=0.0, dropout_states=0.5,
                    residual=False, forget_bias=0.0), rnn.LayerNormGRUCell),
     (rnn.RNNConfig(cell_type=C.LNGGRU_TYPE, num_hidden=2, num_layers=2, dropout_inputs=0.0, dropout_states=0.0,
-                   residual=False, forget_bias=0.0), rnn.LayerNormPerGateGRUCell)]
+                   residual=True, forget_bias=0.0), rnn.LayerNormPerGateGRUCell),
+    (rnn.RNNConfig(cell_type=C.LSTM_TYPE, num_hidden=2, num_layers=3, dropout_inputs=0.0, dropout_states=0.0,
+                   residual=True, forget_bias=0.0), mx.rnn.LSTMCell)]
 
 
 @pytest.mark.parametrize("config, expected_cell", get_rnn_test_cases)
 def test_get_stacked_rnn(config, expected_cell):
     cell = rnn.get_stacked_rnn(config, prefix=config.cell_type)
     assert isinstance(cell, mx.rnn.SequentialRNNCell)
-    cell = cell._cells[0]
+    cell = cell._cells[-1]  # last cell
     if config.residual:
         assert isinstance(cell, mx.rnn.ResidualCell)
         cell = cell.base_cell

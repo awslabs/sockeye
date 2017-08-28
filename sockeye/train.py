@@ -237,6 +237,10 @@ def main():
         if decoder_embed_dropout > 0 and decoder_rnn_dropout_inputs > 0:
             logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
                            "two dropout layers on top of each other.")
+        encoder_rnn_dropout_recurrent, decoder_rnn_dropout_recurrent = args.rnn_dropout_recurrent
+        if encoder_rnn_dropout_recurrent > 0 or decoder_rnn_dropout_recurrent > 0:
+            check_condition(args.rnn_cell_type == C.LSTM_TYPE,
+                            "Recurrent dropout without memory loss only supported for LSTMs right now.")
 
         config_conv = None
         if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
@@ -271,6 +275,7 @@ def main():
                                          num_layers=encoder_num_layers,
                                          dropout_inputs=encoder_rnn_dropout_inputs,
                                          dropout_states=encoder_rnn_dropout_states,
+                                         dropout_recurrent=encoder_rnn_dropout_recurrent,
                                          residual=args.rnn_residual_connections,
                                          first_residual_layer=args.rnn_first_residual_layer,
                                          forget_bias=args.rnn_forget_bias),
@@ -316,6 +321,7 @@ def main():
                                          num_layers=decoder_num_layers,
                                          dropout_inputs=decoder_rnn_dropout_inputs,
                                          dropout_states=decoder_rnn_dropout_states,
+                                         dropout_recurrent=decoder_rnn_dropout_recurrent,
                                          residual=args.rnn_residual_connections,
                                          first_residual_layer=args.rnn_first_residual_layer,
                                          forget_bias=args.rnn_forget_bias),
