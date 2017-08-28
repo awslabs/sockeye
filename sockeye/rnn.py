@@ -28,7 +28,8 @@ class RNNConfig(Config):
     :param cell_type: RNN cell type.
     :param num_hidden: Number of RNN hidden units.
     :param num_layers: Number of RNN layers.
-    :param dropout: Dropout probability on RNN outputs.
+    :param dropout_inputs: Dropout probability on RNN inputs.
+    :param dropout_states: Dropout probability on RNN states.
     :param residual: Whether to add residual connections between multi-layered RNNs.
     :param first_residual_layer: First layer with a residual connection (1-based indexes).
            Default is to start at the second layer.
@@ -38,7 +39,8 @@ class RNNConfig(Config):
                  cell_type: str,
                  num_hidden: int,
                  num_layers: int,
-                 dropout: float,
+                 dropout_inputs: float,
+                 dropout_states: float,
                  residual: bool = False,
                  first_residual_layer: int = 2,
                  forget_bias: float = 0.0) -> None:
@@ -46,7 +48,8 @@ class RNNConfig(Config):
         self.cell_type = cell_type
         self.num_hidden = num_hidden
         self.num_layers = num_layers
-        self.dropout = dropout
+        self.dropout_inputs = dropout_inputs
+        self.dropout_states = dropout_states
         self.residual = residual
         self.first_residual_layer = first_residual_layer
         self.forget_bias = forget_bias
@@ -82,10 +85,10 @@ def get_stacked_rnn(config: RNNConfig, prefix: str) -> mx.rnn.SequentialRNNCell:
         else:
             raise NotImplementedError()
 
-        if config.dropout > 0:
+        if config.dropout_inputs > 0 or config.dropout_states > 0:
             cell = VariationalDropoutCell(cell,
-                                          dropout_inputs=config.dropout,
-                                          dropout_states=config.dropout)
+                                          dropout_inputs=config.dropout_inputs,
+                                          dropout_states=config.dropout_states)
 
         # layer_idx is 0 based, whereas first_residual_layer is 1-based
         if config.residual and layer_idx + 1 >= config.first_residual_layer:

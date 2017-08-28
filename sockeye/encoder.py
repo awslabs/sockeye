@@ -413,7 +413,7 @@ class FusedRecurrentEncoder(RecurrentEncoder):
                                        num_layers=self.rnn_config.num_layers,
                                        mode=self.rnn_config.cell_type,
                                        bidirectional=False,
-                                       dropout=self.rnn_config.dropout,
+                                       dropout=self.rnn_config.dropout_inputs,
                                        forget_bias=self.rnn_config.forget_bias,
                                        prefix=prefix)
 
