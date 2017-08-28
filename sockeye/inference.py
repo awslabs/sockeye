@@ -134,7 +134,8 @@ class InferenceModel(model.SockeyeModel):
         Returns a BucketingModule for a single decoder step.
         Given previously predicted word and previous decoder states, it returns
         a distribution over the next predicted word and the next decoder states.
-        The bucket key for this module is the length of the ENCODED source sequence.
+        The bucket key for this module is the length of the source sequence
+        and the current length of the target sequence.
 
         :return: Decoder BucketingModule.
         """
@@ -142,7 +143,6 @@ class InferenceModel(model.SockeyeModel):
         def sym_gen(bucket_key: Tuple[int, int]):
             source_max_len, target_max_len = bucket_key
             source_encoded_seq_len = self.encoder.get_encoded_seq_len(source_max_len)
-            logger.warning("Decoder built with %s", bucket_key)
 
             self.decoder.reset()
             prev_word_ids = mx.sym.Variable(C.TARGET_NAME)
@@ -226,12 +226,12 @@ class InferenceModel(model.SockeyeModel):
         :return: Probability distribution over next word, attention scores, updated model state.
         """
         batch = mx.io.DataBatch(
-            data=[sequences.as_in_context(self.context)] + model_state.decoder_states,
+            data=[sequences.as_in_context(self.context)] + model_state.states,
             label=None,
             bucket_key=bucket_key,
             provide_data=self._get_decoder_data_shapes(bucket_key))
         self.decoder_module.forward(data_batch=batch, is_train=False)
-        probs, attention_probs, *model_state.decoder_states = self.decoder_module.get_outputs()
+        probs, attention_probs, *model_state.states = self.decoder_module.get_outputs()
         return probs, attention_probs, model_state
 
     @property
@@ -260,7 +260,8 @@ def load_models(context: mx.context.Context,
     :param model_folders: List of model folders to load models from.
     :param checkpoints: List of checkpoints to use for each model in model_folders. Use None to load best checkpoint.
     :param softmax_temperature: Optional parameter to control steepness of softmax distribution.
-    :param max_output_length_num_stds: TODO.
+    :param max_output_length_num_stds: Number of standard deviations to add to mean target-source length ratio
+           to compute maximum output length.
     :return: List of models, source vocabulary, target vocabulary.
     """
     models, source_vocabs, target_vocabs = [], [], []
@@ -283,6 +284,7 @@ def load_models(context: mx.context.Context,
     utils.check_condition(all(set(vocab.items()) == set(target_vocabs[0].items()) for vocab in target_vocabs),
                           "Target vocabulary ids do not match")
 
+    # set a common max_output length for all models.
     get_max_output_length = get_max_output_length_function(models, max_output_length_num_stds)
     for model in models:
         model.get_max_output_length = get_max_output_length
@@ -348,17 +350,17 @@ Output structure from Translator.
 
 class ModelState:
     """
-    A ModelState encapsulates information about the decoder state of an InferenceModel.
+    A ModelState encapsulates information about the decoder states of an InferenceModel.
     """
 
-    def __init__(self, decoder_states: List[mx.nd.NDArray]):
-        self.decoder_states = decoder_states
+    def __init__(self, states: List[mx.nd.NDArray]):
+        self.states = states
 
     def sort_state(self, best_hyp_indices: mx.nd.NDArray):
         """
         Sorts states according to k-best order from last step in beam search.
         """
-        self.decoder_states = [mx.nd.take(ds, best_hyp_indices) for ds in self.decoder_states]
+        self.states = [mx.nd.take(ds, best_hyp_indices) for ds in self.states]
 
 
 class LengthPenalty:
@@ -534,7 +536,6 @@ class Translator:
         target_string = C.TOKEN_SEPARATOR.join(
             target_token for target_id, target_token in zip(target_ids[1:], target_tokens[1:]) if
             target_id not in self.stop_ids)
-        # TODO: maybe adjust this for plotting
         attention_matrix = attention_matrix[:, :len(trans_input.tokens)]
 
         return TranslatorOutput(id=trans_input.id,
@@ -554,8 +555,7 @@ class Translator:
 
         :return: Sequence of translated ids, attention matrix, length-normalized negative log probability.
         """
-        max_output_length = self.models[0].get_max_output_length(source_length)
-        return self._get_best_from_beam(*self._beam_search(source, source_length, max_output_length))
+        return self._get_best_from_beam(*self._beam_search(source, source_length))
 
     def _encode(self, source: mx.nd.NDArray, source_length: int) -> List[ModelState]:
         """
@@ -565,8 +565,7 @@ class Translator:
         :param source_length: Bucket key.
         :return: List of ModelStates.
         """
-        states = [ModelState(decoder_states=m.run_encoder(source, source_length)) for m in self.models]
-        return states
+        return [ModelState(states=m.run_encoder(source, source_length)) for m in self.models]
 
     def _decode_step(self,
                      sequences: mx.nd.NDArray,
@@ -617,14 +616,12 @@ class Translator:
 
     def _beam_search(self,
                      source: mx.nd.NDArray,
-                     source_length: int,
-                     max_output_length: int) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
+                     source_length: int) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
         """
         Translates a single sentence using beam search.
 
         :param source: Source ids. Shape: (1, bucket_key).
         :param source_length: Source length.
-        :param max_output_length: Run beam search up to this number of iterations.
         :return List of lists of word ids, list of attentions, array of accumulated length-normalized
                 negative log-probs.
         """
@@ -633,6 +630,8 @@ class Translator:
         utils.check_condition(all(encoded_source_length ==
                                   model.encoder.get_encoded_seq_len(source_length) for model in self.models),
                               "Models must agree on encoded sequence length")
+        # Maximum output length
+        max_output_length = self.models[0].get_max_output_length(source_length)
 
         # sequences: (beam_size, output_length), pre-filled with <s> symbols on index 0
         sequences = mx.nd.array(np.full((self.beam_size, max_output_length), C.PAD_ID), dtype='int32', ctx=self.context)
