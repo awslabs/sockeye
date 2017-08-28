@@ -89,9 +89,14 @@ class CheckpointDecoder:
         :param checkpoint: Checkpoint to load parameters from.
         :return: Mapping of metric names to scores.
         """
-        translator = sockeye.inference.Translator(self.context, 'linear',
+        ensemble_mode = 'linear'
+        bucket_source_width = 10
+        bucket_target_width = 10
+        translator = sockeye.inference.Translator(self.context,
+                                                  ensemble_mode,
+                                                  bucket_source_width,
+                                                  bucket_target_width,
                                                   sockeye.inference.LengthPenalty(),
-                                                  self.max_output_length_num_stds,
                                                   *sockeye.inference.load_models(self.context,
                                                                                  self.max_input_len,
                                                                                  self.beam_size,

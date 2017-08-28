@@ -166,6 +166,7 @@ class InferenceModel(model.SockeyeModel):
             label_names = []
             return mx.sym.Group([softmax, attention_probs] + states), data_names, label_names
 
+        # pylint: disable=not-callable
         self.decoder_default_bucket_key = (self.config.max_seq_len_source,
                                            self.get_max_output_length(self.config.max_seq_len_source))
         self.decoder_module = mx.mod.BucketingModule(sym_gen=sym_gen,
