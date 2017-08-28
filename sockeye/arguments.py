@@ -364,7 +364,7 @@ def add_model_parameters(params):
 
     model_params.add_argument('--weight-tying',
                               action='store_true',
-                              help='Turn on weight tying. The type of weight sharing is determined through '
+                              help='Turn on weight tying (see arxiv.org/abs/1608.05859). The type of weight sharing is determined through '
                                    '--weight-tying-type. Default: %(default)s.')
     model_params.add_argument('--weight-tying-type',
                               default=C.WEIGHT_TYING_TRG_SOFTMAX,
