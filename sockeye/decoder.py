@@ -480,7 +480,6 @@ class RecurrentDecoder(Decoder):
                                                           layers=range(1, self.rnn_config.num_layers))
         self.rnn_pre_attention_n_states = len(self.rnn_pre_attention.state_shape)
 
-
         if not self.config.zero_state_init:
             self._create_state_init_parameters()
 

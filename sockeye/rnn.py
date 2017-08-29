@@ -58,8 +58,6 @@ class SequentialRNNCellParallelInput(mx.rnn.SequentialRNNCell):
     """
     A SequentialRNNCell, where an additional "parallel" input can be given at
     call time and it will be added to the input of each layer
-
-    :param concat_inputs: Should the inputs be concatenated or passed as an additional argument.
     """
     def __call__(self, inputs, parallel_inputs, states):
         # Adapted copy of mx.rnn.SequentialRNNCell.__call__()
