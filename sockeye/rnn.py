@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 # List is needed for mypy, but not used in the code, only in special comments
-from typing import Optional, List
+from typing import Optional, List, Iterable # NOQA pylint: disable=unused-import
 
 import mxnet as mx
 
@@ -43,7 +43,8 @@ class RNNConfig(Config):
                  dropout_states: float,
                  residual: bool = False,
                  first_residual_layer: int = 2,
-                 forget_bias: float = 0.0) -> None:
+                 forget_bias: float = 0.0,
+                 attention_in_upper_layers: bool = False) -> None:
         super().__init__()
         self.cell_type = cell_type
         self.num_hidden = num_hidden
@@ -53,19 +54,72 @@ class RNNConfig(Config):
         self.residual = residual
         self.first_residual_layer = first_residual_layer
         self.forget_bias = forget_bias
+        self.attention_in_upper_layers = attention_in_upper_layers
 
 
-def get_stacked_rnn(config: RNNConfig, prefix: str) -> mx.rnn.SequentialRNNCell:
+class SequentialRNNCellParallelInput(mx.rnn.SequentialRNNCell):
+    """
+    A SequentialRNNCell, where an additional "parallel" input can be given at
+    call time and it will be added to the input of each layer
+    """
+    def __call__(self, inputs, parallel_inputs, states):
+        # Adapted copy of mx.rnn.SequentialRNNCell.__call__()
+        self._counter += 1
+        next_states = []
+        pos = 0
+        for cell in self._cells:
+            assert not isinstance(cell, mx.rnn.BidirectionalCell)
+            length = len(cell.state_info)
+            state = states[pos:pos+length]
+            pos += length
+            inputs, state = cell(inputs, parallel_inputs, state)
+            next_states.append(state)
+        return inputs, sum(next_states, [])
+
+
+class ParallelInputCell(mx.rnn.ModifierCell):
+    """
+    A modifier cell that accepts two input vectors and concatenates them before
+    calling the original cell. Typically it is used for concatenating the
+    normal and the parallel input in a stacked rnn.
+    """
+    def __call__(self, inputs, parallel_inputs, states):
+        concat_inputs = mx.sym.concat(inputs, parallel_inputs)
+        output, states = self.base_cell(concat_inputs, states)
+        return output, states
+
+
+class ResidualCellParallelInput(mx.rnn.ResidualCell):
+    """
+    A ResidualCell, where an additional "parallel" input can be given at call
+    time and it will be added to the input of each layer, but not considered
+    for the residual connection itself.
+    """
+    def __call__(self, inputs, parallel_inputs, states):
+        concat_inputs = mx.sym.concat(inputs, parallel_inputs)
+        output, states = self.base_cell(concat_inputs, states)
+        output = mx.symbol.elemwise_add(output, inputs, name="%s_plus_residual" % output.name)
+        return output, states
+
+
+def get_stacked_rnn(config: RNNConfig, prefix: str,
+                    parallel_inputs: bool = False,
+                    layers: Optional[Iterable[int]] = None) -> mx.rnn.SequentialRNNCell:
     """
     Returns (stacked) RNN cell given parameters.
 
     :param config: rnn configuration.
     :param prefix: Symbol prefix for RNN.
+    :param parallel_inputs: Support parallel inputs for the stacked RNN cells.
+    :param layers: Specify which layers to create as a list of layer indexes.
+
     :return: RNN cell.
     """
 
-    rnn = mx.rnn.SequentialRNNCell()
-    for layer_idx in range(config.num_layers):
+    rnn = mx.rnn.SequentialRNNCell() if not parallel_inputs else SequentialRNNCellParallelInput()
+    if not layers:
+        layers = range(config.num_layers)
+    for layer_idx in layers:
         # fhieber: the 'l' in the prefix does NOT stand for 'layer' but for the direction 'l' as in mx.rnn.rnn_cell::517
         # this ensures parameter name compatibility of training w/ FusedRNN and decoding with 'unfused' RNN.
         cell_prefix = "%sl%d_" % (prefix, layer_idx)
@@ -92,7 +146,9 @@ def get_stacked_rnn(config: RNNConfig, prefix: str) -> mx.rnn.SequentialRNNCell:
 
         # layer_idx is 0 based, whereas first_residual_layer is 1-based
         if config.residual and layer_idx + 1 >= config.first_residual_layer:
-            cell = mx.rnn.ResidualCell(cell)
+            cell = mx.rnn.ResidualCell(cell) if not parallel_inputs else ResidualCellParallelInput(cell)
+        elif parallel_inputs:
+            cell = ParallelInputCell(cell)
 
         rnn.add(cell)
 

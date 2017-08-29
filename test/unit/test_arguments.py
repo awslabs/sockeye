@@ -101,7 +101,8 @@ def test_device_args(test_params, expected_params):
               conv_embed_num_filters=(200, 200, 250, 250, 300, 300, 300, 300),
               conv_embed_num_highway_layers=4,
               conv_embed_pool_stride=5,
-              conv_embed_add_positional_encodings=False))])
+              conv_embed_add_positional_encodings=False,
+              attention_in_upper_layers=False))])
 def test_model_parameters(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_model_parameters)
 
