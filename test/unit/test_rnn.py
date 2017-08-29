@@ -143,9 +143,10 @@ def test_sequential_rnn_cell_parallel_input():
         last_output, _ = cell(mx.sym.concat(last_output, parallel_input), states)
     manual_stacking_output = last_output
 
-    sequential_cell = rnn.SequentialRNNCellParallelInput(concat_inputs=True)
+    sequential_cell = rnn.SequentialRNNCellParallelInput()
     for _ in range(n_layers):
         cell = mx.rnn.RNNCell(num_hidden, params=params)
+        cell = rnn.ParallelInputCell(cell)
         sequential_cell.add(cell)
     sequential_output, _ = sequential_cell(input, parallel_input, [states]*n_layers)
 

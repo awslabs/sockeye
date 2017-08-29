@@ -61,10 +61,6 @@ class SequentialRNNCellParallelInput(mx.rnn.SequentialRNNCell):
 
     :param concat_inputs: Should the inputs be concatenated or passed as an additional argument.
     """
-    def __init__(self, concat_inputs, params=None):
-        super().__init__(params)
-        self.concat_inputs = concat_inputs
-  
     def __call__(self, inputs, parallel_inputs, states):
         # Adapted copy of mx.rnn.SequentialRNNCell.__call__()
         self._counter += 1
@@ -75,13 +71,21 @@ class SequentialRNNCellParallelInput(mx.rnn.SequentialRNNCell):
             length = len(cell.state_info)
             state = states[pos:pos+length]
             pos += length
-            if self.concat_inputs:
-                concat_inputs = mx.sym.concat(inputs, parallel_inputs)
-                inputs, state = cell(concat_inputs, state)
-            else:
-                inputs, state = cell(inputs, parallel_inputs, state)
+            inputs, state = cell(inputs, parallel_inputs, state)
             next_states.append(state)
         return inputs, sum(next_states, [])
+
+
+class ParallelInputCell(mx.rnn.ModifierCell):
+    """
+    A modifier cell that accepts two input vectors and concatenates them before
+    calling the original cell. Typically it is used for concatenating the
+    normal and the parallel input in a stacked rnn.
+    """
+    def __call__(self, inputs, parallel_inputs, states):
+        concat_inputs = mx.sym.concat(inputs, parallel_inputs)
+        output, states = self.base_cell(concat_inputs, states)
+        return output, states
 
 
 class ResidualCellParallelInput(mx.rnn.ResidualCell):
@@ -98,7 +102,8 @@ class ResidualCellParallelInput(mx.rnn.ResidualCell):
 
 
 def get_stacked_rnn(config: RNNConfig, prefix: str,
-                    parallel_inputs: bool = False, layers: Optional[Iterable[int]] = None) -> mx.rnn.SequentialRNNCell:
+                    parallel_inputs: bool = False,
+                    layers: Optional[Iterable[int]] = None) -> mx.rnn.SequentialRNNCell:
     """
     Returns (stacked) RNN cell given parameters.
 
@@ -110,8 +115,7 @@ def get_stacked_rnn(config: RNNConfig, prefix: str,
     :return: RNN cell.
     """
 
-    rnn = mx.rnn.SequentialRNNCell() if not parallel_inputs \
-        else SequentialRNNCellParallelInput(concat_inputs=not config.residual)
+    rnn = mx.rnn.SequentialRNNCell() if not parallel_inputs else SequentialRNNCellParallelInput()
     if not layers:
         layers = range(config.num_layers)
     for layer_idx in layers:
@@ -140,10 +144,10 @@ def get_stacked_rnn(config: RNNConfig, prefix: str,
                                           dropout_states=config.dropout)
 
         # layer_idx is 0 based, whereas first_residual_layer is 1-based
-        assert not (parallel_inputs and config.residual and config.first_residual_layer > 2), \
-            "Parallel inputs with first residual layer > 2 not implemented yet"
         if config.residual and layer_idx + 1 >= config.first_residual_layer:
             cell = mx.rnn.ResidualCell(cell) if not parallel_inputs else ResidualCellParallelInput(cell)
+        elif parallel_inputs:
+            cell = ParallelInputCell(cell)
 
         rnn.add(cell)
 

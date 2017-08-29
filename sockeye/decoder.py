@@ -456,6 +456,8 @@ class RecurrentDecoder(Decoder):
         self.num_hidden = self.rnn_config.num_hidden
 
         if self.config.context_gating:
+            utils.check_condition(not self.config.attention_in_upper_layers,
+                                  "Context gating is not supported with attention in upper layers.")
             self.gate_w = mx.sym.Variable("%sgate_weight" % prefix)
             self.gate_b = mx.sym.Variable("%sgate_bias" % prefix)
             self.mapped_rnn_output_w = mx.sym.Variable("%smapped_rnn_output_weight" % prefix)
@@ -818,6 +820,9 @@ class RecurrentDecoder(Decoder):
                                         state.layer_states[self.rnn_pre_attention_n_states:])
             hidden_concat = mx.sym.concat(upper_rnn_output, attention_state.context,
                                           dim=1, name='%shidden_concat_t%d' % (self.prefix, seq_idx))
+            if self.config.hidden_dropout > 0:
+                hidden_concat = mx.sym.Dropout(data=hidden_concat, p=self.config.hidden_dropout,
+                                               name='%shidden_concat_dropout_t%d' % (self.prefix, seq_idx))
             hidden = self._hidden_mlp(hidden_concat, seq_idx)
             # TODO: add context gating?
         else:
