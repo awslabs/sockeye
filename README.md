@@ -18,7 +18,7 @@ Sockeye requires:
 
 ## Installation
 
-There are several options for installing Sockeye and it's dependencies. Below we list several alterantives and the
+There are several options for installing Sockeye and it's dependencies. Below we list several alternatives and the
 corresponding instructions.
 
 ### Either: AWS DeepLearning AMI
@@ -30,7 +30,7 @@ corresponding instructions.
 ```
 
 For other environments, you can choose between installing via pip or directly from source. Note that for the
-remaining instructions to work you will need to used `python3` instead of `python` and `pip3` instead of `pip`.
+remaining instructions to work you will need to use `python3` instead of `python` and `pip3` instead of `pip`.
 
 
 ### Or: pip package
@@ -43,7 +43,8 @@ remaining instructions to work you will need to used `python3` instead of `pytho
 
 #### GPU
 
-If you want to run sockeye on a GPU you need to make sure your version of Apache MXNet Incubating contains the GPU code.
+If you want to run sockeye on a GPU you need to make sure your version of Apache MXNet Incubating contains the GPU
+bindings.
 Depending on your version of CUDA you can do this by running the following for CUDA 8.0:
 
 ```bash
@@ -71,7 +72,7 @@ after cloning the repository from git.
 #### GPU
 
 If you want to run sockeye on a GPU you need to make sure your version of Apache MXNet
-Incubating contains the GPU code. Depending on your version of CUDA you can do this by
+Incubating contains the GPU bindings. Depending on your version of CUDA you can do this by
 running the following for CUDA 8.0:
 
 ```bash
@@ -141,7 +142,7 @@ write translations to STDOUT.
 For more detailed examples check out our user documentation.
 
 
-## Step by step tutorial
+## Step-by-step tutorial
 
-More detailed step by step tutorials can be found in the
+More detailed step-by-step tutorials can be found in the
 [tutorials directory](https://github.com/awslabs/sockeye/tree/master/tutorial).

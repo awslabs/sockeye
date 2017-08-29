@@ -10,7 +10,7 @@ For this tutorial we use data that has already been tokenized for us.
 However, keep this in mind for any other data set you want to use with Sockeye.
 In addition to tokenization we will splits words into subwords using Byte Pair Encoding (BPE).
 In order to do so we use a tool called [subword-nmt](https://github.com/rsennrich/subword-nmt).
-Run the following commands to set the tool up:
+Run the following commands to set up the tool:
 
 ```bash
 git clone https://github.com/rsennrich/subword-nmt.git
@@ -98,7 +98,7 @@ python -m sockeye.train -s corpus.tc.BPE.de \
                         -o wmt_model
 ```
 
-This will train a 1-layer bi-LSTM encoder, 1 layer LSTM decoder with dot attention.
+This will train a 1-layer bi-LSTM encoder, 1-layer LSTM decoder with dot attention.
 Sockeye offers a whole variety of different options regarding the model architecture,
 such as stacked RNNs with residual connections (`--num-layers`, `--rnn-residual-connections`),
 [Transformer](https://arxiv.org/abs/1706.03762) encoder and decoder (`--encoder transformer`, `--decoder transformer`),
@@ -115,6 +115,9 @@ Sockeye will then at every checkpoint start a decoder in a separate process runn
 To make sure the decoder finishes before the next checkpoint one can subsample the validation set for
 BLEU score calculation.
 For example `--monitor-bleu 500` will calculate BLEU on a random subset of 500 sentences.
+We sample the random subset once and keep it the same during training and also across trainings by
+fixing the random seed.
+Therefore, validation BLEU scores across training runs are comparable.
 Perplexity will not be affected by this and still be calculated on the full validation set.
 
 Training a model on this data set is going to take a while.
@@ -151,7 +154,7 @@ training. For this tutorial we fed in subword units that were obtained through a
 Therefore, we need to apply the same type of preprocessing before feeding a sentence into Sockeye.
 All symbols that have not been seen during training will be replaced by an `<unk>` symbol.
 When the `<unk>` symbol was observed during training one can that the model will also produce this symbol on the output.
-Note though that bcause of the wy we do the preprocessing with BPE above, the model will not actually observe any
+Note though that because of the way we do the preprocessing with BPE above, the model will not actually observe any
 `<unk>` symbols.
 In the following example we will use a sentence from the development set that is already tokenized and byte pair
 encode it.

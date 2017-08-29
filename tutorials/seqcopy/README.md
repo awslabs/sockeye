@@ -1,17 +1,16 @@
 # Sequence copy model
-This tutorial will show you the basic usage of Sockeye on a task simpler than Machine Translation: copying a sequence.
+This tutorial will show you the basic usage of Sockeye on a on a simple task: copying a sequence.
 We will generate sequences consisting of digits of variable lengths.
 The task is then to train a model that copies the sequence from the source to the target.
 This task is on the one hand difficult enough to be interesting and on the other and allows for quickly training a model.
 
 ## Setup
 For this tutorial we assume that you have successfully [installed](../../README.md#installation) Sockeye.
-Other than that there are no additional dependencies.
 We will be using scripts from the Sockeye repository, so you should either clone the repository or manually download 
 the scripts.
 Just as a reminder: Everything is run using Python 3, so depending on your setup you may have to replace `python` with
 `python3` below.
-All of the commands below assume you're running on a CPU.
+All of the commands below assume you are running on a CPU.
 If you have a GPU available you can simply remove `--use-cpu`.
 
 ## 1. Generating the data
@@ -24,7 +23,7 @@ python genseqcopy.py
 ```
 
 After running this script you have a training (`train.source`, `train.target`) and a development data set
-(`dev.source`, `dev.target`). The sequences that were generate look like this:
+(`dev.source`, `dev.target`). The generated sequences will look like this:
 
 ```
 2 3 5 5 4 6 7 0 3 8 10 9 3 6
@@ -54,7 +53,7 @@ python3 -m sockeye.train -s train.source \
                          -o seqcopy_model
 ```
 
-This will train a 1-layer RNN model with a bidirectional LSTM as the encoder side and a uni-directional LSTM
+This will train a 1-layer RNN model with a bidirectional LSTM as the encoder and a uni-directional LSTM
 as the decoder.
 The RNNs have 64 hidden units and we learn embeddings of size 32.
 Looking at the log we can see that our training data was assigned to buckets according to their
@@ -83,8 +82,8 @@ From the log you can see that initially the accuracy is around 0.1:
 With a vocabulary of size 10 this essentially means that the model is guessing randomly.
 As training progresses we see that after around 14 epochs the accuracy goes up to ~1.0 and the perplexity down to ~1.0.
 Sockeye performs early stopping based on the validation metrics tracked when checkpointing.
-Once the validation metrics have not improve for several checkpoints the training is stopped.
-How many validation non-improved checkpoints to tolerate can be set adjusted `--max-num-checkpoint-not-improved`.
+Once the validation metrics have not improved for several checkpoints the training is stopped.
+The number of tolerated non-improving checkpoints can be adjusted (`--max-num-checkpoint-not-improved`).
 
 ### Trained model
 
@@ -120,7 +119,7 @@ Note that the model was trained on sequences consisting of between 10 and 30 cha
 Therefore, the model will most likely have some difficulties with sequences shorter than 10 characters.
 By default Sockeye will read sentence from stdin and print the translations on stdout.
 
-Internally Sockeye will run a beam search in order to (approximately) find the translation  with the highest
+Internally Sockeye will run a beam search in order to (approximately) find the translation with the highest
 probability.
 
 Instead of using the parameters with the best validation score we can also use other checkpoints using the `-c`
