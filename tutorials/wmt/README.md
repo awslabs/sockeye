@@ -242,7 +242,7 @@ with an checkpointed averaged parameter file:
 
 ```bash
 cp -r wmt_model wmt_model_avg
-python -m sockeye.average -i wmt_model -o wmt_model_avg/param.best
+python -m sockeye.average -o wmt_model_avg/param.best wmt_model
 ```
 
 ## Summary

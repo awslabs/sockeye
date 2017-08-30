@@ -253,7 +253,7 @@ def test_tutorial_train_args(test_params, expected_params, expected_params_prese
     # WMT tutorial
     ('-m wmt_model wmt_model_seed2 '
      '--use-cpu '
-     '--output_type align_plot',
+     '--output-type align_plot',
      dict(models=["wmt_model", "wmt_model_seed2"],
           use_cpu=True,
           output_type="align_plot"),
@@ -266,7 +266,16 @@ def test_tutorial_translate_args(test_params, expected_params, expected_params_p
     _test_args_subset(test_params, expected_params, expected_params_present, arguments.add_translate_cli_args)
 
 
-# TODO: test for WMT parameter averaging...
+@pytest.mark.parametrize("test_params, expected_params, expected_params_present", [
+    # WMT tutorial
+    ('-o wmt_model_avg/param.best wmt_model',
+     dict(inputs=["wmt_model"],
+          output="wmt_model_avg/param.best"),
+     []),
+])
+def test_tutorial_averaging_args(test_params, expected_params, expected_params_present):
+    _test_args_subset(test_params, expected_params, expected_params_present, arguments.add_average_args)
+
 
 def _test_args(test_params, expected_params, args_func):
     test_parser = argparse.ArgumentParser()
