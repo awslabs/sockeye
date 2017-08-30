@@ -175,6 +175,7 @@ def get_training_data_iters(source: str, target: str,
                                             vocab_target[C.EOS_SYMBOL],
                                             C.PAD_ID,
                                             vocab_target[C.UNK_SYMBOL],
+                                            bucket_batch_sizes=None,
                                             fill_up=fill_up)
 
     logger.info("Creating validation data iterator")
@@ -191,6 +192,7 @@ def get_training_data_iters(source: str, target: str,
                                           vocab_target[C.EOS_SYMBOL],
                                           C.PAD_ID,
                                           vocab_target[C.UNK_SYMBOL],
+                                          bucket_batch_sizes=train_iter.bucket_batch_sizes,
                                           fill_up=fill_up)
     return train_iter, val_iter
 
@@ -349,6 +351,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
     :param eos_id: Word id for end-of-sentence.
     :param pad_id: Word id for padding symbols.
     :param unk_id: Word id for unknown symbols.
+    :param bucket_batch_sizes: Pre-computed bucket batch sizes (used to keep iterators consistent for train/validation)
     :param dtype: Data type of generated NDArrays.
     """
 
@@ -362,6 +365,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
                  eos_id: int,
                  pad_id: int,
                  unk_id: int,
+                 bucket_batch_sizes: Optional[List[List[int]]] = None,
                  fill_up: Optional[str] = None,
                  source_data_name=C.SOURCE_NAME,
                  target_data_name=C.TARGET_NAME,
@@ -388,27 +392,30 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         self.data_source = [[] for _ in self.buckets]
         self.data_target = [[] for _ in self.buckets]
         self.data_label = [[] for _ in self.buckets]
+        self.data_label_averge_len = [0 for _ in self.buckets]
 
         # Per-bucket batch sizes [num seq, num word]
-        self.bucket_batch_sizes = [[] for _ in self.buckets]
-        self._populate_bucket_batch_sizes()
+        # If not None, populated as part of assigning to buckets
+        self.bucket_batch_sizes = bucket_batch_sizes
 
         # assign sentence pairs to buckets
         self._assign_to_buckets(source_sentences, target_sentences)
+        self.largest_batch_size = max(size[0] for size in self.bucket_batch_sizes)
 
         # convert to single numpy array for each bucket
         self._convert_to_array()
 
+        # Sized to accommodate the max possible batch size and length
         self.provide_data = [
             mx.io.DataDesc(name=source_data_name,
-                           shape=(self.bucket_batch_sizes[-1][0], self.default_bucket_key[0]),
+                           shape=(self.largest_batch_size, self.default_bucket_key[0]),
                            layout=C.BATCH_MAJOR),
             mx.io.DataDesc(name=target_data_name,
-                           shape=(self.bucket_batch_sizes[-1][0], self.default_bucket_key[1]),
+                           shape=(self.largest_batch_size, self.default_bucket_key[1]),
                            layout=C.BATCH_MAJOR)]
         self.provide_label = [
             mx.io.DataDesc(name=label_name,
-                           shape=(self.bucket_batch_sizes[-1][0], self.default_bucket_key[1]),
+                           shape=(self.largest_batch_size, self.default_bucket_key[1]),
                            layout=C.BATCH_MAJOR)]
 
         self.data_names = [self.source_data_name, self.target_data_name]
@@ -433,38 +440,14 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
 
         self.reset()
 
-    def _populate_bucket_batch_sizes(self):
-        """
-        Number of sentences and words per batch for each bucket
-        """
-        for i in range(len(self.buckets)):
-            bucket_shape = self.buckets[i]
-            seq_len = bucket_shape[1]  # Use target side sequence length
-            if self.batch_by_words:
-                check_condition(seq_len <= self.batch_size, "Word batch size must cover sequence lengths for all"
-                                " buckets: (%d > %d)" % (seq_len, self.batch_size))
-            # Word-based: num words determines num sentences
-            # Sentence-based: num sentences determines num words
-            if self.batch_by_words:
-                # Largest size evenly divisible by seq len that does not exceed desired batch size
-                batch_size_word = self.batch_size - self.batch_size % seq_len
-                batch_size_seq = batch_size_word // seq_len
-                # Increase to next multiple of number of devices
-                rest = batch_size_seq % self.batch_num_devices
-                if rest > 0:
-                    batch_size_seq += self.batch_num_devices - rest
-                batch_size_word = batch_size_seq * seq_len
-            else:
-                batch_size_seq = self.batch_size
-                batch_size_word = batch_size_seq * seq_len
-            self.bucket_batch_sizes[i] = [batch_size_seq, batch_size_word]
-
     def _assign_to_buckets(self, source_sentences, target_sentences):
         ndiscard = 0
         tokens_source = 0
         tokens_target = 0
         num_of_unks_source = 0
         num_of_unks_target = 0
+
+        # Bucket sentences as padded np arrays
         for source, target in zip(source_sentences, target_sentences):
             tokens_source += len(source)
             tokens_target += len(target)
@@ -485,6 +468,18 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
             self.data_source[buck_idx].append(buff_source)
             self.data_target[buck_idx].append(buff_target)
             self.data_label[buck_idx].append(buff_label)
+            self.data_label_averge_len[buck_idx] += len(target)
+
+        # Average number of non-padding elements in target sequence per bucket
+        for buck_idx, buck in enumerate(self.buckets):
+            # Case of empty bucket -> use default padded length
+            if self.data_label_averge_len[buck_idx] == 0:
+                self.data_label_averge_len[buck_idx] = buck[1]
+            else:
+                self.data_label_averge_len[buck_idx] /= len(self.data_label[buck_idx])
+
+        # We now have sufficient information to populate bucket batch sizes
+        self._populate_bucket_batch_sizes()
 
         logger.info("Source words: %d", tokens_source)
         logger.info("Target words: %d", tokens_target)
@@ -494,7 +489,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         nsamples = 0
         for bkt, buck, (batch_size_seq, batch_size_word) in zip(
                 self.buckets, self.data_source, self.bucket_batch_sizes):
-            logger.info("Bucket of %s : %d samples in %d batches of %d (%d words/batch)",
+            logger.info("Bucket of %s : %d samples in %d batches of %d, approx %0.1f words/batch",
                         bkt, len(buck), math.ceil(len(buck) / batch_size_seq), batch_size_seq, batch_size_word)
             nsamples += len(buck)
         check_condition(nsamples > 0, "0 data points available in the data iterator. "
@@ -504,6 +499,39 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         logger.info("%d sentence pairs out of buckets", ndiscard)
         logger.info("fill up mode: %s", self.fill_up)
         logger.info("")
+
+    def _populate_bucket_batch_sizes(self):
+        """
+        Number of sentences and words per batch for each bucket
+        """
+        # Pre-defined bucket batch sizes
+        if self.bucket_batch_sizes is not None:
+            return
+        # Otherwise compute here
+        self.bucket_batch_sizes = [[] for _ in self.buckets]
+        for buck_idx in range(len(self.buckets)):
+            # Target/label length with padding
+            bucket_shape = self.buckets[buck_idx]
+            padded_seq_len = bucket_shape[1]
+            # Average target/label length excluding padding
+            average_seq_len = self.data_label_averge_len[buck_idx]
+            if self.batch_by_words:
+                check_condition(padded_seq_len <= self.batch_size, "Word batch size must cover sequence lengths for all"
+                                " buckets: (%d > %d)" % (padded_seq_len, self.batch_size))
+            # Word-based: num words determines num sentences
+            # Sentence-based: num sentences determines num words
+            if self.batch_by_words:
+                # Get as close as possible (int) to requested batch size without going over, assuming all sentences are
+                # of average length
+                batch_size_seq = math.floor(self.batch_size / average_seq_len)
+                # Round to closest multiple of number of devices (no danger of increasing size/memory usage by rounding
+                # up since we're just "filling up" batch slices for all devices)
+                batch_size_seq = self.batch_num_devices * round(batch_size_seq / self.batch_num_devices)
+                batch_size_word = batch_size_seq * average_seq_len
+            else:
+                batch_size_seq = self.batch_size
+                batch_size_word = batch_size_seq * average_seq_len
+            self.bucket_batch_sizes[buck_idx] = [batch_size_seq, batch_size_word]
 
     def _convert_to_array(self):
         for i in range(len(self.data_source)):
