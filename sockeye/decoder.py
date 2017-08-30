@@ -85,16 +85,18 @@ class Decoder(ABC):
 
     @abstractmethod
     def decode_step(self,
-                    prev_word_id: mx.sym.Symbol,
+                    target: mx.sym.Symbol,
+                    target_max_length: int,
                     source_encoded_max_length: int,
                     *states: mx.sym.Symbol) \
             -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
-        Decodes a single time step given the previous word id and previous decoder states.
+        Decodes a single time step given the previous word ids in target and previous decoder states.
         Returns logits, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param prev_word_id: Previous word id. Shape: (batch_size,).
+        :param target: Previous target word ids. Shape: (batch_size, target_max_length).
+        :param target_max_length: Size of time dimension in prev_word_ids.
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
@@ -122,7 +124,7 @@ class Decoder(ABC):
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
         """
-        return []
+        pass
 
     @abstractmethod
     def state_variables(self) -> List[mx.sym.Symbol]:
@@ -131,7 +133,7 @@ class Decoder(ABC):
 
         :return: List of symbolic variables.
         """
-        return []
+        pass
 
     @abstractmethod
     def state_shapes(self,
@@ -147,9 +149,8 @@ class Decoder(ABC):
         :param source_encoded_depth: Depth of encoded source.
         :return: List of shape descriptions.
         """
-        return []
+        pass
 
-    @abstractmethod
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """
         Returns a list of RNNCells used by this decoder.
@@ -244,42 +245,40 @@ class TransformerDecoder(Decoder):
         return logits
 
     def decode_step(self,
-                    prev_word_id: mx.sym.Symbol,
+                    target: mx.sym.Symbol,
+                    target_max_length: int,
                     source_encoded_max_length: int,
                     *states: mx.sym.Symbol) \
             -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
-        Decodes a single time step given the previous word id and previous decoder states.
+        Decodes a single time step given the previous word ids in target and previous decoder states.
         Returns logits, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param prev_word_id: Previous word id. Shape: (batch_size,).
+        :param target: Previous target word ids. Shape: (batch_size, target_max_length).
+        :param target_max_length: Size of time dimension in prev_word_ids.
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
         """
-        target_max_length = self._get_target_max_length(source_encoded_max_length)
+        source_encoded, source_encoded_lengths = states
 
-        # sequences: (batch_size, target_max_length)
-        source_encoded, source_encoded_lengths, sequences, lengths = states
+        # lengths: (batch_size,)
+        target_lengths = utils.compute_lengths(target)
+        indices = target_lengths - 1
 
-        # (batch_size, target_max_length)
-        mask = mx.sym.one_hot(indices=lengths, depth=target_max_length, on_value=1, off_value=0)
-
-        # all zeros but length position is set to prev_word_id
-        # (batch_size, target_max_length)
-        prev_word_id = mx.sym.broadcast_mul(mx.sym.expand_dims(prev_word_id, axis=1), mask)
-
-        # append/insert prev_word_id to sequences
-        # (batch_size, target_max_length)
-        sequences = sequences + prev_word_id
-        lengths += 1
+        # (batch_size, target_max_length, 1)
+        mask = mx.sym.expand_dims(mx.sym.one_hot(indices=indices,
+                                                 depth=target_max_length,
+                                                 on_value=1, off_value=0), axis=2)
 
         # (1, target_max_length, target_max_length)
         target_bias = transformer.get_autoregressive_bias(target_max_length, name="%sbias" % self.prefix)
 
         # (batch_size, target_max_length, model_size)
-        target, target_lengths, target_max_length = self.embedding.encode(sequences, lengths, target_max_length)
+        target, target_lengths, target_max_length = self.embedding.encode(target,
+                                                                          target_lengths,
+                                                                          target_max_length)
 
         for layer in self.layers:
             target = layer(target, target_lengths, target_max_length, target_bias,
@@ -287,7 +286,7 @@ class TransformerDecoder(Decoder):
 
         # set all target positions to zero except for current time-step
         # target: (batch_size, target_max_length, model_size)
-        target = mx.sym.broadcast_mul(target, mx.sym.expand_dims(mask, axis=2))
+        target = mx.sym.broadcast_mul(target, mask)
         # reduce to single prediction
         # target: (batch_size, model_size)
         target = mx.sym.sum(target, axis=1, keepdims=False)
@@ -298,8 +297,7 @@ class TransformerDecoder(Decoder):
         # TODO(fhieber): no attention probs for now
         attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
 
-        # next states
-        new_states = [source_encoded, source_encoded_lengths, sequences, lengths]
+        new_states = [source_encoded, source_encoded_lengths]
         return logits, attention_probs, new_states
 
     def reset(self):
@@ -318,14 +316,7 @@ class TransformerDecoder(Decoder):
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
         """
-        target_max_length = self._get_target_max_length(source_encoded_max_length)
-        # 0s: (batch_size, target_max_length)
-        sequences = mx.sym.broadcast_axis(mx.sym.expand_dims(mx.sym.zeros_like(source_encoded_lengths), axis=1),
-                                          axis=1,
-                                          size=target_max_length)
-        # 0s: (batch_size, source_encoded_max_length, encoder_depth)
-        lengths = mx.sym.zeros_like(source_encoded_lengths)
-        return [source_encoded, source_encoded_lengths, sequences, lengths]
+        return [source_encoded, source_encoded_lengths]
 
     def state_variables(self) -> List[mx.sym.Symbol]:
         """
@@ -334,9 +325,7 @@ class TransformerDecoder(Decoder):
         :return: List of symbolic variables.
         """
         return [mx.sym.Variable(C.SOURCE_ENCODED_NAME),
-                mx.sym.Variable(C.SOURCE_LENGTH_NAME),
-                mx.sym.Variable('sequences'),
-                mx.sym.Variable('lengths')]
+                mx.sym.Variable(C.SOURCE_LENGTH_NAME)]
 
     def state_shapes(self,
                      batch_size: int,
@@ -351,25 +340,10 @@ class TransformerDecoder(Decoder):
         :param source_encoded_depth: Depth of encoded source.
         :return: List of shape descriptions.
         """
-        target_max_length = self._get_target_max_length(source_encoded_max_length)
         return [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
                                (batch_size, source_encoded_max_length, source_encoded_depth),
                                layout=C.BATCH_MAJOR),
-                mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N"),
-                mx.io.DataDesc('sequences', (batch_size, target_max_length), layout="NC"),
-                mx.io.DataDesc('lengths', (batch_size,), layout="N")]
-
-    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
-        """
-        Returns a list of RNNCells used by this decoder.
-        """
-        return super().get_rnn_cells()
-
-    @staticmethod
-    def _get_target_max_length(source_encoded_max_length: int):
-        # TODO(fhieber): we need to hardcode this for the inference algorithm to work.
-        # This is currently in line with the beam_search algorithm but not ideal.
-        return source_encoded_max_length * C.TARGET_MAX_LENGTH_FACTOR
+                mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")]
 
 
 RecurrentDecoderState = NamedTuple('RecurrentDecoderState', [
@@ -399,6 +373,7 @@ class RecurrentDecoderConfig(Config):
     :param zero_state_init: If true, initialize RNN states with zeros.
     :param context_gating: Whether to use context gating.
     :param layer_normalization: Apply layer normalization.
+    :param attention_in_upper_layers: Pass the attention value to all layers in the decoder.
     """
 
     def __init__(self,
@@ -412,7 +387,8 @@ class RecurrentDecoderConfig(Config):
                  weight_tying: bool = False,
                  zero_state_init: bool = False,
                  context_gating: bool = False,
-                 layer_normalization: bool = False) -> None:
+                 layer_normalization: bool = False,
+                 attention_in_upper_layers: bool = False) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.max_seq_len_source = max_seq_len_source
@@ -425,6 +401,7 @@ class RecurrentDecoderConfig(Config):
         self.zero_state_init = zero_state_init
         self.context_gating = context_gating
         self.layer_normalization = layer_normalization
+        self.attention_in_upper_layers = attention_in_upper_layers
 
 
 class RecurrentDecoder(Decoder):
@@ -453,6 +430,8 @@ class RecurrentDecoder(Decoder):
         self.num_hidden = self.rnn_config.num_hidden
 
         if self.config.context_gating:
+            utils.check_condition(not self.config.attention_in_upper_layers,
+                                  "Context gating is not supported with attention in upper layers.")
             self.gate_w = mx.sym.Variable("%sgate_weight" % prefix)
             self.gate_b = mx.sym.Variable("%sgate_bias" % prefix)
             self.mapped_rnn_output_w = mx.sym.Variable("%smapped_rnn_output_weight" % prefix)
@@ -464,7 +443,16 @@ class RecurrentDecoder(Decoder):
                                   "Residual connections on the first decoder layer are not supported as input and "
                                   "output dimensions do not match.")
 
-        self.rnn = rnn.get_stacked_rnn(self.rnn_config, self.prefix)
+        # Stacked RNN
+        if self.rnn_config.num_layers == 1 or not self.rnn_config.attention_in_upper_layers:
+            self.rnn_pre_attention = rnn.get_stacked_rnn(self.rnn_config, self.prefix, parallel_inputs=False)
+            self.rnn_post_attention = None
+        else:
+            self.rnn_pre_attention = rnn.get_stacked_rnn(self.rnn_config, self.prefix, parallel_inputs=False,
+                                                         layers=[0])
+            self.rnn_post_attention = rnn.get_stacked_rnn(self.rnn_config, self.prefix, parallel_inputs=True,
+                                                          layers=range(1, self.rnn_config.num_layers))
+        self.rnn_pre_attention_n_states = len(self.rnn_pre_attention.state_shape)
 
         if not self.config.zero_state_init:
             self._create_state_init_parameters()
@@ -498,7 +486,10 @@ class RecurrentDecoder(Decoder):
         Creates parameters for encoder last state transformation into decoder layer initial states.
         """
         self.init_ws, self.init_bs, self.init_norms = [], [], []
-        for state_idx, (_, init_num_hidden) in enumerate(self.rnn.state_shape):
+        state_shapes = self.rnn_pre_attention.state_shape
+        if self.rnn_post_attention:
+            state_shapes += self.rnn_post_attention.state_shape
+        for state_idx, (_, init_num_hidden) in enumerate(state_shapes):
             self.init_ws.append(mx.sym.Variable("%senc2decinit_%d_weight" % (self.prefix, state_idx)))
             self.init_bs.append(mx.sym.Variable("%senc2decinit_%d_bias" % (self.prefix, state_idx)))
             if self.config.layer_normalization:
@@ -592,21 +583,27 @@ class RecurrentDecoder(Decoder):
         return logits
 
     def decode_step(self,
-                    prev_word_id: mx.sym.Symbol,
+                    target: mx.sym.Symbol,
+                    target_max_length: int,
                     source_encoded_max_length: int,
                     *states: mx.sym.Symbol) \
             -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
-        Decodes a single time step given the previous word id and previous decoder states.
+        Decodes a single time step given the previous word ids in target and previous decoder states.
         Returns logits, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param prev_word_id: Previous word id. Shape: (batch_size,).
+        :param target: Previous target word ids. Shape: (batch_size, target_max_length).
+        :param target_max_length: Size of time dimension in prev_word_ids.
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
         """
         source_encoded, prev_dynamic_source, source_encoded_length, prev_hidden, *layer_states = states
+
+        # indices: (batch_size,)
+        indices = utils.compute_lengths(target) - 1
+        prev_word_id = mx.sym.pick(target, indices, axis=1)
 
         word_vec_prev, _, _ = self.embedding.encode(prev_word_id, None, 1)
 
@@ -638,9 +635,12 @@ class RecurrentDecoder(Decoder):
         """
         Calls reset on the RNN cell.
         """
-        self.rnn.reset()
-        # TODO remove this once mxnet.rnn.SequentialRNNCell.reset() invokes recursive calls on layer cells
-        for cell in self.rnn._cells:
+        self.rnn_pre_attention.reset()
+        cells_to_reset = self.rnn_pre_attention._cells
+        if self.rnn_post_attention:
+            self.rnn_post_attention.reset()
+            cells_to_reset += self.rnn_post_attention._cells
+        for cell in cells_to_reset:
             # TODO remove this once mxnet.rnn.ModifierCell.reset() invokes reset() of base_cell
             if isinstance(cell, mx.rnn.ModifierCell):
                 cell.base_cell.reset()
@@ -677,7 +677,7 @@ class RecurrentDecoder(Decoder):
                 mx.sym.Variable(C.SOURCE_LENGTH_NAME),
                 mx.sym.Variable(C.HIDDEN_PREVIOUS_NAME)] + \
                [mx.sym.Variable("%senc2decinit_%d" % (self.prefix, i)) for i in
-                range(len(self.rnn.state_info))]
+                range(len(sum([rnn.state_info for rnn in self.get_rnn_cells()], [])))]
 
     def state_shapes(self,
                      batch_size: int,
@@ -706,13 +706,18 @@ class RecurrentDecoder(Decoder):
                                layout="NC")] + \
                [mx.io.DataDesc("%senc2decinit_%d" % (self.prefix, i),
                                (batch_size, num_hidden),
-                               layout=C.BATCH_MAJOR) for i, (_, num_hidden) in enumerate(self.rnn.state_shape)]
+                               layout=C.BATCH_MAJOR) for i, (_, num_hidden) in enumerate(
+                                   sum([rnn.state_shape for rnn in self.get_rnn_cells()], [])
+                               )]
 
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """
         Returns a list of RNNCells used by this decoder.
         """
-        return [self.rnn]
+        cells = [self.rnn_pre_attention]
+        if self.rnn_post_attention:
+            cells.append(self.rnn_post_attention)
+        return cells
 
     def get_initial_state(self,
                           source_encoded: mx.sym.Symbol,
@@ -740,7 +745,7 @@ class RecurrentDecoder(Decoder):
 
         # initial states for each layer
         layer_states = []
-        for state_idx, (_, init_num_hidden) in enumerate(self.rnn.state_shape):
+        for state_idx, (_, init_num_hidden) in enumerate(sum([rnn.state_shape for rnn in self.get_rnn_cells()], [])):
             if self.config.zero_state_init:
                 init = mx.sym.tile(data=zeros, reps=(1, init_num_hidden))
             else:
@@ -757,8 +762,7 @@ class RecurrentDecoder(Decoder):
 
         return RecurrentDecoderState(hidden, layer_states)
 
-    def _step(self,
-              word_vec_prev: mx.sym.Symbol,
+    def _step(self, word_vec_prev: mx.sym.Symbol,
               state: RecurrentDecoderState,
               attention_func: Callable,
               attention_state: attentions.AttentionState,
@@ -779,27 +783,41 @@ class RecurrentDecoder(Decoder):
         # concat previous word embedding and previous hidden state
         rnn_input = mx.sym.concat(word_vec_prev, state.hidden, dim=1,
                                   name="%sconcat_target_context_t%d" % (self.prefix, seq_idx))
-        # rnn_output: (batch_size, rnn_num_hidden)
+        # rnn_pre_attention_output: (batch_size, rnn_num_hidden)
         # next_layer_states: num_layers * [batch_size, rnn_num_hidden]
-        rnn_output, layer_states = self.rnn(rnn_input, state.layer_states)
+        rnn_pre_attention_output, rnn_pre_attention_layer_states = \
+            self.rnn_pre_attention(rnn_input, state.layer_states[:self.rnn_pre_attention_n_states])
 
         # (2) Attention step
-        attention_input = self.attention.make_input(seq_idx, word_vec_prev, rnn_output)
+        attention_input = self.attention.make_input(seq_idx, word_vec_prev, rnn_pre_attention_output)
         attention_state = attention_func(attention_input, attention_state)
 
-        # (3) Combine previous word vector, rnn output, and context
-        hidden_concat = mx.sym.concat(rnn_output, attention_state.context,
-                                      dim=1, name='%shidden_concat_t%d' % (self.prefix, seq_idx))
-        if self.config.hidden_dropout > 0:
-            hidden_concat = mx.sym.Dropout(data=hidden_concat, p=self.config.hidden_dropout,
-                                           name='%shidden_concat_dropout_t%d' % (self.prefix, seq_idx))
-
-        if self.config.context_gating:
-            hidden = self._context_gate(hidden_concat, rnn_output, attention_state, seq_idx)
-        else:
+        # (3) Attention handling (and possibly context gating)
+        if self.rnn_post_attention:
+            upper_rnn_output, upper_rnn_layer_states = \
+                self.rnn_post_attention(rnn_pre_attention_output, attention_state.context,
+                                        state.layer_states[self.rnn_pre_attention_n_states:])
+            hidden_concat = mx.sym.concat(upper_rnn_output, attention_state.context,
+                                          dim=1, name='%shidden_concat_t%d' % (self.prefix, seq_idx))
+            if self.config.hidden_dropout > 0:
+                hidden_concat = mx.sym.Dropout(data=hidden_concat, p=self.config.hidden_dropout,
+                                               name='%shidden_concat_dropout_t%d' % (self.prefix, seq_idx))
             hidden = self._hidden_mlp(hidden_concat, seq_idx)
+            # TODO: add context gating?
+        else:
+            upper_rnn_layer_states = []
+            hidden_concat = mx.sym.concat(rnn_pre_attention_output, attention_state.context,
+                                          dim=1, name='%shidden_concat_t%d' % (self.prefix, seq_idx))
+            if self.config.hidden_dropout > 0:
+                hidden_concat = mx.sym.Dropout(data=hidden_concat, p=self.config.hidden_dropout,
+                                               name='%shidden_concat_dropout_t%d' % (self.prefix, seq_idx))
 
-        return RecurrentDecoderState(hidden, layer_states), attention_state
+            if self.config.context_gating:
+                hidden = self._context_gate(hidden_concat, rnn_pre_attention_output, attention_state, seq_idx)
+            else:
+                hidden = self._hidden_mlp(hidden_concat, seq_idx)
+
+        return RecurrentDecoderState(hidden, rnn_pre_attention_layer_states + upper_rnn_layer_states), attention_state
 
     def _hidden_mlp(self, hidden_concat: mx.sym.Symbol, seq_idx: int) -> mx.sym.Symbol:
         hidden = mx.sym.FullyConnected(data=hidden_concat,

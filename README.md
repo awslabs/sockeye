@@ -3,7 +3,7 @@
 [![Documentation Status](https://readthedocs.org/projects/sockeye/badge/?version=latest)](http://sockeye.readthedocs.io/en/latest/?badge=latest) [![Build Status](https://travis-ci.org/awslabs/sockeye.svg?branch=master)](https://travis-ci.org/awslabs/sockeye)
 
 This package contains the Sockeye project,
-a sequence-to-sequence framework for Neural Machine Translation based on Apache MXNet.
+a sequence-to-sequence framework for Neural Machine Translation based on Apache MXNet Incubating.
 It implements the well-known encoder-decoder architecture with attention.
 
 If you are interested in collaborating or have any questions, please submit a pull request or issue.
@@ -18,16 +18,22 @@ Sockeye requires:
 
 ## Installation
 
-### For AWS DeepLearning AMI users
+There are several options for installing Sockeye and it's dependencies. Below we list several alternatives and the
+corresponding instructions.
 
-AWS DeepLearning AMI users only need to run the following line to install sockeye:
+### Either: AWS DeepLearning AMI
+
+[AWS DeepLearning AMI](https://aws.amazon.com/amazon-ai/amis/) users only need to run the following line to install sockeye:
 
 ```bash
 > sudo pip3 install sockeye --no-deps
 ```
 
-For other environments, you can choose between installing via pip or directly from source.
-### pip
+For other environments, you can choose between installing via pip or directly from source. Note that for the
+remaining instructions to work you will need to use `python3` instead of `python` and `pip3` instead of `pip`.
+
+
+### Or: pip package
 
 #### CPU
 
@@ -37,8 +43,9 @@ For other environments, you can choose between installing via pip or directly fr
 
 #### GPU
 
-If you want to run sockeye on a GPU you need to make sure your version of Apache MXNet contains the GPU code. Depending on your
-version of CUDA you can do this by running the following for CUDA 8.0:
+If you want to run sockeye on a GPU you need to make sure your version of Apache MXNet Incubating contains the GPU
+bindings.
+Depending on your version of CUDA you can do this by running the following for CUDA 8.0:
 
 ```bash
 > wget https://raw.githubusercontent.com/awslabs/sockeye/master/requirements.gpu-cu80.txt
@@ -52,7 +59,7 @@ or the following for CUDA 7.5:
 > rm requirements.gpu-cu75.txt
 ```
 
-### From Source
+### Or: From Source
 
 #### CPU
 
@@ -64,8 +71,9 @@ after cloning the repository from git.
 
 #### GPU
 
-If you want to run sockeye on a GPU you need to make sure your version of Apache MXNet contains the GPU code. Depending on your
-version of CUDA you can do this by running the following for CUDA 8.0:
+If you want to run sockeye on a GPU you need to make sure your version of Apache MXNet
+Incubating contains the GPU bindings. Depending on your version of CUDA you can do this by
+running the following for CUDA 8.0:
 
 ```bash
 > python setup.py install -r requirements.gpu-cu80.txt
@@ -85,7 +93,6 @@ In general you can install all optional dependencies from the Sockeye source fol
 > pip install -e '.[optional]'
 ```
 
-*AWS DeepLearning AMI user need to use python3 command instead of the python*
 
 ### Running sockeye
 
@@ -96,8 +103,6 @@ directly. For example *sockeye-train* can also be invoked as
 ```bash
 > python -m sockeye.train <args>
 ```
-
-*AWS DeepLearning AMI user need to use python3 command instead of the python*
 
 ## First Steps
 
@@ -136,3 +141,8 @@ write translations to STDOUT.
 
 For more detailed examples check out our user documentation.
 
+
+## Step-by-step tutorial
+
+More detailed step-by-step tutorials can be found in the
+[tutorials directory](https://github.com/awslabs/sockeye/tree/master/tutorials).

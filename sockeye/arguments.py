@@ -15,10 +15,12 @@
 Defines commandline arguments for the main CLIs with reasonable defaults.
 """
 import argparse
+import sys
 from typing import Callable, Optional
 
 from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
 from . import constants as C
+from . import data_io
 
 
 def int_greater_or_equal(threshold: int) -> Callable:
@@ -83,6 +85,18 @@ def multiple_values(num_values: int = 0,
                 raise argparse.ArgumentTypeError("Must provide value greater or equal to %d" % greater_or_equal)
         return values
 
+    return parse
+
+
+def file_or_stdin() -> Callable:
+    """
+    Returns a file descriptor from stdin or opening a file from a given path.
+    """
+    def parse(path):
+        if path is None or path == "-":
+            return sys.stdin
+        else:
+            return data_io.smart_open(path)
     return parse
 
 
@@ -335,6 +349,10 @@ def add_model_parameters(params):
                               type=int,
                               default=1,
                               help="Number of hidden units for coverage vectors. Default: %(default)s.")
+    model_params.add_argument('--attention-in-upper-layers',
+                              action="store_true",
+                              help="Pass the attention to the upper layers of the RNN decoder, similar "
+                                   "to GNMT paper. Only applicable if more than one layer is used.")
     model_params.add_argument('--attention-mhdot-heads',
                               type=int, default=None,
                               help='Number of heads for Multi-head dot attention. Default: %(default)s.')
@@ -350,7 +368,8 @@ def add_model_parameters(params):
 
     model_params.add_argument('--weight-tying',
                               action='store_true',
-                              help='Turn on weight tying. The type of weight sharing is determined through '
+                              help='Turn on weight tying (see arxiv.org/abs/1608.05859). '
+                                   'The type of weight sharing is determined through '
                                    '--weight-tying-type. Default: %(default)s.')
     model_params.add_argument('--weight-tying-type',
                               default=C.WEIGHT_TYING_TRG_SOFTMAX,
@@ -451,11 +470,21 @@ def add_training_args(params):
                               default=(.0, .0),
                               help='Dropout probability for source & target embeddings. Use <val>:<val> to specify '
                                    'separate values. Default: %(default)s.')
-    train_params.add_argument('--rnn-dropout',
+    train_params.add_argument('--rnn-dropout-inputs',
                               type=multiple_values(2, data_type=float),
                               default=(.0, .0),
-                              help='RNN variational dropout probability for encoder & decoder RNNs.'
+                              help='RNN variational dropout probability for encoder & decoder RNN inputs. (Gal, 2015)'
                                    'Use <val>:<val> to specify separate values. Default: %(default)s.')
+    train_params.add_argument('--rnn-dropout-states',
+                              type=multiple_values(2, data_type=float),
+                              default=(.0, .0),
+                              help='RNN variational dropout probability for encoder & decoder RNN states. (Gal, 2015)'
+                                   'Use <val>:<val> to specify separate values. Default: %(default)s.')
+    train_params.add_argument('--rnn-dropout-recurrent',
+                              type=multiple_values(2, data_type=float),
+                              default=(.0, .0),
+                              help='Recurrent dropout without memory loss (Semeniuta, 2016) for encoder & decoder '
+                                   'LSTMs. Use <val>:<val> to specify separate values. Default: %(default)s.')
 
     train_params.add_argument('--rnn-decoder-hidden-dropout',
                               type=float,
@@ -572,6 +601,18 @@ def add_training_args(params):
                               help='Keep only the last n params files, use -1 to keep all files. Default: %(default)s')
 
 
+def add_train_cli_args(params):
+    add_io_args(params)
+    add_model_parameters(params)
+    add_training_args(params)
+    add_device_args(params)
+
+
+def add_translate_cli_args(params):
+    add_inference_args(params)
+    add_device_args(params)
+
+
 def add_inference_args(params):
     decode_params = params.add_argument_group("Inference parameters")
 
@@ -606,15 +647,25 @@ def add_inference_args(params):
                                default='linear',
                                choices=['linear', 'log_linear'],
                                help='Ensemble mode. Default: %(default)s.')
+    decode_params.add_argument('--bucket-width',
+                               type=multiple_values(2, greater_or_equal=0, data_type=int),
+                               default=(10, 2),
+                               help='Bucket width for decoder steps. 0 means no bucketing. Default: %(default)s.')
     decode_params.add_argument('--max-input-len', '-n',
                                type=int,
                                default=None,
-                               help='Maximum sequence length. Default: value from model(s).')
+                               help='Maximum input sequence length. Default: value from model(s).')
     decode_params.add_argument('--softmax-temperature',
                                type=float,
                                default=None,
                                help='Controls peakiness of model predictions. Values < 1.0 produce '
                                     'peaked predictions, values > 1.0 produce smoothed distributions.')
+    decode_params.add_argument('--max-output-length-num-stds',
+                               type=int,
+                               default=C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
+                               help='Number of target-to-source length ratio standard deviations from training to add '
+                                    'to calculate maximum output length for beam search for each sentence. '
+                                    'Default: %(default)s.')
 
     decode_params.add_argument('--output-type',
                                default='translation',
@@ -635,3 +686,29 @@ def add_inference_args(params):
                                type=float,
                                help='Beta factor for the length penalty used in beam search: '
                                     '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
+
+
+def add_evaluate_args(params):
+    eval_params = params.add_argument_group("Evaluate parameters")
+    eval_params.add_argument('--references', '-r',
+                             required=True,
+                             type=str,
+                             help="File with references.")
+    eval_params.add_argument('--hypotheses', '-i',
+                             type=file_or_stdin(),
+                             default=sys.stdin,
+                             help="File with hypotheses. If none will read from stdin. Default: %(default)s.")
+    eval_params.add_argument('--quiet', '-q',
+                             action="store_true",
+                             help="Do not print logging information.")
+    eval_params.add_argument('--sentence', '-s',
+                             action="store_true",
+                             help="Show sentence-BLEU. Default: %(default)s.")
+    eval_params.add_argument('--offset',
+                             type=float,
+                             default=0.01,
+                             help="Numerical value of the offset of zero n-gram counts. Default: %(default)s.")
+    eval_params.add_argument('--not-strict', '-n',
+                             action="store_true",
+                             help="Do not fail if number of hypotheses does not match number of references. "
+                                  "Default: %(default)s.")

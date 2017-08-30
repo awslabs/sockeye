@@ -15,4 +15,6 @@ recursive-include docs *.md
 recursive-include docs *.py
 recursive-include docs *.rst
 recursive-include docs Makefile
-
+recursive-include tutorials *.md
+recursive-include tutorials *.png
+recursive-include tutorials *.py

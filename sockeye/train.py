@@ -27,7 +27,7 @@ from typing import Optional, Dict, List
 import mxnet as mx
 import numpy as np
 
-from sockeye.log import setup_main_logger, log_sockeye_version
+from sockeye.log import setup_main_logger, log_sockeye_version, log_mxnet_version
 from sockeye.utils import acquire_gpus, check_condition, get_num_gpus, expand_requested_device_ids
 from . import arguments
 from . import attention
@@ -81,10 +81,7 @@ def _dict_difference(dict1: Dict, dict2: Dict):
 
 def main():
     params = argparse.ArgumentParser(description='CLI to train sockeye sequence-to-sequence models.')
-    arguments.add_io_args(params)
-    arguments.add_model_parameters(params)
-    arguments.add_training_args(params)
-    arguments.add_device_args(params)
+    arguments.add_train_cli_args(params)
     args = params.parse_args()
 
     # seed the RNGs
@@ -101,6 +98,7 @@ def main():
     # Checking status of output folder, resumption, etc.
     # Create temporary logger to console only
     logger = setup_main_logger(__name__, file_logging=False, console=not args.quiet)
+
     output_folder = os.path.abspath(args.output)
     resume_training = False
     training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
@@ -135,6 +133,7 @@ def main():
                                file_logging=True,
                                console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
     log_sockeye_version(logger)
+    log_mxnet_version(logger)
     logger.info("Command: %s", " ".join(sys.argv))
     logger.info("Arguments: %s", args)
     with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "w") as fp:
@@ -187,30 +186,27 @@ def main():
         vocab_target_size = len(vocab_target)
         logger.info("Vocabulary sizes: source=%d target=%d", vocab_source_size, vocab_target_size)
 
-        config_data = data_io.DataConfig(os.path.abspath(args.source),
-                                         os.path.abspath(args.target),
-                                         os.path.abspath(args.validation_source),
-                                         os.path.abspath(args.validation_target),
-                                         args.source_vocab,
-                                         args.target_vocab)
-
         # create data iterators
         max_seq_len_source, max_seq_len_target = args.max_seq_len
         batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
-        train_iter, eval_iter = data_io.get_training_data_iters(source=config_data.source,
-                                                                target=config_data.target,
-                                                                validation_source=config_data.validation_source,
-                                                                validation_target=config_data.validation_target,
-                                                                vocab_source=vocab_source,
-                                                                vocab_target=vocab_target,
-                                                                batch_size=args.batch_size,
-                                                                batch_by_words=args.batch_type == C.BATCH_TYPE_WORD,
-                                                                batch_num_devices=batch_num_devices,
-                                                                fill_up=args.fill_up,
-                                                                max_seq_len_source=max_seq_len_source,
-                                                                max_seq_len_target=max_seq_len_target,
-                                                                bucketing=not args.no_bucketing,
-                                                                bucket_width=args.bucket_width)
+        train_iter, eval_iter, config_data = data_io.get_training_data_iters(source=os.path.abspath(args.source),
+                                                                             target=os.path.abspath(args.target),
+                                                                             validation_source=os.path.abspath(
+                                                                                 args.validation_source),
+                                                                             validation_target=os.path.abspath(
+                                                                                 args.validation_target),
+                                                                             vocab_source=vocab_source,
+                                                                             vocab_target=vocab_target,
+                                                                             vocab_source_path=args.source_vocab,
+                                                                             vocab_target_path=args.target_vocab,
+                                                                             batch_size=args.batch_size,
+                                                                             batch_by_words=args.batch_type == C.BATCH_TYPE_WORD,
+                                                                             batch_num_devices=batch_num_devices,
+                                                                             fill_up=args.fill_up,
+                                                                             max_seq_len_source=max_seq_len_source,
+                                                                             max_seq_len_target=max_seq_len_target,
+                                                                             bucketing=not args.no_bucketing,
+                                                                             bucket_width=args.bucket_width)
 
         # learning rate scheduling
         learning_rate_half_life = none_if_negative(args.learning_rate_half_life)
@@ -232,13 +228,18 @@ def main():
         encoder_num_layers, decoder_num_layers = args.num_layers
 
         encoder_embed_dropout, decoder_embed_dropout = args.embed_dropout
-        encoder_rnn_dropout, decoder_rnn_dropout = args.rnn_dropout
-        if encoder_embed_dropout > 0 and encoder_rnn_dropout > 0:
+        encoder_rnn_dropout_inputs, decoder_rnn_dropout_inputs = args.rnn_dropout_inputs
+        encoder_rnn_dropout_states, decoder_rnn_dropout_states = args.rnn_dropout_inputs
+        if encoder_embed_dropout > 0 and encoder_rnn_dropout_inputs > 0:
             logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
                            "two dropout layers on top of each other.")
-        if decoder_embed_dropout > 0 and decoder_rnn_dropout > 0:
+        if decoder_embed_dropout > 0 and decoder_rnn_dropout_inputs > 0:
             logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
                            "two dropout layers on top of each other.")
+        encoder_rnn_dropout_recurrent, decoder_rnn_dropout_recurrent = args.rnn_dropout_recurrent
+        if encoder_rnn_dropout_recurrent > 0 or decoder_rnn_dropout_recurrent > 0:
+            check_condition(args.rnn_cell_type == C.LSTM_TYPE,
+                            "Recurrent dropout without memory loss only supported for LSTMs right now.")
 
         config_conv = None
         if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
@@ -271,7 +272,9 @@ def main():
                 rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
                                          num_hidden=args.rnn_num_hidden,
                                          num_layers=encoder_num_layers,
-                                         dropout=encoder_rnn_dropout,
+                                         dropout_inputs=encoder_rnn_dropout_inputs,
+                                         dropout_states=encoder_rnn_dropout_states,
+                                         dropout_recurrent=encoder_rnn_dropout_recurrent,
                                          residual=args.rnn_residual_connections,
                                          first_residual_layer=args.rnn_first_residual_layer,
                                          forget_bias=args.rnn_forget_bias),
@@ -315,7 +318,9 @@ def main():
                 rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
                                          num_hidden=args.rnn_num_hidden,
                                          num_layers=decoder_num_layers,
-                                         dropout=decoder_rnn_dropout,
+                                         dropout_inputs=decoder_rnn_dropout_inputs,
+                                         dropout_states=decoder_rnn_dropout_states,
+                                         dropout_recurrent=decoder_rnn_dropout_recurrent,
                                          residual=args.rnn_residual_connections,
                                          first_residual_layer=args.rnn_first_residual_layer,
                                          forget_bias=args.rnn_forget_bias),
@@ -325,7 +330,8 @@ def main():
                 weight_tying=decoder_weight_tying,
                 zero_state_init=args.rnn_decoder_zero_init,
                 context_gating=args.rnn_context_gating,
-                layer_normalization=args.layer_normalization)
+                layer_normalization=args.layer_normalization,
+                attention_in_upper_layers=args.attention_in_upper_layers)
 
         config_loss = loss.LossConfig(type=args.loss,
                                       vocab_size=vocab_target_size,
@@ -399,6 +405,14 @@ def main():
             max_num_checkpoint_not_improved = -1
             min_num_epochs = 0
 
+        monitor_bleu = args.monitor_bleu
+        # Turn on BLEU monitoring when the optimized metric is BLEU and it hasn't been enabled yet
+        if args.optimized_metric == C.BLEU and monitor_bleu == 0:
+            logger.info("You chose BLEU as the optimized metric, will turn on BLEU monitoring during training. "
+                        "To control how many validation sentences are used for calculating bleu use "
+                        "the --monitor-bleu argument.")
+            monitor_bleu = -1
+
         training_model.fit(train_iter, eval_iter,
                            output_folder=output_folder,
                            max_params_files_to_keep=args.keep_last_params,
@@ -410,7 +424,7 @@ def main():
                            optimized_metric=args.optimized_metric,
                            max_num_not_improved=max_num_checkpoint_not_improved,
                            min_num_epochs=min_num_epochs,
-                           monitor_bleu=args.monitor_bleu,
+                           monitor_bleu=monitor_bleu,
                            use_tensorboard=args.use_tensorboard,
                            mxmonitor_pattern=args.monitor_pattern,
                            mxmonitor_stat_func=args.monitor_stat_func)

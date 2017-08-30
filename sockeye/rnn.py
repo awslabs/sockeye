@@ -12,13 +12,14 @@
 # permissions and limitations under the License.
 
 # List is needed for mypy, but not used in the code, only in special comments
-from typing import Optional, List
+from typing import Optional, List, Iterable  # NOQA pylint: disable=unused-import
 
 import mxnet as mx
 
 from sockeye.config import Config
 from sockeye.layers import LayerNormalization
 from . import constants as C
+from . import utils
 
 
 class RNNConfig(Config):
@@ -28,46 +29,114 @@ class RNNConfig(Config):
     :param cell_type: RNN cell type.
     :param num_hidden: Number of RNN hidden units.
     :param num_layers: Number of RNN layers.
-    :param dropout: Dropout probability on RNN outputs.
+    :param dropout_inputs: Dropout probability on RNN inputs (Gal, 2015).
+    :param dropout_states: Dropout probability on RNN states (Gal, 2015).
+    :param dropout_recurrent: Dropout probability on cell update (Semeniuta, 2016).
     :param residual: Whether to add residual connections between multi-layered RNNs.
     :param first_residual_layer: First layer with a residual connection (1-based indexes).
            Default is to start at the second layer.
     :param forget_bias: Initial value of forget biases.
     """
+
     def __init__(self,
                  cell_type: str,
                  num_hidden: int,
                  num_layers: int,
-                 dropout: float,
+                 dropout_inputs: float,
+                 dropout_states: float,
+                 dropout_recurrent: float = 0,
                  residual: bool = False,
                  first_residual_layer: int = 2,
-                 forget_bias: float = 0.0) -> None:
+                 forget_bias: float = 0.0,
+                 attention_in_upper_layers: bool = False) -> None:
         super().__init__()
         self.cell_type = cell_type
         self.num_hidden = num_hidden
         self.num_layers = num_layers
-        self.dropout = dropout
+        self.dropout_inputs = dropout_inputs
+        self.dropout_states = dropout_states
+        self.dropout_recurrent = dropout_recurrent
         self.residual = residual
         self.first_residual_layer = first_residual_layer
         self.forget_bias = forget_bias
+        self.attention_in_upper_layers = attention_in_upper_layers
 
 
-def get_stacked_rnn(config: RNNConfig, prefix: str) -> mx.rnn.SequentialRNNCell:
+class SequentialRNNCellParallelInput(mx.rnn.SequentialRNNCell):
+    """
+    A SequentialRNNCell, where an additional "parallel" input can be given at
+    call time and it will be added to the input of each layer
+    """
+
+    def __call__(self, inputs, parallel_inputs, states):
+        # Adapted copy of mx.rnn.SequentialRNNCell.__call__()
+        self._counter += 1
+        next_states = []
+        pos = 0
+        for cell in self._cells:
+            assert not isinstance(cell, mx.rnn.BidirectionalCell)
+            length = len(cell.state_info)
+            state = states[pos:pos + length]
+            pos += length
+            inputs, state = cell(inputs, parallel_inputs, state)
+            next_states.append(state)
+        return inputs, sum(next_states, [])
+
+
+class ParallelInputCell(mx.rnn.ModifierCell):
+    """
+    A modifier cell that accepts two input vectors and concatenates them before
+    calling the original cell. Typically it is used for concatenating the
+    normal and the parallel input in a stacked rnn.
+    """
+
+    def __call__(self, inputs, parallel_inputs, states):
+        concat_inputs = mx.sym.concat(inputs, parallel_inputs)
+        output, states = self.base_cell(concat_inputs, states)
+        return output, states
+
+
+class ResidualCellParallelInput(mx.rnn.ResidualCell):
+    """
+    A ResidualCell, where an additional "parallel" input can be given at call
+    time and it will be added to the input of each layer, but not considered
+    for the residual connection itself.
+    """
+
+    def __call__(self, inputs, parallel_inputs, states):
+        concat_inputs = mx.sym.concat(inputs, parallel_inputs)
+        output, states = self.base_cell(concat_inputs, states)
+        output = mx.symbol.elemwise_add(output, inputs, name="%s_plus_residual" % output.name)
+        return output, states
+
+
+def get_stacked_rnn(config: RNNConfig, prefix: str,
+                    parallel_inputs: bool = False,
+                    layers: Optional[Iterable[int]] = None) -> mx.rnn.SequentialRNNCell:
     """
     Returns (stacked) RNN cell given parameters.
 
     :param config: rnn configuration.
     :param prefix: Symbol prefix for RNN.
+    :param parallel_inputs: Support parallel inputs for the stacked RNN cells.
+    :param layers: Specify which layers to create as a list of layer indexes.
+
     :return: RNN cell.
     """
 
-    rnn = mx.rnn.SequentialRNNCell()
-    for layer_idx in range(config.num_layers):
+    rnn = mx.rnn.SequentialRNNCell() if not parallel_inputs else SequentialRNNCellParallelInput()
+    if not layers:
+        layers = range(config.num_layers)
+    for layer_idx in layers:
         # fhieber: the 'l' in the prefix does NOT stand for 'layer' but for the direction 'l' as in mx.rnn.rnn_cell::517
         # this ensures parameter name compatibility of training w/ FusedRNN and decoding with 'unfused' RNN.
         cell_prefix = "%sl%d_" % (prefix, layer_idx)
         if config.cell_type == C.LSTM_TYPE:
-            cell = mx.rnn.LSTMCell(num_hidden=config.num_hidden, prefix=cell_prefix, forget_bias=config.forget_bias)
+            if config.dropout_recurrent > 0.0:
+                cell = RecurrentDropoutLSTMCell(num_hidden=config.num_hidden, prefix=cell_prefix,
+                                                forget_bias=config.forget_bias, dropout=config.dropout_recurrent)
+            else:
+                cell = mx.rnn.LSTMCell(num_hidden=config.num_hidden, prefix=cell_prefix, forget_bias=config.forget_bias)
         elif config.cell_type == C.LNLSTM_TYPE:
             cell = LayerNormLSTMCell(num_hidden=config.num_hidden, prefix=cell_prefix, forget_bias=config.forget_bias)
         elif config.cell_type == C.LNGLSTM_TYPE:
@@ -82,14 +151,16 @@ def get_stacked_rnn(config: RNNConfig, prefix: str) -> mx.rnn.SequentialRNNCell:
         else:
             raise NotImplementedError()
 
-        if config.dropout > 0:
+        if config.dropout_inputs > 0 or config.dropout_states > 0:
             cell = VariationalDropoutCell(cell,
-                                          dropout_inputs=config.dropout,
-                                          dropout_states=config.dropout)
+                                          dropout_inputs=config.dropout_inputs,
+                                          dropout_states=config.dropout_states)
 
         # layer_idx is 0 based, whereas first_residual_layer is 1-based
         if config.residual and layer_idx + 1 >= config.first_residual_layer:
-            cell = mx.rnn.ResidualCell(cell)
+            cell = mx.rnn.ResidualCell(cell) if not parallel_inputs else ResidualCellParallelInput(cell)
+        elif parallel_inputs:
+            cell = ParallelInputCell(cell)
 
         rnn.add(cell)
 
@@ -233,6 +304,47 @@ class LayerNormPerGateLSTMCell(mx.rnn.LSTMCell):
         next_h = mx.sym._internal._mul(out_gate,
                                        mx.sym.Activation(self._norm_layers[4].normalize(next_c), act_type="tanh"),
                                        name='%sout' % name)
+        return next_h, [next_h, next_c]
+
+
+class RecurrentDropoutLSTMCell(mx.rnn.LSTMCell):
+    """
+    LSTMCell with recurrent dropout without memory loss as in:
+    http://aclanthology.coli.uni-saarland.de/pdf/C/C16/C16-1165.pdf
+    """
+
+    def __init__(self, num_hidden, prefix='lstm_', params=None, forget_bias=1.0, dropout: float = 0.0) -> None:
+        super().__init__(num_hidden, prefix, params, forget_bias)
+        utils.check_condition(dropout > 0.0, "RecurrentDropoutLSTMCell shoud have dropout > 0.0")
+        self.dropout = dropout
+
+    def __call__(self, inputs, states):
+        self._counter += 1
+        name = '%st%d_' % (self._prefix, self._counter)
+        i2h = mx.sym.FullyConnected(data=inputs, weight=self._iW, bias=self._iB,
+                                    num_hidden=self._num_hidden * 4,
+                                    name='%si2h' % name)
+        h2h = mx.sym.FullyConnected(data=states[0], weight=self._hW, bias=self._hB,
+                                    num_hidden=self._num_hidden * 4,
+                                    name='%sh2h' % name)
+        gates = i2h + h2h
+        slice_gates = mx.sym.SliceChannel(gates, num_outputs=4,
+                                          name="%sslice" % name)
+        in_gate = mx.sym.Activation(slice_gates[0], act_type="sigmoid",
+                                    name='%si' % name)
+        forget_gate = mx.sym.Activation(slice_gates[1], act_type="sigmoid",
+                                        name='%sf' % name)
+        in_transform = mx.sym.Activation(slice_gates[2], act_type="tanh",
+                                         name='%sc' % name)
+        if self.dropout > 0.0:
+            in_transform = mx.sym.Dropout(in_transform, p=self.dropout, name='%sc_dropout' % name)
+        out_gate = mx.sym.Activation(slice_gates[3], act_type="sigmoid",
+                                     name='%so' % name)
+        next_c = mx.sym._internal._plus(forget_gate * states[1], in_gate * in_transform,
+                                        name='%sstate' % name)
+        next_h = mx.sym._internal._mul(out_gate, mx.sym.Activation(next_c, act_type="tanh"),
+                                       name='%sout' % name)
+
         return next_h, [next_h, next_c]
 
 

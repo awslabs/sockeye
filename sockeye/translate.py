@@ -28,7 +28,7 @@ import sockeye.constants as C
 import sockeye.data_io
 import sockeye.inference
 import sockeye.output_handler
-from sockeye.log import setup_main_logger, log_sockeye_version
+from sockeye.log import setup_main_logger, log_sockeye_version, log_mxnet_version
 from sockeye.utils import acquire_gpus, get_num_gpus
 from sockeye.utils import check_condition
 
@@ -37,8 +37,7 @@ logger = setup_main_logger(__name__, file_logging=False)
 
 def main():
     params = argparse.ArgumentParser(description='Translate CLI')
-    arguments.add_inference_args(params)
-    arguments.add_device_args(params)
+    arguments.add_translate_cli_args(params)
     args = params.parse_args()
 
     if args.output is not None:
@@ -49,6 +48,7 @@ def main():
         check_condition(len(args.checkpoints) == len(args.models), "must provide checkpoints for each model")
 
     log_sockeye_version(logger)
+    log_mxnet_version(logger)
     logger.info("Command: %s", " ".join(sys.argv))
     logger.info("Arguments: %s", args)
 
@@ -59,8 +59,11 @@ def main():
     with ExitStack() as exit_stack:
         context = _setup_context(args, exit_stack)
 
+        bucket_source_width, bucket_target_width = args.bucket_width
         translator = sockeye.inference.Translator(context,
                                                   args.ensemble_mode,
+                                                  bucket_source_width,
+                                                  bucket_target_width,
                                                   sockeye.inference.LengthPenalty(args.length_penalty_alpha,
                                                                                   args.length_penalty_beta),
                                                   *sockeye.inference.load_models(context,
@@ -68,7 +71,8 @@ def main():
                                                                                  args.beam_size,
                                                                                  args.models,
                                                                                  args.checkpoints,
-                                                                                 args.softmax_temperature))
+                                                                                 args.softmax_temperature,
+                                                                                 args.max_output_length_num_stds))
         read_and_translate(translator, output_handler, args.input)
 
 
