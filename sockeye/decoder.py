@@ -29,6 +29,7 @@ from . import encoder
 from . import layers
 from . import lexicon as lexicons
 from . import rnn
+from . import convolution
 from . import transformer
 from . import utils
 
@@ -40,6 +41,8 @@ def get_decoder(config: Config,
                 embed_weight: Optional[mx.sym.Symbol] = None) -> 'Decoder':
     if isinstance(config, RecurrentDecoderConfig):
         return RecurrentDecoder(config=config, lexicon=lexicon, embed_weight=embed_weight, prefix=C.DECODER_PREFIX)
+    elif isinstance(config, ConvolutionalDecoderConfig):
+        return ConvolutionalDecoder(config=config, prefix=C.CONVOLUTIONAL_DECODER_PREFIX)
     elif isinstance(config, transformer.TransformerConfig):
         return TransformerDecoder(config=config, embed_weight=embed_weight, prefix=C.DECODER_PREFIX)
     else:
@@ -866,3 +869,143 @@ class RecurrentDecoder(Decoder):
         hidden = mx.sym.Activation(data=hidden, act_type="tanh",
                                    name="%snext_hidden_t%d" % (self.prefix, seq_idx))
         return hidden
+
+
+class ConvolutionalDecoderConfig(Config):
+    """
+    Convolutional decoder configuration.
+
+    :param vocab_size: Target vocabulary size.
+    :param max_seq_len_source: Maximum source sequence length
+    :param num_embed: Target word embedding size.
+    :param embed_dropout: Dropout probability for target embeddings.
+    :param hidden_dropout: Dropout probability on next decoder hidden state.
+    :param weight_tying: Whether to share embedding and prediction parameter matrices.
+    """
+
+    def __init__(self,
+                 convolution_config: convolution.StackedConvolutionConfig,
+                 vocab_size: int,
+                 max_seq_len_source: int,
+                 num_embed: int,
+                 embed_dropout: float = .0,
+                 hidden_dropout: float = .0) -> None:
+        super().__init__()
+        self.convolution_config = convolution_config
+        self.vocab_size = vocab_size
+        self.max_seq_len_source = max_seq_len_source
+        self.num_embed = num_embed
+        self.embed_dropout = embed_dropout
+        self.hidden_dropout = hidden_dropout
+
+
+class ConvolutionalDecoder(Decoder):
+    """
+    TODO: add description
+    Gehring et al. 2017.
+    """
+    def __init__(self,
+                 config: ConvolutionalDecoderConfig,
+                 prefix: str = C.DECODER_PREFIX) -> None:
+        self.config = config
+
+    def decode_sequence(self,
+                        source_encoded: mx.sym.Symbol,
+                        source_encoded_lengths: mx.sym.Symbol,
+                        source_encoded_max_length: int,
+                        target: mx.sym.Symbol,
+                        target_lengths: mx.sym.Symbol,
+                        target_max_length: int,
+                        source_lexicon: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
+        """
+        Decodes given a known target sequence and returns logits
+        with batch size and target length dimensions collapsed.
+        Used for training.
+
+        :param source_encoded: Encoded source: (source_encoded_max_length, batch_size, encoder_depth).
+        :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
+        :param source_encoded_max_length: Size of encoder time dimension.
+        :param target: Target sequence. Shape: (batch_size, target_max_length).
+        :param target_lengths: Lengths of target sequences. Shape: (batch_size,).
+        :param target_max_length: Size of target sequence dimension.
+        :param source_lexicon: Lexical biases for current sentence.
+               Shape: (batch_size, target_vocab_size, source_seq_len)
+        :return: Logits of next-word predictions for target sequence.
+                 Shape: (batch_size * target_max_length, target_vocab_size)
+        """
+        # TODO: how to add the source embeddings to source_encoded?
+        raise NotImplementedError()
+
+    def decode_step(self,
+                    target: mx.sym.Symbol,
+                    target_max_length: int,
+                    source_encoded_max_length: int,
+                    *states: mx.sym.Symbol) \
+            -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
+        """
+        Decodes a single time step given the previous word ids in target and previous decoder states.
+        Returns logits, attention probabilities, and next decoder states.
+        Implementations can maintain an arbitrary number of states.
+
+        :param target: Previous target word ids. Shape: (batch_size, target_max_length).
+        :param target_max_length: Size of time dimension in prev_word_ids.
+        :param source_encoded_max_length: Length of encoded source time dimension.
+        :param states: Arbitrary list of decoder states.
+        :return: logits, attention probabilities, next decoder states.
+        """
+        raise NotImplementedError()
+
+
+    def reset(self):
+        """
+        Reset decoder method. Used for inference.
+        """
+        pass
+
+    def init_states(self,
+                    source_encoded: mx.sym.Symbol,
+                    source_encoded_lengths: mx.sym.Symbol,
+                    source_encoded_max_length: int) -> List[mx.sym.Symbol]:
+        """
+        Returns a list of symbolic states that represent the initial states of this decoder.
+        Used for inference.
+
+        :param source_encoded: Encoded source. Shape: (batch_size, source_encoded_max_length, encoder_depth).
+        :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
+        :param source_encoded_max_length: Size of encoder time dimension.
+        :return: List of symbolic initial states.
+        """
+        pass
+
+    def state_variables(self) -> List[mx.sym.Symbol]:
+        """
+        Returns the list of symbolic variables for this decoder to be used during inference.
+
+        :return: List of symbolic variables.
+        """
+        pass
+
+    def state_shapes(self,
+                     batch_size: int,
+                     source_encoded_max_length: int,
+                     source_encoded_depth: int) -> List[mx.io.DataDesc]:
+        """
+        Returns a list of shape descriptions given batch size, encoded source max length and encoded source depth.
+        Used for inference.
+
+        :param batch_size: Batch size during inference.
+        :param source_encoded_max_length: Size of encoder time dimension.
+        :param source_encoded_depth: Depth of encoded source.
+        :return: List of shape descriptions.
+        """
+        pass
+
+    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
+        """
+        Returns a list of RNNCells used by this decoder.
+
+        :raises: NotImplementedError
+        """
+        return []
+
+

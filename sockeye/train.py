@@ -42,6 +42,7 @@ from . import loss
 from . import lr_scheduler
 from . import model
 from . import rnn
+from . import convolution
 from . import training
 from . import transformer
 from . import vocab
@@ -291,7 +292,17 @@ def main():
                 layer_normalization=args.layer_normalization,
                 weight_tying=args.weight_tying,
                 positional_encodings=not args.transformer_no_positional_encodings)
-
+        elif args.decoder == C.CONVOLUTION_TYPE:
+            #TODO: pass arguments from CLI...
+            convolution_config = convolution.StackedConvolutionConfig(kernel_width=3,
+                                                                      num_hidden=512,
+                                                                      num_layers=6)
+            config_decoder = decoder.ConvolutionalDecoderConfig(convolution_config=convolution_config,
+                                                                vocab_size=vocab_target_size,
+                                                                max_seq_len_source=max_seq_len_source,
+                                                                num_embed=num_embed_target,
+                                                                embed_dropout=decoder_embed_dropout,
+                                                                hidden_dropout=args.rnn_decoder_hidden_dropout)
         else:
             attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
             config_coverage = None

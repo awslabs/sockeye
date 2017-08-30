@@ -48,13 +48,14 @@ SHARED_EMBEDDING_PREFIX = "source_target_embed_"
 RNN_NAME = "rnn"
 RNN_WITH_CONV_EMBED_NAME = "rnn-with-conv-embed"
 TRANSFORMER_TYPE = "transformer"
+CONVOLUTION_TYPE = "convolutional"
 TRANSFORMER_WITH_CONV_EMBED_TYPE = "transformer-with-conv-embed"
 
 # available encoders
 ENCODERS = [RNN_NAME, RNN_WITH_CONV_EMBED_NAME, TRANSFORMER_TYPE, TRANSFORMER_WITH_CONV_EMBED_TYPE]
 
 # available decoder
-DECODERS = [RNN_NAME, TRANSFORMER_TYPE]
+DECODERS = [RNN_NAME, TRANSFORMER_TYPE, CONVOLUTION_TYPE]
 
 # rnn types
 LSTM_TYPE = 'lstm'
@@ -98,6 +99,7 @@ WEIGHT_TYING_SRC_TRG_SOFTMAX='src_trg_softmax'
 
 # default decoder prefixes
 DECODER_PREFIX = "decoder_"
+CONVOLUTIONAL_DECODER_PREFIX = "convolutional_decoder_"
 TRANSFORMER_DECODER_PREFIX = DECODER_PREFIX + "transformer_"
 
 # default I/O variable names
