@@ -28,7 +28,7 @@ _LINE_MAX_LENGTH = 9
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --attention-type mlp"
      " --attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity --max-updates 10000"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
-     " --rnn-dropout 0.0:0.1 --embed-dropout 0.1:0.0",
+     " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0",
      "--beam-size 5",
      1.01,
      0.98),

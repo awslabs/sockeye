@@ -54,7 +54,7 @@ class InferenceModel(model.SockeyeModel):
                  beam_size: int,
                  checkpoint: Optional[int] = None,
                  softmax_temperature: Optional[float] = None,
-                 max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,):
+                 max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH):
         self.model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
         logger.info("Model version: %s", self.model_version)
         utils.check_version(self.model_version)
@@ -393,10 +393,10 @@ class LengthPenalty:
     :param beta: The beta factor for the length penalty (see above).
     """
 
-    def __init__(self, alpha: float=1.0, beta: float=0.0) -> None:
+    def __init__(self, alpha: float = 1.0, beta: float = 0.0) -> None:
         self.alpha = alpha
         self.beta = beta
-        self.denominator = (self.beta + 1)**self.alpha
+        self.denominator = (self.beta + 1) ** self.alpha
 
     def __call__(self, lengths: mx.nd.NDArray) -> mx.nd.NDArray:
         """
@@ -411,7 +411,7 @@ class LengthPenalty:
         else:
             # note: we avoid unnecessary addition or pow operations
             numerator = self.beta + lengths if self.beta != 0.0 else lengths
-            numerator = numerator**self.alpha if self.alpha != 1.0 else numerator
+            numerator = numerator ** self.alpha if self.alpha != 1.0 else numerator
             return numerator / self.denominator
 
 
@@ -589,19 +589,25 @@ class Translator:
     def _decode_step(self,
                      sequences: mx.nd.NDArray,
                      t: int,
-                     bucket_key: Tuple[int, int],
+                     source_length: int,
+                     max_output_length: int,
                      states: List[ModelState]) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, List[ModelState]]:
         """
         Returns decoder predictions (combined from all models), attention scores, and updated states.
 
+        :param sequences: Sequences of current hypotheses. Shape: (beam_size, max_output_length).
+        :param t: Beam search iteration.
+        :param source_length: Length of the input sequence.
+        :param max_output_length: Maximum output length.
         :param: List of model states.
         :return: (probs, attention scores, list of model states)
         """
+        bucket_key = (source_length, max_output_length)
         # bucket target max length based on beam_search progress
         if len(self.buckets_target) > 1:
             target_max_length = data_io.get_bucket(t, self.buckets_target)
-            if target_max_length < bucket_key[1]:
-                bucket_key = bucket_key[0], target_max_length
+            if target_max_length < max_output_length:
+                bucket_key = (source_length, target_max_length)
                 sequences = mx.nd.slice_axis(sequences, axis=1, begin=0, end=target_max_length)
 
         model_probs, model_attention_probs, model_states = [], [], []
@@ -680,8 +686,11 @@ class Translator:
             # (1) obtain next predictions and advance models' state
             # scores: (beam_size, target_vocab_size)
             # attention_scores: (beam_size, bucket_key)
-            bucket_key = (source_length, max_output_length)
-            scores, attention_scores, model_states = self._decode_step(sequences, t, bucket_key, model_states)
+            scores, attention_scores, model_states = self._decode_step(sequences,
+                                                                       t,
+                                                                       source_length,
+                                                                       max_output_length,
+                                                                       model_states)
 
             # (2) compute length-normalized accumulated scores in place
             if t == 1:  # only one hypothesis at t==1
