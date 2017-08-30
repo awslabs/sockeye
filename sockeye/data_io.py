@@ -515,7 +515,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         logger.info("Vocab coverage target: %.0f%%", (1 - num_of_unks_target / tokens_target) * 100)
         logger.info("Total: %d samples in %d buckets", sum(len(b) for b in self.data_source), len(self.buckets))
         nsamples = 0
-        for bkt, buck, (batch_size_seq, batch_size_word), average_seq_len in zip(
+        for bkt, buck, (batch_size_seq, _), average_seq_len in zip(
                 self.buckets, self.data_source, self.bucket_batch_sizes, self.data_label_averge_len):
             logger.info("Bucket of %s : %d samples in %d batches of %d, approx %0.1f words/batch",
                         bkt,
@@ -553,12 +553,10 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
             # Word-based: num words determines num sentences
             # Sentence-based: num sentences determines num words
             if self.batch_by_words:
-                # Get as close as possible (int) to requested batch size without going over, assuming all sentences are
-                # of average length
-                batch_size_seq = math.floor(self.batch_size / average_seq_len)
-                # Round to closest multiple of number of devices (no danger of increasing size/memory usage by rounding
-                # up since we're just "filling up" batch slices for all devices)
-                batch_size_seq = self.batch_num_devices * round(batch_size_seq / self.batch_num_devices)
+                # Multiple of number of devices (int) closest to target number of words, assuming each sentence is of
+                # average length
+                batch_size_seq = self.batch_num_devices * round((self.batch_size / average_seq_len)
+                                                                / self.batch_num_devices)
                 batch_size_word = batch_size_seq * average_seq_len
             else:
                 batch_size_seq = self.batch_size
