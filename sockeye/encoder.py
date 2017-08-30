@@ -10,6 +10,7 @@
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
+from sockeye.convolution import ConvolutionGluBlock
 
 """
 Encoders for sequence-to-sequence models.
@@ -24,6 +25,7 @@ import mxnet as mx
 from sockeye.config import Config
 from . import constants as C
 from . import rnn
+from . import convolution
 from . import transformer
 from . import utils
 
@@ -35,6 +37,8 @@ def get_encoder(config: Config, fused: bool, embed_weight: Optional[mx.sym.Symbo
         return get_recurrent_encoder(config, fused, embed_weight)
     elif isinstance(config, transformer.TransformerConfig):
         return get_transformer_encoder(config, embed_weight)
+    elif isinstance(config, ConvolutionalEncoderConfig):
+        return get_convolutional_encoder(config, embed_weight)
     else:
         raise ValueError("Unsupported encoder configuration")
 
@@ -67,6 +71,34 @@ class RecurrentEncoderConfig(Config):
         self.reverse_input = reverse_input
 
 
+class ConvolutionalEncoderConfig(Config):
+    """
+    Convolutional encoder configuration.
+
+    :param vocab_size: Source vocabulary size.
+    :param num_embed: Size of embedding layer.
+    :param embed_dropout: Dropout probability on embedding layer.
+    :param cnn_config: CNN configuration.
+    :param num_layers: The number of convolutional layers on top of the embeddings.
+    :param hidden_dropout: Dropout probability on next encoder hidden state.
+    """
+
+    def __init__(self,
+                 vocab_size: int,
+                 num_embed: int,
+                 embed_dropout: float,
+                 max_seq_len_source: int,
+                 cnn_config: convolution.ConvolutionGluConfig,
+                 num_layers: int):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.num_embed = num_embed
+        self.embed_dropout = embed_dropout
+        self.num_layers = num_layers
+        self.cnn_config = cnn_config
+        self.max_seq_len_source = max_seq_len_source
+
+
 def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
                           embed_weight: Optional[mx.sym.Symbol] = None) -> 'Encoder':
     """
@@ -91,10 +123,10 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
         encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
 
     encoders.append(BatchMajor2TimeMajor())
-    
+
     if config.reverse_input:
         encoders.append(ReverseSequence())
-    
+
     if config.rnn_config.residual:
         utils.check_condition(config.rnn_config.first_residual_layer >= 2,
                               "Residual connections on the first encoder layer are not supported")
@@ -113,6 +145,31 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
         encoders.append(encoder_class(rnn_config=remaining_rnn_config,
                                       prefix=C.STACKEDRNN_PREFIX,
                                       layout=C.TIME_MAJOR))
+
+    return EncoderSequence(encoders)
+
+
+def get_convolutional_encoder(config: ConvolutionalEncoderConfig,
+                              embed_weight: Optional[mx.sym.Symbol] = None) -> 'Encoder':
+    """
+    Creates a convolutional encoder.
+
+    :param config:
+    :param embed_weight:
+    :return:
+    """
+    encoders = list()  # type: List[Encoder]
+    encoders.append(Embedding(num_embed=config.num_embed,
+                              vocab_size=config.vocab_size,
+                              prefix=C.SOURCE_EMBEDDING_PREFIX,
+                              dropout=config.embed_dropout,
+                              embed_weight=embed_weight))
+    #TODO: alternatively used fix sin/cos pos embeddings?
+    encoders.append(AdditivePositionalEmbedding(num_embed=config.num_embed,
+                                                max_seq_len=config.max_seq_len_source,
+                                                prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
+    encoders.append(ConvolutionalEncoder(config=config))
+    encoders.append(BatchMajor2TimeMajor())
 
     return EncoderSequence(encoders)
 
@@ -289,6 +346,45 @@ class Embedding(Encoder):
         """
         Return the representation size of this encoder.
         """
+        return self.num_embed
+
+
+class AdditivePositionalEmbedding(Encoder):
+    """
+    Take an encoded sequence and add positional embeddings to it.
+
+    """
+
+    def __init__(self, num_embed: int, max_seq_len: int, prefix: str):
+        self.num_embed = num_embed
+        self.max_seq_len = max_seq_len
+        self.prefix = prefix
+        self.embed_weight = mx.sym.Variable(prefix + "weight")
+
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: mx.sym.Symbol,
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+        """
+
+       :param data: (batch_size, source_seq_len, num_embed)
+       :param data_length: (batch_size,)
+       :param seq_len: sequence length.
+       :return: (batch_size, source_seq_len, num_embed)
+       """
+
+        # (1, source_seq_len)
+        positions = mx.sym.expand_dims(data=mx.sym.arange(start=0, stop=seq_len, step=1), axis=0)
+
+        # (1, source_seq_len, num_embed)
+        pos_embedding = mx.sym.Embedding(data=positions,
+                                         input_dim=self.max_seq_len,
+                                         weight=self.embed_weight,
+                                         output_dim=self.num_embed,
+                                         name=self.prefix + "pos_embed")
+        return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix), data_length, seq_len
+
+    def get_num_hidden(self) -> int:
         return self.num_embed
 
 
@@ -500,6 +596,29 @@ class BiDirectionalRNNEncoder(Encoder):
         Returns a list of RNNCells used by this encoder.
         """
         return self.forward_rnn.get_rnn_cells() + self.reverse_rnn.get_rnn_cells()
+
+
+class ConvolutionalEncoder(Encoder):
+    def __init__(self,
+                 config: ConvolutionalEncoderConfig,
+                 prefix: str = C.CNN_ENCODER_PREFIX) -> None:
+        self.config = config
+        self.layers = [ConvolutionGluBlock(
+            config.cnn_config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
+
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: mx.sym.Symbol,
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+        for i, layer in enumerate(self.layers):
+            # residual connections:
+            #data = data + layer(data, data_length, seq_len)
+            #TODO: put back in: we need a linear projection layer from the embeddings...
+            data = layer(data, data_length, seq_len)
+        return data, data_length, seq_len
+
+    def get_num_hidden(self) -> int:
+        return self.config.num_embed
 
 
 class TransformerEncoder(Encoder):

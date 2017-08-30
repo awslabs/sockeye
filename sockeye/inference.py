@@ -91,6 +91,7 @@ class InferenceModel(model.SockeyeModel):
         :param max_input_length: Maximum input length.
         :param get_max_output_length_function: Callable to compute maximum output length.
         """
+        # TODO (IMPORTANT): with AdditivePositionalEmbedding we can't allow for longer sequences than the model was trained for
         self.max_input_length = max_input_length
         if self.max_input_length != self.config.max_seq_len_source:
             logger.warning("Model was trained with max_seq_len_source=%d, but using max_input_len=%d.",

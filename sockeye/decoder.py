@@ -29,6 +29,8 @@ from . import encoder
 from . import layers
 from . import lexicon as lexicons
 from . import rnn
+from . import convolution
+from . import attention
 from . import transformer
 from . import utils
 
@@ -40,6 +42,8 @@ def get_decoder(config: Config,
                 embed_weight: Optional[mx.sym.Symbol] = None) -> 'Decoder':
     if isinstance(config, RecurrentDecoderConfig):
         return RecurrentDecoder(config=config, lexicon=lexicon, embed_weight=embed_weight, prefix=C.DECODER_PREFIX)
+    elif isinstance(config, ConvolutionalDecoderConfig):
+        return ConvolutionalDecoder(config=config, prefix=C.CONVOLUTIONAL_DECODER_PREFIX)
     elif isinstance(config, transformer.TransformerConfig):
         return TransformerDecoder(config=config, embed_weight=embed_weight, prefix=C.DECODER_PREFIX)
     else:
@@ -866,3 +870,202 @@ class RecurrentDecoder(Decoder):
         hidden = mx.sym.Activation(data=hidden, act_type="tanh",
                                    name="%snext_hidden_t%d" % (self.prefix, seq_idx))
         return hidden
+
+
+class ConvolutionalDecoderConfig(Config):
+    """
+    Convolutional decoder configuration.
+
+    :param vocab_size: Target vocabulary size.
+    :param max_seq_len_source: Maximum source sequence length
+    :param num_embed: Target word embedding size.
+    :param encoder_num_hidden: Number of hidden units of the encoder.
+    :param embed_dropout: Dropout probability for target embeddings.
+    :param hidden_dropout: Dropout probability on next decoder hidden state.
+    :param weight_tying: Whether to share embedding and prediction parameter matrices.
+    """
+
+    def __init__(self,
+                 cnn_config: convolution.ConvolutionGluConfig,
+                 vocab_size: int,
+                 max_seq_len_source: int,
+                 num_embed: int,
+                 encoder_num_hidden: int,
+                 num_layers: int,
+                 embed_dropout: float = .0,
+                 hidden_dropout: float = .0) -> None:
+        super().__init__()
+        self.cnn_config = cnn_config
+        self.vocab_size = vocab_size
+        self.max_seq_len_source = max_seq_len_source
+        self.num_embed = num_embed
+        self.encoder_num_hidden = encoder_num_hidden
+        self.embed_dropout = embed_dropout
+        self.hidden_dropout = hidden_dropout
+        self.num_layers = num_layers
+
+
+class ConvolutionalDecoder(Decoder):
+    """
+    TODO: add description
+    Gehring et al. 2017.
+    """
+    def __init__(self,
+                 config: ConvolutionalDecoderConfig,
+                 prefix: str = C.DECODER_PREFIX) -> None:
+        self.config = config
+        self.convolution_weight = mx.sym.Variable("%sconvolution_weight" % prefix)
+        self.convolution_bias = mx.sym.Variable("%sconvolution_bias" % prefix)
+        # TODO: positional embedding
+        self.embedding = encoder.Embedding(self.config.num_embed,
+                                           self.config.vocab_size,
+                                           prefix=C.TARGET_EMBEDDING_PREFIX,
+                                           dropout=config.embed_dropout)
+        #TODO: feed attention in from the outside
+        self.attention = attention.DotAttention(input_previous_word=False,
+                                                # TODO: set them correctly. rnn_num_hidden = encoder num hidden, num_hidden = decoder_num_hidden
+                                                rnn_num_hidden=self.config.cnn_config.num_hidden,
+                                                num_hidden=self.config.cnn_config.num_hidden,
+                                                expand_query_dim=False)
+        self.layers = [convolution.ConvolutionGluBlock(
+            config.cnn_config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
+
+        # TODO: weight tying? lexicon and all other features the RNN supports?!
+        self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
+        self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
+
+    def decode_sequence(self,
+                        source_encoded: mx.sym.Symbol,
+                        source_encoded_lengths: mx.sym.Symbol,
+                        source_encoded_max_length: int,
+                        target: mx.sym.Symbol,
+                        target_lengths: mx.sym.Symbol,
+                        target_max_length: int,
+                        source_lexicon: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
+        """
+        Decodes given a known target sequence and returns logits
+        with batch size and target length dimensions collapsed.
+        Used for training.
+
+        :param source_encoded: Encoded source: (source_encoded_max_length, batch_size, encoder_depth).
+        :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
+        :param source_encoded_max_length: Size of encoder time dimension.
+        :param target: Target sequence. Shape: (batch_size, target_max_length).
+        :param target_lengths: Lengths of target sequences. Shape: (batch_size,).
+        :param target_max_length: Size of target sequence dimension.
+        :param source_lexicon: Lexical biases for current sentence.
+               Shape: (batch_size, target_vocab_size, source_seq_len)
+        :return: Logits of next-word predictions for target sequence.
+                 Shape: (batch_size * target_max_length, target_vocab_size)
+        """
+        # TODO: how to add the source embeddings to source_encoded?
+
+        # TODO: potentially project the source_encoded (if different source num_hidden)
+
+        # (batch_size, source_encoded_max_length, encoder_depth).
+        source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
+        attention = self.attention.on(source_encoded_batch_major, source_encoded_lengths, source_encoded_max_length)
+
+        # TODO: positional embedding
+        # target_embed: (batch_size, target_seq_len, num_target_embed)
+        target_embed, target_lengths, target_max_length = self.embedding.encode(target, target_lengths,
+                                                                                target_max_length)
+        target_hidden = target_embed
+        for i, layer in enumerate(self.layers):
+            # (batch_size, target_seq_len, num_hidden)
+            target_hidden = layer(target_hidden, target_lengths, target_max_length)
+            #TODO: avoid double swapaxes (inside ConvGluBlock and when doing the query)
+            #TODO: use layers.dot_attention instead? Especially as the attention_state doesn't make sense when doing attention once for all time steps
+            #TODO: + also use layers.dot_attetion in the DotAttention class...
+            # (batch_size, num_hidden, target_seq_len)
+            query = mx.sym.swapaxes(data=target_hidden, dim1=1, dim2=2)
+            attention_state = self.attention.get_initial_state(source_encoded_lengths, source_encoded_max_length)
+            attention_input = self.attention.make_input(seq_idx=0,
+                                                        word_vec_prev=None, # TODO: make typing.Optional
+                                                        decoder_state=query)
+            attention_state = attention(attention_input, attention_state)
+            # (batch_size, num_hidden, target_seq_len)
+            context = attention_state.context
+            # (batch_size, target_seq_len, num_hidden)
+            context = mx.sym.swapaxes(data=context, dim1=1, dim2=2)
+            target_hidden = target_hidden + context
+            # TODO: residual connections
+
+        # (batch_size * target_seq_len, num_hidden)
+        target_hidden = mx.sym.reshape(data=target_hidden, shape=(-3, 0))
+        # (batch_size * target_seq_len, target_vocab_size)
+        logits = mx.sym.FullyConnected(data=target_hidden, num_hidden=self.config.vocab_size,
+                                       weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
+
+        return logits
+
+    def decode_step(self,
+                    target: mx.sym.Symbol,
+                    target_max_length: int,
+                    source_encoded_max_length: int,
+                    *states: mx.sym.Symbol) \
+            -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
+        """
+        Decodes a single time step given the previous word ids in target and previous decoder states.
+        Returns logits, attention probabilities, and next decoder states.
+        Implementations can maintain an arbitrary number of states.
+
+        :param target: Previous target word ids. Shape: (batch_size, target_max_length).
+        :param target_max_length: Size of time dimension in prev_word_ids.
+        :param source_encoded_max_length: Length of encoded source time dimension.
+        :param states: Arbitrary list of decoder states.
+        :return: logits, attention probabilities, next decoder states.
+        """
+        # TODO: implement decoding...
+        raise NotImplementedError()
+
+    def reset(self):
+        pass
+
+    def init_states(self,
+                    source_encoded: mx.sym.Symbol,
+                    source_encoded_lengths: mx.sym.Symbol,
+                    source_encoded_max_length: int) -> List[mx.sym.Symbol]:
+        """
+        Returns a list of symbolic states that represent the initial states of this decoder.
+        Used for inference.
+
+        :param source_encoded: Encoded source. Shape: (batch_size, source_encoded_max_length, encoder_depth).
+        :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
+        :param source_encoded_max_length: Size of encoder time dimension.
+        :return: List of symbolic initial states.
+        """
+        return []
+
+    def state_variables(self) -> List[mx.sym.Symbol]:
+        """
+        Returns the list of symbolic variables for this decoder to be used during inference.
+
+        :return: List of symbolic variables.
+        """
+        return []
+
+    def state_shapes(self,
+                     batch_size: int,
+                     source_encoded_max_length: int,
+                     source_encoded_depth: int) -> List[mx.io.DataDesc]:
+        """
+        Returns a list of shape descriptions given batch size, encoded source max length and encoded source depth.
+        Used for inference.
+
+        :param batch_size: Batch size during inference.
+        :param source_encoded_max_length: Size of encoder time dimension.
+        :param source_encoded_depth: Depth of encoded source.
+        :return: List of shape descriptions.
+        """
+        return []
+
+    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
+        """
+        Returns a list of RNNCells used by this decoder.
+
+        :raises: NotImplementedError
+        """
+        return []
+
+

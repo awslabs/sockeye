@@ -42,6 +42,7 @@ from . import loss
 from . import lr_scheduler
 from . import model
 from . import rnn
+from . import convolution
 from . import training
 from . import transformer
 from . import vocab
@@ -223,6 +224,7 @@ def main():
         # model configuration
         num_embed_source, num_embed_target = args.num_embed
         encoder_num_layers, decoder_num_layers = args.num_layers
+        cnn_kernel_width_encoder, cnn_kernel_width_decoder = args.cnn_kernel_width
 
         encoder_embed_dropout, decoder_embed_dropout = args.embed_dropout
         encoder_rnn_dropout_inputs, decoder_rnn_dropout_inputs = args.rnn_dropout_inputs
@@ -261,6 +263,15 @@ def main():
                 weight_tying=args.weight_tying,
                 positional_encodings=not args.transformer_no_positional_encodings,
                 conv_config=config_conv)
+        elif args.encoder == C.CONVOLUTION_TYPE:
+            cnn_config = convolution.ConvolutionGluConfig(kernel_width=cnn_kernel_width_encoder,
+                                                          num_hidden=args.cnn_num_hidden)
+            config_encoder = encoder.ConvolutionalEncoderConfig(vocab_size=vocab_source_size,
+                                                                num_embed=num_embed_source,
+                                                                embed_dropout=encoder_embed_dropout,
+                                                                max_seq_len_source=max_seq_len_source,
+                                                                cnn_config=cnn_config,
+                                                                num_layers=encoder_num_layers)
         else:
             config_encoder = encoder.RecurrentEncoderConfig(
                 vocab_size=vocab_source_size,
@@ -291,7 +302,18 @@ def main():
                 layer_normalization=args.layer_normalization,
                 weight_tying=args.weight_tying,
                 positional_encodings=not args.transformer_no_positional_encodings)
-
+        elif args.decoder == C.CONVOLUTION_TYPE:
+            convolution_config = convolution.ConvolutionGluConfig(kernel_width=cnn_kernel_width_decoder,
+                                                                  num_hidden=args.cnn_num_hidden)
+            config_decoder = decoder.ConvolutionalDecoderConfig(cnn_config=convolution_config,
+                                                                vocab_size=vocab_target_size,
+                                                                max_seq_len_source=max_seq_len_source,
+                                                                num_embed=num_embed_target,
+                                                                #TODO: make this independent of the type of encoder:
+                                                                encoder_num_hidden=args.cnn_num_hidden,
+                                                                num_layers=decoder_num_layers,
+                                                                embed_dropout=decoder_embed_dropout,
+                                                                hidden_dropout=args.rnn_decoder_hidden_dropout)
         else:
             attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
             config_coverage = None
@@ -299,6 +321,7 @@ def main():
                 config_coverage = coverage.CoverageConfig(type=args.attention_coverage_type,
                                                           num_hidden=args.attention_coverage_num_hidden,
                                                           layer_normalization=args.layer_normalization)
+            #TODO: rnn_num_hidden should really be the encoder_num_hidden (to make it independent of the type of encoder used)
             config_attention = attention.AttentionConfig(type=args.attention_type,
                                                          num_hidden=attention_num_hidden,
                                                          input_previous_word=args.attention_use_prev_word,
