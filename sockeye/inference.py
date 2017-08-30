@@ -44,30 +44,26 @@ class InferenceModel(model.SockeyeModel):
     :param beam_size: Beam size.
     :param checkpoint: Checkpoint to load. If None, finds best parameters in model_folder.
     :param softmax_temperature: Optional parameter to control steepness of softmax distribution.
+    :param max_output_length_num_stds: Number of standard deviations as safety margin for maximum output length.
     """
 
     def __init__(self,
                  model_folder: str,
                  context: mx.context.Context,
                  fused: bool,
-                 max_input_len: Optional[int],
                  beam_size: int,
                  checkpoint: Optional[int] = None,
-                 softmax_temperature: Optional[float] = None):
+                 softmax_temperature: Optional[float] = None,
+                 max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,):
         self.model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
         logger.info("Model version: %s", self.model_version)
         utils.check_version(self.model_version)
 
-        # load config & determine parameter file
         config = model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
-        if max_input_len is None:
-            max_input_len = config.max_seq_len_source
-        else:
-            if max_input_len != config.max_seq_len_source:
-                logger.warning("Model was trained with max_seq_len_source=%d, but using max_input_len=%d.",
-                               config.max_seq_len_source, max_input_len)
-        config.max_seq_len_source = max_input_len
         super().__init__(config)
+
+        self.max_input_length = config.max_seq_len_source
+        self.get_max_output_length = get_max_output_length_function([self], max_output_length_num_stds)
 
         self.fname_params = os.path.join(model_folder, C.PARAMS_NAME % checkpoint if checkpoint else C.PARAMS_BEST_NAME)
 
@@ -80,15 +76,29 @@ class InferenceModel(model.SockeyeModel):
         self.context = context
 
         self._build_model_components(fused)
-        self.get_max_output_length = None  # type: Optional[Callable]
 
-    def initialize(self):
+        self.encoder_module = None  # type: Optional[mx.mod.BucketingModule]
+        self.encoder_default_bucket_key = None  # type: Optional[int]
+        self.decoder_module = None  # type: Optional[mx.mod.BucketingModule]
+        self.decoder_default_bucket_key = None  # type: Optional[Tuple[int, int]]
+        self.decoder_data_shapes_cache = None  # type: Optional[Dict]
+
+    def initialize(self, max_input_length: int, get_max_output_length_function: Callable):
         """
         Delayed construction of modules to ensure multiple Inference models can agree on computing a common
         maximum output length.
+
+        :param max_input_length: Maximum input length.
+        :param get_max_output_length_function: Callable to compute maximum output length.
         """
-        self._get_encoder_module()
-        self._get_decoder_module()
+        self.max_input_length = max_input_length
+        if self.max_input_length != self.config.max_seq_len_source:
+            logger.warning("Model was trained with max_seq_len_source=%d, but using max_input_len=%d.",
+                           self.config.max_seq_len_source, self.max_input_length)
+        self.get_max_output_length = get_max_output_length_function
+
+        self.encoder_module, self.encoder_default_bucket_key = self._get_encoder_module()
+        self.decoder_module, self.decoder_default_bucket_key = self._get_decoder_module()
 
         self.decoder_data_shapes_cache = dict()  # bucket_key -> shape cache
         max_encoder_data_shapes = self._get_encoder_data_shapes(self.encoder_default_bucket_key)
@@ -100,13 +110,13 @@ class InferenceModel(model.SockeyeModel):
         self.encoder_module.init_params(arg_params=self.params, allow_missing=False)
         self.decoder_module.init_params(arg_params=self.params, allow_missing=False)
 
-    def _get_encoder_module(self):
+    def _get_encoder_module(self) -> Tuple[mx.mod.BucketingModule, int]:
         """
         Returns a BucketingModule for the encoder. Given a source sequence, it returns
         the initial decoder states of the model.
         The bucket key for this module is the length of the source sequence.
 
-        :return: Encoder BucketingModule.
+        :return: Tuple of encoder module and default bucket key.
         """
 
         def sym_gen(source_seq_len: int):
@@ -128,12 +138,13 @@ class InferenceModel(model.SockeyeModel):
             label_names = []
             return mx.sym.Group(decoder_init_states), data_names, label_names
 
-        self.encoder_default_bucket_key = self.config.max_seq_len_source
-        self.encoder_module = mx.mod.BucketingModule(sym_gen=sym_gen,
-                                                     default_bucket_key=self.encoder_default_bucket_key,
-                                                     context=self.context)
+        default_bucket_key = self.max_input_length
+        module = mx.mod.BucketingModule(sym_gen=sym_gen,
+                                        default_bucket_key=default_bucket_key,
+                                        context=self.context)
+        return module, default_bucket_key
 
-    def _get_decoder_module(self):
+    def _get_decoder_module(self) -> Tuple[mx.mod.BucketingModule, Tuple[int, int]]:
         """
         Returns a BucketingModule for a single decoder step.
         Given previously predicted word and previous decoder states, it returns
@@ -141,7 +152,7 @@ class InferenceModel(model.SockeyeModel):
         The bucket key for this module is the length of the source sequence
         and the current length of the target sequence.
 
-        :return: Decoder BucketingModule.
+        :return: Tuple of decoder module and default bucket key.
         """
 
         def sym_gen(bucket_key: Tuple[int, int]):
@@ -167,11 +178,11 @@ class InferenceModel(model.SockeyeModel):
             return mx.sym.Group([softmax, attention_probs] + states), data_names, label_names
 
         # pylint: disable=not-callable
-        self.decoder_default_bucket_key = (self.config.max_seq_len_source,
-                                           self.get_max_output_length(self.config.max_seq_len_source))
-        self.decoder_module = mx.mod.BucketingModule(sym_gen=sym_gen,
-                                                     default_bucket_key=self.decoder_default_bucket_key,
-                                                     context=self.context)
+        default_bucket_key = (self.max_input_length, self.get_max_output_length(self.max_input_length))
+        module = mx.mod.BucketingModule(sym_gen=sym_gen,
+                                        default_bucket_key=default_bucket_key,
+                                        context=self.context)
+        return module, default_bucket_key
 
     def _get_encoder_data_shapes(self, bucket_key: int) -> List[mx.io.DataDesc]:
         """
@@ -252,7 +263,7 @@ class InferenceModel(model.SockeyeModel):
 
 
 def load_models(context: mx.context.Context,
-                max_input_len: int,
+                max_input_len: Optional[int],
                 beam_size: int,
                 model_folders: List[str],
                 checkpoints: Optional[List[int]] = None,
@@ -281,7 +292,6 @@ def load_models(context: mx.context.Context,
         model = InferenceModel(model_folder=model_folder,
                                context=context,
                                fused=False,
-                               max_input_len=max_input_len,
                                beam_size=beam_size,
                                softmax_temperature=softmax_temperature,
                                checkpoint=checkpoint)
@@ -292,11 +302,12 @@ def load_models(context: mx.context.Context,
     utils.check_condition(all(set(vocab.items()) == set(target_vocabs[0].items()) for vocab in target_vocabs),
                           "Target vocabulary ids do not match")
 
+    if max_input_len is None:
+        max_input_len = max(model.max_input_length for model in models)
     # set a common max_output length for all models.
     get_max_output_length = get_max_output_length_function(models, max_output_length_num_stds)
     for model in models:
-        model.get_max_output_length = get_max_output_length
-        model.initialize()
+        model.initialize(max_input_len, get_max_output_length)
 
     return models, source_vocabs[0], target_vocabs[0]
 
@@ -437,8 +448,8 @@ class Translator:
         self.models = models
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
-        # TODO(fhieber): consider edge case if models differ in max_seq_len_source?
-        max_input_length = self.models[0].config.max_seq_len_source
+        # after models are loaded we ensured that they agree on max_input_length and max_output_length
+        max_input_length = self.models[0].max_input_length
         max_output_length = self.models[0].get_max_output_length(max_input_length)
         if bucket_source_width > 0:
             self.buckets_source = data_io.define_buckets(max_input_length, step=bucket_source_width)

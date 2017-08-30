@@ -27,7 +27,7 @@ from typing import Optional, Dict, List
 import mxnet as mx
 import numpy as np
 
-from sockeye.log import setup_main_logger, log_sockeye_version
+from sockeye.log import setup_main_logger, log_sockeye_version, log_mxnet_version
 from sockeye.utils import acquire_gpus, check_condition, get_num_gpus, expand_requested_device_ids
 from . import arguments
 from . import attention
@@ -135,6 +135,7 @@ def main():
                                file_logging=True,
                                console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
     log_sockeye_version(logger)
+    log_mxnet_version(logger)
     logger.info("Command: %s", " ".join(sys.argv))
     logger.info("Arguments: %s", args)
     with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "w") as fp:

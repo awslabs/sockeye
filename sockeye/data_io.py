@@ -20,7 +20,7 @@ import logging
 import pickle
 import random
 from collections import OrderedDict
-from typing import Dict, Iterator, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterator, Iterable, List, Optional, Tuple
 
 import mxnet as mx
 import numpy as np
@@ -119,7 +119,7 @@ def read_parallel_corpus(data_source: str,
     return source_sentences, target_sentences
 
 
-def length_statistics(source_sentences: List[List[int]], target_sentences: List[List[int]]) -> Tuple[float, float]:
+def length_statistics(source_sentences: List[List[Any]], target_sentences: List[List[int]]) -> Tuple[float, float]:
     """
     Returns mean and standard deviation of target-to-source length ratios of parallel corpus.
 
