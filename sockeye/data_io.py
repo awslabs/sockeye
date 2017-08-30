@@ -160,8 +160,8 @@ def get_training_data_iters(source: str, target: str,
     :param vocab_source_path: Path to source vocabulary.
     :param vocab_target_path: Path to target vocabulary.
     :param batch_size: Batch size.
-    :param batch_num_devices: Number of devices batches will be parallelized across.
     :param batch_by_words: Size batches by words rather than sentences.
+    :param batch_num_devices: Number of devices batches will be parallelized across.
     :param fill_up: Fill-up strategy for buckets.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
@@ -515,10 +515,14 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         logger.info("Vocab coverage target: %.0f%%", (1 - num_of_unks_target / tokens_target) * 100)
         logger.info("Total: %d samples in %d buckets", sum(len(b) for b in self.data_source), len(self.buckets))
         nsamples = 0
-        for bkt, buck, (batch_size_seq, batch_size_word) in zip(
-                self.buckets, self.data_source, self.bucket_batch_sizes):
+        for bkt, buck, (batch_size_seq, batch_size_word), average_seq_len in zip(
+                self.buckets, self.data_source, self.bucket_batch_sizes, self.data_label_averge_len):
             logger.info("Bucket of %s : %d samples in %d batches of %d, approx %0.1f words/batch",
-                        bkt, len(buck), math.ceil(len(buck) / batch_size_seq), batch_size_seq, batch_size_word)
+                        bkt,
+                        len(buck),
+                        math.ceil(len(buck) / batch_size_seq),
+                        batch_size_seq,
+                        batch_size_seq * average_seq_len)
             nsamples += len(buck)
         check_condition(nsamples > 0, "0 data points available in the data iterator. "
                                       "%d data points have been discarded because they "
