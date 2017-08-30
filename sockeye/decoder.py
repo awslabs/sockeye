@@ -85,16 +85,18 @@ class Decoder(ABC):
 
     @abstractmethod
     def decode_step(self,
-                    prev_word_id: mx.sym.Symbol,
+                    target: mx.sym.Symbol,
+                    target_max_length: int,
                     source_encoded_max_length: int,
                     *states: mx.sym.Symbol) \
             -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
-        Decodes a single time step given the previous word id and previous decoder states.
+        Decodes a single time step given the previous word ids in target and previous decoder states.
         Returns logits, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param prev_word_id: Previous word id. Shape: (batch_size,).
+        :param target: Previous target word ids. Shape: (batch_size, target_max_length).
+        :param target_max_length: Size of time dimension in prev_word_ids.
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
@@ -122,7 +124,7 @@ class Decoder(ABC):
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
         """
-        return []
+        pass
 
     @abstractmethod
     def state_variables(self) -> List[mx.sym.Symbol]:
@@ -131,7 +133,7 @@ class Decoder(ABC):
 
         :return: List of symbolic variables.
         """
-        return []
+        pass
 
     @abstractmethod
     def state_shapes(self,
@@ -147,9 +149,8 @@ class Decoder(ABC):
         :param source_encoded_depth: Depth of encoded source.
         :return: List of shape descriptions.
         """
-        return []
+        pass
 
-    @abstractmethod
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """
         Returns a list of RNNCells used by this decoder.
@@ -244,42 +245,40 @@ class TransformerDecoder(Decoder):
         return logits
 
     def decode_step(self,
-                    prev_word_id: mx.sym.Symbol,
+                    target: mx.sym.Symbol,
+                    target_max_length: int,
                     source_encoded_max_length: int,
                     *states: mx.sym.Symbol) \
             -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
-        Decodes a single time step given the previous word id and previous decoder states.
+        Decodes a single time step given the previous word ids in target and previous decoder states.
         Returns logits, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param prev_word_id: Previous word id. Shape: (batch_size,).
+        :param target: Previous target word ids. Shape: (batch_size, target_max_length).
+        :param target_max_length: Size of time dimension in prev_word_ids.
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
         """
-        target_max_length = self._get_target_max_length(source_encoded_max_length)
+        source_encoded, source_encoded_lengths = states
 
-        # sequences: (batch_size, target_max_length)
-        source_encoded, source_encoded_lengths, sequences, lengths = states
+        # lengths: (batch_size,)
+        target_lengths = utils.compute_lengths(target)
+        indices = target_lengths - 1
 
-        # (batch_size, target_max_length)
-        mask = mx.sym.one_hot(indices=lengths, depth=target_max_length, on_value=1, off_value=0)
-
-        # all zeros but length position is set to prev_word_id
-        # (batch_size, target_max_length)
-        prev_word_id = mx.sym.broadcast_mul(mx.sym.expand_dims(prev_word_id, axis=1), mask)
-
-        # append/insert prev_word_id to sequences
-        # (batch_size, target_max_length)
-        sequences = sequences + prev_word_id
-        lengths += 1
+        # (batch_size, target_max_length, 1)
+        mask = mx.sym.expand_dims(mx.sym.one_hot(indices=indices,
+                                                 depth=target_max_length,
+                                                 on_value=1, off_value=0), axis=2)
 
         # (1, target_max_length, target_max_length)
         target_bias = transformer.get_autoregressive_bias(target_max_length, name="%sbias" % self.prefix)
 
         # (batch_size, target_max_length, model_size)
-        target, target_lengths, target_max_length = self.embedding.encode(sequences, lengths, target_max_length)
+        target, target_lengths, target_max_length = self.embedding.encode(target,
+                                                                          target_lengths,
+                                                                          target_max_length)
 
         for layer in self.layers:
             target = layer(target, target_lengths, target_max_length, target_bias,
@@ -287,7 +286,7 @@ class TransformerDecoder(Decoder):
 
         # set all target positions to zero except for current time-step
         # target: (batch_size, target_max_length, model_size)
-        target = mx.sym.broadcast_mul(target, mx.sym.expand_dims(mask, axis=2))
+        target = mx.sym.broadcast_mul(target, mask)
         # reduce to single prediction
         # target: (batch_size, model_size)
         target = mx.sym.sum(target, axis=1, keepdims=False)
@@ -298,8 +297,7 @@ class TransformerDecoder(Decoder):
         # TODO(fhieber): no attention probs for now
         attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
 
-        # next states
-        new_states = [source_encoded, source_encoded_lengths, sequences, lengths]
+        new_states = [source_encoded, source_encoded_lengths]
         return logits, attention_probs, new_states
 
     def reset(self):
@@ -318,14 +316,7 @@ class TransformerDecoder(Decoder):
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
         """
-        target_max_length = self._get_target_max_length(source_encoded_max_length)
-        # 0s: (batch_size, target_max_length)
-        sequences = mx.sym.broadcast_axis(mx.sym.expand_dims(mx.sym.zeros_like(source_encoded_lengths), axis=1),
-                                          axis=1,
-                                          size=target_max_length)
-        # 0s: (batch_size, source_encoded_max_length, encoder_depth)
-        lengths = mx.sym.zeros_like(source_encoded_lengths)
-        return [source_encoded, source_encoded_lengths, sequences, lengths]
+        return [source_encoded, source_encoded_lengths]
 
     def state_variables(self) -> List[mx.sym.Symbol]:
         """
@@ -334,9 +325,7 @@ class TransformerDecoder(Decoder):
         :return: List of symbolic variables.
         """
         return [mx.sym.Variable(C.SOURCE_ENCODED_NAME),
-                mx.sym.Variable(C.SOURCE_LENGTH_NAME),
-                mx.sym.Variable('sequences'),
-                mx.sym.Variable('lengths')]
+                mx.sym.Variable(C.SOURCE_LENGTH_NAME)]
 
     def state_shapes(self,
                      batch_size: int,
@@ -351,25 +340,10 @@ class TransformerDecoder(Decoder):
         :param source_encoded_depth: Depth of encoded source.
         :return: List of shape descriptions.
         """
-        target_max_length = self._get_target_max_length(source_encoded_max_length)
         return [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
                                (batch_size, source_encoded_max_length, source_encoded_depth),
                                layout=C.BATCH_MAJOR),
-                mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N"),
-                mx.io.DataDesc('sequences', (batch_size, target_max_length), layout="NC"),
-                mx.io.DataDesc('lengths', (batch_size,), layout="N")]
-
-    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
-        """
-        Returns a list of RNNCells used by this decoder.
-        """
-        return super().get_rnn_cells()
-
-    @staticmethod
-    def _get_target_max_length(source_encoded_max_length: int):
-        # TODO(fhieber): we need to hardcode this for the inference algorithm to work.
-        # This is currently in line with the beam_search algorithm but not ideal.
-        return source_encoded_max_length * C.TARGET_MAX_LENGTH_FACTOR
+                mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")]
 
 
 RecurrentDecoderState = NamedTuple('RecurrentDecoderState', [
@@ -609,21 +583,27 @@ class RecurrentDecoder(Decoder):
         return logits
 
     def decode_step(self,
-                    prev_word_id: mx.sym.Symbol,
+                    target: mx.sym.Symbol,
+                    target_max_length: int,
                     source_encoded_max_length: int,
                     *states: mx.sym.Symbol) \
             -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
-        Decodes a single time step given the previous word id and previous decoder states.
+        Decodes a single time step given the previous word ids in target and previous decoder states.
         Returns logits, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param prev_word_id: Previous word id. Shape: (batch_size,).
+        :param target: Previous target word ids. Shape: (batch_size, target_max_length).
+        :param target_max_length: Size of time dimension in prev_word_ids.
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
         """
         source_encoded, prev_dynamic_source, source_encoded_length, prev_hidden, *layer_states = states
+
+        # indices: (batch_size,)
+        indices = utils.compute_lengths(target) - 1
+        prev_word_id = mx.sym.pick(target, indices, axis=1)
 
         word_vec_prev, _, _ = self.embedding.encode(prev_word_id, None, 1)
 

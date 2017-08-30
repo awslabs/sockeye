@@ -27,8 +27,8 @@ _LINE_MAX_LENGTH = 9
     # "Vanilla" LSTM encoder-decoder with attention
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --attention-type mlp"
      " --attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity --max-updates 10000"
-     " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
-     " --rnn-dropout 0.0:0.1 --embed-dropout 0.1:0.0"
+     " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
+     " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0",
      "--beam-size 5",
      1.01,
      0.98),
@@ -104,11 +104,11 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
      "--beam-size 5",
      1.01,
      0.99),
-    # LSTM encoder, 1-layer transformer decoder
-    ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
+    # LSTM encoder, 2-layer transformer decoder
+    ("--encoder rnn --num-layers 1:2 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
      " --decoder transformer --batch-size 16"
-     " --loss cross-entropy --optimized-metric perplexity --max-updates 6000"
-     " --transformer-attention-heads 4 --transformer-model-size 32"
+     " --loss cross-entropy --optimized-metric perplexity --max-updates 10000"
+     " --transformer-attention-heads 4 --transformer-model-size 64"
      " --transformer-feed-forward-num-hidden 64"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",

@@ -127,3 +127,8 @@ def log_sockeye_version(logger):
     except ImportError:
         git_hash = "unknown"
     logger.info("Sockeye version %s commit %s", __version__, git_hash)
+
+
+def log_mxnet_version(logger):
+    from mxnet import __version__
+    logger.info("MXNet version %s", __version__)
