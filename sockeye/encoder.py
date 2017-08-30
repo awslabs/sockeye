@@ -38,6 +38,32 @@ def get_encoder(config: Config, fused: bool, embed_weight: Optional[mx.sym.Symbo
     else:
         raise ValueError("Unsupported encoder configuration")
 
+class ConvolutionalEncoderConfig(Config):
+    """
+    Convolutional encoder configuration.
+
+    :param vocab_size: Source vocabulary size.
+    :param num_embed: Size of embedding layer.
+    :param embed_dropout: Dropout probability on embedding layer.
+    :param cnn_config: CNN configuration.
+    :param conv_config: Optional configuration for convolutional embedding.
+    :param reverse_input: Reverse embedding sequence before feeding into CNN.
+    """
+
+    def __init__(self,
+                 vocab_size: int,
+                 num_embed: int,
+                 embed_dropout: float,
+                 cnn_config: convolution.StackedConvolutionConfig,
+                 conv_config: Optional['ConvolutionalEmbeddingConfig'] = None,
+                 reverse_input: bool = False) -> None:
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.num_embed = num_embed
+        self.embed_dropout = embed_dropout
+        self.cnn_config = cnn_config
+        self.conv_config = conv_config
+        self.reverse_input = reverse_input
 
 class RecurrentEncoderConfig(Config):
     """
