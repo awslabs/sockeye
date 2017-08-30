@@ -145,4 +145,4 @@ For more detailed examples check out our user documentation.
 ## Step-by-step tutorial
 
 More detailed step-by-step tutorials can be found in the
-[tutorials directory](https://github.com/awslabs/sockeye/tree/master/tutorial).
+[tutorials directory](https://github.com/awslabs/sockeye/tree/master/tutorials).
