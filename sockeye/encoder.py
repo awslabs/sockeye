@@ -10,25 +10,26 @@
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
-from sockeye.convolution import ConvolutionGluBlock
-
 """
 Encoders for sequence-to-sequence models.
 """
+
+from abc import ABC, abstractmethod
 import logging
 from math import ceil, floor
-from abc import ABC, abstractmethod
 from typing import Callable, List, Optional, Tuple
 
 import mxnet as mx
-
 from sockeye.config import Config
-from . import constants as C
-from . import rnn
-from . import convolution
+from sockeye.convolution import ConvolutionGluBlock
+
 from . import attention
+from . import constants as C
+from . import convolution
+from . import rnn
 from . import transformer
 from . import utils
+
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ def get_encoder(config: Config, fused: bool, embed_weight: Optional[mx.sym.Symbo
         return get_recurrent_encoder(config, fused, embed_weight)
     elif isinstance(config, transformer.TransformerConfig):
         return get_transformer_encoder(config, embed_weight)
-    elif isinstance(config, ConvoultionalEncoderConfig):
+    elif isinstance(config, ConvolutionalEncoderConfig):
         return get_convolutional_encoder(config, embed_weight)
     else:
         raise ValueError("Unsupported encoder configuration")
@@ -61,6 +62,7 @@ class ConvolutionalEncoderConfig(Config):
                  num_layers: int,
                  embed_dropout: float,
                  cnn_config: convolution.StackedConvolutionConfig,
+                 max_seq_length: int,
                  hidden_dropout: float = .0):
         super().__init__()
         self.vocab_size = vocab_size
@@ -68,38 +70,9 @@ class ConvolutionalEncoderConfig(Config):
         self.num_layers = num_layers
         self.embed_dropout = embed_dropout
         self.cnn_config = cnn_config
-
-
-class ConvolutionalEncoder(Encoder):
-    """
-    """
-    def __init__(self,
-                 config: ConvolutionalEncoderConfig,
-                 prefix: str = C.ENCODER_PREFIX) -> None:
-        self.config = config
-        self.convolution_weight = mx.sym.Variable("%sconvolution_weight" % prefix)
-        self.convolution_bias = mx.sym.Variable("%sconvolution_bias" % prefix)
-        
-    def encode(self,
-               data: mx.sym.Symbol,
-               data_length: mx.sym.Symbol,
-               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
-               """
-               """
-        source_conv = my.sym.Convolution(data=data,
-                                         weight=self.convolution_weight,
-                                         bias=self.convolution_bias,
-                                         pad=(self.config.convolution_config.kernel_width - 1),
-                                         kernel=(self.config.convolution_config.kernel_widht,),
-                                         num_filter=2 * self.config.convolution_config.num_hidden)
-
-        source_conv = mx.sym.slice_axis(data=source_conv, axis=2, begin=0, end=seq_length)
-
-        source_gate_a, source_gate_b = my.sym.split(source_conv, num_outputs=2, axis=1)
-
-        source_hidden = mx.sym.broadcast_mul(source_gate_a,
-                                             mx.sym.Activation(data=source_gate_b, act_type="sigmoid"))
-
+        # @TODO: make sure this max_seq_length is passed properly
+        self.max_seq_length = max_seq_length
+        self.hidden_dropout = hidden_dropout
         
 
 class RecurrentEncoderConfig(Config):
@@ -181,7 +154,7 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
 
 
 def get_convolutional_encoder(config: ConvolutionalEncoderConfig,
-                              embed_weight: Optional[mx.sym.Symbol] = None): -> 'Encoder':
+                              embed_weight: Optional[mx.sym.Symbol] = None) -> 'Encoder':
     """
     """
     encoders = list()  # type: List[Encoder]
@@ -192,12 +165,12 @@ def get_convolutional_encoder(config: ConvolutionalEncoderConfig,
                               embed_weight=embed_weight))
     encoders.append(PositionalEmbedding(num_embed=config.model_size,
                                         # @TODO: get max_seq_length from config
-                                        max_seq_length=100,
+                                        max_seq_length=config.max_seq_length,
                                         prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
     encoders.append(ConvolutionalEncoder(config=config))
     encoders.append(BatchMajor2TimeMajor())
     
-    return EncoderSequence(encoder)
+    return EncoderSequence(encoders)
     
 
 def get_transformer_encoder(config: transformer.TransformerConfig,
@@ -284,7 +257,6 @@ class BatchMajor2TimeMajor(Encoder):
         """
         with mx.AttrScope(__layout__=C.TIME_MAJOR):
             return mx.sym.swapaxes(data=data, dim1=0, dim2=1), data_length, seq_len
-
 
 class ReverseSequence(Encoder):
     """
@@ -633,8 +605,8 @@ class ConvolutionalEncoder(Encoder):
                seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         """
-        for i, layer in enumerate(self.layer):
-            data = data + layer(data, data_length, seq_len)
+        for layer in self.layer:
+            data = data + layer(data, seq_len)
         return data, data_length, seq_len
     
 

@@ -11,9 +11,11 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+from typing import Tuple
+
 import mxnet as mx
 from sockeye.config import Config
-from typing import Tuple
+import sockeye.constants as C
 
 
 class StackedConvolutionConfig(Config):
@@ -43,21 +45,19 @@ class ConvolutionGluBlock:
         self.config = config
         self.convolution_weight = mx.sym.Variable("%sconvolution_weight" % prefix)
         self.convolution_bias = mx.sym.Variable("%sconvolution_bias" % prefix)
-        
-        # @TODO: initialize in init or in call?
-        
-    def __call__(self, data: mx.sym.Symbol,) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
-        source_conv = my.sym.Convolution(data=data,
+                
+    def __call__(self, 
+                 data: mx.sym.Symbol,
+                 seq_length: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+        source_conv = mx.sym.Convolution(data=data,
                                          weight=self.convolution_weight,
                                          bias=self.convolution_bias,
                                          pad=(self.config.convolution_config.kernel_width - 1),
-                                         kernel=(self.config.convolution_config.kernel_widht,),
-                                         num_filter=2 * self.config.convolution_config.num_hidden,)
+                                         kernel=(self.config.convolution_config.kernel_width),
+                                         num_filter=2 * self.config.convolution_config.num_hidden)
 
         source_conv = mx.sym.slice_axis(data=source_conv, axis=2, begin=0, end=seq_length)
-        source_gate_a, source_gate_b = my.sym.split(source_conv, num_outputs=2, axis=1)
+        source_gate_a, source_gate_b = mx.sym.split(source_conv, num_outputs=2, axis=1)
         block_output = mx.sym.broadcast_mul(source_gate_a,
-                                             mx.sym.Activaion(data=source_gate_b, act_type="sigmoid"))
+                                             mx.sym.Activation(data=source_gate_b, act_type="sigmoid"))
         return block_output
-
--    
