@@ -41,7 +41,9 @@ CHAR_SEQ_ENCODER_PREFIX = ENCODER_PREFIX + "char_"
 
 # embedding prefixes
 SOURCE_EMBEDDING_PREFIX = "source_embed_"
+SOURCE_POSITIONAL_EMBEDDING_PREFIX = "source_pos_embed"
 TARGET_EMBEDDING_PREFIX = "target_embed_"
+TARGET_POSITIONAL_EMBEDDING_PREFIX = "target_pos_embed"
 SHARED_EMBEDDING_PREFIX = "source_target_embed_"
 
 # encoder names (arguments)
@@ -49,6 +51,7 @@ RNN_NAME = "rnn"
 RNN_WITH_CONV_EMBED_NAME = "rnn-with-conv-embed"
 TRANSFORMER_TYPE = "transformer"
 CONVOLUTION_TYPE = "cnn"
+CONVOLUTIONGLUBLOCK_PREFIX = "cnn_glu_block_"
 TRANSFORMER_WITH_CONV_EMBED_TYPE = "transformer-with-conv-embed"
 
 # available encoders
