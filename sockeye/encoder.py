@@ -24,6 +24,8 @@ import mxnet as mx
 from sockeye.config import Config
 from . import constants as C
 from . import rnn
+from . import convolution
+from . import attention
 from . import transformer
 from . import utils
 
@@ -38,6 +40,7 @@ def get_encoder(config: Config, fused: bool, embed_weight: Optional[mx.sym.Symbo
     else:
         raise ValueError("Unsupported encoder configuration")
 
+
 class ConvolutionalEncoderConfig(Config):
     """
     Convolutional encoder configuration.
@@ -46,8 +49,7 @@ class ConvolutionalEncoderConfig(Config):
     :param num_embed: Size of embedding layer.
     :param embed_dropout: Dropout probability on embedding layer.
     :param cnn_config: CNN configuration.
-    :param conv_config: Optional configuration for convolutional embedding.
-    :param reverse_input: Reverse embedding sequence before feeding into CNN.
+    :param hidden_dropout: Dropout probability on next encoder hidden state.
     """
 
     def __init__(self,
@@ -55,15 +57,49 @@ class ConvolutionalEncoderConfig(Config):
                  num_embed: int,
                  embed_dropout: float,
                  cnn_config: convolution.StackedConvolutionConfig,
-                 conv_config: Optional['ConvolutionalEmbeddingConfig'] = None,
-                 reverse_input: bool = False) -> None:
+                 hidden_dropout: float = .0):
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
         self.embed_dropout = embed_dropout
         self.cnn_config = cnn_config
-        self.conv_config = conv_config
-        self.reverse_input = reverse_input
+
+
+class ConvolutionalEncoder(Encoder):
+    """
+    """
+    def __init__(self,
+                 config: ConvolutionalEncoderConfig,
+                 prefix: str = C.ENCODER_PREFIX) -> None:
+        self.config = config
+        self.convolution_weight = mx.sym.Variable("%sconvolution_weight" % prefix)
+        self.convolution_bias = mx.sym.Variable("%sconvolution_bias" % prefix)
+        self.embedding = Embedding(self.config.num_embed,
+                                   self.config.vocab_size,
+                                   prefix=C.SOURCE_EMBEDDING_PREFIX,
+                                   dropout=config.embed_dropout)
+
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: mx.sym.Symbol,
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               """
+               """
+        source_conv = my.sym.Convolution(data=data,
+                                         weight=self.convolution_weight,
+                                         bias=self.convolution_bias,
+                                         pad=(self.config.convolution_config.kernel_width - 1),
+                                         kernel=(self.config.convolution_config.kernel_widht,),
+                                         num_filter=2 * self.config.convolution_config.num_hidden)
+
+        source_conv = mx.sym.slice_axis(data=source_conv, axis=2, begin=0, end=seq_length)
+
+        source_gate_a, source_gate_b = my.sym.split(source_conv, num_outputs=2, axis=1)
+
+        source_hidden = mx.sym.broadcast_mul(source_gate_a,
+                                             mx.sym.Activation(data=source_gate_b, act_type="sigmoid"))
+
+        
 
 class RecurrentEncoderConfig(Config):
     """
