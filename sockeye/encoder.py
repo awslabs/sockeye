@@ -74,11 +74,7 @@ class ConvolutionalEncoder(Encoder):
         self.config = config
         self.convolution_weight = mx.sym.Variable("%sconvolution_weight" % prefix)
         self.convolution_bias = mx.sym.Variable("%sconvolution_bias" % prefix)
-        self.embedding = Embedding(self.config.num_embed,
-                                   self.config.vocab_size,
-                                   prefix=C.SOURCE_EMBEDDING_PREFIX,
-                                   dropout=config.embed_dropout)
-
+        
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
