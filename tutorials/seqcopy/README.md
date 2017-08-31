@@ -5,25 +5,16 @@ The task is then to train a model that copies the sequence from the source to th
 This task is on the one hand difficult enough to be interesting and on the other and allows for quickly training a model.
 
 ## Setup
-For this tutorial we assume that you have successfully [installed](../../README.md#installation) Sockeye.
-We will be using scripts from the Sockeye repository, so you should either clone the repository or manually download 
-the scripts.
-Just as a reminder: Everything is run using Python 3, so depending on your setup you may have to replace `python` with
-`python3` below.
-All of the commands below assume you are running on a CPU.
-If you have a GPU available you can simply remove `--use-cpu`.
+All of the commands below will actually run on the CPU, as we are training a fairly small model.
+If you would like to run on a GPU you can simply remove `--use-cpu`.
 
-## 1. Generating the data
-As a first step we will generate a synthetic data set consisting of random sequences of digits.
-These sequences are then split into disjoint training and development sets.
-Run the following command to create the data set:
+## 1. Data
+For training we will use synthetically generated data consisting of random sequences of digits.
+These sequences are split into disjoint training and development sets.
 
-```bash
-python genseqcopy.py
-```
-
-After running this script you have a training (`train.source`, `train.target`) and a development data set
-(`dev.source`, `dev.target`). The generated sequences will look like this:
+You can find the training (`train.source`, `train.target`) and a development data sets (`dev.source`, `dev.target`)
+in the folder `/home/ubuntu/efs/tutorials/seqcopy`.
+The generated sequences will look like this:
 
 ```
 2 3 5 5 4 6 7 0 3 8 10 9 3 6
@@ -36,21 +27,23 @@ After running this script you have a training (`train.source`, `train.target`) a
 
 ## 2. Training
 
-Now that we have some training data to play with we can train our model. Start training by running
-the following command:
+Start training by running the following command:
 
 ```bash
-python3 -m sockeye.train -s train.source \
-                         -t train.target \
-                         -vs dev.source \
-                         -vt dev.target \
-                         --num-embed 32 \
-                         --rnn-num-hidden 64 \
-                         --attention-type dot \
-                         --use-cpu \
-                         --metrics perplexity accuracy \
-                         --max-num-checkpoint-not-improved 3 \
-                         -o seqcopy_model
+cd /home/ubuntu/efs/working_dir/YOUR_USERNAME
+train_dir=/home/ubuntu/efs/tutorials/seqcopy
+
+python -m sockeye.train -s $train_dir/train.source \
+                        -t $train_dir/train.target \
+                        -vs $train_dir/dev.source \
+                        -vt $train_dir/dev.target \
+                        --num-embed 32 \
+                        --rnn-num-hidden 64 \
+                        --attention-type dot \
+                        --metrics perplexity accuracy \
+                        --max-num-checkpoint-not-improved 3 \
+                        --use-cpu \
+                        -o seqcopy_model
 ```
 
 This will train a 1-layer RNN model with a bidirectional LSTM as the encoder and a uni-directional LSTM

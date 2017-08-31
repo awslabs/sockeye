@@ -1,26 +1,37 @@
-# Step-by-step tutorials
+# MT Marathon 2017 Tutorial
 
 ## Setup
 
-For running the examples in the tutorials you can either manually install Sockeye, its dependencies and additional
-tools used or use the Dockerfile we provide, which comes with everything included.
+For running the examples in the tutorials you can either manually install Sockeye on your laptop (/any other machine)
+or use the EC2 instance we already set up.
 
-### Either: Dockerfile
+### Either: Provided AWS EC2 instance
 
-Coming soon...
+Everything is already set up for you. You can simply follow the tutorials below without any setup.
 
-<!--we provide a docker file that already includes all prerequisites for running the tutorials.
-If you are using the provided Dockerfile simply skip the `Setup` section in the tutorials below.-->
+### Or: Your laptop/machine
+The tutorial below has been adopted to the provided EC2 machine.
+The exact same tutorial with additional instructions on how to install Sockeye and preprocess data
+can be found [here](https://github.com/awslabs/sockeye/tree/master/tutorials).
+So in case you want to use your own computer please proceed to [that tutorial](https://github.com/awslabs/sockeye/tree/master/tutorials).
 
-### Or: Manual installation
-If you do not use the provided Dockerfile you can follow the [installation instructions](../README.md#installation)
-to manually install Sockeye and all dependencies. The tutorials below might have additional dependencies that
-will be mentioned at the beginning of each tutorial.
+## Setup
+Alright, so assuming you're running on the provided EC2 instance we can get started by creating a folder
+to store you models:
+
+```bash
+ssh ubuntu@$IP_ADDRESS
+mkdir /home/ubuntu/efs/working_dir/YOUR_USERNAME
+cd /home/ubuntu/efs/working_dir/YOUR_USERNAME
+```
+
+All (preprocessed) data that will be used can be found in `/home/ubuntu/efs/tutorials`.
+
 
 ## Tutorials
 
-Below is the full list of tutorials we provide. We recommend going through them in order as they will gradually
-introduce different concepts and parameters used for training and translation.
+The tutorial is split up into two distinct tasks that each show different features of Sockeye.
+It therefore makes sense to first look at the sequence copy task and then train the WMT model.
 
 1. [Sequence copy task](seqcopy)
 1. [WMT German to English news translation](wmt)
