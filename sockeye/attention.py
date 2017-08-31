@@ -277,11 +277,14 @@ class DotAttention(Attention):
                  input_previous_word: bool,
                  rnn_num_hidden: int,
                  num_hidden: int,
-                 scale: Optional[float] = None) -> None:
+                 scale: Optional[float] = None,
+                 expand_query_dim: bool = False) -> None:
         super().__init__(input_previous_word)
         self.project = rnn_num_hidden != num_hidden
         self.num_hidden = num_hidden
         self.scale = scale
+        # TODO: just pull the expand dim out into the decoder
+        self.expand_query_dim = expand_query_dim
         self.t2h_weight = mx.sym.Variable("%st2h_weight" % self.prefix) if self.project else None
         self.s2h_weight = mx.sym.Variable("%ss2h_weight" % self.prefix) if self.project else None
 
@@ -330,14 +333,18 @@ class DotAttention(Attention):
                 query *= self.scale
 
             # (batch_size, decoder_num_hidden, 1)
-            expanded_decoder_state = mx.sym.expand_dims(query, axis=2)
+            if self.expand_query_dim:
+                expanded_decoder_state = mx.sym.expand_dims(query, axis=2)
+            else:
+                expanded_decoder_state = query
 
             # batch_dot: (batch, M, K) X (batch, K, N) –> (batch, M, N).
             # (batch_size, seq_len, 1)
             attention_scores = mx.sym.batch_dot(lhs=local_source, rhs=expanded_decoder_state,
                                                 name="%sbatch_dot" % self.prefix)
 
-            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores)
+            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores,
+                                                                       remove_target_seq_len_dim=self.expand_query_dim)
             return AttentionState(context=context,
                                   probs=attention_probs,
                                   dynamic_source=att_state.dynamic_source)
@@ -735,7 +742,9 @@ def mask_attention_scores(logits: mx.sym.Symbol,
 
 def get_context_and_attention_probs(values: mx.sym.Symbol,
                                     length: mx.sym.Symbol,
-                                    logits: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
+                                    logits: mx.sym.Symbol,
+                                    #TODO: fix but just doing the reshape outside of this method...
+                                    remove_target_seq_len_dim=False) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
     """
     Returns context vector and attention probabilities
     via a weighted sum over values.
@@ -752,8 +761,11 @@ def get_context_and_attention_probs(values: mx.sym.Symbol,
     probs = mx.sym.softmax(logits, axis=1, name='attention_softmax')
 
     # batch_dot: (batch, M, K) X (batch, K, N) –> (batch, M, N).
-    # (batch_size, seq_len, encoder_num_hidden) X (batch_size, seq_len, 1) -> (batch_size, encoder_num_hidden)
+    # (batch_size, encoder_num_hidden, seq_len) X (batch_size, seq_len, 1) -> (batch_size, num_hidden, 1)
     context = mx.sym.batch_dot(lhs=values, rhs=probs, transpose_a=True)
-    context = mx.sym.reshape(data=context, shape=(0, 0))
+    # (batch_size, encoder_num_hidden, 1)-> (batch_size, encoder_num_hidden)
+    if remove_target_seq_len_dim:
+        context = mx.sym.reshape(data=context, shape=(0, 0))
+        probs = mx.sym.reshape(data=probs, shape=(0, 0))
 
-    return context, mx.sym.reshape(data=probs, shape=(0, 0))
+    return context, probs

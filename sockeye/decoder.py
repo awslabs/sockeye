@@ -30,6 +30,7 @@ from . import layers
 from . import lexicon as lexicons
 from . import rnn
 from . import convolution
+from . import attention
 from . import transformer
 from . import utils
 
@@ -908,6 +909,17 @@ class ConvolutionalDecoder(Decoder):
                  config: ConvolutionalDecoderConfig,
                  prefix: str = C.DECODER_PREFIX) -> None:
         self.config = config
+        self.convolution_weight = mx.sym.Variable("%sconvolution_weight" % prefix)
+        self.convolution_bias = mx.sym.Variable("%sconvolution_bias" % prefix)
+        self.embedding = encoder.Embedding(self.config.num_embed,
+                                           self.config.vocab_size,
+                                           prefix=C.TARGET_EMBEDDING_PREFIX,
+                                           dropout=config.embed_dropout)
+        self.attention = attention.DotAttention(input_previous_word=False,
+                                                #TODO: check how to set these correctly...
+                                                rnn_num_hidden=self.config.convolution_config.num_hidden,
+                                                num_hidden=self.config.convolution_config.num_hidden,
+                                                expand_query_dim=False)
 
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
@@ -934,6 +946,46 @@ class ConvolutionalDecoder(Decoder):
                  Shape: (batch_size * target_max_length, target_vocab_size)
         """
         # TODO: how to add the source embeddings to source_encoded?
+
+        # TODO: positional embedding
+        # target_embed: (batch_size, target_seq_len, num_target_embed)
+        target_embed, target_lengths, target_max_length = self.embedding.encode(target, target_lengths,
+                                                                                target_max_length)
+        # target_embed: (batch_size, num_target_embed, target_seq_len)
+        target_embed = mx.sym.swapaxes(target_embed, dim1=1, dim2=2)
+
+        #TODO: correct masking...
+        target_conv = mx.sym.Convolution(data=target_embed,
+                                         weight=self.convolution_weight,
+                                         bias=self.convolution_bias,
+                                         pad=(self.config.convolution_config.kernel_width - 1),
+                                         kernel=(self.config.convolution_config.kernel_width,),
+                                         num_filter=2 * self.config.convolution_config.num_hidden)
+        # (batch_size, 2 * num_hidden, target_seq_len)
+        target_conv = mx.sym.slice_axis(data=target_conv, axis=2, begin=0, end=target_max_length)
+
+        # GLU:
+        # two times: (batch_size, num_hidden, target_seq_len)
+        target_gate_a, target_gate_b = mx.sym.split(target_conv, num_outputs=2, axis=1)
+        # (batch_size, num_hidden, target_seq_len)
+        target_hidden = mx.sym.broadcast_mul(target_gate_a,
+                                             mx.sym.Activation(data=target_gate_b, act_type="sigmoid"))
+
+        # (batch_size, source_encoded_max_length, encoder_depth).
+        source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
+        attention = self.attention.on(source_encoded_batch_major, source_encoded_lengths, source_encoded_max_length)
+        attention_state = self.attention.get_initial_state(source_encoded_lengths, source_encoded_max_length)
+
+        attention_input = self.attention.make_input(seq_idx=0,
+                                                    word_vec_prev=None, # TODO: make optional
+                                                    decoder_state=target_hidden)
+
+        attention_state = attention(attention_input, attention_state)
+        # (batch_size, num_hidden, target_seq_len)
+        context = attention_state.context
+
+        target_hidden = context + target_hidden
+
         raise NotImplementedError()
 
     def decode_step(self,
@@ -955,11 +1007,7 @@ class ConvolutionalDecoder(Decoder):
         """
         raise NotImplementedError()
 
-
     def reset(self):
-        """
-        Reset decoder method. Used for inference.
-        """
         pass
 
     def init_states(self,
@@ -975,7 +1023,7 @@ class ConvolutionalDecoder(Decoder):
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
         """
-        pass
+        return []
 
     def state_variables(self) -> List[mx.sym.Symbol]:
         """
@@ -983,7 +1031,7 @@ class ConvolutionalDecoder(Decoder):
 
         :return: List of symbolic variables.
         """
-        pass
+        return []
 
     def state_shapes(self,
                      batch_size: int,
@@ -998,7 +1046,7 @@ class ConvolutionalDecoder(Decoder):
         :param source_encoded_depth: Depth of encoded source.
         :return: List of shape descriptions.
         """
-        pass
+        return []
 
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """
