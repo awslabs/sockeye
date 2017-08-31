@@ -295,7 +295,7 @@ def main():
         elif args.decoder == C.CONVOLUTION_TYPE:
             #TODO: pass arguments from CLI...
             convolution_config = convolution.StackedConvolutionConfig(kernel_width=3,
-                                                                      num_hidden=512,
+                                                                      num_hidden=64,
                                                                       num_layers=6)
             config_decoder = decoder.ConvolutionalDecoderConfig(convolution_config=convolution_config,
                                                                 vocab_size=vocab_target_size,

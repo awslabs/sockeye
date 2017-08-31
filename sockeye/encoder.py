@@ -70,6 +70,35 @@ class ConvolutionalEncoderConfig(Config):
         self.cnn_config = cnn_config
 
 
+class ConvolutionalEncoder(Encoder):
+    """
+    """
+    def __init__(self,
+                 config: ConvolutionalEncoderConfig,
+                 prefix: str = C.ENCODER_PREFIX) -> None:
+        self.config = config
+        self.convolution_weight = mx.sym.Variable("%sconvolution_weight" % prefix)
+        self.convolution_bias = mx.sym.Variable("%sconvolution_bias" % prefix)
+        
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: mx.sym.Symbol,
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               """
+               """
+        source_conv = my.sym.Convolution(data=data,
+                                         weight=self.convolution_weight,
+                                         bias=self.convolution_bias,
+                                         pad=(self.config.convolution_config.kernel_width - 1),
+                                         kernel=(self.config.convolution_config.kernel_widht,),
+                                         num_filter=2 * self.config.convolution_config.num_hidden)
+
+        source_conv = mx.sym.slice_axis(data=source_conv, axis=2, begin=0, end=seq_length)
+
+        source_gate_a, source_gate_b = my.sym.split(source_conv, num_outputs=2, axis=1)
+
+        source_hidden = mx.sym.broadcast_mul(source_gate_a,
+                                             mx.sym.Activation(data=source_gate_b, act_type="sigmoid"))
 
         
 
@@ -125,10 +154,10 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
         encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
 
     encoders.append(BatchMajor2TimeMajor())
-    
+
     if config.reverse_input:
         encoders.append(ReverseSequence())
-    
+
     if config.rnn_config.residual:
         utils.check_condition(config.rnn_config.first_residual_layer >= 2,
                               "Residual connections on the first encoder layer are not supported")
@@ -344,6 +373,38 @@ class Embedding(Encoder):
         Return the representation size of this encoder.
         """
         return self.num_embed
+
+
+class PositionalEmbedding(Encoder):
+
+    def __init__(self, num_embed: int, max_seq_len: int, prefix: str):
+        self.num_embed = num_embed
+        self.max_seq_len = max_seq_len
+        self.prefix = prefix
+        self.embed_weight = mx.sym.Variable(prefix + "weight")
+
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: mx.sym.Symbol,
+               seq_len: int) -> Tuple[ mx.sym.Symbol, mx.sym.Symbol, int]:
+        """
+
+        :param data: (batch_size, source_seq_len, num_embed)
+        :param data_length: (batch_size,)
+        :param seq_len: sequence length.
+        :return:
+        """
+
+        # (1, source_seq_len)
+        positions = mx.sym.expand_dims(data=mx.sym.arange(start=0, stop=seq_len, step=1), axis=0)
+
+        # (1, source_seq_len, num_embed)
+        pos_embedding = mx.sym.Embedding(data=positions,
+                                         input_dim=self.max_seq_len,
+                                         weight=self.embed_weight,
+                                         output_dim=self.num_embed,
+                                         name=self.prefix + "pos_embed")
+        return mx.sym.broadcast_add(data, pos_embedding), data_length, seq_len
 
 
 class EncoderSequence(Encoder):
