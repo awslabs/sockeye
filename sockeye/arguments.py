@@ -284,6 +284,10 @@ def add_model_parameters(params):
                               type=int_greater_or_equal(1),
                               default=3,
                               help='Kernel width of convolutional encoder and decoder. Default: %(default)s.')
+    model_params.add_argument('--cnn-max-seq-length',
+                              type=int_greater_or_equal(1),
+                              default=3,
+                              help='Maximum sequence length for convolutional encoder and decoder %(default)s.')
 
     # rnn arguments
     model_params.add_argument('--rnn-cell-type',
