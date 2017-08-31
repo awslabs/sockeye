@@ -916,10 +916,13 @@ class ConvolutionalDecoder(Decoder):
                                            prefix=C.TARGET_EMBEDDING_PREFIX,
                                            dropout=config.embed_dropout)
         self.attention = attention.DotAttention(input_previous_word=False,
-                                                #TODO: check how to set these correctly...
+                                                # TODO: set them correctly. rnn_num_hidden = encoder num hidden, num_hidden = decoder_num_hidden
                                                 rnn_num_hidden=self.config.convolution_config.num_hidden,
                                                 num_hidden=self.config.convolution_config.num_hidden,
                                                 expand_query_dim=False)
+        # TODO: weight tying??
+        self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
+        self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
 
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
@@ -971,22 +974,33 @@ class ConvolutionalDecoder(Decoder):
         target_hidden = mx.sym.broadcast_mul(target_gate_a,
                                              mx.sym.Activation(data=target_gate_b, act_type="sigmoid"))
 
+        #TODO: use layers.dot_attention instead? + also use layers.dot_attetion in the DotAttention class...
         # (batch_size, source_encoded_max_length, encoder_depth).
         source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
         attention = self.attention.on(source_encoded_batch_major, source_encoded_lengths, source_encoded_max_length)
         attention_state = self.attention.get_initial_state(source_encoded_lengths, source_encoded_max_length)
 
         attention_input = self.attention.make_input(seq_idx=0,
-                                                    word_vec_prev=None, # TODO: make optional
+                                                    word_vec_prev=None, # TODO: make typing.Optional
                                                     decoder_state=target_hidden)
 
         attention_state = attention(attention_input, attention_state)
         # (batch_size, num_hidden, target_seq_len)
         context = attention_state.context
 
+        # (batch_size, num_hidden, target_seq_len)
         target_hidden = context + target_hidden
 
-        raise NotImplementedError()
+        # (batch_size, target_seq_len, num_hidden)
+        target_hidden = mx.sym.swapaxes(data=target_hidden, dim1=1, dim2=2)
+
+        # (batch_size * target_seq_len, num_hidden)
+        target_hidden = mx.sym.reshape(data=target_hidden, shape=(-3, 0))
+        # (batch_size * target_seq_len, target_vocab_size)
+        logits = mx.sym.FullyConnected(data=target_hidden, num_hidden=self.config.vocab_size,
+                                       weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
+
+        return logits
 
     def decode_step(self,
                     target: mx.sym.Symbol,
