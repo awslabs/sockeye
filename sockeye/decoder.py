@@ -936,6 +936,8 @@ class ConvolutionalDecoder(Decoder):
             pad_type='left',
             prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
 
+        self.residual_linear_weights = mx.sym.Variable('%sresidual_linear_weight' % prefix)
+
         # TODO: weight tying? lexicon and all other features the RNN supports?!
         self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
         self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
@@ -1063,6 +1065,15 @@ class ConvolutionalDecoder(Decoder):
               target_lengths: mx.sym.Symbol,
               target_max_length: int) -> mx.sym.Symbol:
 
+        target_hidden = mx.sym.reshape(target_hidden, shape=(-3, -1))
+        target_hidden = mx.sym.FullyConnected(data=target_hidden,
+                                              num_hidden=self.config.cnn_config.num_hidden,
+                                              no_bias=True,
+                                              weight=self.residual_linear_weights)
+        # re-arrange outcoming layer to the dimensions of the output
+        target_hidden = mx.sym.reshape(target_hidden, shape=(-1, target_max_length, self.config.cnn_config.num_hidden))
+        target_hidden_prev = target_hidden
+
         for layer in self.layers:
             # (batch_size, target_seq_len, num_hidden)
             target_hidden = layer(target_hidden, target_lengths, target_max_length)
@@ -1080,8 +1091,8 @@ class ConvolutionalDecoder(Decoder):
             context = attention_state.context
             # (batch_size, target_seq_len, num_hidden)
             context = mx.sym.swapaxes(data=context, dim1=1, dim2=2)
-            target_hidden = target_hidden + context
-            # TODO: residual connections
+            target_hidden = target_hidden_prev + target_hidden + context
+            target_hidden_prev = target_hidden
 
         return target_hidden
 
