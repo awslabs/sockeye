@@ -934,9 +934,6 @@ class ConvolutionalDecoder(Decoder):
         self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
         self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
         
-        # initialize the weights of the linear transformation required for the residual connections
-        self.residual_linear_weights = mx.sym.Symbol('%sresidual_linear_weights' % (prefix))
-        
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
                         source_encoded_lengths: mx.sym.Symbol,
@@ -1055,7 +1052,8 @@ class ConvolutionalDecoder(Decoder):
               target_max_length: int) -> mx.sym.Symbol:
         """
         """
-        for i, layer in enumerate(self.layers):
+
+        for layer in self.layers:
             # (batch_size, target_seq_len, num_hidden)
             target_hidden = layer(target_hidden, target_lengths, target_max_length)
             #TODO: avoid double swapaxes (inside ConvGluBlock and when doing the query)
