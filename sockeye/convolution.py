@@ -24,12 +24,10 @@ class ConvolutionGluConfig(Config):
     """
     def __init__(self,
                  kernel_width: int,
-                 num_hidden: int,
-                 num_layers: int):
+                 num_hidden: int):
         super().__init__()
         self.kernel_width = kernel_width
         self.num_hidden = num_hidden
-        self.num_layers = num_layers
 
 
 class ConvolutionGluBlock:
@@ -47,7 +45,7 @@ class ConvolutionGluBlock:
 
     def __call__(self, data: mx.sym.Symbol,
                  data_length: mx.sym.Symbol,
-                 seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+                 seq_len: int) -> mx.sym.Symbol:
         """
 
         :param data: (batch_size, seq_len, num_hidden)

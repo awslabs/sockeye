@@ -879,25 +879,30 @@ class ConvolutionalDecoderConfig(Config):
     :param vocab_size: Target vocabulary size.
     :param max_seq_len_source: Maximum source sequence length
     :param num_embed: Target word embedding size.
+    :param encoder_num_hidden: Number of hidden units of the encoder.
     :param embed_dropout: Dropout probability for target embeddings.
     :param hidden_dropout: Dropout probability on next decoder hidden state.
     :param weight_tying: Whether to share embedding and prediction parameter matrices.
     """
 
     def __init__(self,
-                 convolution_config: convolution.ConvolutionGluConfig,
+                 cnn_config: convolution.ConvolutionGluConfig,
                  vocab_size: int,
                  max_seq_len_source: int,
                  num_embed: int,
+                 encoder_num_hidden: int,
+                 num_layers: int,
                  embed_dropout: float = .0,
                  hidden_dropout: float = .0) -> None:
         super().__init__()
-        self.convolution_config = convolution_config
+        self.cnn_config = cnn_config
         self.vocab_size = vocab_size
         self.max_seq_len_source = max_seq_len_source
         self.num_embed = num_embed
+        self.encoder_num_hidden = encoder_num_hidden
         self.embed_dropout = embed_dropout
         self.hidden_dropout = hidden_dropout
+        self.num_layers = num_layers
 
 
 class ConvolutionalDecoder(Decoder):
@@ -916,11 +921,15 @@ class ConvolutionalDecoder(Decoder):
                                            self.config.vocab_size,
                                            prefix=C.TARGET_EMBEDDING_PREFIX,
                                            dropout=config.embed_dropout)
+        #TODO: feed attention in from the outside
         self.attention = attention.DotAttention(input_previous_word=False,
                                                 # TODO: set them correctly. rnn_num_hidden = encoder num hidden, num_hidden = decoder_num_hidden
-                                                rnn_num_hidden=self.config.convolution_config.num_hidden,
-                                                num_hidden=self.config.convolution_config.num_hidden,
+                                                rnn_num_hidden=self.config.cnn_config.num_hidden,
+                                                num_hidden=self.config.cnn_config.num_hidden,
                                                 expand_query_dim=False)
+        self.layers = [convolution.ConvolutionGluBlock(
+            config.cnn_config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
+
         # TODO: weight tying? lexicon and all other features the RNN supports?!
         self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
         self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
@@ -953,51 +962,34 @@ class ConvolutionalDecoder(Decoder):
 
         # TODO: potentially project the source_encoded (if different source num_hidden)
 
+        # (batch_size, source_encoded_max_length, encoder_depth).
+        source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
+        attention = self.attention.on(source_encoded_batch_major, source_encoded_lengths, source_encoded_max_length)
+
         # TODO: positional embedding
         # target_embed: (batch_size, target_seq_len, num_target_embed)
         target_embed, target_lengths, target_max_length = self.embedding.encode(target, target_lengths,
                                                                                 target_max_length)
-        # target_embed: (batch_size, num_target_embed, target_seq_len)
-        target_embed = mx.sym.swapaxes(target_embed, dim1=1, dim2=2)
-
-        #TODO: use convolutional glu block with multiple layers...
-
-        #TODO: correct masking...
-        target_conv = mx.sym.Convolution(data=target_embed,
-                                         weight=self.convolution_weight,
-                                         bias=self.convolution_bias,
-                                         pad=(self.config.convolution_config.kernel_width - 1),
-                                         kernel=(self.config.convolution_config.kernel_width,),
-                                         num_filter=2 * self.config.convolution_config.num_hidden)
-        # (batch_size, 2 * num_hidden, target_seq_len)
-        target_conv = mx.sym.slice_axis(data=target_conv, axis=2, begin=0, end=target_max_length)
-
-        # GLU:
-        # two times: (batch_size, num_hidden, target_seq_len)
-        target_gate_a, target_gate_b = mx.sym.split(target_conv, num_outputs=2, axis=1)
-        # (batch_size, num_hidden, target_seq_len)
-        target_hidden = mx.sym.broadcast_mul(target_gate_a,
-                                             mx.sym.Activation(data=target_gate_b, act_type="sigmoid"))
-
-        #TODO: use layers.dot_attention instead? + also use layers.dot_attetion in the DotAttention class...
-        # (batch_size, source_encoded_max_length, encoder_depth).
-        source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
-        attention = self.attention.on(source_encoded_batch_major, source_encoded_lengths, source_encoded_max_length)
-        attention_state = self.attention.get_initial_state(source_encoded_lengths, source_encoded_max_length)
-
-        attention_input = self.attention.make_input(seq_idx=0,
-                                                    word_vec_prev=None, # TODO: make typing.Optional
-                                                    decoder_state=target_hidden)
-
-        attention_state = attention(attention_input, attention_state)
-        # (batch_size, num_hidden, target_seq_len)
-        context = attention_state.context
-
-        # (batch_size, num_hidden, target_seq_len)
-        target_hidden = context + target_hidden
-
-        # (batch_size, target_seq_len, num_hidden)
-        target_hidden = mx.sym.swapaxes(data=target_hidden, dim1=1, dim2=2)
+        target_hidden = target_embed
+        for i, layer in enumerate(self.layers):
+            # (batch_size, target_seq_len, num_hidden)
+            target_hidden = layer(target_hidden, target_lengths, target_max_length)
+            #TODO: avoid double swapaxes (inside ConvGluBlock and when doing the query)
+            #TODO: use layers.dot_attention instead? Especially as the attention_state doesn't make sense when doing attention once for all time steps
+            #TODO: + also use layers.dot_attetion in the DotAttention class...
+            # (batch_size, num_hidden, target_seq_len)
+            query = mx.sym.swapaxes(data=target_hidden, dim1=1, dim2=2)
+            attention_state = self.attention.get_initial_state(source_encoded_lengths, source_encoded_max_length)
+            attention_input = self.attention.make_input(seq_idx=0,
+                                                        word_vec_prev=None, # TODO: make typing.Optional
+                                                        decoder_state=query)
+            attention_state = attention(attention_input, attention_state)
+            # (batch_size, num_hidden, target_seq_len)
+            context = attention_state.context
+            # (batch_size, target_seq_len, num_hidden)
+            context = mx.sym.swapaxes(data=context, dim1=1, dim2=2)
+            target_hidden = target_hidden + context
+            # TODO: residual connections
 
         # (batch_size * target_seq_len, num_hidden)
         target_hidden = mx.sym.reshape(data=target_hidden, shape=(-3, 0))

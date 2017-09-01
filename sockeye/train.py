@@ -265,8 +265,7 @@ def main():
                 conv_config=config_conv)
         elif args.encoder == C.CONVOLUTION_TYPE:
             cnn_config = convolution.ConvolutionGluConfig(kernel_width=cnn_kernel_width_encoder,
-                                                          num_hidden=args.cnn_num_hidden,
-                                                          num_layers=encoder_num_layers)
+                                                          num_hidden=args.cnn_num_hidden)
             config_encoder = encoder.ConvolutionalEncoderConfig(vocab_size=vocab_source_size,
                                                                 num_embed=num_embed_source,
                                                                 embed_dropout=encoder_embed_dropout,
@@ -305,12 +304,14 @@ def main():
                 positional_encodings=not args.transformer_no_positional_encodings)
         elif args.decoder == C.CONVOLUTION_TYPE:
             convolution_config = convolution.ConvolutionGluConfig(kernel_width=cnn_kernel_width_decoder,
-                                                                  num_hidden=args.cnn_num_hidden,
-                                                                  num_layers=decoder_num_layers)
-            config_decoder = decoder.ConvolutionalDecoderConfig(convolution_config=convolution_config,
+                                                                  num_hidden=args.cnn_num_hidden)
+            config_decoder = decoder.ConvolutionalDecoderConfig(cnn_config=convolution_config,
                                                                 vocab_size=vocab_target_size,
                                                                 max_seq_len_source=max_seq_len_source,
                                                                 num_embed=num_embed_target,
+                                                                #TODO: make this independent of the type of encoder:
+                                                                encoder_num_hidden=args.cnn_num_hidden,
+                                                                num_layers=decoder_num_layers,
                                                                 embed_dropout=decoder_embed_dropout,
                                                                 hidden_dropout=args.rnn_decoder_hidden_dropout)
         else:
@@ -320,6 +321,7 @@ def main():
                 config_coverage = coverage.CoverageConfig(type=args.attention_coverage_type,
                                                           num_hidden=args.attention_coverage_num_hidden,
                                                           layer_normalization=args.layer_normalization)
+            #TODO: rnn_num_hidden should really be the encoder_num_hidden (to make it independent of the type of encoder used)
             config_attention = attention.AttentionConfig(type=args.attention_type,
                                                          num_hidden=attention_num_hidden,
                                                          input_previous_word=args.attention_use_prev_word,

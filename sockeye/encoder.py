@@ -613,7 +613,7 @@ class ConvolutionalEncoder(Encoder):
         for i, layer in enumerate(self.layers):
             # residual connections:
             #data = data + layer(data, data_length, seq_len)
-            #TODO: put back in...
+            #TODO: put back in: we need a linear projection layer from the embeddings...
             data = layer(data, data_length, seq_len)
         return data, data_length, seq_len
 
