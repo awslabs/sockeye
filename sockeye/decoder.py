@@ -973,7 +973,8 @@ class ConvolutionalDecoder(Decoder):
         # target_embed: (batch_size, target_seq_len, num_target_embed)
         target_embed, target_lengths, target_max_length = self.embedding.encode(target, target_lengths,
                                                                                 target_max_length)
-        target_hidden = self._step(source_encoded_lengths=source_encoded_lengths,
+        target_hidden = self._step(attention=attention,
+                                   source_encoded_lengths=source_encoded_lengths,
                                    source_encoded_max_length=source_encoded_max_length,
                                    target_hidden=target_embed,
                                    target_lengths=target_lengths,
@@ -1022,7 +1023,8 @@ class ConvolutionalDecoder(Decoder):
                                                                                 target_max_length)
 
         # (batch_size, target_max_length, num_hidden)
-        target_hidden = self._step(source_encoded_lengths=source_encoded_lengths,
+        target_hidden = self._step(attention=attention,
+                                   source_encoded_lengths=source_encoded_lengths,
                                    source_encoded_max_length=source_encoded_max_length,
                                    target_hidden=target_embed,
                                    target_lengths=target_lengths,
@@ -1045,6 +1047,7 @@ class ConvolutionalDecoder(Decoder):
         
 
     def _step(self,
+              attention: Callable,
               source_encoded_lengths: mx.sym.Symbol,
               source_encoded_max_length: mx.sym.Symbol,
               target_hidden: mx.sym.Symbol,
