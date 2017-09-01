@@ -913,10 +913,10 @@ class ConvolutionalDecoder(Decoder):
     def __init__(self,
                  config: ConvolutionalDecoderConfig,
                  prefix: str = C.DECODER_PREFIX) -> None:
+        #TODO: add dropout..
         self.config = config
         self.convolution_weight = mx.sym.Variable("%sconvolution_weight" % prefix)
         self.convolution_bias = mx.sym.Variable("%sconvolution_bias" % prefix)
-        # TODO: positional embedding
         self.embedding = encoder.Embedding(self.config.num_embed,
                                            self.config.vocab_size,
                                            prefix=C.TARGET_EMBEDDING_PREFIX,
