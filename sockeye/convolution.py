@@ -42,27 +42,43 @@ class ConvolutionGluBlock:
                  config: ConvolutionGluConfig,
                  prefix: str) -> None:
         self.config = config
-        self.convolution_weight = mx.sym.Variable("%sconvolution_weight" % prefix)
-        self.convolution_bias = mx.sym.Variable("%sconvolution_bias" % prefix)
+        self.conv_weight = mx.sym.Variable("%sconv_weight" % prefix)
+        self.conv_bias = mx.sym.Variable("%sconv_bias" % prefix)
 
     def __call__(self, data: mx.sym.Symbol,
                  data_length: mx.sym.Symbol,
                  seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+        """
+
+        :param data: (batch_size, seq_len, num_hidden)
+        :param data_length: (batch_size,)
+        :param seq_len: int
+        :return: (batch_size, seq_len, num_hidden)
+        """
         #TODO: pad + slice differently in decoder vs encoder: pad left vs pad centered
         #TODO: masking
         #TODO: dropout?
+        # (batch_size, num_hidden, seq_len)
+        data = mx.sym.swapaxes(data, dim1=1, dim2=2)
         padding = (self.config.kernel_width - 1,)
-        kernel = (self.config.kernel_width,)
-        source_conv = mx.sym.Convolution(data=data,
-                                         weight=self.convolution_weight,
-                                         bias=self.convolution_bias,
-                                         pad=padding,
-                                         kernel=kernel,
-                                         num_filter=2 * self.config.num_hidden)
+        data_conv = mx.sym.Convolution(data=data,
+                                       weight=self.conv_weight,
+                                       bias=self.conv_bias,
+                                       pad=padding,
+                                       kernel=(self.config.kernel_width,),
+                                       num_filter=2 * self.config.num_hidden)
 
-        source_conv = mx.sym.slice_axis(data=source_conv, axis=2, begin=0, end=seq_len)
-        source_gate_a, source_gate_b = mx.sym.split(source_conv, num_outputs=2, axis=1)
-        block_output = mx.sym.broadcast_mul(source_gate_a,
-                                            mx.sym.Activation(data=source_gate_b, act_type="sigmoid"))
+        # (batch_size, 2 * num_hidden, seq_len)
+        data_conv = mx.sym.slice_axis(data=data_conv, axis=2, begin=0, end=seq_len)
+
+        # GLU
+        # two times: (batch_size, num_hidden, seq_len)
+        gate_a, gate_b = mx.sym.split(data_conv, num_outputs=2, axis=1)
+        # (batch_size, num_hidden, seq_len)
+        block_output = mx.sym.broadcast_mul(gate_a,
+                                            mx.sym.Activation(data=gate_b, act_type="sigmoid"))
+        # (batch_size, seq_len, num_hidden)
+        block_output = mx.sym.swapaxes(block_output, dim1=1, dim2=2)
         return block_output
+
 

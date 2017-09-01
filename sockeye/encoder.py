@@ -164,6 +164,7 @@ def get_convolutional_encoder(config: ConvolutionalEncoderConfig,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
                               dropout=config.embed_dropout,
                               embed_weight=embed_weight))
+    #TODO: alternatively used fix sin/cos pos embeddings?
     encoders.append(AdditivePositionalEmbedding(num_embed=config.num_embed,
                                                 max_seq_len=config.max_seq_len_source,
                                                 prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
@@ -369,7 +370,7 @@ class AdditivePositionalEmbedding(Encoder):
        :param data: (batch_size, source_seq_len, num_embed)
        :param data_length: (batch_size,)
        :param seq_len: sequence length.
-       :return:
+       :return: (batch_size, source_seq_len, num_embed)
        """
 
         # (1, source_seq_len)
@@ -381,7 +382,7 @@ class AdditivePositionalEmbedding(Encoder):
                                          weight=self.embed_weight,
                                          output_dim=self.num_embed,
                                          name=self.prefix + "pos_embed")
-        return mx.sym.broadcast_add(data, pos_embedding), data_length, seq_len
+        return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix), data_length, seq_len
 
     def get_num_hidden(self) -> int:
         return self.num_embed
@@ -612,6 +613,7 @@ class ConvolutionalEncoder(Encoder):
         for i, layer in enumerate(self.layers):
             # residual connections:
             #data = data + layer(data, data_length, seq_len)
+            #TODO: put back in...
             data = layer(data, data_length, seq_len)
         return data, data_length, seq_len
 

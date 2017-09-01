@@ -920,7 +920,7 @@ class ConvolutionalDecoder(Decoder):
                                                 rnn_num_hidden=self.config.convolution_config.num_hidden,
                                                 num_hidden=self.config.convolution_config.num_hidden,
                                                 expand_query_dim=False)
-        # TODO: weight tying??
+        # TODO: weight tying? lexicon and all other features the RNN supports?!
         self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
         self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
 
