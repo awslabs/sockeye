@@ -35,6 +35,8 @@ class ConvolutionGluBlock:
     1. Convolution
     2. GLU
 
+    TODO: properly describe the two padding types.
+
     :param pad_type: 'left' or 'centered'.
     """
     def __init__(self,
@@ -57,26 +59,34 @@ class ConvolutionGluBlock:
         :param seq_len: int
         :return: (batch_size, seq_len, num_hidden)
         """
-        #TODO: pad + slice differently in decoder vs encoder: pad left vs pad centered
-        #TODO: masking
-        #TODO: dropout?
+        # TODO: pad + slice differently in decoder vs encoder: pad left vs pad centered
+        # TODO: dropout?
 
-        # (batch_size, num_hidden, seq_len)
-        data = mx.sym.swapaxes(data, dim1=1, dim2=2)
         if self.pad_type == 'left':
             # we pad enough on both sides and later slice the extra padding from the right
             padding = (self.config.kernel_width - 1,)
-        else:
+        elif self.pad_type == 'centered':
             # we pad enough so that the output size is equal to the input size and we don't need to slice
             utils.check_condition(self.config.kernel_width % 2 == 1,
                                   "Only odd kernel width's supported, but got %d" % self.config.kernel_width)
-            padding = ((self.config.kernel_width - 1)/2,)
+            padding = (int((self.config.kernel_width - 1)/2),)
+        else:
+            raise ValueError("Unknown pad type %s" % self.pad_type)
+        # Apply masking (so that we properly have zero padding for variable sequence length batches)
+        # Note: SequenceMask expects time-major data
+        # (seq_len, batch_size, num_hidden)
+        data = mx.sym.swapaxes(data, dim1=0, dim2=1)
+        data = mx.sym.SequenceMask(data=data, sequence_length=data_length, use_sequence_length=True, value=0)
+        #TODO: better to transpose or to set the layout in the convolution?
+        # (batch_size,  num_hidden, seq_len)
+        data = mx.sym.transpose(data, axes=(1, 2, 0))
         data_conv = mx.sym.Convolution(data=data,
                                        weight=self.conv_weight,
                                        bias=self.conv_bias,
                                        pad=padding,
                                        kernel=(self.config.kernel_width,),
-                                       num_filter=2 * self.config.num_hidden)
+                                       num_filter=2 * self.config.num_hidden,
+                                       layout="NCW")
 
         # (batch_size, 2 * num_hidden, seq_len)
         if self.pad_type == 'left':

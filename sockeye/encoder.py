@@ -605,7 +605,7 @@ class ConvolutionalEncoder(Encoder):
         self.config = config
         self.layers = [ConvolutionGluBlock(
             config.cnn_config,
-            pad_type='left',
+            pad_type='centered',
             prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
 
     def encode(self,
