@@ -933,7 +933,10 @@ class ConvolutionalDecoder(Decoder):
         # TODO: weight tying? lexicon and all other features the RNN supports?!
         self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
         self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
-
+        
+        # initialize the weights of the linear transformation required for the residual connections
+        self.residual_linear_weights = mx.sym.Symbol('%sresidual_linear_weights' % (prefix))
+        
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
                         source_encoded_lengths: mx.sym.Symbol,
@@ -1037,7 +1040,6 @@ class ConvolutionalDecoder(Decoder):
 
         # (batch_size, encoded_max_length)
         attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
-
         return logits, attention_probs, [source_encoded, source_encoded_lengths]
 
         
