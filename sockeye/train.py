@@ -224,6 +224,7 @@ def main():
         # model configuration
         num_embed_source, num_embed_target = args.num_embed
         encoder_num_layers, decoder_num_layers = args.num_layers
+        cnn_kernel_width_encoder, cnn_kernel_width_decoder = args.cnn_kernel_width
 
         encoder_embed_dropout, decoder_embed_dropout = args.embed_dropout
         encoder_rnn_dropout_inputs, decoder_rnn_dropout_inputs = args.rnn_dropout_inputs
@@ -262,6 +263,16 @@ def main():
                 weight_tying=args.weight_tying,
                 positional_encodings=not args.transformer_no_positional_encodings,
                 conv_config=config_conv)
+        elif args.encoder == C.CONVOLUTION_TYPE:
+            cnn_config = convolution.ConvolutionGluConfig(kernel_width=cnn_kernel_width_encoder,
+                                                          num_hidden=args.cnn_num_hidden,
+                                                          num_layers=encoder_num_layers)
+            config_encoder = encoder.ConvolutionalEncoderConfig(vocab_size=vocab_source_size,
+                                                                num_embed=num_embed_source,
+                                                                embed_dropout=encoder_embed_dropout,
+                                                                max_seq_len_source=max_seq_len_source,
+                                                                cnn_config=cnn_config,
+                                                                num_layers=encoder_num_layers)
         else:
             config_encoder = encoder.RecurrentEncoderConfig(
                 vocab_size=vocab_source_size,
@@ -293,10 +304,9 @@ def main():
                 weight_tying=args.weight_tying,
                 positional_encodings=not args.transformer_no_positional_encodings)
         elif args.decoder == C.CONVOLUTION_TYPE:
-            #TODO: pass arguments from CLI...
-            convolution_config = convolution.StackedConvolutionConfig(kernel_width=3,
-                                                                      num_hidden=64,
-                                                                      num_layers=6)
+            convolution_config = convolution.ConvolutionGluConfig(kernel_width=cnn_kernel_width_decoder,
+                                                                  num_hidden=args.cnn_num_hidden,
+                                                                  num_layers=decoder_num_layers)
             config_decoder = decoder.ConvolutionalDecoderConfig(convolution_config=convolution_config,
                                                                 vocab_size=vocab_target_size,
                                                                 max_seq_len_source=max_seq_len_source,

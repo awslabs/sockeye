@@ -885,7 +885,7 @@ class ConvolutionalDecoderConfig(Config):
     """
 
     def __init__(self,
-                 convolution_config: convolution.StackedConvolutionConfig,
+                 convolution_config: convolution.ConvolutionGluConfig,
                  vocab_size: int,
                  max_seq_len_source: int,
                  num_embed: int,
@@ -950,12 +950,16 @@ class ConvolutionalDecoder(Decoder):
         """
         # TODO: how to add the source embeddings to source_encoded?
 
+        # TODO: potentially project the source_encoded (if different num_hidden)
+
         # TODO: positional embedding
         # target_embed: (batch_size, target_seq_len, num_target_embed)
         target_embed, target_lengths, target_max_length = self.embedding.encode(target, target_lengths,
                                                                                 target_max_length)
         # target_embed: (batch_size, num_target_embed, target_seq_len)
         target_embed = mx.sym.swapaxes(target_embed, dim1=1, dim2=2)
+
+        #TODO: use convolutional glu block...
 
         #TODO: correct masking...
         target_conv = mx.sym.Convolution(data=target_embed,
