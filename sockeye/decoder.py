@@ -1013,8 +1013,7 @@ class ConvolutionalDecoder(Decoder):
         """
         source_encoded, source_encoded_lengths = states
 
-        source_encoded_batch_major = source_encoded # mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
-        attention = self.attention.on(source_encoded_batch_major, source_encoded_lengths, source_encoded_max_length)
+        attention = self.attention.on(source_encoded, source_encoded_lengths, source_encoded_max_length)
 
         # (batch_size, target_max_length)
         target_lengths = utils.compute_lengths(target)
