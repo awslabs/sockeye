@@ -635,9 +635,9 @@ class ConvolutionalEncoder(Encoder):
         # linearly transform the input of each convo so that it can be added as a residual to the  
         # output of the convolution + GLU block
         residual_data = mx.sym.FullyConnected(data=residual_data,
-                                     num_hidden=self.config.cnn_config.num_hidden,
-                                     no_bias=True,
-                                     weight=self.residual_linear_weights)
+                                              num_hidden=self.config.cnn_config.num_hidden,
+                                              no_bias=True,
+                                              weight=self.residual_linear_weights)
         # re-arrange outcoming layer to the dimensions of the output
         residual_data = mx.sym.reshape(residual_data, shape=(-1, seq_len, self.config.cnn_config.num_hidden))
         
@@ -647,7 +647,7 @@ class ConvolutionalEncoder(Encoder):
         return data, data_length, seq_len
 
     def get_num_hidden(self) -> int:
-        return self.config.num_embed
+        return self.config.cnn_config.num_hidden
 
 
 class TransformerEncoder(Encoder):
