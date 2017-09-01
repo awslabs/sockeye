@@ -970,26 +970,11 @@ class ConvolutionalDecoder(Decoder):
         # target_embed: (batch_size, target_seq_len, num_target_embed)
         target_embed, target_lengths, target_max_length = self.embedding.encode(target, target_lengths,
                                                                                 target_max_length)
-        target_hidden = target_embed
-        for i, layer in enumerate(self.layers):
-            # (batch_size, target_seq_len, num_hidden)
-            target_hidden = layer(target_hidden, target_lengths, target_max_length)
-            #TODO: avoid double swapaxes (inside ConvGluBlock and when doing the query)
-            #TODO: use layers.dot_attention instead? Especially as the attention_state doesn't make sense when doing attention once for all time steps
-            #TODO: + also use layers.dot_attetion in the DotAttention class...
-            # (batch_size, num_hidden, target_seq_len)
-            query = mx.sym.swapaxes(data=target_hidden, dim1=1, dim2=2)
-            attention_state = self.attention.get_initial_state(source_encoded_lengths, source_encoded_max_length)
-            attention_input = self.attention.make_input(seq_idx=0,
-                                                        word_vec_prev=None, # TODO: make typing.Optional
-                                                        decoder_state=query)
-            attention_state = attention(attention_input, attention_state)
-            # (batch_size, num_hidden, target_seq_len)
-            context = attention_state.context
-            # (batch_size, target_seq_len, num_hidden)
-            context = mx.sym.swapaxes(data=context, dim1=1, dim2=2)
-            target_hidden = target_hidden + context
-            # TODO: residual connections
+        target_hidden = self._step(source_encoded_lengths=source_encoded_lengths,
+                                   source_encoded_max_length=source_encoded_max_length,
+                                   target_hidden=target_embed,
+                                   target_lengths=target_lengths,
+                                   target_max_length=target_max_length)
 
         # (batch_size * target_seq_len, num_hidden)
         target_hidden = mx.sym.reshape(data=target_hidden, shape=(-3, 0))
@@ -1016,8 +1001,76 @@ class ConvolutionalDecoder(Decoder):
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
         """
-        # TODO: implement decoding...
-        raise NotImplementedError()
+        source_encoded, source_encoded_lengths = self.state_variables()
+
+        source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
+        attention = self.attention.on(source_encoded_batch_major, source_encoded_lengths, source_encoded_max_length)
+
+        # (batch_size, target_max_length)
+        target_lengths = utils.compute_lengths(target)
+        indices = target_lengths - 1
+
+        # (batch_size, target_max_length, 1)
+        mask = mx.sym.expand_dims(mx.sym.one_hot(indices=indices,
+                                                 depth=target_max_length,
+                                                 on_value=1, off_value=0), axis=2)
+
+        target_embed, target_lengths, target_max_length = self.embedding.encode(target, target_lengths,
+                                                                                target_max_length)
+
+        # (batch_size, target_max_length, num_hidden)
+        target_hidden = self._step(source_encoded_lengths=source_encoded_lengths,
+                                   source_encoded_max_length=source_encoded_max_length,
+                                   target_hidden=target_embed,
+                                   target_lengths=target_lengths,
+                                   target_max_length=target_max_length)
+
+        # (batch_size, target_max_length, num_hidden)
+        target_hidden = mx.sym.broadcast_mul(target_hidden, mask)
+
+        # (batch_size, num_hidden)
+        target_hidden = mx.sym.sum(target_hidden, axis=1, keepdims=False)
+
+        # (batch_size, vocab_size)
+        logits = mx.sym.FullyConnected(data=target_hidden, num_hidden=self.config.vocab_size,
+            weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
+
+        # (batch_size, encoded_max_length)
+        attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
+
+        return logits, attention_probs, [source_encoded, source_encoded_lengths]
+
+        
+
+    def _step(self,
+              source_encoded_lengths: mx.sym.Symbol,
+              source_encoded_max_length: mx.sym.Symbol,
+              target_hidden: mx.sym.Symbol,
+              target_lengths: mx.sym.Symbol,
+              target_max_length: int) -> mx.sym.Symbol:
+        """
+        """
+        for i, layer in enumerate(self.layers):
+            # (batch_size, target_seq_len, num_hidden)
+            target_hidden = layer(target_hidden, target_lengths, target_max_length)
+            #TODO: avoid double swapaxes (inside ConvGluBlock and when doing the query)
+            #TODO: use layers.dot_attention instead? Especially as the attention_state doesn't make sense when doing attention once for all time steps
+            #TODO: + also use layers.dot_attetion in the DotAttention class...
+            # (batch_size, num_hidden, target_seq_len)
+            query = mx.sym.swapaxes(data=target_hidden, dim1=1, dim2=2)
+            attention_state = self.attention.get_initial_state(source_encoded_lengths, source_encoded_max_length)
+            attention_input = self.attention.make_input(seq_idx=0,
+                                                        word_vec_prev=None, # TODO: make typing.Optional
+                                                        decoder_state=query)
+            attention_state = attention(attention_input, attention_state)
+            # (batch_size, num_hidden, target_seq_len)
+            context = attention_state.context
+            # (batch_size, target_seq_len, num_hidden)
+            context = mx.sym.swapaxes(data=context, dim1=1, dim2=2)
+            target_hidden = target_hidden + context
+            # TODO: residual connections
+
+        return target_hidden
 
     def reset(self):
         pass
@@ -1035,7 +1088,7 @@ class ConvolutionalDecoder(Decoder):
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
         """
-        return []
+        return [source_encoded, source_encoded_lengths]
 
     def state_variables(self) -> List[mx.sym.Symbol]:
         """
@@ -1043,7 +1096,7 @@ class ConvolutionalDecoder(Decoder):
 
         :return: List of symbolic variables.
         """
-        return []
+        return [source_encoded, source_encoded_lengths]
 
     def state_shapes(self,
                      batch_size: int,
