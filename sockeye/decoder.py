@@ -1002,9 +1002,9 @@ class ConvolutionalDecoder(Decoder):
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
         """
-        source_encoded, source_encoded_lengths = self.state_variables()
+        source_encoded, source_encoded_lengths = states
 
-        source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
+        source_encoded_batch_major = source_encoded # mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
         attention = self.attention.on(source_encoded_batch_major, source_encoded_lengths, source_encoded_max_length)
 
         # (batch_size, target_max_length)
@@ -1099,7 +1099,8 @@ class ConvolutionalDecoder(Decoder):
 
         :return: List of symbolic variables.
         """
-        return [source_encoded, source_encoded_lengths]
+        return [mx.sym.Variable(C.SOURCE_ENCODED_NAME),
+        mx.sym.Variable(C.SOURCE_LENGTH_NAME)]
 
     def state_shapes(self,
                      batch_size: int,
@@ -1114,7 +1115,10 @@ class ConvolutionalDecoder(Decoder):
         :param source_encoded_depth: Depth of encoded source.
         :return: List of shape descriptions.
         """
-        return []
+        return [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
+                               (batch_size, source_encoded_max_length, source_encoded_depth),
+                               layout=C.BATCH_MAJOR),
+                mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")]
 
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """
