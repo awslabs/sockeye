@@ -606,7 +606,7 @@ class ConvolutionalEncoder(Encoder):
         self.config = config
         
         # initialize the weights of the linear transformation required for the residual connections
-        self.residual_linear_weights = mx.sym.Symbol('%sresidual_linear_weights' % (prefix))
+        self.residual_linear_weights = mx.sym.Variable('%sresidual_linear_weight' % prefix)
         
         # initialize the layers of blocks containing a convolution and a GLU, since
         # every layer is shared over all encode calls
@@ -628,7 +628,7 @@ class ConvolutionalEncoder(Encoder):
         """
         
         # reshape incoming layer because FullyConnected can accept only a 2-dimensional input
-        residual_data = mx.sym.reshape(data=data, shape=(-3, -1))
+        residual_data = mx.sym.reshape(data, shape=(-3, -1))
         
         # linearly transform the input of each convo so that it can be added as a residual to the  
         # output of the convolution + GLU block
@@ -637,7 +637,7 @@ class ConvolutionalEncoder(Encoder):
                                      no_bias=True,
                                      weight=self.residual_linear_weights)
         # re-arrange outcoming layer to the dimensions of the output
-        residual_data = mx.sym.reshape(data=residual_data, shape=(-1, seq_len, self.cnn_config.num_hidden))
+        residual_data = mx.sym.reshape(residual_data, shape=(-1, seq_len, self.config.cnn_config.num_hidden))
         
         # process with all layers of convolution and GLU
         for layer in self.layers:
