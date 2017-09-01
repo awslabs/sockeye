@@ -888,7 +888,7 @@ class ConvolutionalDecoderConfig(Config):
     def __init__(self,
                  cnn_config: convolution.ConvolutionGluConfig,
                  vocab_size: int,
-                 max_seq_len_source: int,
+                 max_seq_len_target: int,
                  num_embed: int,
                  encoder_num_hidden: int,
                  num_layers: int,
@@ -897,7 +897,7 @@ class ConvolutionalDecoderConfig(Config):
         super().__init__()
         self.cnn_config = cnn_config
         self.vocab_size = vocab_size
-        self.max_seq_len_source = max_seq_len_source
+        self.max_seq_len_target = max_seq_len_target
         self.num_embed = num_embed
         self.encoder_num_hidden = encoder_num_hidden
         self.embed_dropout = embed_dropout
@@ -921,6 +921,10 @@ class ConvolutionalDecoder(Decoder):
                                            self.config.vocab_size,
                                            prefix=C.TARGET_EMBEDDING_PREFIX,
                                            dropout=config.embed_dropout)
+        self.pos_embedding = encoder.AdditivePositionalEmbedding(num_embed=config.num_embed,
+                                                                 max_seq_len=config.max_seq_len_target,
+                                                                 prefix=C.TARGET_POSITIONAL_EMBEDDING_PREFIX)
+
         #TODO: feed attention in from the outside
         self.attention = attention.DotAttention(input_previous_word=False,
                                                 # TODO: set them correctly. rnn_num_hidden = encoder num hidden, num_hidden = decoder_num_hidden
@@ -972,6 +976,9 @@ class ConvolutionalDecoder(Decoder):
         # target_embed: (batch_size, target_seq_len, num_target_embed)
         target_embed, target_lengths, target_max_length = self.embedding.encode(target, target_lengths,
                                                                                 target_max_length)
+        target_embed, target_lengths, target_max_length = self.pos_embedding.encode(target_embed,
+                                                                                    target_lengths,
+                                                                                    target_max_length)
         target_hidden = target_embed
         for i, layer in enumerate(self.layers):
             # (batch_size, target_seq_len, num_hidden)

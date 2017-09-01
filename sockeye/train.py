@@ -307,7 +307,7 @@ def main():
                                                                   num_hidden=args.cnn_num_hidden)
             config_decoder = decoder.ConvolutionalDecoderConfig(cnn_config=convolution_config,
                                                                 vocab_size=vocab_target_size,
-                                                                max_seq_len_source=max_seq_len_source,
+                                                                max_seq_len_target=max_seq_len_target,
                                                                 num_embed=num_embed_target,
                                                                 #TODO: make this independent of the type of encoder:
                                                                 encoder_num_hidden=args.cnn_num_hidden,
