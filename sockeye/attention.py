@@ -344,7 +344,7 @@ class DotAttention(Attention):
                                                 name="%sbatch_dot" % self.prefix)
 
             context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores,
-                                                                       remove_target_seq_len_dim=not self.expand_query_dim)
+                                                                       remove_target_seq_len_dim=self.expand_query_dim)
             return AttentionState(context=context,
                                   probs=attention_probs,
                                   dynamic_source=att_state.dynamic_source)

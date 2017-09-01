@@ -911,6 +911,7 @@ class ConvolutionalDecoder(Decoder):
         self.config = config
         self.convolution_weight = mx.sym.Variable("%sconvolution_weight" % prefix)
         self.convolution_bias = mx.sym.Variable("%sconvolution_bias" % prefix)
+        # TODO: positional embedding
         self.embedding = encoder.Embedding(self.config.num_embed,
                                            self.config.vocab_size,
                                            prefix=C.TARGET_EMBEDDING_PREFIX,
@@ -950,7 +951,7 @@ class ConvolutionalDecoder(Decoder):
         """
         # TODO: how to add the source embeddings to source_encoded?
 
-        # TODO: potentially project the source_encoded (if different num_hidden)
+        # TODO: potentially project the source_encoded (if different source num_hidden)
 
         # TODO: positional embedding
         # target_embed: (batch_size, target_seq_len, num_target_embed)
@@ -959,7 +960,7 @@ class ConvolutionalDecoder(Decoder):
         # target_embed: (batch_size, num_target_embed, target_seq_len)
         target_embed = mx.sym.swapaxes(target_embed, dim1=1, dim2=2)
 
-        #TODO: use convolutional glu block...
+        #TODO: use convolutional glu block with multiple layers...
 
         #TODO: correct masking...
         target_conv = mx.sym.Convolution(data=target_embed,
@@ -1023,6 +1024,7 @@ class ConvolutionalDecoder(Decoder):
         :param states: Arbitrary list of decoder states.
         :return: logits, attention probabilities, next decoder states.
         """
+        # TODO: implement decoding...
         raise NotImplementedError()
 
     def reset(self):
