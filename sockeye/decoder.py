@@ -1026,6 +1026,10 @@ class ConvolutionalDecoder(Decoder):
 
         target_embed, target_lengths, target_max_length = self.embedding.encode(target, target_lengths,
                                                                                 target_max_length)
+        target_embed, target_lengths, target_max_length = self.pos_embedding.encode(target_embed,
+                                                                                    target_lengths,
+                                                                                    target_max_length)
+
 
         # (batch_size, target_max_length, num_hidden)
         target_hidden = self._step(attention=attention,
