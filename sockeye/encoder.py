@@ -604,7 +604,9 @@ class ConvolutionalEncoder(Encoder):
                  prefix: str = C.CNN_ENCODER_PREFIX) -> None:
         self.config = config
         self.layers = [ConvolutionGluBlock(
-            config.cnn_config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
+            config.cnn_config,
+            pad_type='left',
+            prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
 
     def encode(self,
                data: mx.sym.Symbol,

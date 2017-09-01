@@ -928,7 +928,9 @@ class ConvolutionalDecoder(Decoder):
                                                 num_hidden=self.config.cnn_config.num_hidden,
                                                 expand_query_dim=False)
         self.layers = [convolution.ConvolutionGluBlock(
-            config.cnn_config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
+            config.cnn_config,
+            pad_type='left',
+            prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
 
         # TODO: weight tying? lexicon and all other features the RNN supports?!
         self.cls_w = mx.sym.Variable("%scls_weight" % prefix)

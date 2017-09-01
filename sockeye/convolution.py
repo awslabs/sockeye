@@ -12,10 +12,9 @@
 # permissions and limitations under the License.
 
 from sockeye.config import Config
-from . import constants as C
+from . import utils
 
 import mxnet as mx
-from typing import Tuple
 
 
 class ConvolutionGluConfig(Config):
@@ -35,10 +34,15 @@ class ConvolutionGluBlock:
     A convolution-GLU block consists of the 2 following sublayers:
     1. Convolution
     2. GLU
+
+    :param pad_type: 'left' or 'centered'.
     """
     def __init__(self,
                  config: ConvolutionGluConfig,
+                 pad_type: str,
                  prefix: str) -> None:
+        self.prefix = prefix
+        self.pad_type = pad_type
         self.config = config
         self.conv_weight = mx.sym.Variable("%sconv_weight" % prefix)
         self.conv_bias = mx.sym.Variable("%sconv_bias" % prefix)
@@ -56,9 +60,17 @@ class ConvolutionGluBlock:
         #TODO: pad + slice differently in decoder vs encoder: pad left vs pad centered
         #TODO: masking
         #TODO: dropout?
+
         # (batch_size, num_hidden, seq_len)
         data = mx.sym.swapaxes(data, dim1=1, dim2=2)
-        padding = (self.config.kernel_width - 1,)
+        if self.pad_type == 'left':
+            # we pad enough on both sides and later slice the extra padding from the right
+            padding = (self.config.kernel_width - 1,)
+        else:
+            # we pad enough so that the output size is equal to the input size and we don't need to slice
+            utils.check_condition(self.config.kernel_width % 2 == 1,
+                                  "Only odd kernel width's supported, but got %d" % self.config.kernel_width)
+            padding = ((self.config.kernel_width - 1)/2,)
         data_conv = mx.sym.Convolution(data=data,
                                        weight=self.conv_weight,
                                        bias=self.conv_bias,
@@ -67,7 +79,8 @@ class ConvolutionGluBlock:
                                        num_filter=2 * self.config.num_hidden)
 
         # (batch_size, 2 * num_hidden, seq_len)
-        data_conv = mx.sym.slice_axis(data=data_conv, axis=2, begin=0, end=seq_len)
+        if self.pad_type == 'left':
+            data_conv = mx.sym.slice_axis(data=data_conv, axis=2, begin=0, end=seq_len)
 
         # GLU
         # two times: (batch_size, num_hidden, seq_len)
