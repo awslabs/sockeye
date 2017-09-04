@@ -11,6 +11,9 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+"""
+Convolutional layers.
+"""
 from sockeye.config import Config
 from . import utils
 
@@ -20,6 +23,9 @@ import mxnet as mx
 class ConvolutionGluConfig(Config):
     """
     Configuration for a stack of convolutions with Gated Linear Units between layers, similar to Gehring et al. 2017.
+
+    :param kernel_width: Kernel size for 1D convolution.
+    :param num_hidden: Size of hidden representation after convolution.
     """
     def __init__(self,
                  kernel_width: int,
@@ -31,13 +37,14 @@ class ConvolutionGluConfig(Config):
 
 class ConvolutionGluBlock:
     """
-    A convolution-GLU block consists of the 2 following sublayers:
+    A Convolution-GLU block consists of the 2 following sublayers:
     1. Convolution
     2. GLU
 
-    TODO: properly describe the two padding types.
-
-    :param pad_type: 'left' or 'centered'.
+    :param config: Configuration for Convolutional-GLU block.
+    :param pad_type: 'left' or 'centered'. 'left' only pads to the left (for decoding
+    the target sequence). 'centered' pads on both sides (for encoding the source sequence).
+    :param prefix: Name prefix for symbols of this Convolution-GLU block.
     """
     def __init__(self,
                  config: ConvolutionGluConfig,
@@ -53,13 +60,11 @@ class ConvolutionGluBlock:
                  data_length: mx.sym.Symbol,
                  seq_len: int) -> mx.sym.Symbol:
         """
-
-        :param data: (batch_size, seq_len, num_hidden)
-        :param data_length: (batch_size,)
-        :param seq_len: int
-        :return: (batch_size, seq_len, num_hidden)
+        :param data: Input data. Shape: (batch_size, seq_len, num_hidden).
+        :param data_length: Vector with sequence lengths. Shape: (batch_size,).
+        :param seq_len: Maximum sequence length.
+        :return: Symbol(batch_size, seq_len, num_hidden)
         """
-        # TODO: pad + slice differently in decoder vs encoder: pad left vs pad centered
         # TODO: dropout?
 
         if self.pad_type == 'left':
@@ -68,7 +73,7 @@ class ConvolutionGluBlock:
         elif self.pad_type == 'centered':
             # we pad enough so that the output size is equal to the input size and we don't need to slice
             utils.check_condition(self.config.kernel_width % 2 == 1,
-                                  "Only odd kernel width's supported, but got %d" % self.config.kernel_width)
+                                  "Only odd kernel widths supported, but got %d" % self.config.kernel_width)
             padding = (int((self.config.kernel_width - 1)/2),)
         else:
             raise ValueError("Unknown pad type %s" % self.pad_type)

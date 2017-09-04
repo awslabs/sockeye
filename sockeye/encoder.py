@@ -154,9 +154,9 @@ def get_convolutional_encoder(config: ConvolutionalEncoderConfig,
     """
     Creates a convolutional encoder.
 
-    :param config:
-    :param embed_weight:
-    :return:
+    :param config: Configuration for convolutional encoder.
+    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
+    :return: Encoder instance.
     """
     encoders = list()  # type: List[Encoder]
     encoders.append(Embedding(num_embed=config.num_embed,
@@ -334,7 +334,7 @@ class Embedding(Encoder):
         """
         Returns symbol initialized with positional encodings as in Vaswani et al.
 
-        :param length: Maximum sequence length
+        :param length: Maximum sequence length.
         :param depth: Depth.
         :param name: Symbol name.
         :return: Symbol(1, length, depth)
@@ -351,15 +351,26 @@ class Embedding(Encoder):
 
 class AdditivePositionalEmbedding(Encoder):
     """
-    Take an encoded sequence and add positional embeddings to it.
+    Takes an encoded sequence and adds positional embeddings to it.
 
+    :param num_embed: Embedding size.
+    :param max_seq_len: Maximum sequence length.
+    :param prefix: Name prefix for symbols of this encoder.
+    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
     """
 
-    def __init__(self, num_embed: int, max_seq_len: int, prefix: str):
+    def __init__(self,
+                 num_embed: int,
+                 max_seq_len: int,
+                 prefix: str,
+                 embed_weight: Optional[mx.sym.Symbol] = None) -> None:
         self.num_embed = num_embed
         self.max_seq_len = max_seq_len
         self.prefix = prefix
-        self.embed_weight = mx.sym.Variable(prefix + "weight")
+        if embed_weight is not None:
+            self.embed_weight = embed_weight
+        else:
+            self.embed_weight = mx.sym.Variable(prefix + "weight")
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -600,14 +611,20 @@ class BiDirectionalRNNEncoder(Encoder):
 
 
 class ConvolutionalEncoder(Encoder):
+    """
+    Encoder that uses convolution instead of recurrent connections, similar to Gehring et al. 2017.
+
+    :param config: Configuration for convolutional encoder.
+    :param prefix: Name prefix for operations in this encoder.
+    """
     def __init__(self,
                  config: ConvolutionalEncoderConfig,
                  prefix: str = C.CNN_ENCODER_PREFIX) -> None:
         self.config = config
-        
+
         # initialize the weights of the linear transformation required for the residual connections
         self.residual_linear_weights = mx.sym.Variable('%sresidual_linear_weight' % prefix)
-        
+
         # initialize the layers of blocks containing a convolution and a GLU, since
         # every layer is shared over all encode calls
         self.layers = [ConvolutionGluBlock(
@@ -620,7 +637,7 @@ class ConvolutionalEncoder(Encoder):
                data_length: mx.sym.Symbol,
                seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
-        Encodes data with a stack of Convolution+GLU blocks given sequence lengths of individual examples 
+        Encodes data with a stack of Convolution+GLU blocks given sequence lengths of individual examples
         and maximum sequence length.
 
         :param data: Input data.
@@ -628,11 +645,11 @@ class ConvolutionalEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded version of the data.
         """
-        
+
         # reshape incoming layer because FullyConnected can accept only a 2-dimensional input
         residual_data = mx.sym.reshape(data, shape=(-3, -1))
-        
-        # linearly transform the input of each convo so that it can be added as a residual to the  
+
+        # linearly transform the input of each convo so that it can be added as a residual to the
         # output of the convolution + GLU block
         residual_data = mx.sym.FullyConnected(data=residual_data,
                                               num_hidden=self.config.cnn_config.num_hidden,
@@ -640,13 +657,16 @@ class ConvolutionalEncoder(Encoder):
                                               weight=self.residual_linear_weights)
         # re-arrange outcoming layer to the dimensions of the output
         residual_data = mx.sym.reshape(residual_data, shape=(-1, seq_len, self.config.cnn_config.num_hidden))
-        
+
         # process with all layers of convolution and GLU
         for layer in self.layers:
             data = residual_data + layer(data, data_length, seq_len)
         return data, data_length, seq_len
 
     def get_num_hidden(self) -> int:
+        """
+        Returns the representation size of this encoder.
+        """
         return self.config.cnn_config.num_hidden
 
 
