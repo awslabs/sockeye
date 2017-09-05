@@ -76,6 +76,13 @@ RNN_INIT_ORTHOGONAL_STACKED = 'orthogonal_stacked'
 # use the default initializer used also for all other weights
 RNN_INIT_DEFAULT = 'default'
 
+
+# RNN decoder state init types
+RNN_DEC_INIT_ZERO = "zero"
+RNN_DEC_INIT_LAST = "last"
+RNN_DEC_INIT_AVG = "avg"
+RNN_DEC_INIT_CHOICES = [RNN_DEC_INIT_ZERO, RNN_DEC_INIT_LAST, RNN_DEC_INIT_AVG]
+
 # attention types
 ATT_BILINEAR = 'bilinear'
 ATT_DOT = 'dot'
