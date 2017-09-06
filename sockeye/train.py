@@ -226,7 +226,7 @@ def main():
 
         encoder_embed_dropout, decoder_embed_dropout = args.embed_dropout
         encoder_rnn_dropout_inputs, decoder_rnn_dropout_inputs = args.rnn_dropout_inputs
-        encoder_rnn_dropout_states, decoder_rnn_dropout_states = args.rnn_dropout_inputs
+        encoder_rnn_dropout_states, decoder_rnn_dropout_states = args.rnn_dropout_states
         if encoder_embed_dropout > 0 and encoder_rnn_dropout_inputs > 0:
             logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
                            "two dropout layers on top of each other.")
