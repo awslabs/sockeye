@@ -885,6 +885,8 @@ class ConvolutionalDecoderConfig(Config):
     :param weight_tying: Whether to share embedding and prediction parameter matrices.
     """
 
+    # TODO: weight_tying is not used anywhere
+
     def __init__(self,
                  cnn_config: convolution.ConvolutionGluConfig,
                  vocab_size: int,
@@ -907,8 +909,13 @@ class ConvolutionalDecoderConfig(Config):
 
 class ConvolutionalDecoder(Decoder):
     """
-    TODO: add description
-    Gehring et al. 2017.
+    Convolutional decoder similar to Gehring et al. 2017.
+
+    The decoder consists of an embedding layer, positional embeddings, and layers
+    of Convolution-GLU blocks with residual connections.
+
+    :param config: Configuration for convolutional decoder.
+    :param prefix: Name prefix for symbols of this decoder.
     """
     def __init__(self,
                  config: ConvolutionalDecoderConfig,
@@ -941,7 +948,7 @@ class ConvolutionalDecoder(Decoder):
         # TODO: weight tying? lexicon and all other features the RNN supports?!
         self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
         self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
-        
+
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
                         source_encoded_lengths: mx.sym.Symbol,
@@ -1055,7 +1062,7 @@ class ConvolutionalDecoder(Decoder):
         attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
         return logits, attention_probs, [source_encoded, source_encoded_lengths]
 
-        
+
 
     def _step(self,
               attention: Callable,
