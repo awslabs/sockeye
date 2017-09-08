@@ -88,7 +88,7 @@ def test_device_args(test_params, expected_params):
               transformer_preprocess=('', ''),
               transformer_postprocess=('drn', 'drn'),
               attention_use_prev_word=False,
-              rnn_decoder_zero_init=False,
+              rnn_decoder_state_init="last",
               rnn_encoder_reverse_input=False,
               rnn_context_gating=False,
               rnn_cell_type=C.LSTM_TYPE,

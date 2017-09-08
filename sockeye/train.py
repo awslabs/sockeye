@@ -331,7 +331,7 @@ def main():
                 embed_dropout=decoder_embed_dropout,
                 hidden_dropout=args.rnn_decoder_hidden_dropout,
                 weight_tying=decoder_weight_tying,
-                zero_state_init=args.rnn_decoder_zero_init,
+                state_init=args.rnn_decoder_state_init,
                 context_gating=args.rnn_context_gating,
                 layer_normalization=args.layer_normalization,
                 attention_in_upper_layers=args.attention_in_upper_layers)

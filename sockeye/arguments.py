@@ -283,10 +283,10 @@ def add_model_parameters(params):
     model_params.add_argument('--rnn-encoder-reverse-input',
                               action='store_true',
                               help='Reverse input sequence for RNN encoder. Default: %(default)s.')
-    model_params.add_argument('--rnn-decoder-zero-init',
-                              action='store_true',
-                              help='Initialize decoder RNN states with zeros instead from last & highest encoder '
-                                   'RNN state. Default: %(default)s.')
+    model_params.add_argument('--rnn-decoder-state-init',
+                              default=C.RNN_DEC_INIT_LAST,
+                              choices=C.RNN_DEC_INIT_CHOICES,
+                              help='How to initialize RNN decoder states. Default: %(default)s.')
     model_params.add_argument('--rnn-residual-connections',
                               action="store_true",
                               default=False,
