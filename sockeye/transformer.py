@@ -62,20 +62,19 @@ class TransformerEncoderBlock:
     def __init__(self,
                  config: TransformerConfig,
                  prefix: str) -> None:
-
-        self.pre_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                     num_hidden=config.model_size,
-                                                     dropout=config.dropout_prepost,
-                                                     prefix="%satt_pre_" % prefix)
-        self.attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
-                                                       heads=config.attention_heads,
-                                                       depth_out=config.model_size,
-                                                       dropout=config.dropout_attention,
-                                                       prefix="%satt_" % prefix)
-        self.post_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                      num_hidden=config.model_size,
-                                                      dropout=config.dropout_prepost,
-                                                      prefix="%satt_post_" % prefix)
+        self.pre_self_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                          num_hidden=config.model_size,
+                                                          dropout=config.dropout_prepost,
+                                                          prefix="%satt_self_pre_" % prefix)
+        self.self_attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
+                                                            heads=config.attention_heads,
+                                                            depth_out=config.model_size,
+                                                            dropout=config.dropout_attention,
+                                                            prefix="%satt_self_" % prefix)
+        self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                           num_hidden=config.model_size,
+                                                           dropout=config.dropout_prepost,
+                                                           prefix="%satt_self_post_" % prefix)
 
         self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
                                               num_hidden=config.model_size,
@@ -92,11 +91,13 @@ class TransformerEncoderBlock:
 
     def __call__(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, length: int) -> mx.sym.Symbol:
         # self-attention
-        prev = self.attention(self.pre_attention(data, None, length), data_length, length)
-        data = self.post_attention(data, prev, length)
+        data_self_att = self.self_attention(self.pre_self_attention(data, None, length), data_length, length)
+        data = self.post_self_attention(data_self_att, data, length)
+
         # feed-forward
-        prev = self.ff(self.pre_ff(data, None, length), length)
-        data = self.post_ff(data, prev, length)
+        data_ff = self.ff(self.pre_ff(data, None, length), length)
+        data = self.post_ff(data_ff, data, length)
+
         return data
 
 
@@ -123,19 +124,19 @@ class TransformerDecoderBlock:
                                                            dropout=config.dropout_prepost,
                                                            prefix="%satt_self_post_" % prefix)
 
-        self.pre_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                     num_hidden=config.model_size,
-                                                     dropout=config.dropout_prepost,
-                                                     prefix="%satt_pre_" % prefix)
+        self.pre_enc_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                         num_hidden=config.model_size,
+                                                         dropout=config.dropout_prepost,
+                                                         prefix="%satt_enc_pre_" % prefix)
         self.enc_attention = layers.MultiHeadAttention(depth_att=config.model_size,
                                                        heads=config.attention_heads,
                                                        depth_out=config.model_size,
                                                        dropout=config.dropout_attention,
                                                        prefix="%satt_enc_" % prefix)
-        self.post_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                      num_hidden=config.model_size,
-                                                      dropout=config.dropout_prepost,
-                                                      prefix="%satt_post_" % prefix)
+        self.post_enc_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                          num_hidden=config.model_size,
+                                                          dropout=config.dropout_prepost,
+                                                          prefix="%satt_enc_post_" % prefix)
 
         self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
                                               num_hidden=config.model_size,
@@ -158,25 +159,25 @@ class TransformerDecoderBlock:
                  source: mx.sym.Symbol,
                  source_lengths: mx.sym.Symbol,
                  source_max_length: int) -> mx.sym.Symbol:
+
         # self-attention
-        prev = self.self_attention(self.pre_self_attention(target, None, target_max_length),
-                                   target_lengths,
-                                   target_max_length,
-                                   bias=target_bias)
-        target = self.post_self_attention(target, prev, target_max_length)
+        target_self_att = self.self_attention(self.pre_self_attention(target, None, target_max_length),
+                                              target_lengths,
+                                              target_max_length,
+                                              bias=target_bias)
+        target = self.post_self_attention(target_self_att, target, target_max_length)
 
         # encoder attention
-        prev = self.enc_attention(self.pre_attention(target, None, target_max_length),
-                                  target_max_length,
-                                  source,
-                                  source_lengths,
-                                  source_max_length)
-        target = self.post_attention(target, prev, target_max_length)
+        target_enc_att = self.enc_attention(self.pre_enc_attention(target, None, target_max_length),
+                                            target_max_length,
+                                            source,
+                                            source_lengths,
+                                            source_max_length)
+        target = self.post_enc_attention(target_enc_att, target, target_max_length)
 
         # feed-forward
-        prev = self.ff(self.pre_ff(target, None, target_max_length),
-                       target_max_length)
-        target = self.post_ff(target, prev, target_max_length)
+        target_ff = self.ff(self.pre_ff(target, None, target_max_length), target_max_length)
+        target = self.post_ff(target_ff, target, target_max_length)
 
         return target
 
