@@ -238,6 +238,9 @@ def main():
             check_condition(args.rnn_cell_type == C.LSTM_TYPE,
                             "Recurrent dropout without memory loss only supported for LSTMs right now.")
 
+        encoder_transformer_preprocess, decoder_transformer_preprocess = args.transformer_preprocess
+        encoder_transformer_postprocess, decoder_transformer_postprocess = args.transformer_postprocess
+
         config_conv = None
         if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
             config_conv = encoder.ConvolutionalEmbeddingConfig(num_embed=num_embed_source,
@@ -256,10 +259,11 @@ def main():
                 vocab_size=vocab_source_size,
                 dropout_attention=args.transformer_dropout_attention,
                 dropout_relu=args.transformer_dropout_relu,
-                dropout_residual=args.transformer_dropout_residual,
-                layer_normalization=args.layer_normalization,
+                dropout_prepost=args.transformer_dropout_prepost,
                 weight_tying=args.weight_tying,
                 positional_encodings=not args.transformer_no_positional_encodings,
+                preprocess_sequence=encoder_transformer_preprocess,
+                postprocess_sequence=encoder_transformer_postprocess,
                 conv_config=config_conv)
         else:
             config_encoder = encoder.RecurrentEncoderConfig(
@@ -287,10 +291,12 @@ def main():
                 vocab_size=vocab_target_size,
                 dropout_attention=args.transformer_dropout_attention,
                 dropout_relu=args.transformer_dropout_relu,
-                dropout_residual=args.transformer_dropout_residual,
-                layer_normalization=args.layer_normalization,
+                dropout_prepost=args.transformer_dropout_prepost,
                 weight_tying=args.weight_tying,
-                positional_encodings=not args.transformer_no_positional_encodings)
+                positional_encodings=not args.transformer_no_positional_encodings,
+                preprocess_sequence=decoder_transformer_preprocess,
+                postprocess_sequence=decoder_transformer_postprocess,
+                conv_config=None)
 
         else:
             attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden

@@ -166,11 +166,11 @@ def test_parse_version(version_string, expected_version):
 
 
 def test_check_version_disregards_minor():
-    utils.check_version("1.6.0")
+    utils.check_version("1.7.0")
 
 
 def test_check_version_checks_major():
-    version = "1.7.1"
+    version = "1.8.1"
     with pytest.raises(utils.SockeyeError) as e:
         utils.check_version(version)
     assert "Given major version (%s) does not match major code version (%s)" % (version, __version__)
