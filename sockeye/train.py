@@ -229,7 +229,7 @@ def main():
 
         encoder_embed_dropout, decoder_embed_dropout = args.embed_dropout
         encoder_rnn_dropout_inputs, decoder_rnn_dropout_inputs = args.rnn_dropout_inputs
-        encoder_rnn_dropout_states, decoder_rnn_dropout_states = args.rnn_dropout_inputs
+        encoder_rnn_dropout_states, decoder_rnn_dropout_states = args.rnn_dropout_states
         if encoder_embed_dropout > 0 and encoder_rnn_dropout_inputs > 0:
             logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
                            "two dropout layers on top of each other.")
@@ -240,6 +240,9 @@ def main():
         if encoder_rnn_dropout_recurrent > 0 or decoder_rnn_dropout_recurrent > 0:
             check_condition(args.rnn_cell_type == C.LSTM_TYPE,
                             "Recurrent dropout without memory loss only supported for LSTMs right now.")
+
+        encoder_transformer_preprocess, decoder_transformer_preprocess = args.transformer_preprocess
+        encoder_transformer_postprocess, decoder_transformer_postprocess = args.transformer_postprocess
 
         config_conv = None
         if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
@@ -259,10 +262,11 @@ def main():
                 vocab_size=vocab_source_size,
                 dropout_attention=args.transformer_dropout_attention,
                 dropout_relu=args.transformer_dropout_relu,
-                dropout_residual=args.transformer_dropout_residual,
-                layer_normalization=args.layer_normalization,
+                dropout_prepost=args.transformer_dropout_prepost,
                 weight_tying=args.weight_tying,
                 positional_encodings=not args.transformer_no_positional_encodings,
+                preprocess_sequence=encoder_transformer_preprocess,
+                postprocess_sequence=encoder_transformer_postprocess,
                 conv_config=config_conv)
         else:
             config_encoder = encoder.RecurrentEncoderConfig(
@@ -290,10 +294,12 @@ def main():
                 vocab_size=vocab_target_size,
                 dropout_attention=args.transformer_dropout_attention,
                 dropout_relu=args.transformer_dropout_relu,
-                dropout_residual=args.transformer_dropout_residual,
-                layer_normalization=args.layer_normalization,
+                dropout_prepost=args.transformer_dropout_prepost,
                 weight_tying=args.weight_tying,
-                positional_encodings=not args.transformer_no_positional_encodings)
+                positional_encodings=not args.transformer_no_positional_encodings,
+                preprocess_sequence=decoder_transformer_preprocess,
+                postprocess_sequence=decoder_transformer_postprocess,
+                conv_config=None)
 
         else:
             attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
@@ -328,7 +334,7 @@ def main():
                 embed_dropout=decoder_embed_dropout,
                 hidden_dropout=args.rnn_decoder_hidden_dropout,
                 weight_tying=decoder_weight_tying,
-                zero_state_init=args.rnn_decoder_zero_init,
+                state_init=args.rnn_decoder_state_init,
                 context_gating=args.rnn_context_gating,
                 layer_normalization=args.layer_normalization,
                 attention_in_upper_layers=args.attention_in_upper_layers)
