@@ -22,8 +22,10 @@ import math
 from mxnet.ndarray import NDArray, sqrt, zeros
 from mxnet.optimizer import Optimizer
 
+from sockeye.utils import check_condition
 
-CurrentTrainingState = namedtuple("CurrentTrainingState", ["metric_val"])
+BatchState = namedtuple("BatchState", ["metric_val"])
+CheckpointState = namedtuple("CheckpointState", ["checkpoint", "metric_val"])
 
 
 class SockeyeOptimizer(Optimizer):
@@ -32,14 +34,21 @@ class SockeyeOptimizer(Optimizer):
     `update()` method then has access to information such as the metric value for the current batch.
     """
     def __init__(self, **kwargs):
-        self.current_training_state = None
+        self.batch_state = None
+        self.checkpoint_state = None
         super().__init__(**kwargs)
 
-    def pre_update(self, current_training_state: CurrentTrainingState):
+    def pre_update_batch(self, batch_state: BatchState):
         """
         Called automatically prior to `update()` for each batch.
         """
-        self.current_training_state = current_training_state
+        self.batch_state = batch_state
+
+    def pre_update_checkpoint(self, checkpoint_state: CheckpointState):
+        """
+        Called automatically at each checkpoint.
+        """
+        self.checkpoint_state = checkpoint_state
 
     @abstractmethod
     def update(self, index, weight, grad, state):
@@ -58,7 +67,9 @@ class Eve(SockeyeOptimizer):
         * "Improving Stochastic Gradient Descent with Feedback"
           Jayanth Koushik; Hiroaki Hayashi (https://arxiv.org/abs/1611.01505)
 
-    Eve currently does not support rescaling gradients, clipping gradients, or weight decay.
+    An extension allows using validation checkpoint loss in addition to training batch loss.
+
+    Eve does not currently support rescaling gradients, clipping gradients, or weight decay.
 
     :param learning_rate: The initial learning rate.
     :param beta1: Exponential decay rate for the first moment estimates.
@@ -67,6 +78,8 @@ class Eve(SockeyeOptimizer):
     :param epsilon: Small value to avoid division by 0.
     :param k_lo: Lower threshold for relative change.
     :param k_hi: Upper threshold for relative change.
+    :param use_batch_objective: Incorporate batch objective (can use both).
+    :param use_checkpoint_objective: Incorporate checkpoint objective (can use both).
     :param maximize_metric: Whether the optimized metric is maximized.
     """
     def __init__(self,
@@ -77,8 +90,12 @@ class Eve(SockeyeOptimizer):
                  epsilon: float = 1e-8,
                  k_lo: float = 0.1,
                  k_hi: float = 10,
+                 use_batch_objective: bool = True,
+                 use_checkpoint_objective: bool = False,
                  maximize_metric: bool = False,
                  **kwargs):
+        check_condition(any((use_batch_objective, use_checkpoint_objective)),
+                        "Must use at least one of: batch objective, checkpoint objective")
         super().__init__(learning_rate=learning_rate, **kwargs)
         self.beta1 = beta1
         self.beta2 = beta2
@@ -86,12 +103,15 @@ class Eve(SockeyeOptimizer):
         self.epsilon = epsilon
         self.k_lo = k_lo
         self.k_hi = k_hi
+        self.use_batch_objective = use_batch_objective
+        self.use_checkpoint_objective = use_checkpoint_objective
         self.maximize_metric = maximize_metric
 
     def create_state(self, index: int, weight: NDArray):
         return (zeros(weight.shape, weight.context, dtype=weight.dtype),  # mean
                 zeros(weight.shape, weight.context, dtype=weight.dtype),  # variance
-                [0, 1])  # previous objective "hat", previous d
+                [0, 1],  # batch previous objective "hat", previous d
+                [0, 0, 1])  # checkpoint number, previous objective "hat", previous d
 
     def update(self,
                index: int,
@@ -103,7 +123,7 @@ class Eve(SockeyeOptimizer):
         assert isinstance(grad, NDArray)
         lr = self._get_lr(index)
 
-        mean, var, prev = state
+        mean, var, prev_batch, prev_checkpoint = state
 
         # Standard Adam rules for updating mean and variance
         self._update_count(index)
@@ -116,24 +136,57 @@ class Eve(SockeyeOptimizer):
         mean[:] = self.beta1 * mean + (1. - self.beta1) * grad
         var[:] = self.beta2 * var + (1. - self.beta2) * (grad**2)
 
-        # Rules for updating Eve's f_hat and d terms
-        f_hat_prev, d_prev = prev
-        f = self.current_training_state.metric_val
-        if t > 1:
-            if (self.maximize_metric and f < f_hat_prev) or (not self.maximize_metric and f > f_hat_prev):
-                delta_lo = self.k_lo + 1.
-                delta_hi = self.k_hi + 1.
+        # Compute Eve's d term
+        d = 0.
+
+        # Rules from paper: compute f_hat and d based on last training batch objective
+        if self.use_batch_objective:
+            f_hat_prev, d_prev = prev_batch
+            f = self.batch_state.metric_val
+            if t > 1:
+                if (self.maximize_metric and f < f_hat_prev) or (not self.maximize_metric and f > f_hat_prev):
+                    delta_lo = self.k_lo + 1.
+                    delta_hi = self.k_hi + 1.
+                else:
+                    delta_lo = 1. / (self.k_hi + 1.)
+                    delta_hi = 1. / (self.k_lo + 1.)
+                c = min(max(delta_lo, f / f_hat_prev), delta_hi)
+                f_hat = c * f_hat_prev
+                r = abs(f_hat - f_hat_prev) / min(f_hat, f_hat_prev)
+                d_batch = self.beta3 * d_prev + (1. - self.beta3) * r
             else:
-                delta_lo = 1. / (self.k_hi + 1.)
-                delta_hi = 1. / (self.k_lo + 1.)
-            c = min(max(delta_lo, f / f_hat_prev), delta_hi)
-            f_hat = c * f_hat_prev
-            r = abs(f_hat - f_hat_prev) / min(f_hat, f_hat_prev)
-            d = self.beta3 * d_prev + (1. - self.beta3) * r
-        else:
-            f_hat = f
-            d = 1.
-        prev[:] = [f_hat, d]
+                f_hat = f
+                d_batch = 1.
+            prev_batch[:] = [f_hat, d_batch]
+            d += d_batch
+
+        # Extension: compute f_hat and d based on last validation checkpoint objective
+        if self.use_checkpoint_objective:
+            checkpoint, f_hat_prev, d_checkpoint = prev_checkpoint
+            # Only need to compute once per checkpoint
+            if self.checkpoint_state and self.checkpoint_state.checkpoint != checkpoint:
+                checkpoint = self.checkpoint_state.checkpoint
+                f = self.checkpoint_state.metric_val
+                if checkpoint > 1:
+                    if (self.maximize_metric and f < f_hat_prev) or (not self.maximize_metric and f > f_hat_prev):
+                        delta_lo = self.k_lo + 1.
+                        delta_hi = self.k_hi + 1.
+                    else:
+                        delta_lo = 1. / (self.k_hi + 1.)
+                        delta_hi = 1. / (self.k_lo + 1.)
+                    c = min(max(delta_lo, f / f_hat_prev), delta_hi)
+                    f_hat = c * f_hat_prev
+                    # New value replaces old; no decay for checkpoint d term
+                    d_checkpoint = abs(f_hat - f_hat_prev) / min(f_hat, f_hat_prev)
+                else:
+                    f_hat = f
+                    d_checkpoint = 1.
+                prev_checkpoint[:] = [checkpoint, f_hat, d_checkpoint]
+            d += d_checkpoint
+
+        # Batch and checkpoint contribute equally
+        if self.use_batch_objective and self.use_checkpoint_objective:
+            d /= 2.
 
         # Final weight update rule (Adam rule with extra d term)
         weight[:] = weight - lr * mean / (d * sqrt(var) + self.epsilon)

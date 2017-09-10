@@ -32,7 +32,7 @@ from . import checkpoint_decoder
 from . import constants as C
 from . import data_io
 from . import loss
-from .optimizers import CurrentTrainingState, SockeyeOptimizer
+from .optimizers import BatchState, CheckpointState, SockeyeOptimizer
 from . import model
 from . import utils
 
@@ -317,7 +317,7 @@ class TrainingModel(model.SockeyeModel):
             # Update aggregated training loss
             self.module.update_metric(metric_train, batch.label)
 
-            # If using an extended optimizer, provide extra information about the current training state
+            # If using an extended optimizer, provide extra state information about the current batch
             if isinstance(self.module._curr_module._optimizer, SockeyeOptimizer):
                 # Metrics for this batch only
                 metric_batch.reset()
@@ -326,8 +326,8 @@ class TrainingModel(model.SockeyeModel):
                 for name, val in metric_batch.get_name_value():
                     if name == self.training_monitor.optimized_metric:
                         m_val = val
-                current_training_state = CurrentTrainingState(metric_val=m_val)
-                self.module._curr_module._optimizer.pre_update(current_training_state)
+                batch_state = BatchState(metric_val=m_val)
+                self.module._curr_module._optimizer.pre_update_batch(batch_state)
 
             # Call optimizer to update weights given current state
             self.module.update()
@@ -366,6 +366,16 @@ class TrainingModel(model.SockeyeModel):
 
                 # evaluation on validation set
                 has_improved, best_checkpoint = self._evaluate(train_state, val_iter, metric_val)
+
+                # If using an extended optimizer, provide extra state information about the current checkpoint
+                if isinstance(self.module._curr_module._optimizer, SockeyeOptimizer):
+                    m_val = 0
+                    for name, val in metric_val.get_name_value():
+                        if name == self.training_monitor.optimized_metric:
+                            m_val = val
+                    checkpoint_state = CheckpointState(checkpoint=train_state.checkpoint, metric_val=m_val)
+                    self.module._curr_module._optimizer.pre_update_checkpoint(checkpoint_state)
+
                 if self.lr_scheduler is not None:
                     self.lr_scheduler.new_evaluation_result(has_improved)
 
