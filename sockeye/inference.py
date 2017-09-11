@@ -551,9 +551,13 @@ class Translator:
         :param attention_matrix: Attention matrix.
         :return: TranslatorOutput.
         """
+        # remove special sentence start symbol (<s>) from the output:
+        target_ids = target_ids[1:]
+        attention_matrix = attention_matrix[1:,:]
+
         target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
         target_string = C.TOKEN_SEPARATOR.join(
-            target_token for target_id, target_token in zip(target_ids[1:], target_tokens[1:]) if
+            target_token for target_id, target_token in zip(target_ids, target_tokens) if
             target_id not in self.stop_ids)
         attention_matrix = attention_matrix[:, :len(trans_input.tokens)]
 
