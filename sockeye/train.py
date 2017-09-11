@@ -260,7 +260,7 @@ def main():
                 dropout_attention=args.transformer_dropout_attention,
                 dropout_relu=args.transformer_dropout_relu,
                 dropout_prepost=args.transformer_dropout_prepost,
-                weight_tying=args.weight_tying,
+                weight_tying=args.weight_tying and C.WEIGHT_TYING_SRC in args.weight_tying_type,
                 positional_encodings=not args.transformer_no_positional_encodings,
                 preprocess_sequence=encoder_transformer_preprocess,
                 postprocess_sequence=encoder_transformer_postprocess,
@@ -282,6 +282,9 @@ def main():
                 conv_config=config_conv,
                 reverse_input=args.rnn_encoder_reverse_input)
 
+        decoder_weight_tying = args.weight_tying and C.WEIGHT_TYING_TRG in args.weight_tying_type \
+                               and C.WEIGHT_TYING_SOFTMAX in args.weight_tying_type
+
         if args.decoder == C.TRANSFORMER_TYPE:
             config_decoder = transformer.TransformerConfig(
                 model_size=args.transformer_model_size,
@@ -292,7 +295,7 @@ def main():
                 dropout_attention=args.transformer_dropout_attention,
                 dropout_relu=args.transformer_dropout_relu,
                 dropout_prepost=args.transformer_dropout_prepost,
-                weight_tying=args.weight_tying,
+                weight_tying=decoder_weight_tying,
                 positional_encodings=not args.transformer_no_positional_encodings,
                 preprocess_sequence=decoder_transformer_preprocess,
                 postprocess_sequence=decoder_transformer_postprocess,
@@ -301,7 +304,7 @@ def main():
         else:
             attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
             config_coverage = None
-            if args.attention_type == "coverage":
+            if args.attention_type == C.ATT_COV:
                 config_coverage = coverage.CoverageConfig(type=args.attention_coverage_type,
                                                           num_hidden=args.attention_coverage_num_hidden,
                                                           layer_normalization=args.layer_normalization)
@@ -312,8 +315,6 @@ def main():
                                                          layer_normalization=args.layer_normalization,
                                                          config_coverage=config_coverage,
                                                          num_heads=args.attention_mhdot_heads)
-            decoder_weight_tying = args.weight_tying and C.WEIGHT_TYING_TRG in args.weight_tying_type \
-                                   and C.WEIGHT_TYING_SOFTMAX in args.weight_tying_type
             config_decoder = decoder.RecurrentDecoderConfig(
                 vocab_size=vocab_target_size,
                 max_seq_len_source=max_seq_len_source,
