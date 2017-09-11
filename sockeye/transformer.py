@@ -18,7 +18,6 @@ import numpy as np
 
 from . import config
 from . import layers
-from . import utils
 
 
 class TransformerConfig(config.Config):
