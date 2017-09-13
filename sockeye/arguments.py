@@ -510,6 +510,10 @@ def add_training_args(params):
                               default=C.EVE_LOSS_BATCH,
                               choices=C.EVE_LOSS,
                               help='Which loss to use for Eve optimizer. Default: %(default)s.')
+    train_params.add_argument('--eve-beta4',
+                              type=float,
+                              default=0.,
+                              help='Beta4 (checkpoint objective change decay) for Eve optimizer. Default: %(default)s.')
     train_params.add_argument('--weight-init',
                               type=str,
                               default=C.INIT_XAVIER,

@@ -74,7 +74,8 @@ class Eve(SockeyeOptimizer):
     :param learning_rate: The initial learning rate.
     :param beta1: Exponential decay rate for the first moment estimates.
     :param beta2: Exponential decay rate for the second moment estimates.
-    :param beta3: Exponential decay rate for computing relative change.
+    :param beta3: Exponential decay rate for batch objective relative change.
+    :param beta4: Exponential decay rate for checkpoint objective relative change.
     :param epsilon: Small value to avoid division by 0.
     :param k_lo: Lower threshold for relative change.
     :param k_hi: Upper threshold for relative change.
@@ -87,6 +88,7 @@ class Eve(SockeyeOptimizer):
                  beta1: float = 0.9,
                  beta2: float = 0.999,
                  beta3: float = 0.999,
+                 beta4: float = 0.9,
                  epsilon: float = 1e-8,
                  k_lo: float = 0.1,
                  k_hi: float = 10,
@@ -100,6 +102,7 @@ class Eve(SockeyeOptimizer):
         self.beta1 = beta1
         self.beta2 = beta2
         self.beta3 = beta3
+        self.beta4 = beta4
         self.epsilon = epsilon
         self.k_lo = k_lo
         self.k_hi = k_hi
@@ -162,7 +165,8 @@ class Eve(SockeyeOptimizer):
 
         # Extension: compute f_hat and d based on last validation checkpoint objective
         if self.use_checkpoint_objective:
-            checkpoint, f_hat_prev, d_checkpoint = prev_checkpoint
+            checkpoint, f_hat_prev, d_prev = prev_checkpoint
+            d_checkpoint = d_prev
             # Only need to compute once per checkpoint
             if self.checkpoint_state and self.checkpoint_state.checkpoint != checkpoint:
                 checkpoint = self.checkpoint_state.checkpoint
@@ -176,8 +180,8 @@ class Eve(SockeyeOptimizer):
                         delta_hi = 1. / (self.k_lo + 1.)
                     c = min(max(delta_lo, f / f_hat_prev), delta_hi)
                     f_hat = c * f_hat_prev
-                    # New value replaces old; no decay for checkpoint d term
-                    d_checkpoint = abs(f_hat - f_hat_prev) / min(f_hat, f_hat_prev)
+                    r = abs(f_hat - f_hat_prev) / min(f_hat, f_hat_prev)
+                    d_checkpoint = self.beta4 * d_prev + (1. - self.beta4) * r
                 else:
                     f_hat = f
                     d_checkpoint = 1.
