@@ -117,18 +117,27 @@ class TrainingMonitor(object):
             mx.model.BatchEndParam(
                 epoch=epoch, nbatch=nbatch, eval_metric=metric, locals=None))
 
-    def checkpoint_callback(self, checkpoint: int, train_metric: mx.metric.EvalMetric):
+    def checkpoint_callback(self,
+                            checkpoint: int,
+                            train_metric: mx.metric.EvalMetric,
+                            memory_data: Optional[Dict[int, Tuple[int, int]]] = None):
         """
         Callback function when a model checkpoint is performed.
         If TrainingMonitor uses Tensorboard, training metrics are written to the Tensorboard event file.
 
         :param checkpoint: Current checkpoint.
         :param train_metric: Evaluation metric for training data.
+        :param memory_data: Optional data about memory usage.
         """
         metrics = {}
         for name, value in train_metric.get_name_value():
             metrics[name + "-train"] = value
+        if memory_data is not None:
+            utils.log_gpu_memory_usage(memory_data)
+            used_gpu_mem = sum(v[0] for v in memory_data.values())
+            metrics['used-gpu-memory'] = used_gpu_mem  # total gpu memory used in MB
         self.metrics.append(metrics)
+
         if self.summary_writer:
             write_tensorboard(self.summary_writer, metrics, checkpoint)
 
