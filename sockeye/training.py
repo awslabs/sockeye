@@ -219,7 +219,7 @@ class TrainingModel(model.SockeyeModel):
                                                           self.config.config_data.validation_source,
                                                           self.config.config_data.validation_target,
                                                           output_folder, self.config.max_seq_len_source,
-                                                          limit=monitor_bleu) \
+                                                          sample_size=monitor_bleu) \
             if monitor_bleu else None
 
         logger.info("Training started.")

@@ -57,6 +57,7 @@ class TrainingMonitor(object):
                  use_tensorboard: bool = False,
                  cp_decoder: Optional[checkpoint_decoder.CheckpointDecoder] = None,
                  num_concurrent_decodes: int = 1) -> None:
+        self.output_folder = output_folder
         self.metrics = []  # stores dicts of metric names & values for each checkpoint
         self.metrics_filename = os.path.join(output_folder, C.METRICS_NAME)
         self.best_checkpoint = 0
@@ -196,9 +197,12 @@ class TrainingMonitor(object):
 
     def _start_decode_process(self, checkpoint):
         self._wait_for_decode_slot()
+        output_name = os.path.join(self.output_folder, C.DECODE_OUT_NAME % checkpoint)
         process = self.ctx.Process(
             target=_decode_and_evaluate,
-            args=(self.cp_decoder, checkpoint,
+            args=(self.cp_decoder,
+                  checkpoint,
+                  output_name,
                   self.decoder_metric_queue))
         process.name = 'Decoder-%d' % checkpoint
         logger.info("Starting process: %s", process.name)
@@ -258,12 +262,13 @@ class TrainingMonitor(object):
 
 def _decode_and_evaluate(checkpoint_decoder: checkpoint_decoder.CheckpointDecoder,
                          checkpoint: int,
+                         output_name: str,
                          queue: mp.Queue):
     """
     Decodes and evaluates using given checkpoint_decoder and puts result in the queue,
     indexed by the checkpoint.
     """
-    metrics = checkpoint_decoder.decode_and_evaluate(checkpoint)
+    metrics = checkpoint_decoder.decode_and_evaluate(checkpoint, output_name)
     queue.put((checkpoint, metrics))
 
 
