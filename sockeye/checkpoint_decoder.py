@@ -17,15 +17,17 @@ Implements a thin wrapper around Translator to compute BLEU scores on (a sample 
 import logging
 import os
 import random
-from typing import Dict
+import time
+from typing import Dict, Optional
 
 import mxnet as mx
+import numpy as np
 
 import sockeye.bleu
-import sockeye.inference
 import sockeye.output_handler
 from sockeye import constants as C
 from sockeye.data_io import smart_open
+from sockeye.inference import LengthPenalty, load_models, Translator
 from sockeye.utils import check_condition
 
 logger = logging.getLogger(__name__)
@@ -41,7 +43,15 @@ class CheckpointDecoder:
     :param model: Model to load.
     :param max_input_len: Maximum input length.
     :param beam_size: Size of the beam.
-    :param limit: Maximum number of sentences to sample and decode. If <=0, all sentences are used.
+    :param bucket_width_source: Source bucket width.
+    :param bucket_width_target: Target bucket width.
+    :param length_penalty_alpha: Alpha factor for the length penalty
+    :param length_penalty_beta: Beta factor for the length penalty
+    :param softmax_temperature: Optional parameter to control steepness of softmax distribution.
+    :param max_output_length_num_stds: Number of standard deviations as safety margin for maximum output length.
+    :param ensemble_mode: Ensemble mode: linear or log_linear combination.
+    :param sample_size: Maximum number of sentences to sample and decode. If <=0, all sentences are used.
+    :param random_seed: Random seed for sampling. Default: 42.
     """
 
     def __init__(self,
@@ -51,26 +61,39 @@ class CheckpointDecoder:
                  model: str,
                  max_input_len: int,
                  beam_size: int = C.DEFAULT_BEAM_SIZE,
+                 bucket_width_source: int = 10,
+                 bucket_width_target: int = 10,
+                 length_penalty_alpha: float = 1.0,
+                 length_penalty_beta: float = 0.0,
+                 softmax_temperature: Optional[float] = None,
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
-                 limit: int = -1) -> None:
+                 ensemble_mode: str = 'linear',
+                 sample_size: int = -1,
+                 random_seed: int = 42) -> None:
         self.context = context
         self.max_input_len = max_input_len
         self.max_output_length_num_stds = max_output_length_num_stds
+        self.ensemble_mode = ensemble_mode
         self.beam_size = beam_size
+        self.bucket_width_source = bucket_width_source
+        self.bucket_width_target = bucket_width_target
+        self.length_penalty_alpha = length_penalty_alpha
+        self.length_penalty_beta = length_penalty_beta
+        self.softmax_temperature = softmax_temperature
         self.model = model
         with smart_open(inputs) as inputs_fin, smart_open(references) as references_fin:
             input_sentences = inputs_fin.readlines()
             target_sentences = references_fin.readlines()
             check_condition(len(input_sentences) == len(target_sentences), "Number of sentence pairs do not match")
-            if limit <= 0:
-                limit = len(input_sentences)
-            if limit < len(input_sentences):
+            if sample_size <= 0:
+                sample_size = len(input_sentences)
+            if sample_size < len(input_sentences):
                 # custom random number generator to guarantee the same samples across runs in order to be able to
                 # compare metrics across independent runs
-                random_gen = random.Random(42)
+                random_gen = random.Random(random_seed)
                 self.input_sentences, self.target_sentences = zip(
                     *random_gen.sample(list(zip(input_sentences, target_sentences)),
-                                       limit))
+                                       sample_size))
             else:
                 self.input_sentences, self.target_sentences = input_sentences, target_sentences
 
@@ -82,36 +105,47 @@ class CheckpointDecoder:
             [trg_out.write(s) for s in self.target_sentences]
             [src_out.write(s) for s in self.input_sentences]
 
-    def decode_and_evaluate(self, checkpoint: int) -> Dict[str, float]:
+    def decode_and_evaluate(self,
+                            checkpoint: Optional[int] = None,
+                            output_name: str = os.devnull,
+                            speed_percentile: int = 99) -> Dict[str, float]:
         """
         Decodes data set and evaluates given a checkpoint.
 
         :param checkpoint: Checkpoint to load parameters from.
+        :param output_name: Filename to write translations to. Defaults to /dev/null.
+        :param speed_percentile: Percentile to compute for sent/sec. Default: p99.
         :return: Mapping of metric names to scores.
         """
-        ensemble_mode = 'linear'
-        bucket_source_width = 10
-        bucket_target_width = 10
-        translator = sockeye.inference.Translator(self.context,
-                                                  ensemble_mode,
-                                                  bucket_source_width,
-                                                  bucket_target_width,
-                                                  sockeye.inference.LengthPenalty(),
-                                                  *sockeye.inference.load_models(self.context,
-                                                                                 self.max_input_len,
-                                                                                 self.beam_size,
-                                                                                 [self.model],
-                                                                                 [checkpoint]))
-
-        output_name = os.path.join(self.model, C.DECODE_OUT_NAME % checkpoint)
+        models, vocab_source, vocab_target = load_models(self.context,
+                                                         self.max_input_len,
+                                                         self.beam_size,
+                                                         [self.model],
+                                                         [checkpoint],
+                                                         softmax_temperature=self.softmax_temperature,
+                                                         max_output_length_num_stds=self.max_output_length_num_stds)
+        translator = Translator(self.context,
+                                self.ensemble_mode,
+                                self.bucket_width_source,
+                                self.bucket_width_target,
+                                LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
+                                models,
+                                vocab_source,
+                                vocab_target)
+        trans_wall_times = np.zeros((len(self.input_sentences),))
         with smart_open(output_name, 'w') as output:
             handler = sockeye.output_handler.StringOutputHandler(output)
             translations = []
-            for sent_id, input_sentence in enumerate(self.input_sentences):
-                trans_input = translator.make_input(sent_id, input_sentence)
+            for i, input_sentence in enumerate(self.input_sentences):
+                tic = time.time()
+                trans_input = translator.make_input(i, input_sentence)
                 trans_output = translator.translate(trans_input)
                 handler.handle(trans_input, trans_output)
+                trans_wall_time = time.time() - tic
+                trans_wall_times[i] = trans_wall_time
                 translations.append(trans_output.translation)
-        logger.info("Checkpoint [%d] %d translations saved to '%s'", checkpoint, len(translations), output_name)
+        percentile_sent_per_sec = np.percentile(trans_wall_times, speed_percentile)
+
         # TODO(fhieber): eventually add more metrics (METEOR etc.)
-        return {"bleu-val": sockeye.bleu.corpus_bleu(translations, self.target_sentences)}
+        return {C.BLEU_VAL: sockeye.bleu.corpus_bleu(translations, self.target_sentences),
+                C.SPEED_PCT % speed_percentile: percentile_sent_per_sec}
