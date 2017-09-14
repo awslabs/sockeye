@@ -25,24 +25,24 @@ _LINE_MAX_LENGTH = 9
 
 @pytest.mark.parametrize("train_params, translate_params", [
     # "Vanilla" LSTM encoder-decoder with attention
-    ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 16 --num-embed 8 --attention-type mlp"
-     " --attention-num-hidden 16 --batch-size 8 --loss cross-entropy --optimized-metric perplexity --max-updates 10"
+    ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 16 --num-embed 8 --rnn-attention-type mlp"
+     " --rnn-attention-num-hidden 16 --batch-size 8 --loss cross-entropy --optimized-metric perplexity --max-updates 10"
      " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 2"),
     # "Kitchen sink" LSTM encoder-decoder with attention
     ("--encoder rnn --num-layers 4:2 --rnn-cell-type lstm --rnn-num-hidden 16"
      " --rnn-residual-connections"
-     " --num-embed 16 --attention-type coverage --attention-num-hidden 16 --weight-tying --attention-use-prev-word"
-     " --rnn-context-gating --layer-normalization --batch-size 8 --loss smoothed-cross-entropy"
-     " --smoothed-cross-entropy-alpha 0.1 --normalize-loss --optimized-metric perplexity --max-updates 10"
-     " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01"
+     " --num-embed 16 --rnn-attention-type coverage --rnn-attention-num-hidden 16 --weight-tying "
+     "--rnn-attention-use-prev-word --rnn-context-gating --layer-normalization --batch-size 8 "
+     "--loss smoothed-cross-entropy --smoothed-cross-entropy-alpha 0.1 --normalize-loss --optimized-metric perplexity"
+     " --max-updates 10 --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01"
      " --rnn-dropout-inputs 0.5:0.1 --rnn-dropout-states 0.5:0.1 --embed-dropout 0.1 --rnn-decoder-hidden-dropout 0.01"
      " --rnn-decoder-state-init avg --rnn-encoder-reverse-input --rnn-dropout-recurrent 0.1:0.0",
      "--beam-size 2"),
     # Convolutional embedding encoder + LSTM encoder-decoder with attention
     ("--encoder rnn-with-conv-embed --conv-embed-max-filter-width 3 --conv-embed-num-filters 4:4:8"
      " --conv-embed-pool-stride 2 --conv-embed-num-highway-layers 1 --num-layers 1 --rnn-cell-type lstm"
-     " --rnn-num-hidden 16 --num-embed 8 --attention-num-hidden 16 --batch-size 8 --loss cross-entropy"
+     " --rnn-num-hidden 16 --num-embed 8 --rnn-attention-num-hidden 16 --batch-size 8 --loss cross-entropy"
      " --optimized-metric perplexity --max-updates 10 --checkpoint-frequency 10 --optimizer adam"
      " --initial-learning-rate 0.01",
      "--beam-size 2"),
@@ -50,7 +50,7 @@ _LINE_MAX_LENGTH = 9
     ("--encoder transformer --num-layers 2:1 --rnn-cell-type gru --rnn-num-hidden 16 --num-embed 8"
      " --transformer-attention-heads 2 --transformer-model-size 16"
      " --transformer-feed-forward-num-hidden 32"
-     " --attention-type mhdot --attention-mhdot-heads 4 --attention-num-hidden 16 --batch-size 8 --max-updates 10"
+     " --rnn-attention-type mhdot --rnn-attention-mhdot-heads 4 --rnn-attention-num-hidden 16 --batch-size 8 --max-updates 10"
      " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 2"),
     # LSTM encoder, Transformer decoder

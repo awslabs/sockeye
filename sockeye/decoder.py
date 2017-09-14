@@ -23,14 +23,14 @@ import mxnet as mx
 
 from sockeye.config import Config
 from sockeye.utils import check_condition
-from . import attention as attentions
+from . import rnn_attention as attentions
 from . import constants as C
 from . import encoder
 from . import layers
 from . import lexicon as lexicons
 from . import rnn
 from . import convolution
-from . import attention
+from . import rnn_attention
 from . import transformer
 from . import utils
 
@@ -953,11 +953,11 @@ class ConvolutionalDecoder(Decoder):
                                                                  prefix=C.TARGET_POSITIONAL_EMBEDDING_PREFIX)
 
         #TODO: feed attention in from the outside
-        self.attention = attention.DotAttention(input_previous_word=False,
-                                                # TODO: set them correctly. rnn_num_hidden = encoder num hidden, num_hidden = decoder_num_hidden
+        self.attention = rnn_attention.DotAttention(input_previous_word=False,
+                                                    # TODO: set them correctly. rnn_num_hidden = encoder num hidden, num_hidden = decoder_num_hidden
                                                 rnn_num_hidden=self.config.cnn_config.num_hidden,
-                                                num_hidden=self.config.cnn_config.num_hidden,
-                                                expand_query_dim=False)
+                                                    num_hidden=self.config.cnn_config.num_hidden,
+                                                    expand_query_dim=False)
         self.layers = [convolution.ConvolutionGluBlock(
             config.cnn_config,
             pad_type='left',

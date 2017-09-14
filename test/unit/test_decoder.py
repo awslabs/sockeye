@@ -14,7 +14,7 @@
 import mxnet as mx
 import pytest
 
-import sockeye.attention
+import sockeye.rnn_attention
 import sockeye.rnn
 import sockeye.constants as C
 import sockeye.coverage
@@ -50,13 +50,13 @@ def test_step(cell_type, context_gating,
     config_coverage = sockeye.coverage.CoverageConfig(type="tanh",
                                                       num_hidden=2,
                                                       layer_normalization=False)
-    config_attention = sockeye.attention.AttentionConfig(type="coverage",
-                                                         num_hidden=2,
-                                                         input_previous_word=False,
-                                                         rnn_num_hidden=decoder_num_hidden,
-                                                         layer_normalization=False,
-                                                         config_coverage=config_coverage)
-    attention = sockeye.attention.get_attention(config_attention, max_seq_len=source_seq_len)
+    config_attention = sockeye.rnn_attention.AttentionConfig(type="coverage",
+                                                             num_hidden=2,
+                                                             input_previous_word=False,
+                                                             rnn_num_hidden=decoder_num_hidden,
+                                                             layer_normalization=False,
+                                                             config_coverage=config_coverage)
+    attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=source_seq_len)
     attention_state = attention.get_initial_state(source_length, source_seq_len)
     attention_func = attention.on(source, source_length, source_seq_len)
 

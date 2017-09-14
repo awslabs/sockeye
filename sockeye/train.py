@@ -30,7 +30,7 @@ import numpy as np
 from sockeye.log import setup_main_logger, log_sockeye_version, log_mxnet_version
 from sockeye.utils import acquire_gpus, check_condition, get_num_gpus, expand_requested_device_ids
 from . import arguments
-from . import attention
+from . import rnn_attention
 from . import constants as C
 from . import coverage
 from . import data_io
@@ -324,20 +324,20 @@ def main():
                                                                 embed_dropout=decoder_embed_dropout,
                                                                 hidden_dropout=args.rnn_decoder_hidden_dropout)
         else:
-            attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
+            rnn_attention_num_hidden = args.rnn_num_hidden if not args.rnn_attention_num_hidden else args.rnn_attention_num_hidden
             config_coverage = None
-            if args.attention_type == C.ATT_COV:
-                config_coverage = coverage.CoverageConfig(type=args.attention_coverage_type,
-                                                          num_hidden=args.attention_coverage_num_hidden,
+            if args.rnn_attention_type == C.ATT_COV:
+                config_coverage = coverage.CoverageConfig(type=args.rnn_attention_coverage_type,
+                                                          num_hidden=args.rnn_attention_coverage_num_hidden,
                                                           layer_normalization=args.layer_normalization)
             #TODO: rnn_num_hidden should really be the encoder_num_hidden (to make it independent of the type of encoder used)
-            config_attention = attention.AttentionConfig(type=args.attention_type,
-                                                         num_hidden=attention_num_hidden,
-                                                         input_previous_word=args.attention_use_prev_word,
-                                                         rnn_num_hidden=args.rnn_num_hidden,
-                                                         layer_normalization=args.layer_normalization,
-                                                         config_coverage=config_coverage,
-                                                         num_heads=args.attention_mhdot_heads)
+            config_attention = rnn_attention.AttentionConfig(type=args.rnn_attention_type,
+                                                             num_hidden=rnn_attention_num_hidden,
+                                                             input_previous_word=args.rnn_attention_use_prev_word,
+                                                             rnn_num_hidden=args.rnn_num_hidden,
+                                                             layer_normalization=args.layer_normalization,
+                                                             config_coverage=config_coverage,
+                                                             num_heads=args.rnn_attention_mhdot_heads)
             config_decoder = decoder.RecurrentDecoderConfig(
                 vocab_size=vocab_target_size,
                 max_seq_len_source=max_seq_len_source,
@@ -358,7 +358,7 @@ def main():
                 state_init=args.rnn_decoder_state_init,
                 context_gating=args.rnn_context_gating,
                 layer_normalization=args.layer_normalization,
-                attention_in_upper_layers=args.attention_in_upper_layers)
+                attention_in_upper_layers=args.rnn_attention_in_upper_layers)
 
         config_loss = loss.LossConfig(type=args.loss,
                                       vocab_size=vocab_target_size,

@@ -357,34 +357,34 @@ def add_model_parameters(params):
                                    'Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
 
     # attention arguments
-    model_params.add_argument('--attention-type',
+    model_params.add_argument('--rnn-attention-type',
                               choices=C.ATT_TYPES,
                               default=C.ATT_MLP,
                               help='Attention model for RNN decoders. Choices: {%(choices)s}. '
                                    'Default: %(default)s.')
-    model_params.add_argument('--attention-num-hidden',
+    model_params.add_argument('--rnn-attention-num-hidden',
                               default=None,
                               type=int,
                               help='Number of hidden units for attention layers. Default: equal to --rnn-num-hidden.')
-    model_params.add_argument('--attention-use-prev-word', action="store_true",
+    model_params.add_argument('--rnn-attention-use-prev-word', action="store_true",
                               help="Feed the previous target embedding into the attention mechanism.")
 
-    model_params.add_argument('--attention-coverage-type',
+    model_params.add_argument('--rnn-attention-coverage-type',
                               choices=["tanh", "sigmoid", "relu", "softrelu", "gru", "count"],
                               default="count",
                               help="Type of model for updating coverage vectors. 'count' refers to an update method"
                                    "that accumulates attention scores. 'tanh', 'sigmoid', 'relu', 'softrelu' "
                                    "use non-linear layers with the respective activation type, and 'gru' uses a"
                                    "GRU to update the coverage vectors. Default: %(default)s.")
-    model_params.add_argument('--attention-coverage-num-hidden',
+    model_params.add_argument('--rnn-attention-coverage-num-hidden',
                               type=int,
                               default=1,
                               help="Number of hidden units for coverage vectors. Default: %(default)s.")
-    model_params.add_argument('--attention-in-upper-layers',
+    model_params.add_argument('--rnn-attention-in-upper-layers',
                               action="store_true",
                               help="Pass the attention to the upper layers of the RNN decoder, similar "
                                    "to GNMT paper. Only applicable if more than one layer is used.")
-    model_params.add_argument('--attention-mhdot-heads',
+    model_params.add_argument('--rnn-attention-mhdot-heads',
                               type=int, default=None,
                               help='Number of heads for Multi-head dot attention. Default: %(default)s.')
 
