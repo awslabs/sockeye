@@ -379,7 +379,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
     :param eos_id: Word id for end-of-sentence.
     :param pad_id: Word id for padding symbols.
     :param unk_id: Word id for unknown symbols.
-    :param bucket_batch_sizes: Pre-computed bucket batch sizes (used to keep iterators consistent for train/validation)
+    :param bucket_batch_sizes: Pre-computed bucket batch sizes (used to keep iterators consistent for train/validation).
     :param dtype: Data type of generated NDArrays.
     """
 
@@ -393,7 +393,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
                  eos_id: int,
                  pad_id: int,
                  unk_id: int,
-                 bucket_batch_sizes: Optional[List[List[int]]] = None,
+                 bucket_batch_sizes: Optional[List[Tuple[int, int]]] = None,
                  fill_up: Optional[str] = None,
                  source_data_name=C.SOURCE_NAME,
                  target_data_name=C.TARGET_NAME,
@@ -580,12 +580,15 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         # Default bucket batch size: batch size of largest bucket batch by total elements, scaled for default bucket key
         # Effectively, set default values to reserve enough space to provide a batch from any bucket
         largest_total_batch_size = 0
-        for buck_shape, (batch_size_seq, _) in zip(self.buckets, self.bucket_batch_sizes):
-            seq_len = max(*buck_shape)
-            buck_batch_size = seq_len * batch_size_seq
-            if buck_batch_size > largest_total_batch_size:
-                largest_total_batch_size = buck_batch_size
-                self.default_bucket_batch_size = math.ceil((batch_size_seq * seq_len) / max(*self.default_bucket_key))
+        if self.batch_by_words:
+            for buck_shape, (batch_size_seq, _) in zip(self.buckets, self.bucket_batch_sizes):
+                seq_len = max(*buck_shape)
+                buck_batch_size = seq_len * batch_size_seq
+                if buck_batch_size > largest_total_batch_size:
+                    largest_total_batch_size = buck_batch_size
+                    self.default_bucket_batch_size = math.ceil(buck_batch_size / max(*self.default_bucket_key))
+        else:
+            self.default_bucket_batch_size = self.batch_size
 
     def _convert_to_array(self):
         for i in range(len(self.data_source)):
