@@ -79,6 +79,32 @@ class LayerNormalization:
         return inputs_norm
 
 
+class WeightNormalization:
+    """
+    Implements Weight Normalization, see Salimans & Kingma 2016 (https://arxiv.org/abs/1602.07868).
+    For a given tensor the normalization is done per hidden dimension.
+
+    :param weight: Weight tensor of shape: (num_hidden, d1, d2, ...).
+    :param num_hidden: Size of the first dimension.
+    :param ndim: The total number of dimensions of the weight tensor.
+    :param prefix: The prefix used for naming.
+    """
+
+    def __init__(self, weight, num_hidden, ndim=2, prefix: str = ''):
+        self.prefix = prefix
+        self.weight = weight
+        self.num_hidden = num_hidden
+        self.scale = mx.sym.Variable("%swn_scale" % prefix,
+                                     shape=tuple([num_hidden] + [1] * (ndim - 1)),
+                                     init=mx.init.Constant(value=1.0))
+
+    def __call__(self) -> mx.sym.Symbol:
+        """ :return: A weight normalized weight tensor. """
+        # Normalize each hidden dimension and scale afterwards
+        return mx.sym.broadcast_mul(lhs=mx.sym.L2Normalization(self.weight),
+                                    rhs=self.scale, name="%swn_scale" % self.prefix)
+
+
 def split_heads(x: mx.sym.Symbol, length: int, heads: int) -> mx.sym.Symbol:
     """
     Returns a symbol with head dimension folded into batch and depth divided by the number of heads.
@@ -142,7 +168,7 @@ def dot_attention(queries: mx.sym.Symbol,
     :param queries: Attention queries. Shape: (n, lq, d).
     :param keys: Attention keys. Shape: (n, lk, d).
     :param values: Attention values. Shape: (n, lk, dv).
-    :param length: Sequence lengths. Shape: (n,).
+    :param length: Sequence lengths of the keys. Shape: (n,).
     :param dropout: Dropout probability.
     :param bias: Optional bias tensor. Shape: (1, lq, lk).
     :return: 'Context' vectors for each query. Shape: (n, lq, dv).
@@ -389,21 +415,21 @@ class PositionalEncodings(mx.operator.CustomOp):
 
     @staticmethod
     def get_encodings(length, depth) -> np.ndarray:
-        actual_length = length
-        length += 1 if length % 2 != 0 else 0
+        utils.check_condition(depth % 2 == 0, "Positional embeddings require an even embedding size it "
+                                              "is however %d." % depth)
         # (1, depth)
-        channels = np.arange(depth).reshape((1, -1))
-        # (length/2, 1)
-        positions_even = np.arange(0, length, 2).reshape((-1, 1))
-        # (length/2, 1)
-        positions_odd = np.arange(1, length, 2).reshape((-1, 1))
-        # sinusoids for even positions: (length/2, depth)
-        sin = np.sin(positions_even / np.power(10000, (2 * channels) / depth))
-        # cosines for odd positions: (length/2, depth)
-        cos = np.cos(positions_odd / np.power(10000, (2 * channels) / depth))
+        channels = np.arange(depth // 2).reshape((1, -1))
+
+        # (length, 1)
+        positions = np.arange(0, length).reshape((-1, 1))
+        scaled_positions = positions / np.power(10000, (2 * channels) / depth)
+        # sinusoids:
+        sin = np.sin(scaled_positions)
+        # cosines:
+        cos = np.cos(scaled_positions)
         # interleave: (1, length, num_embed)
         encodings = np.hstack([sin, cos]).reshape(1, length, depth)
-        return encodings[:, :actual_length, :]
+        return encodings
 
     def forward(self, is_train, req, in_data, out_data, aux):
         self.assign(out_data[0], req[0], self.encodings)

@@ -10,7 +10,8 @@
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
-from sockeye.convolution import ConvolutionGluBlock
+from sockeye import utils
+from sockeye.convolution import ConvolutionBlock
 
 """
 Encoders for sequence-to-sequence models.
@@ -80,7 +81,7 @@ class ConvolutionalEncoderConfig(Config):
     :param embed_dropout: Dropout probability on embedding layer.
     :param cnn_config: CNN configuration.
     :param num_layers: The number of convolutional layers on top of the embeddings.
-    :param hidden_dropout: Dropout probability on next encoder hidden state.
+    :param positional_embedding_type: The type of positional embedding.
     """
 
     def __init__(self,
@@ -88,8 +89,9 @@ class ConvolutionalEncoderConfig(Config):
                  num_embed: int,
                  embed_dropout: float,
                  max_seq_len_source: int,
-                 cnn_config: convolution.ConvolutionGluConfig,
-                 num_layers: int):
+                 cnn_config: convolution.ConvolutionConfig,
+                 num_layers: int,
+                 positional_embedding_type: str) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
@@ -97,6 +99,7 @@ class ConvolutionalEncoderConfig(Config):
         self.num_layers = num_layers
         self.cnn_config = cnn_config
         self.max_seq_len_source = max_seq_len_source
+        self.positional_embedding_type = positional_embedding_type
 
 
 def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
@@ -120,7 +123,13 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
                               embed_weight=embed_weight))
 
     if config.conv_config is not None:
-        encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
+        encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config,
+                                                      prefix=C.CHAR_SEQ_ENCODER_PREFIX))
+        if config.conv_config.add_positional_encoding:
+            # If specified, add positional encodings to segment embeddings
+            # (TransformerEncoder compatibility, not in original paper)
+            encoders.append(AddSinCosPositionalEmbeddings(num_embed=config.num_embed,
+                                                          prefix="%sadd_positional_encodings" % C.CHAR_SEQ_ENCODER_PREFIX))
 
     encoders.append(BatchMajor2TimeMajor())
 
@@ -164,10 +173,12 @@ def get_convolutional_encoder(config: ConvolutionalEncoderConfig,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
                               dropout=config.embed_dropout,
                               embed_weight=embed_weight))
-    #TODO: alternatively used fix sin/cos pos embeddings?
-    encoders.append(AdditivePositionalEmbedding(num_embed=config.num_embed,
-                                                max_seq_len=config.max_seq_len_source,
-                                                prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
+
+    encoders.append(get_positional_embedding(config.positional_embedding_type,
+                                             config.num_embed,
+                                             max_seq_len=config.max_seq_len_source,
+                                             prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
+
     encoders.append(ConvolutionalEncoder(config=config))
     encoders.append(BatchMajor2TimeMajor())
 
@@ -189,8 +200,11 @@ def get_transformer_encoder(config: transformer.TransformerConfig,
                               vocab_size=config.vocab_size,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
                               dropout=config.dropout_prepost,
-                              embed_weight=embed_weight,
-                              add_positional_encoding=config.positional_encodings))
+                              embed_weight=embed_weight))
+    encoders.append(get_positional_embedding(config.positional_embedding_type,
+                                             config.model_size,
+                                             config.max_seq_len_source,
+                                             C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
     if config.conv_config is not None:
         encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
 
@@ -222,21 +236,27 @@ class Encoder(ABC):
 
     def get_num_hidden(self) -> int:
         """
-        Return the representation size of this encoder.
+        :return: The representation size of this encoder.
         """
         raise NotImplementedError()
 
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """
-        Returns a list of RNNCells used by this encoder.
+        :return: A list of RNNCells used by this encoder.
         """
         return []
 
     def get_encoded_seq_len(self, seq_len: int) -> int:
         """
-        Returns the size of the encoded sequence.
+        :return: The size of the encoded sequence.
         """
         return seq_len
+
+    def get_max_seq_len(self) -> Optional[None]:
+        """
+        :return: The maximum length supported by the encoder if such a restriction exists.
+        """
+        return None
 
 
 class BatchMajor2TimeMajor(Encoder):
@@ -282,7 +302,6 @@ class Embedding(Encoder):
     :param prefix: Name prefix for symbols of this encoder.
     :param dropout: Dropout probability.
     :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
-    :param add_positional_encoding: If true, adds positional encodings to embedding.
     """
 
     def __init__(self,
@@ -290,8 +309,7 @@ class Embedding(Encoder):
                  vocab_size: int,
                  prefix: str,
                  dropout: float,
-                 embed_weight: Optional[mx.sym.Symbol] = None,
-                 add_positional_encoding: bool = False) -> None:
+                 embed_weight: Optional[mx.sym.Symbol] = None) -> None:
         self.num_embed = num_embed
         self.vocab_size = vocab_size
         self.prefix = prefix
@@ -300,11 +318,10 @@ class Embedding(Encoder):
             self.embed_weight = embed_weight
         else:
             self.embed_weight = mx.sym.Variable(prefix + "weight")
-        self.add_positional_encoding = add_positional_encoding
 
     def encode(self,
                data: mx.sym.Symbol,
-               data_length: mx.sym.Symbol,
+               data_length: Optional[mx.sym.Symbol],
                seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
@@ -319,28 +336,9 @@ class Embedding(Encoder):
                                      weight=self.embed_weight,
                                      output_dim=self.num_embed,
                                      name=self.prefix + "embed")
-        if self.add_positional_encoding:
-            embedding = mx.sym.broadcast_add(embedding,
-                                             self.get_positional_encoding(length=seq_len,
-                                                                          depth=self.num_embed,
-                                                                          name="%spositional_encodings" % self.prefix),
-                                             name='%sadd_positional_encodings' % self.prefix)
         if self.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.dropout, name="source_embed_dropout")
         return embedding, data_length, seq_len
-
-    @staticmethod
-    def get_positional_encoding(length: int, depth: int, name: str) -> mx.sym.Symbol:
-        """
-        Returns symbol initialized with positional encodings as in Vaswani et al.
-
-        :param length: Maximum sequence length.
-        :param depth: Depth.
-        :param name: Symbol name.
-        :return: Symbol(1, length, depth)
-        """
-        return mx.sym.BlockGrad(mx.symbol.Custom(length=length, depth=depth, name=name,
-                                                 op_type='positional_encodings'))
 
     def get_num_hidden(self) -> int:
         """
@@ -349,9 +347,88 @@ class Embedding(Encoder):
         return self.num_embed
 
 
-class AdditivePositionalEmbedding(Encoder):
+class PositionalEncoder(Encoder):
+    @abstractmethod
+    def encode_positions(self,
+                         positions: mx.sym.Symbol,
+                         data: mx.sym.Symbol) -> mx.sym.Symbol:
+        """
+        Add positional encodings to the data using the provided positions.
+        :param positions: (batch_size,)
+        :param data: (batch_size, num_embed)
+        :return: (batch_size, num_embed)
+        """
+        pass
+
+
+class AddSinCosPositionalEmbeddings(PositionalEncoder):
     """
-    Takes an encoded sequence and adds positional embeddings to it.
+    Takes an encoded sequence and adds fixed positional embeddings as in Vaswani et al, 2017 to it.
+
+    :param num_embed: Embedding size.
+    :param max_seq_len: Maximum sequence length.
+    :param prefix: Name prefix for symbols of this encoder.
+    """
+
+    def __init__(self,
+                 num_embed: int,
+                 prefix: str) -> None:
+        utils.check_condition(num_embed % 2 == 0, "Positional embeddings require an even embedding size it "
+                              "is however %d." % num_embed)
+        self.num_embed = num_embed
+        self.prefix = prefix
+
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: Optional[mx.sym.Symbol],
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+        """
+        :param data: (batch_size, source_seq_len, num_embed)
+        :param data_length: (batch_size,)
+        :param seq_len: sequence length.
+        :return: (batch_size, source_seq_len, num_embed)
+        """
+        embedding = mx.sym.broadcast_add(data,
+                                         mx.sym.BlockGrad(mx.symbol.Custom(length=seq_len,
+                                                                           depth=self.num_embed,
+                                                                           name="%spositional_encodings" % self.prefix,
+                                                                           op_type='positional_encodings')))
+        return embedding, data_length, seq_len
+
+    def encode_positions(self,
+                         positions: mx.sym.Symbol,
+                         data: mx.sym.Symbol) -> mx.sym.Symbol:
+        """
+        :param positions: (batch_size,)
+        :param data: (batch_size, num_embed)
+        :return: (batch_size, num_embed)
+        """
+        # (batch_size, 1)
+        positions = mx.sym.expand_dims(positions, axis=1)
+        # (num_embed,)
+        channels = mx.sym.arange(0, self.num_embed // 2)
+        # (1, num_embed,)
+        scaling = mx.sym.expand_dims(1. / mx.sym.pow(10000, (2 * channels) / self.num_embed), axis=0)
+
+        # (batch_size, num_embed/2)
+        scaled_positions = mx.sym.dot(positions, scaling)
+
+        sin = mx.sym.sin(scaled_positions)
+        cos = mx.sym.cos(scaled_positions)
+
+        # (batch_size, num_embed/2)
+        pos_embedding = mx.sym.concat(sin, cos, dim=1)
+
+        return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix)
+
+    def get_num_hidden(self) -> int:
+        return self.num_embed
+
+
+class AddLearnedPositionalEmbeddings(PositionalEncoder):
+    """
+    Takes an encoded sequence and adds positional embeddings to it, which are learned jointly. Note that this will
+    limited the maximum sentence length during decoding.
 
     :param num_embed: Embedding size.
     :param max_seq_len: Maximum sequence length.
@@ -374,15 +451,14 @@ class AdditivePositionalEmbedding(Encoder):
 
     def encode(self,
                data: mx.sym.Symbol,
-               data_length: mx.sym.Symbol,
+               data_length: Optional[mx.sym.Symbol],
                seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
-
-       :param data: (batch_size, source_seq_len, num_embed)
-       :param data_length: (batch_size,)
-       :param seq_len: sequence length.
-       :return: (batch_size, source_seq_len, num_embed)
-       """
+        :param data: (batch_size, source_seq_len, num_embed)
+        :param data_length: (batch_size,)
+        :param seq_len: sequence length.
+        :return: (batch_size, source_seq_len, num_embed)
+        """
 
         # (1, source_seq_len)
         positions = mx.sym.expand_dims(data=mx.sym.arange(start=0, stop=seq_len, step=1), axis=0)
@@ -395,8 +471,65 @@ class AdditivePositionalEmbedding(Encoder):
                                          name=self.prefix + "pos_embed")
         return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix), data_length, seq_len
 
+    def encode_positions(self,
+                         positions: mx.sym.Symbol,
+                         data: mx.sym.Symbol) -> mx.sym.Symbol:
+        """
+        :param positions: (batch_size,)
+        :param data: (batch_size, num_embed)
+        :return: (batch_size, num_embed)
+        """
+
+        # (batch_size, source_seq_len, num_embed)
+        pos_embedding = mx.sym.Embedding(data=positions,
+                                         input_dim=self.max_seq_len,
+                                         weight=self.embed_weight,
+                                         output_dim=self.num_embed,
+                                         name=self.prefix + "pos_embed")
+        return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix)
+
     def get_num_hidden(self) -> int:
         return self.num_embed
+
+    def get_max_seq_len(self):
+        # we can only support sentences as long as the maximum length during training.
+        return self.max_seq_len
+
+
+class NoOpPositionalEmbeddings(PositionalEncoder):
+    """
+    Simple NoOp pos embedding. It does not modify the data, but avoids lots of if statements.
+    """
+
+    def __init__(self, num_embed) -> None:
+        self.num_embed = num_embed
+
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: Optional[mx.sym.Symbol],
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+        return data, data_length, seq_len
+
+    def encode_positions(self,
+                         positions: mx.sym.Symbol,
+                         data: mx.sym.Symbol) -> mx.sym.Symbol:
+        return data
+
+    def get_num_hidden(self) -> int:
+        return self.num_embed
+
+
+def get_positional_embedding(positional_embedding_type, num_embed, max_seq_len, prefix) -> PositionalEncoder:
+    if positional_embedding_type == C.FIXED_POSITIONAL_EMBEDDING:
+         return AddSinCosPositionalEmbeddings(num_embed=num_embed, prefix=prefix)
+    elif positional_embedding_type == C.LEARNED_POSITIONAL_EMBEDDING:
+        return AddLearnedPositionalEmbeddings(num_embed=num_embed,
+                                              max_seq_len=max_seq_len,
+                                              prefix=prefix)
+    elif positional_embedding_type == C.NO_POSITIONAL_EMBEDDING:
+        return NoOpPositionalEmbeddings(num_embed=num_embed)
+    else:
+        raise ValueError("Unknown positional embedding type %s" % positional_embedding_type)
 
 
 class EncoderSequence(Encoder):
@@ -623,11 +756,11 @@ class ConvolutionalEncoder(Encoder):
         self.config = config
 
         # initialize the weights of the linear transformation required for the residual connections
-        self.residual_linear_weights = mx.sym.Variable('%sresidual_linear_weight' % prefix)
+        self.i2h_weight = mx.sym.Variable('%si2h_weight' % prefix)
 
         # initialize the layers of blocks containing a convolution and a GLU, since
         # every layer is shared over all encode calls
-        self.layers = [ConvolutionGluBlock(
+        self.layers = [ConvolutionBlock(
             config.cnn_config,
             pad_type='centered',
             prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
@@ -640,33 +773,30 @@ class ConvolutionalEncoder(Encoder):
         Encodes data with a stack of Convolution+GLU blocks given sequence lengths of individual examples
         and maximum sequence length.
 
-        :param data: Input data.
+        :param data: Input data. Shape: (batch_size, seq_len, input_num_hidden).
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
         :return: Encoded version of the data.
         """
 
-        # reshape incoming layer because FullyConnected can accept only a 2-dimensional input
-        residual_data = mx.sym.reshape(data, shape=(-3, -1))
+        # reshape incoming data because FullyConnected only takes 2-d input
+        data = mx.sym.reshape(data, shape=(-3, -1))
 
-        # linearly transform the input of each convo so that it can be added as a residual to the
-        # output of the convolution + GLU block
-        residual_data = mx.sym.FullyConnected(data=residual_data,
-                                              num_hidden=self.config.cnn_config.num_hidden,
-                                              no_bias=True,
-                                              weight=self.residual_linear_weights)
-        # re-arrange outcoming layer to the dimensions of the output
-        residual_data = mx.sym.reshape(residual_data, shape=(-1, seq_len, self.config.cnn_config.num_hidden))
+        # project input dim to hidden dim
+        # (batch_size * seq_len, num_hidden)
+        data = mx.sym.FullyConnected(data=data,
+                                     num_hidden=self.config.cnn_config.num_hidden,
+                                     no_bias=True,
+                                     weight=self.i2h_weight)
+        # (batch_size, seq_len, num_hidden)
+        data = mx.sym.reshape(data, shape=(-1, seq_len, self.config.cnn_config.num_hidden))
 
-        # process with all layers of convolution and GLU
+        # Multiple layers with residual connections:
         for layer in self.layers:
-            data = residual_data + layer(data, data_length, seq_len)
+            data = data + layer(data, data_length, seq_len)
         return data, data_length, seq_len
 
     def get_num_hidden(self) -> int:
-        """
-        Returns the representation size of this encoder.
-        """
         return self.config.cnn_config.num_hidden
 
 
@@ -729,6 +859,7 @@ class ConvolutionalEmbeddingConfig(Config):
     :param pool_stride: Stride for pooling layer after convolutions.
     :param num_highway_layers: Number of highway layers for segment embeddings.
     :param dropout: Dropout probability.
+    :param add_positional_encoding: Dropout probability.
     """
 
     def __init__(self,
@@ -901,16 +1032,6 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         # (batch_size, encoded_seq_len, num_segment_emded)
         seg_embedding = mx.sym.Reshape(data=seg_embedding,
                                        shape=(-1, encoded_seq_len, self.output_dim))
-
-        # If specified, add positional encodings to segment embeddings
-        # (TransformerEncoder compatibility, not in original paper)
-        if self.add_positional_encoding:
-            seg_embedding = mx.sym.broadcast_add(seg_embedding,
-                                                 Embedding.get_positional_encoding(
-                                                     length=encoded_seq_len,
-                                                     depth=self.output_dim,
-                                                     name="%spositional_encodings" % self.prefix),
-                                                 name='%sadd_positional_encodings' % self.prefix)
 
         # Dropout on final segment embeddings
         if self.dropout > 0:

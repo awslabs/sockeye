@@ -53,7 +53,8 @@ def test_step(cell_type, context_gating,
     config_attention = sockeye.rnn_attention.AttentionConfig(type="coverage",
                                                              num_hidden=2,
                                                              input_previous_word=False,
-                                                             rnn_num_hidden=decoder_num_hidden,
+                                                             source_num_hidden=decoder_num_hidden,
+                                                             query_num_hidden=decoder_num_hidden,
                                                              layer_normalization=False,
                                                              config_coverage=config_coverage)
     attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=source_seq_len)

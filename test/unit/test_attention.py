@@ -37,7 +37,8 @@ def test_attention(attention_type,
     config_attention = sockeye.rnn_attention.AttentionConfig(type=attention_type,
                                                              num_hidden=2,
                                                              input_previous_word=False,
-                                                             rnn_num_hidden=2,
+                                                             source_num_hidden=2,
+                                                             query_num_hidden=2,
                                                              layer_normalization=False,
                                                              config_coverage=None)
     attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=source_seq_len)
@@ -88,7 +89,8 @@ def test_coverage_attention(attention_coverage_type,
     config_attention = sockeye.rnn_attention.AttentionConfig(type="coverage",
                                                              num_hidden=5,
                                                              input_previous_word=False,
-                                                             rnn_num_hidden=0,
+                                                             source_num_hidden=encoder_num_hidden,
+                                                             query_num_hidden=decoder_num_hidden,
                                                              layer_normalization=False,
                                                              config_coverage=config_coverage)
     attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=source_seq_len)
@@ -140,7 +142,8 @@ def test_last_state_attention(batch_size=1,
     config_attention = sockeye.rnn_attention.AttentionConfig(type="fixed",
                                                              num_hidden=0,
                                                              input_previous_word=False,
-                                                             rnn_num_hidden=0,
+                                                             source_num_hidden=2,
+                                                             query_num_hidden=2,
                                                              layer_normalization=False,
                                                              config_coverage=None)
     attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=source_seq_len)

@@ -1,5 +1,5 @@
 sockeye/arguments.py
-sockeye/attention.py
+sockeye/rnn_attention.py
 sockeye/bleu.py
 sockeye/checkpoint_decoder.py
 sockeye/constants.py

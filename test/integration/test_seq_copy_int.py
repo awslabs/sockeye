@@ -50,8 +50,8 @@ _LINE_MAX_LENGTH = 9
     ("--encoder transformer --num-layers 2:1 --rnn-cell-type gru --rnn-num-hidden 16 --num-embed 8"
      " --transformer-attention-heads 2 --transformer-model-size 16"
      " --transformer-feed-forward-num-hidden 32"
-     " --rnn-attention-type mhdot --rnn-attention-mhdot-heads 4 --rnn-attention-num-hidden 16 --batch-size 8 --max-updates 10"
-     " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
+     " --rnn-attention-type mhdot --rnn-attention-mhdot-heads 4 --rnn-attention-num-hidden 16 --batch-size 8 "
+     " --max-updates 10 --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 2"),
     # LSTM encoder, Transformer decoder
     ("--encoder rnn --num-layers 2:2 --rnn-cell-type lstm --rnn-num-hidden 16 --num-embed 8"
@@ -69,6 +69,12 @@ _LINE_MAX_LENGTH = 9
      " --batch-size 8 --max-updates 10"
      " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 2"),
+    # 3-layer cnn
+    ("--encoder cnn --decoder cnn "
+     " --batch-size 16 --num-layers 3 --max-updates 10 --checkpoint-frequency 10"
+     " --cnn-num-hidden 32 --cnn-positional-embedding-type fixed"
+     " --optimizer adam --initial-learning-rate 0.001",
+     "--beam-size 2")
 ])
 def test_seq_copy(train_params, translate_params):
     """Task: copy short sequences of digits"""

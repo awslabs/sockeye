@@ -15,7 +15,6 @@ from typing import Optional
 
 import mxnet as mx
 import numpy as np
-
 from . import config
 from . import layers
 
@@ -32,9 +31,11 @@ class TransformerConfig(config.Config):
                  dropout_relu: float,
                  dropout_prepost: float,
                  weight_tying: bool,
-                 positional_encodings: bool,
+                 positional_embedding_type: str,
                  preprocess_sequence: str,
                  postprocess_sequence: str,
+                 max_seq_len_source: int,
+                 max_seq_len_target: int,
                  conv_config: Optional['ConvolutionalEmbeddingConfig'] = None) -> None:  # type: ignore
         super().__init__()
         self.model_size = model_size
@@ -46,9 +47,11 @@ class TransformerConfig(config.Config):
         self.dropout_relu = dropout_relu
         self.dropout_prepost = dropout_prepost
         self.weight_tying = weight_tying
-        self.positional_encodings = positional_encodings
+        self.positional_embedding_type = positional_embedding_type
         self.preprocess_sequence = preprocess_sequence
         self.postprocess_sequence = postprocess_sequence
+        self.max_seq_len_source = max_seq_len_source
+        self.max_seq_len_target = max_seq_len_target
         self.conv_config = conv_config
 
 

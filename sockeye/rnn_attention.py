@@ -35,7 +35,8 @@ class AttentionConfig(config.Config):
     :param type: Attention name.
     :param num_hidden: Number of hidden units for attention networks.
     :param input_previous_word: Feeds the previous target embedding into the attention mechanism.
-    :param rnn_num_hidden: Number of hidden units of encoder/decoder RNNs.
+    :param source_num_hidden: Number of hidden units of the source.
+    :param query_num_hidden: Number of hidden units of the query.
     :param layer_normalization: Apply layer normalization to MLP attention.
     :param config_coverage: Optional coverage configuration.
     :param num_heads: Number of attention heads. Only used for Multi-head dot attention.
@@ -44,7 +45,8 @@ class AttentionConfig(config.Config):
                  type: str,
                  num_hidden: int,
                  input_previous_word: bool,
-                 rnn_num_hidden: int,
+                 source_num_hidden: int,
+                 query_num_hidden: int,
                  layer_normalization: bool,
                  config_coverage: Optional[coverage.CoverageConfig] = None,
                  num_heads: Optional[int] = None) -> None:
@@ -52,7 +54,8 @@ class AttentionConfig(config.Config):
         self.type = type
         self.num_hidden = num_hidden
         self.input_previous_word = input_previous_word
-        self.rnn_num_hidden = rnn_num_hidden
+        self.source_num_hidden = source_num_hidden
+        self.query_num_hidden = query_num_hidden
         self.layer_normalization = layer_normalization
         self.config_coverage = config_coverage
         self.num_heads = num_heads
@@ -69,17 +72,18 @@ def get_attention(config: AttentionConfig, max_seq_len: int) -> 'Attention':
     if config.type == C.ATT_BILINEAR:
         if config.input_previous_word:
             logger.warning("bilinear attention does not support input_previous_word")
-        return BilinearAttention(config.rnn_num_hidden)
+        return BilinearAttention(config.query_num_hidden)
     elif config.type == C.ATT_DOT:
-        return DotAttention(config.input_previous_word, config.rnn_num_hidden, config.num_hidden)
+        return DotAttention(config.input_previous_word, config.source_num_hidden, config.query_num_hidden,
+                            config.num_hidden)
     elif config.type == C.ATT_MH_DOT:
         utils.check_condition(config.num_heads is not None, "%s requires setting num-heads." % C.ATT_MH_DOT)
         return MultiHeadDotAttention(config.input_previous_word,
                                      num_hidden=config.num_hidden,
                                      heads=config.num_heads)
     elif config.type == C.ATT_DOT_SCALED:
-        return DotAttention(config.input_previous_word, config.rnn_num_hidden, config.num_hidden,
-                            scale=config.rnn_num_hidden ** -0.5)
+        return DotAttention(config.input_previous_word, config.source_num_hidden, config.query_num_hidden,
+                            config.num_hidden, scale=config.num_hidden ** -0.5)
     elif config.type == C.ATT_FIXED:
         return EncoderLastStateAttention(config.input_previous_word)
     elif config.type == C.ATT_LOC:
@@ -202,7 +206,7 @@ class BilinearAttention(Attention):
 
     :math:`score(h_t, h_s) = h_s^T \\mathbf{W} h_t`
 
-    :param num_hidden: Number of hidden units.
+    :param num_hidden: Number of hidden units the source will be projected to.
     """
 
     def __init__(self, num_hidden: int) -> None:
@@ -275,18 +279,18 @@ class DotAttention(Attention):
 
     def __init__(self,
                  input_previous_word: bool,
-                 rnn_num_hidden: int,
+                 source_num_hidden: int,
+                 query_num_hidden: int,
                  num_hidden: int,
-                 scale: Optional[float] = None,
-                 expand_query_dim: bool = False) -> None:
+                 scale: Optional[float] = None) -> None:
         super().__init__(input_previous_word)
-        self.project = rnn_num_hidden != num_hidden
+        self.project_source = source_num_hidden != num_hidden
+        self.project_query = query_num_hidden != num_hidden
         self.num_hidden = num_hidden
         self.scale = scale
-        # TODO: just pull the expand dim out into the decoder
-        self.expand_query_dim = expand_query_dim
-        self.t2h_weight = mx.sym.Variable("%st2h_weight" % self.prefix) if self.project else None
-        self.s2h_weight = mx.sym.Variable("%ss2h_weight" % self.prefix) if self.project else None
+
+        self.s2h_weight = mx.sym.Variable("%ss2h_weight" % self.prefix) if self.project_source else None
+        self.t2h_weight = mx.sym.Variable("%st2h_weight" % self.prefix) if self.project_query else None
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """
@@ -300,7 +304,7 @@ class DotAttention(Attention):
         :return: Attention callable.
         """
 
-        if self.project:
+        if self.project_source:
             # (batch_size * seq_len, self.num_hidden)
             source_hidden = mx.sym.FullyConnected(
                 data=mx.sym.reshape(data=source, shape=(-3, -1), name="%sflat_source" % self.prefix),
@@ -309,6 +313,8 @@ class DotAttention(Attention):
             # (batch_size, seq_len, self.num_hidden)
             source_hidden = mx.sym.reshape(source_hidden, shape=(-1, source_seq_len, self.num_hidden),
                                            name="%ssource_hidden" % self.prefix)
+        else:
+            source_hidden = source
 
         def attend(att_input: AttentionInput, att_state: AttentionState) -> AttentionState:
             """
@@ -319,9 +325,7 @@ class DotAttention(Attention):
             :return: Updated attention state.
             """
             query = att_input.query
-            local_source = source
-            if self.project:
-                local_source = source_hidden
+            if self.project_query:
                 # query: (batch_size, self.num_hidden)
                 query = mx.sym.FullyConnected(data=query,
                                               weight=self.t2h_weight,
@@ -333,18 +337,14 @@ class DotAttention(Attention):
                 query *= self.scale
 
             # (batch_size, decoder_num_hidden, 1)
-            if self.expand_query_dim:
-                expanded_decoder_state = mx.sym.expand_dims(query, axis=2)
-            else:
-                expanded_decoder_state = query
+            expanded_decoder_state = mx.sym.expand_dims(query, axis=2)
 
             # batch_dot: (batch, M, K) X (batch, K, N) –> (batch, M, N).
             # (batch_size, seq_len, 1)
-            attention_scores = mx.sym.batch_dot(lhs=local_source, rhs=expanded_decoder_state,
+            attention_scores = mx.sym.batch_dot(lhs=source_hidden, rhs=expanded_decoder_state,
                                                 name="%sbatch_dot" % self.prefix)
 
-            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores,
-                                                                       remove_target_seq_len_dim=self.expand_query_dim)
+            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores)
             return AttentionState(context=context,
                                   probs=attention_probs,
                                   dynamic_source=att_state.dynamic_source)
@@ -742,9 +742,7 @@ def mask_attention_scores(logits: mx.sym.Symbol,
 
 def get_context_and_attention_probs(values: mx.sym.Symbol,
                                     length: mx.sym.Symbol,
-                                    logits: mx.sym.Symbol,
-                                    #TODO: fix but just doing the reshape outside of this method...
-                                    remove_target_seq_len_dim=True) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
+                                    logits: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
     """
     Returns context vector and attention probabilities
     via a weighted sum over values.
@@ -764,8 +762,7 @@ def get_context_and_attention_probs(values: mx.sym.Symbol,
     # (batch_size, encoder_num_hidden, seq_len) X (batch_size, seq_len, 1) -> (batch_size, num_hidden, 1)
     context = mx.sym.batch_dot(lhs=values, rhs=probs, transpose_a=True)
     # (batch_size, encoder_num_hidden, 1)-> (batch_size, encoder_num_hidden)
-    if remove_target_seq_len_dim:
-        context = mx.sym.reshape(data=context, shape=(0, 0))
-        probs = mx.sym.reshape(data=probs, shape=(0, 0))
+    context = mx.sym.reshape(data=context, shape=(0, 0))
+    probs = mx.sym.reshape(data=probs, shape=(0, 0))
 
     return context, probs

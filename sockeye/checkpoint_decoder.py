@@ -25,10 +25,10 @@ import numpy as np
 
 import sockeye.bleu
 import sockeye.output_handler
-from sockeye import constants as C
-from sockeye.data_io import smart_open
-from sockeye.inference import LengthPenalty, load_models, Translator
-from sockeye.utils import check_condition
+from . import constants as C
+from . import data_io
+from . import inference
+from . import utils
 
 logger = logging.getLogger(__name__)
 
@@ -81,10 +81,10 @@ class CheckpointDecoder:
         self.length_penalty_beta = length_penalty_beta
         self.softmax_temperature = softmax_temperature
         self.model = model
-        with smart_open(inputs) as inputs_fin, smart_open(references) as references_fin:
+        with data_io.smart_open(inputs) as inputs_fin, data_io.smart_open(references) as references_fin:
             input_sentences = inputs_fin.readlines()
             target_sentences = references_fin.readlines()
-            check_condition(len(input_sentences) == len(target_sentences), "Number of sentence pairs do not match")
+            utils.check_condition(len(input_sentences) == len(target_sentences), "Number of sentence pairs do not match")
             if sample_size <= 0:
                 sample_size = len(input_sentences)
             if sample_size < len(input_sentences):
@@ -100,8 +100,8 @@ class CheckpointDecoder:
         logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d)",
                     max_input_len, beam_size, model, len(self.input_sentences))
 
-        with smart_open(os.path.join(self.model, C.DECODE_REF_NAME), 'w') as trg_out, \
-                smart_open(os.path.join(self.model, C.DECODE_IN_NAME), 'w') as src_out:
+        with data_io.smart_open(os.path.join(self.model, C.DECODE_REF_NAME), 'w') as trg_out, \
+                data_io.smart_open(os.path.join(self.model, C.DECODE_IN_NAME), 'w') as src_out:
             [trg_out.write(s) for s in self.target_sentences]
             [src_out.write(s) for s in self.input_sentences]
 
@@ -117,23 +117,23 @@ class CheckpointDecoder:
         :param speed_percentile: Percentile to compute for sent/sec. Default: p99.
         :return: Mapping of metric names to scores.
         """
-        models, vocab_source, vocab_target = load_models(self.context,
-                                                         self.max_input_len,
-                                                         self.beam_size,
-                                                         [self.model],
-                                                         [checkpoint],
-                                                         softmax_temperature=self.softmax_temperature,
-                                                         max_output_length_num_stds=self.max_output_length_num_stds)
-        translator = Translator(self.context,
-                                self.ensemble_mode,
-                                self.bucket_width_source,
-                                self.bucket_width_target,
-                                LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
-                                models,
-                                vocab_source,
-                                vocab_target)
+        models, vocab_source, vocab_target = inference.load_models(self.context,
+                                                                   self.max_input_len,
+                                                                   self.beam_size,
+                                                                   [self.model],
+                                                                   [checkpoint],
+                                                                   softmax_temperature=self.softmax_temperature,
+                                                                   max_output_length_num_stds=self.max_output_length_num_stds)
+        translator = inference.Translator(self.context,
+                                          self.ensemble_mode,
+                                          self.bucket_width_source,
+                                          self.bucket_width_target,
+                                          inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
+                                          models,
+                                          vocab_source,
+                                          vocab_target)
         trans_wall_times = np.zeros((len(self.input_sentences),))
-        with smart_open(output_name, 'w') as output:
+        with data_io.smart_open(output_name, 'w') as output:
             handler = sockeye.output_handler.StringOutputHandler(output)
             translations = []
             for i, input_sentence in enumerate(self.input_sentences):

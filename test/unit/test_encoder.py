@@ -69,3 +69,21 @@ def test_convolutional_embedding_encoder(config, out_data_shape, out_data_length
     assert np.equal(exe.outputs[0].asnumpy(), np.asarray(out_data_length)).all()
 
     assert encoded_seq_len == out_seq_len
+
+
+def test_sincos_positional_embeddings():
+    # Test that .encode() and .encode_positions() return the same values:
+    data = mx.sym.Variable("data")
+    positions = mx.sym.Variable("positions")
+    pos_encoder = sockeye.encoder.AddSinCosPositionalEmbeddings(num_embed=_NUM_EMBED, prefix="test")
+    encoded, _, __ = pos_encoder.encode(data, None, _SEQ_LEN)
+    nd_encoded = encoded.eval(data=mx.nd.zeros((_BATCH_SIZE, _SEQ_LEN, _NUM_EMBED)))[0]
+    # Take the first element in the batch to get (seq_len, num_embed)
+    nd_encoded = nd_encoded[0]
+
+    encoded_positions = pos_encoder.encode_positions(positions, data)
+    # Explicitly encode all positions from 0 to _SEQ_LEN
+    nd_encoded_positions = encoded_positions.eval(positions=mx.nd.arange(0, _SEQ_LEN),
+                                                  data=mx.nd.zeros((_SEQ_LEN, _NUM_EMBED)))[0]
+    assert np.isclose(nd_encoded.asnumpy(), nd_encoded_positions.asnumpy()).all()
+

@@ -274,13 +274,21 @@ def add_model_parameters(params):
     # convolutional encoder/decoder arguments arguments
     model_params.add_argument('--cnn-kernel-width',
                               type=multiple_values(num_values=2, greater_or_equal=1, data_type=int),
-                              default=(3, 3),
+                              default=(3, 5),
                               help='Kernel width of the convolutional encoder and decoder. Default: %(default)s.')
     model_params.add_argument('--cnn-num-hidden',
                               type=int_greater_or_equal(1),
                               default=512,
                               help='Number of hidden units for the convolutional encoder and decoder. '
                                    'Default: %(default)s.')
+    model_params.add_argument('--cnn-activation-type',
+                              choices=C.CNN_ACTIVATION_TYPES,
+                              default=C.GLU,
+                              help="Type activation to use for each convolutional layer. Default: %(default)s.")
+    model_params.add_argument('--cnn-positional-embedding-type',
+                              choices=C.POSITIONAL_EMBEDDING_TYPES,
+                              default=C.LEARNED_POSITIONAL_EMBEDDING,
+                              help='The type of positional embedding. Default: %(default)s.')
 
     # rnn arguments
     model_params.add_argument('--rnn-cell-type',
@@ -325,9 +333,10 @@ def add_model_parameters(params):
                               default=2048,
                               help='Number of hidden units in feed forward layers when using transformer. '
                                    'Default: %(default)s.')
-    model_params.add_argument('--transformer-no-positional-encodings',
-                              action='store_true',
-                              help='Do not use positional encodings.')
+    model_params.add_argument('--transformer-positional-embedding-type',
+                              choices=C.POSITIONAL_EMBEDDING_TYPES,
+                              default=C.FIXED_POSITIONAL_EMBEDDING,
+                              help='The type of positional embedding. Default: %(default)s.')
     model_params.add_argument('--transformer-preprocess',
                               type=multiple_values(num_values=2, greater_or_equal=None, data_type=str),
                               default=('', ''),
@@ -419,10 +428,13 @@ def add_model_parameters(params):
     model_params.add_argument('--layer-normalization', action="store_true",
                               help="Adds layer normalization before non-linear activations. "
                                    "This includes MLP attention, RNN decoder state initialization, "
-                                   "RNN decoder hidden state, transformer layers."
+                                   "RNN decoder hidden state, and cnn layers."
                                    "It does not normalize RNN cell activations "
                                    "(this can be done using the '%s' or '%s' rnn-cell-type." % (C.LNLSTM_TYPE,
                                                                                                 C.LNGLSTM_TYPE))
+
+    model_params.add_argument('--weight-normalization', action="store_true",
+                              help="Adds weight normalization")
 
 
 def add_training_args(params):
@@ -532,6 +544,10 @@ def add_training_args(params):
                               type=float,
                               default=.0,
                               help="Dropout probability for ConvolutionalEmbeddingEncoder. Default: %(default)s.")
+    train_params.add_argument('--cnn-hidden-dropout',
+                              type=float,
+                              default=.0,
+                              help="Dropout probability for dropout between convolutional layers. Default: %(default)s.")
 
     train_params.add_argument('--optimizer',
                               default='adam',

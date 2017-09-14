@@ -45,3 +45,17 @@ def test_layer_normalization():
     expected_norm = (x_np - expected_mean) / np.sqrt(expected_var)
 
     assert np.isclose(norm.asnumpy(), expected_norm, atol=1.e-6).all()
+
+
+def test_weight_normalization():
+    # The norm after the operation should be equal to the scale factor.
+    expected_norm = np.asarray([1., 2.])
+    scale_factor = mx.nd.array([[1.], [2.]])
+    weight = mx.sym.Variable("weight")
+    weight_norm = sockeye.layers.WeightNormalization(weight,
+                                                     num_hidden=2)
+    norm_weight = weight_norm()
+    nd_norm_weight = norm_weight.eval(weight=mx.nd.array([[1., 2.],
+                                                          [3., 4.]]),
+                                      wn_scale=scale_factor)
+    assert np.isclose(np.linalg.norm(nd_norm_weight[0].asnumpy(), axis=1), expected_norm).all()

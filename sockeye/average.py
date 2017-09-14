@@ -21,7 +21,7 @@ works well in practice.
 import argparse
 import itertools
 import os
-from typing import Dict, Iterable
+from typing import Dict, Iterable, List
 
 import mxnet as mx
 
@@ -67,7 +67,7 @@ def average(param_paths: Iterable[str]) -> Dict[str, mx.nd.NDArray]:
     return avg_params
 
 
-def find_checkpoints(model_path: str, size=4, strategy="best", metric: str = C.PERPLEXITY) -> Iterable[str]:
+def find_checkpoints(model_path: str, size=4, strategy="best", metric: str = C.PERPLEXITY) -> List[str]:
     """
     Finds N best points from .metrics file according to strategy.
 

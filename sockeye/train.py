@@ -263,20 +263,28 @@ def main():
                 dropout_relu=args.transformer_dropout_relu,
                 dropout_prepost=args.transformer_dropout_prepost,
                 weight_tying=args.weight_tying and C.WEIGHT_TYING_SRC in args.weight_tying_type,
-                positional_encodings=not args.transformer_no_positional_encodings,
+                positional_embedding_type=args.transformer_positional_embedding_type,
                 preprocess_sequence=encoder_transformer_preprocess,
                 postprocess_sequence=encoder_transformer_postprocess,
+                max_seq_len_source=max_seq_len_source,
+                max_seq_len_target=max_seq_len_target,
                 conv_config=config_conv)
+            encoder_num_hidden = args.transformer_model_size
         elif args.encoder == C.CONVOLUTION_TYPE:
-            cnn_config = convolution.ConvolutionGluConfig(kernel_width=cnn_kernel_width_encoder,
-                                                          num_hidden=args.cnn_num_hidden)
+            encoder_num_hidden = args.cnn_num_hidden
+            cnn_config = convolution.ConvolutionConfig(kernel_width=cnn_kernel_width_encoder,
+                                                       num_hidden=args.cnn_num_hidden,
+                                                       act_type=args.cnn_activation_type,
+                                                       weight_normalization=args.weight_normalization)
             config_encoder = encoder.ConvolutionalEncoderConfig(vocab_size=vocab_source_size,
                                                                 num_embed=num_embed_source,
                                                                 embed_dropout=encoder_embed_dropout,
                                                                 max_seq_len_source=max_seq_len_source,
                                                                 cnn_config=cnn_config,
-                                                                num_layers=encoder_num_layers)
+                                                                num_layers=encoder_num_layers,
+                                                                positional_embedding_type=args.cnn_positional_embedding_type)
         else:
+            encoder_num_hidden = args.rnn_num_hidden
             config_encoder = encoder.RecurrentEncoderConfig(
                 vocab_size=vocab_source_size,
                 num_embed=num_embed_source,
@@ -307,22 +315,28 @@ def main():
                 dropout_relu=args.transformer_dropout_relu,
                 dropout_prepost=args.transformer_dropout_prepost,
                 weight_tying=decoder_weight_tying,
-                positional_encodings=not args.transformer_no_positional_encodings,
+                positional_embedding_type=args.transformer_positional_embedding_type,
                 preprocess_sequence=decoder_transformer_preprocess,
                 postprocess_sequence=decoder_transformer_postprocess,
+                max_seq_len_source=max_seq_len_source,
+                max_seq_len_target=max_seq_len_target,
                 conv_config=None)
         elif args.decoder == C.CONVOLUTION_TYPE:
-            convolution_config = convolution.ConvolutionGluConfig(kernel_width=cnn_kernel_width_decoder,
-                                                                  num_hidden=args.cnn_num_hidden)
+            convolution_config = convolution.ConvolutionConfig(kernel_width=cnn_kernel_width_decoder,
+                                                               num_hidden=args.cnn_num_hidden,
+                                                               act_type=args.cnn_activation_type,
+                                                               weight_normalization=args.weight_normalization)
             config_decoder = decoder.ConvolutionalDecoderConfig(cnn_config=convolution_config,
                                                                 vocab_size=vocab_target_size,
                                                                 max_seq_len_target=max_seq_len_target,
                                                                 num_embed=num_embed_target,
-                                                                #TODO: make this independent of the type of encoder:
-                                                                encoder_num_hidden=args.cnn_num_hidden,
+                                                                encoder_num_hidden=encoder_num_hidden,
                                                                 num_layers=decoder_num_layers,
+                                                                positional_embedding_type=args.cnn_positional_embedding_type,
+                                                                weight_tying=decoder_weight_tying,
                                                                 embed_dropout=decoder_embed_dropout,
-                                                                hidden_dropout=args.rnn_decoder_hidden_dropout)
+                                                                weight_normalization=args.weight_normalization,
+                                                                hidden_dropout=args.cnn_hidden_dropout)
         else:
             rnn_attention_num_hidden = args.rnn_num_hidden if not args.rnn_attention_num_hidden else args.rnn_attention_num_hidden
             config_coverage = None
@@ -330,11 +344,11 @@ def main():
                 config_coverage = coverage.CoverageConfig(type=args.rnn_attention_coverage_type,
                                                           num_hidden=args.rnn_attention_coverage_num_hidden,
                                                           layer_normalization=args.layer_normalization)
-            #TODO: rnn_num_hidden should really be the encoder_num_hidden (to make it independent of the type of encoder used)
             config_attention = rnn_attention.AttentionConfig(type=args.rnn_attention_type,
                                                              num_hidden=rnn_attention_num_hidden,
                                                              input_previous_word=args.rnn_attention_use_prev_word,
-                                                             rnn_num_hidden=args.rnn_num_hidden,
+                                                             source_num_hidden=encoder_num_hidden,
+                                                             query_num_hidden=args.rnn_num_hidden,
                                                              layer_normalization=args.layer_normalization,
                                                              config_coverage=config_coverage,
                                                              num_heads=args.rnn_attention_mhdot_heads)

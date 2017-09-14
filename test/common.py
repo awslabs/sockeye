@@ -89,10 +89,12 @@ def generate_digits_file(source_path: str,
                          target_path: str,
                          line_count: int = 100,
                          line_length: int = 9,
-                         sort_target: bool = False):
+                         sort_target: bool = False,
+                         seed=13):
+    random_gen = random.Random(seed)
     with open(source_path, "w") as source_out, open(target_path, "w") as target_out:
         for _ in range(line_count):
-            digits = [random.choice(_DIGITS) for _ in range(random.randint(1, line_length))]
+            digits = [random_gen.choice(_DIGITS) for _ in range(random_gen.randint(1, line_length))]
             print(" ".join(digits), file=source_out)
             if sort_target:
                 digits.sort()
@@ -120,9 +122,13 @@ def run_train_translate(train_params: str,
 
     :param train_params: Command line args for model training.
     :param translate_params: Command line args for translation.
-    :param perplexity_thresh: Maximum perplexity for success
-    :param bleu_thresh: Minimum BLEU score for success
-    :return: (perplexity, bleu)
+    :param train_source_path: Path to the source file.
+    :param train_target_path: Path to the target file.
+    :param dev_source_path: Path to the development source file.
+    :param dev_target_path: Path to the development target file.
+    :param max_seq_len: The maximum sequence length.
+    :param work_dir: The directory to store the model and other outputs in.
+    :return: A tuple containing perplexity and bleu.
     """
     with TemporaryDirectory(dir=work_dir, prefix="test_train_translate.") as work_dir:
         # Train model
