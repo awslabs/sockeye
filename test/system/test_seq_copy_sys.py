@@ -20,7 +20,7 @@ from test.common import generate_digits_file, run_train_translate
 
 _TRAIN_LINE_COUNT = 10000
 _DEV_LINE_COUNT = 100
-_LINE_MAX_LENGTH = 9
+_LINE_MAX_LENGTH = 10
 
 
 @pytest.mark.parametrize("train_params, translate_params, perplexity_thresh, bleu_thresh", [
@@ -28,6 +28,14 @@ _LINE_MAX_LENGTH = 9
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --attention-type mlp"
      " --attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity --max-updates 10000"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
+     " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0",
+     "--beam-size 5",
+     1.01,
+     0.98),
+    # "Vanilla" LSTM encoder-decoder with attention (word-based batching)
+    ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --attention-type mlp"
+     " --attention-num-hidden 32 --batch-size 80 --batch-type word --loss cross-entropy --optimized-metric perplexity"
+     " --max-updates 10000 --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
      " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0",
      "--beam-size 5",
      1.01,
@@ -80,7 +88,7 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
                                                train_target_path,
                                                dev_source_path,
                                                dev_target_path,
-                                               max_seq_len=_LINE_MAX_LENGTH + 1,
+                                               max_seq_len=_LINE_MAX_LENGTH + 10,
                                                work_dir=work_dir)
         assert perplexity <= perplexity_thresh
         assert bleu >= bleu_thresh
@@ -91,6 +99,14 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --attention-type mlp"
      " --attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity --max-updates 10000"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
+     "--beam-size 5",
+     1.03,
+     0.98),
+    # "Vanilla" LSTM encoder-decoder with attention (word-based batching)
+    ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --attention-type mlp"
+     " --attention-num-hidden 32 --batch-size 80 --batch-type word --loss cross-entropy --optimized-metric perplexity"
+     " --max-updates 10000 --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
+     " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0",
      "--beam-size 5",
      1.03,
      0.98),
