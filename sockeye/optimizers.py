@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 """
-Extensions to MXNet optimizers
+Extra optimizers not included in MXNet.
 """
 
 from abc import abstractmethod
@@ -30,8 +30,8 @@ CheckpointState = namedtuple("CheckpointState", ["checkpoint", "metric_val"])
 
 class SockeyeOptimizer(Optimizer):
     """
-    Extended optimizer that is passed the current training state via the `pre_update()` method.  The
-    `update()` method then has access to information such as the metric value for the current batch.
+    Optimizer that has access to additional information from the last batch and the last chekpoint
+    when updating weights.
     """
     def __init__(self, **kwargs):
         self.batch_state = None
@@ -52,6 +52,9 @@ class SockeyeOptimizer(Optimizer):
 
     @abstractmethod
     def update(self, index, weight, grad, state):
+        """
+        Called automatically as normal.
+        """
         pass
 
 
@@ -67,7 +70,7 @@ class Eve(SockeyeOptimizer):
         * "Improving Stochastic Gradient Descent with Feedback"
           Jayanth Koushik; Hiroaki Hayashi (https://arxiv.org/abs/1611.01505)
 
-    An extension allows using validation checkpoint loss in addition to training batch loss.
+    This version allows using validation checkpoint loss in addition to training batch loss.
 
     Eve does not currently support rescaling gradients, clipping gradients, or weight decay.
 
@@ -81,20 +84,18 @@ class Eve(SockeyeOptimizer):
     :param k_hi: Upper threshold for relative change.
     :param use_batch_objective: Incorporate batch objective (can use both).
     :param use_checkpoint_objective: Incorporate checkpoint objective (can use both).
-    :param maximize_metric: Whether the optimized metric is maximized.
     """
     def __init__(self,
                  learning_rate: float = 0.001,
                  beta1: float = 0.9,
                  beta2: float = 0.999,
                  beta3: float = 0.999,
-                 beta4: float = 0.9,
+                 beta4: float = 0.,
                  epsilon: float = 1e-8,
                  k_lo: float = 0.1,
                  k_hi: float = 10,
                  use_batch_objective: bool = True,
                  use_checkpoint_objective: bool = False,
-                 maximize_metric: bool = False,
                  **kwargs):
         check_condition(any((use_batch_objective, use_checkpoint_objective)),
                         "Must use at least one of: batch objective, checkpoint objective")
@@ -108,12 +109,11 @@ class Eve(SockeyeOptimizer):
         self.k_hi = k_hi
         self.use_batch_objective = use_batch_objective
         self.use_checkpoint_objective = use_checkpoint_objective
-        self.maximize_metric = maximize_metric
 
     def create_state(self, index: int, weight: NDArray):
         return (zeros(weight.shape, weight.context, dtype=weight.dtype),  # mean
                 zeros(weight.shape, weight.context, dtype=weight.dtype),  # variance
-                [0, 1],  # batch previous objective "hat", previous d
+                [0, 1],     # batch previous objective "hat", previous d
                 [0, 0, 1])  # checkpoint number, previous objective "hat", previous d
 
     def update(self,
@@ -139,20 +139,23 @@ class Eve(SockeyeOptimizer):
         mean[:] = self.beta1 * mean + (1. - self.beta1) * grad
         var[:] = self.beta2 * var + (1. - self.beta2) * (grad**2)
 
-        # Compute Eve's d term
+        # Now compute Eve's d term
         d = 0.
 
-        # Rules from paper: compute f_hat and d based on last training batch objective
+        # Eve rules from paper: compute f_hat and d based on last training batch objective
         if self.use_batch_objective:
             f_hat_prev, d_prev = prev_batch
             f = self.batch_state.metric_val
             if t > 1:
-                if (self.maximize_metric and f < f_hat_prev) or (not self.maximize_metric and f > f_hat_prev):
-                    delta_lo = self.k_lo + 1.
-                    delta_hi = self.k_hi + 1.
-                else:
+                # The original paper has a typo in the algorithm here.  The following lines are re-
+                # written to reflect the actual logic presented in the authors' longer explanation.
+                if f <= f_hat_prev:
                     delta_lo = 1. / (self.k_hi + 1.)
                     delta_hi = 1. / (self.k_lo + 1.)
+                else:
+                    delta_lo = self.k_lo + 1.
+                    delta_hi = self.k_hi + 1.
+                # ^ End modified section ^
                 c = min(max(delta_lo, f / f_hat_prev), delta_hi)
                 f_hat = c * f_hat_prev
                 r = abs(f_hat - f_hat_prev) / min(f_hat, f_hat_prev)
@@ -164,20 +167,21 @@ class Eve(SockeyeOptimizer):
             d += d_batch
 
         # Extension: compute f_hat and d based on last validation checkpoint objective
+        # Computation occurs once per checkpoint using the checkpoint number as t.  Prior to the
+        # first checkpoint, d = 1.
         if self.use_checkpoint_objective:
             checkpoint, f_hat_prev, d_prev = prev_checkpoint
-            d_checkpoint = d_prev
-            # Only need to compute once per checkpoint
+            # Only need to recompute if we've seen a new checkpoint since the previous batch update
             if self.checkpoint_state and self.checkpoint_state.checkpoint != checkpoint:
                 checkpoint = self.checkpoint_state.checkpoint
                 f = self.checkpoint_state.metric_val
                 if checkpoint > 1:
-                    if (self.maximize_metric and f < f_hat_prev) or (not self.maximize_metric and f > f_hat_prev):
-                        delta_lo = self.k_lo + 1.
-                        delta_hi = self.k_hi + 1.
-                    else:
+                    if f <= f_hat_prev:
                         delta_lo = 1. / (self.k_hi + 1.)
                         delta_hi = 1. / (self.k_lo + 1.)
+                    else:
+                        delta_lo = self.k_lo + 1.
+                        delta_hi = self.k_hi + 1.
                     c = min(max(delta_lo, f / f_hat_prev), delta_hi)
                     f_hat = c * f_hat_prev
                     r = abs(f_hat - f_hat_prev) / min(f_hat, f_hat_prev)
@@ -186,9 +190,11 @@ class Eve(SockeyeOptimizer):
                     f_hat = f
                     d_checkpoint = 1.
                 prev_checkpoint[:] = [checkpoint, f_hat, d_checkpoint]
+            else:
+                d_checkpoint = d_prev
             d += d_checkpoint
 
-        # Batch and checkpoint contribute equally
+        # Batch and checkpoint contribute equally when both are used
         if self.use_batch_objective and self.use_checkpoint_objective:
             d /= 2.
 

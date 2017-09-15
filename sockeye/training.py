@@ -314,7 +314,7 @@ class TrainingModel(model.SockeyeModel):
             # Forward-backward to get outputs, gradients
             self.module.forward_backward(batch)
 
-            # Update aggregated training loss
+            # Update aggregate training loss
             self.module.update_metric(metric_train, batch.label)
 
             # If using an extended optimizer, provide extra state information about the current batch
@@ -329,7 +329,7 @@ class TrainingModel(model.SockeyeModel):
                 batch_state = BatchState(metric_val=m_val)
                 self.module._curr_module._optimizer.pre_update_batch(batch_state)
 
-            # Call optimizer to update weights given current state
+            # Call optimizer to update weights given gradients, current state
             self.module.update()
 
             if mxmonitor is not None:
