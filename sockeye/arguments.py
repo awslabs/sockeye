@@ -421,6 +421,12 @@ def add_training_args(params):
                               type=int_greater_or_equal(1),
                               default=64,
                               help='Mini-batch size. Default: %(default)s.')
+    train_params.add_argument("--batch-type",
+                              type=str,
+                              default=C.BATCH_TYPE_SENTENCE,
+                              choices=[C.BATCH_TYPE_SENTENCE, C.BATCH_TYPE_WORD],
+                              help="Sentence: each batch contains X sentences, number of words varies. Word: each batch"
+                                   " contains (approximately) X words, number of sentences varies. Default: %(default)s.")
     train_params.add_argument('--fill-up',
                               type=str,
                               default='replicate',

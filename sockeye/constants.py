@@ -184,6 +184,9 @@ INFERENCE_ARG_OUTPUT_SHORT = "-o"
 BATCH_MAJOR = "NTC"
 TIME_MAJOR = "TNC"
 
+BATCH_TYPE_SENTENCE = "sentence"
+BATCH_TYPE_WORD = "word"
+
 # Training constants
 LR_SCHEDULER_FIXED_RATE_INV_SQRT_T = "fixed-rate-inv-sqrt-t"
 LR_SCHEDULER_FIXED_RATE_INV_T = "fixed-rate-inv-t"

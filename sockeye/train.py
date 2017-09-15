@@ -188,6 +188,7 @@ def main():
 
         # create data iterators
         max_seq_len_source, max_seq_len_target = args.max_seq_len
+        batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
         train_iter, eval_iter, config_data = data_io.get_training_data_iters(source=os.path.abspath(args.source),
                                                                              target=os.path.abspath(args.target),
                                                                              validation_source=os.path.abspath(
@@ -199,6 +200,8 @@ def main():
                                                                              vocab_source_path=args.source_vocab,
                                                                              vocab_target_path=args.target_vocab,
                                                                              batch_size=args.batch_size,
+                                                                             batch_by_words=args.batch_type == C.BATCH_TYPE_WORD,
+                                                                             batch_num_devices=batch_num_devices,
                                                                              fill_up=args.fill_up,
                                                                              max_seq_len_source=max_seq_len_source,
                                                                              max_seq_len_target=max_seq_len_target,
