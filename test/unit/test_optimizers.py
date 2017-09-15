@@ -22,7 +22,9 @@ from sockeye.optimizers import BatchState, CheckpointState, SockeyeOptimizer
 
 @pytest.mark.parametrize("optimizer, optimizer_params",
                          ((C.OPTIMIZER_ADAM, {}),
-                          (C.OPTIMIZER_EVE, {"use_batch_objective": True, "use_checkpoint_objective": True})))
+                          (C.OPTIMIZER_EVE, {}),
+                          (C.OPTIMIZER_EVE, {"use_batch_objective": True, "use_checkpoint_objective": True}),
+                          ))
 def test_optimizer(optimizer, optimizer_params):
     # Weights
     index = 0
