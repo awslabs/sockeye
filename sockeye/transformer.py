@@ -30,10 +30,11 @@ class TransformerConfig(config.Config):
                  vocab_size: int,
                  dropout_attention: float,
                  dropout_relu: float,
-                 dropout_residual: float,
-                 layer_normalization: bool,
+                 dropout_prepost: float,
                  weight_tying: bool,
                  positional_encodings: bool,
+                 preprocess_sequence: str,
+                 postprocess_sequence: str,
                  conv_config: Optional['ConvolutionalEmbeddingConfig'] = None) -> None:  # type: ignore
         super().__init__()
         self.model_size = model_size
@@ -43,93 +44,111 @@ class TransformerConfig(config.Config):
         self.vocab_size = vocab_size
         self.dropout_attention = dropout_attention
         self.dropout_relu = dropout_relu
-        self.dropout_residual = dropout_residual
-        self.layer_normalization = layer_normalization
+        self.dropout_prepost = dropout_prepost
         self.weight_tying = weight_tying
         self.positional_encodings = positional_encodings
+        self.preprocess_sequence = preprocess_sequence
+        self.postprocess_sequence = postprocess_sequence
         self.conv_config = conv_config
 
 
 class TransformerEncoderBlock:
     """
-    A transformer encoder block consists of the 4 following sublayers:
-     1. self-attention
-     2. residual connection (w/ optional layer normalization)
-     3. feed-forward network
-     4. residual connection (w/ optional layer normalization)
+    A transformer encoder block consists self-attention and a feed-forward layer with pre/post process blocks
+    in between.
     """
 
     def __init__(self,
                  config: TransformerConfig,
                  prefix: str) -> None:
-        self.attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
-                                                       heads=config.attention_heads,
-                                                       depth_out=config.model_size,
-                                                       dropout=config.dropout_attention,
-                                                       prefix="%satt_" % prefix)
-        self.residual1 = TransformerResidual(num_hidden=config.model_size,
-                                             layer_normalization=config.layer_normalization,
-                                             dropout=config.dropout_residual,
-                                             prefix="%satt_res" % prefix)
-        self.feed_forward = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
-                                                   num_model=config.model_size,
-                                                   dropout=config.dropout_relu,
-                                                   prefix="%sff_" % prefix)
-        self.residual2 = TransformerResidual(num_hidden=config.model_size,
-                                             layer_normalization=config.layer_normalization,
-                                             dropout=config.dropout_residual,
-                                             prefix="%sff_res" % prefix)
-
-    def __call__(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
-        data = self.residual1(data,
-                              self.attention(data, data_length, seq_len),
-                              seq_len)
-        data = self.residual2(data,
-                              self.feed_forward(data, seq_len),
-                              seq_len)
-        return data
-
-
-class TransformerDecoderBlock:
-    """
-    A transformer decoder block consists of the following sublayers:
-     1. self-attention
-     2. residual connection (w/ optional layer normalization)
-     3. source-attention
-     4. residual connection (w/ optional layer normalization)
-     5. feed-forward network
-     6. residual connection (w/ optional layer normalization)
-    """
-
-    def __init__(self,
-                 config: TransformerConfig,
-                 prefix: str) -> None:
+        self.pre_self_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                          num_hidden=config.model_size,
+                                                          dropout=config.dropout_prepost,
+                                                          prefix="%satt_self_pre_" % prefix)
         self.self_attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
                                                             heads=config.attention_heads,
                                                             depth_out=config.model_size,
                                                             dropout=config.dropout_attention,
                                                             prefix="%satt_self_" % prefix)
-        self.residual_self = TransformerResidual(num_hidden=config.model_size,
-                                                 layer_normalization=config.layer_normalization,
-                                                 dropout=config.dropout_residual,
-                                                 prefix="%satt_self_res" % prefix)
+        self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                           num_hidden=config.model_size,
+                                                           dropout=config.dropout_prepost,
+                                                           prefix="%satt_self_post_" % prefix)
+
+        self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                              num_hidden=config.model_size,
+                                              dropout=config.dropout_prepost,
+                                              prefix="%sff_pre_" % prefix)
+        self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
+                                         num_model=config.model_size,
+                                         dropout=config.dropout_relu,
+                                         prefix="%sff_" % prefix)
+        self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                               num_hidden=config.model_size,
+                                               dropout=config.dropout_prepost,
+                                               prefix="%sff_post_" % prefix)
+
+    def __call__(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, length: int) -> mx.sym.Symbol:
+        # self-attention
+        data_self_att = self.self_attention(self.pre_self_attention(data, None, length), data_length, length)
+        data = self.post_self_attention(data_self_att, data, length)
+
+        # feed-forward
+        data_ff = self.ff(self.pre_ff(data, None, length), length)
+        data = self.post_ff(data_ff, data, length)
+
+        return data
+
+
+class TransformerDecoderBlock:
+    """
+    A transformer encoder block consists self-attention, encoder attention, and a feed-forward layer
+    with pre/post process blocks in between.
+    """
+
+    def __init__(self,
+                 config: TransformerConfig,
+                 prefix: str) -> None:
+        self.pre_self_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                          num_hidden=config.model_size,
+                                                          dropout=config.dropout_prepost,
+                                                          prefix="%satt_self_pre_" % prefix)
+        self.self_attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
+                                                            heads=config.attention_heads,
+                                                            depth_out=config.model_size,
+                                                            dropout=config.dropout_attention,
+                                                            prefix="%satt_self_" % prefix)
+        self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                           num_hidden=config.model_size,
+                                                           dropout=config.dropout_prepost,
+                                                           prefix="%satt_self_post_" % prefix)
+
+        self.pre_enc_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                         num_hidden=config.model_size,
+                                                         dropout=config.dropout_prepost,
+                                                         prefix="%satt_enc_pre_" % prefix)
         self.enc_attention = layers.MultiHeadAttention(depth_att=config.model_size,
                                                        heads=config.attention_heads,
                                                        depth_out=config.model_size,
                                                        dropout=config.dropout_attention,
                                                        prefix="%satt_enc_" % prefix)
-        self.residual_enc = TransformerResidual(num_hidden=config.model_size,
-                                                layer_normalization=config.layer_normalization,
-                                                dropout=config.dropout_residual,
-                                                prefix="%satt_enc_res" % prefix)
-        self.feed_forward = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
-                                                   num_model=config.model_size,
-                                                   dropout=config.dropout_relu,
-                                                   prefix="%sff_" % prefix)
-        self.residual_ff = TransformerResidual(num_hidden=config.model_size,
-                                               layer_normalization=config.layer_normalization,
-                                               dropout=config.dropout_residual,
-                                               prefix="%sff_res" % prefix)
+        self.post_enc_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                          num_hidden=config.model_size,
+                                                          dropout=config.dropout_prepost,
+                                                          prefix="%satt_enc_post_" % prefix)
+
+        self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                              num_hidden=config.model_size,
+                                              dropout=config.dropout_prepost,
+                                              prefix="%sff_pre_" % prefix)
+        self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
+                                         num_model=config.model_size,
+                                         dropout=config.dropout_relu,
+                                         prefix="%sff_" % prefix)
+        self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                               num_hidden=config.model_size,
+                                               dropout=config.dropout_prepost,
+                                               prefix="%sff_post_" % prefix)
 
     def __call__(self,
                  target: mx.sym.Symbol,
@@ -139,57 +158,89 @@ class TransformerDecoderBlock:
                  source: mx.sym.Symbol,
                  source_lengths: mx.sym.Symbol,
                  source_max_length: int) -> mx.sym.Symbol:
-        target = self.residual_self(target,
-                                    self.self_attention(target, target_lengths,
-                                                        target_max_length, bias=target_bias),
-                                    target_max_length)
-        target = self.residual_enc(target,
-                                   self.enc_attention(target, target_max_length,
-                                                      source, source_lengths, source_max_length),
-                                   target_max_length)
-        target = self.residual_ff(target,
-                                  self.feed_forward(target, target_max_length),
-                                  target_max_length)
+
+        # self-attention
+        target_self_att = self.self_attention(self.pre_self_attention(target, None, target_max_length),
+                                              target_lengths,
+                                              target_max_length,
+                                              bias=target_bias)
+        target = self.post_self_attention(target_self_att, target, target_max_length)
+
+        # encoder attention
+        target_enc_att = self.enc_attention(self.pre_enc_attention(target, None, target_max_length),
+                                            target_max_length,
+                                            source,
+                                            source_lengths,
+                                            source_max_length)
+        target = self.post_enc_attention(target_enc_att, target, target_max_length)
+
+        # feed-forward
+        target_ff = self.ff(self.pre_ff(target, None, target_max_length), target_max_length)
+        target = self.post_ff(target_ff, target, target_max_length)
+
         return target
 
 
-class TransformerResidual:
+class TransformerProcessBlock:
     """
-    Residual connection with optional layer normalization.
+    Block to perform pre/post processing on layer inputs.
+    The processing steps are determined by the sequence argument, which can contain one of the three operations:
+    n: layer normalization
+    r: residual connection
+    d: dropout
     """
 
     def __init__(self,
+                 sequence: str,
                  num_hidden: int,
-                 layer_normalization: bool,
                  dropout: float,
                  prefix: str) -> None:
+        self.sequence = sequence
         self.num_hidden = num_hidden
         self.dropout = dropout
-        self.layer_norm = None
         self.prefix = prefix
-        if layer_normalization:
-            self.layer_norm = layers.LayerNormalization(num_hidden=self.num_hidden, prefix=self.prefix)
+        self.layer_norm = None
+        if "n" in sequence:
+            self.layer_norm = layers.LayerNormalization(num_hidden=self.num_hidden, prefix="%snorm" % self.prefix)
 
-    def __call__(self, x: mx.sym.Symbol, y: mx.sym.Symbol, length: int) -> mx.sym.Symbol:
+    def __call__(self,
+                 data: mx.sym.Symbol,
+                 prev: Optional[mx.sym.Symbol],
+                 length: int) -> mx.sym.Symbol:
         """
-        Apply residual connections with optional layer normalization and dropout.
+        Apply processing sequence to data with optional previous input.
 
-        :param x: (batch, length, num_hidden).
-        :param y: (batch, length, num_hidden).
-        :param length: maximum sequence length.
-        :return: (batch, length, num_hidden).
+        :param data: Input data. Shape: (batch, length, num_hidden).
+        :param prev: Previous data. Shape: (batch, length, num_hidden).
+        :param length: Maximum sequence length.
+        :return: Processed data. Shape: (batch, length, num_hidden).
         """
-        if self.dropout > 0.0:
-            y = mx.sym.Dropout(y, p=self.dropout)
-        z = x + y
-        if self.layer_norm is not None:
-            z = self._reshape_and_normalize(z, length)
-        return z
+        if not self.sequence:
+            return data
+
+        if prev is None:
+            assert 'r' not in self.sequence, "Residual connection not allowed if no previous value given."
+
+        for step in self.sequence:
+
+            if step == "r":
+                data = mx.sym._internal._plus(data, prev, name="%sresidual" % self.prefix)
+
+            elif step == "n":
+                data = self._reshape_and_normalize(data, length)
+
+            elif step == "d":
+                if self.dropout > 0.0:
+                    data = mx.sym.Dropout(data, p=self.dropout, name="%sdropout" % self.prefix)
+            else:
+                raise ValueError("Unknown step in sequence: %s" % step)
+
+        return data
 
     def _reshape_and_normalize(self, data: mx.sym.Symbol, length: int) -> mx.sym.Symbol:
         data = mx.sym.reshape(data, shape=(-3, self.num_hidden))
         data = self.layer_norm.normalize(data)
-        data = mx.sym.reshape(data, shape=(-4, -1, length, self.num_hidden))
+        data = mx.sym.reshape(data, shape=(-4, -1, length, self.num_hidden), name="%snormalized" % self.prefix)
         return data
 
 

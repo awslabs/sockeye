@@ -340,6 +340,39 @@ def get_num_gpus() -> int:
     return num_gpus
 
 
+def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Optional[Dict[int, Tuple[int, int]]]:
+    """
+    Returns used and total memory for GPUs identified by the given context list.
+
+    :param ctx: List of MXNet context devices.
+    :return: Dictionary of device id mapping to a tuple of (memory used, memory total).
+    """
+    if isinstance(ctx, mx.context.Context):
+        ctx = [ctx]
+    ctx = [c for c in ctx if c.device_type == 'gpu']
+    if not ctx:
+        return None
+    if shutil.which("nvidia-smi") is None:
+        logger.warning("Couldn't find nvidia-smi, therefore we assume no GPUs are available.")
+        return [0] * len(ctx)
+    ids = [str(c.device_id) for c in ctx]
+    query = "--query-gpu=index,memory.used,memory.total"
+    format = "--format=csv,noheader,nounits"
+    sp = subprocess.Popen(['nvidia-smi', query, format, "-i", ",".join(ids)],
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    result = sp.communicate()[0].decode("utf-8").rstrip().split("\n")
+    memory_data = {}
+    for line in result:
+        gpu_id, mem_used, mem_total = line.split(",")
+        memory_data[int(gpu_id)] = (int(mem_used), int(mem_total))
+    return memory_data
+
+
+def log_gpu_memory_usage(memory_data: Dict[int, Tuple[int, int]]):
+    log_str = " ".join("GPU %d: %d/%d MB (%.2f%%)" %(k, v[0], v[1], v[0] * 100.0/v[1]) for k, v in memory_data.items())
+    logger.info(log_str)
+
+
 def expand_requested_device_ids(requested_device_ids: List[int]) -> List[int]:
     """
     Transform a list of device id requests to concrete device ids. For example on a host with 8 GPUs when requesting

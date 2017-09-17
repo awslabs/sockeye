@@ -189,6 +189,7 @@ def main():
 
         # create data iterators
         max_seq_len_source, max_seq_len_target = args.max_seq_len
+        batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
         train_iter, eval_iter, config_data = data_io.get_training_data_iters(source=os.path.abspath(args.source),
                                                                              target=os.path.abspath(args.target),
                                                                              validation_source=os.path.abspath(
@@ -200,6 +201,8 @@ def main():
                                                                              vocab_source_path=args.source_vocab,
                                                                              vocab_target_path=args.target_vocab,
                                                                              batch_size=args.batch_size,
+                                                                             batch_by_words=args.batch_type == C.BATCH_TYPE_WORD,
+                                                                             batch_num_devices=batch_num_devices,
                                                                              fill_up=args.fill_up,
                                                                              max_seq_len_source=max_seq_len_source,
                                                                              max_seq_len_target=max_seq_len_target,
@@ -239,6 +242,9 @@ def main():
             check_condition(args.rnn_cell_type == C.LSTM_TYPE,
                             "Recurrent dropout without memory loss only supported for LSTMs right now.")
 
+        encoder_transformer_preprocess, decoder_transformer_preprocess = args.transformer_preprocess
+        encoder_transformer_postprocess, decoder_transformer_postprocess = args.transformer_postprocess
+
         config_conv = None
         if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
             config_conv = encoder.ConvolutionalEmbeddingConfig(num_embed=num_embed_source,
@@ -257,10 +263,11 @@ def main():
                 vocab_size=vocab_source_size,
                 dropout_attention=args.transformer_dropout_attention,
                 dropout_relu=args.transformer_dropout_relu,
-                dropout_residual=args.transformer_dropout_residual,
-                layer_normalization=args.layer_normalization,
-                weight_tying=args.weight_tying,
+                dropout_prepost=args.transformer_dropout_prepost,
+                weight_tying=args.weight_tying and C.WEIGHT_TYING_SRC in args.weight_tying_type,
                 positional_encodings=not args.transformer_no_positional_encodings,
+                preprocess_sequence=encoder_transformer_preprocess,
+                postprocess_sequence=encoder_transformer_postprocess,
                 conv_config=config_conv)
         else:
             config_encoder = encoder.RecurrentEncoderConfig(
@@ -279,6 +286,9 @@ def main():
                 conv_config=config_conv,
                 reverse_input=args.rnn_encoder_reverse_input)
 
+        decoder_weight_tying = args.weight_tying and C.WEIGHT_TYING_TRG in args.weight_tying_type \
+                               and C.WEIGHT_TYING_SOFTMAX in args.weight_tying_type
+
         if args.decoder == C.TRANSFORMER_TYPE:
             config_decoder = transformer.TransformerConfig(
                 model_size=args.transformer_model_size,
@@ -288,15 +298,17 @@ def main():
                 vocab_size=vocab_target_size,
                 dropout_attention=args.transformer_dropout_attention,
                 dropout_relu=args.transformer_dropout_relu,
-                dropout_residual=args.transformer_dropout_residual,
-                layer_normalization=args.layer_normalization,
-                weight_tying=args.weight_tying,
-                positional_encodings=not args.transformer_no_positional_encodings)
+                dropout_prepost=args.transformer_dropout_prepost,
+                weight_tying=decoder_weight_tying,
+                positional_encodings=not args.transformer_no_positional_encodings,
+                preprocess_sequence=decoder_transformer_preprocess,
+                postprocess_sequence=decoder_transformer_postprocess,
+                conv_config=None)
 
         else:
             attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
             config_coverage = None
-            if args.attention_type == "coverage":
+            if args.attention_type == C.ATT_COV:
                 config_coverage = coverage.CoverageConfig(type=args.attention_coverage_type,
                                                           num_hidden=args.attention_coverage_num_hidden,
                                                           layer_normalization=args.layer_normalization)
@@ -307,8 +319,6 @@ def main():
                                                          layer_normalization=args.layer_normalization,
                                                          config_coverage=config_coverage,
                                                          num_heads=args.attention_mhdot_heads)
-            decoder_weight_tying = args.weight_tying and C.WEIGHT_TYING_TRG in args.weight_tying_type \
-                                   and C.WEIGHT_TYING_SOFTMAX in args.weight_tying_type
             config_decoder = decoder.RecurrentDecoderConfig(
                 vocab_size=vocab_target_size,
                 max_seq_len_source=max_seq_len_source,
@@ -326,7 +336,7 @@ def main():
                 embed_dropout=decoder_embed_dropout,
                 hidden_dropout=args.rnn_decoder_hidden_dropout,
                 weight_tying=decoder_weight_tying,
-                zero_state_init=args.rnn_decoder_zero_init,
+                state_init=args.rnn_decoder_state_init,
                 context_gating=args.rnn_context_gating,
                 layer_normalization=args.layer_normalization,
                 attention_in_upper_layers=args.attention_in_upper_layers)

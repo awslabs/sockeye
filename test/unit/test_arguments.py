@@ -85,8 +85,10 @@ def test_device_args(test_params, expected_params):
               transformer_feed_forward_num_hidden=2048,
               transformer_model_size=512,
               transformer_no_positional_encodings=False,
+              transformer_preprocess=('', ''),
+              transformer_postprocess=('drn', 'drn'),
               attention_use_prev_word=False,
-              rnn_decoder_zero_init=False,
+              rnn_decoder_state_init="last",
               rnn_encoder_reverse_input=False,
               rnn_context_gating=False,
               rnn_cell_type=C.LSTM_TYPE,
@@ -109,6 +111,7 @@ def test_model_parameters(test_params, expected_params):
 
 @pytest.mark.parametrize("test_params, expected_params", [
     ('', dict(batch_size=64,
+              batch_type="sentence",
               fill_up='replicate',
               no_bucketing=False,
               bucket_width=10,
@@ -123,7 +126,7 @@ def test_model_parameters(test_params, expected_params):
               embed_dropout=(.0, .0),
               transformer_dropout_attention=0.0,
               transformer_dropout_relu=0.0,
-              transformer_dropout_residual=0.0,
+              transformer_dropout_prepost=0.0,
               conv_embed_dropout=0.0,
               optimizer='adam',
               eve_loss=C.EVE_LOSS_BATCH,
