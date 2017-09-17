@@ -529,9 +529,13 @@ def add_training_args(params):
                               help="Dropout probability for ConvolutionalEmbeddingEncoder. Default: %(default)s.")
 
     train_params.add_argument('--optimizer',
-                              default='adam',
-                              choices=['adam', 'sgd', 'rmsprop'],
+                              default=C.OPTIMIZER_ADAM,
+                              choices=C.OPTIMIZERS,
                               help='SGD update rule. Default: %(default)s.')
+    train_params.add_argument('--eve-loss',
+                              default=C.EVE_LOSS_BATCH,
+                              choices=C.EVE_LOSS,
+                              help='Which loss to use for Eve optimizer. Default: %(default)s.')
     train_params.add_argument('--weight-init',
                               type=str,
                               default=C.INIT_XAVIER,

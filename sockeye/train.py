@@ -41,6 +41,7 @@ from . import lexicon
 from . import loss
 from . import lr_scheduler
 from . import model
+from . import optimizers
 from . import rnn
 from . import training
 from . import transformer
@@ -399,6 +400,10 @@ def main():
         else:
             # Making MXNet module API's default scaling factor explicit
             optimizer_params["rescale_grad"] = 1.0 / args.batch_size
+        if optimizer == C.OPTIMIZER_EVE:
+            optimizer_params["use_batch_objective"] = args.eve_loss in(C.EVE_LOSS_BATCH, C.EVE_LOSS_BOTH)
+            optimizer_params["use_checkpoint_objective"] = args.eve_loss in(C.EVE_LOSS_CHECKPOINT, C.EVE_LOSS_BOTH)
+            optimizer_params["maximize_metric"] = C.METRIC_MAXIMIZE[args.optimized_metric]
         logger.info("Optimizer: %s", optimizer)
         logger.info("Optimizer Parameters: %s", optimizer_params)
 

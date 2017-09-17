@@ -32,6 +32,7 @@ from . import checkpoint_decoder
 from . import constants as C
 from . import data_io
 from . import loss
+from .optimizers import BatchState, CheckpointState, SockeyeOptimizer
 from . import model
 from . import utils
 
@@ -280,6 +281,7 @@ class TrainingModel(model.SockeyeModel):
         :param mxmonitor: Optional MXNet monitor instance.
         """
         metric_train = self._create_eval_metric(metrics)
+        metric_batch = self._create_eval_metric(metrics)
         metric_val = self._create_eval_metric(metrics)
 
         tic = time.time()
@@ -309,7 +311,25 @@ class TrainingModel(model.SockeyeModel):
             if mxmonitor is not None:
                 mxmonitor.tic()
 
+            # Forward-backward to get outputs, gradients
             self.module.forward_backward(batch)
+
+            # Update aggregate training loss
+            self.module.update_metric(metric_train, batch.label)
+
+            # If using an extended optimizer, provide extra state information about the current batch
+            if isinstance(self.module._curr_module._optimizer, SockeyeOptimizer):
+                # Metrics for this batch only
+                metric_batch.reset()
+                self.module.update_metric(metric_batch, batch.label)
+                m_val = 0
+                for name, val in metric_batch.get_name_value():
+                    if name == self.training_monitor.optimized_metric:
+                        m_val = val
+                batch_state = BatchState(metric_val=m_val)
+                self.module._curr_module._optimizer.pre_update_batch(batch_state)
+
+            # Call optimizer to update weights given gradients, current state
             self.module.update()
 
             if mxmonitor is not None:
@@ -322,8 +342,6 @@ class TrainingModel(model.SockeyeModel):
                 # pre-fetch next batch
                 next_data_batch = train_iter.next()
                 self.module.prepare(next_data_batch)
-
-            self.module.update_metric(metric_train, batch.label)
 
             self.training_monitor.batch_end_callback(train_state.epoch, train_state.updates, metric_train)
             train_state.updates += 1
@@ -349,6 +367,16 @@ class TrainingModel(model.SockeyeModel):
 
                 # evaluation on validation set
                 has_improved, best_checkpoint = self._evaluate(train_state, val_iter, metric_val)
+
+                # If using an extended optimizer, provide extra state information about the current checkpoint
+                if isinstance(self.module._curr_module._optimizer, SockeyeOptimizer):
+                    m_val = 0
+                    for name, val in metric_val.get_name_value():
+                        if name == self.training_monitor.optimized_metric:
+                            m_val = val
+                    checkpoint_state = CheckpointState(checkpoint=train_state.checkpoint, metric_val=m_val)
+                    self.module._curr_module._optimizer.pre_update_checkpoint(checkpoint_state)
+
                 if self.lr_scheduler is not None:
                     self.lr_scheduler.new_evaluation_result(has_improved)
 
