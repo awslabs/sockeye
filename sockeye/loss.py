@@ -14,9 +14,10 @@
 """
 Functions to generate loss symbols for sequence-to-sequence models.
 """
-from typing import List
+from typing import List, Optional
 
 import mxnet as mx
+from mxnet.metric import EvalMetric, alias, register
 
 from . import config
 from . import constants as C
@@ -168,3 +169,38 @@ class SmoothedCrossEntropyLoss(Loss):
         cross_entropy = mx.sym.MakeLoss(cross_entropy, name=C.SMOOTHED_CROSS_ENTROPY)
         probs = mx.sym.BlockGrad(probs, name=C.SOFTMAX_NAME)
         return [cross_entropy, probs]
+
+
+@register
+@alias("sce")
+class PreComputedSmoothedCrossEntropy(EvalMetric):
+    """
+    This is a simple helper class that can be called as a metric to sum pre-computed smoothed
+    cross entropy values.  It was written mainly as a bridge to make SCE loss available to extended
+    optimizers during training.
+
+    :param normalized: Whether loss is pre-normalized by the number of examples.
+    :param name: Name of this metric instance for display.
+    :param output_names: Name of predictions that should be used when updating with update_dict.
+    :param output_labels: Name of labels that should be used when updating with update_dict.
+    """
+    def __init__(self,
+                 normalized: bool = False,
+                 name: str = "smoothed-cross-entropy",
+                 output_names: Optional[List[str]] = None,
+                 label_names: Optional[List[str]] = None) -> None:
+        super().__init__(name, output_names=output_names, label_names=label_names)
+        self.normalized = normalized
+
+    def update(self, labels, preds):
+        """Sum pre-computed smoothed cross entropy values"""
+        # Take cross entropy values only
+        sces = preds[::2]
+        for label, sce in zip(labels, sces):
+            label = label.asnumpy()
+            label = label.ravel()
+            assert label.shape[0] == sce.shape[0]
+            # SCE is pre-computed, so just sum
+            self.sum_metric += sce.asnumpy().sum()
+            # Only scale if loss is not already normalized
+            self.num_inst += 1 if self.normalized else label.shape[0]

@@ -281,8 +281,13 @@ class TrainingModel(model.SockeyeModel):
         :param mxmonitor: Optional MXNet monitor instance.
         """
         metric_train = self._create_eval_metric(metrics)
-        metric_batch = self._create_eval_metric(metrics)
         metric_val = self._create_eval_metric(metrics)
+        # Track loss for optimizer if needed
+        if isinstance(self.module._curr_module._optimizer, SockeyeOptimizer):
+            if self.config.config_loss.type == C.CROSS_ENTROPY:
+                metric_loss = mx.metric.create("ce")
+            elif self.config.config_loss.type == C.SMOOTHED_CROSS_ENTROPY:
+                metric_loss = mx.metric.create("sce", normalized=self.config.config_loss.normalize)
 
         tic = time.time()
 
@@ -318,14 +323,12 @@ class TrainingModel(model.SockeyeModel):
             self.module.update_metric(metric_train, batch.label)
 
             # If using an extended optimizer, provide extra state information about the current batch
+            # Loss: training loss
             if isinstance(self.module._curr_module._optimizer, SockeyeOptimizer):
-                # Metrics for this batch only
-                metric_batch.reset()
-                self.module.update_metric(metric_batch, batch.label)
-                m_val = 0
-                for name, val in metric_batch.get_name_value():
-                    if name == self.training_monitor.optimized_metric:
-                        m_val = val
+                # Loss for this batch
+                metric_loss.reset()
+                metric_loss.update(batch.label, self.module.get_outputs())
+                [(_, m_val)] = metric_loss.get_name_value()
                 batch_state = BatchState(metric_val=m_val)
                 self.module._curr_module._optimizer.pre_update_batch(batch_state)
 
@@ -369,6 +372,7 @@ class TrainingModel(model.SockeyeModel):
                 has_improved, best_checkpoint = self._evaluate(train_state, val_iter, metric_val)
 
                 # If using an extended optimizer, provide extra state information about the current checkpoint
+                # Loss: optimized metric
                 if isinstance(self.module._curr_module._optimizer, SockeyeOptimizer):
                     m_val = 0
                     for name, val in metric_val.get_name_value():
