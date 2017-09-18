@@ -114,7 +114,7 @@ class CheckpointDecoder:
 
         :param checkpoint: Checkpoint to load parameters from.
         :param output_name: Filename to write translations to. Defaults to /dev/null.
-        :param speed_percentile: Percentile to compute for sent/sec. Default: p99.
+        :param speed_percentile: Percentile to compute for sec/sent. Default: p99.
         :return: Mapping of metric names to scores.
         """
         models, vocab_source, vocab_target = load_models(self.context,
@@ -144,8 +144,8 @@ class CheckpointDecoder:
                 trans_wall_time = time.time() - tic
                 trans_wall_times[i] = trans_wall_time
                 translations.append(trans_output.translation)
-        percentile_sent_per_sec = np.percentile(trans_wall_times, speed_percentile)
+        percentile_sec_per_sent = np.percentile(trans_wall_times, speed_percentile)
 
         # TODO(fhieber): eventually add more metrics (METEOR etc.)
         return {C.BLEU_VAL: sockeye.bleu.corpus_bleu(translations, self.target_sentences),
-                C.SPEED_PCT % speed_percentile: percentile_sent_per_sec}
+                C.SPEED_PCT % speed_percentile: percentile_sec_per_sent}
