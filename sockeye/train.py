@@ -48,6 +48,10 @@ from . import transformer
 from . import vocab
 
 
+# Temporary logger, the real one (logging to a file probably, will be created in the main function)
+logger = setup_main_logger(__name__, file_logging=False, console=False)
+
+
 def none_if_negative(val):
     return None if val < 0 else val
 
@@ -91,7 +95,7 @@ def seedRNGs(args: argparse.Namespace) -> None:
     mx.random.seed(args.seed)
 
 
-def check_resume(args: argparse.Namespace, output_folder: str) -> (str, str):
+def check_resume(args: argparse.Namespace, output_folder: str) -> Tuple[bool, str]:
     """
     Check if we should resume a broken training run.
 
@@ -150,7 +154,7 @@ def log_basic_info(args) -> None:
     logger.info("Arguments: %s", args)
 
 
-def determine_context(args: argparse.Namespace, exit_stack: ExitStack) -> [mx.Context]:
+def determine_context(args: argparse.Namespace, exit_stack: ExitStack) -> List[mx.Context]:
     """
     Determine the context we should run on (CPU or GPU).
 
@@ -176,7 +180,7 @@ def determine_context(args: argparse.Namespace, exit_stack: ExitStack) -> [mx.Co
     return context
 
 
-def load_or_create_vocabs(args: argparse.Namespace, resume_training: bool, output_folder: str) -> (Dict, Dict):
+def load_or_create_vocabs(args: argparse.Namespace, resume_training: bool, output_folder: str) -> Tuple[Dict, Dict]:
     """
     Load the vocabularies from disks if given, create them if not.
 
@@ -214,9 +218,9 @@ def load_or_create_vocabs(args: argparse.Namespace, resume_training: bool, outpu
 
 def create_data_iters(args: argparse.Namespace,
                       vocab_source: Dict,
-                      vocab_target: Dict) -> Tuple['ParallelBucketSentenceIter',
-                                                   'ParallelBucketSentenceIter',
-                                                   'DataConfig']:
+                      vocab_target: Dict) -> Tuple['data_io.ParallelBucketSentenceIter',
+                                                   'data_io.ParallelBucketSentenceIter',
+                                                   'data_io.DataConfig']:
     """
     Create the data iterators.
 
@@ -284,6 +288,7 @@ def create_encoder_config(args: argparse.Namespace, vocab_source_size: int,
     :return: The encoder config.
     """
     encoder_num_layers, _ = args.num_layers
+    config_encoder = Config()  # Make mypy happy
 
     if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
         encoder_transformer_preprocess, _ = args.transformer_preprocess
@@ -339,6 +344,7 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int) -> C
 
     decoder_weight_tying = args.weight_tying and C.WEIGHT_TYING_TRG in args.weight_tying_type \
         and C.WEIGHT_TYING_SOFTMAX in args.weight_tying_type
+    config_decoder = Config()
 
     if args.decoder == C.TRANSFORMER_TYPE:
         _, decoder_transformer_preprocess = args.transformer_preprocess
@@ -427,7 +433,7 @@ def check_encoder_decoder_args(args) -> None:
 
 
 def create_model_config(args: argparse.Namespace,
-                        vocab_source_size: Dict, vocab_target_size: Dict,
+                        vocab_source_size: int, vocab_target_size: int,
                         config_data: data_io.DataConfig) -> model.ModelConfig:
     """
     Create a ModelConfig from the argument given in the command line.
@@ -475,7 +481,7 @@ def create_model_config(args: argparse.Namespace,
 
 
 def create_training_model(model_config: model.ModelConfig, args: argparse.Namespace,
-                          context: [mx.Context], train_iter: data_io.ParallelBucketSentenceIter,
+                          context: List[mx.Context], train_iter: data_io.ParallelBucketSentenceIter,
                           lr_scheduler_instance: lr_scheduler.LearningRateScheduler,
                           resume_training: bool, training_state_dir: str) -> training.TrainingModel:
     """
@@ -509,7 +515,7 @@ def create_training_model(model_config: model.ModelConfig, args: argparse.Namesp
     return training_model
 
 
-def define_optimizer(args, lr_scheduler_instance) -> (str, str):
+def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict]:
     """
     Defines the optimizer to use and its parameters
 
