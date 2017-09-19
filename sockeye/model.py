@@ -142,6 +142,10 @@ class SockeyeModel:
         :param fname: Path to load parameters from.
         """
         assert self.built
+        utils.check_condition(os.path.exists(fname), "No model parameter file found under %s. "
+                                                     "This is either not a model directory or the first training "
+                                                     "checkpoint has not happened yet." % fname)
+
         self.params, _ = utils.load_params(fname)
         # pack rnn cell weights
         for cell in self.rnn_cells:
