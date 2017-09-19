@@ -27,6 +27,7 @@ from typing import Optional, Dict, List, Tuple
 import mxnet as mx
 import numpy as np
 
+from sockeye.config import Config
 from sockeye.log import setup_main_logger, log_sockeye_version, log_mxnet_version
 from sockeye.utils import acquire_gpus, check_condition, get_num_gpus, expand_requested_device_ids
 from . import arguments
@@ -272,48 +273,21 @@ def create_lr_scheduler(args: argparse.Namespace, resume_training: bool,
     return lr_scheduler_instance
 
 
-def create_model_config(args: argparse.Namespace,
-                        vocab_source_size: Dict, vocab_target_size: Dict,
-                        config_data: data_io.DataConfig) -> model.ModelConfig:
+def create_encoder_config(args: argparse.Namespace, vocab_source_size: int,
+                          config_conv: Optional[encoder.ConvolutionalEmbeddingConfig]) -> Config:
     """
-    Create a ModelConfig from the argument given in the command line.
+    Create the encoder config.
 
     :param args: Arguments as returned by argparse.
     :param vocab_source_size: The source vocabulary.
-    :param vocab_target_size: The target vocabulary.
-    :return: The model configuration.
+    :param config_conv: The config for the convolutional encoder (optional).
+    :return: The encoder config.
     """
-    max_seq_len_source, max_seq_len_target = args.max_seq_len
-    num_embed_source, num_embed_target = args.num_embed
-    encoder_num_layers, decoder_num_layers = args.num_layers
-
-    encoder_embed_dropout, decoder_embed_dropout = args.embed_dropout
-    encoder_rnn_dropout_inputs, decoder_rnn_dropout_inputs = args.rnn_dropout_inputs
-    encoder_rnn_dropout_states, decoder_rnn_dropout_states = args.rnn_dropout_states
-    if encoder_embed_dropout > 0 and encoder_rnn_dropout_inputs > 0:
-        logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
-                       "two dropout layers on top of each other.")
-    if decoder_embed_dropout > 0 and decoder_rnn_dropout_inputs > 0:
-        logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
-                       "two dropout layers on top of each other.")
-    encoder_rnn_dropout_recurrent, decoder_rnn_dropout_recurrent = args.rnn_dropout_recurrent
-    if encoder_rnn_dropout_recurrent > 0 or decoder_rnn_dropout_recurrent > 0:
-        check_condition(args.rnn_cell_type == C.LSTM_TYPE,
-                        "Recurrent dropout without memory loss only supported for LSTMs right now.")
-
-    encoder_transformer_preprocess, decoder_transformer_preprocess = args.transformer_preprocess
-    encoder_transformer_postprocess, decoder_transformer_postprocess = args.transformer_postprocess
-
-    config_conv = None
-    if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
-        config_conv = encoder.ConvolutionalEmbeddingConfig(num_embed=num_embed_source,
-                                                           max_filter_width=args.conv_embed_max_filter_width,
-                                                           num_filters=args.conv_embed_num_filters,
-                                                           pool_stride=args.conv_embed_pool_stride,
-                                                           num_highway_layers=args.conv_embed_num_highway_layers,
-                                                           dropout=args.conv_embed_dropout)
+    encoder_num_layers, _ = args.num_layers
 
     if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
+        encoder_transformer_preprocess, _ = args.transformer_preprocess
+        encoder_transformer_postprocess, _ = args.transformer_postprocess
         config_encoder = transformer.TransformerConfig(
             model_size=args.transformer_model_size,
             attention_heads=args.transformer_attention_heads,
@@ -329,6 +303,11 @@ def create_model_config(args: argparse.Namespace,
             postprocess_sequence=encoder_transformer_postprocess,
             conv_config=config_conv)
     else:
+        num_embed_source, _ = args.num_embed
+        encoder_embed_dropout, _ = args.embed_dropout
+        encoder_rnn_dropout_inputs, _ = args.rnn_dropout_inputs
+        encoder_rnn_dropout_states, _ = args.rnn_dropout_states
+        encoder_rnn_dropout_recurrent, _ = args.rnn_dropout_recurrent
         config_encoder = encoder.RecurrentEncoderConfig(
             vocab_size=vocab_source_size,
             num_embed=num_embed_source,
@@ -345,10 +324,25 @@ def create_model_config(args: argparse.Namespace,
             conv_config=config_conv,
             reverse_input=args.rnn_encoder_reverse_input)
 
+    return config_encoder
+
+
+def create_decoder_config(args: argparse.Namespace, vocab_target_size: int) -> Config:
+    """
+    Create the config for the decoder.
+
+    :param args: Arguments as returned by argparse.
+    :param vocab_target_size: The size of the target vocabulary.
+    :return: The config for the decoder.
+    """
+    _, decoder_num_layers = args.num_layers
+
     decoder_weight_tying = args.weight_tying and C.WEIGHT_TYING_TRG in args.weight_tying_type \
-                           and C.WEIGHT_TYING_SOFTMAX in args.weight_tying_type
+        and C.WEIGHT_TYING_SOFTMAX in args.weight_tying_type
 
     if args.decoder == C.TRANSFORMER_TYPE:
+        _, decoder_transformer_preprocess = args.transformer_preprocess
+        _, decoder_transformer_postprocess = args.transformer_postprocess
         config_decoder = transformer.TransformerConfig(
             model_size=args.transformer_model_size,
             attention_heads=args.transformer_attention_heads,
@@ -378,6 +372,14 @@ def create_model_config(args: argparse.Namespace,
                                                      layer_normalization=args.layer_normalization,
                                                      config_coverage=config_coverage,
                                                      num_heads=args.attention_mhdot_heads)
+
+        max_seq_len_source, _ = args.max_seq_len
+        _, num_embed_target = args.num_embed
+        _, decoder_embed_dropout = args.embed_dropout
+        _, decoder_rnn_dropout_inputs = args.rnn_dropout_inputs
+        _, decoder_rnn_dropout_states = args.rnn_dropout_states
+        _, decoder_rnn_dropout_recurrent = args.rnn_dropout_recurrent
+
         config_decoder = decoder.RecurrentDecoderConfig(
             vocab_size=vocab_target_size,
             max_seq_len_source=max_seq_len_source,
@@ -399,6 +401,58 @@ def create_model_config(args: argparse.Namespace,
             context_gating=args.rnn_context_gating,
             layer_normalization=args.layer_normalization,
             attention_in_upper_layers=args.attention_in_upper_layers)
+
+    return config_decoder
+
+
+def check_encoder_decoder_args(args) -> None:
+    """
+    Check possible encoder-decoder argument conflicts.
+
+    :param args: Arguments as returned by argparse.
+    """
+    encoder_embed_dropout, decoder_embed_dropout = args.embed_dropout
+    encoder_rnn_dropout_inputs, decoder_rnn_dropout_inputs = args.rnn_dropout_inputs
+    encoder_rnn_dropout_states, decoder_rnn_dropout_states = args.rnn_dropout_states
+    if encoder_embed_dropout > 0 and encoder_rnn_dropout_inputs > 0:
+        logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
+                       "two dropout layers on top of each other.")
+    if decoder_embed_dropout > 0 and decoder_rnn_dropout_inputs > 0:
+        logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
+                       "two dropout layers on top of each other.")
+    encoder_rnn_dropout_recurrent, decoder_rnn_dropout_recurrent = args.rnn_dropout_recurrent
+    if encoder_rnn_dropout_recurrent > 0 or decoder_rnn_dropout_recurrent > 0:
+        check_condition(args.rnn_cell_type == C.LSTM_TYPE,
+                        "Recurrent dropout without memory loss only supported for LSTMs right now.")
+
+
+def create_model_config(args: argparse.Namespace,
+                        vocab_source_size: Dict, vocab_target_size: Dict,
+                        config_data: data_io.DataConfig) -> model.ModelConfig:
+    """
+    Create a ModelConfig from the argument given in the command line.
+
+    :param args: Arguments as returned by argparse.
+    :param vocab_source_size: The size of the source vocabulary.
+    :param vocab_target_size: The size of the target vocabulary.
+    :return: The model configuration.
+    """
+    max_seq_len_source, max_seq_len_target = args.max_seq_len
+    num_embed_source, _ = args.num_embed
+
+    check_encoder_decoder_args(args)
+
+    config_conv = None
+    if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
+        config_conv = encoder.ConvolutionalEmbeddingConfig(num_embed=num_embed_source,
+                                                           max_filter_width=args.conv_embed_max_filter_width,
+                                                           num_filters=args.conv_embed_num_filters,
+                                                           pool_stride=args.conv_embed_pool_stride,
+                                                           num_highway_layers=args.conv_embed_num_highway_layers,
+                                                           dropout=args.conv_embed_dropout)
+
+    config_encoder = create_encoder_config(args, vocab_source_size, config_conv)
+    config_decoder = create_decoder_config(args, vocab_target_size)
 
     config_loss = loss.LossConfig(type=args.loss,
                                   vocab_size=vocab_target_size,
