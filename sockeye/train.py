@@ -123,9 +123,12 @@ def main():
                 logger.error("Mismatch in arguments for training continuation.")
                 logger.error("Differing arguments: %s.", ", ".join(arg_diffs))
                 sys.exit(1)
-        else:
-            logger.error("Refusing to overwrite existing output folder %s.", output_folder)
+        elif os.path.exists(os.path.join(output_folder, C.PARAMS_BEST_NAME)):
+            logger.error("Refusing to overwrite model folder %s as it seems to contain a trained model.", output_folder)
             sys.exit(1)
+        else:
+            logger.info("The output folder %s already exists, but no training state or parameter file was found. "
+                        "Will start training from scratch.", output_folder)
     else:
         os.makedirs(output_folder)
 
