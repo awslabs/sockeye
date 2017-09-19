@@ -207,7 +207,7 @@ class MultiHeadAttentionBase:
                 memory_max_length: int,
                 bias: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
         # scale by sqrt(depth_per_head)
-        queries *= self.depth_per_head ** -0.5
+        queries = queries * self.depth_per_head ** -0.5
 
         # (batch*heads, length, depth/heads)
         queries = split_heads(queries, queries_max_length, self.heads)

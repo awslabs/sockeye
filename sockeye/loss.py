@@ -160,7 +160,7 @@ class SmoothedCrossEntropyLoss(Loss):
         cross_entropy = mx.sym.where(labels, cross_entropy, mx.sym.zeros((0, self._vocab_size)))
 
         # compute cross_entropy
-        cross_entropy *= - mx.sym.log(data=probs + 1e-10)
+        cross_entropy = cross_entropy * - mx.sym.log(data=probs + 1e-10)
         cross_entropy = mx.sym.sum(data=cross_entropy, axis=1)
 
         if self._normalize:
@@ -186,7 +186,7 @@ class PreComputedSmoothedCrossEntropy(EvalMetric):
     """
     def __init__(self,
                  normalized: bool = False,
-                 name: str = "smoothed-cross-entropy",
+                 name: str = C.SMOOTHED_CROSS_ENTROPY,
                  output_names: Optional[List[str]] = None,
                  label_names: Optional[List[str]] = None) -> None:
         super().__init__(name, output_names=output_names, label_names=label_names)
@@ -197,9 +197,7 @@ class PreComputedSmoothedCrossEntropy(EvalMetric):
         # Take cross entropy values only
         sces = preds[::2]
         for label, sce in zip(labels, sces):
-            label = label.asnumpy()
-            label = label.ravel()
-            assert label.shape[0] == sce.shape[0]
+            label = mx.nd.reshape(label, shape=sce.shape)
             # SCE is pre-computed, so just sum
             self.sum_metric += sce.asnumpy().sum()
             # Only scale if loss is not already normalized

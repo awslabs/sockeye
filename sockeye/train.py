@@ -408,8 +408,7 @@ def main():
             optimizer_params["use_checkpoint_objective"] = args.eve_loss in(C.EVE_LOSS_CHECKPOINT, C.EVE_LOSS_BOTH)
         # Manually specified params
         if args.optimizer_params:
-            for k, v in args.optimizer_params.items():
-                optimizer_params[k] = v
+            optimizer_params.update(args.optimizer_params)
         logger.info("Optimizer: %s", optimizer)
         logger.info("Optimizer Parameters: %s", optimizer_params)
 

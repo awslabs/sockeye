@@ -35,8 +35,8 @@ class SockeyeOptimizer(Optimizer):
     when updating weights.
     """
     def __init__(self, **kwargs) -> None:
-        self.batch_state: BatchState = None
-        self.checkpoint_state: CheckpointState = None
+        self.batch_state = None
+        self.checkpoint_state = None
         super().__init__(**kwargs)
 
     def pre_update_batch(self, batch_state: BatchState):
