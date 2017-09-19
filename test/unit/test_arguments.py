@@ -129,6 +129,7 @@ def test_model_parameters(test_params, expected_params):
               transformer_dropout_prepost=0.0,
               conv_embed_dropout=0.0,
               optimizer='adam',
+              optimizer_params=None,
               eve_loss=C.EVE_LOSS_BATCH,
               min_num_epochs=0,
               initial_learning_rate=0.0003,

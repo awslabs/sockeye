@@ -15,6 +15,7 @@
 Defines commandline arguments for the main CLIs with reasonable defaults.
 """
 import argparse
+import json
 import sys
 from typing import Callable, Optional
 
@@ -54,6 +55,24 @@ def learning_schedule() -> Callable:
         except ValueError:
             raise argparse.ArgumentTypeError("Learning rate schedule string should have form rate1:num_updates1[,rate2:num_updates2,...]")
         return schedule
+
+    return parse
+
+
+def json_dict() -> Callable:
+    """
+    Returns a method that can be used in argument parsing to check that the argument is a valid dict in json format.
+
+    :return: A method that can be used as a type in argparse.
+    """
+
+    def parse(json_str):
+        try:
+            _json_dict = json.loads(json_str)
+            assert isinstance(_json_dict, dict)
+        except ValueError:
+            raise argparse.ArgumentTypeError("JSON dictionaries should have form '{\"key\": value, ...}'")
+        return _json_dict
 
     return parse
 
@@ -532,6 +551,10 @@ def add_training_args(params):
                               default=C.OPTIMIZER_ADAM,
                               choices=C.OPTIMIZERS,
                               help='SGD update rule. Default: %(default)s.')
+    train_params.add_argument('--optimizer-params',
+                              type=json_dict(),
+                              default=None,
+                              help='Additional optimizer params as JSON dictionary, should only be used for testing.')
     train_params.add_argument('--eve-loss',
                               default=C.EVE_LOSS_BATCH,
                               choices=C.EVE_LOSS,

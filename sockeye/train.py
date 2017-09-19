@@ -406,6 +406,10 @@ def main():
                             "Eve optimizer does not support gradient clipping (use --clip-gradient -1)")
             optimizer_params["use_batch_objective"] = args.eve_loss in(C.EVE_LOSS_BATCH, C.EVE_LOSS_BOTH)
             optimizer_params["use_checkpoint_objective"] = args.eve_loss in(C.EVE_LOSS_CHECKPOINT, C.EVE_LOSS_BOTH)
+        # Manually specified params
+        if args.optimizer_params:
+            for k, v in args.optimizer_params.items():
+                optimizer_params[k] = v
         logger.info("Optimizer: %s", optimizer)
         logger.info("Optimizer Parameters: %s", optimizer_params)
 
