@@ -14,6 +14,7 @@
 """
 A set of utility methods.
 """
+import argparse
 import collections
 import errno
 import fcntl
@@ -32,6 +33,7 @@ import numpy as np
 
 from sockeye import __version__
 import sockeye.constants as C
+from sockeye.log import log_sockeye_version, log_mxnet_version
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,29 @@ def parse_version(version_string: str) -> Tuple[str, str, str]:
     """
     release, major, minor = version_string.split(".", 2)
     return release, major, minor
+
+
+def log_basic_info(args) -> None:
+    """
+    Log basic information like version number, arguments, etc.
+
+    :param args: Arguments as returned by argparse.
+    """
+    log_sockeye_version(logger)
+    log_mxnet_version(logger)
+    logger.info("Command: %s", " ".join(sys.argv))
+    logger.info("Arguments: %s", args)
+
+
+def seedRNGs(args: argparse.Namespace) -> None:
+    """
+    Seed the random number generators (Python, Numpy and MXNet)
+
+    :param args: Arguments as returned by argparse.
+    """
+    np.random.seed(args.seed)
+    random.seed(args.seed)
+    mx.random.seed(args.seed)
 
 
 def check_condition(condition: bool, error_message: str):

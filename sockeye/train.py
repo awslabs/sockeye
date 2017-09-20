@@ -28,8 +28,8 @@ import mxnet as mx
 import numpy as np
 
 from sockeye.config import Config
-from sockeye.log import setup_main_logger, log_sockeye_version, log_mxnet_version
-from sockeye.utils import acquire_gpus, check_condition, get_num_gpus, expand_requested_device_ids
+from sockeye.log import setup_main_logger
+from sockeye.utils import check_condition
 from . import arguments
 from . import attention
 from . import constants as C
@@ -45,11 +45,12 @@ from . import model
 from . import rnn
 from . import training
 from . import transformer
+from . import utils
 from . import vocab
 
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
-logger = setup_main_logger(__name__, file_logging=False, console=False)
+logger = setup_main_logger(__name__, file_logging=False, console=True)
 
 
 def none_if_negative(val):
@@ -84,15 +85,17 @@ def _dict_difference(dict1: Dict, dict2: Dict):
     return diffs
 
 
-def seedRNGs(args: argparse.Namespace) -> None:
+def check_arg_compatibility(args: argparse.Namespace):
     """
-    Seed the random number generators (Python, Numpy and MXNet)
+    Check if some arguments are incompatible with each other.
 
     :param args: Arguments as returned by argparse.
     """
-    np.random.seed(args.seed)
-    random.seed(args.seed)
-    mx.random.seed(args.seed)
+    if args.use_fused_rnn:
+        check_condition(not args.use_cpu, "GPU required for FusedRNN cells")
+
+    check_condition(args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics,
+                    "Must optimize either BLEU or one of tracked metrics (--metrics)")
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> Tuple[bool, str]:
@@ -102,11 +105,8 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> Tuple[bool, st
     :param args: Arguments as returned by argparse.
     :param output_folder: Main output folder for the model.
     :return: Flag signaling if we are resuming training and the directory with
-        the training status
+        the training status.
     """
-    # Create temporary logger to console only
-    logger = setup_main_logger(__name__, file_logging=False, console=not args.quiet)
-
     resume_training = False
     training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
     if os.path.exists(output_folder):
@@ -142,18 +142,6 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> Tuple[bool, st
     return resume_training, training_state_dir
 
 
-def log_basic_info(args) -> None:
-    """
-    Log basic information like version number, arguments, etc.
-
-    :param args: Arguments as returned by argparse.
-    """
-    log_sockeye_version(logger)
-    log_mxnet_version(logger)
-    logger.info("Command: %s", " ".join(sys.argv))
-    logger.info("Arguments: %s", args)
-
-
 def determine_context(args: argparse.Namespace, exit_stack: ExitStack) -> List[mx.Context]:
     """
     Determine the context we should run on (CPU or GPU).
@@ -166,15 +154,15 @@ def determine_context(args: argparse.Namespace, exit_stack: ExitStack) -> List[m
         logger.info("Device: CPU")
         context = [mx.cpu()]
     else:
-        num_gpus = get_num_gpus()
+        num_gpus = utils.get_num_gpus()
         check_condition(num_gpus >= 1,
                         "No GPUs found, consider running on the CPU with --use-cpu "
                         "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
                         "binary isn't on the path).")
         if args.disable_device_locking:
-            context = expand_requested_device_ids(args.device_ids)
+            context = utils.expand_requested_device_ids(args.device_ids)
         else:
-            context = exit_stack.enter_context(acquire_gpus(args.device_ids, lock_dir=args.lock_dir))
+            context = exit_stack.enter_context(utils.acquire_gpus(args.device_ids, lock_dir=args.lock_dir))
         logger.info("Device(s): GPU %s", context)
         context = [mx.gpu(gpu_id) for gpu_id in context]
     return context
@@ -288,7 +276,7 @@ def create_encoder_config(args: argparse.Namespace, vocab_source_size: int,
     :return: The encoder config.
     """
     encoder_num_layers, _ = args.num_layers
-    config_encoder = Config()  # Make mypy happy
+    config_encoder = None  # type: Optional[Config]
 
     if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
         encoder_transformer_preprocess, _ = args.transformer_preprocess
@@ -480,12 +468,15 @@ def create_model_config(args: argparse.Namespace,
     return model_config
 
 
-def create_training_model(model_config: model.ModelConfig, args: argparse.Namespace,
-                          context: List[mx.Context], train_iter: data_io.ParallelBucketSentenceIter,
+def create_training_model(model_config: model.ModelConfig,
+                          args: argparse.Namespace,
+                          context: List[mx.Context],
+                          train_iter: data_io.ParallelBucketSentenceIter,
                           lr_scheduler_instance: lr_scheduler.LearningRateScheduler,
-                          resume_training: bool, training_state_dir: str) -> training.TrainingModel:
+                          resume_training: bool,
+                          training_state_dir: str) -> training.TrainingModel:
     """
-    Create a training model and load the parameters from disk if needed
+    Create a training model and load the parameters from disk if needed.
 
     :param model_config: The configuration for the model.
     :param args: Arguments as returned by argparse.
@@ -517,7 +508,7 @@ def create_training_model(model_config: model.ModelConfig, args: argparse.Namesp
 
 def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict]:
     """
-    Defines the optimizer to use and its parameters
+    Defines the optimizer to use and its parameters.
 
     :param args: Arguments as returned by argparse.
     :param lr_scheduler: The learning rate scheduler.
@@ -551,14 +542,9 @@ def main():
     arguments.add_train_cli_args(params)
     args = params.parse_args()
 
-    seedRNGs(args)
+    utils.seedRNGs(args)
 
-    if args.use_fused_rnn:
-        check_condition(not args.use_cpu, "GPU required for FusedRNN cells")
-
-    check_condition(args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics,
-                    "Must optimize either BLEU or one of tracked metrics (--metrics)")
-
+    check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
     resume_training, training_state_dir = check_resume(args, output_folder)
 
@@ -566,7 +552,7 @@ def main():
     logger = setup_main_logger(__name__,
                                file_logging=True,
                                console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
-    log_basic_info(args)
+    utils.log_basic_info(args)
     with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "w") as fp:
         json.dump(vars(args), fp)
 
