@@ -284,10 +284,8 @@ class TrainingModel(model.SockeyeModel):
         metric_val = self._create_eval_metric(metrics)
         # Track loss for optimizer if needed
         if isinstance(self.module._curr_module._optimizer, SockeyeOptimizer):
-            if self.config.config_loss.type == C.CROSS_ENTROPY:
-                metric_loss = mx.metric.create("ce")
-            elif self.config.config_loss.type == C.SMOOTHED_CROSS_ENTROPY:
-                metric_loss = mx.metric.create("sce", normalized=self.config.config_loss.normalize)
+            # Create metric corresponding to training loss
+            metric_loss = mx.metric.create(self.config.config_loss.type, loss_config=self.config.config_loss)
 
         tic = time.time()
 

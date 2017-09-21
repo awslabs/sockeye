@@ -18,7 +18,7 @@ Extra optimizers not included in MXNet.
 from abc import abstractmethod
 from collections import namedtuple
 import math
-from typing import Tuple
+from typing import Optional, Tuple
 
 from mxnet.ndarray import NDArray, sqrt, zeros_like
 from mxnet.optimizer import Optimizer
@@ -35,8 +35,8 @@ class SockeyeOptimizer(Optimizer):
     when updating weights.
     """
     def __init__(self, **kwargs) -> None:
-        self.batch_state = None
-        self.checkpoint_state = None
+        self.batch_state = Optional[BatchState]
+        self.checkpoint_state = Optional[CheckpointState]
         super().__init__(**kwargs)
 
     def pre_update_batch(self, batch_state: BatchState):

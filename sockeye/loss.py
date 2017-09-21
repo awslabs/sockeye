@@ -172,28 +172,57 @@ class SmoothedCrossEntropyLoss(Loss):
 
 
 @register
-@alias("sce")
-class PreComputedSmoothedCrossEntropy(EvalMetric):
+@alias(C.CROSS_ENTROPY)
+class CrossEntropyMetric(EvalMetric):
     """
-    This is a simple helper class that can be called as a metric to sum pre-computed smoothed
-    cross entropy values.  It was written mainly as a bridge to make SCE loss available to extended
-    optimizers during training.
+    Version of the cross entropy metric that ignores padding tokens.
 
-    :param normalized: Whether loss is pre-normalized by the number of examples.
+    :param loss_config: The configuration used for the corresponding loss.
     :param name: Name of this metric instance for display.
     :param output_names: Name of predictions that should be used when updating with update_dict.
     :param output_labels: Name of labels that should be used when updating with update_dict.
     """
     def __init__(self,
-                 normalized: bool = False,
+                 loss_config: LossConfig,
+                 name: str = C.CROSS_ENTROPY,
+                 output_names: Optional[List[str]] = None,
+                 label_names: Optional[List[str]] = None) -> None:
+        super().__init__(name, output_names=output_names, label_names=label_names)
+        self.loss_config = loss_config
+
+    def update(self, labels, preds):
+        for label, pred in zip(labels, preds):
+            label = label.as_in_context(pred.context).reshape((label.size,))
+            prob = mx.nd.pick(pred, label.astype(dtype="int32"))
+            # Ignore padding
+            ignore = (label == C.PAD_ID).astype(dtype=prob.dtype)
+            prob = prob * (1 - ignore) + ignore
+            # Sum
+            self.sum_metric += mx.nd.sum(-mx.nd.log(prob + 1e-8)).asscalar()
+            self.num_inst += label.size - mx.nd.sum(ignore).asscalar()
+
+
+@register
+@alias(C.SMOOTHED_CROSS_ENTROPY)
+class SmoothedCrossEntropyMetric(EvalMetric):
+    """
+    Metric wrapper for smoothed cross entropy loss.  Since SCE already returns loss values during
+    training, this class simply sums the results.
+
+    :param loss_config: The configuration used for the corresponding loss.
+    :param name: Name of this metric instance for display.
+    :param output_names: Name of predictions that should be used when updating with update_dict.
+    :param output_labels: Name of labels that should be used when updating with update_dict.
+    """
+    def __init__(self,
+                 loss_config: LossConfig,
                  name: str = C.SMOOTHED_CROSS_ENTROPY,
                  output_names: Optional[List[str]] = None,
                  label_names: Optional[List[str]] = None) -> None:
         super().__init__(name, output_names=output_names, label_names=label_names)
-        self.normalized = normalized
+        self.loss_config = loss_config
 
     def update(self, labels, preds):
-        """Sum pre-computed smoothed cross entropy values"""
         # Take cross entropy values only
         sces = preds[::2]
         for label, sce in zip(labels, sces):
@@ -201,4 +230,8 @@ class PreComputedSmoothedCrossEntropy(EvalMetric):
             # SCE is pre-computed, so just sum
             self.sum_metric += sce.asnumpy().sum()
             # Only scale if loss is not already normalized
-            self.num_inst += 1 if self.normalized else label.shape[0]
+            if self.loss_config.normalize:
+                self.num_inst += 1
+            else:
+                ignore = (label == C.PAD_ID).astype(dtype=sce.dtype)
+                self.num_inst += label.size - mx.nd.sum(ignore).asscalar()
