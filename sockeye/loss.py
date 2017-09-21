@@ -197,9 +197,14 @@ class CrossEntropyMetric(EvalMetric):
             # Ignore padding
             ignore = (label == C.PAD_ID).astype(dtype=prob.dtype)
             prob = prob * (1 - ignore) + ignore
-            # Sum
-            self.sum_metric += mx.nd.sum(-mx.nd.log(prob + 1e-8)).asscalar()
-            self.num_inst += label.size - mx.nd.sum(ignore).asscalar()
+            # Sum, normalizing if needed
+            loss = -mx.nd.log(prob + 1e-8)
+            if self.loss_config.normalize:
+                loss = loss / mx.nd.sum(1 - ignore)
+                self.num_inst += 1
+            else:
+                self.num_inst += label.size - mx.nd.sum(ignore).asscalar()
+            self.sum_metric += mx.nd.sum(loss).asscalar()
 
 
 @register
@@ -226,7 +231,6 @@ class SmoothedCrossEntropyMetric(EvalMetric):
         # Take cross entropy values only
         sces = preds[::2]
         for label, sce in zip(labels, sces):
-            label = mx.nd.reshape(label, shape=sce.shape)
             # SCE is pre-computed, so just sum
             self.sum_metric += sce.asnumpy().sum()
             # Only scale if loss is not already normalized
