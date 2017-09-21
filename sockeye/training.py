@@ -280,12 +280,17 @@ class TrainingModel(model.SockeyeModel):
         :param min_num_epochs: Minimum number of epochs to train, even if validation scores did not improve.
         :param mxmonitor: Optional MXNet monitor instance.
         """
+        # TODO: Push update to MXNet to expose the optimizer (Module should have a get_optimizer method)
+        if self.bucketing:
+            optimizer = self.module._curr_module._optimizer
+        else:
+            optimizer = self.module._optimizer
+
         metric_train = self._create_eval_metric(metrics)
         metric_val = self._create_eval_metric(metrics)
-        # Track loss for optimizer if needed
-        if isinstance(self.module._curr_module._optimizer, SockeyeOptimizer):
-            # Create metric corresponding to training loss
-            metric_loss = mx.metric.create(self.config.config_loss.type, loss_config=self.config.config_loss)
+        # If optimizer requires it, track loss as metric
+        if isinstance(optimizer, SockeyeOptimizer):
+            metric_loss = loss.get_loss(self.config.config_loss).create_metric()
 
         tic = time.time()
 
@@ -322,13 +327,13 @@ class TrainingModel(model.SockeyeModel):
 
             # If using an extended optimizer, provide extra state information about the current batch
             # Loss: training loss
-            if isinstance(self.module._curr_module._optimizer, SockeyeOptimizer):
+            if isinstance(optimizer, SockeyeOptimizer):
                 # Loss for this batch
                 metric_loss.reset()
                 metric_loss.update(batch.label, self.module.get_outputs())
                 [(_, m_val)] = metric_loss.get_name_value()
                 batch_state = BatchState(metric_val=m_val)
-                self.module._curr_module._optimizer.pre_update_batch(batch_state)
+                optimizer.pre_update_batch(batch_state)
 
             # Call optimizer to update weights given gradients, current state
             self.module.update()
@@ -371,13 +376,13 @@ class TrainingModel(model.SockeyeModel):
 
                 # If using an extended optimizer, provide extra state information about the current checkpoint
                 # Loss: optimized metric
-                if isinstance(self.module._curr_module._optimizer, SockeyeOptimizer):
+                if isinstance(optimizer, SockeyeOptimizer):
                     m_val = 0
                     for name, val in metric_val.get_name_value():
                         if name == self.training_monitor.optimized_metric:
                             m_val = val
                     checkpoint_state = CheckpointState(checkpoint=train_state.checkpoint, metric_val=m_val)
-                    self.module._curr_module._optimizer.pre_update_checkpoint(checkpoint_state)
+                    optimizer.pre_update_checkpoint(checkpoint_state)
 
                 if self.lr_scheduler is not None:
                     self.lr_scheduler.new_evaluation_result(has_improved)

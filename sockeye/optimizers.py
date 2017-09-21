@@ -186,7 +186,8 @@ class Eve(SockeyeOptimizer):
         # first checkpoint, d = 1.
         if self.use_checkpoint_objective:
             # Only need to recompute if we've seen a new checkpoint since the previous batch update
-            if self.checkpoint_state and self.checkpoint_state.checkpoint != state.checkpoint_prev:
+            if (isinstance(self.checkpoint_state, CheckpointState) and
+                self.checkpoint_state.checkpoint != state.checkpoint_prev):
                 checkpoint = self.checkpoint_state.checkpoint
                 checkpoint_f_hat, checkpoint_d = compute_d(checkpoint,
                                                            self.checkpoint_state.metric_val,

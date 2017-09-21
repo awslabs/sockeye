@@ -341,7 +341,7 @@ def main():
                 layer_normalization=args.layer_normalization,
                 attention_in_upper_layers=args.attention_in_upper_layers)
 
-        config_loss = loss.LossConfig(type=args.loss,
+        config_loss = loss.LossConfig(name=args.loss,
                                       vocab_size=vocab_target_size,
                                       normalize=args.normalize_loss,
                                       smoothed_cross_entropy_alpha=args.smoothed_cross_entropy_alpha)
