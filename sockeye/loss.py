@@ -87,7 +87,7 @@ class CrossEntropyLoss(Loss):
     :param normalize: If True normalize the gradient by dividing by the number of non-PAD tokens.
     """
 
-    def __init__(self, normalize: bool = False):
+    def __init__(self, normalize: bool = False) -> None:
         self._normalize = normalize
 
     def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> List[mx.sym.Symbol]:
@@ -132,7 +132,7 @@ class SmoothedCrossEntropyLoss(Loss):
     :param normalize: If True normalize the gradient by dividing by the number of non-PAD tokens.
     """
 
-    def __init__(self, alpha: float, vocab_size: int, normalize: bool = False):
+    def __init__(self, alpha: float, vocab_size: int, normalize: bool = False) -> None:
         utils.check_condition(alpha >= 0, "alpha for smoothed loss must be >= 0")
         self._alpha = alpha
         self._vocab_size = vocab_size

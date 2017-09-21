@@ -322,7 +322,7 @@ def read_sentences(path: str, vocab: Dict[str, int], add_bos=False, limit=None) 
     sentences = []
     for sentence_tokens in read_content(path, limit):
         sentence = tokens2ids(sentence_tokens, vocab)
-        check_condition(sentence, "Empty sentence in file %s" % path)
+        check_condition(bool(sentence), "Empty sentence in file %s" % path)
         if add_bos:
             sentence.insert(0, vocab[C.BOS_SYMBOL])
         sentences.append(sentence)
@@ -352,7 +352,7 @@ def get_parallel_bucket(buckets: List[Tuple[int, int]],
     :param length_target: Length of target sequence.
     :return: Tuple of (bucket index, bucket), or (None, None) if not fitting.
     """
-    bucket = None, None
+    bucket = None, None  # type: Tuple[int, Tuple[int, int]]
     for j, (source_bkt, target_bkt) in enumerate(buckets):
         if source_bkt >= length_source and target_bkt >= length_target:
             bucket = j, (source_bkt, target_bkt)
@@ -398,7 +398,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
                  source_data_name=C.SOURCE_NAME,
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
-                 dtype='float32'):
+                 dtype='float32') -> None:
         super(ParallelBucketSentenceIter, self).__init__()
 
         self.buckets = list(buckets)
@@ -417,9 +417,9 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         self.fill_up = fill_up
 
         # TODO: consider avoiding explicitly creating label arrays to save host memory
-        self.data_source = [[] for _ in self.buckets]
-        self.data_target = [[] for _ in self.buckets]
-        self.data_label = [[] for _ in self.buckets]
+        self.data_source = [[] for _ in self.buckets]  # type: ignore
+        self.data_target = [[] for _ in self.buckets]  # type: ignore
+        self.data_label = [[] for _ in self.buckets]  # type: ignore
         self.data_label_average_len = [0 for _ in self.buckets]
 
         # Per-bucket batch sizes [num seq, num word]
@@ -452,7 +452,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         self.label_names = [self.label_name]
 
         # create index tuples (i,j) into buckets: i := bucket index ; j := row index of bucket array
-        self.idx = []
+        self.idx = []  # type: List[Tuple[int, int]]
         for i, buck in enumerate(self.data_source):
             batch_size_seq, _ = self.bucket_batch_sizes[i]
             rest = len(buck) % batch_size_seq
@@ -463,10 +463,10 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         self.curr_idx = 0
 
         # holds NDArrays
-        self.indices = []  # This will define how the data arrays will be organized
-        self.nd_source = []
-        self.nd_target = []
-        self.nd_label = []
+        self.indices = []  # type: List[List[int]]
+        self.nd_source = []  # type: List[mx.ndarray]
+        self.nd_target = []  # type: List[mx.ndarray]
+        self.nd_label = []  # type: List[mx.ndarray]
 
         self.reset()
 

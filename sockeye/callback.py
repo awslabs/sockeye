@@ -21,10 +21,9 @@ import os
 import pickle
 import shutil
 import time
-from typing import Optional, Tuple, Dict
+from typing import List, Optional, Tuple, Dict
 
 import mxnet as mx
-import numpy as np
 
 from . import checkpoint_decoder
 from . import constants as C
@@ -58,7 +57,8 @@ class TrainingMonitor(object):
                  cp_decoder: Optional[checkpoint_decoder.CheckpointDecoder] = None,
                  num_concurrent_decodes: int = 1) -> None:
         self.output_folder = output_folder
-        self.metrics = []  # stores dicts of metric names & values for each checkpoint
+        # stores dicts of metric names & values for each checkpoint
+        self.metrics = []  # type: List[Dict]
         self.metrics_filename = os.path.join(output_folder, C.METRICS_NAME)
         self.best_checkpoint = 0
         self.start_tic = time.time()
@@ -75,7 +75,7 @@ class TrainingMonitor(object):
         self.ctx = mp.get_context('spawn')
         self.num_concurrent_decodes = num_concurrent_decodes
         self.decoder_metric_queue = self.ctx.Queue()
-        self.decoder_processes = []
+        self.decoder_processes = []  # type: List[mp.Process]
         # TODO(fhieber): MXNet Speedometer uses root logger. How to fix this?
         self.speedometer = mx.callback.Speedometer(batch_size=batch_size,
                                                    frequent=C.MEASURE_SPEED_EVERY,

@@ -86,7 +86,7 @@ class TrainingModel(model.SockeyeModel):
         self.bucketing = bucketing
         self._build_model_components(fused)
         self.module = self._build_module(train_iter)
-        self.training_monitor = None
+        self.training_monitor = None  # type: Optional[callback.TrainingMonitor]
 
     def _build_module(self, train_iter: data_io.ParallelBucketSentenceIter):
         """
