@@ -15,7 +15,6 @@
 Defines commandline arguments for the main CLIs with reasonable defaults.
 """
 import argparse
-import json
 import sys
 from typing import Callable, Optional
 
@@ -59,20 +58,35 @@ def learning_schedule() -> Callable:
     return parse
 
 
-def json_dict() -> Callable:
+def simple_dict() -> Callable:
     """
-    Returns a method that can be used in argument parsing to check that the argument is a valid dict in json format.
+    A simple dictionary format that does not require spaces or quoting.
+
+    Supported types: bool, int, float
 
     :return: A method that can be used as a type in argparse.
     """
 
-    def parse(json_str):
+    def parse(dict_str: str):
+
+        def _parse(value: str):
+            if value == "True":
+                return True
+            if value == "False":
+                return False
+            if "." in value:
+                return float(value)
+            return int(value)
+
+        _dict = dict()
         try:
-            _json_dict = json.loads(json_str)
-            assert isinstance(_json_dict, dict)
+            for entry in dict_str.split(","):
+                key, value = entry.split(":")
+                _dict[key] = _parse(value)
         except ValueError:
-            raise argparse.ArgumentTypeError("JSON dictionaries should have form '{\"key\": value, ...}'")
-        return _json_dict
+            raise argparse.ArgumentTypeError("Specify argument dictionary as key1:value1,key2:value2,..."
+                                             " Supported types: bool, int, float.")
+        return _dict
 
     return parse
 
@@ -552,9 +566,9 @@ def add_training_args(params):
                               choices=C.OPTIMIZERS,
                               help='SGD update rule. Default: %(default)s.')
     train_params.add_argument('--optimizer-params',
-                              type=json_dict(),
+                              type=simple_dict(),
                               default=None,
-                              help='Additional optimizer params as JSON dictionary, should only be used for testing.')
+                              help='Additional optimizer params as dictionary. Format: key1:value1,key2:value2,...')
     train_params.add_argument('--eve-loss',
                               default=C.EVE_LOSS_BATCH,
                               choices=C.EVE_LOSS,
