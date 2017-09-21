@@ -173,7 +173,7 @@ def load_or_create_vocabs(args: argparse.Namespace, resume_training: bool, outpu
     Load the vocabularies from disks if given, create them if not.
 
     :param args: Arguments as returned by argparse.
-    :param resume_training: Gives if an interrupted training should be resumed.
+    :param resume_training: When True, the vocabulary will be loaded from an existing output folder.
     :param output_folder: Main output folder for the training.
     :return: The source and target vocabularies.
     """
@@ -245,7 +245,7 @@ def create_lr_scheduler(args: argparse.Namespace, resume_training: bool,
     Create the learning rate scheduler.
 
     :param args: Arguments as returned by argparse.
-    :param resume_training: Gives if an interrupted training should be resumed.
+    :param resume_training: When True, the scheduler will be loaded from disk.
     :param training_state_dir: Directory where the training state is stored.
     :return: The learning rate scheduler.
     """
@@ -483,7 +483,7 @@ def create_training_model(model_config: model.ModelConfig,
     :param context: The context(s) to run on.
     :param train_iter: The training data iterator.
     :param lr_scheduler: The learning rate scheduler.
-    :param resume_training: Gives if an interrupted training should be resumed.
+    :param resume_training: When True, the model will be loaded from disk.
     :param training_state_dir: Directory where the training state is stored.
     :return: The training model.
     """
