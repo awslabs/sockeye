@@ -422,12 +422,9 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         self.data_label = [[] for _ in self.buckets]  # type: ignore
         self.data_label_average_len = [0 for _ in self.buckets]
 
-        # Per-bucket batch sizes [num seq, num word]
+        # Per-bucket batch sizes (num seq, num word)
         # If not None, populated as part of assigning to buckets
         self.bucket_batch_sizes = bucket_batch_sizes
-        # Batch size that pairs with default bucket shape to accommodate any bucket's batch size
-        # Set with call to _populate_bucket_batch_sizes() via _assign_to_buckets()
-        self.default_bucket_batch_size = 0
 
         # assign sentence pairs to buckets
         self._assign_to_buckets(source_sentences, target_sentences)
@@ -435,17 +432,19 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         # convert to single numpy array for each bucket
         self._convert_to_array()
 
-        # "Staging area" that needs to fit any size batch we're using by total number of elements
+        # "Staging area" that needs to fit any size batch we're using by total number of elements.
+        # When computing per-bucket batch sizes, we guarantee that the default bucket will have the
+        # largest total batch size.
         self.provide_data = [
             mx.io.DataDesc(name=source_data_name,
-                           shape=(self.default_bucket_batch_size, self.default_bucket_key[0]),
+                           shape=(self.bucket_batch_sizes[-1][0], self.default_bucket_key[0]),
                            layout=C.BATCH_MAJOR),
             mx.io.DataDesc(name=target_data_name,
-                           shape=(self.default_bucket_batch_size, self.default_bucket_key[1]),
+                           shape=(self.bucket_batch_sizes[-1][0], self.default_bucket_key[1]),
                            layout=C.BATCH_MAJOR)]
         self.provide_label = [
             mx.io.DataDesc(name=label_name,
-                           shape=(self.default_bucket_batch_size, self.default_bucket_key[1]),
+                           shape=(self.bucket_batch_sizes[-1][0], self.default_bucket_key[1]),
                            layout=C.BATCH_MAJOR)]
 
         self.data_names = [self.source_data_name, self.target_data_name]
@@ -546,28 +545,24 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         of devices that produces the number of words closest to the target batch size.  Average
         target sentence length (non-padding symbols) is used for word number calculations.
 
-        Default bucket batch size is the number of sentences such that shape
-        (default_bucket_batch_size * default_bucket_key) will fit the total number of elements in
-        the largest batch (batch_size * seq_len).
-
-        Sets: self.bucket_batch_sizes, self.default_bucket_batch_size
+        Sets: self.bucket_batch_sizes
         """
         # Pre-defined bucket batch sizes
         if self.bucket_batch_sizes is not None:
             return
         # Otherwise compute here
         self.bucket_batch_sizes = [[] for _ in self.buckets]
+        largest_total_batch_size = 0
         for buck_idx, bucket_shape in enumerate(self.buckets):
             # Target/label length with padding
             padded_seq_len = bucket_shape[1]
             # Average target/label length excluding padding
             average_seq_len = self.data_label_average_len[buck_idx]
-            if self.batch_by_words:
-                check_condition(padded_seq_len <= self.batch_size, "Word batch size must cover sequence lengths for all"
-                                " buckets: (%d > %d)" % (padded_seq_len, self.batch_size))
             # Word-based: num words determines num sentences
             # Sentence-based: num sentences determines num words
             if self.batch_by_words:
+                check_condition(padded_seq_len <= self.batch_size, "Word batch size must cover sequence lengths for all"
+                                " buckets: (%d > %d)" % (padded_seq_len, self.batch_size))
                 # Multiple of number of devices (int) closest to target number of words, assuming each sentence is of
                 # average length
                 batch_size_seq = self.batch_num_devices * round((self.batch_size / average_seq_len)
@@ -577,18 +572,15 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
                 batch_size_seq = self.batch_size
                 batch_size_word = batch_size_seq * average_seq_len
             self.bucket_batch_sizes[buck_idx] = (batch_size_seq, batch_size_word)
-        # Default bucket batch size: batch size of largest bucket batch by total elements, scaled for default bucket key
-        # Effectively, set default values to reserve enough space to provide a batch from any bucket
-        largest_total_batch_size = 0
-        if self.batch_by_words:
-            for buck_shape, (batch_size_seq, _) in zip(self.buckets, self.bucket_batch_sizes):
-                seq_len = max(*buck_shape)
-                buck_batch_size = seq_len * batch_size_seq
-                if buck_batch_size > largest_total_batch_size:
-                    largest_total_batch_size = buck_batch_size
-                    self.default_bucket_batch_size = math.ceil(buck_batch_size / max(*self.default_bucket_key))
-        else:
-            self.default_bucket_batch_size = self.batch_size
+            # Track largest batch size by total elements
+            largest_total_batch_size = max(largest_total_batch_size, batch_size_seq * max(*bucket_shape))
+        # Final step: guarantee that largest bucket by sequence length also has largest total batch size.
+        padded_seq_len = max(*self.buckets[-1])
+        average_seq_len = self.data_label_average_len[-1]
+        while self.bucket_batch_sizes[-1][0] * padded_seq_len < largest_total_batch_size:
+            batch_size_seq, batch_size_word = self.bucket_batch_sizes[-1]
+            self.bucket_batch_sizes[-1] = (batch_size_seq + self.batch_num_devices,
+                                           batch_size_word + self.batch_num_devices * average_seq_len)
 
     def _convert_to_array(self):
         for i in range(len(self.data_source)):
