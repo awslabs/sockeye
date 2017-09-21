@@ -332,7 +332,7 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int) -> C
 
     decoder_weight_tying = args.weight_tying and C.WEIGHT_TYING_TRG in args.weight_tying_type \
         and C.WEIGHT_TYING_SOFTMAX in args.weight_tying_type
-    config_decoder = Config()
+    config_decoder = None  # type: Optional[Config]
 
     if args.decoder == C.TRANSFORMER_TYPE:
         _, decoder_transformer_preprocess = args.transformer_preprocess
