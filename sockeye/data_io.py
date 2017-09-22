@@ -575,12 +575,14 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
             # Track largest batch size by total elements
             largest_total_batch_size = max(largest_total_batch_size, batch_size_seq * max(*bucket_shape))
         # Final step: guarantee that largest bucket by sequence length also has largest total batch size.
-        padded_seq_len = max(*self.buckets[-1])
-        average_seq_len = self.data_label_average_len[-1]
-        while self.bucket_batch_sizes[-1][0] * padded_seq_len < largest_total_batch_size:
-            batch_size_seq, batch_size_word = self.bucket_batch_sizes[-1]
-            self.bucket_batch_sizes[-1] = (batch_size_seq + self.batch_num_devices,
-                                           batch_size_word + self.batch_num_devices * average_seq_len)
+        # When batching by sentences, this will already be the case.
+        if self.batch_by_words:
+            padded_seq_len = max(*self.buckets[-1])
+            average_seq_len = self.data_label_average_len[-1]
+            while self.bucket_batch_sizes[-1][0] * padded_seq_len < largest_total_batch_size:
+                batch_size_seq, batch_size_word = self.bucket_batch_sizes[-1]
+                self.bucket_batch_sizes[-1] = (batch_size_seq + self.batch_num_devices,
+                                               batch_size_word + self.batch_num_devices * average_seq_len)
 
     def _convert_to_array(self):
         for i in range(len(self.data_source)):
