@@ -21,7 +21,7 @@ import math
 from typing import Optional, Tuple
 
 from mxnet.ndarray import NDArray, sqrt, zeros_like
-from mxnet.optimizer import Optimizer
+from mxnet.optimizer import Optimizer, clip
 
 from sockeye.utils import check_condition
 
@@ -113,9 +113,6 @@ class Eve(SockeyeOptimizer):
                  **kwargs) -> None:
         check_condition(any((use_batch_objective, use_checkpoint_objective)),
                         "Must use at least one of: batch objective, checkpoint objective")
-        check_condition(kwargs.get("rescale_grad", 1.) == 1., "Eve optimizer does not support rescaling gradients.")
-        check_condition(not kwargs.get("clip_gradient", False), "Eve optimizer does not support gradient clipping.")
-        check_condition(kwargs.get("wd", 0.) == 0., "Eve optimizer does not support weight decay.")
         super().__init__(learning_rate=learning_rate, **kwargs)
         self.beta1 = beta1
         self.beta2 = beta2
@@ -135,8 +132,14 @@ class Eve(SockeyeOptimizer):
         assert isinstance(weight, NDArray)
         assert isinstance(grad, NDArray)
         lr = self._get_lr(index)
+        wd = self._get_wd(index)
         self._update_count(index)
         t = self._index_update_count[index]
+
+        # Preprocess grad
+        grad *= self.rescale_grad + wd * weight
+        if self.clip_gradient is not None:
+            grad = clip(grad, -1 * self.clip_gradient, self.clip_gradient)
 
         # Standard Adam rules for updating mean and variance
         mean = state.mean
