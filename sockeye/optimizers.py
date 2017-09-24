@@ -33,8 +33,12 @@ class SockeyeOptimizer(Optimizer):
     """
     Optimizer that has access to additional information from the last batch and the last chekpoint
     when updating weights.
+
+    :param request_optimized_metric: Whether to request the optimized metric (e.g. perplexity) in
+                                     place of optimizer loss (e.g. cross-entropy).
     """
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, request_optimized_metric: bool = False, **kwargs) -> None:
+        self.request_optimized_metric = request_optimized_metric
         self.batch_state = Optional[BatchState]
         self.checkpoint_state = Optional[CheckpointState]
         super().__init__(**kwargs)

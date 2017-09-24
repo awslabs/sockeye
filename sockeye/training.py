@@ -142,19 +142,24 @@ class TrainingModel(model.SockeyeModel):
                                  context=self.context)
 
     @staticmethod
-    def _create_eval_metric(metric_names: List[AnyStr]) -> mx.metric.CompositeEvalMetric:
+    def create_eval_metric(metric_name: AnyStr) -> mx.metric.EvalMetric:
+        """
+        Creates an EvalMetric given a metric names.
+        """
+        # output_names refers to the list of outputs this metric should use to update itself, e.g. the softmax output
+        if metric_name == C.ACCURACY:
+            return utils.Accuracy(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME])
+        elif metric_name == C.PERPLEXITY:
+            return mx.metric.Perplexity(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME])
+        else:
+            raise ValueError("unknown metric name")
+
+    @staticmethod
+    def create_eval_metric_composite(metric_names: List[AnyStr]) -> mx.metric.CompositeEvalMetric:
         """
         Creates a composite EvalMetric given a list of metric names.
         """
-        metrics = []
-        # output_names refers to the list of outputs this metric should use to update itself, e.g. the softmax output
-        for metric_name in metric_names:
-            if metric_name == C.ACCURACY:
-                metrics.append(utils.Accuracy(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME]))
-            elif metric_name == C.PERPLEXITY:
-                metrics.append(mx.metric.Perplexity(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME]))
-            else:
-                raise ValueError("unknown metric name")
+        metrics = [TrainingModel.create_eval_metric(metric_name) for metric_name in metric_names]
         return mx.metric.create(metrics)
 
     def fit(self,
@@ -286,11 +291,15 @@ class TrainingModel(model.SockeyeModel):
         else:
             optimizer = self.module._optimizer
 
-        metric_train = self._create_eval_metric(metrics)
-        metric_val = self._create_eval_metric(metrics)
+        metric_train = self.create_eval_metric_composite(metrics)
+        metric_val = self.create_eval_metric_composite(metrics)
         # If optimizer requires it, track loss as metric
         if isinstance(optimizer, SockeyeOptimizer):
-            metric_loss = loss.get_loss(self.config.config_loss).create_metric()
+            # Select training loss or optimized metric
+            if optimizer.request_optimized_metric:
+                metric_loss = self.create_eval_metric(self.training_monitor.optimized_metric)
+            else:
+                metric_loss = loss.get_loss(self.config.config_loss).create_metric()
 
         tic = time.time()
 

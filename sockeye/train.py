@@ -400,9 +400,6 @@ def main():
         else:
             # Making MXNet module API's default scaling factor explicit
             optimizer_params["rescale_grad"] = 1.0 / args.batch_size
-        if optimizer == C.OPTIMIZER_EVE:
-            optimizer_params["use_batch_objective"] = args.eve_loss in(C.EVE_LOSS_BATCH, C.EVE_LOSS_BOTH)
-            optimizer_params["use_checkpoint_objective"] = args.eve_loss in(C.EVE_LOSS_CHECKPOINT, C.EVE_LOSS_BOTH)
         # Manually specified params
         if args.optimizer_params:
             optimizer_params.update(args.optimizer_params)

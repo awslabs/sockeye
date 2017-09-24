@@ -569,10 +569,6 @@ def add_training_args(params):
                               type=simple_dict(),
                               default=None,
                               help='Additional optimizer params as dictionary. Format: key1:value1,key2:value2,...')
-    train_params.add_argument('--eve-loss',
-                              default=C.EVE_LOSS_BATCH,
-                              choices=C.EVE_LOSS,
-                              help='Which loss to use for Eve optimizer. Default: %(default)s.')
     train_params.add_argument('--weight-init',
                               type=str,
                               default=C.INIT_XAVIER,
