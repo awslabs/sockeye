@@ -67,6 +67,8 @@ class EveState:
         # Mean and variance for Adam
         self.mean = zeros_like(weight, ctx=weight.context)
         self.variance = zeros_like(weight, ctx=weight.context)
+        # For Nadam warmup
+        self.m_schedule = 1.
         # Values for computing Eve's d term (batch)
         self.batch_f_hat_prev = 0.
         self.batch_d_prev = 1.
@@ -84,45 +86,53 @@ class Eve(SockeyeOptimizer):
         * "Improving Stochastic Gradient Descent with Feedback"
           Jayanth Koushik; Hiroaki Hayashi (https://arxiv.org/abs/1611.01505)
 
-    This version allows using validation checkpoint loss in addition to training batch loss.
+    This version allows:
+        * Using validation checkpoint loss in addition to training batch loss.
+        * Using Adam or Nesterov Adam (Nadam) as the base algorithm
 
     Eve does not currently support rescaling gradients, clipping gradients, or weight decay.
 
     :param learning_rate: The initial learning rate.
     :param beta1: Exponential decay rate for the first moment estimates.
     :param beta2: Exponential decay rate for the second moment estimates.
-    :param beta3: Exponential decay rate for batch objective relative change.
-    :param beta4: Exponential decay rate for checkpoint objective relative change.
+    :param beta3_batch: Exponential decay rate for batch objective relative change.
+    :param beta3_checkpoint: Exponential decay rate for checkpoint objective relative change.
     :param epsilon: Small value to avoid division by 0.
     :param k_lo: Lower threshold for relative change.
     :param k_hi: Upper threshold for relative change.
     :param use_batch_objective: Incorporate batch objective (can use both).
     :param use_checkpoint_objective: Incorporate checkpoint objective (can use both).
+    :param use_nesterov_momentum: Use Nesterov-accelerated adaptive moment estimation (update rules
+                                  used by "Nadam" optimizer).
     """
     def __init__(self,
                  learning_rate: float = 0.001,
-                 beta1: float = 0.9,
+                 beta1: float = 0.99,
                  beta2: float = 0.999,
-                 beta3: float = 0.999,
-                 beta4: float = 0.,
+                 beta3_batch: float = 0.999,
+                 beta3_checkpoint: float = 0.,
                  epsilon: float = 1e-8,
                  k_lo: float = 0.1,
                  k_hi: float = 10,
+                 schedule_decay: float = 0.004,
                  use_batch_objective: bool = True,
                  use_checkpoint_objective: bool = False,
+                 use_nesterov_momentum: bool = True,
                  **kwargs) -> None:
         check_condition(any((use_batch_objective, use_checkpoint_objective)),
                         "Must use at least one of: batch objective, checkpoint objective")
         super().__init__(learning_rate=learning_rate, **kwargs)
         self.beta1 = beta1
         self.beta2 = beta2
-        self.beta3 = beta3
-        self.beta4 = beta4
+        self.beta3_batch = beta3_batch
+        self.beta3_checkpoint = beta3_checkpoint
         self.epsilon = epsilon
         self.k_lo = k_lo
         self.k_hi = k_hi
+        self.schedule_decay = schedule_decay
         self.use_batch_objective = use_batch_objective
         self.use_checkpoint_objective = use_checkpoint_objective
+        self.use_nesterov_momentum = use_nesterov_momentum
 
     def create_state(self, index: int, weight: NDArray) -> EveState:
         return EveState(weight)
@@ -134,25 +144,15 @@ class Eve(SockeyeOptimizer):
         lr = self._get_lr(index)
         wd = self._get_wd(index)
         self._update_count(index)
+
         t = self._index_update_count[index]
 
         # Preprocess grad
         grad *= self.rescale_grad + wd * weight
         if self.clip_gradient is not None:
-            grad = clip(grad, -1 * self.clip_gradient, self.clip_gradient)
+            grad = clip(grad, -1. * self.clip_gradient, self.clip_gradient)
 
-        # Standard Adam rules for updating mean and variance
-        mean = state.mean
-        var = state.variance
-
-        coef1 = 1. - self.beta1**t
-        coef2 = 1. - self.beta2**t
-        lr *= math.sqrt(coef2)/coef1
-
-        mean[:] = self.beta1 * mean + (1. - self.beta1) * grad
-        var[:] = self.beta2 * var + (1. - self.beta2) * (grad**2)
-
-        # Now compute Eve's f_hat and d terms
+        # First compute Eve's f_hat and d terms
 
         def compute_d(t: int, f: float, f_hat_prev: float, d_prev: float, beta: float) -> Tuple[float, float]:
             """Compute Eve's f_hat and d terms as described in paper"""
@@ -181,7 +181,7 @@ class Eve(SockeyeOptimizer):
                                              self.batch_state.metric_val,
                                              state.batch_f_hat_prev,
                                              state.batch_d_prev,
-                                             self.beta3)
+                                             self.beta3_batch)
             state.batch_f_hat_prev = batch_f_hat
             state.batch_d_prev = batch_d
 
@@ -196,7 +196,7 @@ class Eve(SockeyeOptimizer):
                                                            self.checkpoint_state.metric_val,
                                                            state.checkpoint_f_hat_prev,
                                                            state.checkpoint_d_prev,
-                                                           self.beta4)
+                                                           self.beta3_checkpoint)
                 state.checkpoint_prev = checkpoint
                 state.checkpoint_f_hat_prev = checkpoint_f_hat
                 state.checkpoint_d_prev = checkpoint_d
@@ -211,5 +211,30 @@ class Eve(SockeyeOptimizer):
         elif self.use_checkpoint_objective:
             d = checkpoint_d
 
-        # Final weight update rule (Adam rule with extra d term)
-        weight[:] = weight - lr * mean / (d * sqrt(var) + self.epsilon)
+        # Update mean and variance (Adam/Nadam)
+        m_t, v_t = state.mean, state.variance
+
+        m_t[:] = self.beta1 * m_t + (1. - self.beta1) * grad
+        v_t[:] = self.beta2 * v_t + (1. - self.beta2) * grad * grad
+
+        # Finally apply either Adam or Nadam update
+        if self.use_nesterov_momentum:
+            # Nadam warming momentum schedule
+            momentum_t = self.beta1 * (1. - 0.5 * 0.96**(t * self.schedule_decay))
+            momentum_t_1 = self.beta1 * (1. - 0.5 * 0.96**((t + 1) * self.schedule_decay))
+            state.m_schedule = state.m_schedule * momentum_t
+            m_schedule_next = state.m_schedule * momentum_t_1
+            # Nadam update terms
+            grad_prime = grad / (1. - state.m_schedule)
+            m_t_prime = m_t / (1. - m_schedule_next)
+            v_t_prime = v_t / (1. - self.beta2**t)
+            m_t_bar = (1. - momentum_t) * grad_prime + momentum_t_1 * m_t_prime
+            # Final weight update with extra d term
+            weight[:] -= lr * m_t_bar / (d * sqrt(v_t_prime) + self.epsilon)
+        else:
+            # Adam warmup
+            coef1 = 1. - self.beta1**t
+            coef2 = 1. - self.beta2**t
+            lr *= math.sqrt(coef2) / coef1
+            # Final weight update with extra d term
+            weight[:] = weight - lr * m_t / (d * sqrt(v_t) + self.epsilon)
