@@ -21,7 +21,7 @@ import math
 import pickle
 import random
 from collections import OrderedDict
-from typing import Any, Dict, Iterator, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterator, Iterable, List, NamedTuple, Optional, Tuple
 
 import mxnet as mx
 import numpy as np
@@ -360,6 +360,16 @@ def get_parallel_bucket(buckets: List[Tuple[int, int]],
     return bucket
 
 
+BucketBatchSize = NamedTuple("BucketBatchSize", [
+    ("batch_size", int),
+    ("average_words_per_batch", float)
+])
+"""
+:param batch_size: Number of sentences in each batch.
+:param average_words_per_batch: Approximate number of non-padding tokens in each batch.
+"""
+
+
 # TODO: consider more memory-efficient data reading (load from disk on demand)
 # TODO: consider using HDF5 format for language data
 class ParallelBucketSentenceIter(mx.io.DataIter):
@@ -393,7 +403,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
                  eos_id: int,
                  pad_id: int,
                  unk_id: int,
-                 bucket_batch_sizes: Optional[List[Tuple[int, int]]] = None,
+                 bucket_batch_sizes: Optional[List[BucketBatchSize]] = None,
                  fill_up: Optional[str] = None,
                  source_data_name=C.SOURCE_NAME,
                  target_data_name=C.TARGET_NAME,
@@ -435,16 +445,20 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         # "Staging area" that needs to fit any size batch we're using by total number of elements.
         # When computing per-bucket batch sizes, we guarantee that the default bucket will have the
         # largest total batch size.
+        # Note: this guarantees memory sharing for input data and is generally a good heuristic for
+        # other parts of the model, but it is possible that some architectures will have intermediate
+        # operations that produce shapes larger than the default bucket size.  In these cases, MXNet
+        # will silently allocate additional memory.
         self.provide_data = [
             mx.io.DataDesc(name=source_data_name,
-                           shape=(self.bucket_batch_sizes[-1][0], self.default_bucket_key[0]),
+                           shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[0]),
                            layout=C.BATCH_MAJOR),
             mx.io.DataDesc(name=target_data_name,
-                           shape=(self.bucket_batch_sizes[-1][0], self.default_bucket_key[1]),
+                           shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[1]),
                            layout=C.BATCH_MAJOR)]
         self.provide_label = [
             mx.io.DataDesc(name=label_name,
-                           shape=(self.bucket_batch_sizes[-1][0], self.default_bucket_key[1]),
+                           shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[1]),
                            layout=C.BATCH_MAJOR)]
 
         self.data_names = [self.source_data_name, self.target_data_name]
@@ -453,7 +467,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         # create index tuples (i,j) into buckets: i := bucket index ; j := row index of bucket array
         self.idx = []  # type: List[Tuple[int, int]]
         for i, buck in enumerate(self.data_source):
-            batch_size_seq, _ = self.bucket_batch_sizes[i]
+            batch_size_seq = self.bucket_batch_sizes[i].batch_size
             rest = len(buck) % batch_size_seq
             if rest > 0:
                 logger.info("Discarding %d samples from bucket %s due to incomplete batch", rest, self.buckets[i])
@@ -516,8 +530,10 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         logger.info("Vocab coverage target: %.0f%%", (1 - num_of_unks_target / tokens_target) * 100)
         logger.info("Total: %d samples in %d buckets", sum(len(b) for b in self.data_source), len(self.buckets))
         nsamples = 0
-        for bkt, buck, (batch_size_seq, _), average_seq_len in zip(
-                self.buckets, self.data_source, self.bucket_batch_sizes, self.data_label_average_len):
+        for bkt, buck, batch_size_seq, average_seq_len in zip(self.buckets,
+                                                              self.data_source,
+                                                              (bbs.batch_size for bbs in self.bucket_batch_sizes),
+                                                              self.data_label_average_len):
             logger.info("Bucket of %s : %d samples in %d batches of %d, approx %0.1f words/batch",
                         bkt,
                         len(buck),
@@ -551,7 +567,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         if self.bucket_batch_sizes is not None:
             return
         # Otherwise compute here
-        self.bucket_batch_sizes = [[] for _ in self.buckets]
+        self.bucket_batch_sizes = [None for _ in self.buckets]
         largest_total_batch_size = 0
         for buck_idx, bucket_shape in enumerate(self.buckets):
             # Target/label length with padding
@@ -571,7 +587,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
             else:
                 batch_size_seq = self.batch_size
                 batch_size_word = batch_size_seq * average_seq_len
-            self.bucket_batch_sizes[buck_idx] = (batch_size_seq, batch_size_word)
+            self.bucket_batch_sizes[buck_idx] = BucketBatchSize(batch_size_seq, batch_size_word)
             # Track largest batch size by total elements
             largest_total_batch_size = max(largest_total_batch_size, batch_size_seq * max(*bucket_shape))
         # Final step: guarantee that largest bucket by sequence length also has largest total batch size.
@@ -579,10 +595,10 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         if self.batch_by_words:
             padded_seq_len = max(*self.buckets[-1])
             average_seq_len = self.data_label_average_len[-1]
-            while self.bucket_batch_sizes[-1][0] * padded_seq_len < largest_total_batch_size:
-                batch_size_seq, batch_size_word = self.bucket_batch_sizes[-1]
-                self.bucket_batch_sizes[-1] = (batch_size_seq + self.batch_num_devices,
-                                               batch_size_word + self.batch_num_devices * average_seq_len)
+            while self.bucket_batch_sizes[-1].batch_size * padded_seq_len < largest_total_batch_size:
+                self.bucket_batch_sizes[-1] = BucketBatchSize(
+                    self.bucket_batch_sizes[-1].batch_size + self.batch_num_devices,
+                    self.bucket_batch_sizes[-1].average_words_per_batch + self.batch_num_devices * average_seq_len)
 
     def _convert_to_array(self):
         for i in range(len(self.data_source)):
@@ -591,7 +607,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
             self.data_label[i] = np.asarray(self.data_label[i], dtype=self.dtype)
 
             n = len(self.data_source[i])
-            batch_size_seq, _ = self.bucket_batch_sizes[i]
+            batch_size_seq = self.bucket_batch_sizes[i].batch_size
             if n % batch_size_seq != 0:
                 buck_shape = self.buckets[i]
                 rest = batch_size_seq - n % batch_size_seq
@@ -653,7 +669,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         i, j = self.idx[self.curr_idx]
         self.curr_idx += 1
 
-        batch_size_seq, _ = self.bucket_batch_sizes[i]
+        batch_size_seq = self.bucket_batch_sizes[i].batch_size
         source = self.nd_source[i][j:j + batch_size_seq]
         target = self.nd_target[i][j:j + batch_size_seq]
         data = [source, target]
