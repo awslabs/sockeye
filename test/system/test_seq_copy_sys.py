@@ -88,7 +88,7 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
                                                train_target_path,
                                                dev_source_path,
                                                dev_target_path,
-                                               max_seq_len=_LINE_MAX_LENGTH + 10,
+                                               max_seq_len=_LINE_MAX_LENGTH + 1,
                                                work_dir=work_dir)
         assert perplexity <= perplexity_thresh
         assert bleu >= bleu_thresh
