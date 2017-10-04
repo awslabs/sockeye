@@ -154,6 +154,7 @@ class CrossEntropyMetric(EvalMetric):
             label = label.as_in_context(pred.context).reshape((label.size,))
             prob = mx.nd.pick(pred, label.astype(dtype="int32"))
             # Ignore padding
+            # TODO: contribute ignoring padding for cross-entropy back to MXNet
             ignore = (label == C.PAD_ID).astype(dtype=prob.dtype)
             prob = prob * (1 - ignore) + ignore
             # Sum, normalizing if needed
