@@ -20,8 +20,7 @@ from collections import namedtuple
 import math
 from typing import Optional, Tuple
 
-from mxnet.ndarray import NDArray, sqrt, zeros_like
-from mxnet.optimizer import Optimizer, clip
+import mxnet as mx
 
 from sockeye.utils import check_condition
 
@@ -29,9 +28,9 @@ BatchState = namedtuple("BatchState", ["metric_val"])
 CheckpointState = namedtuple("CheckpointState", ["checkpoint", "metric_val"])
 
 
-class SockeyeOptimizer(Optimizer):
+class SockeyeOptimizer(mx.optimizer.Optimizer):
     """
-    Optimizer that has access to additional information from the last batch and the last chekpoint
+    Optimizer that has access to additional information from the last batch and the last checkpoint
     when updating weights.
 
     :param request_optimized_metric: Whether to request the optimized metric (e.g. perplexity) in
@@ -67,10 +66,10 @@ class EveState:
     """
     Storage class for Eve optimizer state information.
     """
-    def __init__(self, weight: NDArray) -> None:
+    def __init__(self, weight: mx.nd.NDArray) -> None:
         # Mean and variance for Adam
-        self.mean = zeros_like(weight, ctx=weight.context)
-        self.variance = zeros_like(weight, ctx=weight.context)
+        self.mean = mx.nd.zeros_like(weight, ctx=weight.context)
+        self.variance = mx.nd.zeros_like(weight, ctx=weight.context)
         # For Nadam warmup
         self.m_schedule = 1.
         # Values for computing Eve's d term (batch)
@@ -82,7 +81,7 @@ class EveState:
         self.checkpoint_d_prev = 1.
 
 
-@Optimizer.register
+@mx.optimizer.Optimizer.register
 class Eve(SockeyeOptimizer):
     """
     The Eve optimizer is an extended version of Adam that incorporates feedback from the objective
@@ -138,13 +137,13 @@ class Eve(SockeyeOptimizer):
         self.use_checkpoint_objective = use_checkpoint_objective
         self.use_nesterov_momentum = use_nesterov_momentum
 
-    def create_state(self, index: int, weight: NDArray) -> EveState:
+    def create_state(self, index: int, weight: mx.nd.NDArray) -> EveState:
         return EveState(weight)
 
-    def update(self, index: int, weight: NDArray, grad: NDArray, state: EveState):
+    def update(self, index: int, weight: mx.nd.NDArray, grad: mx.nd.NDArray, state: EveState):
 
-        assert isinstance(weight, NDArray)
-        assert isinstance(grad, NDArray)
+        assert isinstance(weight, mx.nd.NDArray)
+        assert isinstance(grad, mx.nd.NDArray)
         lr = self._get_lr(index)
         wd = self._get_wd(index)
         self._update_count(index)
@@ -152,9 +151,9 @@ class Eve(SockeyeOptimizer):
         t = self._index_update_count[index]
 
         # Preprocess grad
-        grad *= self.rescale_grad + wd * weight
+        grad = grad * self.rescale_grad + wd * weight
         if self.clip_gradient is not None:
-            grad = clip(grad, -1. * self.clip_gradient, self.clip_gradient)
+            grad = mx.nd.clip(grad, -1. * self.clip_gradient, self.clip_gradient)
 
         # First compute Eve's f_hat and d terms
 
@@ -234,11 +233,11 @@ class Eve(SockeyeOptimizer):
             v_t_prime = v_t / (1. - self.beta2**t)
             m_t_bar = (1. - momentum_t) * grad_prime + momentum_t_1 * m_t_prime
             # Final weight update with extra d term
-            weight[:] -= lr * m_t_bar / (d * sqrt(v_t_prime) + self.epsilon)
+            weight[:] -= lr * m_t_bar / (d * mx.nd.sqrt(v_t_prime) + self.epsilon)
         else:
             # Adam warmup
             coef1 = 1. - self.beta1**t
             coef2 = 1. - self.beta2**t
             lr *= math.sqrt(coef2) / coef1
             # Final weight update with extra d term
-            weight[:] = weight - lr * m_t / (d * sqrt(v_t) + self.epsilon)
+            weight[:] = weight - lr * m_t / (d * mx.nd.sqrt(v_t) + self.epsilon)
