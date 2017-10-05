@@ -38,8 +38,8 @@ class SockeyeOptimizer(mx.optimizer.Optimizer):
     """
     def __init__(self, request_optimized_metric: bool = False, **kwargs) -> None:
         self.request_optimized_metric = request_optimized_metric
-        self.batch_state = Optional[BatchState]
-        self.checkpoint_state = Optional[CheckpointState]
+        self.batch_state = None # type: Optional[BatchState]
+        self.checkpoint_state = None # type: Optional[CheckpointState]
         super().__init__(**kwargs)
 
     def pre_update_batch(self, batch_state: BatchState):
