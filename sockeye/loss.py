@@ -151,6 +151,7 @@ class CrossEntropyMetric(EvalMetric):
 
     def update(self, labels, preds):
         for label, pred in zip(labels, preds):
+            batch_size = label.shape[0]
             label = label.as_in_context(pred.context).reshape((label.size,))
             prob = mx.nd.pick(pred, label.astype(dtype="int32"))
             # Ignore padding
@@ -163,7 +164,9 @@ class CrossEntropyMetric(EvalMetric):
                 loss = loss / mx.nd.sum(1 - ignore)
                 self.num_inst += 1
             else:
-                self.num_inst += label.size - mx.nd.sum(ignore).asscalar()
+                # When not normalizing, we divide by the batch size (number of sequences)
+                # NOTE: This is different from MXNet's metrics
+                self.num_inst += batch_size
             self.sum_metric += mx.nd.sum(loss).asscalar()
 
 
@@ -239,11 +242,13 @@ class SmoothedCrossEntropyMetric(EvalMetric):
         # Take cross entropy values only
         sces = preds[::2]
         for label, sce in zip(labels, sces):
+            batch_size = label.shape[0]
             # SCE is pre-computed, so just sum
             self.sum_metric += sce.asnumpy().sum()
             # Only scale if loss is not already normalized
             if self.loss_config.normalize:
                 self.num_inst += 1
             else:
-                ignore = (label == C.PAD_ID).astype(dtype=sce.dtype)
-                self.num_inst += label.size - mx.nd.sum(ignore).asscalar()
+                # When not normalizing, we divide by the batch size (number of sequences)
+                # NOTE: This is different from MXNet's metrics
+                self.num_inst += batch_size
