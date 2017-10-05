@@ -98,7 +98,7 @@ def vocab_to_json(vocab: Mapping, path: str):
     :param vocab: Vocabulary mapping.
     :param path: Output file path.
     """
-    with open(path, "w") as out:
+    with open(path, "w", encoding=C.VOCAB_ENCODING) as out:
         json.dump(vocab, out, indent=4, ensure_ascii=False)
         logger.info('Vocabulary saved to "%s"', path)
 
@@ -137,7 +137,7 @@ def vocab_from_json(path: str) -> Dict:
     :param path: Path to json file containing the vocabulary.
     :return: The loaded vocabulary.
     """
-    with open(path) as inp:
+    with open(path, encoding=C.VOCAB_ENCODING) as inp:
         vocab = json.load(inp)
         logger.info('Vocabulary (%d words) loaded from "%s"', len(vocab), path)
         return vocab
