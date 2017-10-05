@@ -14,7 +14,7 @@
 import copy
 import logging
 import os
-from typing import Optional
+from typing import Dict, List, Optional
 
 import mxnet as mx
 
@@ -62,7 +62,7 @@ class ModelConfig(Config):
                  lexical_bias: bool = False,
                  learn_lexical_bias: bool = False,
                  weight_tying: bool = False,
-                 weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX):
+                 weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX) -> None:
         super().__init__()
         self.config_data = config_data
         self.max_seq_len_source = max_seq_len_source
@@ -89,15 +89,15 @@ class SockeyeModel:
     :param config: Model configuration.
     """
 
-    def __init__(self, config: ModelConfig):
+    def __init__(self, config: ModelConfig) -> None:
         self.config = copy.deepcopy(config)
         self.config.freeze()
         logger.info("%s", self.config)
-        self.encoder = None
-        self.decoder = None
-        self.rnn_cells = []
+        self.encoder = None  # type: Optional[encoder.Encoder]
+        self.decoder = None  # type: Optional[decoder.Decoder]
+        self.rnn_cells = []  # type: List[mx.rnn.RNNCell]
         self.built = False
-        self.params = None
+        self.params = None  # type: Optional[Dict]
 
     def save_config(self, folder: str):
         """
@@ -119,7 +119,7 @@ class SockeyeModel:
         """
         config = ModelConfig.load(fname)
         logger.info('ModelConfig loaded from "%s"', fname)
-        return config
+        return config  # type: ignore
 
     def save_params_to_file(self, fname: str):
         """
@@ -142,6 +142,10 @@ class SockeyeModel:
         :param fname: Path to load parameters from.
         """
         assert self.built
+        utils.check_condition(os.path.exists(fname), "No model parameter file found under %s. "
+                                                     "This is either not a model directory or the first training "
+                                                     "checkpoint has not happened yet." % fname)
+
         self.params, _ = utils.load_params(fname)
         # pack rnn cell weights
         for cell in self.rnn_cells:

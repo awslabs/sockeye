@@ -6,6 +6,8 @@ include pylintrc
 include typechecked-files
 include test/data/config_with_missing_attributes.yaml
 include sockeye/git_version.py
+include CODEOWNERS
+include CONTRIBUTING.md
 exclude *.sh
 include pytest.ini
 recursive-include test *.py

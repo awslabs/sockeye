@@ -183,7 +183,7 @@ def add_io_args(params):
                              help='Folder where model & training results are written to.')
     data_params.add_argument('--overwrite-output',
                              action='store_true',
-                             help='Overwrite output folder if it exists.')
+                             help='Delete all contents of the model directory if it already exists.')
 
     data_params.add_argument('--source-vocab',
                              required=False,
@@ -242,14 +242,7 @@ def add_device_args(params):
                                     'write permissions.')
 
 
-def add_model_parameters(params):
-    model_params = params.add_argument_group("ModelConfig")
-
-    model_params.add_argument('--params', '-p',
-                              type=str,
-                              default=None,
-                              help='Initialize model parameters from file. Overrides random initializations.')
-
+def add_vocab_args(model_params):
     model_params.add_argument('--num-words',
                               type=multiple_values(num_values=2, greater_or_equal=0),
                               default=(50000, 50000),
@@ -259,6 +252,17 @@ def add_model_parameters(params):
                               type=multiple_values(num_values=2, greater_or_equal=1),
                               default=(1, 1),
                               help='Minimum frequency of words to be included in vocabularies. Default: %(default)s.')
+
+
+def add_model_parameters(params):
+    model_params = params.add_argument_group("ModelConfig")
+
+    model_params.add_argument('--params', '-p',
+                              type=str,
+                              default=None,
+                              help='Initialize model parameters from file. Overrides random initializations.')
+
+    add_vocab_args(model_params)
 
     model_params.add_argument('--encoder',
                               choices=C.ENCODERS,
@@ -769,3 +773,9 @@ def add_evaluate_args(params):
                              action="store_true",
                              help="Do not fail if number of hypotheses does not match number of references. "
                                   "Default: %(default)s.")
+
+
+def add_build_vocab_args(params):
+    params.add_argument('-i', '--inputs', required=True, nargs='+', help='List of text files to build vocabulary from.')
+    params.add_argument('-o', '--output', required=True, type=str, help="Output filename to write vocabulary to.")
+    add_vocab_args(params)

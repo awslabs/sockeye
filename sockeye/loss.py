@@ -105,7 +105,7 @@ class CrossEntropyLoss(Loss):
     :param loss_config: Loss configuration.
     """
 
-    def __init__(self, loss_config: LossConfig):
+    def __init__(self, loss_config: LossConfig) -> None:
         self.loss_config = loss_config
 
     def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> List[mx.sym.Symbol]:
@@ -180,7 +180,7 @@ class SmoothedCrossEntropyLoss(Loss):
     :param loss_config: Loss configuration.
     """
 
-    def __init__(self, loss_config: LossConfig):
+    def __init__(self, loss_config: LossConfig) -> None:
         self.loss_config = loss_config
         utils.check_condition(self.loss_config.smoothed_cross_entropy_alpha >= 0,
                               "alpha for smoothed loss must be >= 0")

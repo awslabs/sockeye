@@ -111,7 +111,7 @@ class Eve(SockeyeOptimizer):
     """
     def __init__(self,
                  learning_rate: float = 0.001,
-                 beta1: float = 0.99,
+                 beta1: float = 0.9,
                  beta2: float = 0.999,
                  beta3_batch: float = 0.999,
                  beta3_checkpoint: float = 0.,
@@ -121,7 +121,7 @@ class Eve(SockeyeOptimizer):
                  schedule_decay: float = 0.004,
                  use_batch_objective: bool = True,
                  use_checkpoint_objective: bool = False,
-                 use_nesterov_momentum: bool = True,
+                 use_nesterov_momentum: bool = False,
                  **kwargs) -> None:
         check_condition(any((use_batch_objective, use_checkpoint_objective)),
                         "Must use at least one of: batch objective, checkpoint objective")

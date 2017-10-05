@@ -114,7 +114,8 @@ args = dict(
             'sockeye-translate = sockeye.translate:main',
             'sockeye-average = sockeye.average:main',
             'sockeye-embeddings = sockeye.embeddings:main',
-            'sockeye-evaluate = sockeye.evaluate:main'
+            'sockeye-evaluate = sockeye.evaluate:main',
+            'sockeye-vocab = sockeye.vocab:main'
         ],
     },
 
