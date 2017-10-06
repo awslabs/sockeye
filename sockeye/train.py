@@ -42,6 +42,7 @@ from . import lexicon
 from . import loss
 from . import lr_scheduler
 from . import model
+from . import optimizers
 from . import rnn
 from . import training
 from . import transformer
@@ -448,7 +449,7 @@ def create_model_config(args: argparse.Namespace,
     config_encoder = create_encoder_config(args, vocab_source_size, config_conv)
     config_decoder = create_decoder_config(args, vocab_target_size)
 
-    config_loss = loss.LossConfig(type=args.loss,
+    config_loss = loss.LossConfig(name=args.loss,
                                   vocab_size=vocab_target_size,
                                   normalize=args.normalize_loss,
                                   smoothed_cross_entropy_alpha=args.smoothed_cross_entropy_alpha)
@@ -531,6 +532,9 @@ def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict]:
     else:
         # Making MXNet module API's default scaling factor explicit
         optimizer_params["rescale_grad"] = 1.0 / args.batch_size
+     # Manually specified params
+    if args.optimizer_params:
+        optimizer_params.update(args.optimizer_params)
     logger.info("Optimizer: %s", optimizer)
     logger.info("Optimizer Parameters: %s", optimizer_params)
 

@@ -58,6 +58,39 @@ def learning_schedule() -> Callable:
     return parse
 
 
+def simple_dict() -> Callable:
+    """
+    A simple dictionary format that does not require spaces or quoting.
+
+    Supported types: bool, int, float
+
+    :return: A method that can be used as a type in argparse.
+    """
+
+    def parse(dict_str: str):
+
+        def _parse(value: str):
+            if value == "True":
+                return True
+            if value == "False":
+                return False
+            if "." in value:
+                return float(value)
+            return int(value)
+
+        _dict = dict()
+        try:
+            for entry in dict_str.split(","):
+                key, value = entry.split(":")
+                _dict[key] = _parse(value)
+        except ValueError:
+            raise argparse.ArgumentTypeError("Specify argument dictionary as key1:value1,key2:value2,..."
+                                             " Supported types: bool, int, float.")
+        return _dict
+
+    return parse
+
+
 def multiple_values(num_values: int = 0,
                     greater_or_equal: Optional[float] = None,
                     data_type: Callable = int) -> Callable:
@@ -533,9 +566,13 @@ def add_training_args(params):
                               help="Dropout probability for ConvolutionalEmbeddingEncoder. Default: %(default)s.")
 
     train_params.add_argument('--optimizer',
-                              default='adam',
-                              choices=['adam', 'sgd', 'rmsprop'],
+                              default=C.OPTIMIZER_ADAM,
+                              choices=C.OPTIMIZERS,
                               help='SGD update rule. Default: %(default)s.')
+    train_params.add_argument('--optimizer-params',
+                              type=simple_dict(),
+                              default=None,
+                              help='Additional optimizer params as dictionary. Format: key1:value1,key2:value2,...')
     train_params.add_argument('--weight-init',
                               type=str,
                               default=C.INIT_XAVIER,

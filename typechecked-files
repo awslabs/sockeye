@@ -20,6 +20,7 @@ sockeye/log.py
 sockeye/loss.py
 sockeye/lr_scheduler.py
 sockeye/model.py
+sockeye/optimizers.py
 sockeye/output_handler.py
 sockeye/rnn.py
 sockeye/train.py
