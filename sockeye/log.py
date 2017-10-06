@@ -13,8 +13,8 @@
 
 import logging
 import logging.config
+import sys
 from typing import Optional
-
 
 FORMATTERS = {
     'verbose': {
@@ -117,7 +117,14 @@ def setup_main_logger(name: str, file_logging=True, console=True, path: Optional
         log_config["handlers"]["rotating"]["filename"] = path
 
     logging.config.dictConfig(log_config)
-    return logging.getLogger(name)
+    logger = logging.getLogger(name)
+
+    def exception_hook(exc_type, exc_value, exc_traceback):
+        logger.exception("UNCAUGHT EXCEPTION", exc_info=(exc_type, exc_value, exc_traceback))
+
+    sys.excepthook = exception_hook
+
+    return logger
 
 
 def log_sockeye_version(logger):

@@ -188,7 +188,7 @@ def get_transformer_encoder(config: transformer.TransformerConfig,
     encoders.append(Embedding(num_embed=config.model_size,
                               vocab_size=config.vocab_size,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
-                              dropout=config.dropout_residual,
+                              dropout=config.dropout_prepost,
                               embed_weight=embed_weight,
                               add_positional_encoding=config.positional_encodings))
     if config.conv_config is not None:
@@ -688,6 +688,10 @@ class TransformerEncoder(Encoder):
         self.prefix = prefix
         self.layers = [transformer.TransformerEncoderBlock(
             config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
+        self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                                 num_hidden=config.model_size,
+                                                                 dropout=config.dropout_prepost,
+                                                                 prefix="%sfinal_process" % prefix)
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -704,6 +708,7 @@ class TransformerEncoder(Encoder):
         for i, layer in enumerate(self.layers):
             # (batch_size, seq_len, config.model_size)
             data = layer(data, data_length, seq_len)
+        data = self.final_process(data=data, prev=None, length=seq_len)
         return data, data_length, seq_len
 
     def get_num_hidden(self) -> int:

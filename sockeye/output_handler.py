@@ -37,6 +37,8 @@ def get_output_handler(output_type: str,
         return StringOutputHandler(output_stream)
     elif output_type == C.OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENTS:
         return StringWithAlignmentsOutputHandler(output_stream, sure_align_threshold)
+    elif output_type == C.OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENT_MATRIX:
+        return StringWithAlignmentMatrixOutputHandler(output_stream)
     elif output_type == C.OUTPUT_HANDLER_BENCHMARK:
         return BenchmarkOutputHandler(output_stream)
     elif output_type == C.OUTPUT_HANDLER_ALIGN_PLOT:
@@ -116,6 +118,55 @@ class StringWithAlignmentsOutputHandler(StringOutputHandler):
         alignments = " ".join(
             ["%d-%d" % (s, t) for s, t in get_alignments(t_output.attention_matrix, threshold=self.threshold)])
         self.stream.write("%s\t%s\n" % (t_output.translation, alignments))
+        self.stream.flush()
+
+
+class StringWithAlignmentMatrixOutputHandler(StringOutputHandler):
+    """
+    Output handler to write translations and an alignment matrix to a stream.
+    Note that unlike other output handlers each input sentence will result in an output
+    consisting of multiple lines.
+    More concretely the format is:
+
+    ```
+    sentence id ||| target words ||| score ||| source words ||| number of source words ||| number of target words
+    ALIGNMENT FOR T_1
+    ALIGNMENT FOR T_2
+    ...
+    ALIGNMENT FOR T_n
+    ```
+
+    where the alignment is a list of probabilities of alignment to the source words.
+
+    :param stream: Stream to write translations and alignments to.
+    """
+
+    def __init__(self, stream) -> None:
+        super().__init__(stream)
+
+    def handle(self,
+               t_input: sockeye.inference.TranslatorInput,
+               t_output: sockeye.inference.TranslatorOutput,
+               t_walltime: float = 0.):
+        """
+        :param t_input: Translator input.
+        :param t_output: Translator output.
+        :param t_walltime: Total wall-clock time for translation.
+        """
+        line = "{sent_id:d} ||| {target} ||| {score:f} ||| {source} ||| {source_len:d} ||| {target_len:d}\n"
+        self.stream.write(line.format(sent_id=t_input.id,
+                                      target=" ".join(t_output.tokens),
+                                      score=t_output.score,
+                                      source=" ".join(t_input.tokens),
+                                      source_len=len(t_input.tokens),
+                                      target_len=len(t_output.tokens)))
+        attention_matrix = t_output.attention_matrix.T
+        for i in range(0, attention_matrix.shape[0]):
+            attention_vector = attention_matrix[i]
+            self.stream.write(" ".join(["%f" % value for value in attention_vector]))
+            self.stream.write("\n")
+
+        self.stream.write("\n")
         self.stream.flush()
 
 

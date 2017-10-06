@@ -41,11 +41,11 @@ def get_decoder(config: Config,
                 lexicon: Optional[lexicons.Lexicon] = None,
                 embed_weight: Optional[mx.sym.Symbol] = None) -> 'Decoder':
     if isinstance(config, RecurrentDecoderConfig):
-        return RecurrentDecoder(config=config, lexicon=lexicon, embed_weight=embed_weight, prefix=C.DECODER_PREFIX)
+        return RecurrentDecoder(config=config, lexicon=lexicon, embed_weight=embed_weight, prefix=C.RNN_DECODER_PREFIX)
     elif isinstance(config, ConvolutionalDecoderConfig):
         return ConvolutionalDecoder(config=config, prefix=C.CONVOLUTIONAL_DECODER_PREFIX)
     elif isinstance(config, transformer.TransformerConfig):
-        return TransformerDecoder(config=config, embed_weight=embed_weight, prefix=C.DECODER_PREFIX)
+        return TransformerDecoder(config=config, embed_weight=embed_weight, prefix=C.TRANSFORMER_DECODER_PREFIX)
     else:
         raise ValueError("Unsupported decoder configuration")
 
@@ -185,6 +185,10 @@ class TransformerDecoder(Decoder):
         self.prefix = prefix
         self.layers = [transformer.TransformerDecoderBlock(
             config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
+        self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                                 num_hidden=config.model_size,
+                                                                 dropout=config.dropout_prepost,
+                                                                 prefix="%sfinal_process" % prefix)
 
         # Embedding & output parameters
         if embed_weight is None:
@@ -193,7 +197,7 @@ class TransformerDecoder(Decoder):
         self.embedding = encoder.Embedding(num_embed=config.model_size,
                                            vocab_size=config.vocab_size,
                                            prefix=C.TARGET_EMBEDDING_PREFIX,
-                                           dropout=config.dropout_residual,
+                                           dropout=config.dropout_prepost,
                                            embed_weight=embed_weight,
                                            add_positional_encoding=config.positional_encodings)
         if self.config.weight_tying:
@@ -239,6 +243,7 @@ class TransformerDecoder(Decoder):
         for layer in self.layers:
             target = layer(target, target_lengths, target_max_length, target_bias,
                            source_encoded, source_encoded_lengths, source_encoded_max_length)
+        target = self.final_process(data=target, prev=None, length=target_max_length)
 
         # target: (batch_size * target_max_length, model_size)
         target = mx.sym.reshape(data=target, shape=(-3, -1))
@@ -287,6 +292,7 @@ class TransformerDecoder(Decoder):
         for layer in self.layers:
             target = layer(target, target_lengths, target_max_length, target_bias,
                            source_encoded, source_encoded_lengths, source_encoded_max_length)
+        target = self.final_process(data=target, prev=None, length=target_max_length)
 
         # set all target positions to zero except for current time-step
         # target: (batch_size, target_max_length, model_size)
@@ -374,7 +380,7 @@ class RecurrentDecoderConfig(Config):
     :param embed_dropout: Dropout probability for target embeddings.
     :param hidden_dropout: Dropout probability on next decoder hidden state.
     :param weight_tying: Whether to share embedding and prediction parameter matrices.
-    :param zero_state_init: If true, initialize RNN states with zeros.
+    :param state_init: Type of RNN decoder state initialization: zero, last, average.
     :param context_gating: Whether to use context gating.
     :param layer_normalization: Apply layer normalization.
     :param attention_in_upper_layers: Pass the attention value to all layers in the decoder.
@@ -389,7 +395,7 @@ class RecurrentDecoderConfig(Config):
                  embed_dropout: float = .0,
                  hidden_dropout: float = .0,
                  weight_tying: bool = False,
-                 zero_state_init: bool = False,
+                 state_init: str = C.RNN_DEC_INIT_LAST,
                  context_gating: bool = False,
                  layer_normalization: bool = False,
                  attention_in_upper_layers: bool = False) -> None:
@@ -402,7 +408,7 @@ class RecurrentDecoderConfig(Config):
         self.embed_dropout = embed_dropout
         self.hidden_dropout = hidden_dropout
         self.weight_tying = weight_tying
-        self.zero_state_init = zero_state_init
+        self.state_init = state_init
         self.context_gating = context_gating
         self.layer_normalization = layer_normalization
         self.attention_in_upper_layers = attention_in_upper_layers
@@ -423,7 +429,7 @@ class RecurrentDecoder(Decoder):
                  config: RecurrentDecoderConfig,
                  lexicon: Optional[lexicons.Lexicon] = None,
                  embed_weight: Optional[mx.sym.Symbol] = None,
-                 prefix: str = C.DECODER_PREFIX) -> None:
+                 prefix: str = C.RNN_DECODER_PREFIX) -> None:
         # TODO: implement variant without input feeding
         self.config = config
         self.rnn_config = config.rnn_config
@@ -458,7 +464,7 @@ class RecurrentDecoder(Decoder):
                                                           layers=range(1, self.rnn_config.num_layers))
         self.rnn_pre_attention_n_states = len(self.rnn_pre_attention.state_shape)
 
-        if not self.config.zero_state_init:
+        if self.config.state_init != C.RNN_DEC_INIT_ZERO:
             self._create_state_init_parameters()
 
         # Hidden state parameters
@@ -731,7 +737,7 @@ class RecurrentDecoder(Decoder):
         Optionally, init states for RNN layers are computed using 1 non-linear FC
         with the last state of the encoder as input.
 
-        :param source_encoded: Concatenated encoder states. Shape: (batch_size, source_seq_len, encoder_num_hidden).
+        :param source_encoded: Concatenated encoder states. Shape: (source_seq_len, batch_size, encoder_num_hidden).
         :param source_encoded_length: Lengths of source sequences. Shape: (batch_size,).
         :return: Decoder state.
         """
@@ -739,10 +745,15 @@ class RecurrentDecoder(Decoder):
         # shape inference for the batch dimension during inference.
         # (batch_size, 1)
         zeros = mx.sym.expand_dims(mx.sym.zeros_like(source_encoded_length), axis=1)
-        # last encoder state
+        # last encoder state: (batch, num_hidden)
         source_encoded_last = mx.sym.SequenceLast(data=source_encoded,
                                                   sequence_length=source_encoded_length,
-                                                  use_sequence_length=True) if not self.config.zero_state_init else None
+                                                  use_sequence_length=True) \
+            if self.config.state_init == C.RNN_DEC_INIT_LAST else None
+        source_masked = mx.sym.SequenceMask(data=source_encoded,
+                                            sequence_length=source_encoded_length,
+                                            use_sequence_length=True,
+                                            value=0.) if self.config.state_init == C.RNN_DEC_INIT_AVG else None
 
         # decoder hidden state
         hidden = mx.sym.tile(data=zeros, reps=(1, self.num_hidden))
@@ -750,10 +761,19 @@ class RecurrentDecoder(Decoder):
         # initial states for each layer
         layer_states = []
         for state_idx, (_, init_num_hidden) in enumerate(sum([rnn.state_shape for rnn in self.get_rnn_cells()], [])):
-            if self.config.zero_state_init:
+            if self.config.state_init == C.RNN_DEC_INIT_ZERO:
                 init = mx.sym.tile(data=zeros, reps=(1, init_num_hidden))
             else:
-                init = mx.sym.FullyConnected(data=source_encoded_last,
+                if self.config.state_init == C.RNN_DEC_INIT_LAST:
+                    init = source_encoded_last
+                elif self.config.state_init == C.RNN_DEC_INIT_AVG:
+                    # (batch_size, encoder_num_hidden)
+                    init = mx.sym.broadcast_div(mx.sym.sum(source_masked, axis=0, keepdims=False),
+                                                mx.sym.expand_dims(source_encoded_length, axis=1))
+                else:
+                    raise ValueError("Unknown decoder state init type '%s'" % self.config.state_init)
+
+                init = mx.sym.FullyConnected(data=init,
                                              num_hidden=init_num_hidden,
                                              weight=self.init_ws[state_idx],
                                              bias=self.init_bs[state_idx],

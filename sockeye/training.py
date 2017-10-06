@@ -219,7 +219,7 @@ class TrainingModel(model.SockeyeModel):
                                                           self.config.config_data.validation_source,
                                                           self.config.config_data.validation_target,
                                                           output_folder, self.config.max_seq_len_source,
-                                                          limit=monitor_bleu) \
+                                                          sample_size=monitor_bleu) \
             if monitor_bleu else None
 
         logger.info("Training started.")
@@ -334,7 +334,8 @@ class TrainingModel(model.SockeyeModel):
                 self._save_params(output_folder, train_state.checkpoint)
                 cleanup_params_files(output_folder, max_params_files_to_keep,
                                      train_state.checkpoint, self.training_monitor.get_best_checkpoint())
-                self.training_monitor.checkpoint_callback(train_state.checkpoint, metric_train)
+                self.training_monitor.checkpoint_callback(train_state.checkpoint, metric_train,
+                                                          memory_data=utils.get_gpu_memory_usage(self.context))
 
                 toc = time.time()
                 logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f",
