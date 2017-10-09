@@ -759,7 +759,7 @@ def get_context_and_attention_probs(values: mx.sym.Symbol,
     probs = mx.sym.softmax(logits, axis=1, name='attention_softmax')
 
     # batch_dot: (batch, M, K) X (batch, K, N) –> (batch, M, N).
-    # (batch_size, encoder_num_hidden, seq_len) X (batch_size, seq_len, 1) -> (batch_size, num_hidden, 1)
+    # (batch_size, seq_len, num_hidden) X (batch_size, seq_len, 1) -> (batch_size, num_hidden, 1)
     context = mx.sym.batch_dot(lhs=values, rhs=probs, transpose_a=True)
     # (batch_size, encoder_num_hidden, 1)-> (batch_size, encoder_num_hidden)
     context = mx.sym.reshape(data=context, shape=(0, 0))

@@ -101,8 +101,8 @@ class InferenceModel(model.SockeyeModel):
         if self.max_supported_seq_len_source is not None:
             utils.check_condition(self.max_input_length <= self.max_supported_seq_len_source,
                                   "Encoder only supports a maximum length of %d" % self.max_supported_seq_len_source)
-        decoder_max_len = self.get_max_output_length(max_input_length)
         if self.max_supported_seq_len_target is not None:
+            decoder_max_len = self.get_max_output_length(max_input_length)
             utils.check_condition(decoder_max_len <= self.max_supported_seq_len_target,
                                   "Decoder only supports a maximum length of %d, but %d was requested. Note that the "
                                   "maximum output length depends on the input length and the source/target length "

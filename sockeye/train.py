@@ -275,6 +275,7 @@ def create_encoder_config(args: argparse.Namespace, vocab_source_size: int,
     """
     encoder_num_layers, _ = args.num_layers
     max_seq_len_source, max_seq_len_target = args.max_seq_len
+    config_encoder = None  # type: Optional[Config]
 
     if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
         encoder_transformer_preprocess, _ = args.transformer_preprocess
@@ -352,6 +353,8 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int, enco
 
     decoder_weight_tying = args.weight_tying and C.WEIGHT_TYING_TRG in args.weight_tying_type \
                            and C.WEIGHT_TYING_SOFTMAX in args.weight_tying_type
+
+    config_decoder = None  # type: Optional[Config]
 
     if args.decoder == C.TRANSFORMER_TYPE:
         _, decoder_transformer_preprocess = args.transformer_preprocess
@@ -572,7 +575,7 @@ def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict]:
     else:
         # Making MXNet module API's default scaling factor explicit
         optimizer_params["rescale_grad"] = 1.0 / args.batch_size
-        # Manually specified params
+    # Manually specified params
     if args.optimizer_params:
         optimizer_params.update(args.optimizer_params)
     logger.info("Optimizer: %s", optimizer)

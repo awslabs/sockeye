@@ -127,7 +127,6 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
                                                       prefix=C.CHAR_SEQ_ENCODER_PREFIX))
         if config.conv_config.add_positional_encoding:
             # If specified, add positional encodings to segment embeddings
-            # (TransformerEncoder compatibility, not in original paper)
             encoders.append(AddSinCosPositionalEmbeddings(num_embed=config.num_embed,
                                                           prefix="%sadd_positional_encodings" % C.CHAR_SEQ_ENCODER_PREFIX))
 
@@ -252,7 +251,7 @@ class Encoder(ABC):
         """
         return seq_len
 
-    def get_max_seq_len(self) -> Optional[None]:
+    def get_max_seq_len(self) -> Optional[int]:
         """
         :return: The maximum length supported by the encoder if such a restriction exists.
         """
@@ -374,7 +373,7 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
                  num_embed: int,
                  prefix: str) -> None:
         utils.check_condition(num_embed % 2 == 0, "Positional embeddings require an even embedding size it "
-                              "is however %d." % num_embed)
+                                                  "is however %d." % num_embed)
         self.num_embed = num_embed
         self.prefix = prefix
 
@@ -491,7 +490,7 @@ class AddLearnedPositionalEmbeddings(PositionalEncoder):
     def get_num_hidden(self) -> int:
         return self.num_embed
 
-    def get_max_seq_len(self):
+    def get_max_seq_len(self) -> Optional[int]:
         # we can only support sentences as long as the maximum length during training.
         return self.max_seq_len
 
@@ -521,7 +520,7 @@ class NoOpPositionalEmbeddings(PositionalEncoder):
 
 def get_positional_embedding(positional_embedding_type, num_embed, max_seq_len, prefix) -> PositionalEncoder:
     if positional_embedding_type == C.FIXED_POSITIONAL_EMBEDDING:
-         return AddSinCosPositionalEmbeddings(num_embed=num_embed, prefix=prefix)
+        return AddSinCosPositionalEmbeddings(num_embed=num_embed, prefix=prefix)
     elif positional_embedding_type == C.LEARNED_POSITIONAL_EMBEDDING:
         return AddLearnedPositionalEmbeddings(num_embed=num_embed,
                                               max_seq_len=max_seq_len,
@@ -586,6 +585,14 @@ class EncoderSequence(Encoder):
         for encoder in self.encoders:
             seq_len = encoder.get_encoded_seq_len(seq_len)
         return seq_len
+
+    def get_max_seq_len(self) -> Optional[int]:
+        """
+        :return: The maximum length supported by the encoder if such a restriction exists.
+        """
+        max_seq_len = min((encoder.get_max_seq_len()
+                           for encoder in self.encoders if encoder.get_max_seq_len() is not None), default=None)
+        return max_seq_len
 
 
 class RecurrentEncoder(Encoder):
@@ -742,7 +749,6 @@ class BiDirectionalRNNEncoder(Encoder):
         return self.forward_rnn.get_rnn_cells() + self.reverse_rnn.get_rnn_cells()
 
 
-
 class ConvolutionalEncoder(Encoder):
     """
     Encoder that uses convolution instead of recurrent connections, similar to Gehring et al. 2017.
@@ -750,6 +756,7 @@ class ConvolutionalEncoder(Encoder):
     :param config: Configuration for convolutional encoder.
     :param prefix: Name prefix for operations in this encoder.
     """
+
     def __init__(self,
                  config: ConvolutionalEncoderConfig,
                  prefix: str = C.CNN_ENCODER_PREFIX) -> None:

@@ -23,7 +23,7 @@ import mxnet as mx
 
 from sockeye.config import Config
 from sockeye.utils import check_condition
-from . import rnn_attention as attentions
+from . import rnn_attention
 from . import constants as C
 from . import encoder
 from . import layers
@@ -161,7 +161,7 @@ class Decoder(ABC):
         """
         return []
 
-    def get_max_seq_len(self) -> Optional[None]:
+    def get_max_seq_len(self) -> Optional[int]:
         """
         :return: The maximum length supported by the decoder if such a restriction exists.
         """
@@ -368,7 +368,7 @@ class TransformerDecoder(Decoder):
                                layout=C.BATCH_MAJOR),
                 mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")]
 
-    def get_max_seq_len(self):
+    def get_max_seq_len(self) -> Optional[int]:
         #  The positional embeddings potentially pose a limit on the maximum length at inference time.
         return self.pos_embedding.get_max_seq_len()
 
@@ -408,7 +408,7 @@ class RecurrentDecoderConfig(Config):
                  max_seq_len_source: int,
                  num_embed: int,
                  rnn_config: rnn.RNNConfig,
-                 attention_config: attentions.AttentionConfig,
+                 attention_config: rnn_attention.AttentionConfig,
                  embed_dropout: float = .0,
                  hidden_dropout: float = .0,
                  weight_tying: bool = False,
@@ -450,7 +450,7 @@ class RecurrentDecoder(Decoder):
         # TODO: implement variant without input feeding
         self.config = config
         self.rnn_config = config.rnn_config
-        self.attention = attentions.get_attention(config.attention_config, config.max_seq_len_source)
+        self.attention = rnn_attention.get_attention(config.attention_config, config.max_seq_len_source)
         self.lexicon = lexicon
         self.prefix = prefix
 
@@ -638,7 +638,7 @@ class RecurrentDecoder(Decoder):
         attention_func = self.attention.on(source_encoded, source_encoded_length, source_encoded_max_length)
 
         prev_state = RecurrentDecoderState(prev_hidden, list(layer_states))
-        prev_attention_state = attentions.AttentionState(context=None, probs=None, dynamic_source=prev_dynamic_source)
+        prev_attention_state = rnn_attention.AttentionState(context=None, probs=None, dynamic_source=prev_dynamic_source)
 
         # state.hidden: (batch_size, rnn_num_hidden)
         # attention_state.dynamic_source: (batch_size, source_seq_len, coverage_num_hidden)
@@ -807,8 +807,8 @@ class RecurrentDecoder(Decoder):
     def _step(self, word_vec_prev: mx.sym.Symbol,
               state: RecurrentDecoderState,
               attention_func: Callable,
-              attention_state: attentions.AttentionState,
-              seq_idx: int = 0) -> Tuple[RecurrentDecoderState, attentions.AttentionState]:
+              attention_state: rnn_attention.AttentionState,
+              seq_idx: int = 0) -> Tuple[RecurrentDecoderState, rnn_attention.AttentionState]:
 
         """
         Performs single-time step in the RNN, given previous word vector, previous hidden state, attention function,
@@ -878,7 +878,7 @@ class RecurrentDecoder(Decoder):
     def _context_gate(self,
                       hidden_concat: mx.sym.Symbol,
                       rnn_output: mx.sym.Symbol,
-                      attention_state: attentions.AttentionState,
+                      attention_state: rnn_attention.AttentionState,
                       seq_idx: int) -> mx.sym.Symbol:
         gate = mx.sym.FullyConnected(data=hidden_concat,
                                      num_hidden=self.num_hidden,
@@ -1286,6 +1286,6 @@ class ConvolutionalDecoder(Decoder):
                                layout=C.BATCH_MAJOR),
                 mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")] + next_layer_inputs
 
-    def get_max_seq_len(self):
+    def get_max_seq_len(self) -> Optional[int]:
         #  The positional embeddings potentially pose a limit on the maximum length at inference time.
         return self.pos_embedding.get_max_seq_len()

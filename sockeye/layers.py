@@ -90,7 +90,7 @@ class WeightNormalization:
     :param prefix: The prefix used for naming.
     """
 
-    def __init__(self, weight, num_hidden, ndim=2, prefix: str = ''):
+    def __init__(self, weight, num_hidden, ndim=2, prefix: str = '') -> None:
         self.prefix = prefix
         self.weight = weight
         self.num_hidden = num_hidden
@@ -99,9 +99,12 @@ class WeightNormalization:
                                      init=mx.init.Constant(value=1.0))
 
     def __call__(self) -> mx.sym.Symbol:
-        """ :return: A weight normalized weight tensor. """
-        # Normalize each hidden dimension and scale afterwards
-        return mx.sym.broadcast_mul(lhs=mx.sym.L2Normalization(self.weight),
+        """
+        Normalize each hidden dimension and scale afterwards
+
+        :return: A weight normalized weight tensor.
+        """
+        return mx.sym.broadcast_mul(lhs=mx.sym.L2Normalization(self.weight, mode='instance'),
                                     rhs=self.scale, name="%swn_scale" % self.prefix)
 
 

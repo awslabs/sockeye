@@ -96,7 +96,7 @@ class ConvolutionBlock:
         :param data: Input data. Shape: (batch_size, seq_len, num_hidden).
         :param data_length: Vector with sequence lengths. Shape: (batch_size,).
         :param seq_len: Maximum sequence length.
-        :return: Symbol(batch_size, seq_len, num_hidden)
+        :return: Shape: (batch_size, seq_len, num_hidden).
         """
         if self.pad_type == C.CNN_PAD_LEFT:
             # we pad enough on both sides and later slice the extra padding from the right

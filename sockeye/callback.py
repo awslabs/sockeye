@@ -72,7 +72,7 @@ class TrainingMonitor(object):
             logger.info("Logging training events for Tensorboard at '%s'", log_dir)
             self.summary_writer = tensorboard.FileWriter(log_dir)
         self.cp_decoder = cp_decoder
-        self.ctx = mp.get_context('spawn')
+        self.ctx = mp.get_context('spawn') # type: ignore
         self.num_concurrent_decodes = num_concurrent_decodes
         self.decoder_metric_queue = self.ctx.Queue()
         self.decoder_processes = []  # type: List[mp.Process]
