@@ -32,6 +32,7 @@ from . import checkpoint_decoder
 from . import constants as C
 from . import data_io
 from . import loss
+from .optimizers import BatchState, CheckpointState, SockeyeOptimizer
 from . import model
 from . import utils
 
@@ -86,7 +87,7 @@ class TrainingModel(model.SockeyeModel):
         self.bucketing = bucketing
         self._build_model_components(fused)
         self.module = self._build_module(train_iter)
-        self.training_monitor = None
+        self.training_monitor = None  # type: Optional[callback.TrainingMonitor]
 
     def _build_module(self, train_iter: data_io.ParallelBucketSentenceIter):
         """
@@ -141,19 +142,24 @@ class TrainingModel(model.SockeyeModel):
                                  context=self.context)
 
     @staticmethod
-    def _create_eval_metric(metric_names: List[AnyStr]) -> mx.metric.CompositeEvalMetric:
+    def create_eval_metric(metric_name: AnyStr) -> mx.metric.EvalMetric:
+        """
+        Creates an EvalMetric given a metric names.
+        """
+        # output_names refers to the list of outputs this metric should use to update itself, e.g. the softmax output
+        if metric_name == C.ACCURACY:
+            return utils.Accuracy(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME])
+        elif metric_name == C.PERPLEXITY:
+            return mx.metric.Perplexity(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME])
+        else:
+            raise ValueError("unknown metric name")
+
+    @staticmethod
+    def create_eval_metric_composite(metric_names: List[AnyStr]) -> mx.metric.CompositeEvalMetric:
         """
         Creates a composite EvalMetric given a list of metric names.
         """
-        metrics = []
-        # output_names refers to the list of outputs this metric should use to update itself, e.g. the softmax output
-        for metric_name in metric_names:
-            if metric_name == C.ACCURACY:
-                metrics.append(utils.Accuracy(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME]))
-            elif metric_name == C.PERPLEXITY:
-                metrics.append(mx.metric.Perplexity(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME]))
-            else:
-                raise ValueError("unknown metric name")
+        metrics = [TrainingModel.create_eval_metric(metric_name) for metric_name in metric_names]
         return mx.metric.create(metrics)
 
     def fit(self,
@@ -279,8 +285,21 @@ class TrainingModel(model.SockeyeModel):
         :param min_num_epochs: Minimum number of epochs to train, even if validation scores did not improve.
         :param mxmonitor: Optional MXNet monitor instance.
         """
-        metric_train = self._create_eval_metric(metrics)
-        metric_val = self._create_eval_metric(metrics)
+        # TODO: Push update to MXNet to expose the optimizer (Module should have a get_optimizer method)
+        if self.bucketing:
+            optimizer = self.module._curr_module._optimizer
+        else:
+            optimizer = self.module._optimizer
+
+        metric_train = self.create_eval_metric_composite(metrics)
+        metric_val = self.create_eval_metric_composite(metrics)
+        # If optimizer requires it, track loss as metric
+        if isinstance(optimizer, SockeyeOptimizer):
+            # Select training loss or optimized metric
+            if optimizer.request_optimized_metric:
+                metric_loss = self.create_eval_metric(self.training_monitor.optimized_metric)
+            else:
+                metric_loss = loss.get_loss(self.config.config_loss).create_metric()
 
         tic = time.time()
 
@@ -309,7 +328,23 @@ class TrainingModel(model.SockeyeModel):
             if mxmonitor is not None:
                 mxmonitor.tic()
 
+            # Forward-backward to get outputs, gradients
             self.module.forward_backward(batch)
+
+            # Update aggregate training loss
+            self.module.update_metric(metric_train, batch.label)
+
+            # If using an extended optimizer, provide extra state information about the current batch
+            # Loss: training loss
+            if isinstance(optimizer, SockeyeOptimizer):
+                # Loss for this batch
+                metric_loss.reset()
+                metric_loss.update(batch.label, self.module.get_outputs())
+                [(_, m_val)] = metric_loss.get_name_value()
+                batch_state = BatchState(metric_val=m_val)
+                optimizer.pre_update_batch(batch_state)
+
+            # Call optimizer to update weights given gradients, current state
             self.module.update()
 
             if mxmonitor is not None:
@@ -322,8 +357,6 @@ class TrainingModel(model.SockeyeModel):
                 # pre-fetch next batch
                 next_data_batch = train_iter.next()
                 self.module.prepare(next_data_batch)
-
-            self.module.update_metric(metric_train, batch.label)
 
             self.training_monitor.batch_end_callback(train_state.epoch, train_state.updates, metric_train)
             train_state.updates += 1
@@ -349,6 +382,17 @@ class TrainingModel(model.SockeyeModel):
 
                 # evaluation on validation set
                 has_improved, best_checkpoint = self._evaluate(train_state, val_iter, metric_val)
+
+                # If using an extended optimizer, provide extra state information about the current checkpoint
+                # Loss: optimized metric
+                if isinstance(optimizer, SockeyeOptimizer):
+                    m_val = 0
+                    for name, val in metric_val.get_name_value():
+                        if name == self.training_monitor.optimized_metric:
+                            m_val = val
+                    checkpoint_state = CheckpointState(checkpoint=train_state.checkpoint, metric_val=m_val)
+                    optimizer.pre_update_checkpoint(checkpoint_state)
+
                 if self.lr_scheduler is not None:
                     self.lr_scheduler.new_evaluation_result(has_improved)
 

@@ -334,7 +334,7 @@ class DotAttention(Attention):
 
             # scale down dot product by sqrt(num_hidden) [Vaswani et al, 17]
             if self.scale is not None:
-                query *= self.scale
+                query = query * self.scale
 
             # (batch_size, decoder_num_hidden, 1)
             expanded_decoder_state = mx.sym.expand_dims(query, axis=2)
@@ -430,7 +430,7 @@ class MultiHeadDotAttention(Attention):
             query = mx.sym.reshape(query, shape=(-3, self.num_hidden_per_head, 1))
 
             # scale dot product
-            query *= self.num_hidden_per_head ** -0.5
+            query = query * self.num_hidden_per_head ** -0.5
 
             # (batch*heads, length, num_hidden/head) X (batch*heads, num_hidden/head, 1)
             #   -> (batch*heads, length, 1)

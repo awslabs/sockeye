@@ -20,7 +20,7 @@ import sockeye.model
 
 
 def test_cross_entropy_loss():
-    config = sockeye.loss.LossConfig(type=C.CROSS_ENTROPY, vocab_size=4, normalize=False)
+    config = sockeye.loss.LossConfig(name=C.CROSS_ENTROPY, vocab_size=4, normalize=False)
     loss = sockeye.loss.get_loss(config)
     assert isinstance(loss, sockeye.loss.CrossEntropyLoss)
 
@@ -65,7 +65,7 @@ def test_cross_entropy_loss():
 
 
 def test_smoothed_cross_entropy_loss():
-    config = sockeye.loss.LossConfig(type=C.SMOOTHED_CROSS_ENTROPY,
+    config = sockeye.loss.LossConfig(name=C.SMOOTHED_CROSS_ENTROPY,
                                      vocab_size=4,
                                      normalize=False,
                                      smoothed_cross_entropy_alpha=0.5)

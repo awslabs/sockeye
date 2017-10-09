@@ -114,7 +114,7 @@ def setup_main_logger(name: str, file_logging=True, console=True, path: Optional
         log_config = LOGGING_CONFIGS["console_only"]
 
     if path:
-        log_config["handlers"]["rotating"]["filename"] = path
+        log_config["handlers"]["rotating"]["filename"] = path  # type: ignore
 
     logging.config.dictConfig(log_config)
     logger = logging.getLogger(name)

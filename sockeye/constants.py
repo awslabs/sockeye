@@ -166,6 +166,7 @@ LOG_NAME = "log"
 JSON_SUFFIX = ".json"
 VOCAB_SRC_NAME = "vocab.src"
 VOCAB_TRG_NAME = "vocab.trg"
+VOCAB_ENCODING = "utf-8"
 PARAMS_PREFIX = "params."
 PARAMS_NAME = PARAMS_PREFIX + "%04d"
 PARAMS_BEST_NAME = "params.best"
@@ -205,7 +206,17 @@ INFERENCE_ARG_OUTPUT_SHORT = "-o"
 BATCH_MAJOR = "NTC"
 TIME_MAJOR = "TNC"
 
+BATCH_TYPE_SENTENCE = "sentence"
+BATCH_TYPE_WORD = "word"
+
 # Training constants
+OPTIMIZER_ADAM = "adam"
+OPTIMIZER_EVE = "eve"
+OPTIMIZER_NADAM = "nadam"
+OPTIMIZER_RMSPROP = "rmsprop"
+OPTIMIZER_SGD = "sgd"
+OPTIMIZERS = [OPTIMIZER_ADAM, OPTIMIZER_EVE, OPTIMIZER_NADAM, OPTIMIZER_RMSPROP, OPTIMIZER_SGD]
+
 LR_SCHEDULER_FIXED_RATE_INV_SQRT_T = "fixed-rate-inv-sqrt-t"
 LR_SCHEDULER_FIXED_RATE_INV_T = "fixed-rate-inv-t"
 LR_SCHEDULER_FIXED_STEP = "fixed-step"
@@ -233,7 +244,7 @@ ACCURACY = 'accuracy'
 PERPLEXITY = 'perplexity'
 BLEU = 'bleu'
 BLEU_VAL = BLEU + "-val"
-SPEED_PCT = "p%d-sent-per-sec-val"
+SPEED_PCT = "p%d-sec-per-sent-val"
 METRICS = [PERPLEXITY, ACCURACY, BLEU]
 METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, PERPLEXITY: False}
 METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, PERPLEXITY: np.inf}

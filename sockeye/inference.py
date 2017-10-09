@@ -54,7 +54,7 @@ class InferenceModel(model.SockeyeModel):
                  beam_size: int,
                  checkpoint: Optional[int] = None,
                  softmax_temperature: Optional[float] = None,
-                 max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH):
+                 max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH) -> None:
         self.model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
         logger.info("Model version: %s", self.model_version)
         utils.check_version(self.model_version)
@@ -147,7 +147,7 @@ class InferenceModel(model.SockeyeModel):
                                                            source_encoded_seq_len)
 
             data_names = [C.SOURCE_NAME]
-            label_names = []
+            label_names = []  # type: List[str]
             return mx.sym.Group(decoder_init_states), data_names, label_names
 
         default_bucket_key = self.max_input_length
@@ -186,7 +186,7 @@ class InferenceModel(model.SockeyeModel):
             softmax = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
 
             data_names = [C.TARGET_NAME] + state_names
-            label_names = []
+            label_names = []  # type: List[str]
             return mx.sym.Group([softmax, attention_probs] + states), data_names, label_names
 
         # pylint: disable=not-callable
@@ -438,7 +438,7 @@ class ModelState:
     A ModelState encapsulates information about the decoder states of an InferenceModel.
     """
 
-    def __init__(self, states: List[mx.nd.NDArray]):
+    def __init__(self, states: List[mx.nd.NDArray]) -> None:
         self.states = states
 
     def sort_state(self, best_hyp_indices: mx.nd.NDArray):
@@ -503,7 +503,7 @@ class Translator:
                  length_penalty: LengthPenalty,
                  models: List[InferenceModel],
                  vocab_source: Dict[str, int],
-                 vocab_target: Dict[str, int]):
+                 vocab_target: Dict[str, int]) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.vocab_source = vocab_source

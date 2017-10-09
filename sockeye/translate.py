@@ -28,9 +28,10 @@ import sockeye.constants as C
 import sockeye.data_io
 import sockeye.inference
 import sockeye.output_handler
-from sockeye.log import setup_main_logger, log_sockeye_version, log_mxnet_version
-from sockeye.utils import acquire_gpus, get_num_gpus
+from sockeye.log import setup_main_logger
+from sockeye.utils import acquire_gpus, get_num_gpus, log_basic_info
 from sockeye.utils import check_condition
+
 
 logger = setup_main_logger(__name__, file_logging=False)
 
@@ -47,10 +48,7 @@ def main():
     if args.checkpoints is not None:
         check_condition(len(args.checkpoints) == len(args.models), "must provide checkpoints for each model")
 
-    log_sockeye_version(logger)
-    log_mxnet_version(logger)
-    logger.info("Command: %s", " ".join(sys.argv))
-    logger.info("Arguments: %s", args)
+    log_basic_info(args)
 
     output_handler = sockeye.output_handler.get_output_handler(args.output_type,
                                                                args.output,

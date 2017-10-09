@@ -14,24 +14,26 @@
 """
 A set of utility methods.
 """
+import argparse
 import collections
 import errno
 import fcntl
 import logging
 import os
+import random
 import shutil
 import subprocess
 import sys
 import time
-import random
 from contextlib import contextmanager, ExitStack
-from typing import Mapping, NamedTuple, Any, List, Iterator, Tuple, Dict, Optional
+from typing import Mapping, NamedTuple, Any, List, Iterator, Set, TextIO, Tuple, Dict, Optional
 
 import mxnet as mx
 import numpy as np
 
-from sockeye import __version__
 import sockeye.constants as C
+from sockeye import __version__
+from sockeye.log import log_sockeye_version, log_mxnet_version
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,29 @@ def parse_version(version_string: str) -> Tuple[str, str, str]:
     """
     release, major, minor = version_string.split(".", 2)
     return release, major, minor
+
+
+def log_basic_info(args) -> None:
+    """
+    Log basic information like version number, arguments, etc.
+
+    :param args: Arguments as returned by argparse.
+    """
+    log_sockeye_version(logger)
+    log_mxnet_version(logger)
+    logger.info("Command: %s", " ".join(sys.argv))
+    logger.info("Arguments: %s", args)
+
+
+def seedRNGs(args: argparse.Namespace) -> None:
+    """
+    Seed the random number generators (Python, Numpy and MXNet)
+
+    :param args: Arguments as returned by argparse.
+    """
+    np.random.seed(args.seed)
+    random.seed(args.seed)
+    mx.random.seed(args.seed)
 
 
 def check_condition(condition: bool, error_message: str):
@@ -266,12 +291,12 @@ def print_attention_text(attention_matrix: np.ndarray, source_tokens: List[str],
     :param threshold: The threshold for including an alignment link in the result.
     """
     sys.stdout.write("  ")
-    for j in target_tokens:
+    for _ in target_tokens:
         sys.stdout.write("---")
     sys.stdout.write("\n")
-    for (i, f_i) in enumerate(source_tokens):
+    for i, f_i in enumerate(source_tokens):  # type: ignore
         sys.stdout.write(" |")
-        for (j, _) in enumerate(target_tokens):
+        for j in range(len(target_tokens)):
             align_prob = attention_matrix[j, i]
             if align_prob > threshold:
                 sys.stdout.write("(*)")
@@ -281,7 +306,7 @@ def print_attention_text(attention_matrix: np.ndarray, source_tokens: List[str],
                 sys.stdout.write("   ")
         sys.stdout.write(" | %s\n" % f_i)
     sys.stdout.write("  ")
-    for j in target_tokens:
+    for _ in target_tokens:
         sys.stdout.write("---")
     sys.stdout.write("\n")
     for k in range(max(map(len, target_tokens))):
@@ -354,7 +379,7 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Optional[Dict[int, Tu
         return None
     if shutil.which("nvidia-smi") is None:
         logger.warning("Couldn't find nvidia-smi, therefore we assume no GPUs are available.")
-        return [0] * len(ctx)
+        return {}
     ids = [str(c.device_id) for c in ctx]
     query = "--query-gpu=index,memory.used,memory.total"
     format = "--format=csv,noheader,nounits"
@@ -438,7 +463,7 @@ def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
 
     # split the device ids into the specific ids requested and count up the number of arbitrary ids we want
     # e.g. device_ids = [-3, 2, 5, 7, -5] means we want to acquire device 2, 5 and 7 plus 8 other devices.
-    specific_device_ids = set()
+    specific_device_ids = set()  # type: Set[int]
     num_arbitrary_device_ids = 0
     for device_id in requested_device_ids:
         if device_id < 0:
@@ -468,7 +493,7 @@ def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
 
     while True:
         with ExitStack() as exit_stack:
-            acquired_gpus = []
+            acquired_gpus = []  # type: List[int]
             any_failed = False
             for candidates in candidates_to_request:
                 gpu_id = exit_stack.enter_context(GpuFileLock(candidates=candidates, lock_dir=lock_dir))
@@ -505,12 +530,12 @@ class GpuFileLock:
     :param lock_dir: The directory for storing the lock file.
     """
 
-    def __init__(self, candidates: List[int], lock_dir: str):
+    def __init__(self, candidates: List[int], lock_dir: str) -> None:
         self.candidates = candidates
         self.lock_dir = lock_dir
-        self.lock_file = None
-        self.lock_file_path = None
-        self.gpu_id = None
+        self.lock_file = None  # type: Optional[TextIO]
+        self.lock_file_path = None  # type: Optional[str]
+        self.gpu_id = None  # type: Optional[int]
         self._acquired_lock = False
 
     def __enter__(self) -> Optional[int]:

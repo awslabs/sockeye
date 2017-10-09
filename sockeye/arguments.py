@@ -58,6 +58,39 @@ def learning_schedule() -> Callable:
     return parse
 
 
+def simple_dict() -> Callable:
+    """
+    A simple dictionary format that does not require spaces or quoting.
+
+    Supported types: bool, int, float
+
+    :return: A method that can be used as a type in argparse.
+    """
+
+    def parse(dict_str: str):
+
+        def _parse(value: str):
+            if value == "True":
+                return True
+            if value == "False":
+                return False
+            if "." in value:
+                return float(value)
+            return int(value)
+
+        _dict = dict()
+        try:
+            for entry in dict_str.split(","):
+                key, value = entry.split(":")
+                _dict[key] = _parse(value)
+        except ValueError:
+            raise argparse.ArgumentTypeError("Specify argument dictionary as key1:value1,key2:value2,..."
+                                             " Supported types: bool, int, float.")
+        return _dict
+
+    return parse
+
+
 def multiple_values(num_values: int = 0,
                     greater_or_equal: Optional[float] = None,
                     data_type: Callable = int) -> Callable:
@@ -150,7 +183,7 @@ def add_io_args(params):
                              help='Folder where model & training results are written to.')
     data_params.add_argument('--overwrite-output',
                              action='store_true',
-                             help='Overwrite output folder if it exists.')
+                             help='Delete all contents of the model directory if it already exists.')
 
     data_params.add_argument('--source-vocab',
                              required=False,
@@ -209,14 +242,7 @@ def add_device_args(params):
                                     'write permissions.')
 
 
-def add_model_parameters(params):
-    model_params = params.add_argument_group("ModelConfig")
-
-    model_params.add_argument('--params', '-p',
-                              type=str,
-                              default=None,
-                              help='Initialize model parameters from file. Overrides random initializations.')
-
+def add_vocab_args(model_params):
     model_params.add_argument('--num-words',
                               type=multiple_values(num_values=2, greater_or_equal=0),
                               default=(50000, 50000),
@@ -226,6 +252,17 @@ def add_model_parameters(params):
                               type=multiple_values(num_values=2, greater_or_equal=1),
                               default=(1, 1),
                               help='Minimum frequency of words to be included in vocabularies. Default: %(default)s.')
+
+
+def add_model_parameters(params):
+    model_params = params.add_argument_group("ModelConfig")
+
+    model_params.add_argument('--params', '-p',
+                              type=str,
+                              default=None,
+                              help='Initialize model parameters from file. Overrides random initializations.')
+
+    add_vocab_args(model_params)
 
     model_params.add_argument('--encoder',
                               choices=C.ENCODERS,
@@ -444,6 +481,12 @@ def add_training_args(params):
                               type=int_greater_or_equal(1),
                               default=64,
                               help='Mini-batch size. Default: %(default)s.')
+    train_params.add_argument("--batch-type",
+                              type=str,
+                              default=C.BATCH_TYPE_SENTENCE,
+                              choices=[C.BATCH_TYPE_SENTENCE, C.BATCH_TYPE_WORD],
+                              help="Sentence: each batch contains X sentences, number of words varies. Word: each batch"
+                                   " contains (approximately) X words, number of sentences varies. Default: %(default)s.")
     train_params.add_argument('--fill-up',
                               type=str,
                               default='replicate',
@@ -550,9 +593,13 @@ def add_training_args(params):
                               help="Dropout probability for dropout between convolutional layers. Default: %(default)s.")
 
     train_params.add_argument('--optimizer',
-                              default='adam',
-                              choices=['adam', 'sgd', 'rmsprop'],
+                              default=C.OPTIMIZER_ADAM,
+                              choices=C.OPTIMIZERS,
                               help='SGD update rule. Default: %(default)s.')
+    train_params.add_argument('--optimizer-params',
+                              type=simple_dict(),
+                              default=None,
+                              help='Additional optimizer params as dictionary. Format: key1:value1,key2:value2,...')
     train_params.add_argument('--weight-init',
                               type=str,
                               default=C.INIT_XAVIER,
@@ -753,3 +800,9 @@ def add_evaluate_args(params):
                              action="store_true",
                              help="Do not fail if number of hypotheses does not match number of references. "
                                   "Default: %(default)s.")
+
+
+def add_build_vocab_args(params):
+    params.add_argument('-i', '--inputs', required=True, nargs='+', help='List of text files to build vocabulary from.')
+    params.add_argument('-o', '--output', required=True, type=str, help="Output filename to write vocabulary to.")
+    add_vocab_args(params)
