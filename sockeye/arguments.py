@@ -308,6 +308,25 @@ def add_model_parameters(params):
                               help="Add positional encodings to final segment embeddings for"
                                    " ConvolutionalEmbeddingEncoder. Default: %(default)s.")
 
+    # convolutional encoder/decoder arguments arguments
+    model_params.add_argument('--cnn-kernel-width',
+                              type=multiple_values(num_values=2, greater_or_equal=1, data_type=int),
+                              default=(3, 5),
+                              help='Kernel width of the convolutional encoder and decoder. Default: %(default)s.')
+    model_params.add_argument('--cnn-num-hidden',
+                              type=int_greater_or_equal(1),
+                              default=512,
+                              help='Number of hidden units for the convolutional encoder and decoder. '
+                                   'Default: %(default)s.')
+    model_params.add_argument('--cnn-activation-type',
+                              choices=C.CNN_ACTIVATION_TYPES,
+                              default=C.GLU,
+                              help="Type activation to use for each convolutional layer. Default: %(default)s.")
+    model_params.add_argument('--cnn-positional-embedding-type',
+                              choices=C.POSITIONAL_EMBEDDING_TYPES,
+                              default=C.LEARNED_POSITIONAL_EMBEDDING,
+                              help='The type of positional embedding. Default: %(default)s.')
+
     # rnn arguments
     model_params.add_argument('--rnn-cell-type',
                               choices=C.CELL_TYPES,
@@ -351,9 +370,10 @@ def add_model_parameters(params):
                               default=2048,
                               help='Number of hidden units in feed forward layers when using transformer. '
                                    'Default: %(default)s.')
-    model_params.add_argument('--transformer-no-positional-encodings',
-                              action='store_true',
-                              help='Do not use positional encodings.')
+    model_params.add_argument('--transformer-positional-embedding-type',
+                              choices=C.POSITIONAL_EMBEDDING_TYPES,
+                              default=C.FIXED_POSITIONAL_EMBEDDING,
+                              help='The type of positional embedding. Default: %(default)s.')
     model_params.add_argument('--transformer-preprocess',
                               type=multiple_values(num_values=2, greater_or_equal=None, data_type=str),
                               default=('', ''),
@@ -383,34 +403,34 @@ def add_model_parameters(params):
                                    'Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
 
     # attention arguments
-    model_params.add_argument('--attention-type',
+    model_params.add_argument('--rnn-attention-type',
                               choices=C.ATT_TYPES,
                               default=C.ATT_MLP,
                               help='Attention model for RNN decoders. Choices: {%(choices)s}. '
                                    'Default: %(default)s.')
-    model_params.add_argument('--attention-num-hidden',
+    model_params.add_argument('--rnn-attention-num-hidden',
                               default=None,
                               type=int,
                               help='Number of hidden units for attention layers. Default: equal to --rnn-num-hidden.')
-    model_params.add_argument('--attention-use-prev-word', action="store_true",
+    model_params.add_argument('--rnn-attention-use-prev-word', action="store_true",
                               help="Feed the previous target embedding into the attention mechanism.")
 
-    model_params.add_argument('--attention-coverage-type',
+    model_params.add_argument('--rnn-attention-coverage-type',
                               choices=["tanh", "sigmoid", "relu", "softrelu", "gru", "count"],
                               default="count",
                               help="Type of model for updating coverage vectors. 'count' refers to an update method"
                                    "that accumulates attention scores. 'tanh', 'sigmoid', 'relu', 'softrelu' "
                                    "use non-linear layers with the respective activation type, and 'gru' uses a"
                                    "GRU to update the coverage vectors. Default: %(default)s.")
-    model_params.add_argument('--attention-coverage-num-hidden',
+    model_params.add_argument('--rnn-attention-coverage-num-hidden',
                               type=int,
                               default=1,
                               help="Number of hidden units for coverage vectors. Default: %(default)s.")
-    model_params.add_argument('--attention-in-upper-layers',
+    model_params.add_argument('--rnn-attention-in-upper-layers',
                               action="store_true",
                               help="Pass the attention to the upper layers of the RNN decoder, similar "
                                    "to GNMT paper. Only applicable if more than one layer is used.")
-    model_params.add_argument('--attention-mhdot-heads',
+    model_params.add_argument('--rnn-attention-mhdot-heads',
                               type=int, default=None,
                               help='Number of heads for Multi-head dot attention. Default: %(default)s.')
 
@@ -445,10 +465,14 @@ def add_model_parameters(params):
     model_params.add_argument('--layer-normalization', action="store_true",
                               help="Adds layer normalization before non-linear activations. "
                                    "This includes MLP attention, RNN decoder state initialization, "
-                                   "RNN decoder hidden state, transformer layers."
+                                   "RNN decoder hidden state, and cnn layers."
                                    "It does not normalize RNN cell activations "
                                    "(this can be done using the '%s' or '%s' rnn-cell-type." % (C.LNLSTM_TYPE,
                                                                                                 C.LNGLSTM_TYPE))
+
+    model_params.add_argument('--weight-normalization', action="store_true",
+                              help="Adds weight normalization to all convolutional weight matrices and the "
+                                   "transformation matrix to the output vocab in the convolutional decoder.")
 
 
 def add_training_args(params):
@@ -564,6 +588,10 @@ def add_training_args(params):
                               type=float,
                               default=.0,
                               help="Dropout probability for ConvolutionalEmbeddingEncoder. Default: %(default)s.")
+    train_params.add_argument('--cnn-hidden-dropout',
+                              type=float,
+                              default=.0,
+                              help="Dropout probability for dropout between convolutional layers. Default: %(default)s.")
 
     train_params.add_argument('--optimizer',
                               default=C.OPTIMIZER_ADAM,

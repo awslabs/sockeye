@@ -18,20 +18,18 @@ import argparse
 import json
 import os
 import pickle
-import random
 import shutil
 import sys
 from contextlib import ExitStack
 from typing import Optional, Dict, List, Tuple
 
 import mxnet as mx
-import numpy as np
 
 from sockeye.config import Config
 from sockeye.log import setup_main_logger
 from sockeye.utils import check_condition
 from . import arguments
-from . import attention
+from . import rnn_attention
 from . import constants as C
 from . import coverage
 from . import data_io
@@ -42,13 +40,12 @@ from . import lexicon
 from . import loss
 from . import lr_scheduler
 from . import model
-from . import optimizers
 from . import rnn
+from . import convolution
 from . import training
 from . import transformer
 from . import utils
 from . import vocab
-
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
 logger = setup_main_logger(__name__, file_logging=False, console=True)
@@ -267,16 +264,17 @@ def create_lr_scheduler(args: argparse.Namespace, resume_training: bool,
 
 
 def create_encoder_config(args: argparse.Namespace, vocab_source_size: int,
-                          config_conv: Optional[encoder.ConvolutionalEmbeddingConfig]) -> Config:
+                          config_conv: Optional[encoder.ConvolutionalEmbeddingConfig]) -> Tuple[Config, int]:
     """
     Create the encoder config.
 
     :param args: Arguments as returned by argparse.
     :param vocab_source_size: The source vocabulary.
     :param config_conv: The config for the convolutional encoder (optional).
-    :return: The encoder config.
+    :return: The encoder config and the number of hidden units of the encoder.
     """
     encoder_num_layers, _ = args.num_layers
+    max_seq_len_source, max_seq_len_target = args.max_seq_len
     config_encoder = None  # type: Optional[Config]
 
     if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
@@ -292,10 +290,30 @@ def create_encoder_config(args: argparse.Namespace, vocab_source_size: int,
             dropout_relu=args.transformer_dropout_relu,
             dropout_prepost=args.transformer_dropout_prepost,
             weight_tying=args.weight_tying and C.WEIGHT_TYING_SRC in args.weight_tying_type,
-            positional_encodings=not args.transformer_no_positional_encodings,
+            positional_embedding_type=args.transformer_positional_embedding_type,
             preprocess_sequence=encoder_transformer_preprocess,
             postprocess_sequence=encoder_transformer_postprocess,
+            max_seq_len_source=max_seq_len_source,
+            max_seq_len_target=max_seq_len_target,
             conv_config=config_conv)
+        encoder_num_hidden = args.transformer_model_size
+    elif args.encoder == C.CONVOLUTION_TYPE:
+        num_embed_source, _ = args.num_embed
+        encoder_embed_dropout, _ = args.embed_dropout
+        cnn_kernel_width_encoder, _ = args.cnn_kernel_width
+        cnn_config = convolution.ConvolutionConfig(kernel_width=cnn_kernel_width_encoder,
+                                                   num_hidden=args.cnn_num_hidden,
+                                                   act_type=args.cnn_activation_type,
+                                                   weight_normalization=args.weight_normalization)
+        config_encoder = encoder.ConvolutionalEncoderConfig(vocab_size=vocab_source_size,
+                                                            num_embed=num_embed_source,
+                                                            embed_dropout=encoder_embed_dropout,
+                                                            max_seq_len_source=max_seq_len_source,
+                                                            cnn_config=cnn_config,
+                                                            num_layers=encoder_num_layers,
+                                                            positional_embedding_type=args.cnn_positional_embedding_type)
+
+        encoder_num_hidden = args.cnn_num_hidden
     else:
         num_embed_source, _ = args.num_embed
         encoder_embed_dropout, _ = args.embed_dropout
@@ -317,11 +335,12 @@ def create_encoder_config(args: argparse.Namespace, vocab_source_size: int,
                                      forget_bias=args.rnn_forget_bias),
             conv_config=config_conv,
             reverse_input=args.rnn_encoder_reverse_input)
+        encoder_num_hidden = args.rnn_num_hidden
 
-    return config_encoder
+    return config_encoder, encoder_num_hidden
 
 
-def create_decoder_config(args: argparse.Namespace, vocab_target_size: int) -> Config:
+def create_decoder_config(args: argparse.Namespace, vocab_target_size: int, encoder_num_hidden: int) -> Config:
     """
     Create the config for the decoder.
 
@@ -330,9 +349,11 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int) -> C
     :return: The config for the decoder.
     """
     _, decoder_num_layers = args.num_layers
+    max_seq_len_source, max_seq_len_target = args.max_seq_len
 
     decoder_weight_tying = args.weight_tying and C.WEIGHT_TYING_TRG in args.weight_tying_type \
-        and C.WEIGHT_TYING_SOFTMAX in args.weight_tying_type
+                           and C.WEIGHT_TYING_SOFTMAX in args.weight_tying_type
+
     config_decoder = None  # type: Optional[Config]
 
     if args.decoder == C.TRANSFORMER_TYPE:
@@ -348,27 +369,49 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int) -> C
             dropout_relu=args.transformer_dropout_relu,
             dropout_prepost=args.transformer_dropout_prepost,
             weight_tying=decoder_weight_tying,
-            positional_encodings=not args.transformer_no_positional_encodings,
+            positional_embedding_type=args.transformer_positional_embedding_type,
             preprocess_sequence=decoder_transformer_preprocess,
             postprocess_sequence=decoder_transformer_postprocess,
+            max_seq_len_source=max_seq_len_source,
+            max_seq_len_target=max_seq_len_target,
             conv_config=None)
 
-    else:
-        attention_num_hidden = args.rnn_num_hidden if not args.attention_num_hidden else args.attention_num_hidden
-        config_coverage = None
-        if args.attention_type == C.ATT_COV:
-            config_coverage = coverage.CoverageConfig(type=args.attention_coverage_type,
-                                                      num_hidden=args.attention_coverage_num_hidden,
-                                                      layer_normalization=args.layer_normalization)
-        config_attention = attention.AttentionConfig(type=args.attention_type,
-                                                     num_hidden=attention_num_hidden,
-                                                     input_previous_word=args.attention_use_prev_word,
-                                                     rnn_num_hidden=args.rnn_num_hidden,
-                                                     layer_normalization=args.layer_normalization,
-                                                     config_coverage=config_coverage,
-                                                     num_heads=args.attention_mhdot_heads)
+    elif args.decoder == C.CONVOLUTION_TYPE:
+        _, cnn_kernel_width_decoder = args.cnn_kernel_width
+        _, num_embed_target = args.num_embed
+        _, decoder_embed_dropout = args.embed_dropout
+        convolution_config = convolution.ConvolutionConfig(kernel_width=cnn_kernel_width_decoder,
+                                                           num_hidden=args.cnn_num_hidden,
+                                                           act_type=args.cnn_activation_type,
+                                                           weight_normalization=args.weight_normalization)
+        config_decoder = decoder.ConvolutionalDecoderConfig(cnn_config=convolution_config,
+                                                            vocab_size=vocab_target_size,
+                                                            max_seq_len_target=max_seq_len_target,
+                                                            num_embed=num_embed_target,
+                                                            encoder_num_hidden=encoder_num_hidden,
+                                                            num_layers=decoder_num_layers,
+                                                            positional_embedding_type=args.cnn_positional_embedding_type,
+                                                            weight_tying=decoder_weight_tying,
+                                                            embed_dropout=decoder_embed_dropout,
+                                                            weight_normalization=args.weight_normalization,
+                                                            hidden_dropout=args.cnn_hidden_dropout)
 
-        max_seq_len_source, _ = args.max_seq_len
+    else:
+        rnn_attention_num_hidden = args.rnn_num_hidden if args.rnn_attention_num_hidden is None else args.rnn_attention_num_hidden
+        config_coverage = None
+        if args.rnn_attention_type == C.ATT_COV:
+            config_coverage = coverage.CoverageConfig(type=args.rnn_attention_coverage_type,
+                                                      num_hidden=args.rnn_attention_coverage_num_hidden,
+                                                      layer_normalization=args.layer_normalization)
+        config_attention = rnn_attention.AttentionConfig(type=args.rnn_attention_type,
+                                                         num_hidden=rnn_attention_num_hidden,
+                                                         input_previous_word=args.rnn_attention_use_prev_word,
+                                                         source_num_hidden=encoder_num_hidden,
+                                                         query_num_hidden=args.rnn_num_hidden,
+                                                         layer_normalization=args.layer_normalization,
+                                                         config_coverage=config_coverage,
+                                                         num_heads=args.rnn_attention_mhdot_heads)
+
         _, num_embed_target = args.num_embed
         _, decoder_embed_dropout = args.embed_dropout
         _, decoder_rnn_dropout_inputs = args.rnn_dropout_inputs
@@ -395,7 +438,7 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int) -> C
             state_init=args.rnn_decoder_state_init,
             context_gating=args.rnn_context_gating,
             layer_normalization=args.layer_normalization,
-            attention_in_upper_layers=args.attention_in_upper_layers)
+            attention_in_upper_layers=args.rnn_attention_in_upper_layers)
 
     return config_decoder
 
@@ -446,8 +489,8 @@ def create_model_config(args: argparse.Namespace,
                                                            num_highway_layers=args.conv_embed_num_highway_layers,
                                                            dropout=args.conv_embed_dropout)
 
-    config_encoder = create_encoder_config(args, vocab_source_size, config_conv)
-    config_decoder = create_decoder_config(args, vocab_target_size)
+    config_encoder, encoder_num_hidden = create_encoder_config(args, vocab_source_size, config_conv)
+    config_decoder = create_decoder_config(args, vocab_target_size, encoder_num_hidden)
 
     config_loss = loss.LossConfig(name=args.loss,
                                   vocab_size=vocab_target_size,
@@ -532,7 +575,7 @@ def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict]:
     else:
         # Making MXNet module API's default scaling factor explicit
         optimizer_params["rescale_grad"] = 1.0 / args.batch_size
-     # Manually specified params
+    # Manually specified params
     if args.optimizer_params:
         optimizer_params.update(args.optimizer_params)
     logger.info("Optimizer: %s", optimizer)

@@ -1,10 +1,10 @@
 Python Modules
 ==============
 
-sockeye.attention module
-------------------------
+sockeye.arguments module
+----------------------
 
-.. automodule:: sockeye.attention
+.. automodule:: sockeye.arguments
     :members:
     :show-inheritance:
 
@@ -99,6 +99,13 @@ sockeye.lexicon module
     :members:
     :show-inheritance:
 
+sockeye.log module
+-------------------
+
+.. automodule:: sockeye.log
+    :members:
+    :show-inheritance:
+
 sockeye.loss module
 -------------------
 
@@ -131,6 +138,13 @@ sockeye.rnn module
 ------------------
 
 .. automodule:: sockeye.rnn
+    :members:
+    :show-inheritance:
+
+sockeye.rnn_attention module
+------------------------
+
+.. automodule:: sockeye.rnn_attention
     :members:
     :show-inheritance:
 

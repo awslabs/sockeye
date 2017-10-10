@@ -71,23 +71,23 @@ def test_device_args(test_params, expected_params):
               word_min_count=(1, 1),
               num_layers=(1, 1),
               num_embed=(512, 512),
-              attention_type='mlp',
-              attention_num_hidden=None,
-              attention_coverage_type='count',
-              attention_coverage_num_hidden=1,
+              rnn_attention_type='mlp',
+              rnn_attention_num_hidden=None,
+              rnn_attention_coverage_type='count',
+              rnn_attention_coverage_num_hidden=1,
               lexical_bias=None,
               learn_lexical_bias=False,
               weight_tying=False,
               weight_tying_type="trg_softmax",
               max_seq_len=(100, 100),
-              attention_mhdot_heads=None,
+              rnn_attention_mhdot_heads=None,
               transformer_attention_heads=8,
               transformer_feed_forward_num_hidden=2048,
               transformer_model_size=512,
-              transformer_no_positional_encodings=False,
+              transformer_positional_embedding_type="fixed",
               transformer_preprocess=('', ''),
               transformer_postprocess=('drn', 'drn'),
-              attention_use_prev_word=False,
+              rnn_attention_use_prev_word=False,
               rnn_decoder_state_init="last",
               rnn_encoder_reverse_input=False,
               rnn_context_gating=False,
@@ -95,7 +95,12 @@ def test_device_args(test_params, expected_params):
               rnn_num_hidden=1024,
               rnn_residual_connections=False,
               rnn_first_residual_layer=2,
+              cnn_activation_type='glu',
+              cnn_kernel_width=(3, 5),
+              cnn_num_hidden=512,
+              cnn_positional_embedding_type="learned",
               layer_normalization=False,
+              weight_normalization=False,
               encoder=C.RNN_NAME,
               conv_embed_max_filter_width=8,
               decoder=C.RNN_NAME,
@@ -104,7 +109,7 @@ def test_device_args(test_params, expected_params):
               conv_embed_num_highway_layers=4,
               conv_embed_pool_stride=5,
               conv_embed_add_positional_encodings=False,
-              attention_in_upper_layers=False))])
+              rnn_attention_in_upper_layers=False))])
 def test_model_parameters(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_model_parameters)
 
@@ -148,6 +153,7 @@ def test_model_parameters(test_params, expected_params):
               rnn_dropout_states=(.0, .0),
               rnn_dropout_recurrent=(.0, .0),
               rnn_decoder_hidden_dropout=.0,
+              cnn_hidden_dropout=0.0,
               rnn_forget_bias=0.0,
               rnn_h2h_init=C.RNN_INIT_ORTHOGONAL,
               monitor_bleu=0,
@@ -188,7 +194,7 @@ def test_inference_args(test_params, expected_params):
      '-vt dev.target '
      '--num-embed 32 '
      '--rnn-num-hidden 64 '
-     '--attention-type dot '
+     '--rnn-attention-type dot '
      '--use-cpu '
      '--metrics perplexity accuracy '
      '--max-num-checkpoint-not-improved 3 '
@@ -215,7 +221,7 @@ def test_inference_args(test_params, expected_params):
      '-vt newstest2016.tc.BPE.en '
      '--num-embed 256 '
      '--rnn-num-hidden 512 '
-     '--attention-type dot '
+     '--rnn-attention-type dot '
      '--max-seq-len 60 '
      '--monitor-bleu 500 '
      '--use-tensorboard '
@@ -228,7 +234,7 @@ def test_inference_args(test_params, expected_params):
          validation_target="newstest2016.tc.BPE.en",
          num_embed=(256, 256),
          rnn_num_hidden=512,
-         attention_type='dot',
+         rnn_attention_type='dot',
          max_seq_len=(60, 60),
          monitor_bleu=500,
          use_tensorboard=True,

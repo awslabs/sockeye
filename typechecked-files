@@ -1,6 +1,6 @@
 sockeye/__init__.py
 sockeye/arguments.py
-sockeye/attention.py
+sockeye/rnn_attention.py
 sockeye/average.py
 sockeye/bleu.py
 sockeye/callback.py
