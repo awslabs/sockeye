@@ -3,3 +3,4 @@ sphinx_rtd_theme
 sphinx-autodoc-typehints
 recommonmark
 pypandoc
+pyyaml
