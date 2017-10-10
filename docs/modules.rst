@@ -2,7 +2,7 @@ Python Modules
 ==============
 
 sockeye.arguments module
-----------------------
+------------------------
 
 .. automodule:: sockeye.arguments
     :members:
@@ -142,7 +142,7 @@ sockeye.rnn module
     :show-inheritance:
 
 sockeye.rnn_attention module
-------------------------
+----------------------------
 
 .. automodule:: sockeye.rnn_attention
     :members:
