@@ -4,7 +4,10 @@
 
 This package contains the Sockeye project,
 a sequence-to-sequence framework for Neural Machine Translation based on Apache MXNet Incubating.
-It implements the well-known encoder-decoder architecture with attention.
+It implements state-of-the-art encoder-decoder architectures, such as 
+- Deep Recurrent Neural Networks with Attention [[Bahdanau, '14](https://arxiv.org/abs/1409.0473)]
+- Transformer Models with self-attention [[Vaswani et al, '17](https://arxiv.org/abs/1706.03762)]
+- Fully convolutional sequence-to-sequence models [[Gehring et al, '17](https://arxiv.org/abs/1705.03122)]
 
 If you are interested in collaborating or have any questions, please submit a pull request or issue.
 You can also send questions to *sockeye-dev-at-amazon-dot-com*.
@@ -113,7 +116,7 @@ and one for validation. The latter will be used for computing various metrics du
 Each set should consist of two files: one with source sentences and one with target sentences (translations). Both files should have the same number of lines, each line containing a single
 sentence. Each sentence should be a whitespace delimited list of tokens.
 
-Say you wanted to train a German to English translation model, then you would call sockeye like this:
+Say you wanted to train a RNN German-to-English translation model, then you would call sockeye like this:
 ```bash
 > python -m sockeye.train --source sentences.de \
                        --target sentences.en \
