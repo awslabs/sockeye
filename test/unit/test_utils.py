@@ -22,6 +22,17 @@ from sockeye import __version__
 from sockeye import utils
 
 
+@pytest.mark.parametrize("some_list, expected", [
+    ([1, 2, 3, 4, 5, 6, 7, 8], [[1, 2, 3], [4, 5, 6], [7, 8]]),
+    ([1, 2], [[1, 2]]),
+    ([1, 2, 3], [[1, 2, 3]]),
+    ([1, 2, 3, 4], [[1, 2, 3], [4]]),
+])
+def test_chunks(some_list, expected):
+    chunk_size = 3
+    chunked_list = list(utils.chunks(some_list, chunk_size))
+    assert chunked_list == expected
+
 def test_get_alignments():
     attention_matrix = np.asarray([[0.1, 0.4, 0.5],
                                    [0.2, 0.8, 0.0],

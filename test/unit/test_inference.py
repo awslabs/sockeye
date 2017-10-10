@@ -32,3 +32,12 @@ def test_length_penalty():
 
     assert np.isclose(length_penalty(lengths).asnumpy(), expected_lp).all()
 
+
+def test_length_penalty_int_input():
+    length = 1
+    length_penalty = sockeye.inference.LengthPenalty(.2, 5.0)
+    expected_lp = [6**0.2/6**0.2]
+
+    assert np.isclose(np.asarray([length_penalty(length)]),
+                      np.asarray(expected_lp)).all()
+
