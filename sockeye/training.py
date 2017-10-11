@@ -393,8 +393,12 @@ class TrainingModel(model.SockeyeModel):
                     checkpoint_state = CheckpointState(checkpoint=train_state.checkpoint, metric_val=m_val)
                     optimizer.pre_update_checkpoint(checkpoint_state)
 
+                # learning rate adjustment
                 if self.lr_scheduler is not None:
-                    self.lr_scheduler.new_evaluation_result(has_improved)
+                    lr_adjusted = self.lr_scheduler.new_evaluation_result(has_improved)
+                    if lr_adjusted and not has_improved:
+                        logger.info("Loading parameters from last best checkpoint: %d", best_checkpoint)
+                        self._load_params(output_folder, best_checkpoint)
 
                 if has_improved:
                     best_path = os.path.join(output_folder, C.PARAMS_BEST_NAME)
@@ -443,16 +447,23 @@ class TrainingModel(model.SockeyeModel):
         logger.info("Model parameters: %s", ", ".join(info))
         logger.info("Total # of parameters: %d", total_parameters)
 
-
     def _save_params(self, output_folder: str, checkpoint: int):
         """
-        Saves the parameters to disk.
+        Synchronizes parameters across devices, saves the parameters to disk, and updates self.params.
         """
-        arg_params, aux_params = self.module.get_params()  # sync aux params across devices
+        arg_params, aux_params = self.module.get_params()
         self.module.set_params(arg_params, aux_params)
         self.params = arg_params
         params_base_fname = C.PARAMS_NAME % checkpoint
         self.save_params_to_file(os.path.join(output_folder, params_base_fname))
+
+    def _load_params(self, output_folder: str, checkpoint: int):
+        """
+        Loads parameters from disk, sets self.params and module's parameters.
+        """
+        params_fname = os.path.join(output_folder, C.PARAMS_NAME % checkpoint)
+        self.load_params_from_file(params_fname)  # sets self.params
+        self.module.set_params(self.params, {})
 
     def _evaluate(self, training_state, val_iter, val_metric):
         """
