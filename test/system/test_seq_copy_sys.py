@@ -119,7 +119,7 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
      " --rnn-attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity"
      " --max-updates 10000 --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
-     1.03,
+     1.04,
      0.98),
     # "Vanilla" LSTM encoder-decoder with attention (word-based batching)
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
