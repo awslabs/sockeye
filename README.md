@@ -11,6 +11,8 @@ It implements state-of-the-art encoder-decoder architectures, such as
 
 If you are interested in collaborating or have any questions, please submit a pull request or issue.
 You can also send questions to *sockeye-dev-at-amazon-dot-com*.
+
+Recent developments and changes are tracked in our [changelog](https://github.com/awslabs/sockeye/blob/master/CHANGELOG.md).
  
 ## Dependencies
 
