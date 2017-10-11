@@ -224,7 +224,7 @@ class TrainingModel(model.SockeyeModel):
         cp_decoder = checkpoint_decoder.CheckpointDecoder(self.context[-1],
                                                           self.config.config_data.validation_source,
                                                           self.config.config_data.validation_target,
-                                                          output_folder, self.config.max_seq_len_source,
+                                                          output_folder,
                                                           sample_size=monitor_bleu) \
             if monitor_bleu else None
 

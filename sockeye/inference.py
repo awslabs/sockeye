@@ -645,8 +645,8 @@ class Translator:
                                     score=-np.inf)
 
         if len(trans_input.tokens) > self.max_input_length:
-            logger.warning("Input (%d) exceeds max input length (%d). Splitting into chunks of size %d.",
-                           len(trans_input.tokens), self.buckets_source[-1], self.max_input_length)
+            logger.debug("Input (%d) exceeds max input length (%d). Splitting into chunks of size %d.",
+                         len(trans_input.tokens), self.buckets_source[-1], self.max_input_length)
             token_chunks = utils.chunks(trans_input.tokens, self.max_input_length)
             translations = [self.translate_nd(*self._get_inference_input(tokens))
                             for tokens in token_chunks]
