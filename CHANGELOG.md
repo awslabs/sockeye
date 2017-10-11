@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 For each item we will potentially have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_ and _Fixed_.
 
+## [1.8.1]
+### Changed
+ - Instead of truncating sentences exceeding the maximum input length are now translated in chunks.
+
 ## [1.8.0]
 ### Added
  - Convolutional decoder.
