@@ -16,7 +16,6 @@ Code for inference/translation
 """
 import logging
 import os
-import itertools
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import mxnet as mx
@@ -593,7 +592,7 @@ class Translator:
                                     score=-np.inf)
 
         if len(trans_input.tokens) > self.max_input_length:
-            logger.warning("Input (%d) exceeds max bucket size (%d). Splitting into chunks of size %d.",
+            logger.warning("Input (%d) exceeds max input length (%d). Splitting into chunks of size %d.",
                            len(trans_input.tokens), self.buckets_source[-1], self.max_input_length)
             token_chunks = utils.chunks(trans_input.tokens, self.max_input_length)
             translations = [self.translate_nd(*self._get_inference_input(tokens))
