@@ -59,7 +59,7 @@ class CheckpointDecoder:
                  inputs: str,
                  references: str,
                  model: str,
-                 max_input_len: int,
+                 max_input_len: Optional[int] = None,
                  beam_size: int = C.DEFAULT_BEAM_SIZE,
                  bucket_width_source: int = 10,
                  bucket_width_target: int = 10,
@@ -98,7 +98,8 @@ class CheckpointDecoder:
                 self.input_sentences, self.target_sentences = input_sentences, target_sentences
 
         logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d)",
-                    max_input_len, beam_size, model, len(self.input_sentences))
+                    max_input_len if max_input_len is not None else -1,
+                    beam_size, model, len(self.input_sentences))
 
         with data_io.smart_open(os.path.join(self.model, C.DECODE_REF_NAME), 'w') as trg_out, \
                 data_io.smart_open(os.path.join(self.model, C.DECODE_IN_NAME), 'w') as src_out:
