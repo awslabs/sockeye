@@ -369,7 +369,7 @@ def get_max_input_output_length(models: List[InferenceModel], num_stds: int,
     max_std = max(model.length_ratio_std for model in models)
 
     if num_stds < 0:
-        factor = C.TARGET_MAX_LENGTH_FACTOR
+        factor = C.TARGET_MAX_LENGTH_FACTOR  # type: float
     else:
         factor = max_mean + (max_std * num_stds)
 
@@ -499,7 +499,7 @@ class LengthPenalty:
 
 
 def _concat_translations(translations: List[Translation], start_id: int, stop_ids: Set[int],
-                         length_penalty: Callable) -> Translation:
+                         length_penalty: LengthPenalty) -> Translation:
     """
     Combine translations through concatenation.
 
@@ -544,7 +544,6 @@ def _concat_translations(translations: List[Translation], start_id: int, stop_id
     return Translation(target_ids, attention_matrix_combined, score)
 
 
-
 class Translator:
     """
     Translator uses one or several models to translate input.
@@ -574,7 +573,7 @@ class Translator:
         self.vocab_target = vocab_target
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
         self.start_id = self.vocab_target[C.BOS_SYMBOL]
-        self.stop_ids = {self.vocab_target[C.EOS_SYMBOL], C.PAD_ID} # type: Set[int]
+        self.stop_ids = {self.vocab_target[C.EOS_SYMBOL], C.PAD_ID}  # type: Set[int]
         self.models = models
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
