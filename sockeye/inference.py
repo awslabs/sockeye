@@ -16,7 +16,7 @@ Code for inference/translation
 """
 import logging
 import os
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union, Set
 
 import mxnet as mx
 import numpy as np
@@ -491,6 +491,53 @@ class LengthPenalty:
             return numerator / self.denominator
 
 
+def _concat_translations(translations: List[Translation], start_id: int, stop_ids: Set[int],
+                         length_penalty: Callable) -> Translation:
+    """
+    Combine translations through concatenation.
+
+    :param translations: A list of translations (sequence starting with BOS symbol, attention_matrix), score and length.
+    :param start_id: The EOS symbol.
+    :param translations: The BOS symbols.
+    :return: A concatenation if the translations with a score.
+    """
+    # Concatenation of all target ids without BOS and EOS
+    target_ids = [start_id]
+    attention_matrices = []
+    for idx, translation in enumerate(translations):
+        assert translation.target_ids[0] == start_id
+        if idx == len(translations) - 1:
+            target_ids.extend(translation.target_ids[1:])
+            attention_matrices.append(translation.attention_matrix[1:, :])
+        else:
+            if translation.target_ids[-1] in stop_ids:
+                target_ids.extend(translation.target_ids[1:-1])
+                attention_matrices.append(translation.attention_matrix[1:-1, :])
+            else:
+                target_ids.extend(translation.target_ids[1:])
+                attention_matrices.append(translation.attention_matrix[1:, :])
+
+    # Combine attention matrices:
+    attention_shapes = [attention_matrix.shape for attention_matrix in attention_matrices]
+    # Adding another row for the empty BOS alignment vector
+    bos_align_shape = np.asarray([1, 0])
+    attention_matrix_combined = np.zeros(np.sum(np.asarray(attention_shapes), axis=0) + bos_align_shape)
+
+    # We start at position 1 as position 0 is for the BOS, which is kept zero
+    pos_t, pos_s = 1, 0
+    for attention_matrix, (len_t, len_s) in zip(attention_matrices, attention_shapes):
+        attention_matrix_combined[pos_t:pos_t + len_t, pos_s:pos_s + len_s] = attention_matrix
+        pos_t += len_t
+        pos_s += len_s
+
+    # Unnormalize + sum and renormalize the score:
+    score = sum(translation.score * length_penalty(len(translation.target_ids))
+                for translation in translations)
+    score = score / length_penalty(len(target_ids))
+    return Translation(target_ids, attention_matrix_combined, score)
+
+
+
 class Translator:
     """
     Translator uses one or several models to translate input.
@@ -520,7 +567,7 @@ class Translator:
         self.vocab_target = vocab_target
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
         self.start_id = self.vocab_target[C.BOS_SYMBOL]
-        self.stop_ids = {self.vocab_target[C.EOS_SYMBOL], C.PAD_ID}
+        self.stop_ids = {self.vocab_target[C.EOS_SYMBOL], C.PAD_ID} # type: Set[int]
         self.models = models
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
@@ -652,40 +699,8 @@ class Translator:
         :param translations: A list of translations (sequence, attention_matrix), score and length.
         :return: A concatenation if the translations with a score.
         """
-        # Concatenation of all target ids without BOS and EOS
-        target_ids = [self.start_id]
-        attention_matrices = []
-        for idx, translation in enumerate(translations):
-            assert translation.target_ids[0] == self.start_id
-            if idx == len(translations):
-                target_ids.extend(translation.target_ids[1:])
-                attention_matrices.append(translation.attention_matrix[1:, :])
-            else:
-                if translation.target_ids[-1] in self.stop_ids:
-                    target_ids.extend(translation.target_ids[1:-1])
-                    attention_matrices.append(translation.attention_matrix[1:-1, :])
-                else:
-                    target_ids.extend(translation.target_ids[1:])
-                    attention_matrices.append(translation.attention_matrix[1:, :])
+        return _concat_translations(translations, self.start_id, self.stop_ids, self.length_penalty)
 
-        # Combine attention matrices:
-        attention_shapes = [attention_matrix.shape for attention_matrix in attention_matrices]
-        # Adding another row for the empty BOS alignment vector
-        bos_align_shape = np.asarray([1, 0])
-        attention_matrix_combined = np.zeros(np.sum(np.asarray(attention_shapes), axis=0) + bos_align_shape)
-
-        # We start at position 1 as position 0 is for the BOS, which is kept zero
-        pos_t, pos_s = 1, 0
-        for attention_matrix, (len_t, len_s) in zip(attention_matrices, attention_shapes):
-            attention_matrix_combined[pos_t:pos_t + len_t, pos_s:pos_s + len_s] = attention_matrix
-            pos_t += len_t
-            pos_s += len_s
-
-        # Unnormalize + sum and renormalize the score:
-        score = sum(translation.score * self.length_penalty(len(translation.target_ids))
-                    for translation in translations)
-        score = score / self.length_penalty(len(target_ids))
-        return Translation(target_ids, attention_matrix_combined, score)
 
     def translate_nd(self,
                      source: mx.nd.NDArray,

@@ -12,7 +12,7 @@ For each item we will potentially have subsections for: _Added_, _Changed_, _Rem
 
 ## [1.8.1]
 ### Changed
- - Instead of truncating sentences exceeding the maximum input length are now translated in chunks.
+ - Instead of truncating sentences exceeding the maximum input length they are now translated in chunks.
 
 ## [1.8.0]
 ### Added
