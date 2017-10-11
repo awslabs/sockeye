@@ -174,6 +174,10 @@ def get_training_data_iters(source: str, target: str,
                                                                           target,
                                                                           vocab_source,
                                                                           vocab_target)
+
+    max_observed_source_len = max(len(s) for s in train_source_sentences if len(s) <= max_seq_len_source)
+    max_observed_target_len = max(len(t) for t in train_target_sentences if len(t) <= max_seq_len_target)
+
     lr_mean, lr_std = length_statistics(train_source_sentences, train_target_sentences)
     logger.info("Mean training target/source length ratio: %.2f (+-%.2f)", lr_mean, lr_std)
 
@@ -216,7 +220,7 @@ def get_training_data_iters(source: str, target: str,
     config_data = DataConfig(source, target,
                              validation_source, validation_target,
                              vocab_source_path, vocab_target_path,
-                             lr_mean, lr_std)
+                             lr_mean, lr_std, max_observed_source_len, max_observed_target_len)
 
     return train_iter, val_iter, config_data
 
@@ -233,7 +237,9 @@ class DataConfig(config.Config):
                  vocab_source: Optional[str],
                  vocab_target: Optional[str],
                  length_ratio_mean: float = C.TARGET_MAX_LENGTH_FACTOR,
-                 length_ratio_std: float = 0.0) -> None:
+                 length_ratio_std: float = 0.0,
+                 max_observed_source_seq_len: Optional[int] = None,
+                 max_observed_target_seq_len: Optional[int] = None) -> None:
         super().__init__()
         self.source = source
         self.target = target
@@ -243,6 +249,8 @@ class DataConfig(config.Config):
         self.vocab_target = vocab_target
         self.length_ratio_mean = length_ratio_mean
         self.length_ratio_std = length_ratio_std
+        self.max_observed_source_seq_len = max_observed_source_seq_len
+        self.max_observed_target_seq_len = max_observed_target_seq_len
 
 
 def smart_open(filename: str, mode="rt", ftype="auto", errors='replace'):

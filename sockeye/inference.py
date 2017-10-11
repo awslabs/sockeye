@@ -16,7 +16,7 @@ Code for inference/translation
 """
 import logging
 import os
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union, Set
 
 import mxnet as mx
 import numpy as np
@@ -93,7 +93,8 @@ class InferenceModel(model.SockeyeModel):
         """
         self.max_input_length = max_input_length
         if self.max_input_length > self.training_max_seq_len_source:
-            logger.warning("Model was trained with max_seq_len_source=%d, but using max_input_len=%d.",
+            logger.warning("Model was only trained with sentences up to a length of %d, "
+                           "but a max_input_len of %d is used.",
                            self.training_max_seq_len_source, self.max_input_length)
         self.get_max_output_length = get_max_output_length_function
 
@@ -266,14 +267,20 @@ class InferenceModel(model.SockeyeModel):
         return probs, attention_probs, model_state
 
     @property
-    def training_max_seq_len_source(self):
+    def training_max_seq_len_source(self) -> int:
         """ The maximum sequence length on the source side during training. """
-        return self.config.max_seq_len_source
+        if self.config.config_data.max_observed_source_seq_len is not None:
+            return self.config.config_data.max_observed_source_seq_len
+        else:
+            return self.config.max_seq_len_source
 
     @property
-    def training_max_seq_len_target(self):
+    def training_max_seq_len_target(self) -> int:
         """ The maximum sequence length on the target side during training. """
-        return self.config.max_seq_len_target
+        if self.config.config_data.max_observed_target_seq_len is not None:
+            return self.config.config_data.max_observed_target_seq_len
+        else:
+            return self.config.max_seq_len_target
 
     @property
     def max_supported_seq_len_source(self) -> Optional[int]:
@@ -286,11 +293,11 @@ class InferenceModel(model.SockeyeModel):
         return self.decoder.get_max_seq_len()
 
     @property
-    def length_ratio_mean(self):
+    def length_ratio_mean(self) -> float:
         return self.config.config_data.length_ratio_mean
 
     @property
-    def length_ratio_std(self):
+    def length_ratio_std(self) -> float:
         return self.config.config_data.length_ratio_std
 
 
@@ -362,7 +369,7 @@ def get_max_input_output_length(models: List[InferenceModel], num_stds: int,
     max_std = max(model.length_ratio_std for model in models)
 
     if num_stds < 0:
-        factor = C.TARGET_MAX_LENGTH_FACTOR
+        factor = C.TARGET_MAX_LENGTH_FACTOR  # type: float
     else:
         factor = max_mean + (max_std * num_stds)
 
@@ -432,6 +439,13 @@ Output structure from Translator.
 :param score: Negative log probability of generated translation.
 """
 
+TokenIds = List[int]
+Translation = NamedTuple('Translation', [
+    ('target_ids', TokenIds),
+    ('attention_matrix', np.ndarray),
+    ('score', float)
+])
+
 
 class ModelState:
     """
@@ -462,23 +476,72 @@ class LengthPenalty:
     def __init__(self, alpha: float = 1.0, beta: float = 0.0) -> None:
         self.alpha = alpha
         self.beta = beta
-        self.denominator = (self.beta + 1) ** self.alpha
+        self.denominator = (self.beta + 1.) ** self.alpha
 
-    def __call__(self, lengths: mx.nd.NDArray) -> mx.nd.NDArray:
+    def __call__(self, lengths: Union[mx.nd.NDArray, int, float]) -> Union[mx.nd.NDArray, float]:
         """
         Calculate the length penalty for the given vector of lengths.
 
-        :param lengths: A matrix of sentence lengths of dimensionality (batch_size, 1).
-        :return: The length penalty (batch_size, 1).
+        :param lengths: A scalar or a matrix of sentence lengths of dimensionality (batch_size, 1).
+        :return: The length penalty. A scalar or a matrix (batch_size, 1) depending on the input.
         """
         if self.alpha == 0.0:
-            # no length penalty:
-            return mx.nd.ones_like(lengths)
+            if isinstance(lengths, mx.nd.NDArray):
+                # no length penalty:
+                return mx.nd.ones_like(lengths)
+            else:
+                return 1.0
         else:
             # note: we avoid unnecessary addition or pow operations
             numerator = self.beta + lengths if self.beta != 0.0 else lengths
             numerator = numerator ** self.alpha if self.alpha != 1.0 else numerator
             return numerator / self.denominator
+
+
+def _concat_translations(translations: List[Translation], start_id: int, stop_ids: Set[int],
+                         length_penalty: LengthPenalty) -> Translation:
+    """
+    Combine translations through concatenation.
+
+    :param translations: A list of translations (sequence starting with BOS symbol, attention_matrix), score and length.
+    :param start_id: The EOS symbol.
+    :param translations: The BOS symbols.
+    :return: A concatenation if the translations with a score.
+    """
+    # Concatenation of all target ids without BOS and EOS
+    target_ids = [start_id]
+    attention_matrices = []
+    for idx, translation in enumerate(translations):
+        assert translation.target_ids[0] == start_id
+        if idx == len(translations) - 1:
+            target_ids.extend(translation.target_ids[1:])
+            attention_matrices.append(translation.attention_matrix[1:, :])
+        else:
+            if translation.target_ids[-1] in stop_ids:
+                target_ids.extend(translation.target_ids[1:-1])
+                attention_matrices.append(translation.attention_matrix[1:-1, :])
+            else:
+                target_ids.extend(translation.target_ids[1:])
+                attention_matrices.append(translation.attention_matrix[1:, :])
+
+    # Combine attention matrices:
+    attention_shapes = [attention_matrix.shape for attention_matrix in attention_matrices]
+    # Adding another row for the empty BOS alignment vector
+    bos_align_shape = np.asarray([1, 0])
+    attention_matrix_combined = np.zeros(np.sum(np.asarray(attention_shapes), axis=0) + bos_align_shape)
+
+    # We start at position 1 as position 0 is for the BOS, which is kept zero
+    pos_t, pos_s = 1, 0
+    for attention_matrix, (len_t, len_s) in zip(attention_matrices, attention_shapes):
+        attention_matrix_combined[pos_t:pos_t + len_t, pos_s:pos_s + len_s] = attention_matrix
+        pos_t += len_t
+        pos_s += len_s
+
+    # Unnormalize + sum and renormalize the score:
+    score = sum(translation.score * length_penalty(len(translation.target_ids))
+                for translation in translations)
+    score = score / length_penalty(len(target_ids))
+    return Translation(target_ids, attention_matrix_combined, score)
 
 
 class Translator:
@@ -510,17 +573,17 @@ class Translator:
         self.vocab_target = vocab_target
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
         self.start_id = self.vocab_target[C.BOS_SYMBOL]
-        self.stop_ids = {self.vocab_target[C.EOS_SYMBOL], C.PAD_ID}
+        self.stop_ids = {self.vocab_target[C.EOS_SYMBOL], C.PAD_ID}  # type: Set[int]
         self.models = models
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
         # after models are loaded we ensured that they agree on max_input_length and max_output_length
-        max_input_length = self.models[0].max_input_length
-        max_output_length = self.models[0].get_max_output_length(max_input_length)
+        self.max_input_length = self.models[0].max_input_length
+        max_output_length = self.models[0].get_max_output_length(self.max_input_length)
         if bucket_source_width > 0:
-            self.buckets_source = data_io.define_buckets(max_input_length, step=bucket_source_width)
+            self.buckets_source = data_io.define_buckets(self.max_input_length, step=bucket_source_width)
         else:
-            self.buckets_source = [max_input_length]
+            self.buckets_source = [self.max_input_length]
         if bucket_target_width > 0:
             self.buckets_target = data_io.define_buckets(max_output_length, step=bucket_target_width)
         else:
@@ -581,7 +644,16 @@ class Translator:
                                     attention_matrix=np.asarray([[0]]),
                                     score=-np.inf)
 
-        return self._make_result(trans_input, *self.translate_nd(*self._get_inference_input(trans_input.tokens)))
+        if len(trans_input.tokens) > self.max_input_length:
+            logger.warning("Input (%d) exceeds max input length (%d). Splitting into chunks of size %d.",
+                           len(trans_input.tokens), self.buckets_source[-1], self.max_input_length)
+            token_chunks = utils.chunks(trans_input.tokens, self.max_input_length)
+            translations = [self.translate_nd(*self._get_inference_input(tokens))
+                            for tokens in token_chunks]
+            translation = self._concat_translations(translations)
+            return self._make_result(trans_input, translation)
+        else:
+            return self._make_result(trans_input, self.translate_nd(*self._get_inference_input(trans_input.tokens)))
 
     def _get_inference_input(self, tokens: List[str]) -> Tuple[mx.nd.NDArray, int]:
         """
@@ -591,10 +663,6 @@ class Translator:
         :return NDArray of source ids and bucket key.
         """
         bucket_key = data_io.get_bucket(len(tokens), self.buckets_source)
-        if bucket_key is None:
-            logger.warning("Input (%d) exceeds max bucket size (%d). Stripping", len(tokens), self.buckets_source[-1])
-            bucket_key = self.buckets_source[-1]
-            tokens = tokens[:bucket_key]
 
         utils.check_condition(C.PAD_ID == 0, "pad id should be 0")
         source = mx.nd.zeros((1, bucket_key))
@@ -605,21 +673,18 @@ class Translator:
 
     def _make_result(self,
                      trans_input: TranslatorInput,
-                     target_ids: List[int],
-                     attention_matrix: np.ndarray,
-                     neg_logprob: float) -> TranslatorOutput:
+                     translation: Translation) -> TranslatorOutput:
         """
         Returns a translator result from generated target-side word ids, attention matrix, and score.
         Strips stop ids from translation string.
 
         :param trans_input: Translator input.
-        :param target_ids: List of translated ids.
-        :param attention_matrix: Attention matrix.
+        :param translation: The translation + attention and score.
         :return: TranslatorOutput.
         """
         # remove special sentence start symbol (<s>) from the output:
-        target_ids = target_ids[1:]
-        attention_matrix = attention_matrix[1:, :]
+        target_ids = translation.target_ids[1:]
+        attention_matrix = translation.attention_matrix[1:, :]
 
         target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
         target_string = C.TOKEN_SEPARATOR.join(
@@ -631,11 +696,20 @@ class Translator:
                                 translation=target_string,
                                 tokens=target_tokens,
                                 attention_matrix=attention_matrix,
-                                score=neg_logprob)
+                                score=translation.score)
+
+    def _concat_translations(self, translations: List[Translation]) -> Translation:
+        """
+        Combine translations through concatenation.
+
+        :param translations: A list of translations (sequence, attention_matrix), score and length.
+        :return: A concatenation if the translations with a score.
+        """
+        return _concat_translations(translations, self.start_id, self.stop_ids, self.length_penalty)
 
     def translate_nd(self,
                      source: mx.nd.NDArray,
-                     source_length: int) -> Tuple[np.ndarray, np.ndarray, float]:
+                     source_length: int) -> Translation:
         """
         Translates source of source_length, given a bucket_key.
 
@@ -810,14 +884,15 @@ class Translator:
     def _get_best_from_beam(sequences: mx.nd.NDArray,
                             attention_lists: mx.nd.NDArray,
                             accumulated_scores: mx.nd.NDArray,
-                            lengths: mx.nd.NDArray) -> Tuple[np.ndarray, np.ndarray, float]:
+                            lengths: mx.nd.NDArray) -> Translation:
         """
         Return the best (aka top) entry from the n-best list.
 
         :param sequences: Array of word ids. Shape: (beam_size, bucket_key).
         :param attention_lists: Array of attentions over source words. Shape: (length, bucket_key).
         :param accumulated_scores: Array of length-normalized negative log-probs.
-        :return: Top sequence, top attention matrix, top accumulated score (length-normalized negative log-probs).
+        :return: Top sequence, top attention matrix, top accumulated score (length-normalized negative log-probs)
+                 and length.
         """
         # sequences & accumulated scores are in latest 'k-best order', thus 0th element is best
         best = 0
@@ -826,4 +901,4 @@ class Translator:
         # attention_matrix: (target_seq_len, source_seq_len)
         attention_matrix = np.stack(attention_lists[best].asnumpy()[:length, :], axis=0)
         score = accumulated_scores[best].asscalar()
-        return sequence, attention_matrix, score
+        return Translation(sequence, attention_matrix, score)

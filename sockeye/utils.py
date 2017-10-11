@@ -26,7 +26,7 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager, ExitStack
-from typing import Mapping, NamedTuple, Any, List, Iterator, Set, TextIO, Tuple, Dict, Optional
+from typing import Mapping, NamedTuple, Any, List, Iterator, Iterable, Set, TextIO, Tuple, Dict, Optional
 
 import mxnet as mx
 import numpy as np
@@ -252,6 +252,12 @@ def smallest_k_mx(matrix: mx.nd.NDArray, k: int,
     values, indices = mx.nd.topk(matrix, axis=None, k=k, ret_typ='both', is_ascend=True)
 
     return np.unravel_index(indices.astype(np.int32).asnumpy(), matrix.shape), values
+
+
+def chunks(some_list: List, n: int) -> Iterable[List]:
+    """Yield successive n-sized chunks from l."""
+    for i in range(0, len(some_list), n):
+        yield some_list[i:i + n]
 
 
 def plot_attention(attention_matrix: np.ndarray, source_tokens: List[str], target_tokens: List[str], filename: str):
