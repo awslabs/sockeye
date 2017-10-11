@@ -43,7 +43,7 @@ _SEED_DEV = 17
      1.01,
      0.99),
     # "Vanilla" LSTM encoder-decoder with attention (word-based batching)
-    ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --attention-type mlp"
+    ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
      " --attention-num-hidden 32 --batch-size 80 --batch-type word --loss cross-entropy --optimized-metric perplexity"
      " --max-updates 10000 --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
      " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0",
@@ -122,12 +122,12 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
      1.03,
      0.98),
     # "Vanilla" LSTM encoder-decoder with attention (word-based batching)
-    ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --attention-type mlp"
+    ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
      " --attention-num-hidden 32 --batch-size 80 --batch-type word --loss cross-entropy --optimized-metric perplexity"
      " --max-updates 10000 --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
      " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0",
      "--beam-size 5",
-     1.03,
+     1.04,
      0.98),
     # 1-layer transformer encoder, LSTM decoder with attention
     ("--encoder transformer --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
@@ -147,7 +147,7 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
      " --transformer-feed-forward-num-hidden 64"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
-     1.01,
+     1.03,
      0.98),
     # 2-layer transformer
     ("--encoder transformer --decoder transformer"

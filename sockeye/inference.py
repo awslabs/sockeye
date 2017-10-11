@@ -93,7 +93,8 @@ class InferenceModel(model.SockeyeModel):
         """
         self.max_input_length = max_input_length
         if self.max_input_length > self.training_max_seq_len_source:
-            logger.warning("Model was trained with max_seq_len_source=%d, but using max_input_len=%d.",
+            logger.warning("Model was only trained with sentences up to a length of %d, "
+                           "but a max_input_len of %d is used.",
                            self.training_max_seq_len_source, self.max_input_length)
         self.get_max_output_length = get_max_output_length_function
 
@@ -266,14 +267,20 @@ class InferenceModel(model.SockeyeModel):
         return probs, attention_probs, model_state
 
     @property
-    def training_max_seq_len_source(self):
+    def training_max_seq_len_source(self) -> int:
         """ The maximum sequence length on the source side during training. """
-        return self.config.max_seq_len_source
+        if self.config.config_data.max_observed_source_seq_len is not None:
+            return self.config.config_data.max_observed_source_seq_len
+        else:
+            return self.config.max_seq_len_source
 
     @property
-    def training_max_seq_len_target(self):
+    def training_max_seq_len_target(self) -> int:
         """ The maximum sequence length on the target side during training. """
-        return self.config.max_seq_len_target
+        if self.config.config_data.max_observed_target_seq_len is not None:
+            return self.config.config_data.max_observed_target_seq_len
+        else:
+            return self.config.max_seq_len_target
 
     @property
     def max_supported_seq_len_source(self) -> Optional[int]:
@@ -286,11 +293,11 @@ class InferenceModel(model.SockeyeModel):
         return self.decoder.get_max_seq_len()
 
     @property
-    def length_ratio_mean(self):
+    def length_ratio_mean(self) -> float:
         return self.config.config_data.length_ratio_mean
 
     @property
-    def length_ratio_std(self):
+    def length_ratio_std(self) -> float:
         return self.config.config_data.length_ratio_std
 
 
@@ -700,7 +707,6 @@ class Translator:
         :return: A concatenation if the translations with a score.
         """
         return _concat_translations(translations, self.start_id, self.stop_ids, self.length_penalty)
-
 
     def translate_nd(self,
                      source: mx.nd.NDArray,
