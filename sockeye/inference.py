@@ -653,7 +653,7 @@ class Translator:
         :return: A concatenation if the translations with a score.
         """
         # Concatenation of all target ids without BOS and EOS
-        target_ids = [self.vocab_target[C.BOS_SYMBOL]]
+        target_ids = [self.start_id]
         attention_matrices = []
         for idx, translation in enumerate(translations):
             assert translation.target_ids[0] == self.start_id
