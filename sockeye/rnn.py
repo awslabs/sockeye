@@ -506,7 +506,7 @@ class VariationalDropoutCell(mx.rnn.ModifierCell):
     def __call__(self, inputs, states):
         if self.dropout_inputs > 0:
             if self.mask_inputs is None:
-                self.mask_inputs = mx.sym.Dropout(data=inputs, p=self.dropout_inputs, ) != 0
+                self.mask_inputs = mx.sym.Dropout(data=inputs, p=self.dropout_inputs) != 0
             inputs = inputs * self.mask_inputs
 
         if self.dropout_states > 0:
