@@ -506,12 +506,12 @@ class VariationalDropoutCell(mx.rnn.ModifierCell):
     def __call__(self, inputs, states):
         if self.dropout_inputs > 0:
             if self.mask_inputs is None:
-                self.mask_inputs = mx.sym.Dropout(data=inputs, p=self.dropout_inputs) != 0
+                self.mask_inputs = mx.sym.Dropout(data=mx.sym.ones_like(inputs), p=self.dropout_inputs)
             inputs = inputs * self.mask_inputs
 
         if self.dropout_states > 0:
             if self.mask_states is None:
-                self.mask_states = mx.sym.Dropout(data=states[0], p=self.dropout_states) != 0
+                self.mask_states = mx.sym.Dropout(data=mx.sym.ones_like(states[0]), p=self.dropout_states)
             states[0] = states[0] * self.mask_states
 
         output, states = self.base_cell(inputs, states)

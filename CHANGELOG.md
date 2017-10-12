@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 For each item we will potentially have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_ and _Fixed_.
 
+## [1.8.2]
+### Fixed
+ - The RNN variational dropout mask is now independent of the input
+ (previously any zero initial state led to the first state being canceled).
+
 ## [1.8.1]
 ### Changed
  - Instead of truncating sentences exceeding the maximum input length they are now translated in chunks.
