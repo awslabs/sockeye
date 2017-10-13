@@ -179,7 +179,9 @@ class TrainingModel(model.SockeyeModel):
             monitor_bleu: int = 0,
             use_tensorboard: bool = False,
             mxmonitor_pattern: Optional[str] = None,
-            mxmonitor_stat_func: Optional[str] = None):
+            mxmonitor_stat_func: Optional[str] = None,
+            lr_decay_param_reset: bool = False,
+            lr_decay_opt_states_reset: str = C.LR_DECAY_OPT_STATES_RESET_OFF):
         """
         Fits model to data given by train_iter using early-stopping w.r.t data given by val_iter.
         Saves all intermediate and final output to output_folder
@@ -206,6 +208,8 @@ class TrainingModel(model.SockeyeModel):
                with MXNet's monitor. Default is None which means no monitoring.
         :param mxmonitor_stat_func: Choice of statistics function to run on monitored weights/gradients/outputs
                when using MXNEt's monitor.
+        :param lr_decay_param_reset: Reset parameters to previous best after learning rate decay.
+        :param lr_decay_opt_states_reset: How to reset optimizer states after learning rate decay.
         :return: Best score on validation data observed during training.
         """
         self.save_version(output_folder)
@@ -251,7 +255,9 @@ class TrainingModel(model.SockeyeModel):
                   checkpoint_frequency=checkpoint_frequency,
                   max_num_not_improved=max_num_not_improved,
                   min_num_epochs=min_num_epochs,
-                  mxmonitor=monitor)
+                  mxmonitor=monitor,
+                  lr_decay_param_reset=lr_decay_param_reset,
+                  lr_decay_opt_states_reset=lr_decay_opt_states_reset)
 
         logger.info("Training finished. Best checkpoint: %d. Best validation %s: %.6f",
                     self.training_monitor.get_best_checkpoint(),
@@ -269,7 +275,9 @@ class TrainingModel(model.SockeyeModel):
              checkpoint_frequency: int,
              max_num_not_improved: int,
              min_num_epochs: Optional[int] = None,
-             mxmonitor: Optional[mx.monitor.Monitor] = None):
+             mxmonitor: Optional[mx.monitor.Monitor] = None,
+             lr_decay_param_reset: bool = False,
+             lr_decay_opt_states_reset: str = C.LR_DECAY_OPT_STATES_RESET_OFF):
         """
         Internal fit method. Runtime determined by early stopping.
 
@@ -284,12 +292,13 @@ class TrainingModel(model.SockeyeModel):
                -1 for no early stopping.
         :param min_num_epochs: Minimum number of epochs to train, even if validation scores did not improve.
         :param mxmonitor: Optional MXNet monitor instance.
+        :param lr_decay_param_reset: Reset parameters to previous best after learning rate decay.
+        :param lr_decay_opt_states_reset: How to reset optimizer states after learning rate decay.
         """
         # TODO: Push update to MXNet to expose the optimizer (Module should have a get_optimizer method)
-        if self.bucketing:
-            optimizer = self.module._curr_module._optimizer
-        else:
-            optimizer = self.module._optimizer
+        optimizer = self.module._curr_module._optimizer if self.bucketing else self.module._optimizer
+        if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_INITIAL:
+            self.save_optimizer_states(os.path.join(output_folder, C.OPT_STATES_INITIAL))
 
         metric_train = self.create_eval_metric_composite(metrics)
         metric_val = self.create_eval_metric_composite(metrics)
@@ -397,15 +406,27 @@ class TrainingModel(model.SockeyeModel):
                 if self.lr_scheduler is not None:
                     lr_adjusted = self.lr_scheduler.new_evaluation_result(has_improved)
                     if lr_adjusted and not has_improved:
-                        logger.info("Loading parameters from last best checkpoint: %d", best_checkpoint)
-                        self._load_params(output_folder, best_checkpoint)
+                        if lr_decay_param_reset:
+                            logger.info("Loading parameters from last best checkpoint: %d", best_checkpoint)
+                            self._load_params(output_folder, best_checkpoint)
+                        if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_INITIAL:
+                            logger.info("Resetting optimizer states to initial")
+                            self.load_optimizer_states(os.path.join(output_folder, C.OPT_STATES_INITIAL))
+                        elif lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
+                            logger.info("Resetting optimizer states to last best checkpoint: %d", best_checkpoint)
+                            self.load_optimizer_states(os.path.join(output_folder, C.OPT_STATES_BEST))
 
                 if has_improved:
-                    best_path = os.path.join(output_folder, C.PARAMS_BEST_NAME)
-                    if os.path.lexists(best_path):
-                        os.remove(best_path)
-                    actual_best_fname = C.PARAMS_NAME % best_checkpoint
-                    os.symlink(actual_best_fname, best_path)
+                    best_params_path = os.path.join(output_folder, C.PARAMS_BEST_NAME)
+                    if os.path.lexists(best_params_path):
+                        os.remove(best_params_path)
+                    actual_best_params_fname = C.PARAMS_NAME % best_checkpoint
+                    os.symlink(actual_best_params_fname, best_params_path)
+                    if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
+                        best_opt_states_fname = os.path.join(output_folder, C.OPT_STATES_BEST)
+                        if os.path.exists(best_opt_states_fname):
+                            os.remove(best_opt_states_fname)
+                        self.save_optimizer_states(best_opt_states_fname)
                     train_state.num_not_improved = 0
                 else:
                     train_state.num_not_improved += 1
@@ -431,8 +452,14 @@ class TrainingModel(model.SockeyeModel):
                         break
 
                 self._checkpoint(train_state, output_folder, train_iter)
+
         cleanup_params_files(output_folder, max_params_files_to_keep,
                              train_state.checkpoint, self.training_monitor.get_best_checkpoint())
+
+        if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
+            best_opt_states_fname = os.path.join(output_folder, C.OPT_STATES_BEST)
+            if os.path.exists(best_opt_states_fname):
+                os.remove(best_opt_states_fname)
 
     def _log_params(self):
         """
@@ -463,7 +490,7 @@ class TrainingModel(model.SockeyeModel):
         """
         params_fname = os.path.join(output_folder, C.PARAMS_NAME % checkpoint)
         self.load_params_from_file(params_fname)  # sets self.params
-        self.module.set_params(self.params, {})
+        self.module.set_params(arg_params=self.params, aux_params={})
 
     def _evaluate(self, training_state, val_iter, val_metric):
         """
@@ -495,17 +522,9 @@ class TrainingModel(model.SockeyeModel):
         os.symlink(os.path.join("..", params_base_fname),
                    os.path.join(training_state_dirname, C.TRAINING_STATE_PARAMS_NAME))
 
-        # Optimizer state (from mxnet)
-        opt_state_fname = os.path.join(training_state_dirname, C.MODULE_OPT_STATE_NAME)
-        if self.bucketing:
-            # This is a bit hacky, as BucketingModule does not provide a
-            # save_optimizer_states call. We take the current active module and
-            # save its state. This should work, as the individual modules in
-            # BucketingModule share the same optimizer through
-            # borrow_optimizer.
-            self.module._curr_module.save_optimizer_states(opt_state_fname)
-        else:
-            self.module.save_optimizer_states(opt_state_fname)
+        # Save current optimizer states
+        opt_state_fname = os.path.join(training_state_dirname, C.OPT_STATES_LAST)
+        self.save_optimizer_states(opt_state_fname)
 
         # State of the bucket iterator
         train_iter.save_state(os.path.join(training_state_dirname, C.BUCKET_ITER_STATE_NAME))
@@ -541,25 +560,57 @@ class TrainingModel(model.SockeyeModel):
         if os.path.exists(delete_training_state_dirname):
             shutil.rmtree(delete_training_state_dirname)
 
-    def save_state(self, training_state: _TrainingState, fname: str):
+    @staticmethod
+    def save_state(training_state: _TrainingState, fname: str):
         """
         Saves the state (of the TrainingModel class) to disk.
 
-        :param fname: file name to save the state to.
+        :param training_state: The training state to save.
+        :param fname: File name to save the state to.
         """
         with open(fname, "wb") as fp:
             pickle.dump(training_state, fp)
 
-    def load_state(self, fname: str) -> _TrainingState:
+    @staticmethod
+    def load_state(fname: str) -> _TrainingState:
         """
         Loads the training state (of the TrainingModel class) from disk.
 
-        :param fname: file name to load the state from.
+        :param fname: File name to load the state from.
+        :return: Training state.
         """
         training_state = None
         with open(fname, "rb") as fp:
             training_state = pickle.load(fp)
         return training_state
+
+    def save_optimizer_states(self, fname: str):
+        """
+        Saves optimizer states to a file.
+
+        :param fname: File name to save optimizer states to.
+        """
+        if self.bucketing:
+            # This is a bit hacky, as BucketingModule does not provide a
+            # save_optimizer_states call. We take the current active module and
+            # save its state. This should work, as the individual modules in
+            # BucketingModule share the same optimizer through
+            # borrow_optimizer.
+            self.module._curr_module.save_optimizer_states(fname)
+        else:
+            self.module.save_optimizer_states(fname)
+
+    def load_optimizer_states(self, fname: str):
+        """
+        Loads optimizer states from file.
+
+        :param fname: File name to load optimizer states from.
+        """
+        if self.bucketing:
+            # Same hacky solution as for saving the state
+            self.module._curr_module.load_optimizer_states(fname)
+        else:
+            self.module.load_optimizer_states(fname)
 
     def load_checkpoint(self, directory: str, train_iter: data_io.ParallelBucketSentenceIter) -> _TrainingState:
         """
@@ -572,12 +623,8 @@ class TrainingModel(model.SockeyeModel):
         """
 
         # Optimzer state (from mxnet)
-        opt_state_fname = os.path.join(directory, C.MODULE_OPT_STATE_NAME)
-        if self.bucketing:
-            # Same hacky solution as for saving the state
-            self.module._curr_module.load_optimizer_states(opt_state_fname)
-        else:
-            self.module.load_optimizer_states(opt_state_fname)
+        opt_state_fname = os.path.join(directory, C.OPT_STATES_LAST)
+        self.load_optimizer_states(opt_state_fname)
 
         # State of the bucket iterator
         train_iter.load_state(os.path.join(directory, C.BUCKET_ITER_STATE_NAME))

@@ -659,6 +659,16 @@ def add_training_args(params):
                               default=0,
                               help="Number of warmup steps. If set to x, linearly increases learning rate from 10%% "
                                    "to 100%% of the initial learning rate. Default: %(default)s.")
+    train_params.add_argument('--learning-rate-decay-param-reset',
+                              action='store_true',
+                              help='Resets model parameters to current best when learning rate is reduced due to the '
+                                   'value of --learning-rate-reduce-num-not-improved. Default: %(default)s.')
+    train_params.add_argument('--learning-rate-decay-optimizer-states-reset',
+                              choices=C.LR_DECAY_OPT_STATES_RESET_CHOICES,
+                              default=C.LR_DECAY_OPT_STATES_RESET_OFF,
+                              help="Action to take on optimizer states (e.g. Adam states) when learning rate is "
+                                   "reduced due to the value of --learning-rate-reduce-num-not-improved. "
+                                   "Default: %(default)s.")
 
     train_params.add_argument('--use-fused-rnn',
                               default=False,

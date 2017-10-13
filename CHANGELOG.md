@@ -11,8 +11,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 For each item we will potentially have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
 ## [1.8.3]
-### Changed
- - Training procedure: start from best parameters after updating learning rates if not improved for x checkpoints.
+### Added
+ - Optional smart rollback of parameters and optimizer states after updating the learning rate 
+ if not improved for x checkpoints. New flags: ``--learning-rate-decay-param-reset``,
+ ``--learning-rate-decay-optimizer-states-reset``
 
 ## [1.8.2]
 ### Fixed
