@@ -8,12 +8,19 @@ Any bump in the second digit indicates potential backwards incompatibilities, e.
 simply modifying weight names.
 Note that Sockeye has checks in place to not translate with an old model that was trained with an incompatible version.
 
-For each item we will potentially have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_ and _Fixed_.
+For each item we will potentially have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
+
+## [1.8.3]
+### Added
+ - Optional smart rollback of parameters and optimizer states after updating the learning rate 
+ if not improved for x checkpoints. New flags: ``--learning-rate-decay-param-reset``,
+ ``--learning-rate-decay-optimizer-states-reset``
 
 ## [1.8.2]
 ### Fixed
  - The RNN variational dropout mask is now independent of the input
  (previously any zero initial state led to the first state being canceled).
+ - Correctly pass `self.dropout_inputs` float to `mx.sym.Dropout` in `VariationalDropoutCell`.
 
 ## [1.8.1]
 ### Changed

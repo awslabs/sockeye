@@ -181,7 +181,9 @@ TENSORBOARD_NAME = "tensorboard"
 TRAINING_STATE_DIRNAME = "training_state"
 TRAINING_STATE_TEMP_DIRNAME = "tmp.training_state"
 TRAINING_STATE_TEMP_DELETENAME = "delete.training_state"
-MODULE_OPT_STATE_NAME = "mx_optimizer.pkl"
+OPT_STATES_LAST = "mx_optimizer_last.pkl"
+OPT_STATES_BEST = "mx_optimizer_best.pkl"
+OPT_STATES_INITIAL = "mx_optimizer_initial.pkl"
 BUCKET_ITER_STATE_NAME = "bucket.pkl"
 RNG_STATE_NAME = "rng.pkl"
 MONITOR_STATE_NAME = "monitor.pkl"
@@ -225,6 +227,13 @@ LR_SCHEDULERS = [LR_SCHEDULER_FIXED_RATE_INV_SQRT_T,
                  LR_SCHEDULER_FIXED_RATE_INV_T,
                  LR_SCHEDULER_FIXED_STEP,
                  LR_SCHEDULER_PLATEAU_REDUCE]
+
+LR_DECAY_OPT_STATES_RESET_OFF = 'off'
+LR_DECAY_OPT_STATES_RESET_INITIAL = 'initial'
+LR_DECAY_OPT_STATES_RESET_BEST = 'best'
+LR_DECAY_OPT_STATES_RESET_CHOICES = [LR_DECAY_OPT_STATES_RESET_OFF,
+                                     LR_DECAY_OPT_STATES_RESET_INITIAL,
+                                     LR_DECAY_OPT_STATES_RESET_BEST]
 
 OUTPUT_HANDLER_TRANSLATION = "translation"
 OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENTS = "translation_with_alignments"

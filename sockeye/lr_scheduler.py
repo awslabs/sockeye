@@ -29,8 +29,14 @@ class LearningRateScheduler:
         self.log_warmup_every_t = self.warmup // 10
         self.last_warmup_log = -1
 
-    def new_evaluation_result(self, has_improved: bool):
-        pass
+    def new_evaluation_result(self, has_improved: bool) -> bool:
+        """
+        Returns true if the parameters should be reset to the ones with the best validation score.
+
+        :param has_improved: Whether the model improved on held-out validation data.
+        :return: True if parameters should be reset to the ones with best validation score.
+        """
+        return False
 
     def __call__(self, num_updates):
         pass
@@ -71,7 +77,13 @@ class LearningRateSchedulerFixedStep(LearningRateScheduler):
         self.latest_t = 0
         self._update_rate(self.current_step)
 
-    def new_evaluation_result(self, has_improved: bool):
+    def new_evaluation_result(self, has_improved: bool) -> bool:
+        """
+        Returns true if the parameters should be reset to the ones with the best validation score.
+
+        :param has_improved: Whether the model improved on held-out validation data.
+        :return: True if parameters should be reset to the ones with best validation score.
+        """
         logger.info("Checkpoint learning rate: %1.2e (%d/%d updates)",
                     self.current_rate,
                     self.latest_t - self.current_step_started_at,
@@ -79,6 +91,7 @@ class LearningRateSchedulerFixedStep(LearningRateScheduler):
         if self.latest_t >= self.next_step_at:
             self.current_step += 1
             self._update_rate(self.current_step)
+        return False
 
     def _update_rate(self, step: int):
         if self.current_step < len(self.schedule):
@@ -190,7 +203,13 @@ class LearningRateSchedulerPlateauReduce(LearningRateScheduler):
                     " the validation score doesn't improve %d times.",
                     reduce_factor, reduce_num_not_improved)
 
-    def new_evaluation_result(self, has_improved: bool):
+    def new_evaluation_result(self, has_improved: bool) -> bool:
+        """
+        Returns true if the parameters should be reset to the ones with the best validation score.
+
+        :param has_improved: Whether the model improved on held-out validation data.
+        :return: True if parameters should be reset to the ones with best validation score.
+        """
         if self.lr is None:
             assert self.base_lr is not None
             self.lr = self.base_lr
@@ -204,6 +223,8 @@ class LearningRateSchedulerPlateauReduce(LearningRateScheduler):
                 logger.info("%d checkpoints since improvement or rate scaling, "
                             "lowering learning rate: %1.2e -> %1.2e", self.num_not_improved, old_lr, self.lr)
                 self.num_not_improved = 0
+                return True
+        return False
 
     def __call__(self, t):
         if self.lr is None:

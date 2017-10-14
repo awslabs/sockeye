@@ -659,7 +659,9 @@ def main():
                            monitor_bleu=monitor_bleu,
                            use_tensorboard=args.use_tensorboard,
                            mxmonitor_pattern=args.monitor_pattern,
-                           mxmonitor_stat_func=args.monitor_stat_func)
+                           mxmonitor_stat_func=args.monitor_stat_func,
+                           lr_decay_param_reset=args.learning_rate_decay_param_reset,
+                           lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset)
 
 
 if __name__ == "__main__":
