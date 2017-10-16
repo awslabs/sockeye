@@ -82,7 +82,7 @@ Depending on the amount of RAM you have available you might want to reduce size 
 head -n 200000 corpus.tc.BPE.de > corpus.tc.BPE.de.tmp && mv corpus.tc.BPE.de.tmp corpus.tc.BPE.de
 head -n 200000 corpus.tc.BPE.en > corpus.tc.BPE.en.tmp && mv corpus.tc.BPE.en.tmp corpus.tc.BPE.en
 ```
-That said, we can how kick off the training process:
+That said, we can now kick off the training process:
 ```bash
 python -m sockeye.train -s corpus.tc.BPE.de \
                         -t corpus.tc.BPE.en \
@@ -90,7 +90,7 @@ python -m sockeye.train -s corpus.tc.BPE.de \
                         -vt newstest2016.tc.BPE.en \
                         --num-embed 256 \
                         --rnn-num-hidden 512 \
-                        --attention-type dot \
+                        --rnn-attention-type dot \
                         --max-seq-len 60 \
                         --monitor-bleu 500 \
                         --use-tensorboard \
