@@ -24,4 +24,4 @@ script:
   - pylint --rcfile=pylintrc test -E
   - mypy --ignore-missing-imports --follow-imports=silent @typechecked-files
   - check-manifest --ignore sockeye/git_version.py
-  - if [[ ${TRAVIS_EVENT_TYPE} == "cron" ]]; then python -m pytest test/system || travis-terminate 1; fi
+  #- python -m pytest test/system
