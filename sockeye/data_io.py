@@ -175,8 +175,8 @@ def get_training_data_iters(source: str, target: str,
                                                                           vocab_source,
                                                                           vocab_target)
 
-    max_observed_source_len = max(len(s) for s in train_source_sentences if len(s) <= max_seq_len_source)
-    max_observed_target_len = max(len(t) for t in train_target_sentences if len(t) <= max_seq_len_target)
+    max_observed_source_len = max((len(s) for s in train_source_sentences if len(s) <= max_seq_len_source), default=0)
+    max_observed_target_len = max((len(t) for t in train_target_sentences if len(t) <= max_seq_len_target), default=0)
 
     lr_mean, lr_std = length_statistics(train_source_sentences, train_target_sentences)
     logger.info("Mean training target/source length ratio: %.2f (+-%.2f)", lr_mean, lr_std)
