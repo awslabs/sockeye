@@ -255,4 +255,4 @@ def test_print_value():
 
     executor_base.backward()
     executor_print.backward()
-    assert np.isclose(executor_base.grad_arrays[1].asnumpy(), executor_base.grad_arrays[1].asnumpy()).all()
+    assert np.isclose(executor_base.grad_arrays[1].asnumpy(), executor_print.grad_arrays[1].asnumpy()).all()
