@@ -52,7 +52,8 @@ def learning_schedule() -> Callable:
         try:
             schedule = LearningRateSchedulerFixedStep.parse_schedule_str(schedule_str)
         except ValueError:
-            raise argparse.ArgumentTypeError("Learning rate schedule string should have form rate1:num_updates1[,rate2:num_updates2,...]")
+            raise argparse.ArgumentTypeError(
+                "Learning rate schedule string should have form rate1:num_updates1[,rate2:num_updates2,...]")
         return schedule
 
     return parse
@@ -125,11 +126,13 @@ def file_or_stdin() -> Callable:
     """
     Returns a file descriptor from stdin or opening a file from a given path.
     """
+
     def parse(path):
         if path is None or path == "-":
             return sys.stdin
         else:
             return data_io.smart_open(path)
+
     return parse
 
 
@@ -488,6 +491,7 @@ def add_training_args(params):
                               choices=[C.BATCH_TYPE_SENTENCE, C.BATCH_TYPE_WORD],
                               help="Sentence: each batch contains X sentences, number of words varies. Word: each batch"
                                    " contains (approximately) X words, number of sentences varies. Default: %(default)s.")
+
     train_params.add_argument('--fill-up',
                               type=str,
                               default='replicate',
@@ -601,6 +605,15 @@ def add_training_args(params):
                               type=simple_dict(),
                               default=None,
                               help='Additional optimizer params as dictionary. Format: key1:value1,key2:value2,...')
+
+    train_params.add_argument("--kvstore",
+                              type=str,
+                              default=C.KVSTORE_DEVICE,
+                              choices=C.KVSTORE_TYPES,
+                              help="The MXNet kvstore to use. 'device' is recommended for single process training. "
+                                   "Use any of 'dist_sync', 'dist_device_sync' and 'dist_async' for distributed "
+                                   "training. Default: %(default)s.")
+
     train_params.add_argument('--weight-init',
                               type=str,
                               default=C.INIT_XAVIER,
@@ -647,8 +660,8 @@ def add_training_args(params):
                               type=learning_schedule(),
                               default=None,
                               help="For 'fixed-step' scheduler. Fully specified learning schedule in the form"
-                              " rate1:num_updates1[,rate2:num_updates2,...]. Overrides all other args related to"
-                              " learning rate and stopping conditions. Default: %(default)s.")
+                                   " rate1:num_updates1[,rate2:num_updates2,...]. Overrides all other args related to"
+                                   " learning rate and stopping conditions. Default: %(default)s.")
     train_params.add_argument('--learning-rate-half-life',
                               type=float,
                               default=10,

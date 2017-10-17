@@ -135,6 +135,7 @@ def test_model_parameters(test_params, expected_params):
               conv_embed_dropout=0.0,
               optimizer='adam',
               optimizer_params=None,
+              kvstore='device',
               min_num_epochs=0,
               initial_learning_rate=0.0003,
               weight_decay=0.0,

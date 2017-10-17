@@ -174,6 +174,7 @@ class TrainingModel(model.SockeyeModel):
             optimizer: str,
             optimizer_params: dict,
             optimized_metric: str = "perplexity",
+            kvstore: str = C.KVSTORE_DEVICE,
             max_num_not_improved: int = 3,
             min_num_epochs: Optional[int] = None,
             monitor_bleu: int = 0,
@@ -197,6 +198,7 @@ class TrainingModel(model.SockeyeModel):
         :param optimizer: The MXNet optimizer that will update the parameters.
         :param optimizer_params: The parameters for the optimizer.
         :param optimized_metric: The metric that is tracked for early stopping.
+        :param kvstore: The MXNet kvstore used.
         :param max_num_not_improved: Stop training if the optimized_metric does not improve for this many checkpoints,
                -1: do not use early stopping.
         :param min_num_epochs: Minimum number of epochs to train, even if validation scores did not improve.
@@ -215,6 +217,11 @@ class TrainingModel(model.SockeyeModel):
         self.save_version(output_folder)
         self.save_config(output_folder)
 
+        if 'dist' in kvstore:
+            # In distributed training the optimizer will run remotely. For eve we however need to pass information about
+            # the loss, which is not possible anymore by means of accessing self.module._curr_module._optimizer.
+            utils.check_condition(optimizer != C.OPTIMIZER_EVE, "Eve optimizer not supported with distributed training.")
+
         self.module.bind(data_shapes=train_iter.provide_data, label_shapes=train_iter.provide_label,
                          for_training=True, force_rebind=True, grad_req='write')
         self.module.symbol.save(os.path.join(output_folder, C.SYMBOL_NAME))
@@ -223,7 +230,7 @@ class TrainingModel(model.SockeyeModel):
                                 allow_missing=False, force_init=False)
         self._log_params()
 
-        self.module.init_optimizer(kvstore='device', optimizer=optimizer, optimizer_params=optimizer_params)
+        self.module.init_optimizer(kvstore=kvstore, optimizer=optimizer, optimizer_params=optimizer_params)
 
         cp_decoder = checkpoint_decoder.CheckpointDecoder(self.context[-1],
                                                           self.config.config_data.validation_source,
