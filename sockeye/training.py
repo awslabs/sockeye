@@ -32,6 +32,7 @@ from . import checkpoint_decoder
 from . import constants as C
 from . import data_io
 from . import loss
+from . import lr_scheduler
 from .optimizers import BatchState, CheckpointState, SockeyeOptimizer
 from . import model
 from . import utils
@@ -221,6 +222,13 @@ class TrainingModel(model.SockeyeModel):
             # In distributed training the optimizer will run remotely. For eve we however need to pass information about
             # the loss, which is not possible anymore by means of accessing self.module._curr_module._optimizer.
             utils.check_condition(optimizer != C.OPTIMIZER_EVE, "Eve optimizer not supported with distributed training.")
+            utils.check_condition(not issubclass(type(self.lr_scheduler), lr_scheduler.AdaptiveLearningRateScheduler),
+                                  "Adaptive learning rate schedulers not supported with a dist kvstore. "
+                                  "Try a fixed schedule such as %s." % C.LR_SCHEDULER_FIXED_RATE_INV_SQRT_T)
+            utils.check_condition(not lr_decay_param_reset, "Parameter reset when the learning rate decays not "
+                                                            "supported with distributed training.")
+            utils.check_condition(not lr_decay_opt_states_reset, "Optimizer state reset when the learning rate decays "
+                                                                 "not supported with distributed training.")
 
         self.module.bind(data_shapes=train_iter.provide_data, label_shapes=train_iter.provide_label,
                          for_training=True, force_rebind=True, grad_req='write')
@@ -256,7 +264,8 @@ class TrainingModel(model.SockeyeModel):
                         mxmonitor_pattern, mxmonitor_stat_func)
 
         self._fit(train_iter, val_iter, output_folder,
-                  max_params_files_to_keep,
+                  kvstore=kvstore,
+                  max_params_files_to_keep=max_params_files_to_keep,
                   metrics=metrics,
                   max_updates=max_updates,
                   checkpoint_frequency=checkpoint_frequency,
@@ -276,6 +285,7 @@ class TrainingModel(model.SockeyeModel):
              train_iter: data_io.ParallelBucketSentenceIter,
              val_iter: data_io.ParallelBucketSentenceIter,
              output_folder: str,
+             kvstore: str,
              max_params_files_to_keep: int,
              metrics: List[AnyStr],
              max_updates: int,
@@ -291,7 +301,8 @@ class TrainingModel(model.SockeyeModel):
         :param train_iter: Training data iterator.
         :param val_iter: Validation data iterator.
         :param output_folder: Model output folder.
-        :params max_params_files_to_keep: Maximum number of params files to keep in the output folder (last n are kept).
+        :param kvstore: The MXNet kvstore.
+        :param max_params_files_to_keep: Maximum number of params files to keep in the output folder (last n are kept).
         :param metrics: List of metric names to track on training and validation data.
         :param max_updates: Maximum number of batches to process.
         :param checkpoint_frequency: Frequency of checkpointing.
@@ -321,6 +332,9 @@ class TrainingModel(model.SockeyeModel):
 
         training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
         if os.path.exists(training_state_dir):
+            utils.check_condition('dist' not in kvstore, "Training continuation not supported with "
+                                                         "distributed training.")
+
             train_state = self.load_checkpoint(training_state_dir, train_iter)
         else:
             train_state = _TrainingState(
@@ -411,7 +425,10 @@ class TrainingModel(model.SockeyeModel):
 
                 # learning rate adjustment
                 if self.lr_scheduler is not None:
-                    lr_adjusted = self.lr_scheduler.new_evaluation_result(has_improved)
+                    if issubclass(type(self.lr_scheduler), lr_scheduler.AdaptiveLearningRateScheduler):
+                        lr_adjusted = self.lr_scheduler.new_evaluation_result(has_improved)
+                    else:
+                        lr_adjusted = False
                     if lr_adjusted and not has_improved:
                         if lr_decay_param_reset:
                             logger.info("Loading parameters from last best checkpoint: %d", best_checkpoint)

@@ -161,9 +161,10 @@ def determine_context(args: argparse.Namespace, exit_stack: ExitStack) -> List[m
             context = utils.expand_requested_device_ids(args.device_ids)
         else:
             context = exit_stack.enter_context(utils.acquire_gpus(args.device_ids, lock_dir=args.lock_dir))
-        check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
-                                                             "divisible by the number of devices. Choose a batch size "
-                                                             "that is a multiple of %d." % len(context))
+        if args.batch_type == C.BATCH_TYPE_SENTENCE:
+            check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
+                                                                 "divisible by the number of devices. Choose a batch "
+                                                                 "size that is a multiple of %d." % len(context))
         logger.info("Device(s): GPU %s", context)
         context = [mx.gpu(gpu_id) for gpu_id in context]
     return context
