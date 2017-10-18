@@ -219,7 +219,7 @@ class TrainingModel(model.SockeyeModel):
         self.save_config(output_folder)
 
         if 'dist' in kvstore:
-            self._check_dist_requirements(lr_decay_opt_states_reset, lr_decay_param_reset, optimizer)
+            self._check_dist_kvstore_requirements(lr_decay_opt_states_reset, lr_decay_param_reset, optimizer)
 
         self.module.bind(data_shapes=train_iter.provide_data, label_shapes=train_iter.provide_label,
                          for_training=True, force_rebind=True, grad_req='write')
@@ -272,7 +272,7 @@ class TrainingModel(model.SockeyeModel):
                     self.training_monitor.get_best_validation_score())
         return self.training_monitor.get_best_validation_score()
 
-    def _check_dist_requirements(self, lr_decay_opt_states_reset, lr_decay_param_reset, optimizer):
+    def _check_dist_kvstore_requirements(self, lr_decay_opt_states_reset, lr_decay_param_reset, optimizer):
         # In distributed training the optimizer will run remotely. For eve we however need to pass information about
         # the loss, which is not possible anymore by means of accessing self.module._curr_module._optimizer.
         utils.check_condition(optimizer != C.OPTIMIZER_EVE, "Eve optimizer not supported with distributed training.")
