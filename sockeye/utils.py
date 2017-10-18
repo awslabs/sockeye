@@ -655,25 +655,44 @@ class PrintValue(mx.operator.CustomOp):
 
     Use it as:
     my_sym = mx.sym.Custom(op_type="PrintValue", data=my_sym, print_name="My symbol")
+
+    Additionally you can use the optional arguments 'use_logger=True' for using
+    the system logger and 'print_grad=True' for printing information about the
+    gradient (out_grad, i.e. "upper part" of the graph).
     """
-    def __init__(self, print_name):
+    def __init__(self, print_name, print_grad: str, use_logger: str):
         super().__init__()
         self.print_name = print_name
+        # Note that all the parameters are serialized as strings
+        self.print_grad = (print_grad == "True")
+        self.use_logger = (use_logger == "True")
+
+    def __print_nd__(self, nd: mx.nd.array, label: str):
+        intro = "%s %s - shape %s" % (label, self.print_name, str(nd.shape))
+        if self.use_logger:
+            logger.info(intro)
+            logger.info(str(nd.asnumpy()))
+        else:
+            print(">>>>> ", intro)
+            print(nd.asnumpy())
 
     def forward(self, is_train, req, in_data, out_data, aux):
-        print(">>>>> Symbol", self.print_name, "shape", in_data[0].shape)
-        print(in_data[0].asnumpy())
+        self.__print_nd__(in_data[0], "Symbol")
         self.assign(out_data[0], req[0], in_data[0])
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
+        if self.print_grad:
+            self.__print_nd__(out_grad[0], "Grad")
         self.assign(in_grad[0], req[0], out_grad[0])
 
 
 @mx.operator.register("PrintValue")
 class PrintValueProp(mx.operator.CustomOpProp):
-    def __init__(self, print_name):
+    def __init__(self, print_name: str, print_grad: bool = False, use_logger: bool = False):
         super().__init__(need_top_grad=True)
         self.print_name = print_name
+        self.print_grad = print_grad
+        self.use_logger = use_logger
 
     def list_arguments(self):
         return ["data"]
@@ -688,4 +707,6 @@ class PrintValueProp(mx.operator.CustomOpProp):
         return in_type, in_type, []
 
     def create_operator(self, ctx, shapes, dtypes):
-        return PrintValue(self.print_name)
+        return PrintValue(self.print_name,
+                          print_grad=self.print_grad,
+                          use_logger=self.use_logger)
