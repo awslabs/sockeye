@@ -29,15 +29,6 @@ class LearningRateScheduler:
         self.log_warmup_every_t = self.warmup // 10
         self.last_warmup_log = -1
 
-    def new_evaluation_result(self, has_improved: bool) -> bool:
-        """
-        Returns true if the parameters should be reset to the ones with the best validation score.
-
-        :param has_improved: Whether the model improved on held-out validation data.
-        :return: True if parameters should be reset to the ones with best validation score.
-        """
-        return False
-
     def __call__(self, num_updates):
         pass
 
@@ -55,7 +46,23 @@ class LearningRateScheduler:
         return fraction
 
 
-class LearningRateSchedulerFixedStep(LearningRateScheduler):
+class AdaptiveLearningRateScheduler(LearningRateScheduler):
+    """
+    Learning rate scheduler that implements `new_evaluation_result` and accordingly adaptively adjust the  learning
+    rate.
+    """
+
+    def new_evaluation_result(self, has_improved: bool) -> bool:
+        """
+        Returns true if the parameters should be reset to the ones with the best validation score.
+
+        :param has_improved: Whether the model improved on held-out validation data.
+        :return: True if parameters should be reset to the ones with best validation score.
+        """
+        return False
+
+
+class LearningRateSchedulerFixedStep(AdaptiveLearningRateScheduler):
     """
     Use a fixed schedule of learning rate steps: lr_1 for N steps, lr_2 for M steps, etc.
 
@@ -181,7 +188,7 @@ class LearningRateSchedulerInvT(LearningRateScheduler):
         return lr
 
 
-class LearningRateSchedulerPlateauReduce(LearningRateScheduler):
+class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
     """
     Lower the learning rate as soon as the validation score plateaus.
 

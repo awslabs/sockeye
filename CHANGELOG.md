@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 For each item we will potentially have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.8.4]
+### Added
+ - Exposing the MXNet KVStore through the ``--kvstore`` argument, potentially enabling distributed training.
+
 ## [1.8.3]
 ### Added
  - Optional smart rollback of parameters and optimizer states after updating the learning rate 

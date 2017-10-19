@@ -161,6 +161,10 @@ def determine_context(args: argparse.Namespace, exit_stack: ExitStack) -> List[m
             context = utils.expand_requested_device_ids(args.device_ids)
         else:
             context = exit_stack.enter_context(utils.acquire_gpus(args.device_ids, lock_dir=args.lock_dir))
+        if args.batch_type == C.BATCH_TYPE_SENTENCE:
+            check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
+                                                                 "divisible by the number of devices. Choose a batch "
+                                                                 "size that is a multiple of %d." % len(context))
         logger.info("Device(s): GPU %s", context)
         context = [mx.gpu(gpu_id) for gpu_id in context]
     return context
@@ -550,13 +554,13 @@ def create_training_model(model_config: model.ModelConfig,
     return training_model
 
 
-def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict]:
+def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict, str]:
     """
     Defines the optimizer to use and its parameters.
 
     :param args: Arguments as returned by argparse.
     :param lr_scheduler: The learning rate scheduler.
-    :return: The optimizer type and its parameters.
+    :return: The optimizer type and its parameters as well as the kvstore.
     """
     optimizer = args.optimizer
     optimizer_params = {'wd': args.weight_decay,
@@ -580,8 +584,9 @@ def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict]:
         optimizer_params.update(args.optimizer_params)
     logger.info("Optimizer: %s", optimizer)
     logger.info("Optimizer Parameters: %s", optimizer_params)
+    logger.info("kvstore: %s", args.kvstore)
 
-    return optimizer, optimizer_params
+    return optimizer, optimizer_params, args.kvstore
 
 
 def main():
@@ -625,7 +630,7 @@ def main():
         weight_initializer = initializer.get_initializer(args.weight_init, args.weight_init_scale,
                                                          args.rnn_h2h_init, lexicon=lexicon_array)
 
-        optimizer, optimizer_params = define_optimizer(args, lr_scheduler_instance)
+        optimizer, optimizer_params, kvstore = define_optimizer(args, lr_scheduler_instance)
 
         # Handle options that override training settings
         max_updates = args.max_updates
@@ -654,6 +659,7 @@ def main():
                            checkpoint_frequency=args.checkpoint_frequency,
                            optimizer=optimizer, optimizer_params=optimizer_params,
                            optimized_metric=args.optimized_metric,
+                           kvstore=kvstore,
                            max_num_not_improved=max_num_checkpoint_not_improved,
                            min_num_epochs=min_num_epochs,
                            monitor_bleu=monitor_bleu,
