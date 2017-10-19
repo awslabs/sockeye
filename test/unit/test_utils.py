@@ -222,3 +222,37 @@ def test_save_and_load_params():
         assert "array" in loaded_aux_params
         assert np.isclose(loaded_arg_params['array'].asnumpy(), array.asnumpy()).all()
         assert np.isclose(loaded_aux_params['array'].asnumpy(), array.asnumpy()).all()
+
+
+def test_print_value():
+    data = mx.sym.Variable("data")
+    weights = mx.sym.Variable("weights")
+    softmax_label = mx.sym.Variable("softmax_label")
+
+    fc = mx.sym.FullyConnected(data=data, num_hidden=128, weight=weights, no_bias=True)
+    out = mx.sym.SoftmaxOutput(data=fc, label=softmax_label, name="softmax")
+
+    fc_print = mx.sym.Custom(op_type="PrintValue", data=fc, print_name="FullyConnected")
+    out_print = mx.sym.SoftmaxOutput(data=fc_print, label=softmax_label, name="softmax")
+
+    data_np = np.random.rand(1, 256)
+    weights_np = np.random.rand(128, 256)
+    label_np = np.random.rand(1, 128)
+
+    executor_base = out.simple_bind(mx.cpu(), data=(1, 256), softmax_label=(1, 128), weights=(128, 256))
+    executor_base.arg_dict["data"][:] = data_np
+    executor_base.arg_dict["weights"][:] = weights_np
+    executor_base.arg_dict["softmax_label"][:] = label_np
+
+    executor_print = out_print.simple_bind(mx.cpu(), data=(1, 256), softmax_label=(1, 128), weights=(128, 256))
+    executor_print.arg_dict["data"][:] = data_np
+    executor_print.arg_dict["weights"][:] = weights_np
+    executor_print.arg_dict["softmax_label"][:] = label_np
+
+    output_base = executor_base.forward(is_train=True)[0]
+    output_print = executor_print.forward(is_train=True)[0]
+    assert np.isclose(output_base.asnumpy(), output_print.asnumpy()).all()
+
+    executor_base.backward()
+    executor_print.backward()
+    assert np.isclose(executor_base.grad_arrays[1].asnumpy(), executor_print.grad_arrays[1].asnumpy()).all()
