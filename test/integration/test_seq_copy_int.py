@@ -22,8 +22,7 @@ _TRAIN_LINE_COUNT = 100
 _DEV_LINE_COUNT = 10
 _LINE_MAX_LENGTH = 9
 
-
-@pytest.mark.parametrize("train_params, translate_params", [
+ENCODER_DECODER_SETTINGS = [
     # "Vanilla" LSTM encoder-decoder with attention
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 16 --num-embed 8 --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 16 --batch-size 8 --loss cross-entropy --optimized-metric perplexity --max-updates 10"
@@ -75,8 +74,9 @@ _LINE_MAX_LENGTH = 9
      " --batch-size 16 --num-layers 3 --max-updates 10 --checkpoint-frequency 10"
      " --cnn-num-hidden 32 --cnn-positional-embedding-type fixed"
      " --optimizer adam --initial-learning-rate 0.001",
-     "--beam-size 2")
-])
+     "--beam-size 2")]
+
+@pytest.mark.parametrize("train_params, translate_params", ENCODER_DECODER_SETTINGS)
 def test_seq_copy(train_params, translate_params):
     """Task: copy short sequences of digits"""
     with TemporaryDirectory(prefix="test_seq_copy") as work_dir:
@@ -87,10 +87,12 @@ def test_seq_copy(train_params, translate_params):
         dev_target_path = os.path.join(work_dir, "dev.tgt")
         generate_digits_file(train_source_path, train_target_path, _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH)
         generate_digits_file(dev_source_path, dev_target_path, _DEV_LINE_COUNT, _LINE_MAX_LENGTH)
-        # Test model configuration
+        # Test model configuration, including the output equivalence of batch and no-batch decoding
+        translate_params_batch = translate_params + " --batch-size 2"
         # Ignore return values (perplexity and BLEU) for integration test
         run_train_translate(train_params,
                             translate_params,
+                            translate_params_batch,
                             train_source_path,
                             train_target_path,
                             dev_source_path,

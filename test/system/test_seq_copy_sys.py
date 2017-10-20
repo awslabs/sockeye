@@ -102,6 +102,7 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
         # Test model configuration
         perplexity, bleu = run_train_translate(train_params,
                                                translate_params,
+                                               None,  # no second set of parameters
                                                train_source_path,
                                                train_target_path,
                                                dev_source_path,
@@ -183,6 +184,7 @@ def test_seq_sort(train_params, translate_params, perplexity_thresh, bleu_thresh
         # Test model configuration
         perplexity, bleu = run_train_translate(train_params,
                                                translate_params,
+                                               None,
                                                train_source_path,
                                                train_target_path,
                                                dev_source_path,

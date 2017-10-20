@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 For each item we will potentially have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.9.0]
+### Added
+ - Batch decoding. New options for the translate CLI: ``--batch-size`` and ``--chunk-size``. Translator.translate()  
+ now accepts and returns lists of inputs and outputs.
+
 ## [1.8.4]
 ### Added
  - Exposing the MXNet KVStore through the ``--kvstore`` argument, potentially enabling distributed training.
