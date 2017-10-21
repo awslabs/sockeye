@@ -164,6 +164,33 @@ def add_average_args(params):
         help="selection method. Default: %(default)s.")
 
 
+def add_lexicon_args(params):
+    lexicon_params = params.add_argument_group("Lexicon")
+    lexicon_params.add_argument(
+        "--input",
+        "-i",
+        required=True,
+        type=str,
+        help="Probabilistic lexicon (fast_align format) to use for building top-k lexicon.")
+    lexicon_params.add_argument(
+        "--output",
+        "-o",
+        required=True,
+        type=str,
+        help="JSON file to write top-k lexicon to.")
+    lexicon_params.add_argument(
+        "--model",
+        "-m",
+        required=True,
+        type=str,
+        help="Trained model directory for source and target vocab.")
+    lexicon_params.add_argument(
+        "-k",
+        type=int,
+        default=20,
+        help="Number of target translations to keep per source. Default: %(default)s.")
+
+
 def add_io_args(params):
     data_params = params.add_argument_group("Data & I/O")
 
@@ -440,8 +467,8 @@ def add_model_parameters(params):
     model_params.add_argument('--lexical-bias',
                               default=None,
                               type=str,
-                              help="Specify probabilistic lexicon for lexical biasing (Arthur ETAL'16). "
-                                   "Set smoothing value epsilon by appending :<eps>")
+                              help="Specify probabilistic lexicon (fast_align format) for lexical biasing (Arthur "
+                                   "ETAL'16). Set smoothing value epsilon by appending :<eps>")
     model_params.add_argument('--learn-lexical-bias',
                               action='store_true',
                               help='Adjust lexicon probabilities during training. Default: %(default)s')
@@ -553,23 +580,23 @@ def add_training_args(params):
     train_params.add_argument('--embed-dropout',
                               type=multiple_values(2, data_type=float),
                               default=(.0, .0),
-                              help='Dropout probability for source & target embeddings. Use <val>:<val> to specify '
+                              help='Dropout probability for source & target embeddings. Use "x:x" to specify '
                                    'separate values. Default: %(default)s.')
     train_params.add_argument('--rnn-dropout-inputs',
                               type=multiple_values(2, data_type=float),
                               default=(.0, .0),
                               help='RNN variational dropout probability for encoder & decoder RNN inputs. (Gal, 2015)'
-                                   'Use <val>:<val> to specify separate values. Default: %(default)s.')
+                                   'Use "x:x" to specify separate values. Default: %(default)s.')
     train_params.add_argument('--rnn-dropout-states',
                               type=multiple_values(2, data_type=float),
                               default=(.0, .0),
                               help='RNN variational dropout probability for encoder & decoder RNN states. (Gal, 2015)'
-                                   'Use <val>:<val> to specify separate values. Default: %(default)s.')
+                                   'Use "x:x" to specify separate values. Default: %(default)s.')
     train_params.add_argument('--rnn-dropout-recurrent',
                               type=multiple_values(2, data_type=float),
                               default=(.0, .0),
                               help='Recurrent dropout without memory loss (Semeniuta, 2016) for encoder & decoder '
-                                   'LSTMs. Use <val>:<val> to specify separate values. Default: %(default)s.')
+                                   'LSTMs. Use "x:x" to specify separate values. Default: %(default)s.')
 
     train_params.add_argument('--rnn-decoder-hidden-dropout',
                               type=float,
@@ -660,8 +687,8 @@ def add_training_args(params):
                               type=learning_schedule(),
                               default=None,
                               help="For 'fixed-step' scheduler. Fully specified learning schedule in the form"
-                                   " rate1:num_updates1[,rate2:num_updates2,...]. Overrides all other args related to"
-                                   " learning rate and stopping conditions. Default: %(default)s.")
+                                   " \"rate1:num_updates1[,rate2:num_updates2,...]\". Overrides all other args related"
+                                   " to learning rate and stopping conditions. Default: %(default)s.")
     train_params.add_argument('--learning-rate-half-life',
                               type=float,
                               default=10,
@@ -778,6 +805,11 @@ def add_inference_args(params):
                                help='Number of target-to-source length ratio standard deviations from training to add '
                                     'to calculate maximum output length for beam search for each sentence. '
                                     'Default: %(default)s.')
+    decode_params.add_argument('--restrict-output-vocab',
+                               type=str,
+                               default=None,
+                               help="Specify top-k lexicon to use for restricting output vocabulary based on input "
+                                    "words. See lexicon module.")
 
     decode_params.add_argument('--output-type',
                                default='translation',
