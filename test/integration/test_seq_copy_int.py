@@ -37,7 +37,7 @@ ENCODER_DECODER_SETTINGS = [
      " --max-updates 10 --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01"
      " --rnn-dropout-inputs 0.5:0.1 --rnn-dropout-states 0.5:0.1 --embed-dropout 0.1 --rnn-decoder-hidden-dropout 0.01"
      " --rnn-decoder-state-init avg --rnn-encoder-reverse-input --rnn-dropout-recurrent 0.1:0.0"
-     " --learning-rate-decay-param-reset",
+     " --learning-rate-decay-param-reset --weight-normalization",
      "--beam-size 2"),
     # Convolutional embedding encoder + LSTM encoder-decoder with attention
     ("--encoder rnn-with-conv-embed --conv-embed-max-filter-width 3 --conv-embed-num-filters 4:4:8"

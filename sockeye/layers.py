@@ -11,12 +11,16 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import logging
 from typing import Optional, Tuple
+from . import constants as C
 
 import mxnet as mx
 import numpy as np
 
 from . import utils
+
+logger = logging.getLogger(__name__)
 
 
 class LayerNormalization:
@@ -106,6 +110,64 @@ class WeightNormalization:
         """
         return mx.sym.broadcast_mul(lhs=mx.sym.L2Normalization(self.weight, mode='instance'),
                                     rhs=self.scale, name="%swn_scale" % self.prefix)
+
+
+class OutputLayer:
+    """
+    Defines the output layer of Sockeye decoders. Supports weight tying and weight normalization.
+
+    :param num_hidden: Number of hidden units in layer input (decoder representation).
+    :param num_embed: Target embedding size.
+    :param vocab_size: Target vocabulary size.
+    :param weight_tying: Whether to use target embedding parameters as output layer parameters.
+    :param embed_weight: Optional embedding matrix. Required if weight_tying == True.
+    :param weight_normalization: Whether to apply weight normalization.
+    :param prefix: Prefix used for naming.
+    """
+
+    def __init__(self,
+                 num_hidden: int,
+                 num_embed: int,
+                 vocab_size: int,
+                 weight_tying: bool,
+                 embed_weight: Optional[mx.sym.Symbol],
+                 weight_normalization: bool,
+                 prefix: str = ''):
+        self.vocab_size = vocab_size
+
+        self.w = mx.sym.Variable("%scls_weight" % prefix, shape=(vocab_size, num_hidden))
+        self.b = mx.sym.Variable("%scls_bias" % prefix)
+
+        if weight_tying:
+            utils.check_condition(num_hidden == num_embed,
+                                  "Weight tying requires target embedding size and decoder hidden size " +
+                                  "to be equal: %d vs. %d" % (num_embed, num_hidden))
+
+            logger.info("Tying the target embeddings and prediction matrix.")
+            assert embed_weight is not None, "Must provide embed_weight if weight_tying == True"
+            self.w = embed_weight
+
+        if weight_normalization:
+            logger.info("Normalizing output layer weights.")
+            self.weight_norm = WeightNormalization(self.w,
+                                                   num_hidden=vocab_size,
+                                                   ndim=2,
+                                                   prefix="%scls_" % prefix)
+            self.w = self.weight_norm()
+
+    def __call__(self, hidden: mx.sym.Symbol):
+        """
+        Linear transformation to vocab size. Returns logits.
+
+        :param hidden: Decoder representation for n elements. Shape: (n, self.num_hidden).
+        :return: Logits. Shape(n, self.vocab_size).
+        """
+        return mx.sym.FullyConnected(data=hidden,
+                                     num_hidden=self.vocab_size,
+                                     weight=self.w,
+                                     bias=self.b,
+                                     flatten=False,
+                                     name=C.LOGITS_NAME)
 
 
 def split_heads(x: mx.sym.Symbol, length: int, heads: int) -> mx.sym.Symbol:
@@ -236,7 +298,7 @@ class MultiHeadAttentionBase:
                 memory_max_length: int,
                 bias: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
         # scale by sqrt(depth_per_head)
-        queries = queries * self.depth_per_head ** -0.5
+        queries = queries * (self.depth_per_head ** -0.5)
 
         # (batch*heads, length, depth/heads)
         queries = split_heads(queries, queries_max_length, self.heads)
@@ -251,14 +313,12 @@ class MultiHeadAttentionBase:
         contexts = combine_heads(contexts, queries_max_length, self.heads)
 
         if self.depth_out != self.depth:
-            contexts = mx.sym.reshape(contexts, shape=(-3, -1))
-            # contexts: (batch * queries_max_length, output_depth)
+            # contexts: (batch, queries_max_length, output_depth)
             contexts = mx.sym.FullyConnected(data=contexts,
                                              weight=self.w_h2o,
                                              bias=self.b_h2o,
-                                             num_hidden=self.depth_out)
-            # contexts: (batch, queries_max_length, output_depth)
-            contexts = mx.sym.reshape(contexts, shape=(-1, queries_max_length, self.depth_out))
+                                             num_hidden=self.depth_out,
+                                             flatten=False)
         return contexts
 
 
@@ -298,20 +358,13 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         :param bias: Symbol of shape (1, max_length, max_length).
         :return: Symbol of shape (batch, max_length, output_depth).
         """
-        # combine batch and time dimension
-        # inputs: (batch * max_length, num_hidden)
-        inputs = mx.sym.reshape(data=inputs, shape=(-3, -1))
-
-        # combined: (batch * max_length, depth * 3)
+        # combined: (batch, max_length, depth * 3)
         combined = mx.sym.FullyConnected(data=inputs,
                                          weight=self.w_i2h,
                                          bias=self.b_i2h,
                                          num_hidden=self.depth * 3,
+                                         flatten=False,
                                          name="%sqkv_transform" % self.prefix)
-        # split batch and time dimension
-        # combined: (batch, max_length, depth * 3)
-        combined = mx.sym.reshape(data=combined, shape=(-1, max_length, self.depth * 3))
-
         # split into query, keys and values
         # (batch, max_length, depth)
         queries, keys, values = mx.sym.split(data=combined, num_outputs=3, axis=2)
@@ -364,35 +417,26 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         :param memory_max_length: Size of memory time dimension.
         :return: Symbol of shape (batch, queries_max_length, output_depth).
         """
-        # Combine batch and time dimension
-        # inputs: (batch * memory_max_length, num_hidden)
-        memory = mx.sym.reshape(data=memory, shape=(-3, -1))
-
-        # (batch * memory_max_length, depth * 2)
+        # (batch, memory_max_length, depth * 2)
         combined = mx.sym.FullyConnected(data=memory,
                                          weight=self.w_kv2h,
                                          bias=self.b_kv2h,
                                          num_hidden=self.depth * 2,
+                                         flatten=False,
                                          name="%skv_transform" % self.prefix)
-
-        # split batch and time dimension
-        # (batch, memory_max_length, depth * 2)
-        combined = mx.sym.reshape(data=combined, shape=(-1, memory_max_length, self.depth * 2))
 
         # split into query, keys and values
         # (batch, memory_max_length, depth)
         # NOTE: requires depth to be equal across all 2 parts.
         keys, values = mx.sym.split(data=combined, num_outputs=2, axis=2)
 
-        queries = mx.sym.reshape(data=queries, shape=(-3, -1))
-        # (batch * memory_max_length, depth * 2)
+        # (batch, memory_max_length, depth * 2)
         queries = mx.sym.FullyConnected(data=queries,
                                         weight=self.w_q2h,
                                         bias=self.b_q2h,
                                         num_hidden=self.depth,
+                                        flatten=False,
                                         name="%sq_transform" % self.prefix)
-        # (batch, memory_max_length, depth)
-        queries = mx.sym.reshape(data=queries, shape=(-1, queries_max_length, self.depth))
 
         return self._attend(queries,
                             keys,

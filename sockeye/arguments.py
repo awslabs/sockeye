@@ -474,8 +474,8 @@ def add_model_parameters(params):
                                                                                                 C.LNGLSTM_TYPE))
 
     model_params.add_argument('--weight-normalization', action="store_true",
-                              help="Adds weight normalization to all convolutional weight matrices and the "
-                                   "transformation matrix to the output vocab in the convolutional decoder.")
+                              help="Adds weight normalization to decoder output layers "
+                                   "(and all convolutional weight matrices for CNN decoders). Default: %(default)s.")
 
 
 def add_training_args(params):

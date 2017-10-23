@@ -226,14 +226,13 @@ class BilinearAttention(Attention):
         :return: Attention callable.
         """
 
-        # (batch_size * seq_len, self.num_hidden)
-        source_hidden = mx.sym.FullyConnected(data=mx.sym.reshape(data=source, shape=(-3, -1),
-                                                                  name="%sflat_source" % self.prefix),
-                                              weight=self.s2t_weight, num_hidden=self.num_hidden,
-                                              no_bias=True, name="%ssource_hidden_fc" % self.prefix)
         # (batch_size, seq_len, self.num_hidden)
-        source_hidden = mx.sym.reshape(source_hidden, shape=(-1, source_seq_len, self.num_hidden),
-                                       name="%ssource_hidden" % self.prefix)
+        source_hidden = mx.sym.FullyConnected(data=source,
+                                              weight=self.s2t_weight,
+                                              num_hidden=self.num_hidden,
+                                              no_bias=True,
+                                              flatten=False,
+                                              name="%ssource_hidden_fc" % self.prefix)
 
         def attend(att_input: AttentionInput, att_state: AttentionState) -> AttentionState:
             """
@@ -305,14 +304,13 @@ class DotAttention(Attention):
         """
 
         if self.project_source:
-            # (batch_size * seq_len, self.num_hidden)
-            source_hidden = mx.sym.FullyConnected(
-                data=mx.sym.reshape(data=source, shape=(-3, -1), name="%sflat_source" % self.prefix),
-                weight=self.s2h_weight, num_hidden=self.num_hidden,
-                no_bias=True, name="%ssource_hidden_fc" % self.prefix)
             # (batch_size, seq_len, self.num_hidden)
-            source_hidden = mx.sym.reshape(source_hidden, shape=(-1, source_seq_len, self.num_hidden),
-                                           name="%ssource_hidden" % self.prefix)
+            source_hidden = mx.sym.FullyConnected(data=source,
+                                                  weight=self.s2h_weight,
+                                                  num_hidden=self.num_hidden,
+                                                  no_bias=True,
+                                                  flatten=False,
+                                                  name="%ssource_hidden_fc" % self.prefix)
         else:
             source_hidden = source
 
@@ -390,18 +388,13 @@ class MultiHeadDotAttention(Attention):
         :param source_seq_len: Maximum length of source sequences.
         :return: Attention callable.
         """
-
-        # Combine batch and time dimension
-        # (batch * length, input_depth)
-        source = mx.sym.reshape(data=source, shape=(-3, -1))
-
-        # (batch * length, num_hidden * 2)
-        source_hidden = mx.sym.FullyConnected(data=source,
-                                              weight=self.s2h_weight, bias=self.s2h_bias,
-                                              num_hidden=self.num_hidden * 2,
-                                              name="%ssource_hidden_fc" % self.prefix)
         # (batch, length, num_hidden * 2)
-        source_hidden = mx.sym.reshape(data=source_hidden, shape=(-1, source_seq_len, self.num_hidden * 2))
+        source_hidden = mx.sym.FullyConnected(data=source,
+                                              weight=self.s2h_weight,
+                                              bias=self.s2h_bias,
+                                              num_hidden=self.num_hidden * 2,
+                                              flatten=False,
+                                              name="%ssource_hidden_fc" % self.prefix)
         # split keys and values
         # (batch, length, num_hidden)
         keys, values = mx.sym.split(data=source_hidden, num_outputs=2, axis=2)
@@ -430,7 +423,7 @@ class MultiHeadDotAttention(Attention):
             query = mx.sym.reshape(query, shape=(-3, self.num_hidden_per_head, 1))
 
             # scale dot product
-            query = query * self.num_hidden_per_head ** -0.5
+            query = query * (self.num_hidden_per_head ** -0.5)
 
             # (batch*heads, length, num_hidden/head) X (batch*heads, num_hidden/head, 1)
             #   -> (batch*heads, length, 1)
@@ -619,19 +612,13 @@ class MlpAttention(Attention):
 
         coverage_func = self.coverage.on(source, source_length, source_seq_len) if self.coverage else None
 
-        # (batch_size * seq_len, attention_num_hidden)
-        source_hidden = mx.sym.FullyConnected(data=mx.sym.reshape(data=source,
-                                                                  shape=(-3, -1),
-                                                                  name="%satt_flat_source" % self.prefix),
+        # (batch_size, seq_len, attention_num_hidden)
+        source_hidden = mx.sym.FullyConnected(data=source,
                                               weight=self.att_e2h_weight,
                                               num_hidden=self.attention_num_hidden,
                                               no_bias=True,
+                                              flatten=False,
                                               name="%ssource_hidden_fc" % self.prefix)
-
-        # (batch_size, seq_len, attention_num_hidden)
-        source_hidden = mx.sym.reshape(source_hidden,
-                                       shape=(-1, source_seq_len, self.attention_num_hidden),
-                                       name="%ssource_hidden" % self.prefix)
 
         def attend(att_input: AttentionInput, att_state: AttentionState) -> AttentionState:
             """
@@ -656,19 +643,13 @@ class MlpAttention(Attention):
 
             attention_hidden_lhs = source_hidden
             if self.coverage:
-                # (batch_size * seq_len, attention_num_hidden)
-                dynamic_hidden = mx.sym.FullyConnected(data=mx.sym.reshape(data=att_state.dynamic_source,
-                                                                           shape=(-3, -1),
-                                                                           name="%sflat_dynamic_source" % self.prefix),
+                # (batch_size, seq_len, attention_num_hidden)
+                dynamic_hidden = mx.sym.FullyConnected(data=att_state.dynamic_source,
                                                        weight=self.att_c2h_weight,
                                                        num_hidden=self.attention_num_hidden,
                                                        no_bias=True,
+                                                       flatten=False,
                                                        name="%sdynamic_source_hidden_fc" % self.prefix)
-
-                # (batch_size, seq_len, attention_num_hidden)
-                dynamic_hidden = mx.sym.reshape(dynamic_hidden,
-                                                shape=(-1, source_seq_len, self.attention_num_hidden),
-                                                name="%sdynamic_source_hidden" % self.prefix)
 
                 # (batch_size, seq_len, attention_num_hidden
                 attention_hidden_lhs = dynamic_hidden + source_hidden

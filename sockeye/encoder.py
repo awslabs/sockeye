@@ -785,18 +785,12 @@ class ConvolutionalEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded version of the data.
         """
-
-        # reshape incoming data because FullyConnected only takes 2-d input
-        data = mx.sym.reshape(data, shape=(-3, -1))
-
-        # project input dim to hidden dim
-        # (batch_size * seq_len, num_hidden)
+        # data: (batch_size, seq_len, num_hidden)
         data = mx.sym.FullyConnected(data=data,
                                      num_hidden=self.config.cnn_config.num_hidden,
                                      no_bias=True,
+                                     flatten=False,
                                      weight=self.i2h_weight)
-        # (batch_size, seq_len, num_hidden)
-        data = mx.sym.reshape(data, shape=(-1, seq_len, self.config.cnn_config.num_hidden))
 
         # Multiple layers with residual connections:
         for layer in self.layers:

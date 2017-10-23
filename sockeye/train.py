@@ -294,6 +294,7 @@ def create_encoder_config(args: argparse.Namespace, vocab_source_size: int,
             dropout_relu=args.transformer_dropout_relu,
             dropout_prepost=args.transformer_dropout_prepost,
             weight_tying=args.weight_tying and C.WEIGHT_TYING_SRC in args.weight_tying_type,
+            weight_normalization=False,
             positional_embedding_type=args.transformer_positional_embedding_type,
             preprocess_sequence=encoder_transformer_preprocess,
             postprocess_sequence=encoder_transformer_postprocess,
@@ -373,6 +374,7 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int, enco
             dropout_relu=args.transformer_dropout_relu,
             dropout_prepost=args.transformer_dropout_prepost,
             weight_tying=decoder_weight_tying,
+            weight_normalization=args.weight_normalization,
             positional_embedding_type=args.transformer_positional_embedding_type,
             preprocess_sequence=decoder_transformer_preprocess,
             postprocess_sequence=decoder_transformer_postprocess,
@@ -442,7 +444,8 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int, enco
             state_init=args.rnn_decoder_state_init,
             context_gating=args.rnn_context_gating,
             layer_normalization=args.layer_normalization,
-            attention_in_upper_layers=args.rnn_attention_in_upper_layers)
+            attention_in_upper_layers=args.rnn_attention_in_upper_layers,
+            weight_normalization=args.weight_normalization)
 
     return config_decoder
 

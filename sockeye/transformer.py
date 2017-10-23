@@ -31,6 +31,7 @@ class TransformerConfig(config.Config):
                  dropout_relu: float,
                  dropout_prepost: float,
                  weight_tying: bool,
+                 weight_normalization: bool,
                  positional_embedding_type: str,
                  preprocess_sequence: str,
                  postprocess_sequence: str,
@@ -47,6 +48,7 @@ class TransformerConfig(config.Config):
         self.dropout_relu = dropout_relu
         self.dropout_prepost = dropout_prepost
         self.weight_tying = weight_tying
+        self.weight_normalization = weight_normalization
         self.positional_embedding_type = positional_embedding_type
         self.preprocess_sequence = preprocess_sequence
         self.postprocess_sequence = postprocess_sequence
@@ -97,7 +99,7 @@ class TransformerEncoderBlock:
         data = self.post_self_attention(data_self_att, data, length)
 
         # feed-forward
-        data_ff = self.ff(self.pre_ff(data, None, length), length)
+        data_ff = self.ff(self.pre_ff(data, None, length))
         data = self.post_ff(data_ff, data, length)
 
         return data
@@ -178,7 +180,7 @@ class TransformerDecoderBlock:
         target = self.post_enc_attention(target_enc_att, target, target_max_length)
 
         # feed-forward
-        target_ff = self.ff(self.pre_ff(target, None, target_max_length), target_max_length)
+        target_ff = self.ff(self.pre_ff(target, None, target_max_length))
         target = self.post_ff(target_ff, target, target_max_length)
 
         return target
@@ -266,22 +268,18 @@ class TransformerFeedForward:
         self.w_h2o = mx.sym.Variable('%sh2o_weight' % prefix)
         self.b_h2o = mx.sym.Variable('%sh2o_bias' % prefix)
 
-    def __call__(self, x, length) -> mx.sym.Symbol:
+    def __call__(self, x) -> mx.sym.Symbol:
         """
         Position-wise feed-forward network with ReLU activation.
 
         :param x: Symbol of shape (batch_size, seq_len, num_hidden)
-        :param length: sequence length
         :return: Symbol of shape (batch_size, seq_len, num_hidden)
         """
-        # TODO: use a convolution?
-        x = mx.sym.reshape(x, shape=(-3, -1))
-        h = mx.sym.FullyConnected(data=x, num_hidden=self.num_hidden, weight=self.w_i2h, bias=self.b_i2h)
+        h = mx.sym.FullyConnected(data=x, num_hidden=self.num_hidden, weight=self.w_i2h, bias=self.b_i2h, flatten=False)
         h = mx.sym.Activation(h, act_type="relu")
         if self.dropout > 0.0:
             h = mx.sym.Dropout(h, p=self.dropout)
-        y = mx.sym.FullyConnected(data=h, num_hidden=self.num_model, weight=self.w_h2o, bias=self.b_h2o)
-        y = mx.sym.reshape(y, shape=(-1, length, self.num_model))
+        y = mx.sym.FullyConnected(data=h, num_hidden=self.num_model, weight=self.w_h2o, bias=self.b_h2o, flatten=False)
         return y
 
 

@@ -34,6 +34,7 @@ class LossConfig(config.Config):
     :param normalize: Whether to normalize loss value.
     :param smoothed_cross_entropy_alpha: Smoothing value for smoothed-cross-entropy loss.
     """
+
     def __init__(self,
                  name: str,
                  vocab_size: int,
@@ -121,12 +122,11 @@ class CrossEntropyLoss(Loss):
         else:
             normalization = "null"
         return [mx.sym.SoftmaxOutput(data=logits,
-                                    label=labels,
-                                    ignore_label=C.PAD_ID,
-                                    use_ignore=True,
-                                    normalization=normalization,
-                                    name=C.SOFTMAX_NAME)]
-
+                                     label=labels,
+                                     ignore_label=C.PAD_ID,
+                                     use_ignore=True,
+                                     normalization=normalization,
+                                     name=C.SOFTMAX_NAME)]
 
     def create_metric(self) -> "CrossEntropyMetric":
         return CrossEntropyMetric(self.loss_config)
@@ -141,6 +141,7 @@ class CrossEntropyMetric(EvalMetric):
     :param output_names: Name of predictions that should be used when updating with update_dict.
     :param output_labels: Name of labels that should be used when updating with update_dict.
     """
+
     def __init__(self,
                  loss_config: LossConfig,
                  name: str = C.CROSS_ENTROPY,
@@ -206,7 +207,7 @@ class SmoothedCrossEntropyLoss(Loss):
         cross_entropy = mx.sym.where(labels, cross_entropy, mx.sym.zeros((0, self.loss_config.vocab_size)))
 
         # compute cross_entropy
-        cross_entropy = cross_entropy * - mx.sym.log(data=probs + 1e-10)
+        cross_entropy = cross_entropy * (-mx.sym.log(data=probs + 1e-10))
         cross_entropy = mx.sym.sum(data=cross_entropy, axis=1)
 
         if self.loss_config.normalize:
@@ -230,6 +231,7 @@ class SmoothedCrossEntropyMetric(EvalMetric):
     :param output_names: Name of predictions that should be used when updating with update_dict.
     :param output_labels: Name of labels that should be used when updating with update_dict.
     """
+
     def __init__(self,
                  loss_config: LossConfig,
                  name: str = C.SMOOTHED_CROSS_ENTROPY,
