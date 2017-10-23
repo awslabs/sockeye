@@ -33,7 +33,7 @@ ENCODER_DECODER_SETTINGS = [
      " --rnn-residual-connections"
      " --num-embed 16 --rnn-attention-type coverage --rnn-attention-num-hidden 16 --weight-tying "
      "--rnn-attention-use-prev-word --rnn-context-gating --layer-normalization --batch-size 8 "
-     "--loss smoothed-cross-entropy --smoothed-cross-entropy-alpha 0.1 --normalize-loss --optimized-metric perplexity"
+     "--loss cross-entropy --label-smoothing 0.1 --loss-normalization-type batch --optimized-metric perplexity"
      " --max-updates 10 --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01"
      " --rnn-dropout-inputs 0.5:0.1 --rnn-dropout-states 0.5:0.1 --embed-dropout 0.1 --rnn-decoder-hidden-dropout 0.01"
      " --rnn-decoder-state-init avg --rnn-encoder-reverse-input --rnn-dropout-recurrent 0.1:0.0"

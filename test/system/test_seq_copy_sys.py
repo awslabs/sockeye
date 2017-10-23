@@ -30,8 +30,8 @@ _SEED_DEV = 17
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity"
      " --max-updates 10000 --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
-     " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --max-updates 5000",
-     "--beam-size 5 --weight-normalization",
+     " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --max-updates 5000 --weight-normalization",
+     "--beam-size 5",
      1.01,
      0.99),
     # "Vanilla" LSTM encoder-decoder translating in chunks (due to lower --max-input-len)

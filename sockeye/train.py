@@ -501,8 +501,8 @@ def create_model_config(args: argparse.Namespace,
 
     config_loss = loss.LossConfig(name=args.loss,
                                   vocab_size=vocab_target_size,
-                                  normalize=args.normalize_loss,
-                                  smoothed_cross_entropy_alpha=args.smoothed_cross_entropy_alpha)
+                                  normalization_type=args.loss_normalization_type,
+                                  label_smoothing=args.label_smoothing)
 
     model_config = model.ModelConfig(config_data=config_data,
                                      max_seq_len_source=max_seq_len_source,
@@ -575,11 +575,10 @@ def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict, str]:
         optimizer_params["clip_gradient"] = clip_gradient
     if args.momentum is not None:
         optimizer_params["momentum"] = args.momentum
-    if args.normalize_loss:
-        # When normalize_loss is turned on we normalize by the number of non-PAD symbols in a batch which implicitly
-        # already contains the number of sentences and therefore we need to disable rescale_grad.
+    if args.loss_normalization_type == C.LOSS_NORM_VALID:
+        # When we normalize by the number of non-PAD symbols in a batch we need to disable rescale_grad.
         optimizer_params["rescale_grad"] = 1.0
-    else:
+    elif args.loss_normalization_type == C.LOSS_NORM_BATCH:
         # Making MXNet module API's default scaling factor explicit
         optimizer_params["rescale_grad"] = 1.0 / args.batch_size
     # Manually specified params

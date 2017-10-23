@@ -132,7 +132,7 @@ class OutputLayer:
                  weight_tying: bool,
                  embed_weight: Optional[mx.sym.Symbol],
                  weight_normalization: bool,
-                 prefix: str = ''):
+                 prefix: str = '') -> None:
         self.vocab_size = vocab_size
 
         self.w = mx.sym.Variable("%scls_weight" % prefix, shape=(vocab_size, num_hidden))
