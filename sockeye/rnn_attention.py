@@ -709,8 +709,6 @@ def mask_attention_scores(logits: mx.sym.Symbol,
     :param length: Shape: (batch_size,).
     :return: Masked logits: (batch_size, seq_len, 1).
     """
-    # Note: we need to add an axis as SequenceMask expects 3D input
-    # TODO: SequenceMask should accept 2d input.
     # TODO: Masking with 0-1 mask, to avoid the multiplication
     logits = mx.sym.swapaxes(data=logits, dim1=0, dim2=1)
     logits = mx.sym.SequenceMask(data=logits,
