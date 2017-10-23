@@ -14,6 +14,7 @@
 import os
 from tempfile import TemporaryDirectory
 
+import mxnet as mx
 import numpy as np
 
 import sockeye.constants as C
@@ -21,6 +22,11 @@ import sockeye.lexicon
 
 
 def test_topk_lexicon():
+
+    lexicon = ["a\ta\t-0.6931471805599453",
+               "a\tb\t-1.2039728043259361",
+               "a\tc\t-1.6094379124341003",
+               "b\tb\t0.0"]
     vocab_list = ["a", "b", "c"]
     vocab = dict((y, x) for (x, y) in enumerate(C.VOCAB_SYMBOLS + vocab_list))
     k = 2
@@ -30,15 +36,15 @@ def test_topk_lexicon():
     with TemporaryDirectory(prefix="test_topk_lexicon.") as work_dir:
         input_lex_path = os.path.join(work_dir, "input.lex")
         with open(input_lex_path, "w") as out:
-            print("a\ta\t-0.6931471805599453", file=out)
-            print("a\tb\t-1.2039728043259361", file=out)
-            print("a\tc\t-1.6094379124341003", file=out)
-            print("b\tb\t0.0", file=out)
+            for line in lexicon:
+                print(line, file=out)
         lex.create(input_lex_path)
 
         # Test against known lexicon
         expected = np.zeros((len(C.VOCAB_SYMBOLS) + len(vocab_list), k), dtype=np.int)
+        # a -> special + a b
         expected[len(C.VOCAB_SYMBOLS),:2] = [len(C.VOCAB_SYMBOLS), len(C.VOCAB_SYMBOLS) + 1]
+        # b -> special + b
         expected[len(C.VOCAB_SYMBOLS) + 1,:1] = [len(C.VOCAB_SYMBOLS) + 1]
         assert np.all(lex.lex == expected)
 
@@ -47,3 +53,17 @@ def test_topk_lexicon():
         lex.save(json_lex_path)
         lex.load(json_lex_path)
         assert np.all(lex.lex == expected)
+
+        # Test lookup
+
+        trg_ids = lex.get_trg_ids(mx.nd.array([[vocab["a"], vocab["c"]]], dtype="int32"))
+        expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["a", "b"]], dtype=np.int)
+        assert np.all(trg_ids.asnumpy() == expected)
+
+        trg_ids = lex.get_trg_ids(mx.nd.array([[vocab["b"]]], dtype="int32"))
+        expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["b"]], dtype=np.int)
+        assert np.all(trg_ids.asnumpy() == expected)
+
+        trg_ids = lex.get_trg_ids(mx.nd.array([[vocab["c"]]], dtype="int32"))
+        expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS], dtype=np.int)
+        assert np.all(trg_ids.asnumpy() == expected)

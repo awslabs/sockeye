@@ -17,7 +17,7 @@ import json
 import logging
 import operator
 import os
-from typing import Dict, Generator, Set, Tuple
+from typing import Dict, Generator, Tuple
 
 import mxnet as mx
 import numpy as np
@@ -187,7 +187,8 @@ class LexiconInitializer(mx.initializer.Initializer):
 
 class TopKLexicon:
     """
-    TODO
+    Lexicon component that stores the k most likely target words for each source word.  Used during
+    decoding to restrict target vocabulary for each source sequence.
 
     :param vocab_source: Trained model source vocabulary.
     :param vocab_target: Trained mode target vocabulary.
@@ -211,11 +212,11 @@ class TopKLexicon:
 
         :param path: Path to lexicon file.
         """
-        self.lex[:,:] = 0
+        self.lex[:, :] = 0
         # Read lexicon
         src_unk_id = self.vocab_source[C.UNK_SYMBOL]
         trg_unk_id = self.vocab_target[C.UNK_SYMBOL]
-        _lex = collections.defaultdict(lambda: collections.defaultdict(float)) # type: Dict[int, Dict[int, float]]
+        _lex = collections.defaultdict(dict) # type: Dict[int, Dict[int, float]]
         for src_id, trg_id, prob in lexicon_iterator(path, self.vocab_source, self.vocab_target):
             # Unk token will always be part of target vocab, so no need to track it here
             if src_id == src_unk_id or trg_id == trg_unk_id:
@@ -224,7 +225,7 @@ class TopKLexicon:
         # Sort and copy top-k trg_ids to lex array row src_id
         for src_id, trg_entries in _lex.items():
             top_k = list(sorted(trg_entries.items(), key=operator.itemgetter(1), reverse=True))[:self.k]
-            self.lex[src_id,:len(top_k)] = list(sorted(trg_id for (trg_id, _) in top_k))
+            self.lex[src_id, :len(top_k)] = list(sorted(trg_id for (trg_id, _) in top_k))
             # Free memory after copy
             trg_entries.clear()
 
@@ -245,10 +246,21 @@ class TopKLexicon:
         :param path: Path to JSON file.
         """
         with open(path, encoding=C.VOCAB_ENCODING) as inp:
-            self.lex[:,:] = 0
+            self.lex[:, :] = 0
             loaded = json.load(inp)
             for (src_id, top_k) in loaded.items():
-                self.lex[int(src_id),:len(top_k)] = top_k
+                self.lex[int(src_id), :len(top_k)] = top_k
+
+    def get_trg_ids(self, src_ids: mx.nd.NDArray) -> mx.nd.NDArray:
+        """
+        Lookup possible target ids for input sequence of source ids.
+
+        :param source: Sequence of source ids.
+        :return: Top k target ids (union over source, always includes special symbols).
+        """
+        unique_src_ids = np.unique(src_ids.asnumpy())
+        trg_ids = np.union1d(self.always_allow, np.unique(self.lex[unique_src_ids, :]))
+        return mx.nd.array(trg_ids, ctx=src_ids.context, dtype=src_ids.dtype)
 
 
 def main():
