@@ -822,7 +822,7 @@ class TransformerEncoder(Encoder):
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                  num_hidden=config.model_size,
                                                                  dropout=config.dropout_prepost,
-                                                                 prefix="%sfinal_process" % prefix)
+                                                                 prefix="%sfinal_process_" % prefix)
 
     def encode(self,
                data: mx.sym.Symbol,

@@ -144,21 +144,40 @@ class CrossEntropyMetric(EvalMetric):
         super().__init__(name, output_names=output_names, label_names=label_names)
         self.loss_config = loss_config
 
+    def _cross_entropy(self, pred, label, ignore):
+        prob = mx.nd.pick(pred, label.astype(dtype="int32"))
+        prob = prob * (1 - ignore) + ignore
+        loss = -mx.nd.log(prob + 1e-8)
+        return loss
+
+    def _cross_entropy_smoothed(self, pred, label, ignore):
+        label_dist = mx.nd.one_hot(indices=label.astype(dtype='int32'),
+                                   depth=self.loss_config.vocab_size,
+                                   on_value=1.0 - self.loss_config.label_smoothing,
+                                   off_value=self.loss_config.label_smoothing /
+                                             (self.loss_config.vocab_size - 1.0))
+        label_dist = mx.nd.where(ignore, label_dist, mx.nd.zeros_like(label_dist))
+        loss = label_dist * (- mx.nd.log(pred + 1e-8))
+        return loss
+
     def update(self, labels, preds):
         for label, pred in zip(labels, preds):
             batch_size = label.shape[0]
             label = label.as_in_context(pred.context).reshape((label.size,))
-            prob = mx.nd.pick(pred, label.astype(dtype="int32"))
             # Ignore padding
             # TODO: contribute ignoring padding for cross-entropy back to MXNet
-            ignore = (label == C.PAD_ID).astype(dtype=prob.dtype)
-            prob = prob * (1 - ignore) + ignore
+            ignore = (label == C.PAD_ID).astype(dtype=pred.dtype)
+
+            if self.loss_config.label_smoothing > 0.0:
+                loss = self._cross_entropy_smoothed(pred, label, ignore)
+            else:
+                loss = self._cross_entropy(pred, label, ignore)
+
             # Sum, normalizing if needed
-            loss = -mx.nd.log(prob + 1e-8)
-            if self.loss_config.normalize:
+            if self.loss_config.normalization_type == C.LOSS_NORM_VALID:
                 loss = loss / mx.nd.sum(1 - ignore)
                 self.num_inst += 1
-            else:
+            elif self.loss_config.normalization_type == C.LOSS_NORM_BATCH:
                 # When not normalizing, we divide by the batch size (number of sequences)
                 # NOTE: This is different from MXNet's metrics
                 self.num_inst += batch_size
