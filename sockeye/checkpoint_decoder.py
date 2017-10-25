@@ -108,19 +108,18 @@ class CheckpointDecoder:
 
     def decode_and_evaluate(self,
                             checkpoint: Optional[int] = None,
-                            output_name: str = os.devnull,
-                            speed_percentile: int = 99) -> Dict[str, float]:
+                            output_name: str = os.devnull) -> Dict[str, float]:
         """
         Decodes data set and evaluates given a checkpoint.
 
         :param checkpoint: Checkpoint to load parameters from.
         :param output_name: Filename to write translations to. Defaults to /dev/null.
-        :param speed_percentile: Percentile to compute for sec/sent. Default: p99.
         :return: Mapping of metric names to scores.
         """
         models, vocab_source, vocab_target = inference.load_models(self.context,
                                                                    self.max_input_len,
                                                                    self.beam_size,
+                                                                   16,  # batch size
                                                                    [self.model],
                                                                    [checkpoint],
                                                                    softmax_temperature=self.softmax_temperature,
@@ -133,20 +132,19 @@ class CheckpointDecoder:
                                           models,
                                           vocab_source,
                                           vocab_target)
-        trans_wall_times = np.zeros((len(self.input_sentences),))
+        trans_wall_time = 0.0
+        translations = []
         with data_io.smart_open(output_name, 'w') as output:
             handler = sockeye.output_handler.StringOutputHandler(output)
-            translations = []
-            for i, input_sentence in enumerate(self.input_sentences):
-                tic = time.time()
-                trans_input = translator.make_input(i, input_sentence)
-                trans_output = translator.translate(trans_input)
+            tic = time.time()
+            trans_inputs = [translator.make_input(i, line) for i, line in enumerate(self.input_sentences)]
+            trans_outputs = translator.translate(trans_inputs)
+            trans_wall_time = time.time() - tic
+            for trans_input, trans_output in zip(trans_inputs, trans_outputs):
                 handler.handle(trans_input, trans_output)
-                trans_wall_time = time.time() - tic
-                trans_wall_times[i] = trans_wall_time
                 translations.append(trans_output.translation)
-        percentile_sec_per_sent = np.percentile(trans_wall_times, speed_percentile)
+        avg_time = trans_wall_time / len(self.input_sentences)
 
         # TODO(fhieber): eventually add more metrics (METEOR etc.)
         return {C.BLEU_VAL: sockeye.bleu.corpus_bleu(translations, self.target_sentences),
-                C.SPEED_PCT % speed_percentile: percentile_sec_per_sent}
+                C.AVG_TIME: avg_time}

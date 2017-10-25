@@ -242,6 +242,10 @@ LR_DECAY_OPT_STATES_RESET_CHOICES = [LR_DECAY_OPT_STATES_RESET_OFF,
                                      LR_DECAY_OPT_STATES_RESET_INITIAL,
                                      LR_DECAY_OPT_STATES_RESET_BEST]
 
+# id of an empty translation input; used to mark them while chunking during decoding
+EMPTY_TRANSLATION_INPUT_ID = -999999999
+
+# output handler
 OUTPUT_HANDLER_TRANSLATION = "translation"
 OUTPUT_HANDLER_TRANSLATION_WITH_SCORE = "translation_with_score"
 OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENTS = "translation_with_alignments"
@@ -262,7 +266,7 @@ ACCURACY = 'accuracy'
 PERPLEXITY = 'perplexity'
 BLEU = 'bleu'
 BLEU_VAL = BLEU + "-val"
-SPEED_PCT = "p%d-sec-per-sent-val"
+AVG_TIME = "avg-sec-per-sent-val"
 METRICS = [PERPLEXITY, ACCURACY, BLEU]
 METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, PERPLEXITY: False}
 METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, PERPLEXITY: np.inf}
