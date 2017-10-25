@@ -27,6 +27,7 @@ class TransformerConfig(config.Config):
                  feed_forward_num_hidden: int,
                  num_layers: int,
                  vocab_size: int,
+                 dropout_embed: int,
                  dropout_attention: float,
                  dropout_relu: float,
                  dropout_prepost: float,
@@ -44,6 +45,7 @@ class TransformerConfig(config.Config):
         self.feed_forward_num_hidden = feed_forward_num_hidden
         self.num_layers = num_layers
         self.vocab_size = vocab_size
+        self.dropout_embed = dropout_embed
         self.dropout_attention = dropout_attention
         self.dropout_relu = dropout_relu
         self.dropout_prepost = dropout_prepost

@@ -51,7 +51,8 @@ ENCODER_DECODER_SETTINGS = [
      " --transformer-attention-heads 2 --transformer-model-size 16"
      " --transformer-feed-forward-num-hidden 32"
      " --rnn-attention-type mhdot --rnn-attention-mhdot-heads 4 --rnn-attention-num-hidden 16 --batch-size 8 "
-     " --max-updates 10 --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
+     " --max-updates 10 --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01"
+     " --weight-init-xavier-factor-type avg --weight-init-scale 3.0 --embed-weight-init normal",
      "--beam-size 2"),
     # LSTM encoder, Transformer decoder
     ("--encoder rnn --num-layers 2:2 --rnn-cell-type lstm --rnn-num-hidden 16 --num-embed 8"

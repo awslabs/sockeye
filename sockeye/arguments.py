@@ -618,12 +618,22 @@ def add_training_args(params):
                               type=str,
                               default=C.INIT_XAVIER,
                               choices=C.INIT_TYPES,
-                              help='Type of weight initialization. Default: %(default)s.')
+                              help='Type of base weight initialization. Default: %(default)s.')
     train_params.add_argument('--weight-init-scale',
                               type=float,
-                              default=0.04,
-                              help='Weight initialization scale (currently only applies to uniform initialization). '
+                              default=2.34,
+                              help='Weight initialization scale. Applies to uniform (scale) and xavier (magnitude). '
                                    'Default: %(default)s.')
+    train_params.add_argument('--weight-init-xavier-factor-type',
+                              type=str,
+                              default='in',
+                              choices=['in', 'out', 'avg'],
+                              help='Xavier factor type. Default: %(default)s.')
+    train_params.add_argument('--embed-weight-init',
+                              type=str,
+                              default=C.EMBED_INIT_DEFAULT,
+                              choices=C.EMBED_INIT_TYPES,
+                              help='Type of embedding matrix weight initialization. Default: %(default)s.')
     train_params.add_argument('--initial-learning-rate',
                               type=float,
                               default=0.0003,

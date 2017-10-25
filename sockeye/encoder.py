@@ -195,11 +195,14 @@ def get_transformer_encoder(config: transformer.TransformerConfig,
     :return: Encoder instance.
     """
     encoders = list()  # type: List[Encoder]
+    # Note: Transformers use model_size as embedding size
+    # Note: Embedding vectors are scaled by transformer model size.
     encoders.append(Embedding(num_embed=config.model_size,
                               vocab_size=config.vocab_size,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
-                              dropout=config.dropout_prepost,
-                              embed_weight=embed_weight))
+                              dropout=config.dropout_embed,
+                              embed_weight=embed_weight,
+                              embed_scale=config.model_size**0.5))
     encoders.append(get_positional_embedding(config.positional_embedding_type,
                                              config.model_size,
                                              config.max_seq_len_source,
@@ -301,6 +304,7 @@ class Embedding(Encoder):
     :param prefix: Name prefix for symbols of this encoder.
     :param dropout: Dropout probability.
     :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
+    :param embed_scale: Optional fixed scaling factor for embeddings.
     """
 
     def __init__(self,
@@ -308,7 +312,8 @@ class Embedding(Encoder):
                  vocab_size: int,
                  prefix: str,
                  dropout: float,
-                 embed_weight: Optional[mx.sym.Symbol] = None) -> None:
+                 embed_weight: Optional[mx.sym.Symbol] = None,
+                 embed_scale: Optional[float] = None) -> None:
         self.num_embed = num_embed
         self.vocab_size = vocab_size
         self.prefix = prefix
@@ -316,7 +321,8 @@ class Embedding(Encoder):
         if embed_weight is not None:
             self.embed_weight = embed_weight
         else:
-            self.embed_weight = mx.sym.Variable(prefix + "weight")
+            self.embed_weight = self.get_embed_weight(vocab_size, num_embed, prefix)
+        self.embed_scale = embed_scale
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -337,6 +343,8 @@ class Embedding(Encoder):
                                      name=self.prefix + "embed")
         if self.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.dropout, name="source_embed_dropout")
+        if self.embed_scale is not None and self.embed_scale != 1.0:
+            embedding = embedding * self.embed_scale
         return embedding, data_length, seq_len
 
     def get_num_hidden(self) -> int:
@@ -344,6 +352,13 @@ class Embedding(Encoder):
         Return the representation size of this encoder.
         """
         return self.num_embed
+
+    @staticmethod
+    def get_embed_weight(vocab_size: int, embed_size: int, prefix: str) -> mx.sym.Variable:
+        """
+        Creates a variable for the embedding matrix.
+        """
+        return mx.sym.Variable(prefix + "weight", shape=(vocab_size, embed_size))
 
 
 class PositionalEncoder(Encoder):
@@ -836,6 +851,10 @@ class TransformerEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data data, data_length, seq_len.
         """
+
+        if self.config.dropout_prepost > 0.0:
+            data = mx.sym.Dropout(data=data, p=self.config.dropout_prepost)
+
         for i, layer in enumerate(self.layers):
             # (batch_size, seq_len, config.model_size)
             data = layer(data, data_length, seq_len)

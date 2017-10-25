@@ -197,13 +197,14 @@ class TransformerDecoder(Decoder):
 
         # Embedding & output parameters
         if embed_weight is None:
-            embed_weight = mx.sym.Variable(C.TARGET_EMBEDDING_PREFIX + "weight",
-                                           shape=(config.vocab_size, config.model_size))
-
+            embed_weight = encoder.Embedding.get_embed_weight(config.vocab_size,
+                                                              config.model_size,
+                                                              C.TARGET_EMBEDDING_PREFIX)
+        # Note: Transformers use model_size as embedding size
         self.embedding = encoder.Embedding(num_embed=config.model_size,
                                            vocab_size=config.vocab_size,
                                            prefix=C.TARGET_EMBEDDING_PREFIX,
-                                           dropout=config.dropout_prepost,
+                                           dropout=config.dropout_embed,
                                            embed_weight=embed_weight)
         self.pos_embedding = encoder.get_positional_embedding(config.positional_embedding_type,
                                                               config.model_size,
@@ -242,27 +243,51 @@ class TransformerDecoder(Decoder):
         :return: Logits of next-word predictions for target sequence.
                  Shape: (batch_size * target_max_length, target_vocab_size)
         """
-        # (1, target_max_length, target_max_length)
-        target_bias = transformer.get_autoregressive_bias(target_max_length, name="%sbias" % self.prefix)
-
         # (batch_size, source_max_length, num_source_embed)
         source_encoded = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
+
+        # (batch_size, target_max_length, model_size)
+        target = self._decode(source_encoded, source_encoded_lengths, source_encoded_max_length,
+                              target, target_lengths, target_max_length)
+
+        # (batch_size * target_max_length, model_size)
+        target = mx.sym.reshape(data=target, shape=(-3, -1))
+
+        # (batch_size * target_max_length, vocab_size)
+        logits = self.output_layer(target)
+        return logits
+
+    def _decode(self,
+                source_encoded, source_encoded_lengths, source_encoded_max_length,
+                target, target_lengths, target_max_length):
+        """
+        Runs stacked decoder transformer blocks.
+
+        :param source_encoded: Batch-major encoded source: (batch_size, source_encoded_max_length, encoder_depth).
+        :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
+        :param source_encoded_max_length: Size of encoder time dimension.
+        :param target: Target sequence. Shape: (batch_size, target_max_length).
+        :param target_lengths: Lengths of target sequences. Shape: (batch_size,).
+        :param target_max_length: Size of target sequence dimension.
+        :return: Result of stacked transformer blocks.
+        """
+
+        # (1, target_max_length, target_max_length)
+        target_bias = transformer.get_autoregressive_bias(target_max_length, name="%sbias" % self.prefix)
 
         # target: (batch_size, target_max_length, model_size)
         target, target_lengths, target_max_length = self.embedding.encode(target, target_lengths, target_max_length)
         target, target_lengths, target_max_length = self.pos_embedding.encode(target, target_lengths, target_max_length)
+
+        if self.config.dropout_prepost > 0.0:
+            target = mx.sym.Dropout(data=target, p=self.config.dropout_prepost)
 
         for layer in self.layers:
             target = layer(target, target_lengths, target_max_length, target_bias,
                            source_encoded, source_encoded_lengths, source_encoded_max_length)
         target = self.final_process(data=target, prev=None, length=target_max_length)
 
-        # target: (batch_size * target_max_length, model_size)
-        target = mx.sym.reshape(data=target, shape=(-3, -1))
-
-        # logits: (batch_size * target_max_length, vocab_size)
-        logits = self.output_layer(target)
-        return logits
+        return target
 
     def decode_step(self,
                     target: mx.sym.Symbol,
@@ -292,21 +317,9 @@ class TransformerDecoder(Decoder):
                                                  depth=target_max_length,
                                                  on_value=1, off_value=0), axis=2)
 
-        # (1, target_max_length, target_max_length)
-        target_bias = transformer.get_autoregressive_bias(target_max_length, name="%sbias" % self.prefix)
-
         # (batch_size, target_max_length, model_size)
-        target, target_lengths, target_max_length = self.embedding.encode(target,
-                                                                          target_lengths,
-                                                                          target_max_length)
-        target, target_lengths, target_max_length = self.pos_embedding.encode(target,
-                                                                              target_lengths,
-                                                                              target_max_length)
-
-        for layer in self.layers:
-            target = layer(target, target_lengths, target_max_length, target_bias,
-                           source_encoded, source_encoded_lengths, source_encoded_max_length)
-        target = self.final_process(data=target, prev=None, length=target_max_length)
+        target = self._decode(source_encoded, source_encoded_lengths, source_encoded_max_length,
+                              target, target_lengths, target_max_length)
 
         # set all target positions to zero except for current time-step
         # target: (batch_size, target_max_length, model_size)
@@ -496,8 +509,9 @@ class RecurrentDecoder(Decoder):
 
         # Embedding & output parameters
         if embed_weight is None:
-            embed_weight = mx.sym.Variable(C.TARGET_EMBEDDING_PREFIX + "weight",
-                                           shape=(self.config.vocab_size, self.config.num_embed))
+            embed_weight = encoder.Embedding.get_embed_weight(self.config.vocab_size,
+                                                              self.config.num_embed,
+                                                              C.TARGET_EMBEDDING_PREFIX)
         self.embedding = encoder.Embedding(self.config.num_embed,
                                            self.config.vocab_size,
                                            prefix=C.TARGET_EMBEDDING_PREFIX,
@@ -991,8 +1005,9 @@ class ConvolutionalDecoder(Decoder):
                               "as we have in the encoder")
 
         if embed_weight is None:
-            embed_weight = mx.sym.Variable(C.TARGET_EMBEDDING_PREFIX + "weight",
-                                           shape=(self.config.vocab_size, self.config.num_embed))
+            embed_weight = encoder.Embedding.get_embed_weight(self.config.vocab_size,
+                                                              self.config.num_embed,
+                                                              C.TARGET_EMBEDDING_PREFIX)
 
         self.embedding = encoder.Embedding(self.config.num_embed,
                                            self.config.vocab_size,
