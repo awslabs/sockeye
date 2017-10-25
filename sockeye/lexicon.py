@@ -192,27 +192,25 @@ class TopKLexicon:
 
     :param vocab_source: Trained model source vocabulary.
     :param vocab_target: Trained mode target vocabulary.
-    :param k: Number of target entries per source to keep.
     """
     def __init__(self,
                  vocab_source: Dict[str, int],
-                 vocab_target: Dict[str, int],
-                 k: int = 20) -> None:
+                 vocab_target: Dict[str, int]) -> None:
         self.vocab_source = vocab_source
         self.vocab_target = vocab_target
-        self.k = k
-        # Shape: (vocab_source_size, k), populated by create() or load()
-        self.lex = np.zeros((len(self.vocab_source), self.k), dtype=np.int)
+        # Shape: (vocab_source_size, k), k determined at create() or load()
+        self.lex = None # type: np.ndarray
         # Always allow special vocab symbols in target vocab
         self.always_allow = np.array([vocab_target[symbol] for symbol in C.VOCAB_SYMBOLS], dtype=np.int)
 
-    def create(self, path: str):
+    def create(self, path: str, k: int = 20):
         """
         Create from a scored lexicon file (fast_align format) using vocab from a trained Sockeye model.
 
         :param path: Path to lexicon file.
+        :param k: Number of target entries per source to keep.
         """
-        self.lex[:, :] = 0
+        self.lex = np.zeros((len(self.vocab_source), k), dtype=np.int)
         # Read lexicon
         src_unk_id = self.vocab_source[C.UNK_SYMBOL]
         trg_unk_id = self.vocab_target[C.UNK_SYMBOL]
@@ -224,10 +222,11 @@ class TopKLexicon:
             _lex[src_id][trg_id] = prob
         # Sort and copy top-k trg_ids to lex array row src_id
         for src_id, trg_entries in _lex.items():
-            top_k = list(sorted(trg_entries.items(), key=operator.itemgetter(1), reverse=True))[:self.k]
+            top_k = list(sorted(trg_entries.items(), key=operator.itemgetter(1), reverse=True))[:k]
             self.lex[src_id, :len(top_k)] = list(sorted(trg_id for (trg_id, _) in top_k))
             # Free memory after copy
             trg_entries.clear()
+        logger.info("Created top-k lexicon from \"%s\", k=%d.", path, k)
 
     def save(self, path: str):
         """
@@ -235,7 +234,8 @@ class TopKLexicon:
 
         :param path: Path to JSON output file.
         """
-        to_save = dict(enumerate(row.tolist() for row in self.lex))
+        # Save k, lex array in dict form
+        to_save = [self.lex.shape[1], dict(enumerate(row.tolist() for row in self.lex))]
         with open(path, "w", encoding=C.VOCAB_ENCODING) as out:
             json.dump(to_save, out, indent=4, ensure_ascii=False)
 
@@ -246,10 +246,11 @@ class TopKLexicon:
         :param path: Path to JSON file.
         """
         with open(path, encoding=C.VOCAB_ENCODING) as inp:
-            self.lex[:, :] = 0
-            loaded = json.load(inp)
+            k, loaded = json.load(inp)
+            self.lex = np.zeros((len(self.vocab_source), k), dtype=np.int)
             for (src_id, top_k) in loaded.items():
                 self.lex[int(src_id), :len(top_k)] = top_k
+        logger.info("Loaded top-k lexicon from \"%s\".", path)
 
     def get_trg_ids(self, src_ids: mx.nd.NDArray) -> mx.nd.NDArray:
         """
@@ -279,10 +280,9 @@ def main():
     vocab_target = vocab.vocab_from_json_or_pickle(os.path.join(args.model, C.VOCAB_TRG_NAME))
 
     logger.info("Creating top-k lexicon from \"%s\"", args.input)
-    lexicon = TopKLexicon(vocab_source, vocab_target, args.k)
-    lexicon.create(args.input)
+    lexicon = TopKLexicon(vocab_source, vocab_target)
+    lexicon.create(args.input, args.k)
     lexicon.save(args.output)
-    logger.info("Top-k lexicon JSON written to \"%s\"", args.output)
 
 
 if __name__ == "__main__":

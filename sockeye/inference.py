@@ -23,6 +23,7 @@ import numpy as np
 
 from . import constants as C
 from . import data_io
+from .lexicon import TopKLexicon
 from . import model
 from . import utils
 from . import vocab
@@ -556,6 +557,7 @@ class Translator:
     :param models: List of models.
     :param vocab_source: Source vocabulary.
     :param vocab_target: Target vocabulary.
+    :param restrict_lexicon: Top-k lexicon to use for target vocabulary restriction.
     """
 
     def __init__(self,
@@ -566,12 +568,14 @@ class Translator:
                  length_penalty: LengthPenalty,
                  models: List[InferenceModel],
                  vocab_source: Dict[str, int],
-                 vocab_target: Dict[str, int]) -> None:
+                 vocab_target: Dict[str, int],
+                 restrict_lexicon: Optional[TopKLexicon] = None) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.vocab_source = vocab_source
         self.vocab_target = vocab_target
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
+        self.restrict_lexicon = restrict_lexicon
         self.start_id = self.vocab_target[C.BOS_SYMBOL]
         self.stop_ids = {self.vocab_target[C.EOS_SYMBOL], C.PAD_ID}  # type: Set[int]
         self.models = models

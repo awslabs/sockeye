@@ -30,7 +30,7 @@ def test_topk_lexicon():
     vocab_list = ["a", "b", "c"]
     vocab = dict((y, x) for (x, y) in enumerate(C.VOCAB_SYMBOLS + vocab_list))
     k = 2
-    lex = sockeye.lexicon.TopKLexicon(vocab, vocab, k)
+    lex = sockeye.lexicon.TopKLexicon(vocab, vocab)
 
     # Create from known lexicon
     with TemporaryDirectory(prefix="test_topk_lexicon.") as work_dir:
@@ -38,7 +38,7 @@ def test_topk_lexicon():
         with open(input_lex_path, "w") as out:
             for line in lexicon:
                 print(line, file=out)
-        lex.create(input_lex_path)
+        lex.create(input_lex_path, k)
 
         # Test against known lexicon
         expected = np.zeros((len(C.VOCAB_SYMBOLS) + len(vocab_list), k), dtype=np.int)

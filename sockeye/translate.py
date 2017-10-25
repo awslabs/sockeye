@@ -27,6 +27,7 @@ import sockeye.arguments as arguments
 import sockeye.constants as C
 import sockeye.data_io
 import sockeye.inference
+from sockeye.lexicon import TopKLexicon
 import sockeye.output_handler
 from sockeye.log import setup_main_logger
 from sockeye.utils import acquire_gpus, get_num_gpus, log_basic_info
@@ -58,19 +59,28 @@ def main():
         context = _setup_context(args, exit_stack)
 
         bucket_source_width, bucket_target_width = args.bucket_width
+        models, vocab_source, vocab_target = sockeye.inference.load_models(
+            context,
+            args.max_input_len,
+            args.beam_size,
+            args.models,
+            args.checkpoints,
+            args.softmax_temperature,
+            args.max_output_length_num_stds)
+        restrict_lexicon = None # type: TopKLexicon
+        if args.restrict_vocab_lexicon:
+            restrict_lexicon = TopKLexicon(vocab_source, vocab_target)
+            restrict_lexicon.load(args.restrict_vocab_lexicon)
         translator = sockeye.inference.Translator(context,
                                                   args.ensemble_mode,
                                                   bucket_source_width,
                                                   bucket_target_width,
                                                   sockeye.inference.LengthPenalty(args.length_penalty_alpha,
                                                                                   args.length_penalty_beta),
-                                                  *sockeye.inference.load_models(context,
-                                                                                 args.max_input_len,
-                                                                                 args.beam_size,
-                                                                                 args.models,
-                                                                                 args.checkpoints,
-                                                                                 args.softmax_temperature,
-                                                                                 args.max_output_length_num_stds))
+                                                  models,
+                                                  vocab_source,
+                                                  vocab_target,
+                                                  restrict_lexicon)
         read_and_translate(translator, output_handler, args.input)
 
 

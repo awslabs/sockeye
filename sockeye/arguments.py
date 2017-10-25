@@ -805,11 +805,11 @@ def add_inference_args(params):
                                help='Number of target-to-source length ratio standard deviations from training to add '
                                     'to calculate maximum output length for beam search for each sentence. '
                                     'Default: %(default)s.')
-    decode_params.add_argument('--restrict-output-vocab',
+    decode_params.add_argument('--restrict-vocab-lexicon',
                                type=str,
                                default=None,
-                               help="Specify top-k lexicon to use for restricting output vocabulary based on input "
-                                    "words. See lexicon module.")
+                               help="Specify top-k lexicon to restrict output vocabulary based on source.  See lexicon "
+                                    "module.")
 
     decode_params.add_argument('--output-type',
                                default='translation',
