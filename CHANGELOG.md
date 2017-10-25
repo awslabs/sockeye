@@ -17,10 +17,15 @@ For each item we will potentially have subsections for: _Added_, _Changed_, _Rem
  Label smoothing should now require signficantly less memory due to its addition to MXNet's `SoftmaxOutput` operator.
  - `--weight-normalization` now applies not only to convolutional weight matrices, but to output layers of all decoders.
  It is also independent of weight tying.
+ - Transformers now use `--embed-dropout`. Before they were using `--transformer-dropout-prepost` for this.
+ - Transformers now scale their embedding vectors before adding fixed positional embeddings.
+ This turned out to be crucial for effective learning.
 
 ### Added
  - `--loss-normalization-type`. Added a new flag to control loss normalization. New default is to normalize
  by the number of valid, non-PAD tokens instead of the batch size.
+ - `--weight-init-xavier-factor-type`. Added new flag to control Xavier factor type when `--weight-init=xavier`.
+ - `--embed-weight-init`. Added new flag for initialization of embeddings matrices.
  
 ### Removed
  - `--smoothed-cross-entropy-alpha` argument. See above.
