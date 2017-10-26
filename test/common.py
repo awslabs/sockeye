@@ -111,6 +111,7 @@ _EVAL_PARAMS_COMMON = "--hypotheses {hypotheses} --references {references}"
 
 def run_train_translate(train_params: str,
                         translate_params: str,
+                        translate_params_equiv: str,
                         train_source_path: str,
                         train_target_path: str,
                         dev_source_path: str,
@@ -121,7 +122,8 @@ def run_train_translate(train_params: str,
     Train a model and translate a dev set.  Report validation perplexity and BLEU.
 
     :param train_params: Command line args for model training.
-    :param translate_params: Command line args for translation.
+    :param translate_params: First command line args for translation.
+    :param translate_params_equiv: Second command line args for translation. Should produce the same outputs
     :param train_source_path: Path to the source file.
     :param train_target_path: Path to the target file.
     :param dev_source_path: Path to the development source file.
@@ -144,7 +146,7 @@ def run_train_translate(train_params: str,
         with patch.object(sys, "argv", params.split()):
             sockeye.train.main()
 
-        # Translate corpus
+        # Translate corpus with the 1st params
         out_path = os.path.join(work_dir, "out.txt")
         params = "{} {} {}".format(sockeye.translate.__file__,
                                    _TRANSLATE_PARAMS_COMMON.format(model=model_path,
@@ -153,6 +155,24 @@ def run_train_translate(train_params: str,
                                    translate_params)
         with patch.object(sys, "argv", params.split()):
             sockeye.translate.main()
+
+        # Translate corpus with the 2nd params
+        if translate_params_equiv is not None:
+            out_path_equiv = os.path.join(work_dir, "out_equiv.txt")
+            params = "{} {} {}".format(sockeye.translate.__file__,
+                                       _TRANSLATE_PARAMS_COMMON.format(model=model_path,
+                                                                       input=dev_source_path,
+                                                                       output=out_path_equiv),
+                                       translate_params_equiv)
+            with patch.object(sys, "argv", params.split()):
+                sockeye.translate.main()
+
+            # read-in both outputs, ensure they are the same
+            with open(out_path, 'rt') as f:
+                lines = f.readlines()
+            with open(out_path_equiv, 'rt') as f:
+                lines_equiv = f.readlines()
+            assert all(a == b for a,b in zip(lines, lines_equiv))
 
         # test averaging
         points = sockeye.average.find_checkpoints(model_path=model_path,
