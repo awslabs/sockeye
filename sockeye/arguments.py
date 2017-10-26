@@ -768,9 +768,8 @@ def add_inference_args(params):
     decode_params.add_argument('--batch-size',
                                type=int_greater_or_equal(1),
                                default=1,
-                               help='Batch size during decoding. '
-                                    'Determines how many sentences are translated simultaneously.'
-                                    'Default: %(default)s.')
+                               help='Batch size during decoding. Determines how many sentences are translated '
+                                    'simultaneously. Default: %(default)s.')
     decode_params.add_argument('--chunk-size',
                                type=int_greater_or_equal(1),
                                default=1,
