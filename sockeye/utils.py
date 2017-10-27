@@ -715,8 +715,10 @@ class PrintValueProp(mx.operator.CustomOpProp):
 
 def grouper(iterable: Iterable, size: int) -> Iterable:
     """
-    Collect data into fixed-length chunks or blocks
-    without either dicarding underfilled chunks or padding them
+    Collect data into fixed-length chunks or blocks without discarding underfilled chunks or padding them.
+
+    :param iterable: A sequence of inputs.
+    :return: Sequence of chunks.
     """
     it = iter(iterable)
     while True:
