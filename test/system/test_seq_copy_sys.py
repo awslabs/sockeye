@@ -94,18 +94,18 @@ def test_seq_copy(name, train_params, translate_params, perplexity_thresh, bleu_
     with tmp_digits_dataset("test_seq_copy.", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT,
                             _LINE_MAX_LENGTH, seed_train=_SEED_TRAIN, seed_dev=_SEED_DEV) as data:
         # Test model configuration
-        perplexity, bleu, bleu_restrict = run_train_translate(train_params,
-                                                              translate_params,
-                                                              None,  # no second set of parameters
-                                                              data['source'],
-                                                              data['target'],
-                                                              data['validation_source'],
-                                                              data['validation_target'],
-                                                              max_seq_len=_LINE_MAX_LENGTH + 1,
-                                                              restrict_lexicon=True,
-                                                              work_dir=data['work_dir'])
+        perplexity, bleu, bleu_restrict, chrf = run_train_translate(train_params,
+                                                                    translate_params,
+                                                                    None,  # no second set of parameters
+                                                                    data['source'],
+                                                                    data['target'],
+                                                                    data['validation_source'],
+                                                                    data['validation_target'],
+                                                                    max_seq_len=_LINE_MAX_LENGTH + 1,
+                                                                    restrict_lexicon=True,
+                                                                    work_dir=data['work_dir'])
         logger.info("test: %s", name)
-        logger.info("perplexity=%f, bleu=%f, bleu_restrict=%f", perplexity, bleu, bleu_restrict)
+        logger.info("perplexity=%f, bleu=%f, bleu_restrict=%f chrf=%f", perplexity, bleu, bleu_restrict, chrf)
         assert perplexity <= perplexity_thresh
         assert bleu >= bleu_thresh
         assert bleu_restrict >= bleu_thresh
@@ -170,18 +170,18 @@ def test_seq_sort(name, train_params, translate_params, perplexity_thresh, bleu_
     with tmp_digits_dataset("test_seq_sort.", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT,
                             _LINE_MAX_LENGTH, sort_target=True, seed_train=_SEED_TRAIN, seed_dev=_SEED_DEV) as data:
         # Test model configuration
-        perplexity, bleu, bleu_restrict = run_train_translate(train_params,
-                                                              translate_params,
-                                                              None,  # no second set of parameters
-                                                              data['source'],
-                                                              data['target'],
-                                                              data['validation_source'],
-                                                              data['validation_target'],
-                                                              max_seq_len=_LINE_MAX_LENGTH + 1,
-                                                              restrict_lexicon=True,
-                                                              work_dir=data['work_dir'])
+        perplexity, bleu, bleu_restrict, chrf = run_train_translate(train_params,
+                                                                    translate_params,
+                                                                    None,  # no second set of parameters
+                                                                    data['source'],
+                                                                    data['target'],
+                                                                    data['validation_source'],
+                                                                    data['validation_target'],
+                                                                    max_seq_len=_LINE_MAX_LENGTH + 1,
+                                                                    restrict_lexicon=True,
+                                                                    work_dir=data['work_dir'])
         logger.info("test: %s", name)
-        logger.info("perplexity=%f, bleu=%f, bleu_restrict=%f", perplexity, bleu, bleu_restrict)
+        logger.info("perplexity=%f, bleu=%f, bleu_restrict=%f chrf=%f", perplexity, bleu, bleu_restrict, chrf)
         assert perplexity <= perplexity_thresh
         assert bleu >= bleu_thresh
         assert bleu_restrict >= bleu_thresh

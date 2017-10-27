@@ -81,6 +81,7 @@ ENCODER_DECODER_SETTINGS = [
      "--beam-size 2",
      True)]
 
+
 @pytest.mark.parametrize("train_params, translate_params, restrict_lexicon", ENCODER_DECODER_SETTINGS)
 def test_seq_copy(train_params: str, translate_params: str, restrict_lexicon: bool):
     """Task: copy short sequences of digits"""

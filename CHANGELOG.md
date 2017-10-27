@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.13.1]
+### Added
+- Added chrF metric
+([Popovic 2015: chrF: character n-gram F-score for automatic MT evaluation](http://www.statmt.org/wmt15/pdf/WMT49.pdf)) to Sockeye.
+sockeye.evaluate now accepts `bleu` and `chrf` as values for `--metrics`
 
 ## [1.13.0]
 ### Fixed
