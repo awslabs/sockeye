@@ -650,7 +650,7 @@ class Translator:
         # prepare chunks, keeping track of empty or splitted inputs
         for trans_input in trans_inputs:
             if not trans_input.tokens:  # empty input?
-                chunk_markers.append(C.EMPTY_TRANSLATION_INPUT_ID)
+                continue
             elif len(trans_input.tokens) > self.max_input_length:  # oversized input?
                 logger.debug("Input %d has length (%d) that exceeds max input length (%d). Splitting into chunks of size %d.",
                              trans_input.id, len(trans_input.tokens), self.buckets_source[-1], self.max_input_length)
@@ -661,45 +661,40 @@ class Translator:
                 input_chunks.append(trans_input.tokens)
                 chunk_markers.append(trans_input.id)
 
-        # start translation in batches
+        # translate in batch-sized blocks over input chunks
         translations = []  # type: List[Translation]
-        for i in range(0, len(input_chunks), self.batch_size):
-            logger.debug("Translating batch %d", i)
-            batch = input_chunks[i:i + self.batch_size]
+        for batch_id, batch in enumerate(utils.grouper(input_chunks, self.batch_size)):
+            logger.debug("Translating batch %d", batch_id)
             # underfilled batch will be filled to a full batch size with copies of the 1st input
             rest = self.batch_size - len(batch)
             if rest > 0:
                 logger.debug("Extending the last batch to the full batch size (%d)", self.batch_size)
                 batch = batch + [batch[0]] * rest
-            # translate
             translated_batch = self.translate_nd(*self._get_inference_input(batch))
             # truncate to remove duplicated translations
             if rest > 0:
                 translated_batch = translated_batch[:-rest]
             translations.extend(translated_batch)
 
-        # concatenate translations corresponding to spans of chunk markers with the same input id
+        # concatenate translations with the same input id into a dict of complete translations
+        concat_translations = dict()
+        for idx, translations_and_markers in itertools.groupby(zip(translations, chunk_markers), key=lambda x: x[1]):
+            trans_to_concat = [trans for trans, _ in translations_and_markers]
+            concat_translations[idx] = trans_to_concat[0] if len(trans_to_concat) == 1 else \
+                                       self._concat_translations(trans_to_concat)
+
+        # create translation outputs inserting empty ones when necessary
         results = []  # type: List[TranslatorOutput]
-        start = 0
-        while start < len(chunk_markers):
-            trans_input = trans_inputs[len(results)]
-            if chunk_markers[start] == C.EMPTY_TRANSLATION_INPUT_ID:
+        for trans_input in trans_inputs:
+            if trans_input.id not in concat_translations:
                 results.append(TranslatorOutput(id=trans_input.id,
                                                 translation="",
                                                 tokens=[""],
                                                 attention_matrix=np.asarray([[0]]),
                                                 score=-np.inf))
-                start += 1
             else:
-                # while it's the same marker (sent id), take pairs of indices & translations.
-                print(list(zip(*itertools.takewhile(lambda tup: chunk_markers[start] == chunk_markers[start + tup[0]], enumerate(translations[start:])))))
-                _, translations_to_concat = zip(*itertools.takewhile(
-                                                lambda tup: chunk_markers[start] == chunk_markers[start + tup[0]],
-                                                enumerate(translations[start:])))
-                concatenated = translations_to_concat[0] if len(translations_to_concat) == 1 else \
-                               self._concat_translations(translations_to_concat)
-                results.append(self._make_result(trans_input, concatenated))
-                start += len(translations_to_concat)
+                results.append(self._make_result(trans_input,
+                                                 concat_translations[trans_input.id]))
         return results
 
     def _get_inference_input(self, sequences: List[List[str]]) -> Tuple[mx.nd.NDArray, int]:
