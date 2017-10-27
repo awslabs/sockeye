@@ -640,7 +640,7 @@ class Translator:
         Batch-translates a list of TranslatorInputs, returns a list of TranslatorOutputs.
         Splits oversized sentences to sentence chunks of size less than max_input_length.
 
-        :param trans_input: List of TranslatorInputs as returned by make_input().
+        :param trans_inputs: List of TranslatorInputs as returned by make_input().
         :return: List of translation results.
         """
         # keep input ids to be able to concatenate translated sentence chunks back
@@ -691,9 +691,11 @@ class Translator:
                                                 score=-np.inf))
                 start += 1
             else:
-                _, translations_to_concat = zip(*itertools.takewhile(                                               # while..
-                                                lambda tup: chunk_markers[start] == chunk_markers[start + tup[0]],  # ..it's the same marker (sent id),
-                                                enumerate(translations[start:])))                                   # take pairs of indices & translations.
+                # while it's the same marker (sent id), take pairs of indices & translations.
+                print(list(zip(*itertools.takewhile(lambda tup: chunk_markers[start] == chunk_markers[start + tup[0]], enumerate(translations[start:])))))
+                _, translations_to_concat = zip(*itertools.takewhile(
+                                                lambda tup: chunk_markers[start] == chunk_markers[start + tup[0]],
+                                                enumerate(translations[start:])))
                 concatenated = translations_to_concat[0] if len(translations_to_concat) == 1 else \
                                self._concat_translations(translations_to_concat)
                 results.append(self._make_result(trans_input, concatenated))
