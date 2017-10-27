@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 import time
+import itertools
 from contextlib import contextmanager, ExitStack
 from typing import Mapping, NamedTuple, Any, List, Iterator, Iterable, Set, TextIO, Tuple, Dict, Optional
 
@@ -710,3 +711,18 @@ class PrintValueProp(mx.operator.CustomOpProp):
         return PrintValue(self.print_name,
                           print_grad=self.print_grad,
                           use_logger=self.use_logger)
+
+
+def grouper(iterable: Iterable, size: int) -> Iterable:
+    """
+    Collect data into fixed-length chunks or blocks without discarding underfilled chunks or padding them.
+
+    :param iterable: A sequence of inputs.
+    :return: Sequence of chunks.
+    """
+    it = iter(iterable)
+    while True:
+        chunk = list(itertools.islice(it, size))
+        if not chunk:
+            return
+        yield chunk

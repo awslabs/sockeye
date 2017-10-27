@@ -33,7 +33,7 @@ from sockeye.lexicon import TopKLexicon
 import sockeye.output_handler
 from sockeye.log import setup_main_logger
 from sockeye.utils import acquire_gpus, get_num_gpus, log_basic_info
-from sockeye.utils import check_condition
+from sockeye.utils import check_condition, grouper
 
 
 logger = setup_main_logger(__name__, file_logging=False)
@@ -99,25 +99,13 @@ def read_and_translate(translator: sockeye.inference.Translator, output_handler:
     :param chunk_size: The size of the portion to read at a time from the input.
     :param source: Path to file which will be translated line-by-line if included, if none use stdin.
     """
-    def grouper(iterable: Iterable, size: int) -> Iterable:
-        """
-        Collect data into fixed-length chunks or blocks
-        without either dicarding underfilled chunks or padding them
-        """
-        it = iter(iterable)
-        while True:
-            chunk = list(itertools.islice(it, size))
-            if not chunk:
-                return
-            yield chunk
-
     source_data = sys.stdin if source is None else sockeye.data_io.smart_open(source)
 
     logger.info("Translating...")
 
     total_time, total_lines = 0.0, 0
     for chunk in grouper(source_data, chunk_size):
-        chunk_time = translate(output_handler, chunk, translator)
+        chunk_time = translate(output_handler, chunk, translator, total_lines)
         total_lines += len(chunk)
         total_time += chunk_time
 
@@ -130,23 +118,24 @@ def read_and_translate(translator: sockeye.inference.Translator, output_handler:
 
 
 def translate(output_handler: sockeye.output_handler.OutputHandler, source_data: Iterable[str],
-                    translator: sockeye.inference.Translator) -> float:
+                    translator: sockeye.inference.Translator, chunk_id: int = 0) -> float:
     """
     Translates each line from source_data, calling output handler after translating a batch.
 
     :param output_handler: A handler that will be called once with the output of each translation.
     :param source_data: A enumerable list of source sentences that will be translated.
     :param translator: The translator that will be used for each line of input.
+    :param chunk_id: Global id of the chunk.
     :return: Total time taken.
     """
 
-    total_time = 0.0
     tic = time.time()
-    trans_inputs = [translator.make_input(i, line) for i, line in enumerate(source_data, 1)]
+    trans_inputs = [translator.make_input(i, line) for i, line in enumerate(source_data, chunk_id + 1)]
     trans_outputs = translator.translate(trans_inputs)
     total_time = time.time() - tic
+    batch_time = total_time / len(trans_inputs)
     for trans_input, trans_output in zip(trans_inputs, trans_outputs):
-        output_handler.handle(trans_input, trans_output)
+        output_handler.handle(trans_input, trans_output, batch_time)
     return total_time
 
 
