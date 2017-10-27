@@ -120,7 +120,7 @@ def translate(output_handler: sockeye.output_handler.OutputHandler, source_data:
     """
 
     tic = time.time()
-    trans_inputs = [translator.make_input(i, line) for i, line in enumerate(source_data, chunk_id)]
+    trans_inputs = [translator.make_input(i, line) for i, line in enumerate(source_data, chunk_id + 1)]
     trans_outputs = translator.translate(trans_inputs)
     total_time = time.time() - tic
     batch_time = total_time / len(trans_inputs)
