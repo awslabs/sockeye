@@ -242,9 +242,6 @@ LR_DECAY_OPT_STATES_RESET_CHOICES = [LR_DECAY_OPT_STATES_RESET_OFF,
                                      LR_DECAY_OPT_STATES_RESET_INITIAL,
                                      LR_DECAY_OPT_STATES_RESET_BEST]
 
-# id of an empty translation input; used to mark them while chunking during decoding
-EMPTY_TRANSLATION_INPUT_ID = -999999999
-
 # output handler
 OUTPUT_HANDLER_TRANSLATION = "translation"
 OUTPUT_HANDLER_TRANSLATION_WITH_SCORE = "translation_with_score"
