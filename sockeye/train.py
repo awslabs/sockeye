@@ -238,7 +238,8 @@ def create_data_iters(args: argparse.Namespace,
                                            max_seq_len_source=max_seq_len_source,
                                            max_seq_len_target=max_seq_len_target,
                                            bucketing=not args.no_bucketing,
-                                           bucket_width=args.bucket_width)
+                                           bucket_width=args.bucket_width,
+                                           sequence_limit=args.limit)
 
 
 def create_lr_scheduler(args: argparse.Namespace, resume_training: bool,

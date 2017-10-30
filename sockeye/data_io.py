@@ -100,24 +100,6 @@ def get_bucket(seq_len: int, buckets: List[int]) -> Optional[int]:
     return buckets[bucket_idx]
 
 
-def read_parallel_corpus(data_source: str,
-                         data_target: str,
-                         vocab_source: Dict[str, int],
-                         vocab_target: Dict[str, int]) -> Tuple[Iterator[List[int]], Iterator[List[int]]]:
-    """
-    Loads source and target data, making sure they have the same length.
-
-    :param data_source: Path to source training data.
-    :param data_target: Path to target training data.
-    :param vocab_source: Source vocabulary.
-    :param vocab_target: Target vocabulary.
-    :return: Tuple of (source sentences, target sentences).
-    """
-    source_sentences = SentenceReader(data_source, vocab_source, add_bos=False)
-    target_sentences = SentenceReader(data_target, vocab_target, add_bos=True)
-    return source_sentences, target_sentences
-
-
 def length_statistics(source_sentences: Iterable[List[Any]], target_sentences: Iterable[List[int]]) -> Tuple[float, float]:
     """
     Returns mean and standard deviation of target-to-source length ratios of parallel corpus.
@@ -143,9 +125,10 @@ def get_training_data_iters(source: str, target: str,
                             max_seq_len_source: int,
                             max_seq_len_target: int,
                             bucketing: bool,
-                            bucket_width: int) -> Tuple['ParallelBucketSentenceIter',
-                                                        'ParallelBucketSentenceIter',
-                                                        'DataConfig']:
+                            bucket_width: int,
+                            sequence_limit: Optional[int] = None) -> Tuple['ParallelBucketSentenceIter',
+                                                                           'ParallelBucketSentenceIter',
+                                                                           'DataConfig']:
     """
     Returns data iterators for training and validation data.
 
@@ -165,15 +148,18 @@ def get_training_data_iters(source: str, target: str,
     :param max_seq_len_target: Maximum target sequence length.
     :param bucketing: Whether to use bucketing.
     :param bucket_width: Size of buckets.
+    :param sequence_limit: Maximum number of training sequences to read.
     :return: Tuple of (training data iterator, validation data iterator, data config).
     """
     logger.info("Creating train data iterator")
-    train_source_sentences, train_target_sentences = read_parallel_corpus(source,
-                                                                          target,
-                                                                          vocab_source,
-                                                                          vocab_target)
+    # streams id-coded sentences from disk
+    train_source_sentences = SentenceReader(source, vocab_source, add_bos=False, limit=sequence_limit)
+    train_target_sentences = SentenceReader(target, vocab_target, add_bos=True, limit=sequence_limit)
 
+    # reads the id-coded sentences from disk once
     lr_mean, lr_std = length_statistics(train_source_sentences, train_target_sentences)
+    logger.info("%d source sentences in '%s'", train_source_sentences.count, source)
+    logger.info("%d target sentences in '%s'", train_target_sentences.count, target)
     logger.info("Mean training target/source length ratio: %.2f (+-%.2f)", lr_mean, lr_std)
 
     # define buckets
@@ -196,10 +182,9 @@ def get_training_data_iters(source: str, target: str,
                                             fill_up=fill_up)
 
     logger.info("Creating validation data iterator")
-    val_source_sentences, val_target_sentences = read_parallel_corpus(validation_source,
-                                                                      validation_target,
-                                                                      vocab_source,
-                                                                      vocab_target)
+    val_source_sentences = SentenceReader(validation_source, vocab_source, add_bos=False, limit=None)
+    val_target_sentences = SentenceReader(validation_target, vocab_source, add_bos=False, limit=None)
+
     val_iter = ParallelBucketSentenceIter(val_source_sentences,
                                           val_target_sentences,
                                           buckets,
@@ -248,7 +233,7 @@ class DataConfig(config.Config):
         self.max_observed_target_seq_len = max_observed_target_seq_len
 
 
-def smart_open(filename: str, mode="rt", ftype="auto", errors='replace'):
+def smart_open(filename: str, mode: str = "rt", ftype: str = "auto", errors:str = 'replace'):
     """
     Returns a file descriptor for filename with UTF-8 encoding.
     If mode is "rt", file is opened read-only.
@@ -269,7 +254,7 @@ def smart_open(filename: str, mode="rt", ftype="auto", errors='replace'):
         return open(filename, mode=mode, encoding='utf-8', errors=errors)
 
 
-def read_content(path: str, limit=None) -> Iterator[List[str]]:
+def read_content(path: str, limit: bool = None) -> Iterator[List[str]]:
     """
     Returns a list of tokens for each line in path up to a limit.
 
@@ -328,26 +313,25 @@ class SentenceReader(Iterator):
         assert vocab[C.PAD_SYMBOL] == C.PAD_ID
         assert C.BOS_SYMBOL in vocab
         assert C.EOS_SYMBOL in vocab
-        self.it = None  # type: Optional[Iterator]
+        self._iter = None  # type: Optional[Iterator]
         self._iterated_once = False
-        self._count = 0
+        self.count = 0
 
     def __iter__(self):
-        self.it = read_content(self.path, self.limit)
-        self._count = 0
+        self._iter = read_content(self.path, self.limit)
         return self
 
     def __next__(self):
-        for sentence_tokens in self.it:
+        for sentence_tokens in self._iter:
             sentence = tokens2ids(sentence_tokens, self.vocab)
             check_condition(bool(sentence), "Empty sentence in file %s" % self.path)
             if self.add_bos:
                 sentence.insert(0, self.vocab[C.BOS_SYMBOL])
-            self._count += 1
+            if not self._iterated_once:
+                self.count += 1
             return sentence
-        self.it = None
+        self._iter = None
         if not self._iterated_once:
-            logger.info("%d sentences loaded from '%s'", self._count, self.path)
             self._iterated_once = True
         raise StopIteration
 
@@ -392,11 +376,13 @@ BucketBatchSize = NamedTuple("BucketBatchSize", [
 """
 
 
-# TODO: consider more memory-efficient data reading (load from disk on demand)
+# TODO: consider more memory-efficient batch creation (load from disk on demand)
 # TODO: consider using HDF5 format for language data
 class ParallelBucketSentenceIter(mx.io.DataIter):
     """
-    A Bucket sentence iterator for parallel data. Randomly shuffles the data after every call to reset().
+    A bucketing parallel sentence iterator.
+    Data is read into NDArrays for the buckets defined in buckets.
+    Randomly shuffles the data after every call to reset().
     Data is stored in NDArrays for each epoch for fast indexing during iteration.
 
     :param source_sentences: Iterable of source sentences (integer-coded).
