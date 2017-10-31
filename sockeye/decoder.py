@@ -58,6 +58,10 @@ class Decoder(ABC):
     For the inference module to be able to keep track of decoder's states
     a decoder provides methods to return initial states (init_states), state variables and their shapes.
     """
+    def __init__(self):
+        # Tracked to find params for logit computation
+        self.cls_w = None  # type: mx.sym.Symbol
+        self.cls_b = None  # type: mx.sym.Symbol
 
     @abstractmethod
     def decode_sequence(self,
@@ -91,20 +95,39 @@ class Decoder(ABC):
                     target: mx.sym.Symbol,
                     target_max_length: int,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol) \
-            -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    *states: mx.sym.Symbol,
+                    return_logit_inputs: bool = False,
+                    return_logits: bool = True) \
+            -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the previous word ids in target and previous decoder states.
-        Returns logits, attention probabilities, and next decoder states.
+        Returns logit inputs (optional), logits (optional), attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
         :param target: Previous target word ids. Shape: (batch_size, target_max_length).
         :param target_max_length: Size of time dimension in prev_word_ids.
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
-        :return: logits, attention probabilities, next decoder states.
+        :param return_logit_inputs: Return inputs to logits (scores over target vocabulary).
+        :param return_logits: Return logits (scores over target vocabulary).  If false, logits are not computed as part
+                              of graph.
+        :return: logit inputs (or None), logits (or None), attention probabilities, next decoder states.
         """
         pass
+
+    def decode_step_logits_nd(self,
+                              logit_inputs: mx.nd.NDArray,
+                              cls_w: mx.nd.NDArray,
+                              cls_b: mx.nd.NDArray) -> mx.nd.NDArray:
+        """
+        NDarray version of computing logits from logit inputs for this decoder.
+
+        :param logit_inputs: Inputs for logit computation, result of `decode_step`.
+        :param cls_w: Weights for logit computation.
+        :param cls_b: Biases for logit computation.
+        :return: logits.
+        """
+        return mx.nd.FullyConnected(data=logit_inputs, weight=cls_w, bias=cls_b, num_hidden=cls_b.shape[0])
 
     @abstractmethod
     def reset(self):
@@ -614,18 +637,23 @@ class RecurrentDecoder(Decoder):
                     target: mx.sym.Symbol,
                     target_max_length: int,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol) \
-            -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    *states: mx.sym.Symbol,
+                    return_logit_inputs: bool = False,
+                    return_logits: bool = True) \
+            -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the previous word ids in target and previous decoder states.
-        Returns logits, attention probabilities, and next decoder states.
+        Returns logit inputs (optional), logits (optional), attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
         :param target: Previous target word ids. Shape: (batch_size, target_max_length).
         :param target_max_length: Size of time dimension in prev_word_ids.
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
-        :return: logits, attention probabilities, next decoder states.
+        :param return_logit_inputs: Return inputs to logits (scores over target vocabulary).
+        :param return_logits: Return logits (scores over target vocabulary).  If false, logits are not computed as part
+                              of graph.
+        :return: logit inputs (or None), logits (or None), attention probabilities, next decoder states.
         """
         source_encoded, prev_dynamic_source, source_encoded_length, prev_hidden, *layer_states = states
 
@@ -648,16 +676,24 @@ class RecurrentDecoder(Decoder):
                                             attention_func,
                                             prev_attention_state)
 
+        # logit inputs aka state.hidden: (batch_size, rnn_num_hidden)
+        logit_inputs = None
+        if return_logit_inputs:
+            # TODO: Better way of naming this?
+            logit_inputs = mx.sym.reshape(state.hidden, shape=(-2,), name=C.LOGIT_INPUTS_NAME)
+
         # logits: (batch_size, target_vocab_size)
-        logits = mx.sym.FullyConnected(data=state.hidden, num_hidden=self.config.vocab_size,
-                                       weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
+        logits = None
+        if return_logits:
+            logits = mx.sym.FullyConnected(data=state.hidden, num_hidden=self.config.vocab_size,
+                                           weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
 
         new_states = [source_encoded,
                       attention_state.dynamic_source,
                       source_encoded_length,
                       state.hidden] + state.layer_states
 
-        return logits, attention_state.probs, new_states
+        return logit_inputs, logits, attention_state.probs, new_states
 
     def reset(self):
         """

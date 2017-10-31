@@ -178,7 +178,7 @@ def test_training_arg(test_params, expected_params):
                       ensemble_mode='linear',
                       bucket_width=(10, 2),
                       max_input_len=None,
-                      restrict_vocab_lexicon=None,
+                      restrict_lexicon=None,
                       softmax_temperature=None,
                       output_type='translation',
                       sure_align_threshold=0.9,

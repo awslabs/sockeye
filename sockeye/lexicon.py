@@ -260,8 +260,8 @@ class TopKLexicon:
         :return: Possible target ids for source (unique sorted, always includes special symbols).
         """
         # TODO: When MXNet adds support for set operations, we can migrate to avoid conversions to/from NumPy.
-        unique_src_ids = np.lib.arraysetops.union1d(self.always_allow, src_ids.reshape(-1))
-        trg_ids = np.lib.arraysetops.unique(self.lex[unique_src_ids, :])
+        unique_src_ids = np.lib.arraysetops.unique(src_ids)
+        trg_ids = np.lib.arraysetops.union1d(self.always_allow, self.lex[unique_src_ids, :].reshape(-1))
         return trg_ids
 
 

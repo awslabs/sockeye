@@ -69,11 +69,13 @@ def main():
             args.models,
             args.checkpoints,
             args.softmax_temperature,
-            args.max_output_length_num_stds)
+            args.max_output_length_num_stds,
+            decoder_return_logit_inputs=args.restrict_lexicon is not None,
+            cache_cls_w_b=args.restrict_lexicon is not None)
         restrict_lexicon = None # type: TopKLexicon
-        if args.restrict_vocab_lexicon:
+        if args.restrict_lexicon:
             restrict_lexicon = TopKLexicon(vocab_source, vocab_target)
-            restrict_lexicon.load(args.restrict_vocab_lexicon)
+            restrict_lexicon.load(args.restrict_lexicon)
         translator = sockeye.inference.Translator(context,
                                                   args.ensemble_mode,
                                                   bucket_source_width,

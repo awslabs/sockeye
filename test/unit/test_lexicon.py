@@ -56,14 +56,14 @@ def test_topk_lexicon():
 
         # Test lookup
 
-        trg_ids = lex.get_trg_ids(mx.nd.array([[vocab["a"], vocab["c"]]], dtype="int32"))
+        trg_ids = lex.get_trg_ids(np.array([[vocab["a"], vocab["c"]]], dtype=np.int))
         expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["a", "b"]], dtype=np.int)
-        assert np.all(trg_ids.asnumpy() == expected)
+        assert np.all(trg_ids == expected)
 
-        trg_ids = lex.get_trg_ids(mx.nd.array([[vocab["b"]]], dtype="int32"))
+        trg_ids = lex.get_trg_ids(np.array([[vocab["b"]]], dtype=np.int))
         expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["b"]], dtype=np.int)
-        assert np.all(trg_ids.asnumpy() == expected)
+        assert np.all(trg_ids == expected)
 
-        trg_ids = lex.get_trg_ids(mx.nd.array([[vocab["c"]]], dtype="int32"))
+        trg_ids = lex.get_trg_ids(np.array([[vocab["c"]]], dtype=np.int))
         expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS], dtype=np.int)
-        assert np.all(trg_ids.asnumpy() == expected)
+        assert np.all(trg_ids == expected)
