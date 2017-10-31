@@ -199,7 +199,7 @@ class TopKLexicon:
         self.vocab_source = vocab_source
         self.vocab_target = vocab_target
         # Shape: (vocab_source_size, k), k determined at create() or load()
-        self.lex = None # type: np.ndarray
+        self.lex = None  # type: np.ndarray
         # Always allow special vocab symbols in target vocab
         self.always_allow = np.array([vocab_target[symbol] for symbol in C.VOCAB_SYMBOLS], dtype=np.int)
 
@@ -214,7 +214,7 @@ class TopKLexicon:
         # Read lexicon
         src_unk_id = self.vocab_source[C.UNK_SYMBOL]
         trg_unk_id = self.vocab_target[C.UNK_SYMBOL]
-        _lex = collections.defaultdict(dict) # type: Dict[int, Dict[int, float]]
+        _lex = collections.defaultdict(dict)  # type: Dict[int, Dict[int, float]]
         for src_id, trg_id, prob in lexicon_iterator(path, self.vocab_source, self.vocab_target):
             # Unk token will always be part of target vocab, so no need to track it here
             if src_id == src_unk_id or trg_id == trg_unk_id:
@@ -252,16 +252,17 @@ class TopKLexicon:
                 self.lex[int(src_id), :len(top_k)] = top_k
         logger.info("Loaded top-k lexicon from \"%s\".", path)
 
-    def get_trg_ids(self, src_ids: mx.nd.NDArray) -> mx.nd.NDArray:
+    def get_trg_ids(self, src_ids: np.ndarray) -> np.ndarray:
         """
         Lookup possible target ids for input sequence of source ids.
 
-        :param source: Sequence of source ids.
-        :return: Top k target ids (union over source, always includes special symbols).
+        :param source: Sequence(s) of source ids (any shape).
+        :return: Possible target ids for source (unique sorted, always includes special symbols).
         """
-        unique_src_ids = np.unique(src_ids.asnumpy())
-        trg_ids = np.union1d(self.always_allow, np.unique(self.lex[unique_src_ids, :]))
-        return mx.nd.array(trg_ids, ctx=src_ids.context, dtype=src_ids.dtype)
+        # TODO: When MXNet adds support for set operations, we can migrate to avoid conversions to/from NumPy.
+        unique_src_ids = np.lib.arraysetops.union1d(self.always_allow, src_ids.reshape(-1))
+        trg_ids = np.lib.arraysetops.unique(self.lex[unique_src_ids, :])
+        return trg_ids
 
 
 def main():
