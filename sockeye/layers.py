@@ -135,9 +135,6 @@ class OutputLayer:
                  prefix: str = '') -> None:
         self.vocab_size = vocab_size
 
-        self.w = mx.sym.Variable("%scls_weight" % prefix, shape=(vocab_size, num_hidden))
-        self.b = mx.sym.Variable("%scls_bias" % prefix)
-
         if weight_tying:
             utils.check_condition(num_hidden == num_embed,
                                   "Weight tying requires target embedding size and decoder hidden size " +
@@ -146,6 +143,8 @@ class OutputLayer:
             logger.info("Tying the target embeddings and prediction matrix.")
             assert embed_weight is not None, "Must provide embed_weight if weight_tying == True"
             self.w = embed_weight
+        else:
+            self.w = mx.sym.Variable("%scls_weight" % prefix, shape=(vocab_size, num_hidden))
 
         if weight_normalization:
             logger.info("Normalizing output layer weights.")
@@ -154,6 +153,8 @@ class OutputLayer:
                                                    ndim=2,
                                                    prefix="%scls_" % prefix)
             self.w = self.weight_norm()
+
+        self.b = mx.sym.Variable("%scls_bias" % prefix)
 
     def __call__(self, hidden: mx.sym.Symbol):
         """

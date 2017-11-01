@@ -14,14 +14,16 @@ For each item we will potentially have subsections for: _Added_, _Changed_, _Rem
 ### Changed
  - Updated MXNet dependency to 0.12 (w/ MKL support by default).
  - Changed `--smoothed-cross-entropy-alpha` to `--label-smoothing`.
- Label smoothing should now require signficantly less memory due to its addition to MXNet's `SoftmaxOutput` operator.
+ Label smoothing should now require significantly less memory due to its addition to MXNet's `SoftmaxOutput` operator.
  - `--weight-normalization` now applies not only to convolutional weight matrices, but to output layers of all decoders.
  It is also independent of weight tying.
  - Transformers now use `--embed-dropout`. Before they were using `--transformer-dropout-prepost` for this.
  - Transformers now scale their embedding vectors before adding fixed positional embeddings.
- This turned out to be crucial for effective learning.
+ This turns out to be crucial for effective learning.
+ - `.param` files now use 5 digit identifiers to reduce risk of overflowing with many checkpoints.
 
 ### Added
+ - Added CUDA 9.0 requirements file.
  - `--loss-normalization-type`. Added a new flag to control loss normalization. New default is to normalize
  by the number of valid, non-PAD tokens instead of the batch size.
  - `--weight-init-xavier-factor-type`. Added new flag to control Xavier factor type when `--weight-init=xavier`.

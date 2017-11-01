@@ -56,7 +56,7 @@ Depending on your version of CUDA, you can do this by running the following:
 > pip install sockeye --no-deps -r requirements.gpu-cu${CUDA_VERSION}.txt
 > rm requirements.gpu-cu${CUDA_VERSION}.txt
 ```
-where `${CUDA_VERSION}` can be `75`, `80`, or `90`.
+where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), or `90` (9.0).
 
 ### Or: From Source
 
@@ -77,7 +77,7 @@ running the following:
 ```bash
 > python setup.py install -r requirements.gpu-cu${CUDA_VERSION}.txt
 ```
-where `${CUDA_VERSION}` can be `75`, `80`, or `90`.
+where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), or `90` (9.0).
 
 ### Optional dependencies
 In order to track learning curves during training you can optionally install dmlc's tensorboard fork
