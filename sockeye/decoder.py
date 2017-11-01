@@ -205,7 +205,8 @@ class TransformerDecoder(Decoder):
                                            vocab_size=config.vocab_size,
                                            prefix=C.TARGET_EMBEDDING_PREFIX,
                                            dropout=config.dropout_embed,
-                                           embed_weight=embed_weight)
+                                           embed_weight=embed_weight,
+                                           embed_scale=config.model_size ** 0.5)
         self.pos_embedding = encoder.get_positional_embedding(config.positional_embedding_type,
                                                               config.model_size,
                                                               max_seq_len=config.max_seq_len_target,
@@ -655,7 +656,8 @@ class RecurrentDecoder(Decoder):
         attention_func = self.attention.on(source_encoded, source_encoded_length, source_encoded_max_length)
 
         prev_state = RecurrentDecoderState(prev_hidden, list(layer_states))
-        prev_attention_state = rnn_attention.AttentionState(context=None, probs=None, dynamic_source=prev_dynamic_source)
+        prev_attention_state = rnn_attention.AttentionState(context=None, probs=None,
+                                                            dynamic_source=prev_dynamic_source)
 
         # state.hidden: (batch_size, rnn_num_hidden)
         # attention_state.dynamic_source: (batch_size, source_seq_len, coverage_num_hidden)

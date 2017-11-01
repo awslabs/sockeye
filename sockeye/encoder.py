@@ -202,7 +202,7 @@ def get_transformer_encoder(config: transformer.TransformerConfig,
                               prefix=C.SOURCE_EMBEDDING_PREFIX,
                               dropout=config.dropout_embed,
                               embed_weight=embed_weight,
-                              embed_scale=config.model_size**0.5))
+                              embed_scale=config.model_size ** 0.5))
     encoders.append(get_positional_embedding(config.positional_embedding_type,
                                              config.model_size,
                                              config.max_seq_len_source,
