@@ -14,8 +14,8 @@
 """
 Code for inference/translation
 """
-import logging
 import itertools
+import logging
 import os
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union, Set
 
@@ -49,7 +49,7 @@ class InferenceModel(model.SockeyeModel):
     :param max_output_length_num_stds: Number of standard deviations as safety margin for maximum output length.
     :param decoder_return_logit_inputs: Decoder returns inputs to logit computation instead of softmax over target
                                         vocabulary.  Used when logits/softmax are handled separately.
-    :param cache_cls_w_b: Cache weights and biases for logit computation as NumPy arrays (used with restrict lexicon).
+    :param cache_output_layer_w_b: Cache weights and biases for logit computation as NumPy arrays.
     """
 
     def __init__(self,
@@ -62,7 +62,7 @@ class InferenceModel(model.SockeyeModel):
                  softmax_temperature: Optional[float] = None,
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  decoder_return_logit_inputs: bool = False,
-                 cache_cls_w_b: bool = False) -> None:
+                 cache_output_layer_w_b: bool = False) -> None:
         self.model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
         logger.info("Model version: %s", self.model_version)
         utils.check_version(self.model_version)
@@ -92,9 +92,9 @@ class InferenceModel(model.SockeyeModel):
         self.decoder_data_shapes_cache = None  # type: Optional[Dict]
         self.decoder_return_logit_inputs = decoder_return_logit_inputs
 
-        self.cache_cls_w_b = cache_cls_w_b
-        self.cls_w = None  # type: np.ndarray
-        self.cls_b = None  # type: np.ndarray
+        self.cache_output_layer_w_b = cache_output_layer_w_b
+        self.output_layer_w = None  # type: np.ndarray
+        self.output_layer_b = None  # type: np.ndarray
 
     def initialize(self, max_input_length: int, get_max_output_length_function: Callable):
         """
@@ -136,9 +136,9 @@ class InferenceModel(model.SockeyeModel):
         self.encoder_module.init_params(arg_params=self.params, allow_missing=False)
         self.decoder_module.init_params(arg_params=self.params, allow_missing=False)
 
-        if self.cache_cls_w_b:
-            self.cls_w = self.params[self.decoder.cls_w.name].asnumpy()
-            self.cls_b = self.params[self.decoder.cls_b.name].asnumpy()
+        if self.cache_output_layer_w_b:
+            self.output_layer_w = self.params[self.decoder.output_layer.w.name].asnumpy()
+            self.output_layer_b = self.params[self.decoder.output_layer.b.name].asnumpy()
 
     def _get_encoder_module(self) -> Tuple[mx.mod.BucketingModule, int]:
         """
@@ -249,7 +249,8 @@ class InferenceModel(model.SockeyeModel):
         source_max_length, target_max_length = bucket_key
         return self.decoder_data_shapes_cache.setdefault(
             bucket_key,
-            [mx.io.DataDesc(name=C.TARGET_NAME, shape=(self.batch_size * self.beam_size, target_max_length), layout="NT")] +
+            [mx.io.DataDesc(name=C.TARGET_NAME, shape=(self.batch_size * self.beam_size, target_max_length),
+                            layout="NT")] +
             self.decoder.state_shapes(self.batch_size * self.beam_size,
                                       self.encoder.get_encoded_seq_len(source_max_length),
                                       self.encoder.get_num_hidden()))
@@ -340,7 +341,7 @@ def load_models(context: mx.context.Context,
                 softmax_temperature: Optional[float] = None,
                 max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                 decoder_return_logit_inputs: bool = False,
-                cache_cls_w_b: bool = False) -> Tuple[List[InferenceModel], Dict[str, int], Dict[str, int]]:
+                cache_output_layer_w_b: bool = False) -> Tuple[List[InferenceModel], Dict[str, int], Dict[str, int]]:
     """
     Loads a list of models for inference.
 
@@ -354,8 +355,8 @@ def load_models(context: mx.context.Context,
            to compute maximum output length.
     :param decoder_return_logit_inputs: Model decoders return inputs to logit computation instead of softmax over target
                                         vocabulary.  Used when logits/softmax are handled separately.
-    :param cache_cls_w_b: Models cache weights and biases for logit computation as NumPy arrays (used with restrict
-                          lexicon).
+    :param cache_output_layer_w_b: Models cache weights and biases for logit computation as NumPy arrays (used with
+                                   restrict lexicon).
     :return: List of models, source vocabulary, target vocabulary.
     """
     models, source_vocabs, target_vocabs = [], [], []
@@ -372,7 +373,7 @@ def load_models(context: mx.context.Context,
                                softmax_temperature=softmax_temperature,
                                checkpoint=checkpoint,
                                decoder_return_logit_inputs=decoder_return_logit_inputs,
-                               cache_cls_w_b=cache_cls_w_b)
+                               cache_output_layer_w_b=cache_output_layer_w_b)
         models.append(model)
 
     utils.check_condition(all(set(vocab.items()) == set(source_vocabs[0].items()) for vocab in source_vocabs),
@@ -499,6 +500,7 @@ class ModelState:
         Sorts states according to k-best order from last step in beam search.
         """
         self.states = [mx.nd.take(ds, best_hyp_indices) for ds in self.states]
+
 
 class LengthPenalty:
     """
@@ -631,12 +633,14 @@ class Translator:
             self.buckets_target = data_io.define_buckets(max_output_length, step=bucket_target_width)
         else:
             self.buckets_target = [max_output_length]
-        self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target)), val=np.inf, ctx=self.context)
-        logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s "
+        self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target)), val=np.inf,
+                                   ctx=self.context)
+        logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s batch_size=%d "
                     "buckets_source=%s buckets_target=%s)",
                     len(self.models),
                     self.beam_size,
                     "None" if len(self.models) == 1 else ensemble_mode,
+                    self.batch_size,
                     self.buckets_source,
                     self.buckets_target)
 
@@ -651,6 +655,7 @@ class Translator:
 
     @staticmethod
     def _linear_interpolation(predictions):
+        # pylint: disable=invalid-unary-operand-type
         return -mx.nd.log(utils.average_arrays(predictions))
 
     @staticmethod
@@ -659,6 +664,7 @@ class Translator:
         Returns averaged and re-normalized log probabilities
         """
         log_probs = utils.average_arrays([mx.nd.log(p) for p in predictions])
+        # pylint: disable=invalid-unary-operand-type
         return -mx.nd.log(mx.nd.softmax(log_probs))
 
     @staticmethod
@@ -690,8 +696,9 @@ class Translator:
             if not trans_input.tokens:  # empty input?
                 continue
             elif len(trans_input.tokens) > self.max_input_length:  # oversized input?
-                logger.debug("Input %d has length (%d) that exceeds max input length (%d). Splitting into chunks of size %d.",
-                             trans_input.id, len(trans_input.tokens), self.buckets_source[-1], self.max_input_length)
+                logger.debug(
+                    "Input %d has length (%d) that exceeds max input length (%d). Splitting into chunks of size %d.",
+                    trans_input.id, len(trans_input.tokens), self.buckets_source[-1], self.max_input_length)
                 token_chunks = list(utils.chunks(trans_input.tokens, self.max_input_length))
                 input_chunks.extend(token_chunks)
                 chunk_markers.extend([trans_input.id] * len(token_chunks))
@@ -817,8 +824,9 @@ class Translator:
                      source_length: int,
                      max_output_length: int,
                      states: List[ModelState],
-                     models_cls_w: List[mx.nd.NDArray],
-                     models_cls_b: List[mx.nd.NDArray]) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, List[ModelState]]:
+                     models_output_layer_w: List[mx.nd.NDArray],
+                     models_output_layer_b: List[mx.nd.NDArray]) \
+            -> Tuple[mx.nd.NDArray, mx.nd.NDArray, List[ModelState]]:
         """
         Returns decoder predictions (combined from all models), attention scores, and updated states.
 
@@ -827,8 +835,8 @@ class Translator:
         :param source_length: Length of the input sequence.
         :param max_output_length: Maximum output length.
         :param states: List of model states.
-        :param models_cls_w: Custom model weights for logit computation (empty for none).
-        :param models_cls_b: Custom model biases for logit computation (empty for none).
+        :param models_output_layer_w: Custom model weights for logit computation (empty for none).
+        :param models_output_layer_b: Custom model biases for logit computation (empty for none).
         :return: (probs, attention scores, list of model states)
         """
         bucket_key = (source_length, max_output_length)
@@ -840,11 +848,12 @@ class Translator:
                 sequences = mx.nd.slice_axis(sequences, axis=1, begin=0, end=target_max_length)
 
         model_probs, model_attention_probs, model_states = [], [], []
-        for model, cls_w, cls_b, state in itertools.zip_longest(self.models, models_cls_w, models_cls_b, states):
+        for model, out_w, out_b, state in itertools.zip_longest(
+                self.models, models_output_layer_w, models_output_layer_b, states):
             decoder_outputs, attention_probs, state = model.run_decoder(sequences, bucket_key, state)
             # Compute logits and softmax with restricted vocabulary
             if self.restrict_lexicon:
-                logits = model.decoder.decode_step_logits_nd(decoder_outputs, cls_w, cls_b)
+                logits = model.decoder.decode_step_logits_nd(decoder_outputs, out_w, out_b)
                 probs = mx.nd.softmax(logits)
             else:
                 # Otherwise decoder outputs are already target vocab probs
@@ -870,7 +879,7 @@ class Translator:
 
         # combine model predictions and convert to neg log probs
         if len(self.models) == 1:
-            neg_logprobs = -mx.nd.log(probs[0])
+            neg_logprobs = -mx.nd.log(probs[0])  # pylint: disable=invalid-unary-operand-type
         else:
             neg_logprobs = self.interpolation_func(probs)
         return neg_logprobs, attention_prob_score
@@ -898,14 +907,16 @@ class Translator:
         # then the next block for the 2nd sentence and so on
 
         # sequences: (batch_size * beam_size, output_length), pre-filled with <s> symbols on index 0
-        sequences = mx.nd.full((self.batch_size * self.beam_size, max_output_length), val=C.PAD_ID, ctx=self.context, dtype='int32')
+        sequences = mx.nd.full((self.batch_size * self.beam_size, max_output_length), val=C.PAD_ID, ctx=self.context,
+                               dtype='int32')
         sequences[:, 0] = self.start_id
 
         lengths = mx.nd.ones((self.batch_size * self.beam_size, 1), ctx=self.context)
         finished = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
 
         # attentions: (batch_size * beam_size, output_length, encoded_source_length)
-        attentions = mx.nd.zeros((self.batch_size * self.beam_size, max_output_length, encoded_source_length), ctx=self.context)
+        attentions = mx.nd.zeros((self.batch_size * self.beam_size, max_output_length, encoded_source_length),
+                                 ctx=self.context)
 
         # best_hyp_indices: row indices of smallest scores (ascending).
         best_hyp_indices = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
@@ -923,8 +934,8 @@ class Translator:
 
         # If using a top-k lexicon, select param rows for logit computation that correspond to the
         # target vocab for this sentence.
-        models_cls_w = list()
-        models_cls_b = list()
+        models_output_layer_w = list()
+        models_output_layer_b = list()
         pad_dist = self.pad_dist
         vocab_slice_ids = None  # type: np.ndarray
         if self.restrict_lexicon:
@@ -933,8 +944,8 @@ class Translator:
             pad_dist = mx.nd.full((self.batch_size * self.beam_size, vocab_slice_ids.shape[0]),
                                   val=np.inf, ctx=self.context)
             for m in self.models:
-                models_cls_w.append(mx.nd.array(m.cls_w[vocab_slice_ids], ctx=self.context))
-                models_cls_b.append(mx.nd.array(m.cls_b[vocab_slice_ids], ctx=self.context))
+                models_output_layer_w.append(mx.nd.array(m.output_layer_w[vocab_slice_ids], ctx=self.context))
+                models_output_layer_b.append(mx.nd.array(m.output_layer_b[vocab_slice_ids], ctx=self.context))
 
         # (0) encode source sentence, returns a list
         model_states = self._encode(source, source_length)
@@ -950,8 +961,8 @@ class Translator:
                                                                        source_length,
                                                                        max_output_length,
                                                                        model_states,
-                                                                       models_cls_w,
-                                                                       models_cls_b)
+                                                                       models_output_layer_w,
+                                                                       models_output_layer_b)
 
             # (2) compute length-normalized accumulated scores in place
             if t == 1 and self.batch_size == 1:  # only one hypothesis at t==1
@@ -975,9 +986,9 @@ class Translator:
                 sliced_scores = scores if t == 1 and self.batch_size == 1 else scores[rows]
                 # TODO we could save some tiny amount of time here by not running smallest_k for a finished sent
                 (best_hyp_indices_np[rows], best_word_indices_np[rows]), \
-                        scores_accumulated_np[rows] = utils.smallest_k(sliced_scores, self.beam_size, t == 1)
-                best_hyp_indices_np[rows] += rows.start  # offseting since the returned smallest_k() indices
-                                                         # were slice-relative
+                    scores_accumulated_np[rows] = utils.smallest_k(sliced_scores, self.beam_size, t == 1)
+                # offsetting since the returned smallest_k() indices were slice-relative
+                best_hyp_indices_np[rows] += rows.start
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
                 best_word_indices_np[:] = vocab_slice_ids[best_word_indices_np]
@@ -994,6 +1005,7 @@ class Translator:
             attentions = mx.nd.take(attentions, best_hyp_indices)
 
             # (5) update best hypotheses, their attention lists and lengths (only for non-finished hyps)
+            # pylint: disable=unsupported-assignment-operation
             sequences[:, t] = mx.nd.expand_dims(best_word_indices, axis=1)
             attentions[:, t, :] = mx.nd.expand_dims(attention_scores, axis=1)
             lengths += mx.nd.cast(1 - mx.nd.expand_dims(finished, axis=1), dtype='float32')

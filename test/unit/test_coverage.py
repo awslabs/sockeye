@@ -57,7 +57,7 @@ def _test_activation_coverage(act_type):
     source_shape = (batch_size, source_seq_len, encoder_num_hidden)
     source_length_shape = (batch_size,)
     prev_hidden_shape = (batch_size, decoder_num_hidden)
-    attention_scores_shape = (batch_size, source_seq_len, 1)
+    attention_scores_shape = (batch_size, source_seq_len)
     prev_coverage_shape = (batch_size, source_seq_len, config_coverage.num_hidden)
     source_data = gaussian_vector(shape=source_shape)
     source_length_data = integer_vector(shape=source_length_shape, max_value=source_seq_len)

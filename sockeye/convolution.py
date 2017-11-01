@@ -168,6 +168,7 @@ class ConvolutionBlock:
         if self.config.act_type == C.GLU:
             # GLU
             # two times: (batch_size, num_hidden, seq_len)
+            # pylint: disable=unbalanced-tuple-unpacking
             gate_a, gate_b = mx.sym.split(data_conv, num_outputs=2, axis=1)
             # (batch_size, num_hidden, seq_len)
             block_output = mx.sym.broadcast_mul(gate_a,

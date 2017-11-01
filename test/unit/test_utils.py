@@ -177,14 +177,21 @@ def test_parse_version(version_string, expected_version):
 
 
 def test_check_version_disregards_minor():
-    utils.check_version("1.9.0")
+    release, major, minor = utils.parse_version(__version__)
+    other_minor_version = "%s.%s.%d" % (release, major, int(minor) + 1)
+    utils.check_version(other_minor_version)
+
+
+def _get_later_major_version():
+    release, major, minor = utils.parse_version(__version__)
+    return "%s.%d.%s" % (release, int(major) + 1, minor)
 
 
 def test_check_version_checks_major():
-    version = "1.10.1"
+    version = _get_later_major_version()
     with pytest.raises(utils.SockeyeError) as e:
         utils.check_version(version)
-    assert "Given major version (%s) does not match major code version (%s)" % (version, __version__)
+    assert "Given major version (%s) does not match major code version (%s)" % (version, __version__) == str(e.value)
 
 
 def test_average_arrays():

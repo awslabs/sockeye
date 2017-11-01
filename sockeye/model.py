@@ -173,7 +173,9 @@ class SockeyeModel:
         if self.config.weight_tying and C.WEIGHT_TYING_SRC in self.config.weight_tying_type \
                 and C.WEIGHT_TYING_TRG in self.config.weight_tying_type:
             logger.info("Tying the source and target embeddings.")
-            embed_weight = mx.sym.Variable(C.SHARED_EMBEDDING_PREFIX + "weight")
+            embed_weight = encoder.Embedding.get_embed_weight(vocab_size=self.config.vocab_source_size,
+                                                              embed_size=0,  # will get inferred
+                                                              prefix=C.SHARED_EMBEDDING_PREFIX)
         else:
             embed_weight = None
 

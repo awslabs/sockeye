@@ -14,13 +14,12 @@
 """
 Translation CLI.
 """
-import itertools
 import argparse
 import sys
 import time
 from math import ceil
 from contextlib import ExitStack
-from typing import Optional, Iterable, Tuple
+from typing import Optional, Iterable
 
 import mxnet as mx
 
@@ -71,7 +70,7 @@ def main():
             args.softmax_temperature,
             args.max_output_length_num_stds,
             decoder_return_logit_inputs=args.restrict_lexicon is not None,
-            cache_cls_w_b=args.restrict_lexicon is not None)
+            cache_output_layer_w_b=args.restrict_lexicon is not None)
         restrict_lexicon = None # type: TopKLexicon
         if args.restrict_lexicon:
             restrict_lexicon = TopKLexicon(vocab_source, vocab_target)
@@ -86,8 +85,6 @@ def main():
                                                   vocab_source,
                                                   vocab_target,
                                                   restrict_lexicon)
-
-        logger.info("Using batches of size %d", args.batch_size)
         read_and_translate(translator, output_handler, args.chunk_size, args.input)
 
 
