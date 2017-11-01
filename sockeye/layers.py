@@ -367,6 +367,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
                                          name="%sqkv_transform" % self.prefix)
         # split into query, keys and values
         # (batch, max_length, depth)
+        # pylint: disable=unbalanced-tuple-unpacking
         queries, keys, values = mx.sym.split(data=combined, num_outputs=3, axis=2)
 
         return self._attend(queries,
@@ -428,6 +429,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         # split into query, keys and values
         # (batch, memory_max_length, depth)
         # NOTE: requires depth to be equal across all 2 parts.
+        # pylint: disable=unbalanced-tuple-unpacking
         keys, values = mx.sym.split(data=combined, num_outputs=2, axis=2)
 
         # (batch, memory_max_length, depth * 2)

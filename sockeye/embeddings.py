@@ -64,6 +64,7 @@ def nearest_k(similarity_matrix: mx.nd.NDArray,
     :param gamma: Parameter to control distribution steepness.
     :return: List of indices and values of k nearest elements.
     """
+    # pylint: disable=unbalanced-tuple-unpacking
     values, indices = mx.nd.topk(mx.nd.softmax(similarity_matrix[query_word_id] / gamma), k=k, ret_typ='both')
     return zip(indices.asnumpy(), values.asnumpy())
 

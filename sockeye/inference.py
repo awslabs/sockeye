@@ -617,6 +617,7 @@ class Translator:
 
     @staticmethod
     def _linear_interpolation(predictions):
+        # pylint: disable=invalid-unary-operand-type
         return -mx.nd.log(utils.average_arrays(predictions))
 
     @staticmethod
@@ -625,6 +626,7 @@ class Translator:
         Returns averaged and re-normalized log probabilities
         """
         log_probs = utils.average_arrays([mx.nd.log(p) for p in predictions])
+        # pylint: disable=invalid-unary-operand-type
         return -mx.nd.log(mx.nd.softmax(log_probs))
 
     @staticmethod
@@ -826,7 +828,7 @@ class Translator:
 
         # combine model predictions and convert to neg log probs
         if len(self.models) == 1:
-            neg_logprobs = -mx.nd.log(probs[0])
+            neg_logprobs = -mx.nd.log(probs[0])  # pylint: disable=invalid-unary-operand-type
         else:
             neg_logprobs = self.interpolation_func(probs)
         return neg_logprobs, attention_prob_score
@@ -932,6 +934,7 @@ class Translator:
             attentions = mx.nd.take(attentions, best_hyp_indices)
 
             # (5) update best hypotheses, their attention lists and lengths (only for non-finished hyps)
+            # pylint: disable=unsupported-assignment-operation
             sequences[:, t] = mx.nd.expand_dims(best_word_indices, axis=1)
             attentions[:, t, :] = mx.nd.expand_dims(attention_scores, axis=1)
             lengths += mx.nd.cast(1 - mx.nd.expand_dims(finished, axis=1), dtype='float32')

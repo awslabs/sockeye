@@ -147,7 +147,7 @@ class CrossEntropyMetric(EvalMetric):
     def _cross_entropy(self, pred, label, ignore):
         prob = mx.nd.pick(pred, label.astype(dtype="int32"))
         prob = prob * (1 - ignore) + ignore
-        loss = -mx.nd.log(prob + 1e-8)
+        loss = -mx.nd.log(prob + 1e-8) # pylint: disable=invalid-unary-operand-type
         return loss
 
     def _cross_entropy_smoothed(self, pred, label, ignore):
@@ -157,7 +157,7 @@ class CrossEntropyMetric(EvalMetric):
                                    off_value=self.loss_config.label_smoothing /
                                              (self.loss_config.vocab_size - 1.0))
         label_dist = mx.nd.where(ignore, label_dist, mx.nd.zeros_like(label_dist))
-        loss = label_dist * (- mx.nd.log(pred + 1e-8))
+        loss = label_dist * (- mx.nd.log(pred + 1e-8)) # pylint: disable=invalid-unary-operand-type
         return loss
 
     def update(self, labels, preds):

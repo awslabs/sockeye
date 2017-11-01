@@ -397,6 +397,7 @@ class MultiHeadDotAttention(Attention):
                                               name="%ssource_hidden_fc" % self.prefix)
         # split keys and values
         # (batch, length, num_hidden)
+        # pylint: disable=unbalanced-tuple-unpacking
         keys, values = mx.sym.split(data=source_hidden, num_outputs=2, axis=2)
 
         # (batch*heads, length, num_hidden/head)
