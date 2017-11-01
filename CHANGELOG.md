@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 For each item we will potentially have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.11.0]
+### Added
+ - Lexicon-based target vocabulary restriction for faster decoding. New CLI for top-k lexicon creation, sockeye.lexicon.
+ New translate CLI argument `--restrict-lexicon`.
+
 ## [1.10.0]
 ### Changed
  - Updated MXNet dependency to 0.12 (w/ MKL support by default).
@@ -28,14 +33,14 @@ For each item we will potentially have subsections for: _Added_, _Changed_, _Rem
  by the number of valid, non-PAD tokens instead of the batch size.
  - `--weight-init-xavier-factor-type`. Added new flag to control Xavier factor type when `--weight-init=xavier`.
  - `--embed-weight-init`. Added new flag for initialization of embeddings matrices.
- 
+
 ### Removed
  - `--smoothed-cross-entropy-alpha` argument. See above.
  - `--normalize-loss` argument. See above.
 
 ## [1.9.0]
 ### Added
- - Batch decoding. New options for the translate CLI: ``--batch-size`` and ``--chunk-size``. Translator.translate()  
+ - Batch decoding. New options for the translate CLI: ``--batch-size`` and ``--chunk-size``. Translator.translate()
  now accepts and returns lists of inputs and outputs.
 
 ## [1.8.4]
@@ -44,7 +49,7 @@ For each item we will potentially have subsections for: _Added_, _Changed_, _Rem
 
 ## [1.8.3]
 ### Added
- - Optional smart rollback of parameters and optimizer states after updating the learning rate 
+ - Optional smart rollback of parameters and optimizer states after updating the learning rate
  if not improved for x checkpoints. New flags: ``--learning-rate-decay-param-reset``,
  ``--learning-rate-decay-optimizer-states-reset``
 
