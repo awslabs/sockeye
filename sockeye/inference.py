@@ -210,9 +210,11 @@ class InferenceModel(model.SockeyeModel):
             if self.softmax_temperature is not None:
                 logits /= self.softmax_temperature
 
-            softmax = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
-
-            outputs = logit_inputs if self.decoder_return_logit_inputs else softmax
+            # Return logit inputs or softmax over target vocab
+            if self.decoder_return_logit_inputs:
+                outputs = logit_inputs
+            else:
+                outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
 
             data_names = [C.TARGET_NAME] + state_names
             label_names = []  # type: List[str]
@@ -743,7 +745,7 @@ class Translator:
         bucket_key = data_io.get_bucket(max(len(tokens) for tokens in sequences), self.buckets_source)
 
         utils.check_condition(C.PAD_ID == 0, "pad id should be 0")
-        source = mx.nd.zeros((len(sequences), bucket_key), dtype="int32")
+        source = mx.nd.zeros((len(sequences), bucket_key))
         for j, tokens in enumerate(sequences):
             ids = data_io.tokens2ids(tokens, self.vocab_source)
             for i, wid in enumerate(ids):
@@ -926,7 +928,8 @@ class Translator:
         pad_dist = self.pad_dist
         vocab_slice_ids = None  # type: np.ndarray
         if self.restrict_lexicon:
-            vocab_slice_ids = self.restrict_lexicon.get_trg_ids(source.asnumpy())
+            # TODO: See note in method about migrating to pure MXNet when operations are supported.
+            vocab_slice_ids = self.restrict_lexicon.get_trg_ids(source.astype("int32").asnumpy())
             pad_dist = mx.nd.full((self.batch_size * self.beam_size, vocab_slice_ids.shape[0]),
                                   val=np.inf, ctx=self.context)
             for m in self.models:
