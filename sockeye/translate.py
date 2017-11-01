@@ -74,8 +74,6 @@ def main():
                                                                                  args.checkpoints,
                                                                                  args.softmax_temperature,
                                                                                  args.max_output_length_num_stds))
-
-        logger.info("Using batches of size %d", args.batch_size)
         read_and_translate(translator, output_handler, args.chunk_size, args.input)
 
 

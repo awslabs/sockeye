@@ -197,24 +197,28 @@ class TransformerDecoder(Decoder):
 
         # Embedding & output parameters
         if embed_weight is None:
-            embed_weight = mx.sym.Variable(C.TARGET_EMBEDDING_PREFIX + "weight")
-
+            embed_weight = encoder.Embedding.get_embed_weight(config.vocab_size,
+                                                              config.model_size,
+                                                              C.TARGET_EMBEDDING_PREFIX)
+        # Note: Transformers use model_size as embedding size
         self.embedding = encoder.Embedding(num_embed=config.model_size,
                                            vocab_size=config.vocab_size,
                                            prefix=C.TARGET_EMBEDDING_PREFIX,
-                                           dropout=config.dropout_prepost,
-                                           embed_weight=embed_weight)
+                                           dropout=config.dropout_embed,
+                                           embed_weight=embed_weight,
+                                           embed_scale=config.model_size ** 0.5)
         self.pos_embedding = encoder.get_positional_embedding(config.positional_embedding_type,
                                                               config.model_size,
                                                               max_seq_len=config.max_seq_len_target,
                                                               prefix=C.TARGET_POSITIONAL_EMBEDDING_PREFIX)
 
-        if self.config.weight_tying:
-            logger.info("Tying the target embeddings and prediction matrix.")
-            self.cls_w = embed_weight
-        else:
-            self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
-        self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
+        self.output_layer = layers.OutputLayer(num_hidden=self.config.model_size,
+                                               num_embed=self.config.model_size,
+                                               vocab_size=self.config.vocab_size,
+                                               weight_tying=self.config.weight_tying,
+                                               embed_weight=embed_weight,
+                                               weight_normalization=self.config.weight_normalization,
+                                               prefix=prefix)
 
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
@@ -240,28 +244,51 @@ class TransformerDecoder(Decoder):
         :return: Logits of next-word predictions for target sequence.
                  Shape: (batch_size * target_max_length, target_vocab_size)
         """
-        # (1, target_max_length, target_max_length)
-        target_bias = transformer.get_autoregressive_bias(target_max_length, name="%sbias" % self.prefix)
-
         # (batch_size, source_max_length, num_source_embed)
         source_encoded = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
+
+        # (batch_size, target_max_length, model_size)
+        target = self._decode(source_encoded, source_encoded_lengths, source_encoded_max_length,
+                              target, target_lengths, target_max_length)
+
+        # (batch_size * target_max_length, model_size)
+        target = mx.sym.reshape(data=target, shape=(-3, -1))
+
+        # (batch_size * target_max_length, vocab_size)
+        logits = self.output_layer(target)
+        return logits
+
+    def _decode(self,
+                source_encoded, source_encoded_lengths, source_encoded_max_length,
+                target, target_lengths, target_max_length):
+        """
+        Runs stacked decoder transformer blocks.
+
+        :param source_encoded: Batch-major encoded source: (batch_size, source_encoded_max_length, encoder_depth).
+        :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
+        :param source_encoded_max_length: Size of encoder time dimension.
+        :param target: Target sequence. Shape: (batch_size, target_max_length).
+        :param target_lengths: Lengths of target sequences. Shape: (batch_size,).
+        :param target_max_length: Size of target sequence dimension.
+        :return: Result of stacked transformer blocks.
+        """
+
+        # (1, target_max_length, target_max_length)
+        target_bias = transformer.get_autoregressive_bias(target_max_length, name="%sbias" % self.prefix)
 
         # target: (batch_size, target_max_length, model_size)
         target, target_lengths, target_max_length = self.embedding.encode(target, target_lengths, target_max_length)
         target, target_lengths, target_max_length = self.pos_embedding.encode(target, target_lengths, target_max_length)
+
+        if self.config.dropout_prepost > 0.0:
+            target = mx.sym.Dropout(data=target, p=self.config.dropout_prepost)
 
         for layer in self.layers:
             target = layer(target, target_lengths, target_max_length, target_bias,
                            source_encoded, source_encoded_lengths, source_encoded_max_length)
         target = self.final_process(data=target, prev=None, length=target_max_length)
 
-        # target: (batch_size * target_max_length, model_size)
-        target = mx.sym.reshape(data=target, shape=(-3, -1))
-
-        # logits: (batch_size * target_max_length, vocab_size)
-        logits = mx.sym.FullyConnected(data=target, num_hidden=self.config.vocab_size,
-                                       weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
-        return logits
+        return target
 
     def decode_step(self,
                     target: mx.sym.Symbol,
@@ -291,21 +318,9 @@ class TransformerDecoder(Decoder):
                                                  depth=target_max_length,
                                                  on_value=1, off_value=0), axis=2)
 
-        # (1, target_max_length, target_max_length)
-        target_bias = transformer.get_autoregressive_bias(target_max_length, name="%sbias" % self.prefix)
-
         # (batch_size, target_max_length, model_size)
-        target, target_lengths, target_max_length = self.embedding.encode(target,
-                                                                          target_lengths,
-                                                                          target_max_length)
-        target, target_lengths, target_max_length = self.pos_embedding.encode(target,
-                                                                              target_lengths,
-                                                                              target_max_length)
-
-        for layer in self.layers:
-            target = layer(target, target_lengths, target_max_length, target_bias,
-                           source_encoded, source_encoded_lengths, source_encoded_max_length)
-        target = self.final_process(data=target, prev=None, length=target_max_length)
+        target = self._decode(source_encoded, source_encoded_lengths, source_encoded_max_length,
+                              target, target_lengths, target_max_length)
 
         # set all target positions to zero except for current time-step
         # target: (batch_size, target_max_length, model_size)
@@ -314,8 +329,7 @@ class TransformerDecoder(Decoder):
         # target: (batch_size, model_size)
         target = mx.sym.sum(target, axis=1, keepdims=False)
         # logits: (batch_size, vocab_size)
-        logits = mx.sym.FullyConnected(data=target, num_hidden=self.config.vocab_size,
-                                       weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
+        logits = self.output_layer(target)
 
         # TODO(fhieber): no attention probs for now
         attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
@@ -401,6 +415,7 @@ class RecurrentDecoderConfig(Config):
     :param context_gating: Whether to use context gating.
     :param layer_normalization: Apply layer normalization.
     :param attention_in_upper_layers: Pass the attention value to all layers in the decoder.
+    :param weight_normalization: Weight normalization.
     """
 
     def __init__(self,
@@ -415,7 +430,8 @@ class RecurrentDecoderConfig(Config):
                  state_init: str = C.RNN_DEC_INIT_LAST,
                  context_gating: bool = False,
                  layer_normalization: bool = False,
-                 attention_in_upper_layers: bool = False) -> None:
+                 attention_in_upper_layers: bool = False,
+                 weight_normalization: bool = False) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.max_seq_len_source = max_seq_len_source
@@ -429,6 +445,7 @@ class RecurrentDecoderConfig(Config):
         self.context_gating = context_gating
         self.layer_normalization = layer_normalization
         self.attention_in_upper_layers = attention_in_upper_layers
+        self.weight_normalization = weight_normalization
 
 
 class RecurrentDecoder(Decoder):
@@ -493,20 +510,22 @@ class RecurrentDecoder(Decoder):
 
         # Embedding & output parameters
         if embed_weight is None:
-            embed_weight = mx.sym.Variable(C.TARGET_EMBEDDING_PREFIX + "weight")
+            embed_weight = encoder.Embedding.get_embed_weight(self.config.vocab_size,
+                                                              self.config.num_embed,
+                                                              C.TARGET_EMBEDDING_PREFIX)
         self.embedding = encoder.Embedding(self.config.num_embed,
                                            self.config.vocab_size,
                                            prefix=C.TARGET_EMBEDDING_PREFIX,
                                            dropout=config.embed_dropout,
                                            embed_weight=embed_weight)
-        if self.config.weight_tying:
-            check_condition(self.num_hidden == self.config.num_embed,
-                            "Weight tying requires target embedding size and rnn_num_hidden to be equal")
-            logger.info("Tying the target embeddings and prediction matrix.")
-            self.cls_w = embed_weight
-        else:
-            self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
-        self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
+
+        self.output_layer = layers.OutputLayer(num_hidden=self.num_hidden,
+                                               num_embed=self.config.num_embed,
+                                               vocab_size=self.config.vocab_size,
+                                               weight_tying=self.config.weight_tying,
+                                               embed_weight=embed_weight,
+                                               weight_normalization=self.config.weight_normalization,
+                                               prefix=prefix)
 
     def _create_state_init_parameters(self):
         """
@@ -597,8 +616,7 @@ class RecurrentDecoder(Decoder):
         hidden_concat = mx.sym.reshape(data=hidden_concat, shape=(-1, self.num_hidden))
 
         # logits: (batch_size * target_seq_len, target_vocab_size)
-        logits = mx.sym.FullyConnected(data=hidden_concat, num_hidden=self.config.vocab_size,
-                                       weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
+        logits = self.output_layer(hidden_concat)
 
         if source_lexicon is not None:
             # lexical_biases_concat: (batch_size, target_seq_len, target_vocab_size)
@@ -638,7 +656,8 @@ class RecurrentDecoder(Decoder):
         attention_func = self.attention.on(source_encoded, source_encoded_length, source_encoded_max_length)
 
         prev_state = RecurrentDecoderState(prev_hidden, list(layer_states))
-        prev_attention_state = rnn_attention.AttentionState(context=None, probs=None, dynamic_source=prev_dynamic_source)
+        prev_attention_state = rnn_attention.AttentionState(context=None, probs=None,
+                                                            dynamic_source=prev_dynamic_source)
 
         # state.hidden: (batch_size, rnn_num_hidden)
         # attention_state.dynamic_source: (batch_size, source_seq_len, coverage_num_hidden)
@@ -649,8 +668,7 @@ class RecurrentDecoder(Decoder):
                                             prev_attention_state)
 
         # logits: (batch_size, target_vocab_size)
-        logits = mx.sym.FullyConnected(data=state.hidden, num_hidden=self.config.vocab_size,
-                                       weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
+        logits = self.output_layer(state.hidden)
 
         new_states = [source_encoded,
                       attention_state.dynamic_source,
@@ -989,7 +1007,9 @@ class ConvolutionalDecoder(Decoder):
                               "as we have in the encoder")
 
         if embed_weight is None:
-            embed_weight = mx.sym.Variable(C.TARGET_EMBEDDING_PREFIX + "weight")
+            embed_weight = encoder.Embedding.get_embed_weight(self.config.vocab_size,
+                                                              self.config.num_embed,
+                                                              C.TARGET_EMBEDDING_PREFIX)
 
         self.embedding = encoder.Embedding(self.config.num_embed,
                                            self.config.vocab_size,
@@ -1008,26 +1028,13 @@ class ConvolutionalDecoder(Decoder):
 
         self.i2h_weight = mx.sym.Variable('%si2h_weight' % prefix)
 
-        if self.config.weight_tying:
-            check_condition(self.config.cnn_config.num_hidden == self.config.num_embed,
-                            "Weight tying requires target embedding size and decoder hidden size to be equal")
-
-            logger.info("Tying the target embeddings and prediction matrix.")
-            self.cls_w = embed_weight
-        else:
-            if self.config.weight_normalization:
-                self.cls_w = mx.sym.Variable("%scls_weight" % prefix, shape=(self.config.vocab_size,
-                                                                             self.config.cnn_config.num_hidden))
-                self.weight_norm = layers.WeightNormalization(self.cls_w,
-                                                              num_hidden=self.config.vocab_size,
-                                                              ndim=2,
-                                                              prefix="%scls_" % prefix)
-                self.cls_w = self.weight_norm()
-
-            else:
-                self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
-                self.weight_norm = None
-        self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
+        self.output_layer = layers.OutputLayer(num_hidden=self.config.cnn_config.num_hidden,
+                                               num_embed=self.config.num_embed,
+                                               vocab_size=self.config.vocab_size,
+                                               weight_tying=self.config.weight_tying,
+                                               embed_weight=embed_weight,
+                                               weight_normalization=self.config.weight_normalization,
+                                               prefix=prefix)
 
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
@@ -1068,9 +1075,7 @@ class ConvolutionalDecoder(Decoder):
         # (batch_size * target_seq_len, num_hidden)
         target_hidden = mx.sym.reshape(data=target_hidden, shape=(-3, 0))
         # (batch_size * target_seq_len, target_vocab_size)
-        logits = mx.sym.FullyConnected(data=target_hidden, num_hidden=self.config.vocab_size,
-                                       weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
-
+        logits = self.output_layer(target_hidden)
         return logits
 
     def _decode(self,
@@ -1095,14 +1100,12 @@ class ConvolutionalDecoder(Decoder):
         target_embed, target_lengths, target_max_length = self.pos_embedding.encode(target_embed,
                                                                                     target_lengths,
                                                                                     target_max_length)
-
-        target_hidden = mx.sym.reshape(target_embed, shape=(-3, -1))
-        target_hidden = mx.sym.FullyConnected(data=target_hidden,
+        # target_hidden: (batch_size, target_seq_len, num_hidden)
+        target_hidden = mx.sym.FullyConnected(data=target_embed,
                                               num_hidden=self.config.cnn_config.num_hidden,
                                               no_bias=True,
+                                              flatten=False,
                                               weight=self.i2h_weight)
-        # re-arrange outcoming layer to the dimensions of the output
-        target_hidden = mx.sym.reshape(target_hidden, shape=(-1, target_max_length, self.config.cnn_config.num_hidden))
         target_hidden_prev = target_hidden
 
         drop_prob = self.config.hidden_dropout
@@ -1216,8 +1219,7 @@ class ConvolutionalDecoder(Decoder):
                                          shape=(0, -1))
 
         # (batch_size, vocab_size)
-        logits = mx.sym.FullyConnected(data=target_hidden, num_hidden=self.config.vocab_size,
-                                       weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
+        logits = self.output_layer(target_hidden)
         return logits, attention_probs, [source_encoded, source_encoded_lengths] + new_layer_states
 
     def reset(self):

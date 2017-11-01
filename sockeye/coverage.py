@@ -88,7 +88,7 @@ class Coverage:
                             prev_coverage: mx.sym.Symbol):
             """
             :param prev_hidden: Previous hidden decoder state. Shape: (batch_size, decoder_num_hidden).
-            :param attention_prob_scores: Current attention scores. Shape: (batch_size, source_seq_len, 1).
+            :param attention_prob_scores: Current attention scores. Shape: (batch_size, source_seq_len).
             :param prev_coverage: Shape: (batch_size, source_seq_len, coverage_num_hidden).
             :return: Updated coverage matrix . Shape: (batch_size, source_seq_len, coverage_num_hidden).
             """
@@ -120,7 +120,7 @@ class CountCoverage(Coverage):
                             prev_coverage: mx.sym.Symbol):
             """
             :param prev_hidden: Previous hidden decoder state. Shape: (batch_size, decoder_num_hidden).
-            :param attention_prob_scores: Current attention scores. Shape: (batch_size, source_seq_len, 1).
+            :param attention_prob_scores: Current attention scores. Shape: (batch_size, source_seq_len).
             :param prev_coverage: Shape: (batch_size, source_seq_len, coverage_num_hidden).
             :return: Updated coverage matrix . Shape: (batch_size, source_seq_len, coverage_num_hidden).
             """
@@ -164,7 +164,7 @@ class GRUCoverage(Coverage):
                             prev_coverage: mx.sym.Symbol):
             """
             :param prev_hidden: Previous hidden decoder state. Shape: (batch_size, decoder_num_hidden).
-            :param attention_prob_scores: Current attention scores. Shape: (batch_size, source_seq_len, 1).
+            :param attention_prob_scores: Current attention scores. Shape: (batch_size, source_seq_len).
             :param prev_coverage: Shape: (batch_size, source_seq_len, coverage_num_hidden).
             :return: Updated coverage matrix . Shape: (batch_size, source_seq_len, coverage_num_hidden).
             """
@@ -240,60 +240,42 @@ class ActivationCoverage(Coverage):
         :return: Coverage callable.
         """
 
-        # (batch_size * seq_len, coverage_hidden_num)
-        source_hidden = mx.sym.FullyConnected(data=mx.sym.reshape(data=source,
-                                                                  shape=(-3, -1),
-                                                                  name="%sflat_source" % self.prefix),
+        # (batch_size, seq_len, coverage_hidden_num)
+        source_hidden = mx.sym.FullyConnected(data=source,
                                               weight=self.cov_e2h_weight,
                                               no_bias=True,
                                               num_hidden=self.num_hidden,
+                                              flatten=False,
                                               name="%ssource_hidden_fc" % self.prefix)
-
-        # (batch_size, seq_len, coverage_hidden_num)
-        source_hidden = mx.sym.reshape(source_hidden,
-                                       shape=(-1, source_seq_len, self.num_hidden),
-                                       name="%ssource_hidden" % self.prefix)
 
         def update_coverage(prev_hidden: mx.sym.Symbol,
                             attention_prob_scores: mx.sym.Symbol,
                             prev_coverage: mx.sym.Symbol):
             """
             :param prev_hidden: Previous hidden decoder state. Shape: (batch_size, decoder_num_hidden).
-            :param attention_prob_scores: Current attention scores. Shape: (batch_size, source_seq_len, 1).
+            :param attention_prob_scores: Current attention scores. Shape: (batch_size, source_seq_len).
             :param prev_coverage: Shape: (batch_size, source_seq_len, coverage_num_hidden).
             :return: Updated coverage matrix . Shape: (batch_size, source_seq_len, coverage_num_hidden).
             """
 
-            # (batch_size * seq_len, coverage_hidden_num)
-            coverage_hidden = mx.sym.FullyConnected(data=mx.sym.reshape(data=prev_coverage,
-                                                                        shape=(-3, -1),
-                                                                        name="%sflat_previous" % self.prefix),
+            # (batch_size, seq_len, coverage_hidden_num)
+            coverage_hidden = mx.sym.FullyConnected(data=prev_coverage,
                                                     weight=self.cov_prev2h_weight,
                                                     no_bias=True,
                                                     num_hidden=self.num_hidden,
+                                                    flatten=False,
                                                     name="%sprevious_hidden_fc" % self.prefix)
 
-            # (batch_size, source_seq_len, coverage_hidden_num)
-            coverage_hidden = mx.sym.reshape(coverage_hidden,
-                                             shape=(-1, source_seq_len, self.num_hidden),
-                                             name="%sprevious_hidden" % self.prefix)
-
             # (batch_size, source_seq_len, 1)
-            attention_prob_score = mx.sym.expand_dims(attention_prob_scores, axis=2)
+            attention_prob_scores = mx.sym.expand_dims(attention_prob_scores, axis=2)
 
-            # (batch_size * source_seq_len, coverage_num_hidden)
-            attention_hidden = mx.sym.FullyConnected(data=mx.sym.reshape(attention_prob_score,
-                                                                         shape=(-3, 0),
-                                                                         name="%sreshape_att_probs" % self.prefix),
+            # (batch_size, source_seq_len, coverage_num_hidden)
+            attention_hidden = mx.sym.FullyConnected(data=attention_prob_scores,
                                                      weight=self.cov_a2h_weight,
                                                      no_bias=True,
                                                      num_hidden=self.num_hidden,
+                                                     flatten=False,
                                                      name="%sattention_fc" % self.prefix)
-
-            # (batch_size, source_seq_len, coverage_num_hidden)
-            attention_hidden = mx.sym.reshape(attention_hidden,
-                                              shape=(-1, source_seq_len, self.num_hidden),
-                                              name="%sreshape_att" % self.prefix)
 
             # (batch_size, coverage_num_hidden)
             prev_hidden = mx.sym.FullyConnected(data=prev_hidden, weight=self.cov_dec2h_weight, no_bias=True,

@@ -474,8 +474,8 @@ def add_model_parameters(params):
                                                                                                 C.LNGLSTM_TYPE))
 
     model_params.add_argument('--weight-normalization', action="store_true",
-                              help="Adds weight normalization to all convolutional weight matrices and the "
-                                   "transformation matrix to the output vocab in the convolutional decoder.")
+                              help="Adds weight normalization to decoder output layers "
+                                   "(and all convolutional weight matrices for CNN decoders). Default: %(default)s.")
 
 
 def add_training_args(params):
@@ -506,17 +506,17 @@ def add_training_args(params):
 
     train_params.add_argument('--loss',
                               default=C.CROSS_ENTROPY,
-                              choices=[C.CROSS_ENTROPY, C.SMOOTHED_CROSS_ENTROPY],
+                              choices=[C.CROSS_ENTROPY],
                               help='Loss to optimize. Default: %(default)s.')
-    train_params.add_argument('--smoothed-cross-entropy-alpha',
-                              default=0.3,
+    train_params.add_argument('--label-smoothing',
+                              default=0.0,
                               type=float,
-                              help='Smoothing value for smoothed-cross-entropy loss. Default: %(default)s.')
-    train_params.add_argument('--normalize-loss',
-                              default=False,
-                              action="store_true",
-                              help='If turned on we normalize the loss by dividing by the number of non-PAD tokens.'
-                                   'If turned off the loss is only normalized by the number of sentences in a batch.')
+                              help='Smoothing constant for label smoothing. Default: %(default)s.')
+    train_params.add_argument('--loss-normalization-type',
+                              default=C.LOSS_NORM_VALID,
+                              choices=[C.LOSS_NORM_VALID, C.LOSS_NORM_BATCH],
+                              help='How to normalize the loss. By default we normalize by the number '
+                                   'of valid/non-PAD tokens (%s)' % C.LOSS_NORM_VALID)
 
     train_params.add_argument('--metrics',
                               nargs='+',
@@ -618,12 +618,23 @@ def add_training_args(params):
                               type=str,
                               default=C.INIT_XAVIER,
                               choices=C.INIT_TYPES,
-                              help='Type of weight initialization. Default: %(default)s.')
+                              help='Type of base weight initialization. Default: %(default)s.')
     train_params.add_argument('--weight-init-scale',
                               type=float,
-                              default=0.04,
-                              help='Weight initialization scale (currently only applies to uniform initialization). '
+                              default=2.34,
+                              help='Weight initialization scale. Applies to uniform (scale) and xavier (magnitude). '
                                    'Default: %(default)s.')
+    train_params.add_argument('--weight-init-xavier-factor-type',
+                              type=str,
+                              default='in',
+                              choices=['in', 'out', 'avg'],
+                              help='Xavier factor type. Default: %(default)s.')
+    train_params.add_argument('--embed-weight-init',
+                              type=str,
+                              default=C.EMBED_INIT_DEFAULT,
+                              choices=C.EMBED_INIT_TYPES,
+                              help='Type of embedding matrix weight initialization. If normal, initializes embedding '
+                                   'weights using a normal distribution with std=vocab_size. Default: %(default)s.')
     train_params.add_argument('--initial-learning-rate',
                               type=float,
                               default=0.0003,
@@ -757,8 +768,8 @@ def add_inference_args(params):
     decode_params.add_argument('--batch-size',
                                type=int_greater_or_equal(1),
                                default=1,
-                               help='Batch size during decoding. Determines how many sentences are translated simultaneously.'
-                                    'Default: %(default)s.')
+                               help='Batch size during decoding. Determines how many sentences are translated '
+                                    'simultaneously. Default: %(default)s.')
     decode_params.add_argument('--chunk-size',
                                type=int_greater_or_equal(1),
                                default=1,

@@ -33,11 +33,11 @@ ENCODER_DECODER_SETTINGS = [
      " --rnn-residual-connections"
      " --num-embed 16 --rnn-attention-type coverage --rnn-attention-num-hidden 16 --weight-tying "
      "--rnn-attention-use-prev-word --rnn-context-gating --layer-normalization --batch-size 8 "
-     "--loss smoothed-cross-entropy --smoothed-cross-entropy-alpha 0.1 --normalize-loss --optimized-metric perplexity"
+     "--loss cross-entropy --label-smoothing 0.1 --loss-normalization-type batch --optimized-metric perplexity"
      " --max-updates 10 --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01"
      " --rnn-dropout-inputs 0.5:0.1 --rnn-dropout-states 0.5:0.1 --embed-dropout 0.1 --rnn-decoder-hidden-dropout 0.01"
      " --rnn-decoder-state-init avg --rnn-encoder-reverse-input --rnn-dropout-recurrent 0.1:0.0"
-     " --learning-rate-decay-param-reset",
+     " --learning-rate-decay-param-reset --weight-normalization",
      "--beam-size 2"),
     # Convolutional embedding encoder + LSTM encoder-decoder with attention
     ("--encoder rnn-with-conv-embed --conv-embed-max-filter-width 3 --conv-embed-num-filters 4:4:8"
@@ -51,7 +51,8 @@ ENCODER_DECODER_SETTINGS = [
      " --transformer-attention-heads 2 --transformer-model-size 16"
      " --transformer-feed-forward-num-hidden 32"
      " --rnn-attention-type mhdot --rnn-attention-mhdot-heads 4 --rnn-attention-num-hidden 16 --batch-size 8 "
-     " --max-updates 10 --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
+     " --max-updates 10 --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01"
+     " --weight-init-xavier-factor-type avg --weight-init-scale 3.0 --embed-weight-init normal",
      "--beam-size 2"),
     # LSTM encoder, Transformer decoder
     ("--encoder rnn --num-layers 2:2 --rnn-cell-type lstm --rnn-num-hidden 16 --num-embed 8"
