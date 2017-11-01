@@ -634,7 +634,7 @@ def add_training_args(params):
                               default=C.EMBED_INIT_DEFAULT,
                               choices=C.EMBED_INIT_TYPES,
                               help='Type of embedding matrix weight initialization. If normal, initializes embedding '
-                                   'weights using a normal distirbution with std=vocab_size. Default: %(default)s.')
+                                   'weights using a normal distribution with std=vocab_size. Default: %(default)s.')
     train_params.add_argument('--initial-learning-rate',
                               type=float,
                               default=0.0003,
