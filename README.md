@@ -50,19 +50,13 @@ remaining instructions to work you will need to use `python3` instead of `python
 
 If you want to run sockeye on a GPU you need to make sure your version of Apache MXNet Incubating contains the GPU
 bindings.
-Depending on your version of CUDA you can do this by running the following for CUDA 8.0:
-
+Depending on your version of CUDA, you can do this by running the following:
 ```bash
-> wget https://raw.githubusercontent.com/awslabs/sockeye/master/requirements.gpu-cu80.txt
-> pip install sockeye --no-deps -r requirements.gpu-cu80.txt
-> rm requirements.gpu-cu80.txt
+> wget https://raw.githubusercontent.com/awslabs/sockeye/master/requirements.gpu-cu${CUDA_VERSION}.txt
+> pip install sockeye --no-deps -r requirements.gpu-cu${CUDA_VERSION}.txt
+> rm requirements.gpu-cu${CUDA_VERSION}.txt
 ```
-or the following for CUDA 7.5:
-```bash
-> wget https://raw.githubusercontent.com/awslabs/sockeye/master/requirements.gpu-cu75.txt
-> pip install sockeye --no-deps -r requirements.gpu-cu75.txt
-> rm requirements.gpu-cu75.txt
-```
+where `${CUDA_VERSION}` can be `75`, `80`, or `90`.
 
 ### Or: From Source
 
@@ -78,15 +72,12 @@ after cloning the repository from git.
 
 If you want to run sockeye on a GPU you need to make sure your version of Apache MXNet
 Incubating contains the GPU bindings. Depending on your version of CUDA you can do this by
-running the following for CUDA 8.0:
+running the following:
 
 ```bash
-> python setup.py install -r requirements.gpu-cu80.txt
+> python setup.py install -r requirements.gpu-cu${CUDA_VERSION}.txt
 ```
-or the following for CUDA 7.5:
-```bash
-> python setup.py install -r requirements.gpu-cu75.txt
-```
+where `${CUDA_VERSION}` can be `75`, `80`, or `90`.
 
 ### Optional dependencies
 In order to track learning curves during training you can optionally install dmlc's tensorboard fork
