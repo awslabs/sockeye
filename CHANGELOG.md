@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 For each item we will potentially have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.10.1]
+### Changed
+ - Reduced memory footprint when creating data iterators: integer sequences
+ are streamed from disk when being assigned to buckets.
+
 ## [1.10.0]
 ### Changed
  - Updated MXNet dependency to 0.12 (w/ MKL support by default).
