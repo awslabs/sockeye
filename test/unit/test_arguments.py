@@ -24,19 +24,19 @@ import sockeye.constants as C
     ('--source test_src --target test_tgt '
      '--validation-source test_validation_src --validation-target test_validation_tgt '
      '--output test_output',
-     dict(source='test_src', target='test_tgt',
+     dict(source='test_src', target='test_tgt', limit=None,
           validation_source='test_validation_src', validation_target='test_validation_tgt',
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, use_tensorboard=False, quiet=False,
           monitor_pattern=None, monitor_stat_func='mx_default')),
 
     # all parameters
-    ('--source test_src --target test_tgt '
+    ('--source test_src --target test_tgt --limit 10 '
      '--validation-source test_validation_src --validation-target test_validation_tgt '
      '--output test_output '
      '--source-vocab test_src_vocab --target-vocab test_tgt_vocab '
      '--use-tensorboard --overwrite-output --quiet',
-     dict(source='test_src', target='test_tgt',
+     dict(source='test_src', target='test_tgt', limit=10,
           validation_source='test_validation_src', validation_target='test_validation_tgt',
           output='test_output', overwrite_output=True,
           source_vocab='test_src_vocab', target_vocab='test_tgt_vocab', use_tensorboard=True, quiet=True,
@@ -46,7 +46,7 @@ import sockeye.constants as C
     ('-s test_src -t test_tgt '
      '-vs test_validation_src -vt test_validation_tgt '
      '-o test_output -q',
-     dict(source='test_src', target='test_tgt',
+     dict(source='test_src', target='test_tgt', limit=None,
           validation_source='test_validation_src', validation_target='test_validation_tgt',
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, use_tensorboard=False, quiet=True,

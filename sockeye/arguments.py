@@ -173,6 +173,10 @@ def add_io_args(params):
     data_params.add_argument('--target', '-t',
                              required=True,
                              help='Target side of parallel training data.')
+    data_params.add_argument('--limit',
+                             default=None,
+                             type=int,
+                             help="Maximum number of training sequences to read. Default: %(default)s.")
 
     data_params.add_argument('--validation-source', '-vs',
                              required=True,
