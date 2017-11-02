@@ -100,7 +100,8 @@ def get_bucket(seq_len: int, buckets: List[int]) -> Optional[int]:
     return buckets[bucket_idx]
 
 
-def length_statistics(source_sentences: Iterable[List[Any]], target_sentences: Iterable[List[int]]) -> Tuple[float, float]:
+def length_statistics(source_sentences: Iterable[List[Any]],
+                      target_sentences: Iterable[List[Any]]) -> Tuple[float, float]:
     """
     Returns mean and standard deviation of target-to-source length ratios of parallel corpus.
 
@@ -158,6 +159,8 @@ def get_training_data_iters(source: str, target: str,
 
     # reads the id-coded sentences from disk once
     lr_mean, lr_std = length_statistics(train_source_sentences, train_target_sentences)
+    check_condition(train_source_sentences.is_done() and train_target_sentences.is_done(),
+                    "Different number of lines in source and target data.")
     logger.info("%d source sentences in '%s'", train_source_sentences.count, source)
     logger.info("%d target sentences in '%s'", train_target_sentences.count, target)
     logger.info("Mean training target/source length ratio: %.2f (+-%.2f)", lr_mean, lr_std)
@@ -196,6 +199,11 @@ def get_training_data_iters(source: str, target: str,
                                           vocab_target[C.UNK_SYMBOL],
                                           bucket_batch_sizes=train_iter.bucket_batch_sizes,
                                           fill_up=fill_up)
+
+    check_condition(val_source_sentences.is_done() and val_target_sentences.is_done(),
+                    "Different number of lines in source and target validation data.")
+    logger.info("%d validation source sentences in '%s'", val_source_sentences.count, source)
+    logger.info("%d validation target sentences in '%s'", val_target_sentences.count, target)
 
     config_data = DataConfig(source, target,
                              validation_source, validation_target,
@@ -316,24 +324,38 @@ class SentenceReader(Iterator):
         self._iter = None  # type: Optional[Iterator]
         self._iterated_once = False
         self.count = 0
+        self._next = None
 
     def __iter__(self):
+        assert self._next is None, "Can not iterate multiple times simultaneously."
         self._iter = read_content(self.path, self.limit)
+        self._next = next(self._iter, None)
         return self
 
     def __next__(self):
-        for sentence_tokens in self._iter:
-            sentence = tokens2ids(sentence_tokens, self.vocab)
-            check_condition(bool(sentence), "Empty sentence in file %s" % self.path)
-            if self.add_bos:
-                sentence.insert(0, self.vocab[C.BOS_SYMBOL])
-            if not self._iterated_once:
-                self.count += 1
-            return sentence
-        self._iter = None
+        if self._next is None:
+            raise StopIteration
+
+        sentence_tokens = self._next
+        sentence = tokens2ids(sentence_tokens, self.vocab)
+        check_condition(bool(sentence), "Empty sentence in file %s" % self.path)
+        if self.add_bos:
+            sentence.insert(0, self.vocab[C.BOS_SYMBOL])
+
         if not self._iterated_once:
-            self._iterated_once = True
-        raise StopIteration
+            self.count += 1
+
+        # fetch next element
+        self._next = next(self._iter, None)
+        if self._next is None:
+            self._iter = None
+            if not self._iterated_once:
+                self._iterated_once = True
+
+        return sentence
+
+    def is_done(self):
+        return self._iterated_once and self._next is None
 
 
 def get_default_bucket_key(buckets: List[Tuple[int, int]]) -> Tuple[int, int]:
