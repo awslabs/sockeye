@@ -170,7 +170,7 @@ class TrainingModel(model.SockeyeModel):
             max_params_files_to_keep: int,
             metrics: List[AnyStr],
             initializer: mx.initializer.Initializer,
-            max_updates: int,
+            max_updates: Optional[int],
             checkpoint_frequency: int,
             optimizer: str,
             optimizer_params: dict,
@@ -178,6 +178,7 @@ class TrainingModel(model.SockeyeModel):
             kvstore: str = C.KVSTORE_DEVICE,
             max_num_not_improved: int = 3,
             min_num_epochs: Optional[int] = None,
+            max_num_epochs: Optional[int] = None,
             monitor_bleu: int = 0,
             use_tensorboard: bool = False,
             mxmonitor_pattern: Optional[str] = None,
@@ -194,7 +195,7 @@ class TrainingModel(model.SockeyeModel):
         :param max_params_files_to_keep: Maximum number of params files to keep in the output folder (last n are kept).
         :param metrics: The metrics that will be evaluated during training.
         :param initializer: The parameter initializer.
-        :param max_updates: Maximum number of batches to process.
+        :param max_updates: Optional maximum number of batches to process.
         :param checkpoint_frequency: Frequency of checkpointing in number of updates.
         :param optimizer: The MXNet optimizer that will update the parameters.
         :param optimizer_params: The parameters for the optimizer.
@@ -202,7 +203,8 @@ class TrainingModel(model.SockeyeModel):
         :param kvstore: The MXNet kvstore used.
         :param max_num_not_improved: Stop training if the optimized_metric does not improve for this many checkpoints,
                -1: do not use early stopping.
-        :param min_num_epochs: Minimum number of epochs to train, even if validation scores did not improve.
+        :param min_num_epochs: Optional minimum number of epochs to train, even if validation scores did not improve.
+        :param max_num_epochs: Optional maximum number of epochs to train.
         :param monitor_bleu: Monitor BLEU during training (0: off, >=0: the number of sentences to decode for BLEU
                evaluation, -1: decode the full validation set.).
         :param use_tensorboard: If True write tensorboard compatible logs for monitoring training and
@@ -262,6 +264,7 @@ class TrainingModel(model.SockeyeModel):
                   checkpoint_frequency=checkpoint_frequency,
                   max_num_not_improved=max_num_not_improved,
                   min_num_epochs=min_num_epochs,
+                  max_num_epochs=max_num_epochs,
                   mxmonitor=monitor,
                   lr_decay_param_reset=lr_decay_param_reset,
                   lr_decay_opt_states_reset=lr_decay_opt_states_reset)
@@ -291,10 +294,11 @@ class TrainingModel(model.SockeyeModel):
              kvstore: str,
              max_params_files_to_keep: int,
              metrics: List[AnyStr],
-             max_updates: int,
+             max_updates: Optional[int],
              checkpoint_frequency: int,
              max_num_not_improved: int,
              min_num_epochs: Optional[int] = None,
+             max_num_epochs: Optional[int] = None,
              mxmonitor: Optional[mx.monitor.Monitor] = None,
              lr_decay_param_reset: bool = False,
              lr_decay_opt_states_reset: str = C.LR_DECAY_OPT_STATES_RESET_OFF):
@@ -307,11 +311,12 @@ class TrainingModel(model.SockeyeModel):
         :param kvstore: The MXNet kvstore.
         :param max_params_files_to_keep: Maximum number of params files to keep in the output folder (last n are kept).
         :param metrics: List of metric names to track on training and validation data.
-        :param max_updates: Maximum number of batches to process.
+        :param max_updates: Optional maximum number of batches to process.
         :param checkpoint_frequency: Frequency of checkpointing.
         :param max_num_not_improved: Maximum number of checkpoints until fitting is stopped if model does not improve,
                -1 for no early stopping.
-        :param min_num_epochs: Minimum number of epochs to train, even if validation scores did not improve.
+        :param min_num_epochs: Optional minimum number of epochs to train, even if validation scores did not improve.
+        :param max_num_epochs: Optional maximum number of epochs to train.
         :param mxmonitor: Optional MXNet monitor instance.
         :param lr_decay_param_reset: Reset parameters to previous best after learning rate decay.
         :param lr_decay_opt_states_reset: How to reset optimizer states after learning rate decay.
@@ -350,10 +355,15 @@ class TrainingModel(model.SockeyeModel):
 
         next_data_batch = train_iter.next()
 
-        while max_updates == -1 or train_state.updates < max_updates:
+        while True:
             if not train_iter.iter_next():
                 train_state.epoch += 1
                 train_iter.reset()
+
+            if (max_updates is not None and train_state.updates == max_updates) or \
+                    (max_num_epochs is not None and train_state.epoch == max_num_epochs):
+                logger.info("Maximum # of updates (%s) or epochs (%s) reached.", max_updates, max_num_epochs)
+                break
 
             # process batch
             batch = next_data_batch
@@ -471,17 +481,18 @@ class TrainingModel(model.SockeyeModel):
                         stop_fit = False
 
                     if stop_fit:
-                        logger.info("Stopping fit")
-                        self.training_monitor.stop_fit_callback()
-                        final_training_state_dirname = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
-                        if os.path.exists(final_training_state_dirname):
-                            shutil.rmtree(final_training_state_dirname)
                         break
 
                 self._checkpoint(train_state, output_folder, train_iter)
 
         cleanup_params_files(output_folder, max_params_files_to_keep,
                              train_state.checkpoint, self.training_monitor.get_best_checkpoint())
+
+        logger.info('Training stopped')
+        self.training_monitor.stop_fit_callback()
+        final_training_state_dirname = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
+        if os.path.exists(final_training_state_dirname):
+            shutil.rmtree(final_training_state_dirname)
 
         if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
             best_opt_states_fname = os.path.join(output_folder, C.OPT_STATES_BEST)

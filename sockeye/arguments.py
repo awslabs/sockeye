@@ -535,9 +535,8 @@ def add_training_args(params):
 
     train_params.add_argument('--max-updates',
                               type=int,
-                              default=-1,
-                              help='Maximum number of updates/batches to process. -1 for infinite. '
-                                   'Default: %(default)s.')
+                              default=None,
+                              help='Maximum number of updates/batches to process. Default: %(default)s.')
     train_params.add_argument('--checkpoint-frequency',
                               type=int_greater_or_equal(1),
                               default=1000,
@@ -550,8 +549,13 @@ def add_training_args(params):
                                    'Default: %(default)s')
     train_params.add_argument('--min-num-epochs',
                               type=int,
-                              default=0,
+                              default=None,
                               help='Minimum number of epochs (passes through the training data) '
+                                   'before fitting is stopped. Default: %(default)s.')
+    train_params.add_argument('--max-num-epochs',
+                              type=int,
+                              default=None,
+                              help='Maximum number of epochs (passes through the training data) '
                                    'before fitting is stopped. Default: %(default)s.')
 
     train_params.add_argument('--embed-dropout',
