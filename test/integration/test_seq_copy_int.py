@@ -77,6 +77,7 @@ ENCODER_DECODER_SETTINGS = [
      " --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 2")]
 
+
 @pytest.mark.parametrize("train_params, translate_params", ENCODER_DECODER_SETTINGS)
 def test_seq_copy(train_params, translate_params):
     """Task: copy short sequences of digits"""

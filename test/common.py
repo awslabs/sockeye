@@ -111,7 +111,7 @@ _EVAL_PARAMS_COMMON = "--hypotheses {hypotheses} --references {references}"
 
 def run_train_translate(train_params: str,
                         translate_params: str,
-                        translate_params_equiv: str,
+                        translate_params_equiv: Optional[str],
                         train_source_path: str,
                         train_target_path: str,
                         dev_source_path: str,
@@ -172,7 +172,7 @@ def run_train_translate(train_params: str,
                 lines = f.readlines()
             with open(out_path_equiv, 'rt') as f:
                 lines_equiv = f.readlines()
-            assert all(a == b for a,b in zip(lines, lines_equiv))
+            assert all(a == b for a, b in zip(lines, lines_equiv))
 
         # test averaging
         points = sockeye.average.find_checkpoints(model_path=model_path,

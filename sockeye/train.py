@@ -643,11 +643,16 @@ def main():
         max_updates = args.max_updates
         max_num_checkpoint_not_improved = args.max_num_checkpoint_not_improved
         min_num_epochs = args.min_num_epochs
+        max_num_epochs = args.max_num_epochs
+        if min_num_epochs is not None and max_num_epochs is not None:
+            check_condition(min_num_epochs <= max_num_epochs,
+                            "Minimum number of epochs must be smaller than maximum number of epochs")
         # Fixed training schedule always runs for a set number of updates
         if args.learning_rate_schedule:
             max_updates = sum(num_updates for (_, num_updates) in args.learning_rate_schedule)
             max_num_checkpoint_not_improved = -1
-            min_num_epochs = 0
+            min_num_epochs = None
+            max_num_epochs = None
 
         monitor_bleu = args.monitor_bleu
         # Turn on BLEU monitoring when the optimized metric is BLEU and it hasn't been enabled yet
@@ -669,6 +674,7 @@ def main():
                            kvstore=kvstore,
                            max_num_not_improved=max_num_checkpoint_not_improved,
                            min_num_epochs=min_num_epochs,
+                           max_num_epochs=max_num_epochs,
                            monitor_bleu=monitor_bleu,
                            use_tensorboard=args.use_tensorboard,
                            mxmonitor_pattern=args.monitor_pattern,
