@@ -95,6 +95,9 @@ def check_arg_compatibility(args: argparse.Namespace):
     check_condition(args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics,
                     "Must optimize either BLEU or one of tracked metrics (--metrics)")
 
+    check_condition(all(os.path.isfile(f) for f in [args.source, args.target, args.validation_source, args.validation_target]),
+                    "All training and validation inputs must be regular files")
+
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> Tuple[bool, str]:
     """
