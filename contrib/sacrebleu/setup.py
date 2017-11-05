@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 
+"""
+A setuptools based setup module.
+
+See:
+- https://packaging.python.org/en/latest/distributing.html
+- https://github.com/pypa/sampleproject
+"""
 
 # Always prefer setuptools over distutils
 from setuptools import setup
-
-VERSION = '1.0.0'
+import sacrebleu
 
 setup(
     name = 'sacrebleu',
@@ -12,17 +18,17 @@ setup(
     # Versions should comply with PEP440.  For a discussion on single-sourcing
     # the version across setup.py and the project code, see
     # https://packaging.python.org/en/latest/single_source_version.html
-    version = VERSION,
+    version = sacrebleu.VERSION,
 
     description = 'Hassle-free computation of shareable, comparable, and reproducible BLEU scores',
     long_description = 'SacréBLEU is a standard BLEU implementation that downloads and manages WMT datasets, produces scores on detokenized outputs, and reports a string encapsulating BLEU parameters, facilitating the production of shareable, comparable BLEU scores.',
 
     # The project's main homepage.
-    url = 'https://github.com/mjpost/sacreBLEU',
-    download_url = 'https://github.com/mjpost/sacreBLEU/archive/{}.tar.gz'.format(VERSION),
+    url = 'https://github.com/awslabs/sockeye',
 
-    author = 'Amazon',
-    author_email = 'sockeye-dev@amazon.com
+    author='Amazon',
+    author_email='sockeye-dev@amazon.com',
+    maintainer_email='sockeye-dev@amazon.com',
 
     license = 'Apache License 2.0',
 
@@ -30,7 +36,13 @@ setup(
 
     # See https://pypi.python.org/pypi?%3Aaction=list_classifiers
     classifiers = [
+        # How mature is this project? Common values are
+        #   3 - Alpha
+        #   4 - Beta
+        #   5 - Production/Stable
         'Development Status :: 5 - Production/Stable',
+
+        # Indicate who your project is intended for
         'Intended Audience :: Developers',
         'Intended Audience :: Science/Research',
         'Topic :: Scientific/Engineering',
@@ -48,8 +60,12 @@ setup(
     # What does your project relate to?
     keywords = ['machine translation, evaluation, NLP, natural language processing, computational linguistics'],
 
+    # You can just specify the packages manually here if your project is
+    # simple. Or you can use find_packages().
+#    packages = ['sacreBLEU'],
+
     # Alternatively, if you want to distribute just a my_module.py, uncomment this:
-    py_modules = ['sacrebleu'],
+    py_modules = ["sacrebleu"],
 
     # List run-time dependencies here.  These will be installed by pip when
     # your project is installed. For an analysis of "install_requires" vs pip's
