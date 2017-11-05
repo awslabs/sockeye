@@ -10,7 +10,8 @@ include sockeye/git_version.py
 include CODEOWNERS
 include CONTRIBUTING.md
 exclude *.sh
-exclude contrib/sacrebleu
+exclude contrib
+recursive-exclude contrib *
 include pytest.ini
 recursive-include test *.py
 recursive-include test *.ini
