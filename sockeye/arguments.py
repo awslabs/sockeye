@@ -16,11 +16,28 @@ Defines commandline arguments for the main CLIs with reasonable defaults.
 """
 import argparse
 import sys
+import os
 from typing import Callable, Optional
 
 from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
 from . import constants as C
 from . import data_io
+
+def regular_file() -> Callable:
+    """
+    Returns a method that can be used in argument parsing to check the argument is a regular file or a symbolic link,
+    but not, e.g., a process substitution.
+
+    :return: A method that can be used as a type in argparse.
+    """
+
+    def check_regular_file(value_to_check):
+        value_to_check = str(value_to_check)
+        if not os.path.isfile(value_to_check):
+            raise argparse.ArgumentTypeError("must exist and be a regular file.")
+        return value_to_check
+
+    return check_regular_file
 
 
 def int_greater_or_equal(threshold: int) -> Callable:
@@ -196,16 +213,24 @@ def add_io_args(params):
 
     data_params.add_argument('--source', '-s',
                              required=True,
+                             type=regular_file(),
                              help='Source side of parallel training data.')
     data_params.add_argument('--target', '-t',
                              required=True,
+                             type=regular_file(),
                              help='Target side of parallel training data.')
+    data_params.add_argument('--limit',
+                             default=None,
+                             type=int,
+                             help="Maximum number of training sequences to read. Default: %(default)s.")
 
     data_params.add_argument('--validation-source', '-vs',
                              required=True,
+                             type=regular_file(),
                              help='Source side of validation data.')
     data_params.add_argument('--validation-target', '-vt',
                              required=True,
+                             type=regular_file(),
                              help='Target side of validation data.')
 
     data_params.add_argument('--output', '-o',
@@ -558,9 +583,8 @@ def add_training_args(params):
 
     train_params.add_argument('--max-updates',
                               type=int,
-                              default=-1,
-                              help='Maximum number of updates/batches to process. -1 for infinite. '
-                                   'Default: %(default)s.')
+                              default=None,
+                              help='Maximum number of updates/batches to process. Default: %(default)s.')
     train_params.add_argument('--checkpoint-frequency',
                               type=int_greater_or_equal(1),
                               default=1000,
@@ -573,8 +597,13 @@ def add_training_args(params):
                                    'Default: %(default)s')
     train_params.add_argument('--min-num-epochs',
                               type=int,
-                              default=0,
+                              default=None,
                               help='Minimum number of epochs (passes through the training data) '
+                                   'before fitting is stopped. Default: %(default)s.')
+    train_params.add_argument('--max-num-epochs',
+                              type=int,
+                              default=None,
+                              help='Maximum number of epochs (passes through the training data) '
                                    'before fitting is stopped. Default: %(default)s.')
 
     train_params.add_argument('--embed-dropout',

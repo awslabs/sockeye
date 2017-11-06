@@ -15,6 +15,20 @@ For each item we will potentially have subsections for: _Added_, _Changed_, _Rem
  - Lexicon-based target vocabulary restriction for faster decoding. New CLI for top-k lexicon creation, sockeye.lexicon.
  New translate CLI argument `--restrict-lexicon`.
 
+## [1.10.3]
+### Changed
+ - Fixed a bug with max_observed_{source,target}_len being computed on the complete data set, not only on the
+ sentences actually added to the buckets based on `--max_seq_len`.
+
+## [1.10.2]
+### Added
+ - `--max-num-epochs` flag to train for a maximum number of passes through the training data.
+
+## [1.10.1]
+### Changed
+ - Reduced memory footprint when creating data iterators: integer sequences
+ are streamed from disk when being assigned to buckets.
+
 ## [1.10.0]
 ### Changed
  - Updated MXNet dependency to 0.12 (w/ MKL support by default).
