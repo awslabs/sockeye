@@ -12,12 +12,13 @@
 # permissions and limitations under the License.
 
 import argparse
-
 import pytest
+import os
 
 import sockeye.arguments as arguments
 import sockeye.constants as C
 
+from itertools import zip_longest
 
 @pytest.mark.parametrize("test_params, expected_params", [
     # mandatory parameters
@@ -298,10 +299,40 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
     _test_args_subset(test_params, expected_params, expected_params_present, arguments.add_average_args)
 
 
+def _create_argument_values_that_must_be_files(params):
+    """
+    Loop over test_params and create temporary files for training/validation sources/targets.
+    """
+
+    def grouper(iterable, n, fillvalue=None):
+        "Collect data into fixed-length chunks or blocks"
+        args = [iter(iterable)] * n
+        return zip_longest(fillvalue=fillvalue, *args)
+
+    params = params.split()
+    regular_files_params = {'-vs', '-vt', '-t', '-s', '--source', '--target', '--validation-source', '--validation-target'}
+    to_unlink = set()
+    for arg, val in grouper(params, 2):
+        if arg in regular_files_params and not os.path.isfile(val):
+            to_unlink.add((val, open(val, 'a')))
+    return to_unlink
+
+
+def _delete_argument_values_that_must_be_files(to_unlink):
+    """
+    Close and delete previously created files.
+    """
+    for name, f in to_unlink:
+        f.close()
+        os.unlink(name)
+
+
 def _test_args(test_params, expected_params, args_func):
     test_parser = argparse.ArgumentParser()
     args_func(test_parser)
+    created = _create_argument_values_that_must_be_files(test_params)
     parsed_params = test_parser.parse_args(test_params.split())
+    _delete_argument_values_that_must_be_files(created)
     assert dict(vars(parsed_params)) == expected_params
 
 
@@ -316,7 +347,9 @@ def _test_args_subset(test_params, expected_params, expected_params_present, arg
     """
     test_parser = argparse.ArgumentParser()
     args_func(test_parser)
+    created = _create_argument_values_that_must_be_files(test_params)
     parsed_params = dict(vars(test_parser.parse_args(test_params.split())))
+    _delete_argument_values_that_must_be_files(created)
     parsed_params_subset = {k: v for k, v in parsed_params.items() if k in expected_params}
     assert parsed_params_subset == expected_params
     for expected_param_present in expected_params_present:
