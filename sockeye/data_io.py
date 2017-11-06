@@ -523,6 +523,11 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         for source, target in zip(source_sentences, target_sentences):
             source_len = len(source)
             target_len = len(target)
+            buck_idx, buck = get_parallel_bucket(self.buckets, source_len, target_len)
+            if buck is None:
+                ndiscard += 1
+                continue  # skip this sentence pair
+
             tokens_source += source_len
             tokens_target += target_len
             if source_len > self.max_observed_source_len:
@@ -533,18 +538,13 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
             num_of_unks_source += source.count(self.unk_id)
             num_of_unks_target += target.count(self.unk_id)
 
-            buck_idx, buck = get_parallel_bucket(self.buckets, len(source), len(target))
-            if buck is None:
-                ndiscard += 1
-                continue
-
             buff_source = np.full((buck[0],), self.pad_id, dtype=self.dtype)
             buff_target = np.full((buck[1],), self.pad_id, dtype=self.dtype)
-            buff_source[:len(source)] = source
-            buff_target[:len(target)] = target
+            buff_source[:source_len] = source
+            buff_target[:target_len] = target
             self.data_source[buck_idx].append(buff_source)
             self.data_target[buck_idx].append(buff_target)
-            self.data_target_average_len[buck_idx] += len(target)
+            self.data_target_average_len[buck_idx] += target_len
 
         # Average number of non-padding elements in target sequence per bucket
         for buck_idx, buck in enumerate(self.buckets):

@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 For each item we will potentially have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.10.3]
+### Changed
+ - Fixed a bug with max_observed_{source,target}_len being computed on the complete data set, not only on the
+ sentences actually added to the buckets based on `--max_seq_len`.
+
 ## [1.10.2]
 ### Added
  - `--max-num-epochs` flag to train for a maximum number of passes through the training data.
