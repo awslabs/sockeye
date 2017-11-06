@@ -829,7 +829,7 @@ def add_inference_args(params):
                                type=str,
                                default=None,
                                help="Specify top-k lexicon to restrict output vocabulary based on source.  See lexicon "
-                                    "module.")
+                                    "module. Default: %(default)s.")
 
     decode_params.add_argument('--output-type',
                                default='translation',

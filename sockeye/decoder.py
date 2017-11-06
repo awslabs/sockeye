@@ -58,7 +58,7 @@ class Decoder(ABC):
     For the inference module to be able to keep track of decoder's states
     a decoder provides methods to return initial states (init_states), state variables and their shapes.
     """
-    def __init__(self):
+    def __init__(self) -> None:
         # Tracked to find params for logit computation
         self.output_layer = None  # type: layers.OutputLayer
 
@@ -113,24 +113,6 @@ class Decoder(ABC):
         :return: logit inputs (or None), logits (or None), attention probabilities, next decoder states.
         """
         pass
-
-    def decode_step_logits_nd(self,
-                              logit_inputs: mx.nd.NDArray,
-                              output_layer_w: mx.nd.NDArray,
-                              output_layer_b: mx.nd.NDArray) -> mx.nd.NDArray:
-        """
-        NDarray version of computing logits from logit inputs for this decoder.
-        This version matches `OutputLayer.__call__()`.
-
-        :param logit_inputs: Inputs for logit computation, result of `decode_step`.
-        :param output_layer_w: Weights for logit computation.
-        :param output_layer_b: Biases for logit computation.
-        :return: logits.
-        """
-        return mx.nd.FullyConnected(data=logit_inputs,
-                                    weight=output_layer_w,
-                                    bias=output_layer_b,
-                                    num_hidden=output_layer_b.shape[0])
 
     @abstractmethod
     def reset(self):

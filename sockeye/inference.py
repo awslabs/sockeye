@@ -853,7 +853,7 @@ class Translator:
             decoder_outputs, attention_probs, state = model.run_decoder(sequences, bucket_key, state)
             # Compute logits and softmax with restricted vocabulary
             if self.restrict_lexicon:
-                logits = model.decoder.decode_step_logits_nd(decoder_outputs, out_w, out_b)
+                logits = model.decoder.output_layer(decoder_outputs, out_w, out_b)
                 probs = mx.nd.softmax(logits)
             else:
                 # Otherwise decoder outputs are already target vocab probs

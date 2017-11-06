@@ -14,7 +14,6 @@
 import os
 from tempfile import TemporaryDirectory
 
-import mxnet as mx
 import numpy as np
 
 import sockeye.constants as C
@@ -34,10 +33,12 @@ def test_topk_lexicon():
 
     # Create from known lexicon
     with TemporaryDirectory(prefix="test_topk_lexicon.") as work_dir:
+        # Write fast_align format lex table
         input_lex_path = os.path.join(work_dir, "input.lex")
         with open(input_lex_path, "w") as out:
             for line in lexicon:
                 print(line, file=out)
+        # Use fast_align lex table to build top-k lexicon
         lex.create(input_lex_path, k)
 
         # Test against known lexicon
