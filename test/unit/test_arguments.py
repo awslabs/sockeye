@@ -314,7 +314,7 @@ def _create_argument_values_that_must_be_files(params):
     to_unlink = set()
     for arg, val in grouper(params, 2):
         if arg in regular_files_params and not os.path.isfile(val):
-            to_unlink.add((val, open(val, 'a')))
+            to_unlink.add((val, open(val, 'w')))
     return to_unlink
 
 

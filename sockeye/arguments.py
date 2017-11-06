@@ -23,7 +23,7 @@ from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
 from . import constants as C
 from . import data_io
 
-def is_file() -> Callable:
+def regular_file() -> Callable:
     """
     Returns a method that can be used in argument parsing to check the argument is a regular file or a symbolic link,
     but not, e.g., a process substitution.
@@ -186,11 +186,11 @@ def add_io_args(params):
 
     data_params.add_argument('--source', '-s',
                              required=True,
-                             type=is_file(),
+                             type=regular_file(),
                              help='Source side of parallel training data.')
     data_params.add_argument('--target', '-t',
                              required=True,
-                             type=is_file(),
+                             type=regular_file(),
                              help='Target side of parallel training data.')
     data_params.add_argument('--limit',
                              default=None,
@@ -199,11 +199,11 @@ def add_io_args(params):
 
     data_params.add_argument('--validation-source', '-vs',
                              required=True,
-                             type=is_file(),
+                             type=regular_file(),
                              help='Source side of validation data.')
     data_params.add_argument('--validation-target', '-vt',
                              required=True,
-                             type=is_file(),
+                             type=regular_file(),
                              help='Target side of validation data.')
 
     data_params.add_argument('--output', '-o',
