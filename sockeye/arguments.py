@@ -16,11 +16,28 @@ Defines commandline arguments for the main CLIs with reasonable defaults.
 """
 import argparse
 import sys
+import os
 from typing import Callable, Optional
 
 from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
 from . import constants as C
 from . import data_io
+
+def is_file() -> Callable:
+    """
+    Returns a method that can be used in argument parsing to check the argument is a regular file or a symbolic link,
+    but not, e.g., a process substitution.
+
+    :return: A method that can be used as a type in argparse.
+    """
+
+    def check_regular_file(value_to_check):
+        value_to_check = str(value_to_check)
+        if not os.path.isfile(value_to_check):
+            raise argparse.ArgumentTypeError("must exist and be a regular file.")
+        return value_to_check
+
+    return check_regular_file
 
 
 def int_greater_or_equal(threshold: int) -> Callable:
@@ -169,9 +186,11 @@ def add_io_args(params):
 
     data_params.add_argument('--source', '-s',
                              required=True,
+                             type=is_file(),
                              help='Source side of parallel training data.')
     data_params.add_argument('--target', '-t',
                              required=True,
+                             type=is_file(),
                              help='Target side of parallel training data.')
     data_params.add_argument('--limit',
                              default=None,
@@ -180,9 +199,11 @@ def add_io_args(params):
 
     data_params.add_argument('--validation-source', '-vs',
                              required=True,
+                             type=is_file(),
                              help='Source side of validation data.')
     data_params.add_argument('--validation-target', '-vt',
                              required=True,
+                             type=is_file(),
                              help='Target side of validation data.')
 
     data_params.add_argument('--output', '-o',
