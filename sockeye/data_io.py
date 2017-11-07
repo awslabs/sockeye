@@ -186,7 +186,7 @@ def get_training_data_iters(source: str, target: str,
 
     logger.info("Creating validation data iterator")
     val_source_sentences = SentenceReader(validation_source, vocab_source, add_bos=False, limit=None)
-    val_target_sentences = SentenceReader(validation_target, vocab_source, add_bos=False, limit=None)
+    val_target_sentences = SentenceReader(validation_target, vocab_target, add_bos=True, limit=None)
 
     val_iter = ParallelBucketSentenceIter(val_source_sentences,
                                           val_target_sentences,
