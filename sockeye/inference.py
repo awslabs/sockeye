@@ -137,8 +137,8 @@ class InferenceModel(model.SockeyeModel):
         self.decoder_module.init_params(arg_params=self.params, allow_missing=False)
 
         if self.cache_output_layer_w_b:
-            self.output_layer_w = mx.nd.array(self.params[self.decoder.output_layer.w.name], ctx=self.context)
-            self.output_layer_b = mx.nd.array(self.params[self.decoder.output_layer.b.name], ctx=self.context)
+            self.output_layer_w = self.params[self.decoder.output_layer.w.name].as_in_context(self.context)
+            self.output_layer_b = self.params[self.decoder.output_layer.b.name].as_in_context(self.context)
 
     def _get_encoder_module(self) -> Tuple[mx.mod.BucketingModule, int]:
         """
@@ -940,7 +940,8 @@ class Translator:
         if self.restrict_lexicon:
             # TODO: See note in method about migrating to pure MXNet when set operations are supported.
             #       We currently convert source to NumPy and target ids back to NDArray.
-            vocab_slice_ids = mx.nd.array(self.restrict_lexicon.get_trg_ids(source.astype("int32").asnumpy()))
+            vocab_slice_ids = mx.nd.array(self.restrict_lexicon.get_trg_ids(source.astype("int32").asnumpy()),
+                                          ctx=self.context)
             pad_dist = mx.nd.full((self.batch_size * self.beam_size, vocab_slice_ids.shape[0]),
                                   val=np.inf, ctx=self.context)
             for m in self.models:
