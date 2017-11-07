@@ -93,8 +93,8 @@ class InferenceModel(model.SockeyeModel):
         self.decoder_return_logit_inputs = decoder_return_logit_inputs
 
         self.cache_output_layer_w_b = cache_output_layer_w_b
-        self.output_layer_w = None  # type: np.ndarray
-        self.output_layer_b = None  # type: np.ndarray
+        self.output_layer_w = None  # type: mx.nd.NDArray
+        self.output_layer_b = None  # type: mx.nd.NDArray
 
     def initialize(self, max_input_length: int, get_max_output_length_function: Callable):
         """
@@ -137,8 +137,8 @@ class InferenceModel(model.SockeyeModel):
         self.decoder_module.init_params(arg_params=self.params, allow_missing=False)
 
         if self.cache_output_layer_w_b:
-            self.output_layer_w = self.params[self.decoder.output_layer.w.name].asnumpy()
-            self.output_layer_b = self.params[self.decoder.output_layer.b.name].asnumpy()
+            self.output_layer_w = mx.nd.array(self.params[self.decoder.output_layer.w.name], ctx=self.context)
+            self.output_layer_b = mx.nd.array(self.params[self.decoder.output_layer.b.name], ctx=self.context)
 
     def _get_encoder_module(self) -> Tuple[mx.mod.BucketingModule, int]:
         """
@@ -936,15 +936,16 @@ class Translator:
         models_output_layer_w = list()
         models_output_layer_b = list()
         pad_dist = self.pad_dist
-        vocab_slice_ids = None  # type: np.ndarray
+        vocab_slice_ids = None  # type: mx.nd.NDArray
         if self.restrict_lexicon:
-            # TODO: See note in method about migrating to pure MXNet when operations are supported.
-            vocab_slice_ids = self.restrict_lexicon.get_trg_ids(source.astype("int32").asnumpy())
+            # TODO: See note in method about migrating to pure MXNet when set operations are supported.
+            #       We currently convert source to NumPy and target ids back to NDArray.
+            vocab_slice_ids = mx.nd.array(self.restrict_lexicon.get_trg_ids(source.astype("int32").asnumpy()))
             pad_dist = mx.nd.full((self.batch_size * self.beam_size, vocab_slice_ids.shape[0]),
                                   val=np.inf, ctx=self.context)
             for m in self.models:
-                models_output_layer_w.append(mx.nd.array(m.output_layer_w[vocab_slice_ids], ctx=self.context))
-                models_output_layer_b.append(mx.nd.array(m.output_layer_b[vocab_slice_ids], ctx=self.context))
+                models_output_layer_w.append(m.output_layer_w.take(vocab_slice_ids))
+                models_output_layer_b.append(m.output_layer_b.take(vocab_slice_ids))
 
         # (0) encode source sentence, returns a list
         model_states = self._encode(source, source_length)
@@ -988,14 +989,15 @@ class Translator:
                     scores_accumulated_np[rows] = utils.smallest_k(sliced_scores, self.beam_size, t == 1)
                 # offsetting since the returned smallest_k() indices were slice-relative
                 best_hyp_indices_np[rows] += rows.start
-            # Map from restricted to full vocab ids if needed
-            if self.restrict_lexicon:
-                best_word_indices_np[:] = vocab_slice_ids[best_word_indices_np]
 
             # convert back to mx.ndarray again
             best_hyp_indices[:] = best_hyp_indices_np
             best_word_indices[:] = best_word_indices_np
             scores_accumulated[:] = np.expand_dims(scores_accumulated_np, axis=1)
+            # Map from restricted to full vocab ids if needed
+            if self.restrict_lexicon:
+                best_word_indices[:] = vocab_slice_ids.take(best_word_indices)
+
             # (4) get hypotheses and their properties for beam_size winning hypotheses (ascending)
             sequences = mx.nd.take(sequences, best_hyp_indices)
             lengths = mx.nd.take(lengths, best_hyp_indices)
