@@ -204,9 +204,7 @@ class InferenceModel(model.SockeyeModel):
              states) = self.decoder.decode_step(prev_word_ids,
                                                 target_max_len,
                                                 source_encoded_seq_len,
-                                                *states,
-                                                return_logit_inputs=self.decoder_return_logit_inputs,
-                                                return_logits=not self.decoder_return_logit_inputs)
+                                                *states)
             if self.softmax_temperature is not None:
                 logits /= self.softmax_temperature
 
