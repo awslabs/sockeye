@@ -15,6 +15,11 @@ For each item we will potentially have subsections for: _Added_, _Changed_, _Rem
  - Lexicon-based target vocabulary restriction for faster decoding. New CLI for top-k lexicon creation, sockeye.lexicon.
  New translate CLI argument `--restrict-lexicon`.
 
+## [1.10.4]
+### Fixed
+ - Fixed a bug with the revised data iterator not correctly appending EOS symbols for variable-length batches.
+ This reverts part of the commit added in 1.10.1 but is now correct again.
+
 ## [1.10.3]
 ### Changed
  - Fixed a bug with max_observed_{source,target}_len being computed on the complete data set, not only on the
