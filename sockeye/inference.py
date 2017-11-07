@@ -846,6 +846,7 @@ class Translator:
                 sequences = mx.nd.slice_axis(sequences, axis=1, begin=0, end=target_max_length)
 
         model_probs, model_attention_probs, model_states = [], [], []
+        # We use zip_longest here since we'll have empty lists when not using restrict_lexicon
         for model, out_w, out_b, state in itertools.zip_longest(
                 self.models, models_output_layer_w, models_output_layer_b, states):
             decoder_outputs, attention_probs, state = model.run_decoder(sequences, bucket_key, state)
