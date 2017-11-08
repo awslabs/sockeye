@@ -24,7 +24,7 @@ import numpy as np
 
 from . import constants as C
 from . import data_io
-from .lexicon import TopKLexicon
+from . import lexicon
 from . import model
 from . import utils
 from . import vocab
@@ -49,7 +49,7 @@ class InferenceModel(model.SockeyeModel):
     :param max_output_length_num_stds: Number of standard deviations as safety margin for maximum output length.
     :param decoder_return_logit_inputs: Decoder returns inputs to logit computation instead of softmax over target
                                         vocabulary.  Used when logits/softmax are handled separately.
-    :param cache_output_layer_w_b: Cache weights and biases for logit computation as NumPy arrays.
+    :param cache_output_layer_w_b: Cache weights and biases for logit computation.
     """
 
     def __init__(self,
@@ -607,7 +607,7 @@ class Translator:
                  models: List[InferenceModel],
                  vocab_source: Dict[str, int],
                  vocab_target: Dict[str, int],
-                 restrict_lexicon: Optional[TopKLexicon] = None) -> None:
+                 restrict_lexicon: Optional[lexicon.TopKLexicon] = None) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.vocab_source = vocab_source

@@ -98,7 +98,7 @@ class Decoder(ABC):
             -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the previous word ids in target and previous decoder states.
-        Returns logit inputs (optional), logits (optional), attention probabilities, and next decoder states.
+        Returns logit inputs, logits, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
         :param target: Previous target word ids. Shape: (batch_size, target_max_length).
@@ -301,7 +301,7 @@ class TransformerDecoder(Decoder):
             -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the previous word ids in target and previous decoder states.
-        Returns logit inputs (optional), logits (optional), attention probabilities, and next decoder states.
+        Returns logit inputs, logits, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
         :param target: Previous target word ids. Shape: (batch_size, target_max_length).
@@ -640,7 +640,7 @@ class RecurrentDecoder(Decoder):
             -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the previous word ids in target and previous decoder states.
-        Returns logit inputs (optional), logits (optional), attention probabilities, and next decoder states.
+        Returns logit inputs, logits, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
         :param target: Previous target word ids. Shape: (batch_size, target_max_length).
@@ -672,7 +672,7 @@ class RecurrentDecoder(Decoder):
                                             prev_attention_state)
 
         # logit inputs aka state.hidden: (batch_size, rnn_num_hidden)
-        logit_inputs = mx.sym.reshape(state.hidden, shape=(-2,), name=C.LOGIT_INPUTS_NAME)
+        logit_inputs = mx.sym.identity(state.hidden, name=C.LOGIT_INPUTS_NAME)
 
         # logits: (batch_size, target_vocab_size)
         logits = self.output_layer(state.hidden)
@@ -1141,7 +1141,7 @@ class ConvolutionalDecoder(Decoder):
             -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the previous word ids in target and previous decoder states.
-        Returns logit inputs (optional), logits (optional), attention probabilities, and next decoder states.
+        Returns logit inputs, logits, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
         :param target: Previous target word ids. Shape: (batch_size, target_max_length).
@@ -1226,7 +1226,7 @@ class ConvolutionalDecoder(Decoder):
                                          shape=(0, -1))
 
         # logit inputs aka target_hidden
-        logit_inputs = mx.sym.reshape(target_hidden, shape=(-2,), name=C.LOGIT_INPUTS_NAME)
+        logit_inputs = mx.sym.identity(target_hidden, name=C.LOGIT_INPUTS_NAME)
 
         # (batch_size, vocab_size)
         logits = self.output_layer(target_hidden)
