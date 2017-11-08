@@ -16,11 +16,28 @@ Defines commandline arguments for the main CLIs with reasonable defaults.
 """
 import argparse
 import sys
+import os
 from typing import Callable, Optional
 
 from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
 from . import constants as C
 from . import data_io
+
+def regular_file() -> Callable:
+    """
+    Returns a method that can be used in argument parsing to check the argument is a regular file or a symbolic link,
+    but not, e.g., a process substitution.
+
+    :return: A method that can be used as a type in argparse.
+    """
+
+    def check_regular_file(value_to_check):
+        value_to_check = str(value_to_check)
+        if not os.path.isfile(value_to_check):
+            raise argparse.ArgumentTypeError("must exist and be a regular file.")
+        return value_to_check
+
+    return check_regular_file
 
 
 def int_greater_or_equal(threshold: int) -> Callable:
@@ -169,16 +186,24 @@ def add_io_args(params):
 
     data_params.add_argument('--source', '-s',
                              required=True,
+                             type=regular_file(),
                              help='Source side of parallel training data.')
     data_params.add_argument('--target', '-t',
                              required=True,
+                             type=regular_file(),
                              help='Target side of parallel training data.')
+    data_params.add_argument('--limit',
+                             default=None,
+                             type=int,
+                             help="Maximum number of training sequences to read. Default: %(default)s.")
 
     data_params.add_argument('--validation-source', '-vs',
                              required=True,
+                             type=regular_file(),
                              help='Source side of validation data.')
     data_params.add_argument('--validation-target', '-vt',
                              required=True,
+                             type=regular_file(),
                              help='Target side of validation data.')
 
     data_params.add_argument('--output', '-o',
@@ -474,8 +499,8 @@ def add_model_parameters(params):
                                                                                                 C.LNGLSTM_TYPE))
 
     model_params.add_argument('--weight-normalization', action="store_true",
-                              help="Adds weight normalization to all convolutional weight matrices and the "
-                                   "transformation matrix to the output vocab in the convolutional decoder.")
+                              help="Adds weight normalization to decoder output layers "
+                                   "(and all convolutional weight matrices for CNN decoders). Default: %(default)s.")
 
 
 def add_training_args(params):
@@ -506,17 +531,17 @@ def add_training_args(params):
 
     train_params.add_argument('--loss',
                               default=C.CROSS_ENTROPY,
-                              choices=[C.CROSS_ENTROPY, C.SMOOTHED_CROSS_ENTROPY],
+                              choices=[C.CROSS_ENTROPY],
                               help='Loss to optimize. Default: %(default)s.')
-    train_params.add_argument('--smoothed-cross-entropy-alpha',
-                              default=0.3,
+    train_params.add_argument('--label-smoothing',
+                              default=0.0,
                               type=float,
-                              help='Smoothing value for smoothed-cross-entropy loss. Default: %(default)s.')
-    train_params.add_argument('--normalize-loss',
-                              default=False,
-                              action="store_true",
-                              help='If turned on we normalize the loss by dividing by the number of non-PAD tokens.'
-                                   'If turned off the loss is only normalized by the number of sentences in a batch.')
+                              help='Smoothing constant for label smoothing. Default: %(default)s.')
+    train_params.add_argument('--loss-normalization-type',
+                              default=C.LOSS_NORM_VALID,
+                              choices=[C.LOSS_NORM_VALID, C.LOSS_NORM_BATCH],
+                              help='How to normalize the loss. By default we normalize by the number '
+                                   'of valid/non-PAD tokens (%s)' % C.LOSS_NORM_VALID)
 
     train_params.add_argument('--metrics',
                               nargs='+',
@@ -531,9 +556,8 @@ def add_training_args(params):
 
     train_params.add_argument('--max-updates',
                               type=int,
-                              default=-1,
-                              help='Maximum number of updates/batches to process. -1 for infinite. '
-                                   'Default: %(default)s.')
+                              default=None,
+                              help='Maximum number of updates/batches to process. Default: %(default)s.')
     train_params.add_argument('--checkpoint-frequency',
                               type=int_greater_or_equal(1),
                               default=1000,
@@ -546,8 +570,13 @@ def add_training_args(params):
                                    'Default: %(default)s')
     train_params.add_argument('--min-num-epochs',
                               type=int,
-                              default=0,
+                              default=None,
                               help='Minimum number of epochs (passes through the training data) '
+                                   'before fitting is stopped. Default: %(default)s.')
+    train_params.add_argument('--max-num-epochs',
+                              type=int,
+                              default=None,
+                              help='Maximum number of epochs (passes through the training data) '
                                    'before fitting is stopped. Default: %(default)s.')
 
     train_params.add_argument('--embed-dropout',
@@ -618,12 +647,23 @@ def add_training_args(params):
                               type=str,
                               default=C.INIT_XAVIER,
                               choices=C.INIT_TYPES,
-                              help='Type of weight initialization. Default: %(default)s.')
+                              help='Type of base weight initialization. Default: %(default)s.')
     train_params.add_argument('--weight-init-scale',
                               type=float,
-                              default=0.04,
-                              help='Weight initialization scale (currently only applies to uniform initialization). '
+                              default=2.34,
+                              help='Weight initialization scale. Applies to uniform (scale) and xavier (magnitude). '
                                    'Default: %(default)s.')
+    train_params.add_argument('--weight-init-xavier-factor-type',
+                              type=str,
+                              default='in',
+                              choices=['in', 'out', 'avg'],
+                              help='Xavier factor type. Default: %(default)s.')
+    train_params.add_argument('--embed-weight-init',
+                              type=str,
+                              default=C.EMBED_INIT_DEFAULT,
+                              choices=C.EMBED_INIT_TYPES,
+                              help='Type of embedding matrix weight initialization. If normal, initializes embedding '
+                                   'weights using a normal distribution with std=vocab_size. Default: %(default)s.')
     train_params.add_argument('--initial-learning-rate',
                               type=float,
                               default=0.0003,
@@ -757,8 +797,8 @@ def add_inference_args(params):
     decode_params.add_argument('--batch-size',
                                type=int_greater_or_equal(1),
                                default=1,
-                               help='Batch size during decoding. Determines how many sentences are translated simultaneously.'
-                                    'Default: %(default)s.')
+                               help='Batch size during decoding. Determines how many sentences are translated '
+                                    'simultaneously. Default: %(default)s.')
     decode_params.add_argument('--chunk-size',
                                type=int_greater_or_equal(1),
                                default=1,

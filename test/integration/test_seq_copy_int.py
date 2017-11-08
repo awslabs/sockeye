@@ -11,12 +11,9 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import os
-from tempfile import TemporaryDirectory
-
 import pytest
 
-from test.common import generate_digits_file, run_train_translate
+from test.common import run_train_translate, tmp_digits_dataset
 
 _TRAIN_LINE_COUNT = 100
 _DEV_LINE_COUNT = 10
@@ -33,11 +30,11 @@ ENCODER_DECODER_SETTINGS = [
      " --rnn-residual-connections"
      " --num-embed 16 --rnn-attention-type coverage --rnn-attention-num-hidden 16 --weight-tying "
      "--rnn-attention-use-prev-word --rnn-context-gating --layer-normalization --batch-size 8 "
-     "--loss smoothed-cross-entropy --smoothed-cross-entropy-alpha 0.1 --normalize-loss --optimized-metric perplexity"
+     "--loss cross-entropy --label-smoothing 0.1 --loss-normalization-type batch --optimized-metric perplexity"
      " --max-updates 10 --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01"
      " --rnn-dropout-inputs 0.5:0.1 --rnn-dropout-states 0.5:0.1 --embed-dropout 0.1 --rnn-decoder-hidden-dropout 0.01"
      " --rnn-decoder-state-init avg --rnn-encoder-reverse-input --rnn-dropout-recurrent 0.1:0.0"
-     " --learning-rate-decay-param-reset",
+     " --learning-rate-decay-param-reset --weight-normalization",
      "--beam-size 2"),
     # Convolutional embedding encoder + LSTM encoder-decoder with attention
     ("--encoder rnn-with-conv-embed --conv-embed-max-filter-width 3 --conv-embed-num-filters 4:4:8"
@@ -51,7 +48,8 @@ ENCODER_DECODER_SETTINGS = [
      " --transformer-attention-heads 2 --transformer-model-size 16"
      " --transformer-feed-forward-num-hidden 32"
      " --rnn-attention-type mhdot --rnn-attention-mhdot-heads 4 --rnn-attention-num-hidden 16 --batch-size 8 "
-     " --max-updates 10 --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
+     " --max-updates 10 --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01"
+     " --weight-init-xavier-factor-type avg --weight-init-scale 3.0 --embed-weight-init normal",
      "--beam-size 2"),
     # LSTM encoder, Transformer decoder
     ("--encoder rnn --num-layers 2:2 --rnn-cell-type lstm --rnn-num-hidden 16 --num-embed 8"
@@ -76,26 +74,21 @@ ENCODER_DECODER_SETTINGS = [
      " --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 2")]
 
+
 @pytest.mark.parametrize("train_params, translate_params", ENCODER_DECODER_SETTINGS)
 def test_seq_copy(train_params, translate_params):
     """Task: copy short sequences of digits"""
-    with TemporaryDirectory(prefix="test_seq_copy") as work_dir:
-        # Simple digits files for train/dev data
-        train_source_path = os.path.join(work_dir, "train.src")
-        train_target_path = os.path.join(work_dir, "train.tgt")
-        dev_source_path = os.path.join(work_dir, "dev.src")
-        dev_target_path = os.path.join(work_dir, "dev.tgt")
-        generate_digits_file(train_source_path, train_target_path, _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH)
-        generate_digits_file(dev_source_path, dev_target_path, _DEV_LINE_COUNT, _LINE_MAX_LENGTH)
+    with tmp_digits_dataset("test_seq_copy", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT,
+                            _LINE_MAX_LENGTH) as data:
         # Test model configuration, including the output equivalence of batch and no-batch decoding
         translate_params_batch = translate_params + " --batch-size 2"
         # Ignore return values (perplexity and BLEU) for integration test
         run_train_translate(train_params,
                             translate_params,
                             translate_params_batch,
-                            train_source_path,
-                            train_target_path,
-                            dev_source_path,
-                            dev_target_path,
+                            data['source'],
+                            data['target'],
+                            data['validation_source'],
+                            data['validation_target'],
                             max_seq_len=_LINE_MAX_LENGTH + 1,
-                            work_dir=work_dir)
+                            work_dir=data['work_dir'])

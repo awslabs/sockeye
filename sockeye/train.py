@@ -238,7 +238,8 @@ def create_data_iters(args: argparse.Namespace,
                                            max_seq_len_source=max_seq_len_source,
                                            max_seq_len_target=max_seq_len_target,
                                            bucketing=not args.no_bucketing,
-                                           bucket_width=args.bucket_width)
+                                           bucket_width=args.bucket_width,
+                                           sequence_limit=args.limit)
 
 
 def create_lr_scheduler(args: argparse.Namespace, resume_training: bool,
@@ -279,6 +280,8 @@ def create_encoder_config(args: argparse.Namespace, vocab_source_size: int,
     """
     encoder_num_layers, _ = args.num_layers
     max_seq_len_source, max_seq_len_target = args.max_seq_len
+    num_embed_source, _ = args.num_embed
+    encoder_embed_dropout, _ = args.embed_dropout
     config_encoder = None  # type: Optional[Config]
 
     if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
@@ -290,10 +293,12 @@ def create_encoder_config(args: argparse.Namespace, vocab_source_size: int,
             feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
             num_layers=encoder_num_layers,
             vocab_size=vocab_source_size,
+            dropout_embed=encoder_embed_dropout,
             dropout_attention=args.transformer_dropout_attention,
             dropout_relu=args.transformer_dropout_relu,
             dropout_prepost=args.transformer_dropout_prepost,
             weight_tying=args.weight_tying and C.WEIGHT_TYING_SRC in args.weight_tying_type,
+            weight_normalization=False,
             positional_embedding_type=args.transformer_positional_embedding_type,
             preprocess_sequence=encoder_transformer_preprocess,
             postprocess_sequence=encoder_transformer_postprocess,
@@ -302,8 +307,6 @@ def create_encoder_config(args: argparse.Namespace, vocab_source_size: int,
             conv_config=config_conv)
         encoder_num_hidden = args.transformer_model_size
     elif args.encoder == C.CONVOLUTION_TYPE:
-        num_embed_source, _ = args.num_embed
-        encoder_embed_dropout, _ = args.embed_dropout
         cnn_kernel_width_encoder, _ = args.cnn_kernel_width
         cnn_config = convolution.ConvolutionConfig(kernel_width=cnn_kernel_width_encoder,
                                                    num_hidden=args.cnn_num_hidden,
@@ -319,8 +322,6 @@ def create_encoder_config(args: argparse.Namespace, vocab_source_size: int,
 
         encoder_num_hidden = args.cnn_num_hidden
     else:
-        num_embed_source, _ = args.num_embed
-        encoder_embed_dropout, _ = args.embed_dropout
         encoder_rnn_dropout_inputs, _ = args.rnn_dropout_inputs
         encoder_rnn_dropout_states, _ = args.rnn_dropout_states
         encoder_rnn_dropout_recurrent, _ = args.rnn_dropout_recurrent
@@ -354,6 +355,8 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int, enco
     """
     _, decoder_num_layers = args.num_layers
     max_seq_len_source, max_seq_len_target = args.max_seq_len
+    _, num_embed_target = args.num_embed
+    _, decoder_embed_dropout = args.embed_dropout
 
     decoder_weight_tying = args.weight_tying and C.WEIGHT_TYING_TRG in args.weight_tying_type \
                            and C.WEIGHT_TYING_SOFTMAX in args.weight_tying_type
@@ -369,10 +372,12 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int, enco
             feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
             num_layers=decoder_num_layers,
             vocab_size=vocab_target_size,
+            dropout_embed=decoder_embed_dropout,
             dropout_attention=args.transformer_dropout_attention,
             dropout_relu=args.transformer_dropout_relu,
             dropout_prepost=args.transformer_dropout_prepost,
             weight_tying=decoder_weight_tying,
+            weight_normalization=args.weight_normalization,
             positional_embedding_type=args.transformer_positional_embedding_type,
             preprocess_sequence=decoder_transformer_preprocess,
             postprocess_sequence=decoder_transformer_postprocess,
@@ -382,8 +387,6 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int, enco
 
     elif args.decoder == C.CONVOLUTION_TYPE:
         _, cnn_kernel_width_decoder = args.cnn_kernel_width
-        _, num_embed_target = args.num_embed
-        _, decoder_embed_dropout = args.embed_dropout
         convolution_config = convolution.ConvolutionConfig(kernel_width=cnn_kernel_width_decoder,
                                                            num_hidden=args.cnn_num_hidden,
                                                            act_type=args.cnn_activation_type,
@@ -416,8 +419,6 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int, enco
                                                          config_coverage=config_coverage,
                                                          num_heads=args.rnn_attention_mhdot_heads)
 
-        _, num_embed_target = args.num_embed
-        _, decoder_embed_dropout = args.embed_dropout
         _, decoder_rnn_dropout_inputs = args.rnn_dropout_inputs
         _, decoder_rnn_dropout_states = args.rnn_dropout_states
         _, decoder_rnn_dropout_recurrent = args.rnn_dropout_recurrent
@@ -442,7 +443,8 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int, enco
             state_init=args.rnn_decoder_state_init,
             context_gating=args.rnn_context_gating,
             layer_normalization=args.layer_normalization,
-            attention_in_upper_layers=args.rnn_attention_in_upper_layers)
+            attention_in_upper_layers=args.rnn_attention_in_upper_layers,
+            weight_normalization=args.weight_normalization)
 
     return config_decoder
 
@@ -498,8 +500,8 @@ def create_model_config(args: argparse.Namespace,
 
     config_loss = loss.LossConfig(name=args.loss,
                                   vocab_size=vocab_target_size,
-                                  normalize=args.normalize_loss,
-                                  smoothed_cross_entropy_alpha=args.smoothed_cross_entropy_alpha)
+                                  normalization_type=args.loss_normalization_type,
+                                  label_smoothing=args.label_smoothing)
 
     model_config = model.ModelConfig(config_data=config_data,
                                      max_seq_len_source=max_seq_len_source,
@@ -512,7 +514,7 @@ def create_model_config(args: argparse.Namespace,
                                      lexical_bias=args.lexical_bias,
                                      learn_lexical_bias=args.learn_lexical_bias,
                                      weight_tying=args.weight_tying,
-                                     weight_tying_type=args.weight_tying_type if args.weight_tying else None)
+                                     weight_tying_type=args.weight_tying_type if args.weight_tying else None,)
     return model_config
 
 
@@ -572,11 +574,10 @@ def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict, str]:
         optimizer_params["clip_gradient"] = clip_gradient
     if args.momentum is not None:
         optimizer_params["momentum"] = args.momentum
-    if args.normalize_loss:
-        # When normalize_loss is turned on we normalize by the number of non-PAD symbols in a batch which implicitly
-        # already contains the number of sentences and therefore we need to disable rescale_grad.
+    if args.loss_normalization_type == C.LOSS_NORM_VALID:
+        # When we normalize by the number of non-PAD symbols in a batch we need to disable rescale_grad.
         optimizer_params["rescale_grad"] = 1.0
-    else:
+    elif args.loss_normalization_type == C.LOSS_NORM_BATCH:
         # Making MXNet module API's default scaling factor explicit
         optimizer_params["rescale_grad"] = 1.0 / args.batch_size
     # Manually specified params
@@ -627,8 +628,14 @@ def main():
         lexicon_array = lexicon.initialize_lexicon(args.lexical_bias,
                                                    vocab_source, vocab_target) if args.lexical_bias else None
 
-        weight_initializer = initializer.get_initializer(args.weight_init, args.weight_init_scale,
-                                                         args.rnn_h2h_init, lexicon=lexicon_array)
+        weight_initializer = initializer.get_initializer(
+            default_init_type=args.weight_init,
+            default_init_scale=args.weight_init_scale,
+            default_init_xavier_factor_type=args.weight_init_xavier_factor_type,
+            embed_init_type=args.embed_weight_init,
+            embed_init_sigma=vocab_source_size ** -0.5,  # TODO
+            rnn_init_type=args.rnn_h2h_init,
+            lexicon=lexicon_array)
 
         optimizer, optimizer_params, kvstore = define_optimizer(args, lr_scheduler_instance)
 
@@ -636,11 +643,16 @@ def main():
         max_updates = args.max_updates
         max_num_checkpoint_not_improved = args.max_num_checkpoint_not_improved
         min_num_epochs = args.min_num_epochs
+        max_num_epochs = args.max_num_epochs
+        if min_num_epochs is not None and max_num_epochs is not None:
+            check_condition(min_num_epochs <= max_num_epochs,
+                            "Minimum number of epochs must be smaller than maximum number of epochs")
         # Fixed training schedule always runs for a set number of updates
         if args.learning_rate_schedule:
             max_updates = sum(num_updates for (_, num_updates) in args.learning_rate_schedule)
             max_num_checkpoint_not_improved = -1
-            min_num_epochs = 0
+            min_num_epochs = None
+            max_num_epochs = None
 
         monitor_bleu = args.monitor_bleu
         # Turn on BLEU monitoring when the optimized metric is BLEU and it hasn't been enabled yet
@@ -662,6 +674,7 @@ def main():
                            kvstore=kvstore,
                            max_num_not_improved=max_num_checkpoint_not_improved,
                            min_num_epochs=min_num_epochs,
+                           max_num_epochs=max_num_epochs,
                            monitor_bleu=monitor_bleu,
                            use_tensorboard=args.use_tensorboard,
                            mxmonitor_pattern=args.monitor_pattern,

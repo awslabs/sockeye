@@ -11,12 +11,9 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import os
-from tempfile import TemporaryDirectory
-
 import pytest
 
-from test.common import generate_digits_file, run_train_translate
+from test.common import tmp_digits_dataset, run_train_translate
 
 _TRAIN_LINE_COUNT = 10000
 _DEV_LINE_COUNT = 100
@@ -30,7 +27,7 @@ _SEED_DEV = 17
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity"
      " --max-updates 10000 --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
-     " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --max-updates 5000",
+     " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --max-updates 5000 --weight-normalization",
      "--beam-size 5",
      1.01,
      0.99),
@@ -91,24 +88,18 @@ _SEED_DEV = 17
 ])
 def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh):
     """Task: copy short sequences of digits"""
-    with TemporaryDirectory(prefix="test_seq_copy.") as work_dir:
-        # Simple digits files for train/dev data
-        train_source_path = os.path.join(work_dir, "train.src")
-        train_target_path = os.path.join(work_dir, "train.tgt")
-        dev_source_path = os.path.join(work_dir, "dev.src")
-        dev_target_path = os.path.join(work_dir, "dev.tgt")
-        generate_digits_file(train_source_path, train_target_path, _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, seed=_SEED_TRAIN)
-        generate_digits_file(dev_source_path, dev_target_path, _DEV_LINE_COUNT, _LINE_MAX_LENGTH, seed=_SEED_DEV)
+    with tmp_digits_dataset("test_seq_copy.", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT,
+                            _LINE_MAX_LENGTH, seed_train=_SEED_TRAIN, seed_dev=_SEED_DEV) as data:
         # Test model configuration
         perplexity, bleu = run_train_translate(train_params,
                                                translate_params,
                                                None,  # no second set of parameters
-                                               train_source_path,
-                                               train_target_path,
-                                               dev_source_path,
-                                               dev_target_path,
+                                               data['source'],
+                                               data['target'],
+                                               data['validation_source'],
+                                               data['validation_target'],
                                                max_seq_len=_LINE_MAX_LENGTH + 1,
-                                               work_dir=work_dir)
+                                               work_dir=data['work_dir'])
 
         assert perplexity <= perplexity_thresh
         assert bleu >= bleu_thresh
@@ -171,25 +162,17 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
 ])
 def test_seq_sort(train_params, translate_params, perplexity_thresh, bleu_thresh):
     """Task: sort short sequences of digits"""
-    with TemporaryDirectory(prefix="test_seq_sort.") as work_dir:
-        # Simple digits files for train/dev data
-        train_source_path = os.path.join(work_dir, "train.src")
-        train_target_path = os.path.join(work_dir, "train.tgt")
-        dev_source_path = os.path.join(work_dir, "dev.src")
-        dev_target_path = os.path.join(work_dir, "dev.tgt")
-        generate_digits_file(train_source_path, train_target_path, _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH,
-                             sort_target=True, seed=_SEED_TRAIN)
-        generate_digits_file(dev_source_path, dev_target_path, _DEV_LINE_COUNT, _LINE_MAX_LENGTH,
-                             sort_target=True, seed=_SEED_DEV)
+    with tmp_digits_dataset("test_seq_sort.", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT,
+                            _LINE_MAX_LENGTH, sort_target=True, seed_train=_SEED_TRAIN, seed_dev=_SEED_DEV) as data:
         # Test model configuration
         perplexity, bleu = run_train_translate(train_params,
                                                translate_params,
                                                None,
-                                               train_source_path,
-                                               train_target_path,
-                                               dev_source_path,
-                                               dev_target_path,
+                                               data['source'],
+                                               data['target'],
+                                               data['validation_source'],
+                                               data['validation_target'],
                                                max_seq_len=_LINE_MAX_LENGTH + 1,
-                                               work_dir=work_dir)
+                                               work_dir=data['work_dir'])
         assert perplexity <= perplexity_thresh
         assert bleu >= bleu_thresh

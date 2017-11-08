@@ -10,6 +10,52 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 For each item we will potentially have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.10.5]
+### Fixed
+ - Fixed yet another bug with the data iterator.
+
+## [1.10.4]
+### Fixed
+ - Fixed a bug with the revised data iterator not correctly appending EOS symbols for variable-length batches.
+ This reverts part of the commit added in 1.10.1 but is now correct again.
+
+## [1.10.3]
+### Changed
+ - Fixed a bug with max_observed_{source,target}_len being computed on the complete data set, not only on the
+ sentences actually added to the buckets based on `--max_seq_len`.
+
+## [1.10.2]
+### Added
+ - `--max-num-epochs` flag to train for a maximum number of passes through the training data.
+
+## [1.10.1]
+### Changed
+ - Reduced memory footprint when creating data iterators: integer sequences
+ are streamed from disk when being assigned to buckets.
+
+## [1.10.0]
+### Changed
+ - Updated MXNet dependency to 0.12 (w/ MKL support by default).
+ - Changed `--smoothed-cross-entropy-alpha` to `--label-smoothing`.
+ Label smoothing should now require significantly less memory due to its addition to MXNet's `SoftmaxOutput` operator.
+ - `--weight-normalization` now applies not only to convolutional weight matrices, but to output layers of all decoders.
+ It is also independent of weight tying.
+ - Transformers now use `--embed-dropout`. Before they were using `--transformer-dropout-prepost` for this.
+ - Transformers now scale their embedding vectors before adding fixed positional embeddings.
+ This turns out to be crucial for effective learning.
+ - `.param` files now use 5 digit identifiers to reduce risk of overflowing with many checkpoints.
+
+### Added
+ - Added CUDA 9.0 requirements file.
+ - `--loss-normalization-type`. Added a new flag to control loss normalization. New default is to normalize
+ by the number of valid, non-PAD tokens instead of the batch size.
+ - `--weight-init-xavier-factor-type`. Added new flag to control Xavier factor type when `--weight-init=xavier`.
+ - `--embed-weight-init`. Added new flag for initialization of embeddings matrices.
+ 
+### Removed
+ - `--smoothed-cross-entropy-alpha` argument. See above.
+ - `--normalize-loss` argument. See above.
+
 ## [1.9.0]
 ### Added
  - Batch decoding. New options for the translate CLI: ``--batch-size`` and ``--chunk-size``. Translator.translate()  

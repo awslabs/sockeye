@@ -14,8 +14,8 @@
 """
 Code for inference/translation
 """
-import logging
 import itertools
+import logging
 import os
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union, Set
 
@@ -221,7 +221,8 @@ class InferenceModel(model.SockeyeModel):
         source_max_length, target_max_length = bucket_key
         return self.decoder_data_shapes_cache.setdefault(
             bucket_key,
-            [mx.io.DataDesc(name=C.TARGET_NAME, shape=(self.batch_size * self.beam_size, target_max_length), layout="NT")] +
+            [mx.io.DataDesc(name=C.TARGET_NAME, shape=(self.batch_size * self.beam_size, target_max_length),
+                            layout="NT")] +
             self.decoder.state_shapes(self.batch_size * self.beam_size,
                                       self.encoder.get_encoded_seq_len(source_max_length),
                                       self.encoder.get_num_hidden()))
@@ -465,6 +466,7 @@ class ModelState:
         """
         self.states = [mx.nd.take(ds, best_hyp_indices) for ds in self.states]
 
+
 class LengthPenalty:
     """
     Calculates the length penalty as:
@@ -593,12 +595,14 @@ class Translator:
             self.buckets_target = data_io.define_buckets(max_output_length, step=bucket_target_width)
         else:
             self.buckets_target = [max_output_length]
-        self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target)), val=np.inf, ctx=self.context)
-        logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s "
+        self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target)), val=np.inf,
+                                   ctx=self.context)
+        logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s batch_size=%d "
                     "buckets_source=%s buckets_target=%s)",
                     len(self.models),
                     self.beam_size,
                     "None" if len(self.models) == 1 else ensemble_mode,
+                    self.batch_size,
                     self.buckets_source,
                     self.buckets_target)
 
@@ -613,6 +617,7 @@ class Translator:
 
     @staticmethod
     def _linear_interpolation(predictions):
+        # pylint: disable=invalid-unary-operand-type
         return -mx.nd.log(utils.average_arrays(predictions))
 
     @staticmethod
@@ -621,6 +626,7 @@ class Translator:
         Returns averaged and re-normalized log probabilities
         """
         log_probs = utils.average_arrays([mx.nd.log(p) for p in predictions])
+        # pylint: disable=invalid-unary-operand-type
         return -mx.nd.log(mx.nd.softmax(log_probs))
 
     @staticmethod
@@ -652,8 +658,9 @@ class Translator:
             if not trans_input.tokens:  # empty input?
                 continue
             elif len(trans_input.tokens) > self.max_input_length:  # oversized input?
-                logger.debug("Input %d has length (%d) that exceeds max input length (%d). Splitting into chunks of size %d.",
-                             trans_input.id, len(trans_input.tokens), self.buckets_source[-1], self.max_input_length)
+                logger.debug(
+                    "Input %d has length (%d) that exceeds max input length (%d). Splitting into chunks of size %d.",
+                    trans_input.id, len(trans_input.tokens), self.buckets_source[-1], self.max_input_length)
                 token_chunks = list(utils.chunks(trans_input.tokens, self.max_input_length))
                 input_chunks.extend(token_chunks)
                 chunk_markers.extend([trans_input.id] * len(token_chunks))
@@ -821,7 +828,7 @@ class Translator:
 
         # combine model predictions and convert to neg log probs
         if len(self.models) == 1:
-            neg_logprobs = -mx.nd.log(probs[0])
+            neg_logprobs = -mx.nd.log(probs[0])  # pylint: disable=invalid-unary-operand-type
         else:
             neg_logprobs = self.interpolation_func(probs)
         return neg_logprobs, attention_prob_score
@@ -849,14 +856,16 @@ class Translator:
         # then the next block for the 2nd sentence and so on
 
         # sequences: (batch_size * beam_size, output_length), pre-filled with <s> symbols on index 0
-        sequences = mx.nd.full((self.batch_size * self.beam_size, max_output_length), val=C.PAD_ID, ctx=self.context, dtype='int32')
+        sequences = mx.nd.full((self.batch_size * self.beam_size, max_output_length), val=C.PAD_ID, ctx=self.context,
+                               dtype='int32')
         sequences[:, 0] = self.start_id
 
         lengths = mx.nd.ones((self.batch_size * self.beam_size, 1), ctx=self.context)
         finished = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
 
         # attentions: (batch_size * beam_size, output_length, encoded_source_length)
-        attentions = mx.nd.zeros((self.batch_size * self.beam_size, max_output_length, encoded_source_length), ctx=self.context)
+        attentions = mx.nd.zeros((self.batch_size * self.beam_size, max_output_length, encoded_source_length),
+                                 ctx=self.context)
 
         # best_hyp_indices: row indices of smallest scores (ascending).
         best_hyp_indices = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
@@ -909,9 +918,9 @@ class Translator:
                 sliced_scores = scores if t == 1 and self.batch_size == 1 else scores[rows]
                 # TODO we could save some tiny amount of time here by not running smallest_k for a finished sent
                 (best_hyp_indices_np[rows], best_word_indices_np[rows]), \
-                        scores_accumulated_np[rows] = utils.smallest_k(sliced_scores, self.beam_size, t == 1)
-                best_hyp_indices_np[rows] += rows.start  # offseting since the returned smallest_k() indices 
-                                                         # were slice-relative
+                    scores_accumulated_np[rows] = utils.smallest_k(sliced_scores, self.beam_size, t == 1)
+                # offsetting since the returned smallest_k() indices were slice-relative
+                best_hyp_indices_np[rows] += rows.start
             # convert back to mx.ndarray again
             best_hyp_indices[:] = best_hyp_indices_np
             best_word_indices[:] = best_word_indices_np
@@ -925,6 +934,7 @@ class Translator:
             attentions = mx.nd.take(attentions, best_hyp_indices)
 
             # (5) update best hypotheses, their attention lists and lengths (only for non-finished hyps)
+            # pylint: disable=unsupported-assignment-operation
             sequences[:, t] = mx.nd.expand_dims(best_word_indices, axis=1)
             attentions[:, t, :] = mx.nd.expand_dims(attention_scores, axis=1)
             lengths += mx.nd.cast(1 - mx.nd.expand_dims(finished, axis=1), dtype='float32')

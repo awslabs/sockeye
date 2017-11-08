@@ -14,6 +14,7 @@
 import os
 import random
 import sys
+from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 from typing import Optional, Tuple
 from unittest.mock import patch
@@ -102,6 +103,30 @@ def generate_digits_file(source_path: str,
             print(" ".join(digits), file=target_out)
 
 
+@contextmanager
+def tmp_digits_dataset(prefix: str,
+                       train_line_count: int, train_max_length: int,
+                       dev_line_count: int, dev_max_length: int,
+                       sort_target: bool = False,
+                       seed_train: int = 13, seed_dev: int = 13):
+    with TemporaryDirectory(prefix=prefix) as work_dir:
+        # Simple digits files for train/dev data
+        train_source_path = os.path.join(work_dir, "train.src")
+        train_target_path = os.path.join(work_dir, "train.tgt")
+        dev_source_path = os.path.join(work_dir, "dev.src")
+        dev_target_path = os.path.join(work_dir, "dev.tgt")
+        generate_digits_file(train_source_path, train_target_path, train_line_count, train_max_length,
+                             sort_target=sort_target, seed=seed_train)
+        generate_digits_file(dev_source_path, dev_target_path, dev_line_count, dev_max_length, sort_target=sort_target,
+                             seed=seed_dev)
+        data = {'work_dir': work_dir,
+                'source': train_source_path,
+                'target': train_target_path,
+                'validation_source': dev_source_path,
+                'validation_target': dev_target_path}
+        yield data
+
+
 _TRAIN_PARAMS_COMMON = "--use-cpu --max-seq-len {max_len} --source {train_source} --target {train_target}" \
                        " --validation-source {dev_source} --validation-target {dev_target} --output {model}"
 
@@ -112,7 +137,7 @@ _EVAL_PARAMS_COMMON = "--hypotheses {hypotheses} --references {references}"
 
 def run_train_translate(train_params: str,
                         translate_params: str,
-                        translate_params_equiv: str,
+                        translate_params_equiv: Optional[str],
                         train_source_path: str,
                         train_target_path: str,
                         dev_source_path: str,
@@ -173,7 +198,7 @@ def run_train_translate(train_params: str,
                 lines = f.readlines()
             with open(out_path_equiv, 'rt') as f:
                 lines_equiv = f.readlines()
-            assert all(a == b for a,b in zip(lines, lines_equiv))
+            assert all(a == b for a, b in zip(lines, lines_equiv))
 
         # test averaging
         points = sockeye.average.find_checkpoints(model_path=model_path,
