@@ -131,7 +131,6 @@ import urllib.parse
 import argparse
 
 from collections import Counter, namedtuple
-from typing import List
 
 try:
     # SIGPIPE is not available on Windows machines, throwing an exception.
@@ -694,7 +693,7 @@ def download_test_set(test_set, langpair=None):
 BLEU = namedtuple('BLEU', 'score, counts, totals, precisions, bp, sys_len, ref_len')
 
 
-def compute_bleu(correct: List[int], total: List[int], sys_len: int, ref_len: int, smooth = 'none', smooth_floor = 0.01):
+def compute_bleu(correct, total, sys_len: int, ref_len: int, smooth = 'none', smooth_floor = 0.01):
     """Computes BLEU score from its sufficient statistics. Adds smoothing.
 
     :param correct: List of counts of correct ngrams, 1 <= n <= NGRAM_ORDER
