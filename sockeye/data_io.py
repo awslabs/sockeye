@@ -676,6 +676,7 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
 
         self.nd_source = []
         self.nd_target = []
+        self.nd_label = []
         self.indices = []
         for i in range(len(self.data_source)):
             # shuffle indices within each bucket
