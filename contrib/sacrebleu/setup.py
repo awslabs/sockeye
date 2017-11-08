@@ -39,7 +39,7 @@ setup(
     # The project's main homepage.
     url = 'https://github.com/awslabs/sockeye',
 
-    author='Amazon',
+    author = 'Amazon',
     author_email='sockeye-dev@amazon.com',
     maintainer_email='sockeye-dev@amazon.com',
 

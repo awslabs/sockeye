@@ -83,6 +83,15 @@ Sacré BLEU.
 
 # VERSION HISTORY
 
+- 1.1.0 (8 November 2017).
+   - Factored code a bit to facilitate API:
+      - compute_bleu: works from raw stats
+      - corpus_bleu for use from the command line
+      - raw_corpus_bleu: turns off tokenization, command-line sanity checks, floor smoothing
+   - Smoothing (type 'exp', now the default) fixed to produce mteval-v13a.pl results
+   - Added 'floor' smoothing (adds 0.01 to 0 counts, more versatile via API), 'none' smoothing (via API)
+   - Small bugfixes, windows compatibility (H/T Christian Federmann)
+
 - 1.0.3 (4 November 2017).
    - Contributions from Christian Federmann:
    - Added explicit support for encoding  
@@ -106,8 +115,8 @@ SacréBLEU is licensed under the Apache 2.0 License.
 # CREDITS
 
 This was all Rico Sennrich's idea.
-Originally written by Matt Post.  
-The official source version can be found at github.com/awslabs/sockeye (under `contrib/sacrebleu`).
+Originally written by Matt Post.
+The official version can be found at github.com/awslabs/sockeye, under `contrib/sacrebleu`.
 """
 
 import re
@@ -121,12 +130,21 @@ import urllib.request
 import urllib.parse
 import argparse
 
-from collections import defaultdict, namedtuple
+from collections import Counter, namedtuple
+from typing import List
 
-from signal import signal, SIGPIPE, SIG_DFL
-signal(SIGPIPE,SIG_DFL) 
+try:
+    # SIGPIPE is not available on Windows machines, throwing an exception.
+    from signal import SIGPIPE
 
-VERSION = '1.0.3'
+    # If SIGPIPE is available, change behaviour to default instead of ignore.
+    from signal import signal, SIG_DFL
+    signal(SIGPIPE, SIG_DFL)
+
+except ImportError:
+    logging.warn('Could not import signal.SIGPIPE (this is expected on Windows machines)')
+
+VERSION = '1.1.0'
 
 # Where to store downloaded test sets.
 # Define the environment variable $SACREBLEU, or use the default of ~/.sacrebleu.
@@ -137,6 +155,9 @@ VERSION = '1.0.3'
 from os.path import expanduser
 USERHOME = expanduser("~")
 SACREBLEU = os.environ.get('SACREBLEU', os.path.join(USERHOME, '.sacrebleu'))
+
+# n-gram order. Don't change this.
+NGRAM_ORDER = 4
 
 # This defines data locations.
 # At the top level are test sets.
@@ -489,8 +510,9 @@ def tokenize_zh(sentence):
 tokenizers = {
     '13a': tokenize_13a,
     'zh': tokenize_zh,
+    'none': lambda x: x,
 }
-
+DEFAULT_TOKENIZER='13a'
 
 def _read(file, encoding='utf-8'):
     """Convenience function for reading compressed or plain text files.
@@ -534,7 +556,10 @@ def build_signature(args, numrefs):
     }
 
     data = {'tok': args.tokenize,
-            'version': VERSION}
+            'version': VERSION,
+            'smooth': args.smooth,
+            'numrefs': numrefs,
+            'case': 'lc' if args.lc else 'mixed'}
 
     if args.test_set is not None:
         data['test'] = args.test_set
@@ -542,30 +567,20 @@ def build_signature(args, numrefs):
     if args.langpair is not None:
         data['lang'] = args.langpair
 
-    if args.lc:
-        data['case'] = 'lc'
-    else:
-        data['case'] = 'mixed'
-
-    if args.smooth > 0.0:
-        data['smooth'] = args.smooth
-
-    data['numrefs'] = numrefs
-
     sigstr = '+'.join(['{}.{}'.format(abbr[x] if args.short else x, data[x]) for x in sorted(data.keys())])
 
     return sigstr
 
 
-def extract_ngrams(line, max=4):
-    """Extracts all the ngrams (1 <= n <= 4) from a sequence of tokens.
+def extract_ngrams(line, max=NGRAM_ORDER):
+    """Extracts all the ngrams (1 <= n <= NGRAM_ORDER) from a sequence of tokens.
 
     :param line: a segment containing a sequence of words
     :param max: collect n-grams from 1<=n<=max
     :return: a dictionary containing ngrams and counts
     """
 
-    ngrams = defaultdict(int)
+    ngrams = Counter()
     tokens = line.split()
     for n in range(1, max + 1):
         for i in range(0, len(tokens) - n + 1):
@@ -576,7 +591,7 @@ def extract_ngrams(line, max=4):
 
 
 def ref_stats(output, refs):
-    ngrams = defaultdict(int)
+    ngrams = Counter()
     closest_diff = None
     closest_len = None
     for ref in refs:
@@ -676,36 +691,82 @@ def download_test_set(test_set, langpair=None):
     return found
 
 
-BLEU = namedtuple('BLEU', 'score, ngram1, ngram2, ngram3, ngram4, bp, sys_len, ref_len')
+BLEU = namedtuple('BLEU', 'score, counts, totals, precisions, bp, sys_len, ref_len')
 
 
-def compute_bleu(instream, refstreams, smooth=0., force=False, lc=False, tokenize=False) -> BLEU:
-    """Produces the BLEU scores along with its sufficient statistics from a source against one or more references.
+def compute_bleu(correct: List[int], total: List[int], sys_len: int, ref_len: int, smooth = 'none', smooth_floor = 0.01):
+    """Computes BLEU score from its sufficient statistics. Adds smoothing.
 
-    :param instream: the input stream, one segment per line
-    :param refstreams: a list of reference streams
+    :param correct: List of counts of correct ngrams, 1 <= n <= NGRAM_ORDER
+    :param total: List of counts of total ngrams, 1 <= n <= NGRAM_ORDER
+    :param sys_len: The cumulative system length
+    :param ref_len: The cumulative reference length
+    :param smooth: The smoothing method to use
+    :param smooth_floor: The smoothing value added, if smooth method 'floor' is used
+    """
+
+    precisions = [0 for x in range(NGRAM_ORDER)]
+
+    smooth_mteval = 1
+    for n in range(NGRAM_ORDER):
+        if total[n] == 0:
+            precisions[n] = 0
+        elif correct[n] == 0:
+            if smooth == 'exp':
+                smooth_mteval *= 2
+                precisions[n] = 100. / (smooth_mteval * total[n])
+            elif smooth == 'floor':
+                precisions[n] = 100. * smooth_floor / total[n]
+        else:
+            precisions[n] = 100. * correct[n] / total[n]
+
+    brevity_penalty = 1.0
+    if sys_len < ref_len:
+        brevity_penalty = math.exp(1 - ref_len / sys_len) if sys_len > 0 else 0.0
+
+    bleu = 1. * brevity_penalty * math.exp(sum(map(my_log, precisions)) / NGRAM_ORDER)
+
+    return BLEU._make([bleu, correct, total, precisions, brevity_penalty, sys_len, ref_len])
+    
+
+
+def corpus_bleu(sys_stream, ref_streams, smooth='exp', smooth_floor=0.0, force=False, lc=False, tokenize=DEFAULT_TOKENIZER) -> BLEU:
+    """Produces BLEU scores along with its sufficient statistics from a source against one or more references.
+
+    :param sys_stream: The system stream (a sequence of segments)
+    :param ref_streams: A list of one or more reference streams (each a sequence of segments)
+    :param smooth: The smoothing method to use
+    :param smooth_floor: For 'floor' smoothing, the floor to use
+    :param force: Ignore data that looks already tokenized
+    :param lc: Lowercase the data
+    :param tokenize: The tokenizer to use
     :return: a BLEU object containing everything you'd want
     """
 
-    fhs = [sys.stdin] + refstreams
+    # Add some robustness to the input arguments
+    if isinstance(sys_stream, str):
+        sys_stream = [sys_stream]
+    if isinstance(ref_streams, str):
+        ref_streams = [[ref_streams]]
 
     sys_len = 0
     ref_len = 0
 
-    correct = defaultdict(int)
-    total = defaultdict(int)
+    correct = [0 for n in range(NGRAM_ORDER)]
+    total = [0 for n in range(NGRAM_ORDER)]
 
     # look for already-tokenized sentences
     tokenized_count = 0
 
+    fhs = [sys_stream] + ref_streams
     for sentno, lines in enumerate(zip(*fhs)):
         if lc:
             lines = [x.lower() for x in lines]
 
-        if lines[0].rstrip().endswith(' .'):
+        if (tokenize == 'none' or not force) and lines[0].rstrip().endswith(' .'):
             tokenized_count += 1
 
-            if tokenized_count > 100 and not force:
+            if tokenized_count > 100:
                 logging.error('FATAL: That\'s > 100 lines that end in a tokenized period (\'.\')')
                 logging.error('It looks like you forgot to detokenize your test data, which will hurt your score.')
                 logging.error('If you insist your data is tokenized, rerun with \'--force\'.')
@@ -722,25 +783,21 @@ def compute_bleu(instream, refstreams, smooth=0., force=False, lc=False, tokeniz
         for ngram in sys_ngrams.keys():
             n = len(ngram.split())
 
-            total[n] += sys_ngrams[ngram]
-            correct[n] += min(sys_ngrams[ngram], ref_ngrams.get(ngram, 0))
+            correct[n-1] += min(sys_ngrams[ngram], ref_ngrams.get(ngram, 0))
+            total[n-1] += sys_ngrams[ngram]
 
-    if sum(total) == 0:
-        logging.error('No input?')
-        sys.exit(1)
+    return compute_bleu(correct, total, sys_len, ref_len, smooth, smooth_floor)
 
-    precisions = [0, 0, 0, 0, 0]
 
-    for n in range(1, 5):
-        precisions[n] = max(smooth, 100. * correct[n] / total[n] if total.get(n) > 0 else 0)
+def raw_corpus_bleu(sys_stream, ref_streams, smooth_floor=0.0):
+    """Convenience function that wraps corpus_bleu().
+    This is convenient if you're using sacrebleu as a library, say for scoring on dev.
+    It uses no tokenization and 'floor' smoothing, with the floor default to 0 (no smoothing).
 
-    brevity_penalty = 1.0
-    if sys_len < ref_len:
-        brevity_penalty = math.exp(1 - ref_len / sys_len)
-
-    bleu = 1. * brevity_penalty * math.exp(sum(map(my_log, precisions[1:])) / 4)
-
-    return BLEU._make([bleu, precisions[1], precisions[2], precisions[3], precisions[4], brevity_penalty, sys_len, ref_len])
+    :param sys_stream: the system stream (a sequence of segments)
+    :param ref_streams: a list of one or more reference streams (each a sequence of segments)
+    """
+    return corpus_bleu(sys_stream, ref_streams, smooth='floor', smooth_floor=smooth_floor, force=True, tokenize='none')
 
 
 def main():
@@ -752,8 +809,8 @@ def main():
                             help='The test set to use')
     arg_parser.add_argument('-lc', action='store_true', default=False,
                             help='Use case-insensitive BLEU (default: actual case)')
-    arg_parser.add_argument('--smooth', '-s', type=float, default=0.0,
-                            help='Smooth zero-count precisions with specified value')
+    arg_parser.add_argument('--smooth', '-s', choices=['exp', 'floor', 'none'], default='exp',
+                            help='Smoothing method: exponential decay (default), floor (0 count -> 0.01), or none')
     arg_parser.add_argument('--tokenize', '-tok', choices=['13a', 'zh'], default='13a',
                             help='Tokenization method to use.')
     arg_parser.add_argument('--language-pair', '-l', dest='langpair', default=None,
@@ -825,12 +882,12 @@ def main():
         if target == 'zh' and args.tokenize != 'zh':
             logging.warn('You should also pass "--tok zh" when scoring Chinese...')
 
-    bleu = compute_bleu(sys.stdin, refs, smooth=args.smooth, force=args.force,
-                        lc=args.lc, tokenize=args.tokenize)
+    bleu = corpus_bleu(sys.stdin, refs, smooth=args.smooth, force=args.force,
+                       lc=args.lc, tokenize=args.tokenize)
 
     version_str = build_signature(args, len(refs))
 
-    print('BLEU+{} = {:.2f} {:.1f}/{:.1f}/{:.1f}/{:.1f} (BP = {:.3f} ratio = {:.3f} hyp_len = {:d} ref_len = {:d})'.format(version_str, bleu.score, bleu.ngram1, bleu.ngram2, bleu.ngram3, bleu.ngram4, bleu.bp, bleu.sys_len / bleu.ref_len, bleu.sys_len, bleu.ref_len))
+    print('BLEU+{} = {:.2f} {:.1f}/{:.1f}/{:.1f}/{:.1f} (BP = {:.3f} ratio = {:.3f} hyp_len = {:d} ref_len = {:d})'.format(version_str, bleu.score, bleu.precisions[0], bleu.precisions[1], bleu.precisions[2], bleu.precisions[3], bleu.bp, bleu.sys_len / bleu.ref_len, bleu.sys_len, bleu.ref_len))
 
 
 if __name__ == '__main__':

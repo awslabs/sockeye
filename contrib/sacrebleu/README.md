@@ -67,9 +67,18 @@ Sacré BLEU.
 
 # VERSION HISTORY
 
+- 1.1.0 (8 November 2017).
+   - Factored code a bit to facilitate API:
+      - compute_bleu: works from raw stats
+      - corpus_bleu for use from the command line
+      - raw_corpus_bleu: turns off tokenization, command-line sanity checks, floor smoothing
+   - Smoothing (type 'exp', now the default) fixed to produce mteval-v13a.pl results
+   - Added 'floor' smoothing (adds 0.01 to 0 counts, more versatile via API), 'none' smoothing (via API)
+   - Small bugfixes, windows compatibility (H/T Christian Federmann)
+
 - 1.0.3 (4 November 2017).
    - Contributions from Christian Federmann:
-   - Added explicit support for encoding
+   - Added explicit support for encoding  
    - Fixed Windows support
    - Bugfix in handling reference length with multiple refs
 
@@ -90,5 +99,5 @@ SacréBLEU is licensed under the Apache 2.0 License.
 # CREDITS
 
 This was all Rico Sennrich's idea.
-Originally written by Matt Post.  
-The official source version can be found at github.com/awslabs/sockeye (under `contrib/sacrebleu`).
+Originally written by Matt Post.
+The official version can be found at github.com/awslabs/sockeye, under `contrib/sacrebleu`.
