@@ -15,13 +15,6 @@ sockeye.average module
     :members:
     :show-inheritance:
 
-sockeye.bleu module
--------------------
-
-.. automodule:: sockeye.bleu
-    :members: corpus_bleu
-    :show-inheritance:
-
 sockeye.callback module
 -----------------------
 

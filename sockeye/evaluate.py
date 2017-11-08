@@ -59,7 +59,7 @@ def main():
         print(bleu, file=sys.stdout)
     else:
         for h, r in zip(hypotheses, references):
-            bleu = corpus_bleu(h, r, args.offset)
+            bleu = raw_corpus_bleu(h, r, args.offset)
             print(bleu, file=sys.stdout)
 
 
