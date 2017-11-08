@@ -24,6 +24,7 @@ import numpy as np
 
 from . import constants as C
 from . import data_io
+from . import lexicon
 from . import model
 from . import utils
 from . import vocab
@@ -46,6 +47,9 @@ class InferenceModel(model.SockeyeModel):
     :param checkpoint: Checkpoint to load. If None, finds best parameters in model_folder.
     :param softmax_temperature: Optional parameter to control steepness of softmax distribution.
     :param max_output_length_num_stds: Number of standard deviations as safety margin for maximum output length.
+    :param decoder_return_logit_inputs: Decoder returns inputs to logit computation instead of softmax over target
+                                        vocabulary.  Used when logits/softmax are handled separately.
+    :param cache_output_layer_w_b: Cache weights and biases for logit computation.
     """
 
     def __init__(self,
@@ -56,7 +60,9 @@ class InferenceModel(model.SockeyeModel):
                  batch_size: int,
                  checkpoint: Optional[int] = None,
                  softmax_temperature: Optional[float] = None,
-                 max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH) -> None:
+                 max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
+                 decoder_return_logit_inputs: bool = False,
+                 cache_output_layer_w_b: bool = False) -> None:
         self.model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
         logger.info("Model version: %s", self.model_version)
         utils.check_version(self.model_version)
@@ -84,6 +90,11 @@ class InferenceModel(model.SockeyeModel):
         self.decoder_module = None  # type: Optional[mx.mod.BucketingModule]
         self.decoder_default_bucket_key = None  # type: Optional[Tuple[int, int]]
         self.decoder_data_shapes_cache = None  # type: Optional[Dict]
+        self.decoder_return_logit_inputs = decoder_return_logit_inputs
+
+        self.cache_output_layer_w_b = cache_output_layer_w_b
+        self.output_layer_w = None  # type: mx.nd.NDArray
+        self.output_layer_b = None  # type: mx.nd.NDArray
 
     def initialize(self, max_input_length: int, get_max_output_length_function: Callable):
         """
@@ -124,6 +135,10 @@ class InferenceModel(model.SockeyeModel):
         self.load_params_from_file(self.fname_params)
         self.encoder_module.init_params(arg_params=self.params, allow_missing=False)
         self.decoder_module.init_params(arg_params=self.params, allow_missing=False)
+
+        if self.cache_output_layer_w_b:
+            self.output_layer_w = self.params[self.decoder.output_layer.w.name].as_in_context(self.context)
+            self.output_layer_b = self.params[self.decoder.output_layer.b.name].as_in_context(self.context)
 
     def _get_encoder_module(self) -> Tuple[mx.mod.BucketingModule, int]:
         """
@@ -171,6 +186,10 @@ class InferenceModel(model.SockeyeModel):
         """
 
         def sym_gen(bucket_key: Tuple[int, int]):
+            """
+            Returns either softmax output (probs over target vocabulary) or inputs to logit
+            computation, controlled by decoder_return_logit_inputs
+            """
             source_max_len, target_max_len = bucket_key
             source_encoded_seq_len = self.encoder.get_encoded_seq_len(source_max_len)
 
@@ -179,18 +198,25 @@ class InferenceModel(model.SockeyeModel):
             states = self.decoder.state_variables()
             state_names = [state.name for state in states]
 
-            logits, attention_probs, states = self.decoder.decode_step(prev_word_ids,
-                                                                       target_max_len,
-                                                                       source_encoded_seq_len,
-                                                                       *states)
+            (logit_inputs,
+             logits,
+             attention_probs,
+             states) = self.decoder.decode_step(prev_word_ids,
+                                                target_max_len,
+                                                source_encoded_seq_len,
+                                                *states)
             if self.softmax_temperature is not None:
                 logits /= self.softmax_temperature
 
-            softmax = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
+            # Return logit inputs or softmax over target vocab
+            if self.decoder_return_logit_inputs:
+                outputs = logit_inputs
+            else:
+                outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
 
             data_names = [C.TARGET_NAME] + state_names
             label_names = []  # type: List[str]
-            return mx.sym.Group([softmax, attention_probs] + states), data_names, label_names
+            return mx.sym.Group([outputs, attention_probs] + states), data_names, label_names
 
         # pylint: disable=not-callable
         default_bucket_key = (self.max_input_length, self.get_max_output_length(self.max_input_length))
@@ -311,8 +337,9 @@ def load_models(context: mx.context.Context,
                 model_folders: List[str],
                 checkpoints: Optional[List[int]] = None,
                 softmax_temperature: Optional[float] = None,
-                max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH) \
-        -> Tuple[List[InferenceModel], Dict[str, int], Dict[str, int]]:
+                max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
+                decoder_return_logit_inputs: bool = False,
+                cache_output_layer_w_b: bool = False) -> Tuple[List[InferenceModel], Dict[str, int], Dict[str, int]]:
     """
     Loads a list of models for inference.
 
@@ -324,6 +351,10 @@ def load_models(context: mx.context.Context,
     :param softmax_temperature: Optional parameter to control steepness of softmax distribution.
     :param max_output_length_num_stds: Number of standard deviations to add to mean target-source length ratio
            to compute maximum output length.
+    :param decoder_return_logit_inputs: Model decoders return inputs to logit computation instead of softmax over target
+                                        vocabulary.  Used when logits/softmax are handled separately.
+    :param cache_output_layer_w_b: Models cache weights and biases for logit computation as NumPy arrays (used with
+                                   restrict lexicon).
     :return: List of models, source vocabulary, target vocabulary.
     """
     models, source_vocabs, target_vocabs = [], [], []
@@ -338,7 +369,9 @@ def load_models(context: mx.context.Context,
                                beam_size=beam_size,
                                batch_size=batch_size,
                                softmax_temperature=softmax_temperature,
-                               checkpoint=checkpoint)
+                               checkpoint=checkpoint,
+                               decoder_return_logit_inputs=decoder_return_logit_inputs,
+                               cache_output_layer_w_b=cache_output_layer_w_b)
         models.append(model)
 
     utils.check_condition(all(set(vocab.items()) == set(source_vocabs[0].items()) for vocab in source_vocabs),
@@ -472,7 +505,7 @@ class LengthPenalty:
     Calculates the length penalty as:
     (beta + len(Y))**alpha / (beta + 1)**alpha
 
-    See Wu et al. 2016 (note that in the paper beta has a different meaning, 
+    See Wu et al. 2016 (note that in the paper beta has a different meaning,
     and a fixed value 5 was used for this parameter)
 
     :param alpha: The alpha factor for the length penalty (see above).
@@ -562,6 +595,7 @@ class Translator:
     :param models: List of models.
     :param vocab_source: Source vocabulary.
     :param vocab_target: Target vocabulary.
+    :param restrict_lexicon: Top-k lexicon to use for target vocabulary restriction.
     """
 
     def __init__(self,
@@ -572,12 +606,14 @@ class Translator:
                  length_penalty: LengthPenalty,
                  models: List[InferenceModel],
                  vocab_source: Dict[str, int],
-                 vocab_target: Dict[str, int]) -> None:
+                 vocab_target: Dict[str, int],
+                 restrict_lexicon: Optional[lexicon.TopKLexicon] = None) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.vocab_source = vocab_source
         self.vocab_target = vocab_target
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
+        self.restrict_lexicon = restrict_lexicon
         self.start_id = self.vocab_target[C.BOS_SYMBOL]
         self.stop_ids = {self.vocab_target[C.EOS_SYMBOL], C.PAD_ID}  # type: Set[int]
         self.models = models
@@ -785,7 +821,10 @@ class Translator:
                      t: int,
                      source_length: int,
                      max_output_length: int,
-                     states: List[ModelState]) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, List[ModelState]]:
+                     states: List[ModelState],
+                     models_output_layer_w: List[mx.nd.NDArray],
+                     models_output_layer_b: List[mx.nd.NDArray]) \
+            -> Tuple[mx.nd.NDArray, mx.nd.NDArray, List[ModelState]]:
         """
         Returns decoder predictions (combined from all models), attention scores, and updated states.
 
@@ -793,7 +832,9 @@ class Translator:
         :param t: Beam search iteration.
         :param source_length: Length of the input sequence.
         :param max_output_length: Maximum output length.
-        :param: List of model states.
+        :param states: List of model states.
+        :param models_output_layer_w: Custom model weights for logit computation (empty for none).
+        :param models_output_layer_b: Custom model biases for logit computation (empty for none).
         :return: (probs, attention scores, list of model states)
         """
         bucket_key = (source_length, max_output_length)
@@ -805,8 +846,17 @@ class Translator:
                 sequences = mx.nd.slice_axis(sequences, axis=1, begin=0, end=target_max_length)
 
         model_probs, model_attention_probs, model_states = [], [], []
-        for model, state in zip(self.models, states):
-            probs, attention_probs, state = model.run_decoder(sequences, bucket_key, state)
+        # We use zip_longest here since we'll have empty lists when not using restrict_lexicon
+        for model, out_w, out_b, state in itertools.zip_longest(
+                self.models, models_output_layer_w, models_output_layer_b, states):
+            decoder_outputs, attention_probs, state = model.run_decoder(sequences, bucket_key, state)
+            # Compute logits and softmax with restricted vocabulary
+            if self.restrict_lexicon:
+                logits = model.decoder.output_layer(decoder_outputs, out_w, out_b)
+                probs = mx.nd.softmax(logits)
+            else:
+                # Otherwise decoder outputs are already target vocab probs
+                probs = decoder_outputs
             model_probs.append(probs)
             model_attention_probs.append(attention_probs)
             model_states.append(state)
@@ -881,6 +931,23 @@ class Translator:
         # reset all padding distribution cells to np.inf
         self.pad_dist[:] = np.inf
 
+        # If using a top-k lexicon, select param rows for logit computation that correspond to the
+        # target vocab for this sentence.
+        models_output_layer_w = list()
+        models_output_layer_b = list()
+        pad_dist = self.pad_dist
+        vocab_slice_ids = None  # type: mx.nd.NDArray
+        if self.restrict_lexicon:
+            # TODO: See note in method about migrating to pure MXNet when set operations are supported.
+            #       We currently convert source to NumPy and target ids back to NDArray.
+            vocab_slice_ids = mx.nd.array(self.restrict_lexicon.get_trg_ids(source.astype("int32").asnumpy()),
+                                          ctx=self.context)
+            pad_dist = mx.nd.full((self.batch_size * self.beam_size, vocab_slice_ids.shape[0]),
+                                  val=np.inf, ctx=self.context)
+            for m in self.models:
+                models_output_layer_w.append(m.output_layer_w.take(vocab_slice_ids))
+                models_output_layer_b.append(m.output_layer_b.take(vocab_slice_ids))
+
         # (0) encode source sentence, returns a list
         model_states = self._encode(source, source_length)
 
@@ -894,7 +961,9 @@ class Translator:
                                                                        t,
                                                                        source_length,
                                                                        max_output_length,
-                                                                       model_states)
+                                                                       model_states,
+                                                                       models_output_layer_w,
+                                                                       models_output_layer_b)
 
             # (2) compute length-normalized accumulated scores in place
             if t == 1 and self.batch_size == 1:  # only one hypothesis at t==1
@@ -904,11 +973,11 @@ class Translator:
                 scores = (scores + scores_accumulated * self.length_penalty(lengths - 1)) / self.length_penalty(lengths)
                 # ... but not for finished hyps.
                 # their predicted distribution is set to their accumulated scores at C.PAD_ID.
-                self.pad_dist[:, C.PAD_ID] = scores_accumulated
+                pad_dist[:, C.PAD_ID] = scores_accumulated
                 # this is equivalent to doing this in numpy:
-                #   self.pad_dist[finished, :] = np.inf
-                #   self.pad_dist[finished, C.PAD_ID] = scores_accumulated[finished]
-                scores = mx.nd.where(finished, self.pad_dist, scores)
+                #   pad_dist[finished, :] = np.inf
+                #   pad_dist[finished, C.PAD_ID] = scores_accumulated[finished]
+                scores = mx.nd.where(finished, pad_dist, scores)
 
             # (3) get beam_size winning hypotheses for each sentence block separately
             # TODO(fhieber): once mx.nd.topk is sped-up no numpy conversion necessary anymore.
@@ -921,10 +990,14 @@ class Translator:
                     scores_accumulated_np[rows] = utils.smallest_k(sliced_scores, self.beam_size, t == 1)
                 # offsetting since the returned smallest_k() indices were slice-relative
                 best_hyp_indices_np[rows] += rows.start
+
             # convert back to mx.ndarray again
             best_hyp_indices[:] = best_hyp_indices_np
             best_word_indices[:] = best_word_indices_np
             scores_accumulated[:] = np.expand_dims(scores_accumulated_np, axis=1)
+            # Map from restricted to full vocab ids if needed
+            if self.restrict_lexicon:
+                best_word_indices[:] = vocab_slice_ids.take(best_word_indices)
 
             # (4) get hypotheses and their properties for beam_size winning hypotheses (ascending)
             sequences = mx.nd.take(sequences, best_hyp_indices)
@@ -959,7 +1032,7 @@ class Translator:
         Return the best (aka top) entry from the n-best list.
 
         :param sequences: Array of word ids. Shape: (batch_size * beam_size, bucket_key).
-        :param attention_lists: Array of attentions over source words. 
+        :param attention_lists: Array of attentions over source words.
                                 Shape: (batch_size * self.beam_size, max_output_length, encoded_source_length).
         :param accumulated_scores: Array of length-normalized negative log-probs.
         :return: Top sequence, top attention matrix, top accumulated score (length-normalized

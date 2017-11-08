@@ -153,6 +153,7 @@ TARGET_PREVIOUS_NAME = "prev_target_word_id"
 HIDDEN_PREVIOUS_NAME = "prev_hidden"
 SOURCE_DYNAMIC_PREVIOUS_NAME = "prev_dynamic_source"
 
+LOGIT_INPUTS_NAME = "logit_inputs"
 LOGITS_NAME = "logits"
 SOFTMAX_NAME = "softmax"
 SOFTMAX_OUTPUT_NAME = SOFTMAX_NAME + "_output"
