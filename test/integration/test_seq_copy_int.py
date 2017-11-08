@@ -11,12 +11,9 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import os
-from tempfile import TemporaryDirectory
-
 import pytest
 
-from test.common import generate_digits_file, run_train_translate
+from test.common import run_train_translate, tmp_digits_dataset
 
 _TRAIN_LINE_COUNT = 100
 _DEV_LINE_COUNT = 10
@@ -87,24 +84,18 @@ ENCODER_DECODER_SETTINGS = [
 @pytest.mark.parametrize("train_params, translate_params, restrict_lexicon", ENCODER_DECODER_SETTINGS)
 def test_seq_copy(train_params: str, translate_params: str, restrict_lexicon: bool):
     """Task: copy short sequences of digits"""
-    with TemporaryDirectory(prefix="test_seq_copy") as work_dir:
-        # Simple digits files for train/dev data
-        train_source_path = os.path.join(work_dir, "train.src")
-        train_target_path = os.path.join(work_dir, "train.tgt")
-        dev_source_path = os.path.join(work_dir, "dev.src")
-        dev_target_path = os.path.join(work_dir, "dev.tgt")
-        generate_digits_file(train_source_path, train_target_path, _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH)
-        generate_digits_file(dev_source_path, dev_target_path, _DEV_LINE_COUNT, _LINE_MAX_LENGTH)
+    with tmp_digits_dataset("test_seq_copy", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT,
+                            _LINE_MAX_LENGTH) as data:
         # Test model configuration, including the output equivalence of batch and no-batch decoding
         translate_params_batch = translate_params + " --batch-size 2"
         # Ignore return values (perplexity and BLEU) for integration test
         run_train_translate(train_params,
                             translate_params,
                             translate_params_batch,
-                            train_source_path,
-                            train_target_path,
-                            dev_source_path,
-                            dev_target_path,
+                            data['source'],
+                            data['target'],
+                            data['validation_source'],
+                            data['validation_target'],
                             max_seq_len=_LINE_MAX_LENGTH + 1,
                             restrict_lexicon=restrict_lexicon,
-                            work_dir=work_dir)
+                            work_dir=data['work_dir'])
