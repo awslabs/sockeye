@@ -10,7 +10,6 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 For each item we will potentially have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-
 ## [1.13.0]
  - Removed RNN parameter (un-)packing and support for FusedRNNCells (removed `--use-fused-rnns` flag).
  These were not used, not correctly initialized, and performed worse than regular RNN cells. Moreover,
@@ -27,7 +26,6 @@ For each item we will potentially have subsections for: _Added_, _Changed_, _Rem
 
 ## [1.12.0]
 ### Changed
-<<<<<<< HEAD
  - Transformers now always use the linear output transformation after combining attention heads, even if input & output
  depth do not differ.
 
