@@ -750,11 +750,6 @@ def add_training_args(params):
                                    "reduced due to the value of --learning-rate-reduce-num-not-improved. "
                                    "Default: %(default)s.")
 
-    train_params.add_argument('--use-fused-rnn',
-                              default=False,
-                              action="store_true",
-                              help='Use FusedRNNCell in encoder (requires GPU device). Speeds up training.')
-
     train_params.add_argument('--rnn-forget-bias',
                               default=0.0,
                               type=float,

@@ -89,9 +89,6 @@ def check_arg_compatibility(args: argparse.Namespace):
 
     :param args: Arguments as returned by argparse.
     """
-    if args.use_fused_rnn:
-        check_condition(not args.use_cpu, "GPU required for FusedRNN cells")
-
     check_condition(args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics,
                     "Must optimize either BLEU or one of tracked metrics (--metrics)")
 
@@ -541,7 +538,6 @@ def create_training_model(model_config: model.ModelConfig,
     training_model = training.TrainingModel(config=model_config,
                                             context=context,
                                             train_iter=train_iter,
-                                            fused=args.use_fused_rnn,
                                             bucketing=not args.no_bucketing,
                                             lr_scheduler=lr_scheduler_instance)
 

@@ -32,9 +32,9 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
-def get_encoder(config: Config, fused: bool, embed_weight: Optional[mx.sym.Symbol] = None):
+def get_encoder(config: Config, embed_weight: Optional[mx.sym.Symbol] = None):
     if isinstance(config, RecurrentEncoderConfig):
-        return get_recurrent_encoder(config, fused, embed_weight)
+        return get_recurrent_encoder(config, embed_weight)
     elif isinstance(config, transformer.TransformerConfig):
         return get_transformer_encoder(config, embed_weight)
     elif isinstance(config, ConvolutionalEncoderConfig):
@@ -101,14 +101,13 @@ class ConvolutionalEncoderConfig(Config):
         self.positional_embedding_type = positional_embedding_type
 
 
-def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
+def get_recurrent_encoder(config: RecurrentEncoderConfig,
                           embed_weight: Optional[mx.sym.Symbol] = None) -> 'Encoder':
     """
     Returns a recurrent encoder with embedding, batch2time-major conversion, and bidirectional RNN.
     If num_layers > 1, adds additional uni-directional RNNs.
 
     :param config: Configuration for recurrent encoder.
-    :param fused: Whether to use FusedRNNCell (CuDNN). Only works with GPU context.
     :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
     :return: Encoder instance.
     """
@@ -138,7 +137,6 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
         utils.check_condition(config.rnn_config.first_residual_layer >= 2,
                               "Residual connections on the first encoder layer are not supported")
 
-    encoder_class = FusedRecurrentEncoder if fused else RecurrentEncoder
     # One layer bi-directional RNN:
     encoders.append(BiDirectionalRNNEncoder(rnn_config=config.rnn_config.copy(num_layers=1),
                                             prefix=C.BIDIRECTIONALRNN_PREFIX,
@@ -149,7 +147,7 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
         # Because we already have a one layer bi-rnn we reduce the num_layers as well as the first_residual_layer.
         remaining_rnn_config = config.rnn_config.copy(num_layers=config.rnn_config.num_layers - 1,
                                                       first_residual_layer=config.rnn_config.first_residual_layer - 1)
-        encoders.append(encoder_class(rnn_config=remaining_rnn_config,
+        encoders.append(RecurrentEncoder(rnn_config=remaining_rnn_config,
                                       prefix=C.STACKEDRNN_PREFIX,
                                       layout=C.TIME_MAJOR))
 
@@ -240,12 +238,6 @@ class Encoder(ABC):
         :return: The representation size of this encoder.
         """
         raise NotImplementedError()
-
-    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
-        """
-        :return: A list of RNNCells used by this encoder.
-        """
-        return []
 
     def get_encoded_seq_len(self, seq_len: int) -> int:
         """
@@ -581,16 +573,6 @@ class EncoderSequence(Encoder):
         else:
             return self.encoders[-1].get_num_hidden()
 
-    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
-        """
-        Returns a list of RNNCells used by this encoder.
-        """
-        cells = []
-        for encoder in self.encoders:
-            for cell in encoder.get_rnn_cells():
-                cells.append(cell)
-        return cells
-
     def get_encoded_seq_len(self, seq_len: int) -> int:
         """
         Returns the size of the encoded sequence.
@@ -652,30 +634,6 @@ class RecurrentEncoder(Encoder):
         Return the representation size of this encoder.
         """
         return self.rnn_config.num_hidden
-
-
-class FusedRecurrentEncoder(RecurrentEncoder):
-    """
-    Uni-directional (multi-layered) recurrent encoder.
-
-    :param rnn_config: RNN configuration.
-    :param prefix: Prefix.
-    :param layout: Data layout.
-    """
-
-    def __init__(self,
-                 rnn_config: rnn.RNNConfig,
-                 prefix: str = C.STACKEDRNN_PREFIX,
-                 layout: str = C.TIME_MAJOR) -> None:
-        super().__init__(rnn_config, prefix, layout)
-        logger.warning("%s: FusedRNNCell uses standard MXNet Orthogonal initializer w/ rand_type=uniform", prefix)
-        self.rnn = mx.rnn.FusedRNNCell(self.rnn_config.num_hidden,
-                                       num_layers=self.rnn_config.num_layers,
-                                       mode=self.rnn_config.cell_type,
-                                       bidirectional=False,
-                                       dropout=self.rnn_config.dropout_inputs,
-                                       forget_bias=self.rnn_config.forget_bias,
-                                       prefix=prefix)
 
 
 class BiDirectionalRNNEncoder(Encoder):

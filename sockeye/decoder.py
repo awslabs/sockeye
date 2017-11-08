@@ -157,13 +157,6 @@ class Decoder(ABC):
         """
         pass
 
-    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
-        """
-        Returns a list of RNNCells used by this decoder.
-
-        """
-        return []
-
     def get_max_seq_len(self) -> Optional[int]:
         """
         :return: The maximum length supported by the decoder if such a restriction exists.

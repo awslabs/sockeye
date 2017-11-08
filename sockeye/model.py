@@ -95,7 +95,6 @@ class SockeyeModel:
         logger.info("%s", self.config)
         self.encoder = None  # type: Optional[encoder.Encoder]
         self.decoder = None  # type: Optional[decoder.Decoder]
-        self.rnn_cells = []  # type: List[mx.rnn.RNNCell]
         self.built = False
         self.params = None  # type: Optional[Dict]
 
@@ -128,11 +127,7 @@ class SockeyeModel:
         :param fname: Path to save parameters to.
         """
         assert self.built
-        params = self.params.copy()
-        # unpack rnn cell weights
-        for cell in self.rnn_cells:
-            params = cell.unpack_weights(params)
-        utils.save_params(params, fname)
+        utils.save_params(self.params.copy(), fname)
         logging.info('Saved params to "%s"', fname)
 
     def load_params_from_file(self, fname: str):
@@ -145,11 +140,7 @@ class SockeyeModel:
         utils.check_condition(os.path.exists(fname), "No model parameter file found under %s. "
                                                      "This is either not a model directory or the first training "
                                                      "checkpoint has not happened yet." % fname)
-
         self.params, _ = utils.load_params(fname)
-        # pack rnn cell weights
-        for cell in self.rnn_cells:
-            self.params = cell.pack_weights(self.params)
         logger.info('Loaded params from "%s"', fname)
 
     @staticmethod
@@ -163,11 +154,9 @@ class SockeyeModel:
         with open(fname, "w") as out:
             out.write(__version__)
 
-    def _build_model_components(self, fused_encoder: bool):
+    def _build_model_components(self):
         """
         Instantiates model components.
-
-        :param fused_encoder: Use FusedRNNCells in encoder.
         """
         # we tie the source and target embeddings if both appear in the type
         if self.config.weight_tying and C.WEIGHT_TYING_SRC in self.config.weight_tying_type \
@@ -179,14 +168,12 @@ class SockeyeModel:
         else:
             embed_weight = None
 
-        self.encoder = encoder.get_encoder(self.config.config_encoder, fused_encoder, embed_weight)
+        self.encoder = encoder.get_encoder(self.config.config_encoder, embed_weight)
 
         self.lexicon = lexicon.Lexicon(self.config.vocab_source_size,
                                        self.config.vocab_target_size,
                                        self.config.learn_lexical_bias) if self.config.lexical_bias else None
 
         self.decoder = decoder.get_decoder(self.config.config_decoder, self.lexicon, embed_weight)
-
-        self.rnn_cells = self.encoder.get_rnn_cells() + self.decoder.get_rnn_cells()
 
         self.built = True

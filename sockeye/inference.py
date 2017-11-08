@@ -41,7 +41,6 @@ class InferenceModel(model.SockeyeModel):
 
     :param model_folder: Folder to load model from.
     :param context: MXNet context to bind modules to.
-    :param fused: Whether to use FusedRNNCell (CuDNN). Only works with GPU context.
     :param beam_size: Beam size.
     :param batch_size: Batch size.
     :param checkpoint: Checkpoint to load. If None, finds best parameters in model_folder.
@@ -55,7 +54,6 @@ class InferenceModel(model.SockeyeModel):
     def __init__(self,
                  model_folder: str,
                  context: mx.context.Context,
-                 fused: bool,
                  beam_size: int,
                  batch_size: int,
                  checkpoint: Optional[int] = None,
@@ -80,7 +78,7 @@ class InferenceModel(model.SockeyeModel):
         self.batch_size = batch_size
         self.context = context
 
-        self._build_model_components(fused)
+        self._build_model_components()
 
         self.max_input_length, self.get_max_output_length = get_max_input_output_length([self],
                                                                                         max_output_length_num_stds)
@@ -372,7 +370,6 @@ def load_models(context: mx.context.Context,
         target_vocabs.append(vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_TRG_NAME)))
         model = InferenceModel(model_folder=model_folder,
                                context=context,
-                               fused=False,
                                beam_size=beam_size,
                                batch_size=batch_size,
                                softmax_temperature=softmax_temperature,
