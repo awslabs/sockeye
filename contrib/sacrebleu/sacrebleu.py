@@ -83,7 +83,7 @@ Sacré BLEU.
 
 # VERSION HISTORY
 
-- 1.1.0 (8 November 2017).
+- 1.1.1 (8 November 2017).
    - Factored code a bit to facilitate API:
       - compute_bleu: works from raw stats
       - corpus_bleu for use from the command line
@@ -144,7 +144,7 @@ try:
 except ImportError:
     logging.warn('Could not import signal.SIGPIPE (this is expected on Windows machines)')
 
-VERSION = '1.1.0'
+VERSION = '1.1.1'
 
 # Where to store downloaded test sets.
 # Define the environment variable $SACREBLEU, or use the default of ~/.sacrebleu.
