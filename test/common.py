@@ -22,12 +22,13 @@ import mxnet as mx
 import numpy as np
 
 import sockeye.average
-import sockeye.bleu
 import sockeye.constants as C
 import sockeye.evaluate
 import sockeye.train
 import sockeye.translate
 import sockeye.utils
+
+import sacrebleu
 
 
 def gaussian_vector(shape, return_symbol=False):
@@ -188,8 +189,8 @@ def run_train_translate(train_params: str,
         perplexity = metrics[-1][C.PERPLEXITY + '-val']
 
         # Measure BLEU
-        bleu = sockeye.bleu.corpus_bleu(open(out_path, "r").readlines(),
-                                        open(dev_target_path, "r").readlines())
+        bleu = sacrebleu.raw_corpus_bleu(open(out_path, "r").readlines(),
+                                         [open(dev_target_path, "r").readlines()], 0.01)
 
         # Run BLEU cli
         eval_params = "{} {} ".format(sockeye.evaluate.__file__,

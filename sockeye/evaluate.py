@@ -18,7 +18,7 @@ import argparse
 import logging
 import sys
 
-from sockeye.bleu import corpus_bleu, bleu_from_counts, bleu_counts
+import sacrebleu
 from sockeye.log import setup_main_logger, log_sockeye_version
 from . import arguments
 from . import data_io
@@ -26,6 +26,9 @@ from . import utils
 
 logger = setup_main_logger(__name__, file_logging=False)
 
+def raw_corpus_bleu(hypotheses, references, offset):
+    """Simple wrapper around sacreBLEU that turns off tokenization, adds smoothing, etc."""
+    return sacrebleu.raw_corpus_bleu(hypotheses, [references], offset).score / 100
 
 def main():
     params = argparse.ArgumentParser(description='Evaluate translations by calculating 4-BLEU '
@@ -52,11 +55,11 @@ def main():
                                                                                                  len(references)))
 
     if not args.sentence:
-        bleu = corpus_bleu(hypotheses, references, args.offset)
+        bleu = raw_corpus_bleu(hypotheses, references, args.offset)
         print(bleu, file=sys.stdout)
     else:
         for h, r in zip(hypotheses, references):
-            bleu = bleu_from_counts(bleu_counts(h, r), args.offset)
+            bleu = corpus_bleu(h, r, args.offset)
             print(bleu, file=sys.stdout)
 
 

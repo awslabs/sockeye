@@ -1,3 +1,4 @@
 pyyaml
 mxnet==0.10.0
 numpy>=1.12
+sacrebleu
