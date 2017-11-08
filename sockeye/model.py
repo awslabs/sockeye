@@ -14,7 +14,7 @@
 import copy
 import logging
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import mxnet as mx
 
@@ -24,6 +24,7 @@ from . import constants as C
 from . import data_io
 from . import decoder
 from . import encoder
+from . import layers
 from . import lexicon
 from . import loss
 from . import utils
@@ -42,6 +43,8 @@ class ModelConfig(Config):
     :param max_seq_len_target: Maximum target sequence length to unroll during training.
     :param vocab_source_size: Source vocabulary size.
     :param vocab_target_size: Target vocabulary size.
+    :param config_embed_source: Embedding config for source.
+    :param config_embed_target: Embedding config for target.
     :param config_encoder: Encoder configuration.
     :param config_decoder: Decoder configuration.
     :param config_loss: Loss configuration.
@@ -56,28 +59,34 @@ class ModelConfig(Config):
                  max_seq_len_target: int,
                  vocab_source_size: int,
                  vocab_target_size: int,
+                 config_embed_source: Config,
+                 config_embed_target: Config,
                  config_encoder: Config,
                  config_decoder: Config,
                  config_loss: loss.LossConfig,
                  lexical_bias: bool = False,
                  learn_lexical_bias: bool = False,
                  weight_tying: bool = False,
-                 weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX) -> None:
+                 weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
+                 weight_normalization: bool = False) -> None:
         super().__init__()
         self.config_data = config_data
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
         self.vocab_source_size = vocab_source_size
         self.vocab_target_size = vocab_target_size
+        self.config_embed_source = config_embed_source
+        self.config_embed_target = config_embed_target
         self.config_encoder = config_encoder
         self.config_decoder = config_decoder
         self.config_loss = config_loss
         self.lexical_bias = lexical_bias
         self.learn_lexical_bias = learn_lexical_bias
         self.weight_tying = weight_tying
+        self.weight_tying_type = weight_tying_type
+        self.weight_normalization = weight_normalization
         if weight_tying and weight_tying_type is None:
             raise RuntimeError("weight_tying_type must be specified when using weight_tying.")
-        self.weight_tying_type = weight_tying_type
 
 
 class SockeyeModel:
@@ -93,9 +102,12 @@ class SockeyeModel:
         self.config = copy.deepcopy(config)
         self.config.freeze()
         logger.info("%s", self.config)
+        self.embedding_source = None  # type: Optional[encoder.Embedding]
         self.encoder = None  # type: Optional[encoder.Encoder]
+        self.embedding_target = None  # type: Optional[encoder.Embedding]
         self.decoder = None  # type: Optional[decoder.Decoder]
-        self.built = False
+        self.output_layer = None  # type: Optional[layers.OutputLayer]
+        self._is_built = False
         self.params = None  # type: Optional[Dict]
 
     def save_config(self, folder: str):
@@ -126,7 +138,7 @@ class SockeyeModel:
 
         :param fname: Path to save parameters to.
         """
-        assert self.built
+        assert self._is_built
         utils.save_params(self.params.copy(), fname)
         logging.info('Saved params to "%s"', fname)
 
@@ -136,7 +148,7 @@ class SockeyeModel:
 
         :param fname: Path to load parameters from.
         """
-        assert self.built
+        assert self._is_built
         utils.check_condition(os.path.exists(fname), "No model parameter file found under %s. "
                                                      "This is either not a model directory or the first training "
                                                      "checkpoint has not happened yet." % fname)
@@ -154,26 +166,70 @@ class SockeyeModel:
         with open(fname, "w") as out:
             out.write(__version__)
 
+    def _get_embed_weights(self) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol]:
+        """
+        Returns embedding parameters for source and target.
+
+        :return: Tuple of source and target parameter symbols.
+        """
+        assert isinstance(self.config.config_embed_source, encoder.EmbeddingConfig)
+        assert isinstance(self.config.config_embed_target, encoder.EmbeddingConfig)
+        w_embed_source = mx.sym.Variable(C.SOURCE_EMBEDDING_PREFIX + "weight",
+                                         shape=(self.config.config_embed_source.vocab_size,
+                                                self.config.config_embed_source.num_embed))
+        w_embed_target = mx.sym.Variable(C.TARGET_EMBEDDING_PREFIX + "weight",
+                                         shape=(self.config.config_embed_target.vocab_size,
+                                                self.config.config_embed_target.num_embed))
+        w_out_target = mx.sym.Variable("target_output_weight",
+                                       shape=(self.config.vocab_target_size, 0))
+
+        if self.config.weight_tying:
+            if C.WEIGHT_TYING_SRC in self.config.weight_tying_type \
+                    and C.WEIGHT_TYING_TRG in self.config.weight_tying_type:
+                logger.info("Tying the source and target embeddings.")
+                w_embed_source = w_embed_target = mx.sym.Variable(C.SHARED_EMBEDDING_PREFIX + "weight",
+                                                                  shape=(self.config.config_embed_source.vocab_size,
+                                                                         self.config.config_embed_source.num_embed))
+
+            if C.WEIGHT_TYING_SOFTMAX in self.config.weight_tying_type:
+                logger.info("Tying the target embeddings and output layer parameters.")
+                w_out_target = w_embed_target
+
+        return w_embed_source, w_embed_target, w_out_target
+
     def _build_model_components(self):
         """
         Instantiates model components.
         """
-        # we tie the source and target embeddings if both appear in the type
-        if self.config.weight_tying and C.WEIGHT_TYING_SRC in self.config.weight_tying_type \
-                and C.WEIGHT_TYING_TRG in self.config.weight_tying_type:
-            logger.info("Tying the source and target embeddings.")
-            embed_weight = encoder.Embedding.get_embed_weight(vocab_size=self.config.vocab_source_size,
-                                                              embed_size=0,  # will get inferred
-                                                              prefix=C.SHARED_EMBEDDING_PREFIX)
-        else:
-            embed_weight = None
+        # source & target embeddings
+        embed_weight_source, embed_weight_target, out_weight_target = self._get_embed_weights()
+        assert isinstance(self.config.config_embed_source, encoder.EmbeddingConfig)
+        assert isinstance(self.config.config_embed_target, encoder.EmbeddingConfig)
+        self.embedding_source = encoder.Embedding(self.config.config_embed_source,
+                                                  prefix=C.SOURCE_EMBEDDING_PREFIX,
+                                                  embed_weight=embed_weight_source)
+        self.embedding_target = encoder.Embedding(self.config.config_embed_target,
+                                                  prefix=C.TARGET_EMBEDDING_PREFIX,
+                                                  embed_weight=embed_weight_target)
 
-        self.encoder = encoder.get_encoder(self.config.config_encoder, embed_weight)
+        # encoder & decoder
+        self.encoder = encoder.get_encoder(self.config.config_encoder)
+        self.decoder = decoder.get_decoder(self.config.config_decoder)
 
-        self.lexicon = lexicon.Lexicon(self.config.vocab_source_size,
-                                       self.config.vocab_target_size,
-                                       self.config.learn_lexical_bias) if self.config.lexical_bias else None
+        # TODO remove lexicon bias code
+        #self.lexicon = lexicon.Lexicon(self.config.vocab_source_size,
+        #                               self.config.vocab_target_size,
+        #                               self.config.learn_lexical_bias) if self.config.lexical_bias else None
 
-        self.decoder = decoder.get_decoder(self.config.config_decoder, self.lexicon, embed_weight)
+        # output layer
+        # TODO: generic output layer dropout?
+        utils.check_condition(self.config.config_embed_target.num_embed == self.decoder.get_num_hidden(),
+                              "Weight tying requires target embedding size and decoder hidden size " +
+                              "to be equal: %d vs. %d" % (self.config.config_embed_target.num_embed,
+                                                          self.decoder.get_num_hidden()))
 
-        self.built = True
+        self.output_layer = layers.OutputLayer(vocab_size=self.config.vocab_target_size,
+                                               weight=out_weight_target,
+                                               weight_normalization=self.config.weight_normalization)
+
+        self._is_built = True

@@ -13,11 +13,11 @@
 
 import logging
 from typing import Optional, Tuple, Union
-from . import constants as C
 
 import mxnet as mx
 import numpy as np
 
+from . import constants as C
 from . import utils
 
 logger = logging.getLogger(__name__)
@@ -123,35 +123,21 @@ class OutputLayer:
     """
     Defines the output layer of Sockeye decoders. Supports weight tying and weight normalization.
 
-    :param num_hidden: Number of hidden units in layer input (decoder representation).
-    :param num_embed: Target embedding size.
     :param vocab_size: Target vocabulary size.
-    :param weight_tying: Whether to use target embedding parameters as output layer parameters.
-    :param embed_weight: Optional embedding matrix. Required if weight_tying == True.
     :param weight_normalization: Whether to apply weight normalization.
     :param prefix: Prefix used for naming.
     """
 
     def __init__(self,
-                 num_hidden: int,
-                 num_embed: int,
                  vocab_size: int,
-                 weight_tying: bool,
-                 embed_weight: Optional[mx.sym.Symbol],
-                 weight_normalization: bool,
-                 prefix: str = '') -> None:
+                 weight: Optional[mx.sym.Symbol],
+                 weight_normalization: bool) -> None:
         self.vocab_size = vocab_size
 
-        if weight_tying:
-            utils.check_condition(num_hidden == num_embed,
-                                  "Weight tying requires target embedding size and decoder hidden size " +
-                                  "to be equal: %d vs. %d" % (num_embed, num_hidden))
-
-            logger.info("Tying the target embeddings and prediction matrix.")
-            assert embed_weight is not None, "Must provide embed_weight if weight_tying == True"
-            self.w = embed_weight
+        if weight is None:
+            self.w = mx.sym.Variable("target_output_weight", shape=(vocab_size, 0))
         else:
-            self.w = mx.sym.Variable("%scls_weight" % prefix, shape=(vocab_size, num_hidden))
+            self.w = weight
 
         self.weight_normalization = weight_normalization
         if weight_normalization:
@@ -159,10 +145,10 @@ class OutputLayer:
             self.weight_norm = WeightNormalization(self.w,
                                                    num_hidden=vocab_size,
                                                    ndim=2,
-                                                   prefix="%scls_" % prefix)
+                                                   prefix="target_output_")
             self.w = self.weight_norm()
 
-        self.b = mx.sym.Variable("%scls_bias" % prefix)
+        self.b = mx.sym.Variable("target_output_bias")
 
     def __call__(self,
                  hidden: Union[mx.sym.Symbol, mx.nd.NDArray],
@@ -175,6 +161,7 @@ class OutputLayer:
         :return: Logits. Shape(n, self.vocab_size).
         """
         if isinstance(hidden, mx.sym.Symbol):
+            # TODO dropout?
             return mx.sym.FullyConnected(data=hidden,
                                          num_hidden=self.vocab_size,
                                          weight=self.w,

@@ -110,18 +110,38 @@ class TrainingModel(model.SockeyeModel):
             """
             source_seq_len, target_seq_len = seq_lens
 
+            # source embedding
+            (source_embed,
+             source_embed_length,
+             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
+
+            # target embedding
+            (target_embed,
+             target_embed_length,
+             target_embed_seq_len) = self.embedding_target.encode(target, target_length, target_seq_len)
+
+            # encoder
+            # source_encoded: (source_encoded_length, batch_size, encoder_depth)
             (source_encoded,
              source_encoded_length,
-             source_encoded_seq_len) = self.encoder.encode(source, source_length, seq_len=source_seq_len)
+             source_encoded_seq_len) = self.encoder.encode(source_embed,
+                                                           source_embed_length,
+                                                           source_embed_seq_len)
 
-            source_lexicon = self.lexicon.lookup(source) if self.lexicon else None
+            # decoder
+            # target_decoded: (batch-size, target_len, decoder_depth)
+            target_decoded = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
+                                                          target_embed, target_embed_length, target_embed_seq_len)
 
-            logits = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len, target,
-                                                  target_length, target_seq_len, source_lexicon)
+            # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
+            target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
 
-            outputs = model_loss.get_loss(logits, labels)
+            # logits: (batch_size * target_seq_len, target_vocab_size)
+            logits = self.output_layer(target_decoded)
 
-            return mx.sym.Group(outputs), data_names, label_names
+            probs = model_loss.get_loss(logits, labels)
+
+            return mx.sym.Group(probs), data_names, label_names
 
         if self.bucketing:
             logger.info("Using bucketing. Default max_seq_len=%s", train_iter.default_bucket_key)

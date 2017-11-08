@@ -278,7 +278,6 @@ def create_encoder_config(args: argparse.Namespace, vocab_source_size: int,
     encoder_num_layers, _ = args.num_layers
     max_seq_len_source, max_seq_len_target = args.max_seq_len
     num_embed_source, _ = args.num_embed
-    encoder_embed_dropout, _ = args.embed_dropout
     config_encoder = None  # type: Optional[Config]
 
     if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
@@ -289,13 +288,9 @@ def create_encoder_config(args: argparse.Namespace, vocab_source_size: int,
             attention_heads=args.transformer_attention_heads,
             feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
             num_layers=encoder_num_layers,
-            vocab_size=vocab_source_size,
-            dropout_embed=encoder_embed_dropout,
             dropout_attention=args.transformer_dropout_attention,
             dropout_relu=args.transformer_dropout_relu,
             dropout_prepost=args.transformer_dropout_prepost,
-            weight_tying=args.weight_tying and C.WEIGHT_TYING_SRC in args.weight_tying_type,
-            weight_normalization=False,
             positional_embedding_type=args.transformer_positional_embedding_type,
             preprocess_sequence=encoder_transformer_preprocess,
             postprocess_sequence=encoder_transformer_postprocess,
@@ -309,9 +304,7 @@ def create_encoder_config(args: argparse.Namespace, vocab_source_size: int,
                                                    num_hidden=args.cnn_num_hidden,
                                                    act_type=args.cnn_activation_type,
                                                    weight_normalization=args.weight_normalization)
-        config_encoder = encoder.ConvolutionalEncoderConfig(vocab_size=vocab_source_size,
-                                                            num_embed=num_embed_source,
-                                                            embed_dropout=encoder_embed_dropout,
+        config_encoder = encoder.ConvolutionalEncoderConfig(num_embed=num_embed_source,
                                                             max_seq_len_source=max_seq_len_source,
                                                             cnn_config=cnn_config,
                                                             num_layers=encoder_num_layers,
@@ -323,9 +316,6 @@ def create_encoder_config(args: argparse.Namespace, vocab_source_size: int,
         encoder_rnn_dropout_states, _ = args.rnn_dropout_states
         encoder_rnn_dropout_recurrent, _ = args.rnn_dropout_recurrent
         config_encoder = encoder.RecurrentEncoderConfig(
-            vocab_size=vocab_source_size,
-            num_embed=num_embed_source,
-            embed_dropout=encoder_embed_dropout,
             rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
                                      num_hidden=args.rnn_num_hidden,
                                      num_layers=encoder_num_layers,
@@ -353,10 +343,6 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int, enco
     _, decoder_num_layers = args.num_layers
     max_seq_len_source, max_seq_len_target = args.max_seq_len
     _, num_embed_target = args.num_embed
-    _, decoder_embed_dropout = args.embed_dropout
-
-    decoder_weight_tying = args.weight_tying and C.WEIGHT_TYING_TRG in args.weight_tying_type \
-                           and C.WEIGHT_TYING_SOFTMAX in args.weight_tying_type
 
     config_decoder = None  # type: Optional[Config]
 
@@ -368,13 +354,9 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int, enco
             attention_heads=args.transformer_attention_heads,
             feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
             num_layers=decoder_num_layers,
-            vocab_size=vocab_target_size,
-            dropout_embed=decoder_embed_dropout,
             dropout_attention=args.transformer_dropout_attention,
             dropout_relu=args.transformer_dropout_relu,
             dropout_prepost=args.transformer_dropout_prepost,
-            weight_tying=decoder_weight_tying,
-            weight_normalization=args.weight_normalization,
             positional_embedding_type=args.transformer_positional_embedding_type,
             preprocess_sequence=decoder_transformer_preprocess,
             postprocess_sequence=decoder_transformer_postprocess,
@@ -389,15 +371,11 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int, enco
                                                            act_type=args.cnn_activation_type,
                                                            weight_normalization=args.weight_normalization)
         config_decoder = decoder.ConvolutionalDecoderConfig(cnn_config=convolution_config,
-                                                            vocab_size=vocab_target_size,
                                                             max_seq_len_target=max_seq_len_target,
                                                             num_embed=num_embed_target,
                                                             encoder_num_hidden=encoder_num_hidden,
                                                             num_layers=decoder_num_layers,
                                                             positional_embedding_type=args.cnn_positional_embedding_type,
-                                                            weight_tying=decoder_weight_tying,
-                                                            embed_dropout=decoder_embed_dropout,
-                                                            weight_normalization=args.weight_normalization,
                                                             hidden_dropout=args.cnn_hidden_dropout)
 
     else:
@@ -421,9 +399,7 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int, enco
         _, decoder_rnn_dropout_recurrent = args.rnn_dropout_recurrent
 
         config_decoder = decoder.RecurrentDecoderConfig(
-            vocab_size=vocab_target_size,
             max_seq_len_source=max_seq_len_source,
-            num_embed=num_embed_target,
             rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
                                      num_hidden=args.rnn_num_hidden,
                                      num_layers=decoder_num_layers,
@@ -434,14 +410,11 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int, enco
                                      first_residual_layer=args.rnn_first_residual_layer,
                                      forget_bias=args.rnn_forget_bias),
             attention_config=config_attention,
-            embed_dropout=decoder_embed_dropout,
             hidden_dropout=args.rnn_decoder_hidden_dropout,
-            weight_tying=decoder_weight_tying,
             state_init=args.rnn_decoder_state_init,
             context_gating=args.rnn_context_gating,
             layer_normalization=args.layer_normalization,
-            attention_in_upper_layers=args.rnn_attention_in_upper_layers,
-            weight_normalization=args.weight_normalization)
+            attention_in_upper_layers=args.rnn_attention_in_upper_layers)
 
     return config_decoder
 
@@ -480,7 +453,8 @@ def create_model_config(args: argparse.Namespace,
     :return: The model configuration.
     """
     max_seq_len_source, max_seq_len_target = args.max_seq_len
-    num_embed_source, _ = args.num_embed
+    num_embed_source, num_embed_target = args.num_embed
+    embed_dropout_source, embed_dropout_target = args.embed_dropout
 
     check_encoder_decoder_args(args)
 
@@ -496,6 +470,13 @@ def create_model_config(args: argparse.Namespace,
     config_encoder, encoder_num_hidden = create_encoder_config(args, vocab_source_size, config_conv)
     config_decoder = create_decoder_config(args, vocab_target_size, encoder_num_hidden)
 
+    config_embed_source = encoder.EmbeddingConfig(vocab_size=vocab_source_size,
+                                                  num_embed=num_embed_source,
+                                                  dropout=embed_dropout_source)
+    config_embed_target = encoder.EmbeddingConfig(vocab_size=vocab_target_size,
+                                                  num_embed=num_embed_target,
+                                                  dropout=embed_dropout_target)
+
     config_loss = loss.LossConfig(name=args.loss,
                                   vocab_size=vocab_target_size,
                                   normalization_type=args.loss_normalization_type,
@@ -506,13 +487,16 @@ def create_model_config(args: argparse.Namespace,
                                      max_seq_len_target=max_seq_len_target,
                                      vocab_source_size=vocab_source_size,
                                      vocab_target_size=vocab_target_size,
+                                     config_embed_source=config_embed_source,
+                                     config_embed_target=config_embed_target,
                                      config_encoder=config_encoder,
                                      config_decoder=config_decoder,
                                      config_loss=config_loss,
                                      lexical_bias=args.lexical_bias,
                                      learn_lexical_bias=args.learn_lexical_bias,
                                      weight_tying=args.weight_tying,
-                                     weight_tying_type=args.weight_tying_type if args.weight_tying else None,)
+                                     weight_tying_type=args.weight_tying_type if args.weight_tying else None,
+                                     weight_normalization=args.weight_normalization)
     return model_config
 
 

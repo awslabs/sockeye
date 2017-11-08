@@ -32,13 +32,13 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
-def get_encoder(config: Config, embed_weight: Optional[mx.sym.Symbol] = None):
+def get_encoder(config: Config):
     if isinstance(config, RecurrentEncoderConfig):
-        return get_recurrent_encoder(config, embed_weight)
+        return get_recurrent_encoder(config)
     elif isinstance(config, transformer.TransformerConfig):
-        return get_transformer_encoder(config, embed_weight)
+        return get_transformer_encoder(config)
     elif isinstance(config, ConvolutionalEncoderConfig):
-        return get_convolutional_encoder(config, embed_weight)
+        return get_convolutional_encoder(config)
     else:
         raise ValueError("Unsupported encoder configuration")
 
@@ -47,25 +47,16 @@ class RecurrentEncoderConfig(Config):
     """
     Recurrent encoder configuration.
 
-    :param vocab_size: Source vocabulary size.
-    :param num_embed: Size of embedding layer.
-    :param embed_dropout: Dropout probability on embedding layer.
     :param rnn_config: RNN configuration.
     :param conv_config: Optional configuration for convolutional embedding.
     :param reverse_input: Reverse embedding sequence before feeding into RNN.
     """
 
     def __init__(self,
-                 vocab_size: int,
-                 num_embed: int,
-                 embed_dropout: float,
                  rnn_config: rnn.RNNConfig,
                  conv_config: Optional['ConvolutionalEmbeddingConfig'] = None,
                  reverse_input: bool = False) -> None:
         super().__init__()
-        self.vocab_size = vocab_size
-        self.num_embed = num_embed
-        self.embed_dropout = embed_dropout
         self.rnn_config = rnn_config
         self.conv_config = conv_config
         self.reverse_input = reverse_input
@@ -75,57 +66,40 @@ class ConvolutionalEncoderConfig(Config):
     """
     Convolutional encoder configuration.
 
-    :param vocab_size: Source vocabulary size.
-    :param num_embed: Size of embedding layer.
-    :param embed_dropout: Dropout probability on embedding layer.
     :param cnn_config: CNN configuration.
     :param num_layers: The number of convolutional layers on top of the embeddings.
     :param positional_embedding_type: The type of positional embedding.
     """
 
     def __init__(self,
-                 vocab_size: int,
                  num_embed: int,
-                 embed_dropout: float,
                  max_seq_len_source: int,
                  cnn_config: convolution.ConvolutionConfig,
                  num_layers: int,
                  positional_embedding_type: str) -> None:
         super().__init__()
-        self.vocab_size = vocab_size
         self.num_embed = num_embed
-        self.embed_dropout = embed_dropout
         self.num_layers = num_layers
         self.cnn_config = cnn_config
         self.max_seq_len_source = max_seq_len_source
         self.positional_embedding_type = positional_embedding_type
 
 
-def get_recurrent_encoder(config: RecurrentEncoderConfig,
-                          embed_weight: Optional[mx.sym.Symbol] = None) -> 'Encoder':
+def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
     """
-    Returns a recurrent encoder with embedding, batch2time-major conversion, and bidirectional RNN.
-    If num_layers > 1, adds additional uni-directional RNNs.
+    Returns an encoder stack with a bi-directional RNN, and a variable number of uni-directional forward RNNs.
 
     :param config: Configuration for recurrent encoder.
-    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
     :return: Encoder instance.
     """
     # TODO give more control on encoder architecture
     encoders = list()  # type: List[Encoder]
 
-    encoders.append(Embedding(num_embed=config.num_embed,
-                              vocab_size=config.vocab_size,
-                              prefix=C.SOURCE_EMBEDDING_PREFIX,
-                              dropout=config.embed_dropout,
-                              embed_weight=embed_weight))
-
     if config.conv_config is not None:
-        encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config,
-                                                      prefix=C.CHAR_SEQ_ENCODER_PREFIX))
+        encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config, prefix=C.CHAR_SEQ_ENCODER_PREFIX))
         if config.conv_config.add_positional_encoding:
             # If specified, add positional encodings to segment embeddings
-            encoders.append(AddSinCosPositionalEmbeddings(num_embed=config.num_embed,
+            encoders.append(AddSinCosPositionalEmbeddings(num_embed=config.conv_config.num_embed,
                                                           prefix="%sadd_positional_encodings" % C.CHAR_SEQ_ENCODER_PREFIX))
 
     encoders.append(BatchMajor2TimeMajor())
@@ -154,8 +128,7 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig,
     return EncoderSequence(encoders)
 
 
-def get_convolutional_encoder(config: ConvolutionalEncoderConfig,
-                              embed_weight: Optional[mx.sym.Symbol] = None) -> 'Encoder':
+def get_convolutional_encoder(config: ConvolutionalEncoderConfig) -> 'Encoder':
     """
     Creates a convolutional encoder.
 
@@ -164,42 +137,24 @@ def get_convolutional_encoder(config: ConvolutionalEncoderConfig,
     :return: Encoder instance.
     """
     encoders = list()  # type: List[Encoder]
-    encoders.append(Embedding(num_embed=config.num_embed,
-                              vocab_size=config.vocab_size,
-                              prefix=C.SOURCE_EMBEDDING_PREFIX,
-                              dropout=config.embed_dropout,
-                              embed_weight=embed_weight))
-
     encoders.append(get_positional_embedding(config.positional_embedding_type,
                                              config.num_embed,
                                              max_seq_len=config.max_seq_len_source,
                                              prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
-
     encoders.append(ConvolutionalEncoder(config=config))
     encoders.append(BatchMajor2TimeMajor())
-
     return EncoderSequence(encoders)
 
 
-def get_transformer_encoder(config: transformer.TransformerConfig,
-                            embed_weight: Optional[mx.sym.Symbol] = None) -> 'Encoder':
+def get_transformer_encoder(config: transformer.TransformerConfig) -> 'Encoder':
     """
     Returns a Transformer encoder, consisting of an embedding layer with
     positional encodings and a TransformerEncoder instance.
 
     :param config: Configuration for transformer encoder.
-    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
     :return: Encoder instance.
     """
     encoders = list()  # type: List[Encoder]
-    # Note: Transformers use model_size as embedding size
-    # Note: Embedding vectors are scaled by transformer model size.
-    encoders.append(Embedding(num_embed=config.model_size,
-                              vocab_size=config.vocab_size,
-                              prefix=C.SOURCE_EMBEDDING_PREFIX,
-                              dropout=config.dropout_embed,
-                              embed_weight=embed_weight,
-                              embed_scale=config.model_size ** 0.5))
     encoders.append(get_positional_embedding(config.positional_embedding_type,
                                              config.model_size,
                                              config.max_seq_len_source,
@@ -286,34 +241,37 @@ class ReverseSequence(Encoder):
         return data, data_length, seq_len
 
 
+class EmbeddingConfig(Config):
+
+    def __init__(self,
+                 vocab_size: int,
+                 num_embed: int,
+                 dropout: float) -> None:
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.num_embed = num_embed
+        self.dropout = dropout
+
+
 class Embedding(Encoder):
     """
     Thin wrapper around MXNet's Embedding symbol. Works with both time- and batch-major data layouts.
 
-    :param num_embed: Embedding size.
-    :param vocab_size: Source vocabulary size.
+    :param config: Embedding config.
     :param prefix: Name prefix for symbols of this encoder.
-    :param dropout: Dropout probability.
     :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
-    :param embed_scale: Optional fixed scaling factor for embeddings.
     """
 
     def __init__(self,
-                 num_embed: int,
-                 vocab_size: int,
+                 config: EmbeddingConfig,
                  prefix: str,
-                 dropout: float,
-                 embed_weight: Optional[mx.sym.Symbol] = None,
-                 embed_scale: Optional[float] = None) -> None:
-        self.num_embed = num_embed
-        self.vocab_size = vocab_size
+                 embed_weight: Optional[mx.sym.Symbol] = None) -> None:
+        self.config = config
         self.prefix = prefix
-        self.dropout = dropout
-        if embed_weight is not None:
-            self.embed_weight = embed_weight
-        else:
-            self.embed_weight = self.get_embed_weight(vocab_size, num_embed, prefix)
-        self.embed_scale = embed_scale
+        self.embed_weight = embed_weight
+        if self.embed_weight is None:
+            self.embed_weight = mx.sym.Variable(prefix + "weight",
+                                                shape=(self.config.vocab_size, self.config.num_embed))
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -328,28 +286,20 @@ class Embedding(Encoder):
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
         embedding = mx.sym.Embedding(data=data,
-                                     input_dim=self.vocab_size,
+                                     input_dim=self.config.vocab_size,
                                      weight=self.embed_weight,
-                                     output_dim=self.num_embed,
+                                     output_dim=self.config.num_embed,
                                      name=self.prefix + "embed")
-        if self.dropout > 0:
-            embedding = mx.sym.Dropout(data=embedding, p=self.dropout, name="source_embed_dropout")
-        if self.embed_scale is not None and self.embed_scale != 1.0:
-            embedding = embedding * self.embed_scale
+        if self.config.dropout > 0:
+            embedding = mx.sym.Dropout(data=embedding, p=self.config.dropout, name="source_embed_dropout")
+
         return embedding, data_length, seq_len
 
     def get_num_hidden(self) -> int:
         """
         Return the representation size of this encoder.
         """
-        return self.num_embed
-
-    @staticmethod
-    def get_embed_weight(vocab_size: int, embed_size: int, prefix: str) -> mx.sym.Variable:
-        """
-        Creates a variable for the embedding matrix.
-        """
-        return mx.sym.Variable(prefix + "weight", shape=(vocab_size, embed_size))
+        return self.config.num_embed
 
 
 class PositionalEncoder(Encoder):
@@ -392,7 +342,8 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
         :param seq_len: sequence length.
         :return: (batch_size, source_seq_len, num_embed)
         """
-        embedding = mx.sym.broadcast_add(data,
+        # add positional embeddings to up-scaled data
+        embedding = mx.sym.broadcast_add(data * self.num_embed ** 0.5,
                                          mx.sym.BlockGrad(mx.symbol.Custom(length=seq_len,
                                                                            depth=self.num_embed,
                                                                            name="%spositional_encodings" % self.prefix,
