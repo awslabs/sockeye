@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 For each item we will potentially have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.10.5]
+### Fixed
+ - Fixed yet another bug with the data iterator.
+
 ## [1.10.4]
 ### Fixed
  - Fixed a bug with the revised data iterator not correctly appending EOS symbols for variable-length batches.
