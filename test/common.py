@@ -219,6 +219,7 @@ def run_train_translate(train_params: str,
             assert all(a == b for a, b in zip(lines, lines_equiv))
 
         # Test restrict-lexicon
+        out_restrict_path = os.path.join(work_dir, "out-restrict.txt")
         if restrict_lexicon:
             # fast_align lex table
             lex_path = os.path.join(work_dir, "lex")
@@ -232,11 +233,10 @@ def run_train_translate(train_params: str,
             with patch.object(sys, "argv", params.split()):
                 sockeye.lexicon.main()
             # Translate corpus with restrict-lexicon
-            out_path = os.path.join(work_dir, "out-restrict.txt")
             params = "{} {} {} {}".format(sockeye.translate.__file__,
                                           _TRANSLATE_PARAMS_COMMON.format(model=model_path,
                                                                           input=dev_source_path,
-                                                                          output=out_path),
+                                                                          output=out_restrict_path),
                                           translate_params,
                                           _TRANSLATE_PARAMS_RESTRICT.format(json=json_path))
             with patch.object(sys, "argv", params.split()):
@@ -259,11 +259,14 @@ def run_train_translate(train_params: str,
         # Measure BLEU
         bleu = sockeye.bleu.corpus_bleu(open(out_path, "r").readlines(),
                                         open(dev_target_path, "r").readlines())
-
+        bleu_restrict = None
+        if restrict_lexicon:
+            sockeye.bleu.corpus_bleu(open(out_restrict_path, "r").readlines(),
+                                     open(dev_target_path, "r").readlines())
         # Run BLEU cli
         eval_params = "{} {} ".format(sockeye.evaluate.__file__,
                                       _EVAL_PARAMS_COMMON.format(hypotheses=out_path, references=dev_target_path), )
         with patch.object(sys, "argv", eval_params.split()):
             sockeye.evaluate.main()
 
-        return perplexity, bleu
+        return perplexity, bleu, bleu_restrict
