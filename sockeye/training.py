@@ -68,8 +68,6 @@ class TrainingModel(model.SockeyeModel):
     :param config: Configuration object holding details about the model.
     :param context: The context(s) that MXNet will be run in (GPU(s)/CPU)
     :param train_iter: The iterator over the training data.
-    :param fused: If True fused RNN cells will be used (should be slightly more efficient, but is only available
-            on GPUs).
     :param bucketing: If True bucketing will be used, if False the computation graph will always be
             unrolled to the full length.
     :param lr_scheduler: The scheduler that lowers the learning rate during training.
@@ -79,14 +77,13 @@ class TrainingModel(model.SockeyeModel):
                  config: model.ModelConfig,
                  context: List[mx.context.Context],
                  train_iter: data_io.ParallelBucketSentenceIter,
-                 fused: bool,
                  bucketing: bool,
                  lr_scheduler) -> None:
         super().__init__(config)
         self.context = context
         self.lr_scheduler = lr_scheduler
         self.bucketing = bucketing
-        self._build_model_components(fused)
+        self._build_model_components()
         self.module = self._build_module(train_iter)
         self.training_monitor = None  # type: Optional[callback.TrainingMonitor]
 

@@ -14,6 +14,9 @@ For each item we will potentially have subsections for: _Added_, _Changed_, _Rem
 ### Fixed
  - Fixed the attention in upper layers (`--rnn-attention-in-upper-layers`), which was previously not passed correctly
    to the decoder.
+ - Removed RNN parameter (un-)packing and support for FusedRNNCells (removed `--use-fused-rnns` flag).
+ These were not used, not correctly initialized, and performed worse than regular RNN cells. Moreover,
+ they made the code much more complex. RNN models trained with previous versions are no longer compatible.
 
 ## [1.12.2]
 ### Changed
@@ -26,6 +29,7 @@ For each item we will potentially have subsections for: _Added_, _Changed_, _Rem
 
 ## [1.12.0]
 ### Changed
+<<<<<<< HEAD
  - Transformers now always use the linear output transformation after combining attention heads, even if input & output
  depth do not differ.
 

@@ -151,7 +151,6 @@ def test_model_parameters(test_params, expected_params):
               learning_rate_schedule=None,
               learning_rate_decay_param_reset=False,
               learning_rate_decay_optimizer_states_reset='off',
-              use_fused_rnn=False,
               weight_init='xavier',
               weight_init_scale=2.34,
               weight_init_xavier_factor_type='in',
