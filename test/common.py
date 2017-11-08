@@ -25,6 +25,7 @@ import numpy as np
 import sockeye.average
 import sockeye.constants as C
 import sockeye.evaluate
+import sockeye.lexicon
 import sockeye.train
 import sockeye.translate
 import sockeye.utils
@@ -103,6 +104,20 @@ def generate_digits_file(source_path: str,
             print(" ".join(digits), file=target_out)
 
 
+def generate_fast_align_lex(lex_path: str):
+    """
+    Generate a fast_align format lex table for digits.
+
+    :param lex_path: Path to write lex table.
+    """
+    with open(lex_path, "w") as lex_out:
+        for digit in _DIGITS:
+            print("{0}\t{0}\t0".format(digit), file=lex_out)
+
+
+_LEXICON_PARAMS_COMMON = "-i {input} -m {model} -k 1 -o {json}"
+
+
 @contextmanager
 def tmp_digits_dataset(prefix: str,
                        train_line_count: int, train_max_length: int,
@@ -132,6 +147,8 @@ _TRAIN_PARAMS_COMMON = "--use-cpu --max-seq-len {max_len} --source {train_source
 
 _TRANSLATE_PARAMS_COMMON = "--use-cpu --models {model} --input {input} --output {output}"
 
+_TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {json}"
+
 _EVAL_PARAMS_COMMON = "--hypotheses {hypotheses} --references {references}"
 
 
@@ -143,6 +160,7 @@ def run_train_translate(train_params: str,
                         dev_source_path: str,
                         dev_target_path: str,
                         max_seq_len: int = 10,
+                        restrict_lexicon: bool = False,
                         work_dir: Optional[str] = None) -> Tuple[float, float]:
     """
     Train a model and translate a dev set.  Report validation perplexity and BLEU.
@@ -155,6 +173,7 @@ def run_train_translate(train_params: str,
     :param dev_source_path: Path to the development source file.
     :param dev_target_path: Path to the development target file.
     :param max_seq_len: The maximum sequence length.
+    :param restrict_lexicon: Additional translation run with top-k lexicon-based vocabulary restriction.
     :param work_dir: The directory to store the model and other outputs in.
     :return: A tuple containing perplexity and bleu.
     """
@@ -200,6 +219,31 @@ def run_train_translate(train_params: str,
                 lines_equiv = f.readlines()
             assert all(a == b for a, b in zip(lines, lines_equiv))
 
+        # Test restrict-lexicon
+        out_restrict_path = os.path.join(work_dir, "out-restrict.txt")
+        if restrict_lexicon:
+            # fast_align lex table
+            lex_path = os.path.join(work_dir, "lex")
+            generate_fast_align_lex(lex_path)
+            # Top-K JSON
+            json_path = os.path.join(work_dir, "json")
+            params = "{} {}".format(sockeye.lexicon.__file__,
+                                    _LEXICON_PARAMS_COMMON.format(input=lex_path,
+                                                                  model=model_path,
+                                                                  json=json_path))
+            with patch.object(sys, "argv", params.split()):
+                sockeye.lexicon.main()
+            # Translate corpus with restrict-lexicon
+            params = "{} {} {} {}".format(sockeye.translate.__file__,
+                                          _TRANSLATE_PARAMS_COMMON.format(model=model_path,
+                                                                          input=dev_source_path,
+                                                                          output=out_restrict_path),
+                                          translate_params,
+                                          _TRANSLATE_PARAMS_RESTRICT.format(json=json_path))
+            with patch.object(sys, "argv", params.split()):
+                sockeye.translate.main()
+
+
         # test averaging
         points = sockeye.average.find_checkpoints(model_path=model_path,
                                                   size=1,
@@ -217,10 +261,15 @@ def run_train_translate(train_params: str,
         bleu = sacrebleu.raw_corpus_bleu(open(out_path, "r").readlines(),
                                          [open(dev_target_path, "r").readlines()], 0.01)
 
+        bleu_restrict = None
+        if restrict_lexicon:
+            sacrebleu.raw_corpus_bleu(open(out_restrict_path, "r").readlines(),
+                                      [open(dev_target_path, "r").readlines()], 0.01)
+
         # Run BLEU cli
         eval_params = "{} {} ".format(sockeye.evaluate.__file__,
                                       _EVAL_PARAMS_COMMON.format(hypotheses=out_path, references=dev_target_path), )
         with patch.object(sys, "argv", eval_params.split()):
             sockeye.evaluate.main()
 
-        return perplexity, bleu
+        return perplexity, bleu, bleu_restrict

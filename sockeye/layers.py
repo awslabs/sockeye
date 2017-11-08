@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 import logging
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 from . import constants as C
 
 import mxnet as mx
@@ -156,19 +156,33 @@ class OutputLayer:
 
         self.b = mx.sym.Variable("%scls_bias" % prefix)
 
-    def __call__(self, hidden: mx.sym.Symbol):
+    def __call__(self,
+                 hidden: Union[mx.sym.Symbol, mx.nd.NDArray],
+                 weight: Optional[mx.nd.NDArray] = None,
+                 bias: Optional[mx.nd.NDArray] = None):
         """
         Linear transformation to vocab size. Returns logits.
 
         :param hidden: Decoder representation for n elements. Shape: (n, self.num_hidden).
         :return: Logits. Shape(n, self.vocab_size).
         """
-        return mx.sym.FullyConnected(data=hidden,
-                                     num_hidden=self.vocab_size,
-                                     weight=self.w,
-                                     bias=self.b,
-                                     flatten=False,
-                                     name=C.LOGITS_NAME)
+        if isinstance(hidden, mx.sym.Symbol):
+            return mx.sym.FullyConnected(data=hidden,
+                                         num_hidden=self.vocab_size,
+                                         weight=self.w,
+                                         bias=self.b,
+                                         flatten=False,
+                                         name=C.LOGITS_NAME)
+
+        # Equivalent NDArray implementation (requires passed weights/biases)
+        assert isinstance(hidden, mx.nd.NDArray)
+        utils.check_condition(weight is not None and bias is not None,
+                              "OutputLayer NDArray implementation requires passing weight and bias NDArrays.")
+        return mx.nd.FullyConnected(data=hidden,
+                                    num_hidden=bias.shape[0],
+                                    weight=weight,
+                                    bias=bias,
+                                    flatten=False)
 
 
 def split_heads(x: mx.sym.Symbol, length: int, heads: int) -> mx.sym.Symbol:

@@ -14,13 +14,12 @@
 """
 Translation CLI.
 """
-import itertools
 import argparse
 import sys
 import time
 from math import ceil
 from contextlib import ExitStack
-from typing import Optional, Iterable, Tuple
+from typing import Optional, Iterable
 
 import mxnet as mx
 
@@ -29,6 +28,7 @@ import sockeye.arguments as arguments
 import sockeye.constants as C
 import sockeye.data_io
 import sockeye.inference
+from sockeye.lexicon import TopKLexicon
 import sockeye.output_handler
 from sockeye.log import setup_main_logger
 from sockeye.utils import acquire_gpus, get_num_gpus, log_basic_info
@@ -60,20 +60,31 @@ def main():
         context = _setup_context(args, exit_stack)
 
         bucket_source_width, bucket_target_width = args.bucket_width
+        models, vocab_source, vocab_target = sockeye.inference.load_models(
+            context,
+            args.max_input_len,
+            args.beam_size,
+            args.batch_size,
+            args.models,
+            args.checkpoints,
+            args.softmax_temperature,
+            args.max_output_length_num_stds,
+            decoder_return_logit_inputs=args.restrict_lexicon is not None,
+            cache_output_layer_w_b=args.restrict_lexicon is not None)
+        restrict_lexicon = None # type: TopKLexicon
+        if args.restrict_lexicon:
+            restrict_lexicon = TopKLexicon(vocab_source, vocab_target)
+            restrict_lexicon.load(args.restrict_lexicon)
         translator = sockeye.inference.Translator(context,
                                                   args.ensemble_mode,
                                                   bucket_source_width,
                                                   bucket_target_width,
                                                   sockeye.inference.LengthPenalty(args.length_penalty_alpha,
                                                                                   args.length_penalty_beta),
-                                                  *sockeye.inference.load_models(context,
-                                                                                 args.max_input_len,
-                                                                                 args.beam_size,
-                                                                                 args.batch_size,
-                                                                                 args.models,
-                                                                                 args.checkpoints,
-                                                                                 args.softmax_temperature,
-                                                                                 args.max_output_length_num_stds))
+                                                  models,
+                                                  vocab_source,
+                                                  vocab_target,
+                                                  restrict_lexicon)
         read_and_translate(translator, output_handler, args.chunk_size, args.input)
 
 
@@ -94,7 +105,7 @@ def read_and_translate(translator: sockeye.inference.Translator, output_handler:
     total_time, total_lines = 0.0, 0
     for chunk in grouper(source_data, chunk_size):
         chunk_time = translate(output_handler, chunk, translator, total_lines)
-        total_lines += len(chunk) 
+        total_lines += len(chunk)
         total_time += chunk_time
 
     if total_lines != 0:

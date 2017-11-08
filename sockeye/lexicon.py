@@ -11,15 +11,23 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import argparse
+import collections
+import json
 import logging
-from typing import Dict
+import operator
+import os
+from typing import Dict, Generator, Tuple
 
 import mxnet as mx
 import numpy as np
 
-import sockeye.constants as C
-from sockeye.data_io import smart_open
-from sockeye.utils import check_condition
+from . import arguments
+from . import constants as C
+from .data_io import smart_open
+from .log import setup_main_logger, log_sockeye_version
+from .utils import check_condition
+from . import vocab
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +114,30 @@ def initialize_lexicon(cmdline_arg: str, vocab_source: Dict[str, int], vocab_tar
     return lexicon
 
 
+def lexicon_iterator(path: str,
+                     vocab_source: Dict[str, int],
+                     vocab_target: Dict[str, int]) -> Generator[Tuple[int, int, float], None, None]:
+    """
+    Yields lines from a translation table of format: src, trg, logprob.
+
+    :param path: Path to lexicon file.
+    :param vocab_source: Source vocabulary.
+    :param vocab_target: Target vocabulary.
+    :return: Generator returning tuples (src_id, trg_id, prob).
+    """
+    assert C.UNK_SYMBOL in vocab_source
+    assert C.UNK_SYMBOL in vocab_target
+    src_unk_id = vocab_source[C.UNK_SYMBOL]
+    trg_unk_id = vocab_target[C.UNK_SYMBOL]
+    with smart_open(path) as fin:
+        for line in fin:
+            src, trg, logprob = line.rstrip("\n").split("\t")
+            prob = np.exp(float(logprob))
+            src_id = vocab_source.get(src, src_unk_id)
+            trg_id = vocab_target.get(trg, trg_unk_id)
+            yield src_id, trg_id, prob
+
+
 def read_lexicon(path: str, vocab_source: Dict[str, int], vocab_target: Dict[str, int]) -> np.ndarray:
     """
     Loads lexical translation probabilities from a translation table of format: src, trg, logprob.
@@ -119,25 +151,18 @@ def read_lexicon(path: str, vocab_source: Dict[str, int], vocab_target: Dict[str
     :param vocab_target: Target vocabulary.
     :return: Lexicon array. Shape: (vocab_source_size, vocab_target_size).
     """
-    assert C.UNK_SYMBOL in vocab_source
-    assert C.UNK_SYMBOL in vocab_target
     src_unk_id = vocab_source[C.UNK_SYMBOL]
     trg_unk_id = vocab_target[C.UNK_SYMBOL]
     lexicon = np.zeros((len(vocab_source), len(vocab_target)))
     n = 0
-    with smart_open(path) as fin:
-        for line in fin:
-            src, trg, logprob = line.rstrip('\n').split("\t")
-            prob = np.exp(float(logprob))
-            src_id = vocab_source.get(src, src_unk_id)
-            trg_id = vocab_target.get(trg, trg_unk_id)
-            if src_id == src_unk_id:
-                continue
-            if trg_id == trg_unk_id:
-                lexicon[src_id, trg_unk_id] += prob
-            else:
-                lexicon[src_id, trg_id] = prob
-            n += 1
+    for src_id, trg_id, prob in lexicon_iterator(path, vocab_source, vocab_target):
+        if src_id == src_unk_id:
+            continue
+        if trg_id == trg_unk_id:
+            lexicon[src_id, trg_unk_id] += prob
+        else:
+            lexicon[src_id, trg_id] = prob
+        n += 1
     logger.info("Loaded lexicon from '%s' with %d entries", path, n)
     return lexicon
 
@@ -158,3 +183,108 @@ class LexiconInitializer(mx.initializer.Initializer):
         logger.info("Initializing '%s' with lexicon.", sym_name)
         assert len(arr.shape) == 2, "Only 2d weight matrices supported."
         self.lexicon.copyto(arr)
+
+
+class TopKLexicon:
+    """
+    Lexicon component that stores the k most likely target words for each source word.  Used during
+    decoding to restrict target vocabulary for each source sequence.
+
+    :param vocab_source: Trained model source vocabulary.
+    :param vocab_target: Trained mode target vocabulary.
+    """
+    def __init__(self,
+                 vocab_source: Dict[str, int],
+                 vocab_target: Dict[str, int]) -> None:
+        self.vocab_source = vocab_source
+        self.vocab_target = vocab_target
+        # Shape: (vocab_source_size, k), k determined at create() or load()
+        self.lex = None  # type: np.ndarray
+        # Always allow special vocab symbols in target vocab
+        self.always_allow = np.array([vocab_target[symbol] for symbol in C.VOCAB_SYMBOLS], dtype=np.int)
+
+    def create(self, path: str, k: int = 20):
+        """
+        Create from a scored lexicon file (fast_align format) using vocab from a trained Sockeye model.
+
+        :param path: Path to lexicon file.
+        :param k: Number of target entries per source to keep.
+        """
+        self.lex = np.zeros((len(self.vocab_source), k), dtype=np.int)
+        # Read lexicon
+        src_unk_id = self.vocab_source[C.UNK_SYMBOL]
+        trg_unk_id = self.vocab_target[C.UNK_SYMBOL]
+        _lex = collections.defaultdict(dict)  # type: Dict[int, Dict[int, float]]
+        for src_id, trg_id, prob in lexicon_iterator(path, self.vocab_source, self.vocab_target):
+            # Unk token will always be part of target vocab, so no need to track it here
+            if src_id == src_unk_id or trg_id == trg_unk_id:
+                continue
+            _lex[src_id][trg_id] = prob
+        # Sort and copy top-k trg_ids to lex array row src_id
+        for src_id, trg_entries in _lex.items():
+            top_k = list(sorted(trg_entries.items(), key=operator.itemgetter(1), reverse=True))[:k]
+            self.lex[src_id, :len(top_k)] = list(sorted(trg_id for (trg_id, _) in top_k))
+            # Free memory after copy
+            trg_entries.clear()
+        logger.info("Created top-k lexicon from \"%s\", k=%d.", path, k)
+
+    def save(self, path: str):
+        """
+        Save lexicon in JSON format.  Lexicon will be specific to Sockeye model.
+
+        :param path: Path to JSON output file.
+        """
+        # Save k, lex array in dict form
+        to_save = [self.lex.shape[1], dict(enumerate(row.tolist() for row in self.lex))]
+        with open(path, "w", encoding=C.VOCAB_ENCODING) as out:
+            json.dump(to_save, out, indent=4, ensure_ascii=False)
+
+    def load(self, path: str):
+        """
+        Load lexicon from JSON file.
+
+        :param path: Path to JSON file.
+        """
+        with open(path, encoding=C.VOCAB_ENCODING) as inp:
+            k, loaded = json.load(inp)
+            self.lex = np.zeros((len(self.vocab_source), k), dtype=np.int)
+            for (src_id, top_k) in loaded.items():
+                self.lex[int(src_id), :len(top_k)] = top_k
+        logger.info("Loaded top-k lexicon from \"%s\".", path)
+
+    def get_trg_ids(self, src_ids: np.ndarray) -> np.ndarray:
+        """
+        Lookup possible target ids for input sequence of source ids.
+
+        :param source: Sequence(s) of source ids (any shape).
+        :return: Possible target ids for source (unique sorted, always includes special symbols).
+        """
+        # TODO: When MXNet adds support for set operations, we can migrate to avoid conversions to/from NumPy.
+        unique_src_ids = np.lib.arraysetops.unique(src_ids)
+        trg_ids = np.lib.arraysetops.union1d(self.always_allow, self.lex[unique_src_ids, :].reshape(-1))
+        return trg_ids
+
+
+def main():
+    """
+    Commandline interface for building top-k lexicons using during decoding.
+    """
+    logger = setup_main_logger(__name__, console=True, file_logging=False)
+    log_sockeye_version(logger)
+
+    params = argparse.ArgumentParser(description="Build a top-k lexicon for use during decoding.")
+    arguments.add_lexicon_args(params)
+    args = params.parse_args()
+
+    logger.info("Reading source and target vocab from \"%s\"", args.model)
+    vocab_source = vocab.vocab_from_json_or_pickle(os.path.join(args.model, C.VOCAB_SRC_NAME))
+    vocab_target = vocab.vocab_from_json_or_pickle(os.path.join(args.model, C.VOCAB_TRG_NAME))
+
+    logger.info("Creating top-k lexicon from \"%s\"", args.input)
+    lexicon = TopKLexicon(vocab_source, vocab_target)
+    lexicon.create(args.input, args.k)
+    lexicon.save(args.output)
+
+
+if __name__ == "__main__":
+    main()
