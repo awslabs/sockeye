@@ -489,15 +489,6 @@ def add_model_parameters(params):
                               type=int, default=None,
                               help='Number of heads for Multi-head dot attention. Default: %(default)s.')
 
-    model_params.add_argument('--lexical-bias',
-                              default=None,
-                              type=str,
-                              help="Specify probabilistic lexicon (fast_align format) for lexical biasing (Arthur "
-                                   "ETAL'16). Set smoothing value epsilon by appending :<eps>")
-    model_params.add_argument('--learn-lexical-bias',
-                              action='store_true',
-                              help='Adjust lexicon probabilities during training. Default: %(default)s')
-
     model_params.add_argument('--weight-tying',
                               action='store_true',
                               help='Turn on weight tying (see arxiv.org/abs/1608.05859). '
@@ -690,7 +681,8 @@ def add_training_args(params):
                               default=C.EMBED_INIT_DEFAULT,
                               choices=C.EMBED_INIT_TYPES,
                               help='Type of embedding matrix weight initialization. If normal, initializes embedding '
-                                   'weights using a normal distribution with std=vocab_size. Default: %(default)s.')
+                                   'weights using a normal distribution with std=1/srqt(vocab_size). '
+                                   'Default: %(default)s.')
     train_params.add_argument('--initial-learning-rate',
                               type=float,
                               default=0.0003,

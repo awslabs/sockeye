@@ -100,6 +100,8 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
         if config.conv_config.add_positional_encoding:
             # If specified, add positional encodings to segment embeddings
             encoders.append(AddSinCosPositionalEmbeddings(num_embed=config.conv_config.num_embed,
+                                                          scale_input=False,
+                                                          scale_positions=False,
                                                           prefix="%sadd_positional_encodings" % C.CHAR_SEQ_ENCODER_PREFIX))
 
     encoders.append(BatchMajor2TimeMajor())
@@ -140,6 +142,8 @@ def get_convolutional_encoder(config: ConvolutionalEncoderConfig) -> 'Encoder':
     encoders.append(get_positional_embedding(config.positional_embedding_type,
                                              config.num_embed,
                                              max_seq_len=config.max_seq_len_source,
+                                             fixed_scale_input=False,
+                                             fixed_scale_positions=False,
                                              prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
     encoders.append(ConvolutionalEncoder(config=config))
     encoders.append(BatchMajor2TimeMajor())
@@ -158,7 +162,9 @@ def get_transformer_encoder(config: transformer.TransformerConfig) -> 'Encoder':
     encoders.append(get_positional_embedding(config.positional_embedding_type,
                                              config.model_size,
                                              config.max_seq_len_source,
-                                             C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
+                                             fixed_scale_input=True,
+                                             fixed_scale_positions=False,
+                                             prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
     if config.conv_config is not None:
         encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
 
@@ -322,13 +328,19 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
 
     :param num_embed: Embedding size.
     :param prefix: Name prefix for symbols of this encoder.
+    :param scale_input: If True, scales input data UP by num_embed ** 0.5.
+    :param scale_positions: If True, scales positional embeddings DOWN by num_embed ** -0.5.
     """
 
     def __init__(self,
                  num_embed: int,
-                 prefix: str) -> None:
+                 prefix: str,
+                 scale_input: bool,
+                 scale_positions: bool) -> None:
         utils.check_condition(num_embed % 2 == 0, "Positional embeddings require an even embedding size it "
                                                   "is however %d." % num_embed)
+        self.scale_input = scale_input
+        self.scale_positions = scale_positions
         self.num_embed = num_embed
         self.prefix = prefix
 
@@ -342,12 +354,19 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
         :param seq_len: sequence length.
         :return: (batch_size, source_seq_len, num_embed)
         """
-        # add positional embeddings to up-scaled data
-        embedding = mx.sym.broadcast_add(data * self.num_embed ** 0.5,
-                                         mx.sym.BlockGrad(mx.symbol.Custom(length=seq_len,
-                                                                           depth=self.num_embed,
-                                                                           name="%spositional_encodings" % self.prefix,
-                                                                           op_type='positional_encodings')))
+        # add positional embeddings to data
+        if self.scale_input:
+            data = data * (self.num_embed ** 0.5)
+
+        positions = mx.sym.BlockGrad(mx.symbol.Custom(length=seq_len,
+                                                      depth=self.num_embed,
+                                                      name="%spositional_encodings" % self.prefix,
+                                                      op_type='positional_encodings'))
+
+        if self.scale_positions:
+            positions = positions * (self.num_embed ** -0.5)
+
+        embedding = mx.sym.broadcast_add(data, positions)
         return embedding, data_length, seq_len
 
     def encode_positions(self,
@@ -373,6 +392,12 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
 
         # (batch_size, num_embed/2)
         pos_embedding = mx.sym.concat(sin, cos, dim=1)
+
+        if self.scale_input:
+            data = data * (self.num_embed ** 0.5)
+
+        if self.scale_positions:
+            pos_embedding = pos_embedding * (self.num_embed ** -0.5)
 
         return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix)
 
@@ -474,9 +499,17 @@ class NoOpPositionalEmbeddings(PositionalEncoder):
         return self.num_embed
 
 
-def get_positional_embedding(positional_embedding_type, num_embed, max_seq_len, prefix) -> PositionalEncoder:
+def get_positional_embedding(positional_embedding_type: str,
+                             num_embed: int,
+                             max_seq_len: int,
+                             fixed_scale_input: bool = False,
+                             fixed_scale_positions: bool = False,
+                             prefix: str = '') -> PositionalEncoder:
     if positional_embedding_type == C.FIXED_POSITIONAL_EMBEDDING:
-        return AddSinCosPositionalEmbeddings(num_embed=num_embed, prefix=prefix)
+        return AddSinCosPositionalEmbeddings(num_embed=num_embed,
+                                             scale_input=fixed_scale_input,
+                                             scale_positions=fixed_scale_positions,
+                                             prefix=prefix)
     elif positional_embedding_type == C.LEARNED_POSITIONAL_EMBEDDING:
         return AddLearnedPositionalEmbeddings(num_embed=num_embed,
                                               max_seq_len=max_seq_len,

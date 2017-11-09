@@ -136,6 +136,7 @@ class TrainingModel(model.SockeyeModel):
             # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
             target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
 
+            # output layer
             # logits: (batch_size * target_seq_len, target_vocab_size)
             logits = self.output_layer(target_decoded)
 

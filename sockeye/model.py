@@ -25,7 +25,6 @@ from . import data_io
 from . import decoder
 from . import encoder
 from . import layers
-from . import lexicon
 from . import loss
 from . import utils
 
@@ -48,8 +47,6 @@ class ModelConfig(Config):
     :param config_encoder: Encoder configuration.
     :param config_decoder: Decoder configuration.
     :param config_loss: Loss configuration.
-    :param lexical_bias: Use lexical biases.
-    :param learn_lexical_bias: Learn lexical biases during training.
     :param weight_tying: Enables weight tying if True.
     :param weight_tying_type: Determines which weights get tied. Must be set if weight_tying is enabled.
     """
@@ -64,8 +61,6 @@ class ModelConfig(Config):
                  config_encoder: Config,
                  config_decoder: Config,
                  config_loss: loss.LossConfig,
-                 lexical_bias: bool = False,
-                 learn_lexical_bias: bool = False,
                  weight_tying: bool = False,
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
                  weight_normalization: bool = False) -> None:
@@ -80,8 +75,6 @@ class ModelConfig(Config):
         self.config_encoder = config_encoder
         self.config_decoder = config_decoder
         self.config_loss = config_loss
-        self.lexical_bias = lexical_bias
-        self.learn_lexical_bias = learn_lexical_bias
         self.weight_tying = weight_tying
         self.weight_tying_type = weight_tying_type
         self.weight_normalization = weight_normalization
@@ -92,6 +85,13 @@ class ModelConfig(Config):
 class SockeyeModel:
     """
     SockeyeModel shares components needed for both training and inference.
+    The main components of a Sockeye model are
+    1) Source embedding
+    2) Target embedding
+    3) Encoder
+    4) Deoder
+    5) Output Layer
+
     ModelConfig contains parameters and their values that are fixed at training time and must be re-used at inference
     time.
 
@@ -181,7 +181,7 @@ class SockeyeModel:
                                          shape=(self.config.config_embed_target.vocab_size,
                                                 self.config.config_embed_target.num_embed))
         w_out_target = mx.sym.Variable("target_output_weight",
-                                       shape=(self.config.vocab_target_size, 0))
+                                       shape=(self.config.vocab_target_size, self.decoder.get_num_hidden()))
 
         if self.config.weight_tying:
             if C.WEIGHT_TYING_SRC in self.config.weight_tying_type \
@@ -201,6 +201,10 @@ class SockeyeModel:
         """
         Instantiates model components.
         """
+        # encoder & decoder first (to know the decoder depth)
+        self.encoder = encoder.get_encoder(self.config.config_encoder)
+        self.decoder = decoder.get_decoder(self.config.config_decoder)
+
         # source & target embeddings
         embed_weight_source, embed_weight_target, out_weight_target = self._get_embed_weights()
         assert isinstance(self.config.config_embed_source, encoder.EmbeddingConfig)
@@ -212,23 +216,15 @@ class SockeyeModel:
                                                   prefix=C.TARGET_EMBEDDING_PREFIX,
                                                   embed_weight=embed_weight_target)
 
-        # encoder & decoder
-        self.encoder = encoder.get_encoder(self.config.config_encoder)
-        self.decoder = decoder.get_decoder(self.config.config_decoder)
-
-        # TODO remove lexicon bias code
-        #self.lexicon = lexicon.Lexicon(self.config.vocab_source_size,
-        #                               self.config.vocab_target_size,
-        #                               self.config.learn_lexical_bias) if self.config.lexical_bias else None
-
+        if self.config.weight_tying and C.WEIGHT_TYING_SOFTMAX in self.config.weight_tying_type:
+            utils.check_condition(self.config.config_embed_target.num_embed == self.decoder.get_num_hidden(),
+                                  "Weight tying requires target embedding size and decoder hidden size " +
+                                  "to be equal: %d vs. %d" % (self.config.config_embed_target.num_embed,
+                                                              self.decoder.get_num_hidden()))
         # output layer
-        # TODO: generic output layer dropout?
-        utils.check_condition(self.config.config_embed_target.num_embed == self.decoder.get_num_hidden(),
-                              "Weight tying requires target embedding size and decoder hidden size " +
-                              "to be equal: %d vs. %d" % (self.config.config_embed_target.num_embed,
-                                                          self.decoder.get_num_hidden()))
-
-        self.output_layer = layers.OutputLayer(vocab_size=self.config.vocab_target_size,
+        # TODO(fhieber): generic output layer dropout instead of RNNDecoderHiddenDropout
+        self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
+                                               vocab_size=self.config.vocab_target_size,
                                                weight=out_weight_target,
                                                weight_normalization=self.config.weight_normalization)
 

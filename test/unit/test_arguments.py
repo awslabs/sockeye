@@ -76,8 +76,6 @@ def test_device_args(test_params, expected_params):
               rnn_attention_num_hidden=None,
               rnn_attention_coverage_type='count',
               rnn_attention_coverage_num_hidden=1,
-              lexical_bias=None,
-              learn_lexical_bias=False,
               weight_tying=False,
               weight_tying_type="trg_softmax",
               max_seq_len=(100, 100),

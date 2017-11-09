@@ -36,7 +36,6 @@ from . import data_io
 from . import decoder
 from . import encoder
 from . import initializer
-from . import lexicon
 from . import loss
 from . import lr_scheduler
 from . import model
@@ -91,6 +90,16 @@ def check_arg_compatibility(args: argparse.Namespace):
     """
     check_condition(args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics,
                     "Must optimize either BLEU or one of tracked metrics (--metrics)")
+
+    if args.encoder == C.TRANSFORMER_TYPE:
+        check_condition(args.transformer_model_size == args.num_embed[0],
+                        "Source embedding size must match transformer model size: %s vs. %s"
+                        % (args.transformer_model_size, args.num_embed[0]))
+    if args.decoder == C.TRANSFORMER_TYPE:
+        check_condition(args.transformer_model_size == args.num_embed[1],
+                        "Target embedding size must match transformer model size: %s vs. %s"
+                        % (args.transformer_model_size, args.num_embed[1]))
+
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> Tuple[bool, str]:
@@ -265,13 +274,12 @@ def create_lr_scheduler(args: argparse.Namespace, resume_training: bool,
     return lr_scheduler_instance
 
 
-def create_encoder_config(args: argparse.Namespace, vocab_source_size: int,
+def create_encoder_config(args: argparse.Namespace,
                           config_conv: Optional[encoder.ConvolutionalEmbeddingConfig]) -> Tuple[Config, int]:
     """
     Create the encoder config.
 
     :param args: Arguments as returned by argparse.
-    :param vocab_source_size: The source vocabulary.
     :param config_conv: The config for the convolutional encoder (optional).
     :return: The encoder config and the number of hidden units of the encoder.
     """
@@ -332,12 +340,11 @@ def create_encoder_config(args: argparse.Namespace, vocab_source_size: int,
     return config_encoder, encoder_num_hidden
 
 
-def create_decoder_config(args: argparse.Namespace, vocab_target_size: int, encoder_num_hidden: int) -> Config:
+def create_decoder_config(args: argparse.Namespace,  encoder_num_hidden: int) -> Config:
     """
     Create the config for the decoder.
 
     :param args: Arguments as returned by argparse.
-    :param vocab_target_size: The size of the target vocabulary.
     :return: The config for the decoder.
     """
     _, decoder_num_layers = args.num_layers
@@ -467,8 +474,8 @@ def create_model_config(args: argparse.Namespace,
                                                            num_highway_layers=args.conv_embed_num_highway_layers,
                                                            dropout=args.conv_embed_dropout)
 
-    config_encoder, encoder_num_hidden = create_encoder_config(args, vocab_source_size, config_conv)
-    config_decoder = create_decoder_config(args, vocab_target_size, encoder_num_hidden)
+    config_encoder, encoder_num_hidden = create_encoder_config(args, config_conv)
+    config_decoder = create_decoder_config(args, encoder_num_hidden)
 
     config_embed_source = encoder.EmbeddingConfig(vocab_size=vocab_source_size,
                                                   num_embed=num_embed_source,
@@ -492,8 +499,6 @@ def create_model_config(args: argparse.Namespace,
                                      config_encoder=config_encoder,
                                      config_decoder=config_decoder,
                                      config_loss=config_loss,
-                                     lexical_bias=args.lexical_bias,
-                                     learn_lexical_bias=args.learn_lexical_bias,
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
                                      weight_normalization=args.weight_normalization)
@@ -606,17 +611,13 @@ def main():
                                                context, train_iter, lr_scheduler_instance,
                                                resume_training, training_state_dir)
 
-        lexicon_array = lexicon.initialize_lexicon(args.lexical_bias,
-                                                   vocab_source, vocab_target) if args.lexical_bias else None
-
         weight_initializer = initializer.get_initializer(
             default_init_type=args.weight_init,
             default_init_scale=args.weight_init_scale,
             default_init_xavier_factor_type=args.weight_init_xavier_factor_type,
             embed_init_type=args.embed_weight_init,
             embed_init_sigma=vocab_source_size ** -0.5,  # TODO
-            rnn_init_type=args.rnn_h2h_init,
-            lexicon=lexicon_array)
+            rnn_init_type=args.rnn_h2h_init)
 
         optimizer, optimizer_params, kvstore = define_optimizer(args, lr_scheduler_instance)
 

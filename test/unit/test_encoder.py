@@ -75,7 +75,10 @@ def test_sincos_positional_embeddings():
     # Test that .encode() and .encode_positions() return the same values:
     data = mx.sym.Variable("data")
     positions = mx.sym.Variable("positions")
-    pos_encoder = sockeye.encoder.AddSinCosPositionalEmbeddings(num_embed=_NUM_EMBED, prefix="test")
+    pos_encoder = sockeye.encoder.AddSinCosPositionalEmbeddings(num_embed=_NUM_EMBED,
+                                                                scale_input=False,
+                                                                scale_positions=False,
+                                                                prefix="test")
     encoded, _, __ = pos_encoder.encode(data, None, _SEQ_LEN)
     nd_encoded = encoded.eval(data=mx.nd.zeros((_BATCH_SIZE, _SEQ_LEN, _NUM_EMBED)))[0]
     # Take the first element in the batch to get (seq_len, num_embed)

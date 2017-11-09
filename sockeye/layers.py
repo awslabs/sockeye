@@ -123,19 +123,21 @@ class OutputLayer:
     """
     Defines the output layer of Sockeye decoders. Supports weight tying and weight normalization.
 
+    :param hidden_size: Decoder hidden size.
     :param vocab_size: Target vocabulary size.
     :param weight_normalization: Whether to apply weight normalization.
     :param prefix: Prefix used for naming.
     """
 
     def __init__(self,
+                 hidden_size: int,
                  vocab_size: int,
                  weight: Optional[mx.sym.Symbol],
                  weight_normalization: bool) -> None:
         self.vocab_size = vocab_size
 
         if weight is None:
-            self.w = mx.sym.Variable("target_output_weight", shape=(vocab_size, 0))
+            self.w = mx.sym.Variable("target_output_weight", shape=(vocab_size, hidden_size))
         else:
             self.w = weight
 
@@ -173,6 +175,7 @@ class OutputLayer:
         assert isinstance(hidden, mx.nd.NDArray)
         utils.check_condition(weight is not None and bias is not None,
                               "OutputLayer NDArray implementation requires passing weight and bias NDArrays.")
+
         return mx.nd.FullyConnected(data=hidden,
                                     num_hidden=bias.shape[0],
                                     weight=weight,
