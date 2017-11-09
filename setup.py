@@ -4,7 +4,7 @@ import re
 import logging
 import argparse
 import subprocess
-from setuptools import setup, find_packages
+from setuptools import setup, find_packages, Command
 from contextlib import contextmanager
 
 ROOT = os.path.dirname(__file__)
@@ -66,6 +66,18 @@ try:
 except:
     logging.warning("Package 'sphinx' not found. You will not be able to build docs.")
     cmdclass = {}
+
+class NoSetupToolsInstallCommand(Command):
+    user_options = []
+    def initialize_options(self):
+        pass
+    def finalize_options(self):
+        pass
+    def run(self):
+        raise RuntimeError("Instead of 'python setup.py install' use 'pip install .', as setuptools does not support "
+                           "the wheel format, which is needed for mxnet.")
+
+cmdclass['install'] = NoSetupToolsInstallCommand
 
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('-r', '--requirement', help='Optionally specify a different requirements.txt file.', required=False)
