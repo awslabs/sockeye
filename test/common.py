@@ -161,7 +161,7 @@ def run_train_translate(train_params: str,
                         dev_target_path: str,
                         max_seq_len: int = 10,
                         restrict_lexicon: bool = False,
-                        work_dir: Optional[str] = None) -> Tuple[float, float]:
+                        work_dir: Optional[str] = None) -> Tuple[float, float, float]:
     """
     Train a model and translate a dev set.  Report validation perplexity and BLEU.
 
@@ -175,7 +175,7 @@ def run_train_translate(train_params: str,
     :param max_seq_len: The maximum sequence length.
     :param restrict_lexicon: Additional translation run with top-k lexicon-based vocabulary restriction.
     :param work_dir: The directory to store the model and other outputs in.
-    :return: A tuple containing perplexity and bleu.
+    :return: A tuple containing perplexity and bleu scores for standard and reduced vocab decoding.
     """
     with TemporaryDirectory(dir=work_dir, prefix="test_train_translate.") as work_dir:
         # Train model
@@ -263,9 +263,8 @@ def run_train_translate(train_params: str,
 
         bleu_restrict = None
         if restrict_lexicon:
-            sacrebleu.raw_corpus_bleu(open(out_restrict_path, "r").readlines(),
+            bleu_restrict = sacrebleu.raw_corpus_bleu(open(out_restrict_path, "r").readlines(),
                                       [open(dev_target_path, "r").readlines()], 0.01)
-
         # Run BLEU cli
         eval_params = "{} {} ".format(sockeye.evaluate.__file__,
                                       _EVAL_PARAMS_COMMON.format(hypotheses=out_path, references=dev_target_path), )

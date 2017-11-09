@@ -11,7 +11,11 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import logging
+
 import pytest
+
+logger = logging.getLogger(__name__)
 
 from test.common import tmp_digits_dataset, run_train_translate
 
@@ -27,7 +31,7 @@ _SEED_DEV = 17
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity"
      " --max-updates 10000 --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
-     " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --max-updates 5000 --weight-normalization",
+     " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --max-updates 3000 --weight-normalization",
      "--beam-size 5",
      1.01,
      0.99),
@@ -42,7 +46,7 @@ _SEED_DEV = 17
     # "Vanilla" LSTM encoder-decoder with attention (word-based batching)
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 32 --batch-size 80 --batch-type word --loss cross-entropy "
-     " --optimized-metric perplexity --max-updates 10000 --checkpoint-frequency 1000 --optimizer adam "
+     " --optimized-metric perplexity --max-updates 8000 --checkpoint-frequency 1000 --optimizer adam "
      " --initial-learning-rate 0.001 --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0",
      "--beam-size 5",
      1.01,
@@ -50,14 +54,14 @@ _SEED_DEV = 17
     # 2-layer transformer encoder, LSTM decoder with attention
     ("--encoder transformer --num-layers 2:1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
      " --rnn-attention-type mhdot --rnn-attention-num-hidden 32 --batch-size 16 --rnn-attention-mhdot-heads 1"
-     " --loss cross-entropy --optimized-metric perplexity --max-updates 10000"
+     " --loss cross-entropy --optimized-metric perplexity --max-updates 5000"
      " --transformer-attention-heads 4 --transformer-model-size 64"
      " --transformer-feed-forward-num-hidden 64"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
      1.01,
      0.99),
-    # LSTM encoder, 1-layer transformer decoder
+    # # LSTM encoder, 1-layer transformer decoder
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
      " --decoder transformer --batch-size 16"
      " --loss cross-entropy --optimized-metric perplexity --max-updates 3000"
@@ -92,32 +96,32 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
                             _LINE_MAX_LENGTH, seed_train=_SEED_TRAIN, seed_dev=_SEED_DEV) as data:
         # Test model configuration
         perplexity, bleu, bleu_restrict = run_train_translate(train_params,
-                                                             translate_params,
-                                                             None,  # no second set of parameters
-                                                             data['source'],
-                                                             data['target'],
-                                                             data['validation_source'],
-                                                             data['validation_target'],
-                                                             max_seq_len=_LINE_MAX_LENGTH + 1,
-                                                             restrict_lexicon=True,
-                                                             work_dir=data['work_dir'])
+                                                              translate_params,
+                                                              None,  # no second set of parameters
+                                                              data['source'],
+                                                              data['target'],
+                                                              data['validation_source'],
+                                                              data['validation_target'],
+                                                              max_seq_len=_LINE_MAX_LENGTH + 1,
+                                                              restrict_lexicon=True,
+                                                              work_dir=data['work_dir'])
+        logger.info("perplexity=%f, bleu=%f, bleu_restrict=%f", perplexity, bleu, bleu_restrict)
         assert perplexity <= perplexity_thresh
         assert bleu >= bleu_thresh
         assert bleu_restrict >= bleu_thresh
-
 
 @pytest.mark.parametrize("train_params, translate_params, perplexity_thresh, bleu_thresh", [
     # "Vanilla" LSTM encoder-decoder with attention
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity"
-     " --max-updates 10000 --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
+     " --max-updates 5000 --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
      1.04,
      0.98),
     # "Vanilla" LSTM encoder-decoder with attention (word-based batching)
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 32 --batch-size 80 --batch-type word --loss cross-entropy"
-     " --optimized-metric perplexity --max-updates 10000 --checkpoint-frequency 1000 --optimizer adam "
+     " --optimized-metric perplexity --max-updates 5000 --checkpoint-frequency 1000 --optimizer adam "
      " --initial-learning-rate 0.001 --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0",
      "--beam-size 5",
      1.04,
@@ -125,7 +129,7 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
     # 1-layer transformer encoder, LSTM decoder with attention
     ("--encoder transformer --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
      " --rnn-attention-type mhdot --rnn-attention-num-hidden 32 --batch-size 16 --rnn-attention-mhdot-heads 2"
-     " --loss cross-entropy --optimized-metric perplexity --max-updates 8000"
+     " --loss cross-entropy --optimized-metric perplexity --max-updates 5000"
      " --transformer-attention-heads 4 --transformer-model-size 64"
      " --transformer-feed-forward-num-hidden 64"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
@@ -135,7 +139,7 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
     # LSTM encoder, 2-layer transformer decoder
     ("--encoder rnn --num-layers 1:2 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
      " --decoder transformer --batch-size 16"
-     " --loss cross-entropy --optimized-metric perplexity --max-updates 10000"
+     " --loss cross-entropy --optimized-metric perplexity --max-updates 7000"
      " --transformer-attention-heads 4 --transformer-model-size 64"
      " --transformer-feed-forward-num-hidden 64"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
@@ -144,21 +148,21 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
      0.98),
     # 2-layer transformer
     ("--encoder transformer --decoder transformer"
-     " --batch-size 16 --max-updates 6000"
+     " --batch-size 16 --max-updates 5000"
      " --num-layers 2 --transformer-attention-heads 4 --transformer-model-size 32"
      " --transformer-feed-forward-num-hidden 64"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
      " --layer-normalization",
      "--beam-size 1",
-     1.07,
-     0.98),
+     1.03,
+     0.99),
     # 3-layer cnn
     ("--encoder cnn --decoder cnn "
-     " --batch-size 16 --num-layers 3 --max-updates 10000"
+     " --batch-size 16 --num-layers 3 --max-updates 5000"
      " --cnn-num-hidden 32 --cnn-positional-embedding-type fixed"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 1",
-     1.15,
+     1.10,
      0.93)
 ])
 def test_seq_sort(train_params, translate_params, perplexity_thresh, bleu_thresh):
@@ -168,7 +172,7 @@ def test_seq_sort(train_params, translate_params, perplexity_thresh, bleu_thresh
         # Test model configuration
         perplexity, bleu, bleu_restrict = run_train_translate(train_params,
                                                               translate_params,
-                                                              None,
+                                                              None,  # no second set of parameters
                                                               data['source'],
                                                               data['target'],
                                                               data['validation_source'],
@@ -176,6 +180,7 @@ def test_seq_sort(train_params, translate_params, perplexity_thresh, bleu_thresh
                                                               max_seq_len=_LINE_MAX_LENGTH + 1,
                                                               restrict_lexicon=True,
                                                               work_dir=data['work_dir'])
+        logger.info("perplexity=%f, bleu=%f, bleu_restrict=%f", perplexity, bleu, bleu_restrict)
         assert perplexity <= perplexity_thresh
         assert bleu >= bleu_thresh
         assert bleu_restrict >= bleu_thresh

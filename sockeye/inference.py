@@ -137,7 +137,14 @@ class InferenceModel(model.SockeyeModel):
         self.decoder_module.init_params(arg_params=self.params, allow_missing=False)
 
         if self.cache_output_layer_w_b:
-            self.output_layer_w = self.params[self.decoder.output_layer.w.name].as_in_context(self.context)
+            if self.decoder.output_layer.weight_normalization:
+                # precompute normalized output layer weight imperatively
+                assert self.decoder.output_layer.weight_norm is not None
+                weight = self.params[self.decoder.output_layer.weight_norm.weight.name].as_in_context(self.context)
+                scale = self.params[self.decoder.output_layer.weight_norm.scale.name].as_in_context(self.context)
+                self.output_layer_w = self.decoder.output_layer.weight_norm(weight, scale)
+            else:
+                self.output_layer_w = self.params[self.decoder.output_layer.w.name].as_in_context(self.context)
             self.output_layer_b = self.params[self.decoder.output_layer.b.name].as_in_context(self.context)
 
     def _get_encoder_module(self) -> Tuple[mx.mod.BucketingModule, int]:
@@ -942,6 +949,17 @@ class Translator:
             #       We currently convert source to NumPy and target ids back to NDArray.
             vocab_slice_ids = mx.nd.array(self.restrict_lexicon.get_trg_ids(source.astype("int32").asnumpy()),
                                           ctx=self.context)
+
+            if vocab_slice_ids.shape[0] < self.beam_size + 1:
+                # This fixes an edge case for toy models, where the number of vocab ids from the lexicon is
+                # smaller than the beam size.
+                logger.warning("Padding vocab_slice_ids (%d) with EOS to have at least %d+1 elements to expand",
+                               vocab_slice_ids.shape[0], self.beam_size)
+                n = self.beam_size - vocab_slice_ids.shape[0] + 1
+                vocab_slice_ids = mx.nd.concat(vocab_slice_ids,
+                                               mx.nd.full((n,), val=self.vocab_target[C.EOS_SYMBOL]),
+                                               dim=0)
+
             pad_dist = mx.nd.full((self.batch_size * self.beam_size, vocab_slice_ids.shape[0]),
                                   val=np.inf, ctx=self.context)
             for m in self.models:

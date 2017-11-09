@@ -102,14 +102,19 @@ class WeightNormalization:
                                      shape=tuple([num_hidden] + [1] * (ndim - 1)),
                                      init=mx.init.Constant(value=1.0))
 
-    def __call__(self) -> mx.sym.Symbol:
+    def __call__(self, weight: Optional[mx.nd.NDArray] = None, scale: Optional[mx.nd.NDArray] = None) -> mx.sym.Symbol:
         """
         Normalize each hidden dimension and scale afterwards
 
         :return: A weight normalized weight tensor.
         """
-        return mx.sym.broadcast_mul(lhs=mx.sym.L2Normalization(self.weight, mode='instance'),
-                                    rhs=self.scale, name="%swn_scale" % self.prefix)
+        if weight is None and scale is None:
+            return mx.sym.broadcast_mul(lhs=mx.sym.L2Normalization(self.weight, mode='instance'),
+                                        rhs=self.scale, name="%swn_scale" % self.prefix)
+        else:
+            assert isinstance(weight, mx.nd.NDArray)
+            assert isinstance(scale, mx.nd.NDArray)
+            return mx.nd.broadcast_mul(lhs=mx.nd.L2Normalization(weight, mode='instance'), rhs=scale)
 
 
 class OutputLayer:
@@ -146,6 +151,7 @@ class OutputLayer:
         else:
             self.w = mx.sym.Variable("%scls_weight" % prefix, shape=(vocab_size, num_hidden))
 
+        self.weight_normalization = weight_normalization
         if weight_normalization:
             logger.info("Normalizing output layer weights.")
             self.weight_norm = WeightNormalization(self.w,

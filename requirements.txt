@@ -1,5 +1,5 @@
 pyyaml
-mxnet-mkl==0.12.0
+mxnet==0.12.0
 numpy>=1.12
 typing
 sacrebleu
