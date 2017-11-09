@@ -64,7 +64,8 @@ where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), or `90` (9.0).
 
 If you want to just use sockeye without extending it, simply install it via
 ```bash
-> python setup.py install
+> pip install -r requirements.txt
+> pip install .
 ```
 after cloning the repository from git.
 
@@ -75,7 +76,8 @@ Incubating contains the GPU bindings. Depending on your version of CUDA you can 
 running the following:
 
 ```bash
-> python setup.py install -r requirements.gpu-cu${CUDA_VERSION}.txt
+> pip install -r requirements.gpu-cu${CUDA_VERSION}.txt
+> pip install .
 ```
 where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), or `90` (9.0).
 
@@ -86,7 +88,7 @@ If you want to create alignment plots you will need to install matplotlib (````p
 
 In general you can install all optional dependencies from the Sockeye source folder using:
 ```bash
-> pip install -e '.[optional]'
+> pip install '.[optional]'
 ```
 
 
