@@ -36,6 +36,11 @@ test_case_statistics = [("am I am a character sequence", "I am a symbol string s
 
 test_case_scoring = [((Statistics([9, 7, 5, 3], [10, 8, 6, 4]), 11, 11), 0.8375922397)]
 
+test_effective_order = [(["test"], ["a test"], 0.3678794411714425),
+                        (["a test"], ["a test"], 1.0),
+                        (["a little test"], ["a test"], 0.03218297948685433)]
+
+
 # testing that right score is returned for null statistics and different offsets
 # format: stat, offset, expected score
 test_case_degenerate_stats = [((Statistics([0, 0, 0, 0], [4, 4, 2, 1]), 0, 1), 0.0, 0.0),
@@ -48,6 +53,12 @@ test_case_degenerate_stats = [((Statistics([0, 0, 0, 0], [4, 4, 2, 1]), 0, 1), 0
 
 @pytest.mark.parametrize("hypotheses, references, expected_bleu", test_cases)
 def test_bleu(hypotheses, references, expected_bleu):
+    bleu = sacrebleu.raw_corpus_bleu(hypotheses, [references], .01).score / 100
+    assert abs(bleu - expected_bleu) < EPSILON
+
+
+@pytest.mark.parametrize("hypotheses, references, expected_bleu", test_effective_order)
+def test_effective_order(hypotheses, references, expected_bleu):
     bleu = sacrebleu.raw_corpus_bleu(hypotheses, [references], .01).score / 100
     assert abs(bleu - expected_bleu) < EPSILON
 
