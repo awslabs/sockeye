@@ -318,7 +318,7 @@ class InferenceModel(model.SockeyeModel):
         """
         Runs forward pass of the single-step decoder.
 
-        :return: logit_inputs or probability distribution over next word, attention scores, updated model state.
+        :return: Decoder stack output (logit inputs or probability distribution), attention scores, updated model state.
         """
         batch = mx.io.DataBatch(
             data=[sequences.as_in_context(self.context)] + model_state.states,

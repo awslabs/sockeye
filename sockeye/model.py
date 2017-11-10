@@ -89,7 +89,7 @@ class SockeyeModel:
     1) Source embedding
     2) Target embedding
     3) Encoder
-    4) Deoder
+    4) Decoder
     5) Output Layer
 
     ModelConfig contains parameters and their values that are fixed at training time and must be re-used at inference

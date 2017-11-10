@@ -74,7 +74,7 @@ class Decoder(ABC):
         :param source_encoded_max_length: Size of encoder time dimension.
         :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
         :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
-        :param target_embed_max_length: Size of embedded target sequence dimension.
+        :param target_embed_max_length: Dimension of the embedded target sequence.
         :return: Decoder data. Shape: (batch_size, target_embed_max_length, decoder_depth).
         """
         pass
@@ -212,7 +212,7 @@ class TransformerDecoder(Decoder):
         :param source_encoded_max_length: Size of encoder time dimension.
         :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
         :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
-        :param target_embed_max_length: Size of embedded target sequence dimension.
+        :param target_embed_max_length: Dimension of the embedded target sequence.
         :return: Decoder data. Shape: (batch_size, target_embed_max_length, decoder_depth).
         """
         # (batch_size, source_max_length, num_source_embed)
@@ -493,7 +493,7 @@ class RecurrentDecoder(Decoder):
         :param source_encoded_max_length: Size of encoder time dimension.
         :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
         :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
-        :param target_embed_max_length: Size of embedded target sequence dimension.
+        :param target_embed_max_length: Dimension of the embedded target sequence.
         :return: Decoder data. Shape: (batch_size, target_embed_max_length, decoder_depth).
         """
         # target_embed: target_seq_len * (batch_size, num_target_embed)
@@ -921,7 +921,7 @@ class ConvolutionalDecoder(Decoder):
         :param source_encoded_max_length: Size of encoder time dimension.
         :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
         :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
-        :param target_embed_max_length: Size of embedded target sequence dimension.
+        :param target_embed_max_length: Dimension of the embedded target sequence.
         :return: Decoder data. Shape: (batch_size, target_embed_max_length, decoder_depth).
         """
         # (batch_size, source_encoded_max_length, encoder_depth).
