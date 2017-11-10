@@ -222,7 +222,6 @@ class SockeyeModel:
                                   "to be equal: %d vs. %d" % (self.config.config_embed_target.num_embed,
                                                               self.decoder.get_num_hidden()))
         # output layer
-        # TODO(fhieber): generic output layer dropout instead of RNNDecoderHiddenDropout
         self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                vocab_size=self.config.vocab_target_size,
                                                weight=out_weight_target,

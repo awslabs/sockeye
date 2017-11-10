@@ -1,19 +1,26 @@
 # Changelog
-All notable changes to this project will be documented in this file.
+All notable changes to the project are documented in this file.
 
-We use version numbers with three digits such as 1.0.0.
+Version numbers are of the form `1.0.0`.
 Any version bump in the last digit is backwards-compatible, in that a model trained with the previous version can still
 be used for translation with the new version.
-Any bump in the second digit indicates potential backwards incompatibilities, e.g. due to changing the architecture or
-simply modifying weight names.
+Any bump in the second digit indicates a major version change introduces potential backwards incompatibilities,
+e.g. due to changing the architecture or simply modifying model parameter names.
 Note that Sockeye has checks in place to not translate with an old model that was trained with an incompatible version.
 
-For each item we will potentially have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
+Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
 ## [1.13.0]
+### Fixed
+ - Transformer models do not ignore `--num-embed` anymore as they did silently before.
+ As a result there is an error thrown if `--num-embed` != `--transformer-model-size`.
+
+### Removed
  - Removed RNN parameter (un-)packing and support for FusedRNNCells (removed `--use-fused-rnns` flag).
  These were not used, not correctly initialized, and performed worse than regular RNN cells. Moreover,
- they made the code much more complex. RNN models trained with previous versions are no longer compatible.
+ they made the code much more complex. RNN models trained with previous versions are no longer compatible. 
+- Removed the lexical biasing functionality (Arthur ETAL'16) (removed arguments `--lexical-bias`
+ and `--learn-lexical-bias`).
 
 ## [1.12.2]
 ### Changed
@@ -120,7 +127,7 @@ For each item we will potentially have subsections for: _Added_, _Changed_, _Rem
  - Convolutional decoder.
  - Weight normalization (for CNN only so far).
  - Learned positional embeddings for the transformer.
-
+ 
 ### Changed
  - `--attention-*` CLI params renamed to `--rnn-attention-*`.
  - `--transformer-no-positional-encodings` generalized to `--transformer-positional-embedding-type`.
