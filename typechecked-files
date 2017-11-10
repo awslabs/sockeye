@@ -2,7 +2,6 @@ sockeye/__init__.py
 sockeye/arguments.py
 sockeye/rnn_attention.py
 sockeye/average.py
-sockeye/bleu.py
 sockeye/callback.py
 sockeye/checkpoint_decoder.py
 sockeye/config.py

@@ -23,7 +23,7 @@ from typing import Dict, Optional
 import mxnet as mx
 import numpy as np
 
-import sockeye.bleu
+from sacrebleu import raw_corpus_bleu
 import sockeye.output_handler
 from . import constants as C
 from . import data_io
@@ -146,5 +146,5 @@ class CheckpointDecoder:
         avg_time = trans_wall_time / len(self.input_sentences)
 
         # TODO(fhieber): eventually add more metrics (METEOR etc.)
-        return {C.BLEU_VAL: sockeye.bleu.corpus_bleu(translations, self.target_sentences),
+        return {C.BLEU_VAL: raw_corpus_bleu(translations, [self.target_sentences], 0.01).score,
                 C.AVG_TIME: avg_time}

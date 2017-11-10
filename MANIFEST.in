@@ -10,6 +10,8 @@ include sockeye/git_version.py
 recursive-include .github *
 include CONTRIBUTING.md
 exclude *.sh
+exclude contrib
+recursive-exclude contrib *
 include pytest.ini
 recursive-include test *.py
 recursive-include test *.ini
