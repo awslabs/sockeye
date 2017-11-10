@@ -262,7 +262,7 @@ def smart_open(filename: str, mode: str = "rt", ftype: str = "auto", errors:str 
         return open(filename, mode=mode, encoding='utf-8', errors=errors)
 
 
-def read_content(path: str, limit: bool = None) -> Iterator[List[str]]:
+def read_content(path: str, limit: int = None) -> Iterator[List[str]]:
     """
     Returns a list of tokens for each line in path up to a limit.
 
@@ -302,7 +302,7 @@ def tokens2ids(tokens: Iterable[str], vocab: Dict[str, int]) -> List[int]:
 
 class SentenceReader(Iterator):
     """
-    Reads sentences from patch and creates word id sentences.
+    Reads sentences from path and creates word id sentences.
     Streams from disk, instead of loading all sentences into memory.
 
     :param path: Path to read data from.
@@ -481,14 +481,14 @@ class ParallelBucketSentenceIter(mx.io.DataIter):
         # operations that produce shapes larger than the default bucket size.  In these cases, MXNet
         # will silently allocate additional memory.
         self.provide_data = [
-            mx.io.DataDesc(name=source_data_name,
+            mx.io.DataDesc(name=self.source_data_name,
                            shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[0]),
                            layout=C.BATCH_MAJOR),
-            mx.io.DataDesc(name=target_data_name,
+            mx.io.DataDesc(name=self.target_data_name,
                            shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[1]),
                            layout=C.BATCH_MAJOR)]
         self.provide_label = [
-            mx.io.DataDesc(name=label_name,
+            mx.io.DataDesc(name=self.label_name,
                            shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[1]),
                            layout=C.BATCH_MAJOR)]
 
