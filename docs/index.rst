@@ -21,6 +21,7 @@ Table of Contents
     README
     user_documentation
     development
+    CHANGELOG
     faq
     modules
 

@@ -8,20 +8,21 @@ before_install:
   - docker pull ubuntu:16.04
 
 python:
+  - "3.4"
   - "3.5"
   - "3.6"
 
 install:
+  - sudo apt-get -y update && sudo apt-get install -y libgfortran3
   - pip install -r requirements.txt
   - pip install -r requirements.dev.txt
   - pip install -r requirements.docs.txt
 
 script:
   - python3 setup.py test
-  - python3 setup.py docs
   - pylint --version
-  - pylint --rcfile=sockeye.pylintrc sockeye -E
-  - pylint --rcfile=sockeye.pylintrc test -E
+  - pylint --rcfile=pylintrc sockeye -E
+  - pylint --rcfile=pylintrc test -E
   - mypy --ignore-missing-imports --follow-imports=silent @typechecked-files
-  - check-manifest
-
+  - check-manifest --ignore sockeye/git_version.py
+  #- python -m pytest test/system

@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.abspath('..'))
 
 class MockClass(MagicMock):
 
-    def __init__(self, name, *args, **kwargs):
+    def __init__(self, name="", *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.name = name
 
@@ -39,7 +39,7 @@ class MockModule(MagicMock):
     def __getattr__(cls, name):
         return MockClass(name)
 
-MOCK_MODULES = ['mxnet', 'numpy']
+MOCK_MODULES = ['mxnet', 'mxnet.metric', 'numpy']
 sys.modules.update((mod_name, MockModule()) for mod_name in MOCK_MODULES)
 
 

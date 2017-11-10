@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -13,6 +13,7 @@
 
 import logging
 import logging.config
+import sys
 from typing import Optional
 
 FORMATTERS = {
@@ -31,7 +32,7 @@ FILE_LOGGING = {
     'formatters': FORMATTERS,
     'handlers': {
         'rotating': {
-            'level': 'DEBUG',
+            'level': 'INFO',
             'formatter': 'verbose',
             'class': 'logging.handlers.RotatingFileHandler',
             'maxBytes': 10000000,
@@ -75,7 +76,7 @@ FILE_CONSOLE_LOGGING = {
             'stream': None
         },
         'rotating': {
-            'level': 'DEBUG',
+            'level': 'INFO',
             'formatter': 'verbose',
             'class': 'logging.handlers.RotatingFileHandler',
             'maxBytes': 10000000,
@@ -113,7 +114,28 @@ def setup_main_logger(name: str, file_logging=True, console=True, path: Optional
         log_config = LOGGING_CONFIGS["console_only"]
 
     if path:
-        log_config["handlers"]["rotating"]["filename"] = path
+        log_config["handlers"]["rotating"]["filename"] = path  # type: ignore
 
     logging.config.dictConfig(log_config)
-    return logging.getLogger(name)
+    logger = logging.getLogger(name)
+
+    def exception_hook(exc_type, exc_value, exc_traceback):
+        logger.exception("UNCAUGHT EXCEPTION", exc_info=(exc_type, exc_value, exc_traceback))
+
+    sys.excepthook = exception_hook
+
+    return logger
+
+
+def log_sockeye_version(logger):
+    from sockeye import __version__
+    try:
+        from sockeye.git_version import git_hash
+    except ImportError:
+        git_hash = "unknown"
+    logger.info("Sockeye version %s commit %s", __version__, git_hash)
+
+
+def log_mxnet_version(logger):
+    from mxnet import __version__
+    logger.info("MXNet version %s", __version__)

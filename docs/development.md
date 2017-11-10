@@ -52,6 +52,12 @@ If you want to develop sockeye, please adhere to the following development guide
  * Make sure to pass unit tests before submitting a pull request.
  
  * Whenever reasonable, write py.test unit tests covering your contribution.
+ 
+ * When importing other sockeye modules import the entire module instead of individual functions and classes using
+   relative imports:
+    ```python
+    from . import attention
+    ```  
    
 
 ## Building the Documentation
@@ -80,7 +86,7 @@ corresponding `~/.pypirc` set up.
    ```
 1. Upload to PyPITest: 
    ```bash
-   > twine upload dist/sockeye-${VERSION}.tar.gz sockeye-${VERSION}-py3-none-any.whl -r pypitest
+   > twine upload dist/sockeye-${VERSION}.tar.gz dist/sockeye-${VERSION}-py3-none-any.whl -r pypitest
    ```
 1. In a new python environment check that the package is installable
    ```bash
@@ -88,7 +94,7 @@ corresponding `~/.pypirc` set up.
    ```
 1. Upload to PyPI
    ```bash
-   > twine upload dist/sockeye-${VERSION}.tar.gz sockeye-${VERSION}-py3-none-any.whl
+   > twine upload dist/sockeye-${VERSION}.tar.gz dist/sockeye-${VERSION}-py3-none-any.whl
    ```
 
  

@@ -14,11 +14,13 @@
 import mxnet as mx
 import numpy as np
 import pytest
-import sockeye.attention
-import sockeye.coverage
-from test.test_utils import gaussian_vector, integer_vector
 
-attention_types = ['bilinear', 'dot', 'location', 'mlp']
+import sockeye.rnn_attention
+import sockeye.constants as C
+import sockeye.coverage
+from test.common import gaussian_vector, integer_vector
+
+attention_types = [C.ATT_BILINEAR, C.ATT_DOT, C.ATT_DOT_SCALED, C.ATT_LOC, C.ATT_MLP]
 
 
 @pytest.mark.parametrize("attention_type", attention_types)
@@ -32,13 +34,15 @@ def test_attention(attention_type,
     source_length = mx.sym.Variable("source_length")
     source_seq_len = 3
 
-    attention = sockeye.attention.get_attention(input_previous_word=False,
-                                                attention_type=attention_type,
-                                                attention_num_hidden=2,
-                                                rnn_num_hidden=2,
-                                                max_seq_len=source_seq_len,
-                                                attention_coverage_type="",
-                                                attention_coverage_num_hidden=2)
+    config_attention = sockeye.rnn_attention.AttentionConfig(type=attention_type,
+                                                             num_hidden=2,
+                                                             input_previous_word=False,
+                                                             source_num_hidden=2,
+                                                             query_num_hidden=2,
+                                                             layer_normalization=False,
+                                                             config_coverage=None)
+    attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=source_seq_len)
+
     attention_state = attention.get_initial_state(source_length, source_seq_len)
     attention_func = attention.on(source, source_length, source_seq_len)
     attention_input = attention.make_input(0, mx.sym.Variable("word_vec_prev"), mx.sym.Variable("decoder_state"))
@@ -79,13 +83,18 @@ def test_coverage_attention(attention_coverage_type,
     source_length = mx.sym.Variable("source_length")
     source_seq_len = 10
 
-    attention = sockeye.attention.get_attention(input_previous_word=False,
-                                                attention_type="coverage",
-                                                attention_num_hidden=5,
-                                                rnn_num_hidden=0,
-                                                max_seq_len=source_seq_len,
-                                                attention_coverage_type=attention_coverage_type,
-                                                attention_coverage_num_hidden=attention_coverage_num_hidden)
+    config_coverage = sockeye.coverage.CoverageConfig(type=attention_coverage_type,
+                                                      num_hidden=attention_coverage_num_hidden,
+                                                      layer_normalization=False)
+    config_attention = sockeye.rnn_attention.AttentionConfig(type="coverage",
+                                                             num_hidden=5,
+                                                             input_previous_word=False,
+                                                             source_num_hidden=encoder_num_hidden,
+                                                             query_num_hidden=decoder_num_hidden,
+                                                             layer_normalization=False,
+                                                             config_coverage=config_coverage)
+    attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=source_seq_len)
+
     attention_state = attention.get_initial_state(source_length, source_seq_len)
     attention_func = attention.on(source, source_length, source_seq_len)
     attention_input = attention.make_input(0, mx.sym.Variable("word_vec_prev"), mx.sym.Variable("decoder_state"))
@@ -111,7 +120,6 @@ def test_coverage_attention(attention_coverage_type,
     dynamic_source_result = exec_output[2].asnumpy()
 
     expected_probs = (1 / source_length_vector).reshape((batch_size, 1))
-    expected_dynamic_source = (1 / source_length_vector).reshape((batch_size, 1))
 
     assert context_result.shape == (batch_size, encoder_num_hidden)
     assert attention_prob_result.shape == (batch_size, source_seq_len)
@@ -131,13 +139,15 @@ def test_last_state_attention(batch_size=1,
     source_length = mx.sym.Variable("source_length")
     source_seq_len = 3
 
-    attention = sockeye.attention.get_attention(input_previous_word=False,
-                                                attention_type="fixed",
-                                                attention_num_hidden=0,
-                                                rnn_num_hidden=0,
-                                                max_seq_len=source_seq_len,
-                                                attention_coverage_type="",
-                                                attention_coverage_num_hidden=0)
+    config_attention = sockeye.rnn_attention.AttentionConfig(type="fixed",
+                                                             num_hidden=0,
+                                                             input_previous_word=False,
+                                                             source_num_hidden=2,
+                                                             query_num_hidden=2,
+                                                             layer_normalization=False,
+                                                             config_coverage=None)
+    attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=source_seq_len)
+
     attention_state = attention.get_initial_state(source_length, source_seq_len)
     attention_func = attention.on(source, source_length, source_seq_len)
     attention_input = attention.make_input(0, mx.sym.Variable("word_vec_prev"), mx.sym.Variable("decoder_state"))
@@ -164,7 +174,7 @@ def test_get_context_and_attention_probs():
     source = mx.sym.Variable('source')
     source_length = mx.sym.Variable('source_length')
     attention_scores = mx.sym.Variable('scores')
-    context, att_probs = sockeye.attention.get_context_and_attention_probs(source, source_length, attention_scores)
+    context, att_probs = sockeye.rnn_attention.get_context_and_attention_probs(source, source_length, attention_scores)
     sym = mx.sym.Group([context, att_probs])
     assert len(sym.list_arguments()) == 3
 
@@ -172,7 +182,7 @@ def test_get_context_and_attention_probs():
 
     # data
     source_nd = mx.nd.random_normal(shape=(batch_size, seq_len, num_hidden))
-    source_length_np = np.random.random_integers(1, seq_len, (batch_size,))
+    source_length_np = np.random.randint(1, seq_len+1, (batch_size,))
     source_length_nd = mx.nd.array(source_length_np)
     scores_nd = mx.nd.zeros((batch_size, seq_len, 1))
 

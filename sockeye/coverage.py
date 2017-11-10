@@ -19,27 +19,50 @@ from typing import Callable
 
 import mxnet as mx
 
+from . import config
+from . import constants as C
+from . import layers
+from . import rnn
+from . import utils
+
 logger = logging.getLogger(__name__)
 
 
-def get_coverage(coverage_type: str,
-                 coverage_num_hidden: int) -> 'Coverage':
+class CoverageConfig(config.Config):
+    """
+    Coverage configuration.
+
+    :param type: Coverage name.
+    :param num_hidden: Number of hidden units for coverage networks.
+    :param layer_normalization: Apply layer normalization to coverage networks.
+    """
+    def __init__(self,
+                 type: str,
+                 num_hidden: int,
+                 layer_normalization: bool) -> None:
+        super().__init__()
+        self.type = type
+        self.num_hidden = num_hidden
+        self.layer_normalization = layer_normalization
+
+
+def get_coverage(config: CoverageConfig) -> 'Coverage':
     """
     Returns a Coverage instance.
 
-    :param coverage_type: Name of coverage type.
-    :param coverage_num_hidden: Number of hidden units for coverage vectors.
+    :param config: Coverage configuration.
     :return: Instance of Coverage.
     """
-
-    if coverage_type == "gru":
-        return GRUCoverage(coverage_num_hidden)
-    elif coverage_type in {"tanh", "sigmoid", "relu", "softrelu"}:
-        return ActivationCoverage(coverage_num_hidden, coverage_type)
-    elif coverage_type == "count":
+    if config.type == 'count':
+        utils.check_condition(config.num_hidden == 1, "Count coverage requires coverage_num_hidden==1")
+    if config.type == "gru":
+        return GRUCoverage(config.num_hidden, config.layer_normalization)
+    elif config.type in {"tanh", "sigmoid", "relu", "softrelu"}:
+        return ActivationCoverage(config.num_hidden, config.type, config.layer_normalization)
+    elif config.type == "count":
         return CountCoverage()
     else:
-        raise ValueError("Unknown coverage type %s" % coverage_type)
+        raise ValueError("Unknown coverage type %s" % config.type)
 
 
 class Coverage:
@@ -47,37 +70,7 @@ class Coverage:
     Generic coverage class. Similar to Attention classes, a coverage instance returns a callable, update_coverage(),
     function when self.on() is called.
     """
-
-    def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
-        """
-        Returns callable to be used for updating coverage vectors in a sequence decoder.
-
-        :param source: Shape: (batch_size, seq_len, encoder_num_hidden).
-        :param source_length: Shape: (batch_size,).
-        :param source_seq_len: Maximum length of source sequences.
-        :return: Coverage callable.
-        """
-
-        def update_coverage(prev_hidden: mx.sym.Symbol,
-                            attention_prob_scores: mx.sym.Symbol,
-                            prev_coverage: mx.sym.Symbol):
-            """
-            :param prev_hidden: Previous hidden decoder state. Shape: (batch_size, decoder_num_hidden).
-            :param attention_prob_scores: Current attention scores. Shape: (batch_size, source_seq_len, 1).
-            :param prev_coverage: Shape: (batch_size, source_seq_len, coverage_num_hidden).
-            :return: Updated coverage matrix . Shape: (batch_size, source_seq_len, coverage_num_hidden).
-            """
-            raise NotImplementedError()
-
-        return update_coverage
-
-
-class CountCoverage(Coverage):
-    """
-    Coverage class that accumulates the attention weights for each source word.
-    """
-
-    def __init__(self, prefix='') -> None:
+    def __init__(self, prefix=C.COVERAGE_PREFIX):
         self.prefix = prefix
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
@@ -95,7 +88,39 @@ class CountCoverage(Coverage):
                             prev_coverage: mx.sym.Symbol):
             """
             :param prev_hidden: Previous hidden decoder state. Shape: (batch_size, decoder_num_hidden).
-            :param attention_prob_scores: Current attention scores. Shape: (batch_size, source_seq_len, 1).
+            :param attention_prob_scores: Current attention scores. Shape: (batch_size, source_seq_len).
+            :param prev_coverage: Shape: (batch_size, source_seq_len, coverage_num_hidden).
+            :return: Updated coverage matrix . Shape: (batch_size, source_seq_len, coverage_num_hidden).
+            """
+            raise NotImplementedError()
+
+        return update_coverage
+
+
+class CountCoverage(Coverage):
+    """
+    Coverage class that accumulates the attention weights for each source word.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
+        """
+        Returns callable to be used for updating coverage vectors in a sequence decoder.
+
+        :param source: Shape: (batch_size, seq_len, encoder_num_hidden).
+        :param source_length: Shape: (batch_size,).
+        :param source_seq_len: Maximum length of source sequences.
+        :return: Coverage callable.
+        """
+
+        def update_coverage(prev_hidden: mx.sym.Symbol,
+                            attention_prob_scores: mx.sym.Symbol,
+                            prev_coverage: mx.sym.Symbol):
+            """
+            :param prev_hidden: Previous hidden decoder state. Shape: (batch_size, decoder_num_hidden).
+            :param attention_prob_scores: Current attention scores. Shape: (batch_size, source_seq_len).
             :param prev_coverage: Shape: (batch_size, source_seq_len, coverage_num_hidden).
             :return: Updated coverage matrix . Shape: (batch_size, source_seq_len, coverage_num_hidden).
             """
@@ -112,12 +137,17 @@ class GRUCoverage(Coverage):
     It would be better to pre-compute the mapping of the source but this will likely mean opening up the GRU.
 
     :param coverage_num_hidden: Number of hidden units for coverage vectors.
+    :param layer_normalization: If true, applies layer normalization for each gate in the GRU cell.
     """
 
-    def __init__(self, coverage_num_hidden: int, prefix='') -> None:
-        self.prefix = prefix
+    def __init__(self, coverage_num_hidden: int, layer_normalization: bool) -> None:
+        super().__init__()
         self.num_hidden = coverage_num_hidden
-        self.gru = mx.rnn.GRUCell(self.num_hidden, prefix="%scoverage_gru" % self.prefix)
+        gru_prefix= "%sgru" % self.prefix
+        if layer_normalization:
+            self.gru = rnn.LayerNormPerGateGRUCell(self.num_hidden, prefix=gru_prefix)
+        else:
+            self.gru = mx.rnn.GRUCell(self.num_hidden, prefix=gru_prefix)
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """
@@ -134,27 +164,27 @@ class GRUCoverage(Coverage):
                             prev_coverage: mx.sym.Symbol):
             """
             :param prev_hidden: Previous hidden decoder state. Shape: (batch_size, decoder_num_hidden).
-            :param attention_prob_scores: Current attention scores. Shape: (batch_size, source_seq_len, 1).
+            :param attention_prob_scores: Current attention scores. Shape: (batch_size, source_seq_len).
             :param prev_coverage: Shape: (batch_size, source_seq_len, coverage_num_hidden).
             :return: Updated coverage matrix . Shape: (batch_size, source_seq_len, coverage_num_hidden).
             """
 
             # (batch_size, source_seq_len, decoder_num_hidden)
             expanded_decoder = mx.sym.broadcast_axis(
-                data=mx.sym.expand_dims(data=prev_hidden, axis=1, name="%scov_expand_decoder" % self.prefix),
-                axis=1, size=source_seq_len, name="%scov_broadcast_decoder" % self.prefix)
+                data=mx.sym.expand_dims(data=prev_hidden, axis=1, name="%sexpand_decoder" % self.prefix),
+                axis=1, size=source_seq_len, name="%sbroadcast_decoder" % self.prefix)
 
             expanded_att_scores = mx.sym.expand_dims(data=attention_prob_scores,
                                                      axis=2,
-                                                     name="%scov_expand_attention_scores" % self.prefix)
+                                                     name="%sexpand_attention_scores" % self.prefix)
 
             # (batch_size, source_seq_len, encoder_num_hidden + decoder_num_hidden + 1)
             # +1 for the attention_prob_score for the source word
             concat_input = mx.sym.concat(source, expanded_decoder, expanded_att_scores, dim=2,
-                                         name="%scov_concat_inputs" % self.prefix)
+                                         name="%sconcat_inputs" % self.prefix)
 
             # (batch_size * source_seq_len, encoder_num_hidden + decoder_num_hidden + 1)
-            flat_input = mx.sym.reshape(concat_input, shape=(-3, -1), name="%scov_flatten_inputs")
+            flat_input = mx.sym.reshape(concat_input, shape=(-3, -1), name="%sflatten_inputs")
 
             # coverage: (batch_size * seq_len, coverage_num_hidden)
             coverage = mx.sym.reshape(data=prev_coverage, shape=(-3, -1))
@@ -175,20 +205,30 @@ class ActivationCoverage(Coverage):
 
     :param coverage_num_hidden: Number of hidden units for coverage vectors.
     :param activation: Type of activation for Perceptron.
+    :param layer_normalization: If true, applies layer normalization before non-linear activation.
+    :param prefix: Layer name prefix.
     """
 
-    def __init__(self, coverage_num_hidden: int, activation: str, prefix='') -> None:
-        self.prefix = prefix
+    def __init__(self,
+                 coverage_num_hidden: int,
+                 activation: str,
+                 layer_normalization: bool) -> None:
+        super().__init__()
         self.activation = activation
         self.num_hidden = coverage_num_hidden
         # input (encoder) to hidden
-        self.cov_e2h_weight = mx.sym.Variable("%scov_e2h_weight" % self.prefix)
+        self.cov_e2h_weight = mx.sym.Variable("%se2h_weight" % self.prefix)
         # decoder to hidden
-        self.cov_dec2h_weight = mx.sym.Variable("%scov_i2h_weight" % self.prefix)
+        self.cov_dec2h_weight = mx.sym.Variable("%si2h_weight" % self.prefix)
         # previous coverage to hidden
-        self.cov_prev2h_weight = mx.sym.Variable("%scov_prev2h_weight" % self.prefix)
+        self.cov_prev2h_weight = mx.sym.Variable("%sprev2h_weight" % self.prefix)
         # attention scores to hidden
-        self.cov_a2h_weight = mx.sym.Variable("%scov_a2h_weight" % self.prefix)
+        self.cov_a2h_weight = mx.sym.Variable("%sa2h_weight" % self.prefix)
+        # optional layer normalization
+        self.layer_norm = None
+        if layer_normalization and not self.num_hidden != 1:
+            self.layer_norm = layers.LayerNormalization(self.num_hidden,
+                                                        prefix="%snorm" % self.prefix) if layer_normalization else None
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """
@@ -200,80 +240,65 @@ class ActivationCoverage(Coverage):
         :return: Coverage callable.
         """
 
-        # (batch_size * seq_len, coverage_hidden_num)
-        source_hidden = mx.sym.FullyConnected(data=mx.sym.reshape(data=source,
-                                                                  shape=(-3, -1),
-                                                                  name="%scov_flat_source" % self.prefix),
+        # (batch_size, seq_len, coverage_hidden_num)
+        source_hidden = mx.sym.FullyConnected(data=source,
                                               weight=self.cov_e2h_weight,
                                               no_bias=True,
                                               num_hidden=self.num_hidden,
-                                              name="%scov_source_hidden_fc" % self.prefix)
-
-        # (batch_size, seq_len, coverage_hidden_num)
-        source_hidden = mx.sym.reshape(source_hidden,
-                                       shape=(-1, source_seq_len, self.num_hidden),
-                                       name="%scov_source_hidden" % self.prefix)
+                                              flatten=False,
+                                              name="%ssource_hidden_fc" % self.prefix)
 
         def update_coverage(prev_hidden: mx.sym.Symbol,
                             attention_prob_scores: mx.sym.Symbol,
                             prev_coverage: mx.sym.Symbol):
             """
             :param prev_hidden: Previous hidden decoder state. Shape: (batch_size, decoder_num_hidden).
-            :param attention_prob_scores: Current attention scores. Shape: (batch_size, source_seq_len, 1).
+            :param attention_prob_scores: Current attention scores. Shape: (batch_size, source_seq_len).
             :param prev_coverage: Shape: (batch_size, source_seq_len, coverage_num_hidden).
             :return: Updated coverage matrix . Shape: (batch_size, source_seq_len, coverage_num_hidden).
             """
 
-            # (batch_size * seq_len, coverage_hidden_num)
-            coverage_hidden = mx.sym.FullyConnected(data=mx.sym.reshape(data=prev_coverage,
-                                                                        shape=(-3, -1),
-                                                                        name="%scov_flat_previous" % self.prefix),
+            # (batch_size, seq_len, coverage_hidden_num)
+            coverage_hidden = mx.sym.FullyConnected(data=prev_coverage,
                                                     weight=self.cov_prev2h_weight,
                                                     no_bias=True,
                                                     num_hidden=self.num_hidden,
-                                                    name="%scov_previous_hidden_fc" % self.prefix)
-
-            # (batch_size, source_seq_len, coverage_hidden_num)
-            coverage_hidden = mx.sym.reshape(coverage_hidden,
-                                             shape=(-1, source_seq_len, self.num_hidden),
-                                             name="%scov_previous_hidden" % self.prefix)
+                                                    flatten=False,
+                                                    name="%sprevious_hidden_fc" % self.prefix)
 
             # (batch_size, source_seq_len, 1)
-            attention_prob_score = mx.sym.expand_dims(attention_prob_scores, axis=2)
+            attention_prob_scores = mx.sym.expand_dims(attention_prob_scores, axis=2)
 
-            # (batch_size * source_seq_len, coverage_num_hidden)
-            attention_hidden = mx.sym.FullyConnected(data=mx.sym.reshape(attention_prob_score,
-                                                                         shape=(-3, 0),
-                                                                         name="%scov_reshape_att_probs" % self.prefix),
+            # (batch_size, source_seq_len, coverage_num_hidden)
+            attention_hidden = mx.sym.FullyConnected(data=attention_prob_scores,
                                                      weight=self.cov_a2h_weight,
                                                      no_bias=True,
                                                      num_hidden=self.num_hidden,
-                                                     name="%scov_attention_fc" % self.prefix)
-
-            # (batch_size, source_seq_len, coverage_num_hidden)
-            attention_hidden = mx.sym.reshape(attention_hidden,
-                                              shape=(-1, source_seq_len, self.num_hidden),
-                                              name="%scov_reshape_att" % self.prefix)
+                                                     flatten=False,
+                                                     name="%sattention_fc" % self.prefix)
 
             # (batch_size, coverage_num_hidden)
             prev_hidden = mx.sym.FullyConnected(data=prev_hidden, weight=self.cov_dec2h_weight, no_bias=True,
-                                                num_hidden=self.num_hidden, name="%scov_decoder_hidden")
+                                                num_hidden=self.num_hidden, name="%sdecoder_hidden")
 
             # (batch_size, 1, coverage_num_hidden)
             prev_hidden = mx.sym.expand_dims(data=prev_hidden, axis=1,
-                                             name="%scov_input_decoder_hidden_expanded" % self.prefix)
+                                             name="%sinput_decoder_hidden_expanded" % self.prefix)
 
             # (batch_size, source_seq_len, coverage_num_hidden)
             intermediate = mx.sym.broadcast_add(lhs=source_hidden, rhs=prev_hidden,
-                                                name="%scov_source_plus_hidden" % self.prefix)
+                                                name="%ssource_plus_hidden" % self.prefix)
 
             # (batch_size, source_seq_len, coverage_num_hidden)
             updated_coverage = intermediate + attention_hidden + coverage_hidden
 
+            if self.layer_norm is not None:
+                updated_coverage = self.layer_norm.normalize(updated_coverage)
+
             # (batch_size, seq_len, coverage_num_hidden)
             coverage = mx.sym.Activation(data=updated_coverage,
                                          act_type=self.activation,
-                                         name="%scov_activation" % self.prefix)
+                                         name="%sactivation" % self.prefix)
 
             return mask_coverage(coverage, source_length)
 

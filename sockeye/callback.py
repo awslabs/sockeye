@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -21,14 +21,13 @@ import os
 import pickle
 import shutil
 import time
-from typing import Optional, Tuple, Dict
+from typing import List, Optional, Tuple, Dict
 
 import mxnet as mx
-import numpy as np
 
-import sockeye.checkpoint_decoder
-import sockeye.constants as C
-import sockeye.inference
+from . import checkpoint_decoder
+from . import constants as C
+from . import utils
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +45,7 @@ class TrainingMonitor(object):
     :param output_folder: Folder where model files are written to.
     :param optimized_metric: Name of the metric that controls early stopping.
     :param use_tensorboard: Whether to use Tensorboard logging of metrics.
-    :param checkpoint_decoder: Optional CheckpointDecoder instance for BLEU monitoring.
+    :param cp_decoder: Optional CheckpointDecoder instance for BLEU monitoring.
     :param num_concurrent_decodes: Number of concurrent subprocesses to decode validation data.
     """
 
@@ -55,11 +54,12 @@ class TrainingMonitor(object):
                  output_folder: str,
                  optimized_metric: str = C.PERPLEXITY,
                  use_tensorboard: bool = False,
-                 checkpoint_decoder: Optional[sockeye.checkpoint_decoder.CheckpointDecoder] = None,
+                 cp_decoder: Optional[checkpoint_decoder.CheckpointDecoder] = None,
                  num_concurrent_decodes: int = 1) -> None:
-        self.metrics = []  # stores dicts of metric names & values for each checkpoint
+        self.output_folder = output_folder
+        # stores dicts of metric names & values for each checkpoint
+        self.metrics = []  # type: List[Dict]
         self.metrics_filename = os.path.join(output_folder, C.METRICS_NAME)
-        open(self.metrics_filename, 'w').close()  # clear metrics file
         self.best_checkpoint = 0
         self.start_tic = time.time()
         self.summary_writer = None
@@ -71,30 +71,21 @@ class TrainingMonitor(object):
                 shutil.rmtree(log_dir)
             logger.info("Logging training events for Tensorboard at '%s'", log_dir)
             self.summary_writer = tensorboard.FileWriter(log_dir)
-        self.checkpoint_decoder = checkpoint_decoder
-        self.ctx = mp.get_context('spawn')
+        self.cp_decoder = cp_decoder
+        self.ctx = mp.get_context('spawn') # type: ignore
         self.num_concurrent_decodes = num_concurrent_decodes
         self.decoder_metric_queue = self.ctx.Queue()
-        self.decoder_processes = []
+        self.decoder_processes = []  # type: List[mp.Process]
         # TODO(fhieber): MXNet Speedometer uses root logger. How to fix this?
         self.speedometer = mx.callback.Speedometer(batch_size=batch_size,
                                                    frequent=C.MEASURE_SPEED_EVERY,
                                                    auto_reset=False)
+        utils.check_condition(optimized_metric in C.METRICS, "Unsupported metric: %s" % optimized_metric)
+        if optimized_metric == C.BLEU:
+            utils.check_condition(self.cp_decoder is not None, "%s requires CheckpointDecoder" % C.BLEU)
         self.optimized_metric = optimized_metric
-        if self.optimized_metric == C.PERPLEXITY:
-            self.minimize = True
-            self.validation_best = np.inf
-        elif self.optimized_metric == C.ACCURACY:
-            self.minimize = False
-            self.validation_best = -np.inf
-        elif self.optimized_metric == C.BLEU:
-            assert self.checkpoint_decoder is not None, "BLEU requires CheckpointDecoder"
-            self.minimize = False
-            self.validation_best = -np.inf
-        else:
-            raise ValueError("No other metrics supported")
-        logger.info("Early stopping by optimizing '%s' (minimize=%s)",
-                    self.optimized_metric, self.minimize)
+        self.validation_best = C.METRIC_WORST[self.optimized_metric]
+        logger.info("Early stopping by optimizing '%s'", self.optimized_metric)
         self.tic = 0
 
     def get_best_checkpoint(self) -> int:
@@ -109,8 +100,11 @@ class TrainingMonitor(object):
         """
         return self.validation_best
 
-    def _is_better(self, value):
-        return value < self.validation_best if self.minimize else value > self.validation_best
+    def _is_better(self, value: float) -> bool:
+        if C.METRIC_MAXIMIZE[self.optimized_metric]:
+            return value > self.validation_best
+        else:
+            return value < self.validation_best
 
     def batch_end_callback(self, epoch: int, nbatch: int, metric: mx.metric.EvalMetric):
         """
@@ -124,18 +118,27 @@ class TrainingMonitor(object):
             mx.model.BatchEndParam(
                 epoch=epoch, nbatch=nbatch, eval_metric=metric, locals=None))
 
-    def checkpoint_callback(self, checkpoint: int, train_metric: mx.metric.EvalMetric):
+    def checkpoint_callback(self,
+                            checkpoint: int,
+                            train_metric: mx.metric.EvalMetric,
+                            memory_data: Optional[Dict[int, Tuple[int, int]]] = None):
         """
         Callback function when a model checkpoint is performed.
         If TrainingMonitor uses Tensorboard, training metrics are written to the Tensorboard event file.
 
         :param checkpoint: Current checkpoint.
         :param train_metric: Evaluation metric for training data.
+        :param memory_data: Optional data about memory usage.
         """
         metrics = {}
         for name, value in train_metric.get_name_value():
             metrics[name + "-train"] = value
+        if memory_data is not None:
+            utils.log_gpu_memory_usage(memory_data)
+            used_gpu_mem = sum(v[0] for v in memory_data.values())
+            metrics['used-gpu-memory'] = used_gpu_mem  # total gpu memory used in MB
         self.metrics.append(metrics)
+
         if self.summary_writer:
             write_tensorboard(self.summary_writer, metrics, checkpoint)
 
@@ -160,12 +163,12 @@ class TrainingMonitor(object):
         if self.summary_writer:
             write_tensorboard(self.summary_writer, metrics, checkpoint)
 
-        if self.checkpoint_decoder:
+        if self.cp_decoder:
             self._empty_decoder_metric_queue()
             self._start_decode_process(checkpoint)
 
         self.metrics[-1].update(metrics)
-        self._write_scores()
+        utils.write_metrics_file(self.metrics, self.metrics_filename)
 
         has_improved, best_checkpoint = self._find_best_checkpoint()
         return has_improved, best_checkpoint
@@ -192,22 +195,14 @@ class TrainingMonitor(object):
                         self.optimized_metric, self.validation_best)
         return has_improved, self.best_checkpoint
 
-    def _write_scores(self):
-        """
-        Overwrite metrics_filename with latest metrics results.
-        """
-        with open(self.metrics_filename, 'w') as metrics_out:
-            for checkpoint, metric_dict in enumerate(self.metrics, 1):
-                metrics_out.write("%d\t" % checkpoint)
-                metrics_out.write("\t".join(["%s=%.6f" % (name, value)
-                                             for name, value in sorted(
-                        metric_dict.items())]) + "\n")
-
     def _start_decode_process(self, checkpoint):
         self._wait_for_decode_slot()
+        output_name = os.path.join(self.output_folder, C.DECODE_OUT_NAME % checkpoint)
         process = self.ctx.Process(
             target=_decode_and_evaluate,
-            args=(self.checkpoint_decoder, checkpoint,
+            args=(self.cp_decoder,
+                  checkpoint,
+                  output_name,
                   self.decoder_metric_queue))
         process.name = 'Decoder-%d' % checkpoint
         logger.info("Starting process: %s", process.name)
@@ -242,7 +237,7 @@ class TrainingMonitor(object):
                 logger.info("Waiting for %s process to finish." % process.name)
             process.join()
         self._empty_decoder_metric_queue()
-        self._write_scores()
+        utils.write_metrics_file(self.metrics, self.metrics_filename)
 
     def save_state(self, fname: str):
         """
@@ -264,14 +259,16 @@ class TrainingMonitor(object):
             self.metrics = pickle.load(fp)
             self.best_checkpoint = pickle.load(fp)
 
-def _decode_and_evaluate(checkpoint_decoder: sockeye.checkpoint_decoder.CheckpointDecoder,
+
+def _decode_and_evaluate(checkpoint_decoder: checkpoint_decoder.CheckpointDecoder,
                          checkpoint: int,
+                         output_name: str,
                          queue: mp.Queue):
     """
     Decodes and evaluates using given checkpoint_decoder and puts result in the queue,
     indexed by the checkpoint.
     """
-    metrics = checkpoint_decoder.decode_and_evaluate(checkpoint)
+    metrics = checkpoint_decoder.decode_and_evaluate(checkpoint, output_name)
     queue.put((checkpoint, metrics))
 
 
