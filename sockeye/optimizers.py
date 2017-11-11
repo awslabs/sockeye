@@ -178,6 +178,8 @@ class Eve(SockeyeOptimizer):
                 d = 1.
             return (f_hat, d)
 
+        batch_d, checkpoint_d = None, None
+
         # Computation occurs for each batch
         if self.use_batch_objective:
             batch_f_hat, batch_d = compute_d(t,
@@ -213,6 +215,8 @@ class Eve(SockeyeOptimizer):
             d = batch_d
         elif self.use_checkpoint_objective:
             d = checkpoint_d
+        else:
+            raise ValueError
 
         # Update mean and variance (Adam/Nadam)
         m_t, v_t = state.mean, state.variance

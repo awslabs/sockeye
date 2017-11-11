@@ -289,7 +289,7 @@ class TransformerDecoder(Decoder):
         for layer in self.layers:
             target = layer(target, target_lengths, target_max_length, target_bias,
                            source_encoded, source_encoded_lengths, source_encoded_max_length)
-        target = self.final_process(data=target, prev=None, length=target_max_length)
+        target = self.final_process(data=target, prev=None)
 
         return target
 

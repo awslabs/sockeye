@@ -42,8 +42,8 @@ class InferenceModel(model.SockeyeModel):
     :param model_folder: Folder to load model from.
     :param context: MXNet context to bind modules to.
     :param fused: Whether to use FusedRNNCell (CuDNN). Only works with GPU context.
-    :param max_input_len: Maximum input length.
     :param beam_size: Beam size.
+    :param batch_size: Batch size.
     :param checkpoint: Checkpoint to load. If None, finds best parameters in model_folder.
     :param softmax_temperature: Optional parameter to control steepness of softmax distribution.
     :param max_output_length_num_stds: Number of standard deviations as safety margin for maximum output length.
@@ -751,7 +751,7 @@ class Translator:
         """
         Returns NDArray of source ids (shape=(batch_size, bucket_key)) and corresponding bucket_key.
 
-        :param tokens: List of lists of input tokens.
+        :param sequences: List of lists of input tokens.
         :return NDArray of source ids and bucket key.
         """
         bucket_key = data_io.get_bucket(max(len(tokens) for tokens in sequences), self.buckets_source)

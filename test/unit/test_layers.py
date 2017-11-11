@@ -20,9 +20,10 @@ import sockeye.rnn
 
 def test_layer_normalization():
     batch_size = 32
+    other_dim = 10
     num_hidden = 64
     x = mx.sym.Variable('x')
-    x_nd = mx.nd.uniform(0, 10, (batch_size, num_hidden))
+    x_nd = mx.nd.uniform(0, 10, (batch_size, other_dim, num_hidden))
     x_np = x_nd.asnumpy()
 
     ln = sockeye.layers.LayerNormalization(num_hidden, prefix="")
@@ -31,8 +32,8 @@ def test_layer_normalization():
     sym = mx.sym.Group(ln.moments(x))
     mean, var = sym.eval(x=x_nd)
 
-    expected_mean = np.mean(x_np, axis=1, keepdims=True)
-    expected_var = np.var(x_np, axis=1, keepdims=True)
+    expected_mean = np.mean(x_np, axis=-1, keepdims=True)
+    expected_var = np.var(x_np, axis=-1, keepdims=True)
 
     assert np.isclose(mean.asnumpy(), expected_mean).all()
     assert np.isclose(var.asnumpy(), expected_var).all()

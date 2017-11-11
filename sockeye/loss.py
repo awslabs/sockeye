@@ -133,7 +133,7 @@ class CrossEntropyMetric(EvalMetric):
     :param loss_config: The configuration used for the corresponding loss.
     :param name: Name of this metric instance for display.
     :param output_names: Name of predictions that should be used when updating with update_dict.
-    :param output_labels: Name of labels that should be used when updating with update_dict.
+    :param label_names: Name of labels that should be used when updating with update_dict.
     """
 
     def __init__(self,

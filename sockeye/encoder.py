@@ -10,7 +10,6 @@
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
-from sockeye import utils
 from sockeye.convolution import ConvolutionBlock
 
 """
@@ -380,7 +379,6 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
     Takes an encoded sequence and adds fixed positional embeddings as in Vaswani et al, 2017 to it.
 
     :param num_embed: Embedding size.
-    :param max_seq_len: Maximum sequence length.
     :param prefix: Name prefix for symbols of this encoder.
     """
 
@@ -858,7 +856,7 @@ class TransformerEncoder(Encoder):
         for i, layer in enumerate(self.layers):
             # (batch_size, seq_len, config.model_size)
             data = layer(data, data_length, seq_len)
-        data = self.final_process(data=data, prev=None, length=seq_len)
+        data = self.final_process(data=data, prev=None)
         return data, data_length, seq_len
 
     def get_num_hidden(self) -> int:

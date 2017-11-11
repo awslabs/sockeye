@@ -66,7 +66,8 @@ class LearningRateSchedulerFixedStep(AdaptiveLearningRateScheduler):
     """
     Use a fixed schedule of learning rate steps: lr_1 for N steps, lr_2 for M steps, etc.
 
-    :param steps: List of learning rate step tuples in the form (rate, num_updates).
+    :param schedule: List of learning rate step tuples in the form (rate, num_updates).
+    :param updates_per_checkpoint: Updates per checkpoint.
     """
 
     def __init__(self, schedule: List[Tuple[float, int]], updates_per_checkpoint: int) -> None:

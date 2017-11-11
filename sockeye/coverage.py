@@ -206,7 +206,6 @@ class ActivationCoverage(Coverage):
     :param coverage_num_hidden: Number of hidden units for coverage vectors.
     :param activation: Type of activation for Perceptron.
     :param layer_normalization: If true, applies layer normalization before non-linear activation.
-    :param prefix: Layer name prefix.
     """
 
     def __init__(self,
