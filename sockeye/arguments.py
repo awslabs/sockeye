@@ -717,11 +717,15 @@ def add_training_args(params):
                               type=float,
                               default=None,
                               help='Momentum constant. Default: %(default)s.')
-    train_params.add_argument('--clip-gradient',
+    train_params.add_argument('--gradient-clipping-threshold',
                               type=float,
                               default=1.0,
                               help='Clip absolute gradients values greater than this value. '
                                    'Set to negative to disable. Default: %(default)s.')
+    train_params.add_argument('--gradient-clipping-type',
+                              choices=C.GRADIENT_CLIPPING_TYPES,
+                              default=C.GRADIENT_CLIPPING_TYPE_ABS,
+                              help='The type of gradient clipping. Default: %(default)s.')
 
     train_params.add_argument('--learning-rate-scheduler-type',
                               default=C.LR_SCHEDULER_PLATEAU_REDUCE,
