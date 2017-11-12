@@ -897,6 +897,7 @@ class ConvolutionalDecoderConfig(Config):
                  encoder_num_hidden: int,
                  num_layers: int,
                  positional_embedding_type: str,
+                 project_qkv: bool = False,
                  hidden_dropout: float = .0) -> None:
         super().__init__()
         self.cnn_config = cnn_config
@@ -905,6 +906,7 @@ class ConvolutionalDecoderConfig(Config):
         self.encoder_num_hidden = encoder_num_hidden
         self.num_layers = num_layers
         self.positional_embedding_type = positional_embedding_type
+        self.project_qkv = project_qkv
         self.hidden_dropout = hidden_dropout
 
 
@@ -950,6 +952,12 @@ class ConvolutionalDecoder(Decoder):
             config.cnn_config,
             pad_type='left',
             prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
+        if self.config.project_qkv:
+            self.attention_layers = [layers.ProjectedDotAttention("%s%d_" % (prefix, i),
+                                                                  self.config.cnn_config.num_hidden)
+                                     for i in range(config.num_layers)]
+        else:
+            self.attention_layers = [layers.PlainDotAttention() for i in range(config.num_layers)]
 
         self.i2h_weight = mx.sym.Variable('%si2h_weight' % prefix)
 
@@ -1013,16 +1021,13 @@ class ConvolutionalDecoder(Decoder):
 
         drop_prob = self.config.hidden_dropout
 
-        for layer in self.layers:
+        for layer, att_layer in zip(self.layers, self.attention_layers):
             # (batch_size, target_seq_len, num_hidden)
             target_hidden = layer(mx.sym.Dropout(target_hidden, p=drop_prob) if drop_prob > 0 else target_hidden,
                                   target_embed_lengths, target_embed_max_length)
 
             # (batch_size, target_seq_len, num_embed)
-            context = layers.dot_attention(queries=target_hidden,
-                                           keys=source_encoded,
-                                           values=source_encoded,
-                                           lengths=source_encoded_lengths)
+            context = att_layer(target_hidden, source_encoded, source_encoded_lengths)
 
             # residual connection:
             target_hidden = target_hidden_prev + target_hidden + context
@@ -1082,16 +1087,15 @@ class ConvolutionalDecoder(Decoder):
 
         drop_prob = self.config.hidden_dropout
 
-        for layer, layer_state in zip(self.layers, cnn_layer_states):
+        for layer, att_layer, layer_state in zip(self.layers, self.attention_layers, cnn_layer_states):
             # (batch_size, kernel_width, num_hidden) -> (batch_size, 1, num_hidden)
             target_hidden_step = layer.step(mx.sym.Dropout(target_hidden, p=drop_prob)
                                             if drop_prob > 0 else target_hidden)
 
             # (batch_size, 1, num_embed)
-            context_step = layers.dot_attention(queries=target_hidden_step,
-                                                keys=source_encoded,
-                                                values=source_encoded,
-                                                lengths=source_encoded_lengths)
+            # TODO: compute the source encoded projection only once for efficiency reasons
+            context_step = att_layer(target_hidden_step, source_encoded, source_encoded_lengths)
+
             # residual connection:
             target_hidden_step = target_hidden_step_prev + target_hidden_step + context_step
             target_hidden_step_prev = target_hidden_step
