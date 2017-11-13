@@ -262,7 +262,7 @@ def smart_open(filename: str, mode: str = "rt", ftype: str = "auto", errors:str 
         return open(filename, mode=mode, encoding='utf-8', errors=errors)
 
 
-def read_content(path: str, limit: int = None) -> Iterator[List[str]]:
+def read_content(path: str, limit: Optional[int] = None) -> Iterator[List[str]]:
     """
     Returns a list of tokens for each line in path up to a limit.
 
