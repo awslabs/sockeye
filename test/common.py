@@ -259,12 +259,12 @@ def run_train_translate(train_params: str,
 
         # Measure BLEU
         bleu = sacrebleu.raw_corpus_bleu(open(out_path, "r").readlines(),
-                                         [open(dev_target_path, "r").readlines()], 0.01)
+                                         [open(dev_target_path, "r").readlines()], 0.01).score
 
         bleu_restrict = None
         if restrict_lexicon:
             bleu_restrict = sacrebleu.raw_corpus_bleu(open(out_restrict_path, "r").readlines(),
-                                      [open(dev_target_path, "r").readlines()], 0.01)
+                                      [open(dev_target_path, "r").readlines()], 0.01).score
         # Run BLEU cli
         eval_params = "{} {} ".format(sockeye.evaluate.__file__,
                                       _EVAL_PARAMS_COMMON.format(hypotheses=out_path, references=dev_target_path), )
