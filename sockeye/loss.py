@@ -40,7 +40,7 @@ class LossConfig(config.Config):
     def __init__(self,
                  name: str,
                  vocab_size: int,
-                 normalization_type: bool,
+                 normalization_type: str,
                  label_smoothing: float = 0.0) -> None:
         super().__init__()
         self.name = name
@@ -144,20 +144,20 @@ class CrossEntropyMetric(EvalMetric):
         super().__init__(name, output_names=output_names, label_names=label_names)
         self.loss_config = loss_config
 
-    def _cross_entropy(self, pred, label, ignore):
+    def cross_entropy(self, pred, label, ignore):
         prob = mx.nd.pick(pred, label.astype(dtype="int32"))
         prob = prob * (1 - ignore) + ignore
-        loss = -mx.nd.log(prob + 1e-8) # pylint: disable=invalid-unary-operand-type
+        loss = -mx.nd.log(prob + 1e-8)  # pylint: disable=invalid-unary-operand-type
         return loss
 
-    def _cross_entropy_smoothed(self, pred, label, ignore):
+    def cross_entropy_smoothed(self, pred, label, ignore):
         label_dist = mx.nd.one_hot(indices=label.astype(dtype='int32'),
                                    depth=self.loss_config.vocab_size,
                                    on_value=1.0 - self.loss_config.label_smoothing,
                                    off_value=self.loss_config.label_smoothing /
                                              (self.loss_config.vocab_size - 1.0))
-        label_dist = mx.nd.where(ignore, label_dist, mx.nd.zeros_like(label_dist))
-        loss = label_dist * (- mx.nd.log(pred + 1e-8)) # pylint: disable=invalid-unary-operand-type
+        label_dist = mx.nd.where(1 - ignore, label_dist, mx.nd.zeros_like(label_dist))
+        loss = label_dist * (- mx.nd.log(pred + 1e-8))  # pylint: disable=invalid-unary-operand-type
         return loss
 
     def update(self, labels, preds):
@@ -169,9 +169,9 @@ class CrossEntropyMetric(EvalMetric):
             ignore = (label == C.PAD_ID).astype(dtype=pred.dtype)
 
             if self.loss_config.label_smoothing > 0.0:
-                loss = self._cross_entropy_smoothed(pred, label, ignore)
+                loss = self.cross_entropy_smoothed(pred, label, ignore)
             else:
-                loss = self._cross_entropy(pred, label, ignore)
+                loss = self.cross_entropy(pred, label, ignore)
 
             # Sum, normalizing if needed
             if self.loss_config.normalization_type == C.LOSS_NORM_VALID:
