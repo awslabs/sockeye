@@ -271,7 +271,8 @@ class DotAttention(Attention):
     :math:`score(h_t, h_s) = \\langle \\mathbf{W}_t h_t, \\mathbf{W}_s h_s \\rangle`
 
     :param input_previous_word: Feed the previous target embedding into the attention mechanism.
-    :param rnn_num_hidden: Number of hidden units in encoder/decoder RNNs.
+    :param source_num_hidden: Number of hidden units in source.
+    :param query_num_hidden: Number of hidden units in query.
     :param num_hidden: Number of hidden units.
     :param scale: Optionally scale query before dot product [Vaswani et al, 2017].
     """
@@ -568,11 +569,8 @@ class MlpAttention(Attention):
 
     :param input_previous_word: Feed the previous target embedding into the attention mechanism.
     :param attention_num_hidden: Number of hidden units.
-    :param attention_coverage_type: The type of update for the dynamic source encoding.
-           If None, no dynamic source encoding is done.
-    :param attention_coverage_num_hidden: Number of hidden units for coverage attention.
-    :param prefix: Layer name prefix.
     :param layer_normalization: If true, normalizes hidden layer outputs before tanh activation.
+    :param config_coverage: Optional coverage config.
     """
 
     def __init__(self,
@@ -659,29 +657,20 @@ class MlpAttention(Attention):
             attention_hidden = mx.sym.broadcast_add(lhs=attention_hidden_lhs, rhs=query_hidden,
                                                     name="%squery_plus_input" % self.prefix)
 
-            # (batch_size * seq_len, attention_num_hidden)
-            attention_hidden = mx.sym.reshape(data=attention_hidden,
-                                              shape=(-3, -1),
-                                              name="%squery_plus_input_before_fc" % self.prefix)
-
             if self._ln is not None:
                 attention_hidden = self._ln.normalize(attention_hidden)
 
-            # (batch_size * seq_len, attention_num_hidden)
+            # (batch_size, seq_len, attention_num_hidden)
             attention_hidden = mx.sym.Activation(attention_hidden, act_type="tanh",
                                                  name="%shidden" % self.prefix)
 
-            # (batch_size * seq_len, 1)
+            # (batch_size, seq_len, 1)
             attention_scores = mx.sym.FullyConnected(data=attention_hidden,
                                                      weight=self.att_h2s_weight,
                                                      num_hidden=1,
                                                      no_bias=True,
+                                                     flatten=False,
                                                      name="%sraw_att_score_fc" % self.prefix)
-
-            # (batch_size, seq_len, 1)
-            attention_scores = mx.sym.reshape(attention_scores,
-                                              shape=(-1, source_seq_len, 1),
-                                              name="%sraw_att_score_fc" % self.prefix)
 
             context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores)
 

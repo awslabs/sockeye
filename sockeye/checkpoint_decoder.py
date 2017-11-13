@@ -21,7 +21,6 @@ import time
 from typing import Dict, Optional
 
 import mxnet as mx
-import numpy as np
 
 from sacrebleu import raw_corpus_bleu
 import sockeye.output_handler

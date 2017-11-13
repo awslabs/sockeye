@@ -479,6 +479,7 @@ def create_model_config(args: argparse.Namespace,
     :param args: Arguments as returned by argparse.
     :param vocab_source_size: The size of the source vocabulary.
     :param vocab_target_size: The size of the target vocabulary.
+    :param config_data: Data config.
     :return: The model configuration.
     """
     max_seq_len_source, max_seq_len_target = args.max_seq_len

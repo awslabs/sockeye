@@ -97,12 +97,12 @@ class TransformerEncoderBlock:
 
     def __call__(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, length: int) -> mx.sym.Symbol:
         # self-attention
-        data_self_att = self.self_attention(self.pre_self_attention(data, None, length), data_length, length)
-        data = self.post_self_attention(data_self_att, data, length)
+        data_self_att = self.self_attention(self.pre_self_attention(data, None), data_length, length)
+        data = self.post_self_attention(data_self_att, data)
 
         # feed-forward
-        data_ff = self.ff(self.pre_ff(data, None, length))
-        data = self.post_ff(data_ff, data, length)
+        data_ff = self.ff(self.pre_ff(data, None))
+        data = self.post_ff(data_ff, data)
 
         return data
 
@@ -167,23 +167,23 @@ class TransformerDecoderBlock:
                  source_max_length: int) -> mx.sym.Symbol:
 
         # self-attention
-        target_self_att = self.self_attention(self.pre_self_attention(target, None, target_max_length),
+        target_self_att = self.self_attention(self.pre_self_attention(target, None),
                                               target_lengths,
                                               target_max_length,
                                               bias=target_bias)
-        target = self.post_self_attention(target_self_att, target, target_max_length)
+        target = self.post_self_attention(target_self_att, target)
 
         # encoder attention
-        target_enc_att = self.enc_attention(self.pre_enc_attention(target, None, target_max_length),
+        target_enc_att = self.enc_attention(self.pre_enc_attention(target, None),
                                             target_max_length,
                                             source,
                                             source_lengths,
                                             source_max_length)
-        target = self.post_enc_attention(target_enc_att, target, target_max_length)
+        target = self.post_enc_attention(target_enc_att, target)
 
         # feed-forward
-        target_ff = self.ff(self.pre_ff(target, None, target_max_length))
-        target = self.post_ff(target_ff, target, target_max_length)
+        target_ff = self.ff(self.pre_ff(target, None))
+        target = self.post_ff(target_ff, target)
 
         return target
 
@@ -212,14 +212,12 @@ class TransformerProcessBlock:
 
     def __call__(self,
                  data: mx.sym.Symbol,
-                 prev: Optional[mx.sym.Symbol],
-                 length: int) -> mx.sym.Symbol:
+                 prev: Optional[mx.sym.Symbol]) -> mx.sym.Symbol:
         """
         Apply processing sequence to data with optional previous input.
 
         :param data: Input data. Shape: (batch, length, num_hidden).
         :param prev: Previous data. Shape: (batch, length, num_hidden).
-        :param length: Maximum sequence length.
         :return: Processed data. Shape: (batch, length, num_hidden).
         """
         if not self.sequence:
@@ -234,7 +232,7 @@ class TransformerProcessBlock:
                 data = mx.sym._internal._plus(data, prev, name="%sresidual" % self.prefix)
 
             elif step == "n":
-                data = self._reshape_and_normalize(data, length)
+                data = self.layer_norm.normalize(data)
 
             elif step == "d":
                 if self.dropout > 0.0:
@@ -242,12 +240,6 @@ class TransformerProcessBlock:
             else:
                 raise ValueError("Unknown step in sequence: %s" % step)
 
-        return data
-
-    def _reshape_and_normalize(self, data: mx.sym.Symbol, length: int) -> mx.sym.Symbol:
-        data = mx.sym.reshape(data, shape=(-3, self.num_hidden))
-        data = self.layer_norm.normalize(data)
-        data = mx.sym.reshape(data, shape=(-4, -1, length, self.num_hidden), name="%snormalized" % self.prefix)
         return data
 
 

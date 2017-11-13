@@ -55,25 +55,27 @@ class LayerNormalization:
     @staticmethod
     def moments(inputs: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
         """
-        Computes mean and variance of a Symbol across axis 1.
+        Computes mean and variance of the last dimension of a Symbol.
 
-        :param inputs: Shape(batch_size, hidden).
-        :return: mean, var: Shape(batch_size, 1).
+        :param inputs: Shape: (d0, ..., dn, hidden).
+        :return: mean, var: Shape: (d0, ..., dn, 1).
         """
-        mean = mx.sym.mean(data=inputs, axis=1, keepdims=True)
+        mean = mx.sym.mean(data=inputs, axis=-1, keepdims=True)
         # TODO(fhieber): MXNet should have this.
-        var = mx.sym.mean(mx.sym.square(mx.sym.broadcast_minus(inputs, mean)), axis=1, keepdims=True)
+        var = mx.sym.mean(mx.sym.square(mx.sym.broadcast_minus(inputs, mean)), axis=-1, keepdims=True)
         return mean, var
 
     def normalize(self, inputs: mx.sym.Symbol, eps: float = 0.000001) -> mx.sym.Symbol:
         """
-        Normalizes hidden units of inputs as follows::
+        Normalizes hidden units of inputs as follows:
 
         inputs = scale * (inputs - mean) / sqrt(var + eps) + shift
 
-        :param inputs: Inputs to normalize. Shape(batch_size, num_hidden).
+        Normalization is performed over the last dimension of the input data.
+
+        :param inputs: Inputs to normalize. Shape: (d0, ..., dn, num_hidden).
         :param eps: Variance epsilon.
-        :return: inputs_norm: Normalized inputs. Shape(batch_size, num_hidden).
+        :return: inputs_norm: Normalized inputs. Shape: (d0, ..., dn, num_hidden).
         """
         mean, var = self.moments(inputs)
         inputs_norm = mx.sym.broadcast_minus(inputs, mean, name='%sinp_minus_mean' % self.prefix)
@@ -215,7 +217,7 @@ def combine_heads(x: mx.sym.Symbol, length: int, heads: int) -> mx.sym.Symbol:
     :param x: Symbol of shape (batch * heads, length, depth_per_head).
     :param length: Sequence length.
     :param heads: Number of heads.
-    :return: Symbol of shape (batch * length, depth).
+    :return: Symbol of shape (batch, length, depth).
     """
     # (batch, heads, length, depth_per_head)
     x = mx.sym.reshape(data=x, shape=(-4, -1, heads, length, 0))
@@ -340,6 +342,7 @@ class MultiHeadAttentionBase:
                                              bias=self.b_h2o,
                                              num_hidden=self.depth_out,
                                              flatten=False)
+
         return contexts
 
 

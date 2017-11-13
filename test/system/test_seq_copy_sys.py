@@ -30,15 +30,15 @@ _SEED_DEV = 17
     # "Vanilla" LSTM encoder-decoder with attention
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity"
-     " --max-updates 10000 --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
-     " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --max-updates 3000 --weight-normalization",
+     " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
+     " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --max-updates 4000 --weight-normalization",
      "--beam-size 5",
      1.01,
      0.99),
     # "Vanilla" LSTM encoder-decoder translating in chunks (due to lower --max-input-len)
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity"
-     " --max-updates 10000 --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
+     " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
      " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --max-updates 5000",
      "--beam-size 5 --max-input-len 4",
      1.01,
@@ -46,8 +46,8 @@ _SEED_DEV = 17
     # "Vanilla" LSTM encoder-decoder with attention (word-based batching)
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 32 --batch-size 80 --batch-type word --loss cross-entropy "
-     " --optimized-metric perplexity --max-updates 8000 --checkpoint-frequency 1000 --optimizer adam "
-     " --initial-learning-rate 0.001 --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0",
+     " --optimized-metric perplexity --max-updates 5000 --checkpoint-frequency 1000 --optimizer adam "
+     " --initial-learning-rate 0.001 --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --layer-normalization",
      "--beam-size 5",
      1.01,
      0.99),
@@ -109,6 +109,7 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
         assert perplexity <= perplexity_thresh
         assert bleu >= bleu_thresh
         assert bleu_restrict >= bleu_thresh
+
 
 @pytest.mark.parametrize("train_params, translate_params, perplexity_thresh, bleu_thresh", [
     # "Vanilla" LSTM encoder-decoder with attention
