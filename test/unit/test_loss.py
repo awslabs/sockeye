@@ -13,6 +13,7 @@
 
 import mxnet as mx
 import numpy as np
+import pytest
 
 import sockeye.constants as C
 import sockeye.loss
@@ -111,3 +112,49 @@ def test_smoothed_cross_entropy_loss():
     assert np.isclose(grads, expected_grads).all()
     label_grad_sum = executor.grad_dict["labels"].asnumpy().sum()
     assert label_grad_sum == 0
+
+
+@pytest.mark.parametrize("preds, labels, normalization_type, label_smoothing, expected_value",
+                         [(mx.nd.array([[0.0, 0.2, 0.8],
+                                        [0.0, 1.0, 0.0]]),
+                           mx.nd.array([[2],
+                                        [0]]),
+                           'valid',
+                           0.0,
+                           -np.log(0.8 + 1e-8) / 1.0),
+                          (mx.nd.array([[0.0, 0.2, 0.8],
+                                        [0.0, 1.0, 0.0]]),
+                           mx.nd.array([[2],
+                                        [0]]),
+                           'batch',
+                           0.0,
+                           -np.log(0.8 + 1e-8) / 2.0)]
+                         )
+def test_cross_entropy_metric(preds, labels, normalization_type, label_smoothing, expected_value):
+    config = sockeye.loss.LossConfig(name=C.CROSS_ENTROPY,
+                                     vocab_size=preds.shape[1],
+                                     normalization_type=normalization_type,
+                                     label_smoothing=label_smoothing)
+    metric = sockeye.loss.CrossEntropyMetric(config)
+    metric.update([labels], [preds])
+    name, value = metric.get()
+    assert name == 'cross-entropy'
+    assert np.isclose(value, expected_value)
+
+
+def test_cross_entropy_internal():
+    config = sockeye.loss.LossConfig(name=C.CROSS_ENTROPY,
+                                     vocab_size=3,
+                                     normalization_type='valid',
+                                     label_smoothing=0.0)
+    metric = sockeye.loss.CrossEntropyMetric(config)
+
+    pred = mx.nd.array([0.0, 0.2, 0.8])
+    label = mx.nd.array([2])
+    expected_cross_entropy = -np.log(0.8 + 1e-8) / 1.0
+
+    cross_entropy = metric.cross_entropy(pred, label, ignore=(label == C.PAD_ID)).sum()
+    cross_entropy_smoothed = metric.cross_entropy_smoothed(pred, label, ignore=(label == C.PAD_ID)).sum()
+
+    assert np.isclose(cross_entropy.asnumpy(), expected_cross_entropy)
+    assert np.isclose(cross_entropy_smoothed.asnumpy(), expected_cross_entropy)
