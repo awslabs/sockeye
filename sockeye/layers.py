@@ -335,13 +335,12 @@ class MultiHeadAttentionBase:
         # (batch, queries_max_length, depth)
         contexts = combine_heads(contexts, queries_max_length, self.heads)
 
-        if self.depth_out != self.depth:
-            # contexts: (batch, queries_max_length, output_depth)
-            contexts = mx.sym.FullyConnected(data=contexts,
-                                             weight=self.w_h2o,
-                                             bias=self.b_h2o,
-                                             num_hidden=self.depth_out,
-                                             flatten=False)
+        # contexts: (batch, queries_max_length, output_depth)
+        contexts = mx.sym.FullyConnected(data=contexts,
+                                         weight=self.w_h2o,
+                                         bias=self.b_h2o,
+                                         num_hidden=self.depth_out,
+                                         flatten=False)
 
         return contexts
 

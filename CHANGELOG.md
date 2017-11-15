@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 For each item we will potentially have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.12.0]
+### Changed
+ - Transformers now always use the linear output transformation after combining attention heads, even if input & output
+ depth do not differ.
+
 ## [1.11.2]
 ### Fixed
  - Fixed a bug where vocabulary slice padding was defaulting to CPU context.  This was affecting decoding on GPUs with
