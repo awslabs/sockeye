@@ -196,7 +196,7 @@ class TransformerDecoder(Decoder):
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                  num_hidden=config.model_size,
                                                                  dropout=config.dropout_prepost,
-                                                                 prefix="%sfinal_process" % prefix)
+                                                                 prefix="%sfinal_process_" % prefix)
 
         # Embedding & output parameters
         if embed_weight is None:
