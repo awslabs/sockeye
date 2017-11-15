@@ -957,7 +957,7 @@ class Translator:
                                vocab_slice_ids.shape[0], self.beam_size)
                 n = self.beam_size - vocab_slice_ids.shape[0] + 1
                 vocab_slice_ids = mx.nd.concat(vocab_slice_ids,
-                                               mx.nd.full((n,), val=self.vocab_target[C.EOS_SYMBOL]),
+                                               mx.nd.full((n,), val=self.vocab_target[C.EOS_SYMBOL], ctx=self.context),
                                                dim=0)
 
             pad_dist = mx.nd.full((self.batch_size * self.beam_size, vocab_slice_ids.shape[0]),
