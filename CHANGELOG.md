@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 For each item we will potentially have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.12.1]
+### Changed
+ - Removed dependency on sacrebleu pip package. Now imports directly from `contrib/`.
+
 ## [1.12.0]
 ### Changed
  - Transformers now always use the linear output transformation after combining attention heads, even if input & output

@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 import pytest
-import sacrebleu
+from contrib import sacrebleu
 from collections import namedtuple
 
 EPSILON = 1e-8
