@@ -2,4 +2,3 @@ pyyaml
 mxnet-cu75==0.12.0
 numpy>=1.12
 typing
-sacrebleu>=1.1.6

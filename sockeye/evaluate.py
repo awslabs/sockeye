@@ -17,8 +17,9 @@ Evaluation CLI. Prints corpus BLEU
 import argparse
 import logging
 import sys
+from typing import Iterable, Optional
 
-import sacrebleu
+from contrib import sacrebleu
 from sockeye.log import setup_main_logger, log_sockeye_version
 from . import arguments
 from . import data_io
@@ -26,9 +27,18 @@ from . import utils
 
 logger = setup_main_logger(__name__, file_logging=False)
 
-def raw_corpus_bleu(hypotheses, references, offset):
-    """Simple wrapper around sacreBLEU that turns off tokenization, adds smoothing, etc."""
-    return sacrebleu.raw_corpus_bleu(hypotheses, [references], offset).score / 100
+
+def raw_corpus_bleu(hypotheses: Iterable[str], references: Iterable[str], offset: Optional[float] = 0.01) -> float:
+    """
+    Simple wrapper around sacreBLEU's BLEU without tokenization and smoothing.
+
+    :param hypotheses: Hypotheses stream.
+    :param references: Reference stream.
+    :param offset: Smoothing constant.
+    :return: BLEU score as float between 0 and 1.
+    """
+    return sacrebleu.raw_corpus_bleu(hypotheses, [references], smooth_floor=offset).score / 100
+
 
 def main():
     params = argparse.ArgumentParser(description='Evaluate translations by calculating 4-BLEU '
