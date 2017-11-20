@@ -54,7 +54,7 @@ _SEED_DEV = 17
     ("Copy:transformer:lstm",
      "--encoder transformer --num-layers 2:1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
      " --rnn-attention-type mhdot --rnn-attention-num-hidden 32 --batch-size 16 --rnn-attention-mhdot-heads 1"
-     " --loss cross-entropy --optimized-metric perplexity --max-updates 5000"
+     " --loss cross-entropy --optimized-metric perplexity --max-updates 6000"
      " --transformer-attention-heads 4 --transformer-model-size 64"
      " --transformer-feed-forward-num-hidden 64"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
