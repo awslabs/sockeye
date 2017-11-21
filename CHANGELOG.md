@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 For each item we will potentially have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.13.0]
+### Fixed
+ - Fixed the attention in upper layers (`--rnn-attention-in-upper-layers`), which was previously not passed correctly
+   to the decoder.
+
 ## [1.12.2]
 ### Changed
  - Updated to [MXNet 0.12.1](https://github.com/apache/incubator-mxnet/releases/tag/0.12.1), which includes an important

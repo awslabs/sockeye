@@ -47,8 +47,7 @@ class RNNConfig(Config):
                  dropout_recurrent: float = 0,
                  residual: bool = False,
                  first_residual_layer: int = 2,
-                 forget_bias: float = 0.0,
-                 attention_in_upper_layers: bool = False) -> None:
+                 forget_bias: float = 0.0) -> None:
         super().__init__()
         self.cell_type = cell_type
         self.num_hidden = num_hidden
@@ -59,7 +58,6 @@ class RNNConfig(Config):
         self.residual = residual
         self.first_residual_layer = first_residual_layer
         self.forget_bias = forget_bias
-        self.attention_in_upper_layers = attention_in_upper_layers
 
 
 class SequentialRNNCellParallelInput(mx.rnn.SequentialRNNCell):
