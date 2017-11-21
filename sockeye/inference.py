@@ -1026,8 +1026,8 @@ class Translator:
 
             # (5) update best hypotheses, their attention lists and lengths (only for non-finished hyps)
             # pylint: disable=unsupported-assignment-operation
-            sequences[:, t] = mx.nd.expand_dims(best_word_indices, axis=1)
-            attentions[:, t, :] = mx.nd.expand_dims(attention_scores, axis=1)
+            sequences[:, t] = best_word_indices
+            attentions[:, t, :] = attention_scores
             lengths += mx.nd.cast(1 - mx.nd.expand_dims(finished, axis=1), dtype='float32')
 
             # (6) determine which hypotheses in the beam are now finished
