@@ -192,8 +192,8 @@ class TransformerDecoder(Decoder):
         self.pos_embedding = encoder.get_positional_embedding(config.positional_embedding_type,
                                                               config.model_size,
                                                               max_seq_len=config.max_seq_len_target,
-                                                              fixed_scale_input=True,
-                                                              fixed_scale_positions=False,
+                                                              fixed_pos_embed_scale_up_input=True,
+                                                              fixed_pos_embed_scale_down_positions=False,
                                                               prefix=C.TARGET_POSITIONAL_EMBEDDING_PREFIX)
 
     def decode_sequence(self,
@@ -894,8 +894,8 @@ class ConvolutionalDecoder(Decoder):
         self.pos_embedding = encoder.get_positional_embedding(config.positional_embedding_type,
                                                               num_embed=config.num_embed,
                                                               max_seq_len=config.max_seq_len_target,
-                                                              fixed_scale_input=False,
-                                                              fixed_scale_positions=False,
+                                                              fixed_pos_embed_scale_up_input=False,
+                                                              fixed_pos_embed_scale_down_positions=False,
                                                               prefix=C.TARGET_POSITIONAL_EMBEDDING_PREFIX)
 
         self.layers = [convolution.ConvolutionBlock(

@@ -4,7 +4,7 @@ All notable changes to the project are documented in this file.
 Version numbers are of the form `1.0.0`.
 Any version bump in the last digit is backwards-compatible, in that a model trained with the previous version can still
 be used for translation with the new version.
-Any bump in the second digit indicates a major version change introduces potential backwards incompatibilities,
+Any bump in the second digit indicates a backwards-incompatible change,
 e.g. due to changing the architecture or simply modifying model parameter names.
 Note that Sockeye has checks in place to not translate with an old model that was trained with an incompatible version.
 

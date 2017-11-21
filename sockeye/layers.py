@@ -133,11 +133,13 @@ class OutputLayer:
                  hidden_size: int,
                  vocab_size: int,
                  weight: Optional[mx.sym.Symbol],
-                 weight_normalization: bool) -> None:
+                 weight_normalization: bool,
+                 prefix: str = "") -> None:
         self.vocab_size = vocab_size
+        self.prefix = prefix
 
         if weight is None:
-            self.w = mx.sym.Variable("target_output_weight", shape=(vocab_size, hidden_size))
+            self.w = mx.sym.Variable("%starget_output_weight" % self.prefix, shape=(vocab_size, hidden_size))
         else:
             self.w = weight
 
@@ -147,10 +149,10 @@ class OutputLayer:
             self.weight_norm = WeightNormalization(self.w,
                                                    num_hidden=vocab_size,
                                                    ndim=2,
-                                                   prefix="target_output_")
+                                                   prefix="%starget_output_" % self.prefix)
             self.w = self.weight_norm()
 
-        self.b = mx.sym.Variable("target_output_bias")
+        self.b = mx.sym.Variable("%starget_output_bias" % self.prefix)
 
     def __call__(self,
                  hidden: Union[mx.sym.Symbol, mx.nd.NDArray],

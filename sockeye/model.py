@@ -193,6 +193,10 @@ class SockeyeModel:
 
             if C.WEIGHT_TYING_SOFTMAX in self.config.weight_tying_type:
                 logger.info("Tying the target embeddings and output layer parameters.")
+                utils.check_condition(self.config.config_embed_target.num_embed == self.decoder.get_num_hidden(),
+                                      "Weight tying requires target embedding size and decoder hidden size " +
+                                      "to be equal: %d vs. %d" % (self.config.config_embed_target.num_embed,
+                                                                  self.decoder.get_num_hidden()))
                 w_out_target = w_embed_target
 
         return w_embed_source, w_embed_target, w_out_target
@@ -216,11 +220,6 @@ class SockeyeModel:
                                                   prefix=C.TARGET_EMBEDDING_PREFIX,
                                                   embed_weight=embed_weight_target)
 
-        if self.config.weight_tying and C.WEIGHT_TYING_SOFTMAX in self.config.weight_tying_type:
-            utils.check_condition(self.config.config_embed_target.num_embed == self.decoder.get_num_hidden(),
-                                  "Weight tying requires target embedding size and decoder hidden size " +
-                                  "to be equal: %d vs. %d" % (self.config.config_embed_target.num_embed,
-                                                              self.decoder.get_num_hidden()))
         # output layer
         self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                vocab_size=self.config.vocab_target_size,
