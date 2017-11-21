@@ -492,7 +492,7 @@ class RecurrentDecoder(Decoder):
                                   "output dimensions do not match.")
 
         # Stacked RNN
-        if self.rnn_config.num_layers == 1 or not self.rnn_config.attention_in_upper_layers:
+        if self.rnn_config.num_layers == 1 or not self.config.attention_in_upper_layers:
             self.rnn_pre_attention = rnn.get_stacked_rnn(self.rnn_config, self.prefix, parallel_inputs=False)
             self.rnn_post_attention = None
         else:
@@ -536,7 +536,8 @@ class RecurrentDecoder(Decoder):
         Creates parameters for encoder last state transformation into decoder layer initial states.
         """
         self.init_ws, self.init_bs, self.init_norms = [], [], []
-        state_shapes = self.rnn_pre_attention.state_shape
+        # shallow copy of the state shapes:
+        state_shapes = list(self.rnn_pre_attention.state_shape)
         if self.rnn_post_attention:
             state_shapes += self.rnn_post_attention.state_shape
         for state_idx, (_, init_num_hidden) in enumerate(state_shapes):
@@ -689,7 +690,8 @@ class RecurrentDecoder(Decoder):
         Calls reset on the RNN cell.
         """
         self.rnn_pre_attention.reset()
-        cells_to_reset = self.rnn_pre_attention._cells
+        # Shallow copy of cells
+        cells_to_reset = list(self.rnn_pre_attention._cells)
         if self.rnn_post_attention:
             self.rnn_post_attention.reset()
             cells_to_reset += self.rnn_post_attention._cells
