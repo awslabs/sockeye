@@ -18,17 +18,15 @@ import mxnet as mx
 import numpy as np
 
 import sockeye.constants as C
-from sockeye.lexicon import LexiconInitializer
 
 logger = logging.getLogger(__name__)
 
 
 def get_initializer(default_init_type: str, default_init_scale: float, default_init_xavier_factor_type: str,
                     embed_init_type: str, embed_init_sigma: float,
-                    rnn_init_type: str,
-                    lexicon: Optional[mx.nd.NDArray] = None) -> mx.initializer.Initializer:
+                    rnn_init_type: str) -> mx.initializer.Initializer:
     """
-    Returns a mixed MXNet initializer given rnn_init_type and optional lexicon.
+    Returns a mixed MXNet initializer.
 
     :param default_init_type: The default weight initializer type.
     :param default_init_scale: The scale used for default weight initialization (only used with uniform initialization).
@@ -36,7 +34,6 @@ def get_initializer(default_init_type: str, default_init_scale: float, default_i
     :param embed_init_type: Embedding matrix initialization type.
     :param embed_init_sigma: Sigma for normal initialization of embedding matrix.
     :param rnn_init_type: Initialization type for RNN h2h matrices.
-    :param lexicon: Optional lexicon.
     :return: Mixed initializer.
     """
     # default initializer
@@ -68,10 +65,7 @@ def get_initializer(default_init_type: str, default_init_scale: float, default_i
     else:
         raise ValueError('Unknown RNN initializer: %s' % rnn_init_type)
 
-    # lexicon initializer
-    lexicon_init = [(C.LEXICON_NAME, LexiconInitializer(lexicon))] if lexicon is not None else []
-
-    params_init_pairs = embed_init + rnn_init + lexicon_init + default_init
+    params_init_pairs = embed_init + rnn_init + default_init
     return mx.initializer.Mixed(*zip(*params_init_pairs))
 
 

@@ -26,13 +26,9 @@ class TransformerConfig(config.Config):
                  attention_heads: int,
                  feed_forward_num_hidden: int,
                  num_layers: int,
-                 vocab_size: int,
-                 dropout_embed: int,
                  dropout_attention: float,
                  dropout_relu: float,
                  dropout_prepost: float,
-                 weight_tying: bool,
-                 weight_normalization: bool,
                  positional_embedding_type: str,
                  preprocess_sequence: str,
                  postprocess_sequence: str,
@@ -44,13 +40,9 @@ class TransformerConfig(config.Config):
         self.attention_heads = attention_heads
         self.feed_forward_num_hidden = feed_forward_num_hidden
         self.num_layers = num_layers
-        self.vocab_size = vocab_size
-        self.dropout_embed = dropout_embed
         self.dropout_attention = dropout_attention
         self.dropout_relu = dropout_relu
         self.dropout_prepost = dropout_prepost
-        self.weight_tying = weight_tying
-        self.weight_normalization = weight_normalization
         self.positional_embedding_type = positional_embedding_type
         self.preprocess_sequence = preprocess_sequence
         self.postprocess_sequence = postprocess_sequence

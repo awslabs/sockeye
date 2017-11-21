@@ -47,8 +47,8 @@ ENCODER_DECODER_SETTINGS = [
      "--beam-size 2",
      False),
     # Transformer encoder, GRU decoder, mhdot attention
-    ("--encoder transformer --num-layers 2:1 --rnn-cell-type gru --rnn-num-hidden 16 --num-embed 8"
-     " --transformer-attention-heads 2 --transformer-model-size 16"
+    ("--encoder transformer --num-layers 2:1 --rnn-cell-type gru --rnn-num-hidden 16 --num-embed 8:16"
+     " --transformer-attention-heads 2 --transformer-model-size 8"
      " --transformer-feed-forward-num-hidden 32"
      " --rnn-attention-type mhdot --rnn-attention-mhdot-heads 4 --rnn-attention-num-hidden 16 --batch-size 8 "
      " --max-updates 10 --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01"
@@ -56,7 +56,7 @@ ENCODER_DECODER_SETTINGS = [
      "--beam-size 2",
      False),
     # LSTM encoder, Transformer decoder
-    ("--encoder rnn --num-layers 2:2 --rnn-cell-type lstm --rnn-num-hidden 16 --num-embed 8"
+    ("--encoder rnn --decoder transformer --num-layers 2:2 --rnn-cell-type lstm --rnn-num-hidden 16 --num-embed 16"
      " --transformer-attention-heads 2 --transformer-model-size 16"
      " --transformer-feed-forward-num-hidden 32"
      " --batch-size 8 --max-updates 10"
@@ -65,7 +65,7 @@ ENCODER_DECODER_SETTINGS = [
      False),
     # Full transformer
     ("--encoder transformer --decoder transformer"
-     " --num-layers 3 --transformer-attention-heads 2 --transformer-model-size 16"
+     " --num-layers 3 --transformer-attention-heads 2 --transformer-model-size 16 --num-embed 16"
      " --transformer-feed-forward-num-hidden 32"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying --weight-tying-type src_trg_softmax"

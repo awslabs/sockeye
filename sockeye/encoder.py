@@ -32,13 +32,13 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
-def get_encoder(config: Config, fused: bool, embed_weight: Optional[mx.sym.Symbol] = None):
+def get_encoder(config: Config):
     if isinstance(config, RecurrentEncoderConfig):
-        return get_recurrent_encoder(config, fused, embed_weight)
+        return get_recurrent_encoder(config)
     elif isinstance(config, transformer.TransformerConfig):
-        return get_transformer_encoder(config, embed_weight)
+        return get_transformer_encoder(config)
     elif isinstance(config, ConvolutionalEncoderConfig):
-        return get_convolutional_encoder(config, embed_weight)
+        return get_convolutional_encoder(config)
     else:
         raise ValueError("Unsupported encoder configuration")
 
@@ -47,25 +47,16 @@ class RecurrentEncoderConfig(Config):
     """
     Recurrent encoder configuration.
 
-    :param vocab_size: Source vocabulary size.
-    :param num_embed: Size of embedding layer.
-    :param embed_dropout: Dropout probability on embedding layer.
     :param rnn_config: RNN configuration.
     :param conv_config: Optional configuration for convolutional embedding.
     :param reverse_input: Reverse embedding sequence before feeding into RNN.
     """
 
     def __init__(self,
-                 vocab_size: int,
-                 num_embed: int,
-                 embed_dropout: float,
                  rnn_config: rnn.RNNConfig,
                  conv_config: Optional['ConvolutionalEmbeddingConfig'] = None,
                  reverse_input: bool = False) -> None:
         super().__init__()
-        self.vocab_size = vocab_size
-        self.num_embed = num_embed
-        self.embed_dropout = embed_dropout
         self.rnn_config = rnn_config
         self.conv_config = conv_config
         self.reverse_input = reverse_input
@@ -75,58 +66,42 @@ class ConvolutionalEncoderConfig(Config):
     """
     Convolutional encoder configuration.
 
-    :param vocab_size: Source vocabulary size.
-    :param num_embed: Size of embedding layer.
-    :param embed_dropout: Dropout probability on embedding layer.
     :param cnn_config: CNN configuration.
     :param num_layers: The number of convolutional layers on top of the embeddings.
     :param positional_embedding_type: The type of positional embedding.
     """
 
     def __init__(self,
-                 vocab_size: int,
                  num_embed: int,
-                 embed_dropout: float,
                  max_seq_len_source: int,
                  cnn_config: convolution.ConvolutionConfig,
                  num_layers: int,
                  positional_embedding_type: str) -> None:
         super().__init__()
-        self.vocab_size = vocab_size
         self.num_embed = num_embed
-        self.embed_dropout = embed_dropout
         self.num_layers = num_layers
         self.cnn_config = cnn_config
         self.max_seq_len_source = max_seq_len_source
         self.positional_embedding_type = positional_embedding_type
 
 
-def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
-                          embed_weight: Optional[mx.sym.Symbol] = None) -> 'Encoder':
+def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
     """
-    Returns a recurrent encoder with embedding, batch2time-major conversion, and bidirectional RNN.
-    If num_layers > 1, adds additional uni-directional RNNs.
+    Returns an encoder stack with a bi-directional RNN, and a variable number of uni-directional forward RNNs.
 
     :param config: Configuration for recurrent encoder.
-    :param fused: Whether to use FusedRNNCell (CuDNN). Only works with GPU context.
-    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
     :return: Encoder instance.
     """
     # TODO give more control on encoder architecture
     encoders = list()  # type: List[Encoder]
 
-    encoders.append(Embedding(num_embed=config.num_embed,
-                              vocab_size=config.vocab_size,
-                              prefix=C.SOURCE_EMBEDDING_PREFIX,
-                              dropout=config.embed_dropout,
-                              embed_weight=embed_weight))
-
     if config.conv_config is not None:
-        encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config,
-                                                      prefix=C.CHAR_SEQ_ENCODER_PREFIX))
+        encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config, prefix=C.CHAR_SEQ_ENCODER_PREFIX))
         if config.conv_config.add_positional_encoding:
             # If specified, add positional encodings to segment embeddings
-            encoders.append(AddSinCosPositionalEmbeddings(num_embed=config.num_embed,
+            encoders.append(AddSinCosPositionalEmbeddings(num_embed=config.conv_config.num_embed,
+                                                          scale_up_input=False,
+                                                          scale_down_positions=False,
                                                           prefix="%sadd_positional_encodings" % C.CHAR_SEQ_ENCODER_PREFIX))
 
     encoders.append(BatchMajor2TimeMajor())
@@ -138,7 +113,6 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
         utils.check_condition(config.rnn_config.first_residual_layer >= 2,
                               "Residual connections on the first encoder layer are not supported")
 
-    encoder_class = FusedRecurrentEncoder if fused else RecurrentEncoder
     # One layer bi-directional RNN:
     encoders.append(BiDirectionalRNNEncoder(rnn_config=config.rnn_config.copy(num_layers=1),
                                             prefix=C.BIDIRECTIONALRNN_PREFIX,
@@ -149,15 +123,14 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
         # Because we already have a one layer bi-rnn we reduce the num_layers as well as the first_residual_layer.
         remaining_rnn_config = config.rnn_config.copy(num_layers=config.rnn_config.num_layers - 1,
                                                       first_residual_layer=config.rnn_config.first_residual_layer - 1)
-        encoders.append(encoder_class(rnn_config=remaining_rnn_config,
+        encoders.append(RecurrentEncoder(rnn_config=remaining_rnn_config,
                                       prefix=C.STACKEDRNN_PREFIX,
                                       layout=C.TIME_MAJOR))
 
     return EncoderSequence(encoders)
 
 
-def get_convolutional_encoder(config: ConvolutionalEncoderConfig,
-                              embed_weight: Optional[mx.sym.Symbol] = None) -> 'Encoder':
+def get_convolutional_encoder(config: ConvolutionalEncoderConfig) -> 'Encoder':
     """
     Creates a convolutional encoder.
 
@@ -166,46 +139,32 @@ def get_convolutional_encoder(config: ConvolutionalEncoderConfig,
     :return: Encoder instance.
     """
     encoders = list()  # type: List[Encoder]
-    encoders.append(Embedding(num_embed=config.num_embed,
-                              vocab_size=config.vocab_size,
-                              prefix=C.SOURCE_EMBEDDING_PREFIX,
-                              dropout=config.embed_dropout,
-                              embed_weight=embed_weight))
-
     encoders.append(get_positional_embedding(config.positional_embedding_type,
                                              config.num_embed,
                                              max_seq_len=config.max_seq_len_source,
+                                             fixed_pos_embed_scale_up_input=False,
+                                             fixed_pos_embed_scale_down_positions=False,
                                              prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
-
     encoders.append(ConvolutionalEncoder(config=config))
     encoders.append(BatchMajor2TimeMajor())
-
     return EncoderSequence(encoders)
 
 
-def get_transformer_encoder(config: transformer.TransformerConfig,
-                            embed_weight: Optional[mx.sym.Symbol] = None) -> 'Encoder':
+def get_transformer_encoder(config: transformer.TransformerConfig) -> 'Encoder':
     """
     Returns a Transformer encoder, consisting of an embedding layer with
     positional encodings and a TransformerEncoder instance.
 
     :param config: Configuration for transformer encoder.
-    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
     :return: Encoder instance.
     """
     encoders = list()  # type: List[Encoder]
-    # Note: Transformers use model_size as embedding size
-    # Note: Embedding vectors are scaled by transformer model size.
-    encoders.append(Embedding(num_embed=config.model_size,
-                              vocab_size=config.vocab_size,
-                              prefix=C.SOURCE_EMBEDDING_PREFIX,
-                              dropout=config.dropout_embed,
-                              embed_weight=embed_weight,
-                              embed_scale=config.model_size ** 0.5))
     encoders.append(get_positional_embedding(config.positional_embedding_type,
                                              config.model_size,
                                              config.max_seq_len_source,
-                                             C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
+                                             fixed_pos_embed_scale_up_input=True,
+                                             fixed_pos_embed_scale_down_positions=False,
+                                             prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
     if config.conv_config is not None:
         encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
 
@@ -240,12 +199,6 @@ class Encoder(ABC):
         :return: The representation size of this encoder.
         """
         raise NotImplementedError()
-
-    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
-        """
-        :return: A list of RNNCells used by this encoder.
-        """
-        return []
 
     def get_encoded_seq_len(self, seq_len: int) -> int:
         """
@@ -294,34 +247,37 @@ class ReverseSequence(Encoder):
         return data, data_length, seq_len
 
 
+class EmbeddingConfig(Config):
+
+    def __init__(self,
+                 vocab_size: int,
+                 num_embed: int,
+                 dropout: float) -> None:
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.num_embed = num_embed
+        self.dropout = dropout
+
+
 class Embedding(Encoder):
     """
     Thin wrapper around MXNet's Embedding symbol. Works with both time- and batch-major data layouts.
 
-    :param num_embed: Embedding size.
-    :param vocab_size: Source vocabulary size.
+    :param config: Embedding config.
     :param prefix: Name prefix for symbols of this encoder.
-    :param dropout: Dropout probability.
     :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
-    :param embed_scale: Optional fixed scaling factor for embeddings.
     """
 
     def __init__(self,
-                 num_embed: int,
-                 vocab_size: int,
+                 config: EmbeddingConfig,
                  prefix: str,
-                 dropout: float,
-                 embed_weight: Optional[mx.sym.Symbol] = None,
-                 embed_scale: Optional[float] = None) -> None:
-        self.num_embed = num_embed
-        self.vocab_size = vocab_size
+                 embed_weight: Optional[mx.sym.Symbol] = None) -> None:
+        self.config = config
         self.prefix = prefix
-        self.dropout = dropout
-        if embed_weight is not None:
-            self.embed_weight = embed_weight
-        else:
-            self.embed_weight = self.get_embed_weight(vocab_size, num_embed, prefix)
-        self.embed_scale = embed_scale
+        self.embed_weight = embed_weight
+        if self.embed_weight is None:
+            self.embed_weight = mx.sym.Variable(prefix + "weight",
+                                                shape=(self.config.vocab_size, self.config.num_embed))
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -336,28 +292,20 @@ class Embedding(Encoder):
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
         embedding = mx.sym.Embedding(data=data,
-                                     input_dim=self.vocab_size,
+                                     input_dim=self.config.vocab_size,
                                      weight=self.embed_weight,
-                                     output_dim=self.num_embed,
+                                     output_dim=self.config.num_embed,
                                      name=self.prefix + "embed")
-        if self.dropout > 0:
-            embedding = mx.sym.Dropout(data=embedding, p=self.dropout, name="source_embed_dropout")
-        if self.embed_scale is not None and self.embed_scale != 1.0:
-            embedding = embedding * self.embed_scale
+        if self.config.dropout > 0:
+            embedding = mx.sym.Dropout(data=embedding, p=self.config.dropout, name="source_embed_dropout")
+
         return embedding, data_length, seq_len
 
     def get_num_hidden(self) -> int:
         """
         Return the representation size of this encoder.
         """
-        return self.num_embed
-
-    @staticmethod
-    def get_embed_weight(vocab_size: int, embed_size: int, prefix: str) -> mx.sym.Variable:
-        """
-        Creates a variable for the embedding matrix.
-        """
-        return mx.sym.Variable(prefix + "weight", shape=(vocab_size, embed_size))
+        return self.config.num_embed
 
 
 class PositionalEncoder(Encoder):
@@ -380,13 +328,19 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
 
     :param num_embed: Embedding size.
     :param prefix: Name prefix for symbols of this encoder.
+    :param scale_up_input: If True, scales input data up by num_embed ** 0.5.
+    :param scale_down_positions: If True, scales positional embeddings down by num_embed ** -0.5.
     """
 
     def __init__(self,
                  num_embed: int,
-                 prefix: str) -> None:
+                 prefix: str,
+                 scale_up_input: bool,
+                 scale_down_positions: bool) -> None:
         utils.check_condition(num_embed % 2 == 0, "Positional embeddings require an even embedding size it "
                                                   "is however %d." % num_embed)
+        self.scale_up_input = scale_up_input
+        self.scale_down_positions = scale_down_positions
         self.num_embed = num_embed
         self.prefix = prefix
 
@@ -400,11 +354,19 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
         :param seq_len: sequence length.
         :return: (batch_size, source_seq_len, num_embed)
         """
-        embedding = mx.sym.broadcast_add(data,
-                                         mx.sym.BlockGrad(mx.symbol.Custom(length=seq_len,
-                                                                           depth=self.num_embed,
-                                                                           name="%spositional_encodings" % self.prefix,
-                                                                           op_type='positional_encodings')))
+        # add positional embeddings to data
+        if self.scale_up_input:
+            data = data * (self.num_embed ** 0.5)
+
+        positions = mx.sym.BlockGrad(mx.symbol.Custom(length=seq_len,
+                                                      depth=self.num_embed,
+                                                      name="%spositional_encodings" % self.prefix,
+                                                      op_type='positional_encodings'))
+
+        if self.scale_down_positions:
+            positions = positions * (self.num_embed ** -0.5)
+
+        embedding = mx.sym.broadcast_add(data, positions)
         return embedding, data_length, seq_len
 
     def encode_positions(self,
@@ -430,6 +392,12 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
 
         # (batch_size, num_embed/2)
         pos_embedding = mx.sym.concat(sin, cos, dim=1)
+
+        if self.scale_up_input:
+            data = data * (self.num_embed ** 0.5)
+
+        if self.scale_down_positions:
+            pos_embedding = pos_embedding * (self.num_embed ** -0.5)
 
         return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix)
 
@@ -531,9 +499,17 @@ class NoOpPositionalEmbeddings(PositionalEncoder):
         return self.num_embed
 
 
-def get_positional_embedding(positional_embedding_type, num_embed, max_seq_len, prefix) -> PositionalEncoder:
+def get_positional_embedding(positional_embedding_type: str,
+                             num_embed: int,
+                             max_seq_len: int,
+                             fixed_pos_embed_scale_up_input: bool = False,
+                             fixed_pos_embed_scale_down_positions: bool = False,
+                             prefix: str = '') -> PositionalEncoder:
     if positional_embedding_type == C.FIXED_POSITIONAL_EMBEDDING:
-        return AddSinCosPositionalEmbeddings(num_embed=num_embed, prefix=prefix)
+        return AddSinCosPositionalEmbeddings(num_embed=num_embed,
+                                             scale_up_input=fixed_pos_embed_scale_up_input,
+                                             scale_down_positions=fixed_pos_embed_scale_down_positions,
+                                             prefix=prefix)
     elif positional_embedding_type == C.LEARNED_POSITIONAL_EMBEDDING:
         return AddLearnedPositionalEmbeddings(num_embed=num_embed,
                                               max_seq_len=max_seq_len,
@@ -580,16 +556,6 @@ class EncoderSequence(Encoder):
             return self.encoders[-2].get_num_hidden()
         else:
             return self.encoders[-1].get_num_hidden()
-
-    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
-        """
-        Returns a list of RNNCells used by this encoder.
-        """
-        cells = []
-        for encoder in self.encoders:
-            for cell in encoder.get_rnn_cells():
-                cells.append(cell)
-        return cells
 
     def get_encoded_seq_len(self, seq_len: int) -> int:
         """
@@ -652,30 +618,6 @@ class RecurrentEncoder(Encoder):
         Return the representation size of this encoder.
         """
         return self.rnn_config.num_hidden
-
-
-class FusedRecurrentEncoder(RecurrentEncoder):
-    """
-    Uni-directional (multi-layered) recurrent encoder.
-
-    :param rnn_config: RNN configuration.
-    :param prefix: Prefix.
-    :param layout: Data layout.
-    """
-
-    def __init__(self,
-                 rnn_config: rnn.RNNConfig,
-                 prefix: str = C.STACKEDRNN_PREFIX,
-                 layout: str = C.TIME_MAJOR) -> None:
-        super().__init__(rnn_config, prefix, layout)
-        logger.warning("%s: FusedRNNCell uses standard MXNet Orthogonal initializer w/ rand_type=uniform", prefix)
-        self.rnn = mx.rnn.FusedRNNCell(self.rnn_config.num_hidden,
-                                       num_layers=self.rnn_config.num_layers,
-                                       mode=self.rnn_config.cell_type,
-                                       bidirectional=False,
-                                       dropout=self.rnn_config.dropout_inputs,
-                                       forget_bias=self.rnn_config.forget_bias,
-                                       prefix=prefix)
 
 
 class BiDirectionalRNNEncoder(Encoder):
