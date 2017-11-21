@@ -329,7 +329,7 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
     :param num_embed: Embedding size.
     :param prefix: Name prefix for symbols of this encoder.
     :param scale_up_input: If True, scales input data up by num_embed ** 0.5.
-    :param scale_down_positions: If True, scales positional embeddings DOWN by num_embed ** -0.5.
+    :param scale_down_positions: If True, scales positional embeddings down by num_embed ** -0.5.
     """
 
     def __init__(self,

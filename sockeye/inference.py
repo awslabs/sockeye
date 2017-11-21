@@ -211,7 +211,7 @@ class InferenceModel(model.SockeyeModel):
 
             self.decoder.reset()
             target = mx.sym.Variable(C.TARGET_NAME)
-            target_length = utils.compute_lengths(target)
+            target_lengths = utils.compute_lengths(target)
             states = self.decoder.state_variables()
             state_names = [state.name for state in states]
 
@@ -220,10 +220,10 @@ class InferenceModel(model.SockeyeModel):
             # TODO target embedding. Possible optimization: only embed the last and cache the previous target embed vectors by returning them in the states list.
             (target_embed,
              targed_embed_length,
-             target_embed_seq_len) = self.embedding_target.encode(target, target_length, target_seq_len)
+             target_embed_seq_len) = self.embedding_target.encode(target, target_lengths, target_seq_len)
 
             # embedding vector for previous word id
-            indices = target_length - 1  # type: mx.sym.Symbol
+            indices = target_lengths - 1  # type: mx.sym.Symbol
             target_prev = mx.sym.pick(target, indices, axis=1)
             target_embed_prev, _, _ = self.embedding_target.encode(target_prev, None, 1)
 
