@@ -67,6 +67,10 @@ Sacré BLEU.
 
 # VERSION HISTORY
 
+- 1.1.7 (22 November 2017)
+   - small bugfix in tokenization_13a (not affecting WMT references)
+     thanks to Martin Popel
+
 - 1.1.6 (15 November 2017)
    - bugfix for tokenization warning
 

@@ -13,7 +13,7 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-VERSION = '1.1.6'
+VERSION = '1.1.7'
 
 """
 SacréBLEU provides hassle-free computation of shareable, comparable, and reproducible BLEU scores.
@@ -84,6 +84,10 @@ After all, even with all its problems, BLEU is the default and---admit it---well
 Sacré BLEU.
 
 # VERSION HISTORY
+
+- 1.1.7 (22 November 2017)
+   - small bugfix in tokenization_13a (not affecting WMT references)
+     thanks to Martin Popel
 
 - 1.1.6 (15 November 2017)
    - bugfix for tokenization warning
@@ -394,9 +398,9 @@ def tokenize_13a(line):
     norm = norm.replace('-\n', '')
     norm = norm.replace('\n', ' ')
     norm = norm.replace('&quot;', '"')
-    norm = norm.replace('&amp;', '"')
-    norm = norm.replace('&lt;', '"')
-    norm = norm.replace('&gt;', '"')
+    norm = norm.replace('&amp;', '&')
+    norm = norm.replace('&lt;', '<')
+    norm = norm.replace('&gt;', '>')
 
     # language-dependent part (assuming Western languages):
     norm = " {} ".format(norm)
