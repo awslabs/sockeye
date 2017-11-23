@@ -108,7 +108,7 @@ Sacré BLEU.
 
 - 1.0.3 (4 November 2017).
    - Contributions from Christian Federmann:
-   - Added explicit support for encoding  
+   - Added explicit support for encoding
    - Fixed Windows support
    - Bugfix in handling reference length with multiple refs
 
@@ -143,6 +143,7 @@ import logging
 import urllib.request
 import urllib.parse
 import argparse
+import unicodedata
 
 from collections import Counter, namedtuple
 from typing import List
@@ -156,7 +157,7 @@ try:
     signal(SIGPIPE, SIG_DFL)
 
 except ImportError:
-    logging.warn('Could not import signal.SIGPIPE (this is expected on Windows machines)')
+    logging.warning('Could not import signal.SIGPIPE (this is expected on Windows machines)')
 
 # Where to store downloaded test sets.
 # Define the environment variable $SACREBLEU, or use the default of ~/.sacrebleu.
@@ -411,6 +412,49 @@ def tokenize_13a(line):
     return norm
 
 
+class UnicodeRegex:
+    """Ad-hoc hack to recognize all punctuation and symbols.
+
+    without dependening on https://pypi.python.org/pypi/regex/."""
+    def _property_chars(prefix):
+        return ''.join(chr(x) for x in range(sys.maxunicode)
+                       if unicodedata.category(chr(x)).startswith(prefix))
+    punctuation = _property_chars('P')
+    nondigit_punct_re = re.compile(r'([^\d])([' + punctuation + r'])')
+    punct_nondigit_re = re.compile(r'([' + punctuation + r'])([^\d])')
+    symbol_re = re.compile('([' + _property_chars('S') + '])')
+
+
+def tokenize_v14_international(string):
+    r"""Tokenize a string following the official BLEU implementation.
+
+    See https://github.com/moses-smt/mosesdecoder/blob/master/scripts/generic/mteval-v14.pl#L954-L983
+    In our case, the input string is expected to be just one line
+    and no HTML entities de-escaping is needed.
+    So we just tokenize on punctuation and symbols,
+    except when a punctuation is preceded and followed by a digit
+    (e.g. a comma/dot as a thousand/decimal separator).
+
+    Note that a numer (e.g. a year) followed by a dot at the end of sentence is NOT tokenized,
+    i.e. the dot stays with the number because `s/(\p{P})(\P{N})/ $1 $2/g`
+    does not match this case (unless we add a space after each sentence).
+    However, this error is already in the original mteval-v14.pl
+    and we want to be consistent with it.
+    The error is not present in the non-international version,
+    which uses `$norm_text = " $norm_text "` (or `norm = " {} ".format(norm)` in Python).
+
+    Args:
+    string: the input string
+
+    Returns:
+    a list of tokens
+    """
+    string = UnicodeRegex.nondigit_punct_re.sub(r'\1 \2 ', string)
+    string = UnicodeRegex.punct_nondigit_re.sub(r' \1 \2', string)
+    string = UnicodeRegex.symbol_re.sub(r' \1 ', string)
+    return string.strip()
+
+
 def tokenize_zh(sentence):
     """MIT License
     Copyright (c) 2017 - Shujian Huang <huangsj@nju.edu.cn>
@@ -530,10 +574,11 @@ def tokenize_zh(sentence):
 
 tokenizers = {
     '13a': tokenize_13a,
+    'intl': tokenize_v14_international,
     'zh': tokenize_zh,
     'none': lambda x: x,
 }
-DEFAULT_TOKENIZER='13a'
+DEFAULT_TOKENIZER = '13a'
 
 def _read(file, encoding='utf-8'):
     """Convenience function for reading compressed or plain text files.
@@ -847,7 +892,7 @@ def main():
                             help='use case-insensitive BLEU (default: actual case)')
     arg_parser.add_argument('--smooth', '-s', choices=['exp', 'floor', 'none'], default='exp',
                             help='smoothing method: exponential decay (default), floor (0 count -> 0.01), or none')
-    arg_parser.add_argument('--tokenize', '-tok', choices=['13a', 'zh'], default='13a',
+    arg_parser.add_argument('--tokenize', '-tok', choices=['13a', 'intl', 'zh'], default='13a',
                             help='tokenization method to use')
     arg_parser.add_argument('--language-pair', '-l', dest='langpair', default=None,
                             help='source-target language pair (2-char ISO639-1 codes)')
