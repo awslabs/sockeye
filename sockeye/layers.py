@@ -239,7 +239,7 @@ def broadcast_to_heads(x: mx.sym.Symbol, heads: int) -> mx.sym.Symbol:
 def dot_attention(queries: mx.sym.Symbol,
                   keys: mx.sym.Symbol,
                   values: mx.sym.Symbol,
-                  length: mx.sym.Symbol,
+                  lengths: Optional[mx.sym.Symbol] = None,
                   dropout: float = 0.0,
                   bias: Optional[mx.sym.Symbol] = None):
     """
@@ -248,23 +248,27 @@ def dot_attention(queries: mx.sym.Symbol,
     :param queries: Attention queries. Shape: (n, lq, d).
     :param keys: Attention keys. Shape: (n, lk, d).
     :param values: Attention values. Shape: (n, lk, dv).
-    :param length: Sequence lengths of the keys. Shape: (n,).
+    :param lengths: Optional sequence lengths of the keys. Shape: (n,).
     :param dropout: Dropout probability.
     :param bias: Optional bias tensor. Shape: (1, lq, lk).
     :return: 'Context' vectors for each query. Shape: (n, lq, dv).
     """
+    utils.check_condition(lengths is not None or bias is not None,
+                          "Must provide either length or bias argument for masking")
+
     # (n, lq, lk)
     logits = mx.sym.batch_dot(lhs=queries, rhs=keys, transpose_b=True)
 
-    # mask lk dimension
-    # (lk, n, lq)
-    logits = mx.sym.transpose(data=logits, axes=(2, 0, 1))
-    logits = mx.sym.SequenceMask(data=logits,
-                                 use_sequence_length=True,
-                                 sequence_length=length,
-                                 value=-99999999.)
-    # (n, lq, lk)
-    logits = mx.sym.transpose(data=logits, axes=(1, 2, 0))
+    if lengths is not None:
+        # mask lk dimension
+        # (lk, n, lq)
+        logits = mx.sym.transpose(data=logits, axes=(2, 0, 1))
+        logits = mx.sym.SequenceMask(data=logits,
+                                     use_sequence_length=True,
+                                     sequence_length=lengths,
+                                     value=-99999999.)
+        # (n, lq, lk)
+        logits = mx.sym.transpose(data=logits, axes=(1, 2, 0))
 
     if bias is not None:
         logits = mx.sym.broadcast_add(logits, bias)
@@ -308,9 +312,9 @@ class MultiHeadAttentionBase:
                 queries: mx.sym.Symbol,
                 keys: mx.sym.Symbol,
                 values: mx.sym.Symbol,
-                lengths: mx.sym.Symbol,
                 queries_max_length: int,
                 memory_max_length: int,
+                lengths: Optional[mx.sym.Symbol] = None,
                 bias: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
         # scale by sqrt(depth_per_head)
         queries = queries * (self.depth_per_head ** -0.5)
@@ -319,10 +323,10 @@ class MultiHeadAttentionBase:
         queries = split_heads(queries, queries_max_length, self.heads)
         keys = split_heads(keys, memory_max_length, self.heads)
         values = split_heads(values, memory_max_length, self.heads)
-        lengths = broadcast_to_heads(lengths, self.heads)
+        lengths = broadcast_to_heads(lengths, self.heads) if lengths is not None else lengths
 
         # (batch*heads, queries_max_length, depth_per_head)
-        contexts = dot_attention(queries, keys, values, lengths, dropout=self.dropout, bias=bias)
+        contexts = dot_attention(queries, keys, values, lengths=lengths, dropout=self.dropout, bias=bias)
 
         # (batch, queries_max_length, depth)
         contexts = combine_heads(contexts, queries_max_length, self.heads)
@@ -361,16 +365,16 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
 
     def __call__(self,
                  inputs: mx.sym.Symbol,
-                 lengths: mx.sym.Symbol,
                  max_length: int,
+                 lengths: Optional[mx.sym.Symbol] = None,
                  bias: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
         """
         Returns a symbol of shape (batch, max_length, output_depth).
 
         :param inputs: Symbol of shape (batch, max_length, input_depth).
-        :param lengths: Symbol of shape (batch, 1).
         :param max_length: Size of time dimension.
-        :param bias: Symbol of shape (1, max_length, max_length).
+        :param lengths: Optional lengths of inputs. Symbol of shape (batch, 1).
+        :param bias: Optional (auto-regressive bias). Symbol of shape (1, max_length, max_length).
         :return: Symbol of shape (batch, max_length, output_depth).
         """
         # combined: (batch, max_length, depth * 3)
@@ -388,9 +392,9 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         return self._attend(queries,
                             keys,
                             values,
-                            lengths,
                             queries_max_length=max_length,
                             memory_max_length=max_length,
+                            lengths=lengths,
                             bias=bias)
 
 
@@ -458,9 +462,9 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         return self._attend(queries,
                             keys,
                             values,
-                            memory_lengths,
                             queries_max_length=queries_max_length,
                             memory_max_length=memory_max_length,
+                            lengths=memory_lengths,
                             bias=None)
 
 

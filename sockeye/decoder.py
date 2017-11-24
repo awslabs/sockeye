@@ -220,13 +220,13 @@ class TransformerDecoder(Decoder):
 
         # (batch_size, target_max_length, model_size)
         target = self._decode(source_encoded, source_encoded_lengths, source_encoded_max_length,
-                              target_embed, target_embed_lengths, target_embed_max_length)
+                              target_embed, target_embed_max_length)
 
         return target
 
     def _decode(self,
                 source_encoded, source_encoded_lengths, source_encoded_max_length,
-                target_embed, target_embed_lengths, target_embed_max_length):
+                target_embed, target_embed_max_length):
         """
         Runs stacked decoder transformer blocks.
 
@@ -234,7 +234,6 @@ class TransformerDecoder(Decoder):
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
         :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length).
-        :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
         :param target_embed_max_length: Size of embedded target sequence dimension.
         :return: Result of stacked transformer blocks.
         """
@@ -243,16 +242,18 @@ class TransformerDecoder(Decoder):
         target_bias = transformer.get_autoregressive_bias(target_embed_max_length, name="%sbias" % self.prefix)
 
         # target: (batch_size, target_max_length, model_size)
-        target, target_lengths, target_max_length = self.pos_embedding.encode(target_embed,
-                                                                              target_embed_lengths,
-                                                                              target_embed_max_length)
+        target, _, target_max_length = self.pos_embedding.encode(target_embed, None, target_embed_max_length)
 
         if self.config.dropout_prepost > 0.0:
             target = mx.sym.Dropout(data=target, p=self.config.dropout_prepost)
 
         for layer in self.layers:
-            target = layer(target, target_lengths, target_max_length, target_bias,
-                           source_encoded, source_encoded_lengths, source_encoded_max_length)
+            target = layer(target=target,
+                           target_max_length=target_max_length,
+                           target_bias=target_bias,
+                           source=source_encoded,
+                           source_lengths=source_encoded_lengths,
+                           source_max_length=source_encoded_max_length)
         target = self.final_process(data=target, prev=None)
 
         return target
@@ -289,7 +290,7 @@ class TransformerDecoder(Decoder):
 
         # (batch_size, target_max_length, model_size)
         target = self._decode(source_encoded, source_encoded_lengths, source_encoded_max_length,
-                              target_embed, target_embed_lengths, target_embed_max_length)
+                              target_embed, target_embed_max_length)
 
         # set all target positions to zero except for current time-step
         # target: (batch_size, target_max_length, model_size)
@@ -974,8 +975,9 @@ class ConvolutionalDecoder(Decoder):
 
             # (batch_size, target_seq_len, num_embed)
             context = layers.dot_attention(queries=target_hidden,
-                                           keys=source_encoded, values=source_encoded,
-                                           length=source_encoded_lengths)
+                                           keys=source_encoded,
+                                           values=source_encoded,
+                                           lengths=source_encoded_lengths)
 
             # residual connection:
             target_hidden = target_hidden_prev + target_hidden + context
@@ -1045,8 +1047,9 @@ class ConvolutionalDecoder(Decoder):
 
             # (batch_size, 1, num_embed)
             context_step = layers.dot_attention(queries=target_hidden_step,
-                                                keys=source_encoded, values=source_encoded,
-                                                length=source_encoded_lengths)
+                                                keys=source_encoded,
+                                                values=source_encoded,
+                                                lengths=source_encoded_lengths)
             # residual connection:
             target_hidden_step = target_hidden_step_prev + target_hidden_step + context_step
             target_hidden_step_prev = target_hidden_step
