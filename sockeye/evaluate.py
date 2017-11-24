@@ -22,6 +22,8 @@ from typing import Iterable, Optional
 from contrib import sacrebleu
 from sockeye.log import setup_main_logger, log_sockeye_version
 from . import arguments
+from . import chrf
+from . import constants as C
 from . import data_io
 from . import utils
 
@@ -41,8 +43,8 @@ def raw_corpus_bleu(hypotheses: Iterable[str], references: Iterable[str], offset
 
 
 def main():
-    params = argparse.ArgumentParser(description='Evaluate translations by calculating 4-BLEU '
-                                                 'score with respect to a reference set.')
+    params = argparse.ArgumentParser(description='Evaluate translations by calculating metrics with '
+                                                 'respect to a reference set.')
     arguments.add_evaluate_args(params)
     args = params.parse_args()
 
@@ -65,12 +67,26 @@ def main():
                                                                                                  len(references)))
 
     if not args.sentence:
-        bleu = raw_corpus_bleu(hypotheses, references, args.offset)
-        print(bleu, file=sys.stdout)
+        scores = []
+        for metric in args.metrics:
+            if metric == C.BLEU:
+                bleu_score = raw_corpus_bleu(hypotheses, references, args.offset)
+                scores.append("%.6f" % bleu_score)
+            elif metric == C.CHRF:
+                chrf_score = chrf.corpus_chrf(hypotheses, references, trim_whitespaces=True)
+                scores.append("%.6f" % chrf_score)
+        print("\t".join(scores), file=sys.stdout)
     else:
         for h, r in zip(hypotheses, references):
-            bleu = raw_corpus_bleu(h, r, args.offset)
-            print(bleu, file=sys.stdout)
+            scores = []
+            for metric in args.metrics:
+                if metric == C.BLEU:
+                    bleu = raw_corpus_bleu(h, r, args.offset)
+                    scores.append("%.6f" % bleu)
+                elif metric == C.CHRF:
+                    chrf_score = chrf.corpus_chrf(h, r, trim_whitespaces=True)
+                    scores.append("%.6f" % chrf_score)
+            print("\t".join(scores), file=sys.stdout)
 
 
 if __name__ == '__main__':

@@ -31,6 +31,7 @@ import sockeye.translate
 import sockeye.utils
 
 from sockeye.evaluate import raw_corpus_bleu
+from sockeye.chrf import corpus_chrf
 
 
 def gaussian_vector(shape, return_symbol=False):
@@ -149,7 +150,7 @@ _TRANSLATE_PARAMS_COMMON = "--use-cpu --models {model} --input {input} --output 
 
 _TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {json}"
 
-_EVAL_PARAMS_COMMON = "--hypotheses {hypotheses} --references {references}"
+_EVAL_PARAMS_COMMON = "--hypotheses {hypotheses} --references {references} --metrics {metrics}"
 
 
 def run_train_translate(train_params: str,
@@ -161,7 +162,7 @@ def run_train_translate(train_params: str,
                         dev_target_path: str,
                         max_seq_len: int = 10,
                         restrict_lexicon: bool = False,
-                        work_dir: Optional[str] = None) -> Tuple[float, float, float]:
+                        work_dir: Optional[str] = None) -> Tuple[float, float, float, float]:
     """
     Train a model and translate a dev set.  Report validation perplexity and BLEU.
 
@@ -175,7 +176,7 @@ def run_train_translate(train_params: str,
     :param max_seq_len: The maximum sequence length.
     :param restrict_lexicon: Additional translation run with top-k lexicon-based vocabulary restriction.
     :param work_dir: The directory to store the model and other outputs in.
-    :return: A tuple containing perplexity and bleu scores for standard and reduced vocab decoding.
+    :return: A tuple containing perplexity, bleu scores for standard and reduced vocab decoding, chrf score.
     """
     with TemporaryDirectory(dir=work_dir, prefix="test_train_translate.") as work_dir:
         # Train model
@@ -243,7 +244,6 @@ def run_train_translate(train_params: str,
             with patch.object(sys, "argv", params.split()):
                 sockeye.translate.main()
 
-
         # test averaging
         points = sockeye.average.find_checkpoints(model_path=model_path,
                                                   size=1,
@@ -257,20 +257,23 @@ def run_train_translate(train_params: str,
         metrics = sockeye.utils.read_metrics_file(path=os.path.join(model_path, C.METRICS_NAME))
         perplexity = metrics[-1][C.PERPLEXITY + '-val']
 
-        # Measure BLEU
-        bleu = raw_corpus_bleu(hypotheses=open(out_path, "r").readlines(),
-                               references=open(dev_target_path, "r").readlines(),
-                               offset=0.01)
+        hypotheses = open(out_path, "r").readlines()
+        references = open(dev_target_path, "r").readlines()
+
+        # compute metrics
+        bleu = raw_corpus_bleu(hypotheses=hypotheses, references=references, offset=0.01)
+        chrf = corpus_chrf(hypotheses=hypotheses, references=references)
 
         bleu_restrict = None
         if restrict_lexicon:
-            bleu_restrict = raw_corpus_bleu(hypotheses=open(out_restrict_path, "r").readlines(),
-                                            references=open(dev_target_path, "r").readlines(),
-                                            offset=0.01)
+            bleu_restrict = raw_corpus_bleu(hypotheses=hypotheses, references=references, offset=0.01)
+
         # Run BLEU cli
         eval_params = "{} {} ".format(sockeye.evaluate.__file__,
-                                      _EVAL_PARAMS_COMMON.format(hypotheses=out_path, references=dev_target_path), )
+                                      _EVAL_PARAMS_COMMON.format(hypotheses=out_path,
+                                                                 references=dev_target_path,
+                                                                 metrics="bleu chrf"), )
         with patch.object(sys, "argv", eval_params.split()):
             sockeye.evaluate.main()
 
-        return perplexity, bleu, bleu_restrict
+        return perplexity, bleu, bleu_restrict, chrf

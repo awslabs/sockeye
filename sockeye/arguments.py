@@ -881,9 +881,13 @@ def add_evaluate_args(params):
     eval_params.add_argument('--quiet', '-q',
                              action="store_true",
                              help="Do not print logging information.")
+    eval_params.add_argument('--metrics',
+                             nargs='+',
+                             default=[C.BLEU, C.CHRF],
+                             help='List of metrics to compute. Default: %(default)s.')
     eval_params.add_argument('--sentence', '-s',
                              action="store_true",
-                             help="Show sentence-BLEU. Default: %(default)s.")
+                             help="Show sentence-level metrics. Default: %(default)s.")
     eval_params.add_argument('--offset',
                              type=float,
                              default=0.01,
