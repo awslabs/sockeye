@@ -188,7 +188,7 @@ def test_training_arg(test_params, expected_params):
                       batch_size=1,
                       chunk_size=None,
                       ensemble_mode='linear',
-                      bucket_width=(10, 2),
+                      bucket_width=10,
                       max_input_len=None,
                       restrict_lexicon=None,
                       softmax_temperature=None,

@@ -81,20 +81,17 @@ class Decoder(ABC):
 
     @abstractmethod
     def decode_step(self,
-                    target_embed: mx.sym.Symbol,
-                    target_embed_lengths: mx.sym.Symbol,
-                    target_embed_max_length: int,
+                    step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
                     *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
-        Decodes a single time step given the embedded target sequence and previous decoder states.
+        Decodes a single time step given the current step, the previous embedded target word,
+        and previous decoder states.
         Returns decoder representation for the next prediction, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
-        :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
-        :param target_embed_max_length: Size of embedded target sequence dimension.
+        :param step: Global step of inference procedure.
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
@@ -133,10 +130,11 @@ class Decoder(ABC):
         pass
 
     @abstractmethod
-    def state_variables(self) -> List[mx.sym.Symbol]:
+    def state_variables(self, target_max_length: int) -> List[mx.sym.Symbol]:
         """
         Returns the list of symbolic variables for this decoder to be used during inference.
 
+        :param target_max_length: Current target sequence lengths.
         :return: List of symbolic variables.
         """
         pass
@@ -144,6 +142,7 @@ class Decoder(ABC):
     @abstractmethod
     def state_shapes(self,
                      batch_size: int,
+                     target_max_length: int,
                      source_encoded_max_length: int,
                      source_encoded_depth: int) -> List[mx.io.DataDesc]:
         """
@@ -151,6 +150,7 @@ class Decoder(ABC):
         Used for inference.
 
         :param batch_size: Batch size during inference.
+        :param target_max_length: Current target sequence length.
         :param source_encoded_max_length: Size of encoder time dimension.
         :param source_encoded_depth: Depth of encoded source.
         :return: List of shape descriptions.
@@ -219,20 +219,14 @@ class TransformerDecoder(Decoder):
         source_encoded = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
 
         # (batch_size, target_max_length, model_size)
-        target = self._decode(source_encoded, source_encoded_lengths, source_encoded_max_length,
-                              target_embed, target_embed_max_length)
+        return self._decode(source_encoded, source_encoded_lengths, target_embed, target_embed_max_length)
 
-        return target
-
-    def _decode(self,
-                source_encoded, source_encoded_lengths, source_encoded_max_length,
-                target_embed, target_embed_max_length):
+    def _decode(self, source_encoded, source_encoded_lengths, target_embed, target_embed_max_length):
         """
         Runs stacked decoder transformer blocks.
 
         :param source_encoded: Batch-major encoded source: (batch_size, source_encoded_max_length, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
-        :param source_encoded_max_length: Size of encoder time dimension.
         :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length).
         :param target_embed_max_length: Size of embedded target sequence dimension.
         :return: Result of stacked transformer blocks.
@@ -249,60 +243,67 @@ class TransformerDecoder(Decoder):
 
         for layer in self.layers:
             target = layer(target=target,
-                           target_max_length=target_max_length,
                            target_bias=target_bias,
                            source=source_encoded,
-                           source_lengths=source_encoded_lengths,
-                           source_max_length=source_encoded_max_length)
+                           source_lengths=source_encoded_lengths)
         target = self.final_process(data=target, prev=None)
 
         return target
 
     def decode_step(self,
-                    target_embed: mx.sym.Symbol,
-                    target_embed_lengths: mx.sym.Symbol,
-                    target_embed_max_length: int,
+                    step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
                     *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
-        Decodes a single time step given the embedded target sequence and previous decoder states.
+        Decodes a single time step given the current step, the previous embedded target word,
+        and previous decoder states.
         Returns decoder representation for the next prediction, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
-        :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
-        :param target_embed_max_length: Size of embedded target sequence dimension.
+        :param step: Global step of inference procedure.
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
         :return: logit inputs, attention probabilities, next decoder states.
         """
-        source_encoded, source_encoded_lengths = states
+        source_encoded, source_encoded_lengths, *cache = states
 
-        # indices: (batch_size,)
-        indices = target_embed_lengths - 1  # type: mx.sym.Symbol
+        symbolic_step = mx.sym.arange(start=step - 1, stop=step, step=1, name='symbolic_step')
+        # (batch_size, num_embed)
+        target_embed_prev = self.pos_embedding.encode_positions(symbolic_step, target_embed_prev)
+        # (batch_size, 1, num_embed)
+        target = mx.sym.expand_dims(target_embed_prev, axis=1)
 
-        # (batch_size, target_max_length, 1)
-        mask = mx.sym.expand_dims(mx.sym.one_hot(indices=indices,
-                                                 depth=target_embed_max_length,
-                                                 on_value=1, off_value=0), axis=2)
+        # auto-regressive bias for last position in sequence
+        # (1, target_max_length, target_max_length)
+        target_bias = transformer.get_autoregressive_bias(step, name="%sbias" % self.prefix)
+        target_bias = mx.sym.slice_axis(target_bias, axis=1, begin=-1, end=step)
 
-        # (batch_size, target_max_length, model_size)
-        target = self._decode(source_encoded, source_encoded_lengths, source_encoded_max_length,
-                              target_embed, target_embed_max_length)
+        new_cache = []  # type: List[mx.sym.Symbol]
+        for i, layer in enumerate(self.layers):
+            if not cache:
+                assert step == 1
+                layer_cache = {'k': None, 'v': None}
+            else:
+                layer_cache = {'k': cache[2 * i + 0], 'v': cache[2 * i + 1]}
 
-        # set all target positions to zero except for current time-step
-        # target: (batch_size, target_max_length, model_size)
-        target = mx.sym.broadcast_mul(target, mask)
-        # reduce to single prediction
-        # target: (batch_size, model_size)
-        target = mx.sym.sum(target, axis=1, keepdims=False)
+            target = layer(target=target,
+                           target_bias=target_bias,
+                           source=source_encoded,
+                           source_lengths=source_encoded_lengths,
+                           cache=layer_cache)
+            new_cache += [layer_cache['k'], layer_cache['v']]
+
+        # (batch_size, 1, model_size)
+        target = self.final_process(data=target, prev=None)
+        # (batch_size, model_size)
+        target = mx.sym.reshape(target, shape=(-3, -1))
 
         # TODO(fhieber): no attention probs for now
         attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
 
-        new_states = [source_encoded, source_encoded_lengths]
+        new_states = [source_encoded, source_encoded_lengths] + new_cache
         return target, attention_probs, new_states
 
     def reset(self):
@@ -329,17 +330,24 @@ class TransformerDecoder(Decoder):
         """
         return [source_encoded, source_encoded_lengths]
 
-    def state_variables(self) -> List[mx.sym.Symbol]:
+    def state_variables(self, target_max_length: int) -> List[mx.sym.Symbol]:
         """
         Returns the list of symbolic variables for this decoder to be used during inference.
 
+        :param target_max_length: Current target sequence length.
         :return: List of symbolic variables.
         """
-        return [mx.sym.Variable(C.SOURCE_ENCODED_NAME),
+        variables = [mx.sym.Variable(C.SOURCE_ENCODED_NAME),
                 mx.sym.Variable(C.SOURCE_LENGTH_NAME)]
+        if target_max_length > 1:  # no cache for initial decoder step
+            for layer in self.layers:
+                variables += [mx.sym.Variable('%skeys' % layer.prefix),
+                              mx.sym.Variable('%svalues' % layer.prefix)]
+        return variables
 
     def state_shapes(self,
                      batch_size: int,
+                     target_max_length: int,
                      source_encoded_max_length: int,
                      source_encoded_depth: int) -> List[mx.io.DataDesc]:
         """
@@ -347,14 +355,27 @@ class TransformerDecoder(Decoder):
         Used for inference.
 
         :param batch_size: Batch size during inference.
+        :param target_max_length: Current target sequence length.
         :param source_encoded_max_length: Size of encoder time dimension.
         :param source_encoded_depth: Depth of encoded source.
         :return: List of shape descriptions.
         """
-        return [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
-                               (batch_size, source_encoded_max_length, source_encoded_depth),
-                               layout=C.BATCH_MAJOR),
-                mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")]
+        shapes = [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
+                                 (batch_size, source_encoded_max_length, source_encoded_depth),
+                                 layout=C.BATCH_MAJOR),
+                  mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")]
+        if target_max_length > 1:  # no cache data description for first decoder step
+            for layer in self.layers:
+                # the shape of the cached tensors is target_max_length - 1 in the time dimension
+                shapes += [
+                    mx.io.DataDesc(name='%skeys' % layer.prefix,
+                                   shape=(batch_size, target_max_length-1, self.config.model_size),
+                                   layout=C.BATCH_MAJOR),
+                    mx.io.DataDesc(name='%svalues' % layer.prefix,
+                                   shape=(batch_size, target_max_length-1, self.config.model_size),
+                                   layout=C.BATCH_MAJOR)
+                ]
+        return shapes
 
     def get_max_seq_len(self) -> Optional[int]:
         #  The positional embeddings potentially pose a limit on the maximum length at inference time.
@@ -532,20 +553,17 @@ class RecurrentDecoder(Decoder):
         return hidden_concat
 
     def decode_step(self,
-                    target_embed: mx.sym.Symbol,
-                    target_embed_lengths: mx.sym.Symbol,
-                    target_embed_max_length: int,
+                    step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
                     *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
-        Decodes a single time step given the embedded target sequence and previous decoder states.
+        Decodes a single time step given the current step, the previous embedded target word,
+        and previous decoder states.
         Returns decoder representation for the next prediction, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
-        :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
-        :param target_embed_max_length: Size of embedded target sequence dimension.
+        :param step: Global step of inference procedure.
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
@@ -616,10 +634,11 @@ class RecurrentDecoder(Decoder):
         states = [source_encoded, dynamic_source, source_encoded_lengths, hidden] + layer_states
         return states
 
-    def state_variables(self) -> List[mx.sym.Symbol]:
+    def state_variables(self, target_max_length: int) -> List[mx.sym.Symbol]:
         """
         Returns the list of symbolic variables for this decoder to be used during inference.
 
+        :param target_max_length: Current target sequence lengths.
         :return: List of symbolic variables.
         """
         return [mx.sym.Variable(C.SOURCE_ENCODED_NAME),
@@ -631,6 +650,7 @@ class RecurrentDecoder(Decoder):
 
     def state_shapes(self,
                      batch_size: int,
+                     target_max_length: int,
                      source_encoded_max_length: int,
                      source_encoded_depth: int) -> List[mx.io.DataDesc]:
         """
@@ -638,6 +658,7 @@ class RecurrentDecoder(Decoder):
         Used for inference.
 
         :param batch_size: Batch size during inference.
+        :param target_max_length: Current target sequence length.
         :param source_encoded_max_length: Size of encoder time dimension.
         :param source_encoded_depth: Depth of encoded source.
         :return: List of shape descriptions.
@@ -986,27 +1007,22 @@ class ConvolutionalDecoder(Decoder):
         return target_hidden
 
     def decode_step(self,
-                    target_embed: mx.sym.Symbol,
-                    target_embed_lengths: mx.sym.Symbol,
-                    target_embed_max_length: int,
+                    step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
                     *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
-        Decodes a single time step given the embedded target sequence and previous decoder states.
+        Decodes a single time step given the current step, the previous embedded target word,
+        and previous decoder states.
         Returns decoder representation for the next prediction, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
-        :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
-        :param target_embed_max_length: Size of embedded target sequence dimension.
+        :param step: Global step of inference procedure.
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
         :return: logit inputs, attention probabilities, next decoder states.
         """
-        indices = target_embed_lengths - 1  # type: mx.sym.Symbol
-
         # Source_encoded: (batch_size, source_encoded_max_length, encoder_depth)
         source_encoded, source_encoded_lengths, *layer_states = states
 
@@ -1021,7 +1037,8 @@ class ConvolutionalDecoder(Decoder):
         new_layer_states = []
 
         # (batch_size, num_embed)
-        target_embed_prev = self.pos_embedding.encode_positions(indices, target_embed_prev)
+        symbolic_step = mx.sym.arange(start=step - 1, stop=step, step=1, name='symbolic_step')
+        target_embed_prev = self.pos_embedding.encode_positions(symbolic_step, target_embed_prev)
 
         # (batch_size, num_hidden)
         target_hidden_step = mx.sym.FullyConnected(data=target_embed_prev,
@@ -1109,10 +1126,11 @@ class ConvolutionalDecoder(Decoder):
                              for layer_idx in range(0, self.config.num_layers)]
         return [source_encoded, source_encoded_lengths] + next_layer_inputs
 
-    def state_variables(self) -> List[mx.sym.Symbol]:
+    def state_variables(self, target_max_length: int) -> List[mx.sym.Symbol]:
         """
         Returns the list of symbolic variables for this decoder to be used during inference.
 
+        :param target_max_length: Current target sequence lengths.
         :return: List of symbolic variables.
         """
         # we keep a fixed slice of the layer inputs as a state for all upper layers:
@@ -1123,6 +1141,7 @@ class ConvolutionalDecoder(Decoder):
 
     def state_shapes(self,
                      batch_size: int,
+                     target_max_length: int,
                      source_encoded_max_length: int,
                      source_encoded_depth: int) -> List[mx.io.DataDesc]:
         """
@@ -1130,6 +1149,7 @@ class ConvolutionalDecoder(Decoder):
         Used for inference.
 
         :param batch_size: Batch size during inference.
+        :param target_max_length: Current target sequence length.
         :param source_encoded_max_length: Size of encoder time dimension.
         :param source_encoded_depth: Depth of encoded source.
         :return: List of shape descriptions.

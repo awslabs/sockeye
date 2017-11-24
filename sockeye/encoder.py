@@ -791,13 +791,12 @@ class TransformerEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data data, data_length, seq_len.
         """
-
         if self.config.dropout_prepost > 0.0:
             data = mx.sym.Dropout(data=data, p=self.config.dropout_prepost)
 
         for i, layer in enumerate(self.layers):
             # (batch_size, seq_len, config.model_size)
-            data = layer(data, data_length, seq_len)
+            data = layer(data, data_length)
         data = self.final_process(data=data, prev=None)
         return data, data_length, seq_len
 

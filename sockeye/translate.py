@@ -62,7 +62,6 @@ def main():
     with ExitStack() as exit_stack:
         context = _setup_context(args, exit_stack)
 
-        bucket_source_width, bucket_target_width = args.bucket_width
         models, vocab_source, vocab_target = sockeye.inference.load_models(
             context,
             args.max_input_len,
@@ -80,8 +79,7 @@ def main():
             restrict_lexicon.load(args.restrict_lexicon)
         translator = sockeye.inference.Translator(context,
                                                   args.ensemble_mode,
-                                                  bucket_source_width,
-                                                  bucket_target_width,
+                                                  args.bucket_width,
                                                   sockeye.inference.LengthPenalty(args.length_penalty_alpha,
                                                                                   args.length_penalty_beta),
                                                   models,

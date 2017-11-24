@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 import logging
-from typing import Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import mxnet as mx
 import numpy as np
@@ -185,38 +185,38 @@ class OutputLayer:
                                     flatten=False)
 
 
-def split_heads(x: mx.sym.Symbol, length: int, heads: int) -> mx.sym.Symbol:
+def split_heads(x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:
     """
     Returns a symbol with head dimension folded into batch and depth divided by the number of heads.
 
     :param x: Symbol of shape (batch, length, depth).
-    :param length: Sequence length.
+    :param depth_per_head: Depth per head.
     :param heads: Number of heads.
     :return: Symbol of shape (batch * heads, length, depth_per_heads).
     """
     # (batch, length, heads, depth_per_head)
-    x = mx.sym.reshape(data=x, shape=(0, length, heads, -1))
+    x = mx.sym.reshape(data=x, shape=(0, -1, heads, depth_per_head))
     # (batch, heads, length, depth/heads)
     x = mx.sym.transpose(data=x, axes=(0, 2, 1, 3))
     # (batch * heads, length, depth/heads)
-    return mx.sym.reshape(data=x, shape=(-3, length, -1))
+    return mx.sym.reshape(data=x, shape=(-3, -1, depth_per_head))
 
 
-def combine_heads(x: mx.sym.Symbol, length: int, heads: int) -> mx.sym.Symbol:
+def combine_heads(x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:
     """
     Returns a symbol with both batch & length, and head & depth dimensions combined.
 
     :param x: Symbol of shape (batch * heads, length, depth_per_head).
-    :param length: Sequence length.
+    :param depth_per_head: Depth per head.
     :param heads: Number of heads.
     :return: Symbol of shape (batch, length, depth).
     """
     # (batch, heads, length, depth_per_head)
-    x = mx.sym.reshape(data=x, shape=(-4, -1, heads, length, 0))
+    x = mx.sym.reshape(data=x, shape=(-4, -1, heads, 0, depth_per_head))
     # (batch, length, heads, depth_per_head)
     x = mx.sym.transpose(x, axes=(0, 2, 1, 3))
     # (batch, length, depth)
-    return mx.sym.reshape(x, shape=(-1, length, -3))
+    return mx.sym.reshape(x, shape=(-1, 0, depth_per_head * heads))
 
 
 def broadcast_to_heads(x: mx.sym.Symbol, heads: int) -> mx.sym.Symbol:
@@ -257,7 +257,7 @@ def dot_attention(queries: mx.sym.Symbol,
                           "Must provide either length or bias argument for masking")
 
     # (n, lq, lk)
-    logits = mx.sym.batch_dot(lhs=queries, rhs=keys, transpose_b=True)
+    logits = mx.sym.batch_dot(lhs=queries, rhs=keys, transpose_b=True, name='dot_att')
 
     if lengths is not None:
         # mask lk dimension
@@ -266,7 +266,7 @@ def dot_attention(queries: mx.sym.Symbol,
         logits = mx.sym.SequenceMask(data=logits,
                                      use_sequence_length=True,
                                      sequence_length=lengths,
-                                     value=-99999999.)
+                                     value=C.LARGE_NEGATIVE_VALUE)
         # (n, lq, lk)
         logits = mx.sym.transpose(data=logits, axes=(1, 2, 0))
 
@@ -312,26 +312,34 @@ class MultiHeadAttentionBase:
                 queries: mx.sym.Symbol,
                 keys: mx.sym.Symbol,
                 values: mx.sym.Symbol,
-                queries_max_length: int,
-                memory_max_length: int,
                 lengths: Optional[mx.sym.Symbol] = None,
                 bias: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
+        """
+        Returns context vectors of multi-head dot attention.
+
+        :param queries: Query tensor. Shape: (batch_size, query_max_length, depth).
+        :param keys: Keys. Shape: (batch_size, memory_max_length, depth).
+        :param values: Values. Shape: (batch_size, memory_max_length, depth).
+        :param lengths: Optional lengths of keys. Shape: (batch_size, 1).
+        :param bias: Optional bias. Shape: (batch_size, query_max_length, memory_max_length).
+        :return: Context vectors. Shape: (batch_size, query_max_length, output_depth).
+        """
         # scale by sqrt(depth_per_head)
         queries = queries * (self.depth_per_head ** -0.5)
 
         # (batch*heads, length, depth/heads)
-        queries = split_heads(queries, queries_max_length, self.heads)
-        keys = split_heads(keys, memory_max_length, self.heads)
-        values = split_heads(values, memory_max_length, self.heads)
+        queries = split_heads(queries, self.depth_per_head, self.heads)
+        keys = split_heads(keys, self.depth_per_head, self.heads)
+        values = split_heads(values, self.depth_per_head, self.heads)
         lengths = broadcast_to_heads(lengths, self.heads) if lengths is not None else lengths
 
-        # (batch*heads, queries_max_length, depth_per_head)
+        # (batch*heads, query_max_length, depth_per_head)
         contexts = dot_attention(queries, keys, values, lengths=lengths, dropout=self.dropout, bias=bias)
 
-        # (batch, queries_max_length, depth)
-        contexts = combine_heads(contexts, queries_max_length, self.heads)
+        # (batch, query_max_length, depth)
+        contexts = combine_heads(contexts, self.depth_per_head, self.heads)
 
-        # contexts: (batch, queries_max_length, output_depth)
+        # contexts: (batch, query_max_length, output_depth)
         contexts = mx.sym.FullyConnected(data=contexts,
                                          weight=self.w_h2o,
                                          bias=self.b_h2o,
@@ -359,22 +367,23 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
                  depth_out: int = 512,
                  dropout: float = 0.0) -> None:
         super().__init__(prefix, depth_att, heads, depth_out, dropout)
-
         self.w_i2h = mx.sym.Variable("%si2h_weight" % prefix)
         self.b_i2h = mx.sym.Variable("%si2h_bias" % prefix)
 
     def __call__(self,
                  inputs: mx.sym.Symbol,
-                 max_length: int,
-                 lengths: Optional[mx.sym.Symbol] = None,
-                 bias: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
+                 input_lengths: Optional[mx.sym.Symbol] = None,
+                 bias: Optional[mx.sym.Symbol] = None,
+                 cache: Optional[Dict[str, Optional[mx.sym.Symbol]]] = None) -> mx.sym.Symbol:
         """
+        Computes multi-head attention on a set of inputs, serving as queries, keys, and values.
+        May use an auto-regressive bias and a cache of previously computed inputs.
         Returns a symbol of shape (batch, max_length, output_depth).
 
         :param inputs: Symbol of shape (batch, max_length, input_depth).
-        :param max_length: Size of time dimension.
-        :param lengths: Optional lengths of inputs. Symbol of shape (batch, 1).
+        :param input_lengths: Optional lengths of inputs. Symbol of shape (batch, 1).
         :param bias: Optional (auto-regressive bias). Symbol of shape (1, max_length, max_length).
+        :param cache: Optional dictionary of previously computed keys and values.
         :return: Symbol of shape (batch, max_length, output_depth).
         """
         # combined: (batch, max_length, depth * 3)
@@ -389,12 +398,15 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         # pylint: disable=unbalanced-tuple-unpacking
         queries, keys, values = mx.sym.split(data=combined, num_outputs=3, axis=2)
 
+        if cache is not None:
+            # append new keys & values to cache, update the cache
+            keys = cache['k'] = keys if cache['k'] is None else mx.sym.concat(cache['k'], keys, dim=1)
+            values = cache['v'] = values if cache['v'] is None else mx.sym.concat(cache['v'], values, dim=1)
+
         return self._attend(queries,
                             keys,
                             values,
-                            queries_max_length=max_length,
-                            memory_max_length=max_length,
-                            lengths=lengths,
+                            lengths=input_lengths,
                             bias=bias)
 
 
@@ -423,19 +435,17 @@ class MultiHeadAttention(MultiHeadAttentionBase):
 
     def __call__(self,
                  queries: mx.sym.Symbol,
-                 queries_max_length: int,
                  memory: mx.sym.Symbol,
-                 memory_lengths: mx.sym.Symbol,
-                 memory_max_length: int) -> mx.sym.Symbol:
+                 memory_lengths: mx.sym.Symbol) -> mx.sym.Symbol:
         """
+        Computes multi-head attention for queries given a memory tensor.
+        Does not use an auto-regressive bias.
         Returns a symbol of shape (batch, max_length, output_depth).
 
-        :param queries: Symbol of shape (batch, queries_max_length, input_depth). TODO?
-        :param queries_max_length: Size of queries time dimension.
+        :param queries: Symbol of shape (batch, query_max_length, input_depth).
         :param memory: Symbol of shape (batch, memory_max_length, input_depth).
-        :param memory_lengths: Symbol of shape (batch, 1).
-        :param memory_max_length: Size of memory time dimension.
-        :return: Symbol of shape (batch, queries_max_length, output_depth).
+        :param memory_lengths: Lengths of memory sequences. Used for masking. Symbol of shape (batch, 1).
+        :return: Symbol of shape (batch, query_seq_len, output_depth).
         """
         # (batch, memory_max_length, depth * 2)
         combined = mx.sym.FullyConnected(data=memory,
@@ -451,19 +461,16 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         # pylint: disable=unbalanced-tuple-unpacking
         keys, values = mx.sym.split(data=combined, num_outputs=2, axis=2)
 
-        # (batch, memory_max_length, depth * 2)
+        # (batch, query_max_length, depth * 2)
         queries = mx.sym.FullyConnected(data=queries,
                                         weight=self.w_q2h,
                                         bias=self.b_q2h,
                                         num_hidden=self.depth,
                                         flatten=False,
                                         name="%sq_transform" % self.prefix)
-
         return self._attend(queries,
                             keys,
                             values,
-                            queries_max_length=queries_max_length,
-                            memory_max_length=memory_max_length,
                             lengths=memory_lengths,
                             bias=None)
 

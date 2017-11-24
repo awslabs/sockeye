@@ -11,7 +11,7 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-from typing import Optional
+from typing import Dict, Optional
 
 import mxnet as mx
 import numpy as np
@@ -87,9 +87,12 @@ class TransformerEncoderBlock:
                                                dropout=config.dropout_prepost,
                                                prefix="%sff_post_" % prefix)
 
-    def __call__(self, data: mx.sym.Symbol, lengths: mx.sym.Symbol, max_length: int) -> mx.sym.Symbol:
+    def __call__(self, data: mx.sym.Symbol, lengths: mx.sym.Symbol) -> mx.sym.Symbol:
         # self-attention
-        data_self_att = self.self_attention(self.pre_self_attention(data, None), max_length, lengths=lengths, bias=None)
+        data_self_att = self.self_attention(inputs=self.pre_self_attention(data, None),
+                                            input_lengths=lengths,
+                                            bias=None,
+                                            cache=None)
         data = self.post_self_attention(data_self_att, data)
 
         # feed-forward
@@ -108,6 +111,7 @@ class TransformerDecoderBlock:
     def __init__(self,
                  config: TransformerConfig,
                  prefix: str) -> None:
+        self.prefix = prefix
         self.pre_self_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                           num_hidden=config.model_size,
                                                           dropout=config.dropout_prepost,
@@ -151,25 +155,22 @@ class TransformerDecoderBlock:
 
     def __call__(self,
                  target: mx.sym.Symbol,
-                 target_max_length: int,
                  target_bias: mx.sym.Symbol,
                  source: mx.sym.Symbol,
                  source_lengths: mx.sym.Symbol,
-                 source_max_length: int) -> mx.sym.Symbol:
+                 cache: Optional[Dict[str, Optional[mx.sym.Symbol]]] = None) -> mx.sym.Symbol:
 
         # self-attention
-        target_self_att = self.self_attention(self.pre_self_attention(target, None),
-                                              target_max_length,
-                                              lengths=None,
-                                              bias=target_bias)
+        target_self_att = self.self_attention(inputs=self.pre_self_attention(target, None),
+                                              input_lengths=None,
+                                              bias=target_bias,
+                                              cache=cache)
         target = self.post_self_attention(target_self_att, target)
 
         # encoder attention
-        target_enc_att = self.enc_attention(self.pre_enc_attention(target, None),
-                                            target_max_length,
-                                            source,
-                                            source_lengths,
-                                            source_max_length)
+        target_enc_att = self.enc_attention(queries=self.pre_enc_attention(target, None),
+                                            memory=source,
+                                            memory_lengths=source_lengths)
         target = self.post_enc_attention(target_enc_att, target)
 
         # feed-forward

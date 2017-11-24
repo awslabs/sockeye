@@ -402,8 +402,8 @@ class MultiHeadDotAttention(Attention):
         keys, values = mx.sym.split(data=source_hidden, num_outputs=2, axis=2)
 
         # (batch*heads, length, num_hidden/head)
-        keys = layers.split_heads(keys, source_seq_len, self.heads)
-        values = layers.split_heads(values, source_seq_len, self.heads)
+        keys = layers.split_heads(keys, self.num_hidden_per_head, self.heads)
+        values = layers.split_heads(values, self.num_hidden_per_head, self.heads)
 
         def attend(att_input: AttentionInput, att_state: AttentionState) -> AttentionState:
             """
@@ -442,7 +442,7 @@ class MultiHeadDotAttention(Attention):
             # (batch*heads, 1, num_hidden/head)
             context = mx.sym.expand_dims(context, axis=1)
             # (batch, 1, num_hidden)
-            context = layers.combine_heads(context, length=1, heads=self.heads)
+            context = layers.combine_heads(context, self.num_hidden_per_head, heads=self.heads)
             # (batch, num_hidden)
             context = mx.sym.reshape(context, shape=(-3, -1))
 
@@ -704,7 +704,7 @@ def mask_attention_scores(logits: mx.sym.Symbol,
     logits = mx.sym.SequenceMask(data=logits,
                                  use_sequence_length=True,
                                  sequence_length=length,
-                                 value=-99999999.)
+                                 value=C.LARGE_NEGATIVE_VALUE)
     # (batch_size, seq_len, 1)
     return mx.sym.swapaxes(data=logits, dim1=0, dim2=1)
 
