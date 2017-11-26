@@ -182,7 +182,7 @@ class Encoder(ABC):
     @abstractmethod
     def encode(self,
                data: mx.sym.Symbol,
-               data_length: mx.sym.Symbol,
+               data_length: Optional[mx.sym.Symbol],
                seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
@@ -220,7 +220,7 @@ class BatchMajor2TimeMajor(Encoder):
 
     def encode(self,
                data: mx.sym.Symbol,
-               data_length: mx.sym.Symbol,
+               data_length: Optional[mx.sym.Symbol],
                seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
@@ -593,7 +593,7 @@ class RecurrentEncoder(Encoder):
 
     def encode(self,
                data: mx.sym.Symbol,
-               data_length: mx.sym.Symbol,
+               data_length: Optional[mx.sym.Symbol],
                seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.

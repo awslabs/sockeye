@@ -87,9 +87,9 @@ class TransformerEncoderBlock:
                                                dropout=config.dropout_prepost,
                                                prefix="%sff_post_" % prefix)
 
-    def __call__(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, length: int) -> mx.sym.Symbol:
+    def __call__(self, data: mx.sym.Symbol, lengths: mx.sym.Symbol, max_length: int) -> mx.sym.Symbol:
         # self-attention
-        data_self_att = self.self_attention(self.pre_self_attention(data, None), data_length, length)
+        data_self_att = self.self_attention(self.pre_self_attention(data, None), max_length, lengths=lengths, bias=None)
         data = self.post_self_attention(data_self_att, data)
 
         # feed-forward
@@ -151,7 +151,6 @@ class TransformerDecoderBlock:
 
     def __call__(self,
                  target: mx.sym.Symbol,
-                 target_lengths: mx.sym.Symbol,
                  target_max_length: int,
                  target_bias: mx.sym.Symbol,
                  source: mx.sym.Symbol,
@@ -160,8 +159,8 @@ class TransformerDecoderBlock:
 
         # self-attention
         target_self_att = self.self_attention(self.pre_self_attention(target, None),
-                                              target_lengths,
                                               target_max_length,
+                                              lengths=None,
                                               bias=target_bias)
         target = self.post_self_attention(target_self_att, target)
 
