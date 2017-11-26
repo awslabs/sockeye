@@ -199,8 +199,6 @@ class StringWithAlignmentMatrixOutputHandler(StringOutputHandler):
 class BenchmarkOutputHandler(StringOutputHandler):
     """
     Output handler to write detailed benchmark information to a stream.
-
-    :param stream: Stream to write translations to (e.g. sys.stdout).
     """
 
     def handle(self,

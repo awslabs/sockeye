@@ -489,15 +489,6 @@ def add_model_parameters(params):
                               type=int, default=None,
                               help='Number of heads for Multi-head dot attention. Default: %(default)s.')
 
-    model_params.add_argument('--lexical-bias',
-                              default=None,
-                              type=str,
-                              help="Specify probabilistic lexicon (fast_align format) for lexical biasing (Arthur "
-                                   "ETAL'16). Set smoothing value epsilon by appending :<eps>")
-    model_params.add_argument('--learn-lexical-bias',
-                              action='store_true',
-                              help='Adjust lexicon probabilities during training. Default: %(default)s')
-
     model_params.add_argument('--weight-tying',
                               action='store_true',
                               help='Turn on weight tying (see arxiv.org/abs/1608.05859). '
@@ -690,7 +681,8 @@ def add_training_args(params):
                               default=C.EMBED_INIT_DEFAULT,
                               choices=C.EMBED_INIT_TYPES,
                               help='Type of embedding matrix weight initialization. If normal, initializes embedding '
-                                   'weights using a normal distribution with std=vocab_size. Default: %(default)s.')
+                                   'weights using a normal distribution with std=1/srqt(vocab_size). '
+                                   'Default: %(default)s.')
     train_params.add_argument('--initial-learning-rate',
                               type=float,
                               default=0.0003,
@@ -749,11 +741,6 @@ def add_training_args(params):
                               help="Action to take on optimizer states (e.g. Adam states) when learning rate is "
                                    "reduced due to the value of --learning-rate-reduce-num-not-improved. "
                                    "Default: %(default)s.")
-
-    train_params.add_argument('--use-fused-rnn',
-                              default=False,
-                              action="store_true",
-                              help='Use FusedRNNCell in encoder (requires GPU device). Speeds up training.')
 
     train_params.add_argument('--rnn-forget-bias',
                               default=0.0,
@@ -894,9 +881,13 @@ def add_evaluate_args(params):
     eval_params.add_argument('--quiet', '-q',
                              action="store_true",
                              help="Do not print logging information.")
+    eval_params.add_argument('--metrics',
+                             nargs='+',
+                             default=[C.BLEU, C.CHRF],
+                             help='List of metrics to compute. Default: %(default)s.')
     eval_params.add_argument('--sentence', '-s',
                              action="store_true",
-                             help="Show sentence-BLEU. Default: %(default)s.")
+                             help="Show sentence-level metrics. Default: %(default)s.")
     eval_params.add_argument('--offset',
                              type=float,
                              default=0.01,

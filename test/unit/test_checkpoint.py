@@ -12,12 +12,12 @@
 # permissions and limitations under the License.
 
 import tempfile
-from test.common import generate_random_sentence
 
+import numpy as np
 import pytest
 
 import sockeye.data_io
-import numpy as np
+from test.common import generate_random_sentence
 
 
 def create_parallel_sentence_iter(source_sentences, target_sentences, max_len, batch_size, batch_by_words):
@@ -42,6 +42,7 @@ def data_batches_equal(db1, db2):
     for data1, data2 in zip(db1.data, db2.data):
         equal = equal and np.allclose(data1.asnumpy(), data2.asnumpy())
     return equal
+
 
 @pytest.mark.parametrize("batch_size, batch_by_words", [
     (50, False),

@@ -36,15 +36,13 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
-def get_decoder(config: Config,
-                lexicon: Optional[lexicons.Lexicon] = None,
-                embed_weight: Optional[mx.sym.Symbol] = None) -> 'Decoder':
+def get_decoder(config: Config) -> 'Decoder':
     if isinstance(config, RecurrentDecoderConfig):
-        return RecurrentDecoder(config=config, lexicon=lexicon, embed_weight=embed_weight, prefix=C.RNN_DECODER_PREFIX)
+        return RecurrentDecoder(config=config, prefix=C.RNN_DECODER_PREFIX)
     elif isinstance(config, ConvolutionalDecoderConfig):
-        return ConvolutionalDecoder(config=config, embed_weight=embed_weight, prefix=C.CNN_DECODER_PREFIX)
+        return ConvolutionalDecoder(config=config, prefix=C.CNN_DECODER_PREFIX)
     elif isinstance(config, transformer.TransformerConfig):
-        return TransformerDecoder(config=config, embed_weight=embed_weight, prefix=C.TRANSFORMER_DECODER_PREFIX)
+        return TransformerDecoder(config=config, prefix=C.TRANSFORMER_DECODER_PREFIX)
     else:
         raise ValueError("Unsupported decoder configuration")
 
@@ -58,54 +56,49 @@ class Decoder(ABC):
     For the inference module to be able to keep track of decoder's states
     a decoder provides methods to return initial states (init_states), state variables and their shapes.
     """
-    def __init__(self) -> None:
-        # Tracked to find params for logit computation
-        self.output_layer = None  # type: layers.OutputLayer
 
     @abstractmethod
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
                         source_encoded_lengths: mx.sym.Symbol,
                         source_encoded_max_length: int,
-                        target: mx.sym.Symbol,
-                        target_lengths: mx.sym.Symbol,
-                        target_max_length: int,
-                        source_lexicon: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
+                        target_embed: mx.sym.Symbol,
+                        target_embed_lengths: mx.sym.Symbol,
+                        target_embed_max_length: int) -> mx.sym.Symbol:
         """
-        Decodes given a known target sequence and returns logits
-        with batch size and target length dimensions collapsed.
-        Used for training.
+        Decodes a sequence of embedded target words and returns sequence of last decoder
+        representations for each time step.
 
         :param source_encoded: Encoded source: (source_encoded_max_length, batch_size, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
-        :param target: Target sequence. Shape: (batch_size, target_max_length).
-        :param target_lengths: Lengths of target sequences. Shape: (batch_size,).
-        :param target_max_length: Size of target sequence dimension.
-        :param source_lexicon: Lexical biases for current sentence.
-               Shape: (batch_size, target_vocab_size, source_seq_len)
-        :return: Logits of next-word predictions for target sequence.
-                 Shape: (batch_size * target_max_length, target_vocab_size)
+        :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
+        :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
+        :param target_embed_max_length: Dimension of the embedded target sequence.
+        :return: Decoder data. Shape: (batch_size, target_embed_max_length, decoder_depth).
         """
         pass
 
     @abstractmethod
     def decode_step(self,
-                    target: mx.sym.Symbol,
-                    target_max_length: int,
+                    target_embed: mx.sym.Symbol,
+                    target_embed_lengths: mx.sym.Symbol,
+                    target_embed_max_length: int,
+                    target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol) \
-            -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
-        Decodes a single time step given the previous word ids in target and previous decoder states.
-        Returns logit inputs, logits, attention probabilities, and next decoder states.
+        Decodes a single time step given the embedded target sequence and previous decoder states.
+        Returns decoder representation for the next prediction, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param target: Previous target word ids. Shape: (batch_size, target_max_length).
-        :param target_max_length: Size of time dimension in prev_word_ids.
+        :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
+        :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
+        :param target_embed_max_length: Size of embedded target sequence dimension.
+        :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
-        :return: logit inputs, logits, attention probabilities, next decoder states.
+        :return: logit inputs, attention probabilities, next decoder states.
         """
         pass
 
@@ -113,6 +106,13 @@ class Decoder(ABC):
     def reset(self):
         """
         Reset decoder method. Used for inference.
+        """
+        pass
+
+    @abstractmethod
+    def get_num_hidden(self) -> int:
+        """
+        :return: The representation size of this decoder.
         """
         pass
 
@@ -157,13 +157,6 @@ class Decoder(ABC):
         """
         pass
 
-    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
-        """
-        Returns a list of RNNCells used by this decoder.
-
-        """
-        return []
-
     def get_max_seq_len(self) -> Optional[int]:
         """
         :return: The maximum length supported by the decoder if such a restriction exists.
@@ -181,13 +174,11 @@ class TransformerDecoder(Decoder):
     time-step ensures correct self-attention scores and is updated with every step.
 
     :param config: Transformer configuration.
-    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new target embedding.
     :param prefix: Name prefix for symbols of this decoder.
     """
 
     def __init__(self,
                  config: transformer.TransformerConfig,
-                 embed_weight: Optional[mx.sym.Symbol] = None,
                  prefix: str = C.TRANSFORMER_DECODER_PREFIX) -> None:
         self.config = config
         self.prefix = prefix
@@ -196,153 +187,132 @@ class TransformerDecoder(Decoder):
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                  num_hidden=config.model_size,
                                                                  dropout=config.dropout_prepost,
-                                                                 prefix="%sfinal_process" % prefix)
+                                                                 prefix="%sfinal_process_" % prefix)
 
-        # Embedding & output parameters
-        if embed_weight is None:
-            embed_weight = encoder.Embedding.get_embed_weight(config.vocab_size,
-                                                              config.model_size,
-                                                              C.TARGET_EMBEDDING_PREFIX)
-        # Note: Transformers use model_size as embedding size
-        self.embedding = encoder.Embedding(num_embed=config.model_size,
-                                           vocab_size=config.vocab_size,
-                                           prefix=C.TARGET_EMBEDDING_PREFIX,
-                                           dropout=config.dropout_embed,
-                                           embed_weight=embed_weight,
-                                           embed_scale=config.model_size ** 0.5)
         self.pos_embedding = encoder.get_positional_embedding(config.positional_embedding_type,
                                                               config.model_size,
                                                               max_seq_len=config.max_seq_len_target,
+                                                              fixed_pos_embed_scale_up_input=True,
+                                                              fixed_pos_embed_scale_down_positions=False,
                                                               prefix=C.TARGET_POSITIONAL_EMBEDDING_PREFIX)
-
-        self.output_layer = layers.OutputLayer(num_hidden=self.config.model_size,
-                                               num_embed=self.config.model_size,
-                                               vocab_size=self.config.vocab_size,
-                                               weight_tying=self.config.weight_tying,
-                                               embed_weight=embed_weight,
-                                               weight_normalization=self.config.weight_normalization,
-                                               prefix=prefix)
 
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
                         source_encoded_lengths: mx.sym.Symbol,
                         source_encoded_max_length: int,
-                        target: mx.sym.Symbol,
-                        target_lengths: mx.sym.Symbol,
-                        target_max_length: int,
-                        source_lexicon: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
+                        target_embed: mx.sym.Symbol,
+                        target_embed_lengths: mx.sym.Symbol,
+                        target_embed_max_length: int) -> mx.sym.Symbol:
         """
-        Decodes given a known target sequence and returns logits
-        with batch size and target length dimensions collapsed.
-        Used for training.
+        Decodes a sequence of embedded target words and returns sequence of last decoder
+        representations for each time step.
 
         :param source_encoded: Encoded source: (source_encoded_max_length, batch_size, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
-        :param target: Target sequence. Shape: (batch_size, target_max_length).
-        :param target_lengths: Lengths of target sequences. Shape: (batch_size,).
-        :param target_max_length: Size of target sequence dimension.
-        :param source_lexicon: Lexical biases for current sentence.
-               Shape: (batch_size, target_vocab_size, source_seq_len)
-        :return: Logits of next-word predictions for target sequence.
-                 Shape: (batch_size * target_max_length, target_vocab_size)
+        :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
+        :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
+        :param target_embed_max_length: Dimension of the embedded target sequence.
+        :return: Decoder data. Shape: (batch_size, target_embed_max_length, decoder_depth).
         """
         # (batch_size, source_max_length, num_source_embed)
         source_encoded = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
 
         # (batch_size, target_max_length, model_size)
         target = self._decode(source_encoded, source_encoded_lengths, source_encoded_max_length,
-                              target, target_lengths, target_max_length)
+                              target_embed, target_embed_max_length)
 
-        # (batch_size * target_max_length, model_size)
-        target = mx.sym.reshape(data=target, shape=(-3, -1))
-
-        # (batch_size * target_max_length, vocab_size)
-        logits = self.output_layer(target)
-        return logits
+        return target
 
     def _decode(self,
                 source_encoded, source_encoded_lengths, source_encoded_max_length,
-                target, target_lengths, target_max_length):
+                target_embed, target_embed_max_length):
         """
         Runs stacked decoder transformer blocks.
 
         :param source_encoded: Batch-major encoded source: (batch_size, source_encoded_max_length, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
-        :param target: Target sequence. Shape: (batch_size, target_max_length).
-        :param target_lengths: Lengths of target sequences. Shape: (batch_size,).
-        :param target_max_length: Size of target sequence dimension.
+        :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length).
+        :param target_embed_max_length: Size of embedded target sequence dimension.
         :return: Result of stacked transformer blocks.
         """
 
         # (1, target_max_length, target_max_length)
-        target_bias = transformer.get_autoregressive_bias(target_max_length, name="%sbias" % self.prefix)
+        target_bias = transformer.get_autoregressive_bias(target_embed_max_length, name="%sbias" % self.prefix)
 
         # target: (batch_size, target_max_length, model_size)
-        target, target_lengths, target_max_length = self.embedding.encode(target, target_lengths, target_max_length)
-        target, target_lengths, target_max_length = self.pos_embedding.encode(target, target_lengths, target_max_length)
+        target, _, target_max_length = self.pos_embedding.encode(target_embed, None, target_embed_max_length)
 
         if self.config.dropout_prepost > 0.0:
             target = mx.sym.Dropout(data=target, p=self.config.dropout_prepost)
 
         for layer in self.layers:
-            target = layer(target, target_lengths, target_max_length, target_bias,
-                           source_encoded, source_encoded_lengths, source_encoded_max_length)
-        target = self.final_process(data=target, prev=None, length=target_max_length)
+            target = layer(target=target,
+                           target_max_length=target_max_length,
+                           target_bias=target_bias,
+                           source=source_encoded,
+                           source_lengths=source_encoded_lengths,
+                           source_max_length=source_encoded_max_length)
+        target = self.final_process(data=target, prev=None)
 
         return target
 
     def decode_step(self,
-                    target: mx.sym.Symbol,
-                    target_max_length: int,
+                    target_embed: mx.sym.Symbol,
+                    target_embed_lengths: mx.sym.Symbol,
+                    target_embed_max_length: int,
+                    target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol) \
-            -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
-        Decodes a single time step given the previous word ids in target and previous decoder states.
-        Returns logit inputs, logits, attention probabilities, and next decoder states.
+        Decodes a single time step given the embedded target sequence and previous decoder states.
+        Returns decoder representation for the next prediction, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param target: Previous target word ids. Shape: (batch_size, target_max_length).
-        :param target_max_length: Size of time dimension in prev_word_ids.
+        :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
+        :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
+        :param target_embed_max_length: Size of embedded target sequence dimension.
+        :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
-        :return: logit inputs, logits, attention probabilities, next decoder states.
+        :return: logit inputs, attention probabilities, next decoder states.
         """
         source_encoded, source_encoded_lengths = states
 
-        # lengths: (batch_size,)
-        target_lengths = utils.compute_lengths(target)
-        indices = target_lengths - 1  # type: mx.sym.Symbol
+        # indices: (batch_size,)
+        indices = target_embed_lengths - 1  # type: mx.sym.Symbol
 
         # (batch_size, target_max_length, 1)
         mask = mx.sym.expand_dims(mx.sym.one_hot(indices=indices,
-                                                 depth=target_max_length,
+                                                 depth=target_embed_max_length,
                                                  on_value=1, off_value=0), axis=2)
 
         # (batch_size, target_max_length, model_size)
         target = self._decode(source_encoded, source_encoded_lengths, source_encoded_max_length,
-                              target, target_lengths, target_max_length)
+                              target_embed, target_embed_max_length)
 
         # set all target positions to zero except for current time-step
         # target: (batch_size, target_max_length, model_size)
         target = mx.sym.broadcast_mul(target, mask)
         # reduce to single prediction
         # target: (batch_size, model_size)
-        target = mx.sym.sum(target, axis=1, keepdims=False, name=C.LOGIT_INPUTS_NAME)
-
-        # logits: (batch_size, vocab_size)
-        logits = self.output_layer(target)
+        target = mx.sym.sum(target, axis=1, keepdims=False)
 
         # TODO(fhieber): no attention probs for now
         attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
 
         new_states = [source_encoded, source_encoded_lengths]
-        return target, logits, attention_probs, new_states
+        return target, attention_probs, new_states
 
     def reset(self):
         pass
+
+    def get_num_hidden(self) -> int:
+        """
+        :return: The representation size of this decoder.
+        """
+        return self.config.model_size
 
     def init_states(self,
                     source_encoded: mx.sym.Symbol,
@@ -407,49 +377,34 @@ class RecurrentDecoderConfig(Config):
     """
     Recurrent decoder configuration.
 
-    :param vocab_size: Target vocabulary size.
     :param max_seq_len_source: Maximum source sequence length
-    :param num_embed: Target word embedding size.
     :param rnn_config: RNN configuration.
     :param attention_config: Attention configuration.
-    :param embed_dropout: Dropout probability for target embeddings.
     :param hidden_dropout: Dropout probability on next decoder hidden state.
-    :param weight_tying: Whether to share embedding and prediction parameter matrices.
     :param state_init: Type of RNN decoder state initialization: zero, last, average.
     :param context_gating: Whether to use context gating.
     :param layer_normalization: Apply layer normalization.
     :param attention_in_upper_layers: Pass the attention value to all layers in the decoder.
-    :param weight_normalization: Weight normalization.
     """
 
     def __init__(self,
-                 vocab_size: int,
                  max_seq_len_source: int,
-                 num_embed: int,
                  rnn_config: rnn.RNNConfig,
                  attention_config: rnn_attention.AttentionConfig,
-                 embed_dropout: float = .0,
-                 hidden_dropout: float = .0,
-                 weight_tying: bool = False,
+                 hidden_dropout: float = .0,  # TODO: move this dropout functionality to OutputLayer
                  state_init: str = C.RNN_DEC_INIT_LAST,
                  context_gating: bool = False,
                  layer_normalization: bool = False,
-                 attention_in_upper_layers: bool = False,
-                 weight_normalization: bool = False) -> None:
+                 attention_in_upper_layers: bool = False) -> None:
         super().__init__()
-        self.vocab_size = vocab_size
         self.max_seq_len_source = max_seq_len_source
-        self.num_embed = num_embed
         self.rnn_config = rnn_config
         self.attention_config = attention_config
-        self.embed_dropout = embed_dropout
         self.hidden_dropout = hidden_dropout
-        self.weight_tying = weight_tying
         self.state_init = state_init
         self.context_gating = context_gating
         self.layer_normalization = layer_normalization
         self.attention_in_upper_layers = attention_in_upper_layers
-        self.weight_normalization = weight_normalization
 
 
 class RecurrentDecoder(Decoder):
@@ -458,21 +413,16 @@ class RecurrentDecoder(Decoder):
     The architecture is based on Luong et al, 2015: Effective Approaches to Attention-based Neural Machine Translation.
 
     :param config: Configuration for recurrent decoder.
-    :param lexicon: Optional Lexicon.
-    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new target embedding.
     :param prefix: Decoder symbol prefix.
     """
 
     def __init__(self,
                  config: RecurrentDecoderConfig,
-                 lexicon: Optional[lexicons.Lexicon] = None,
-                 embed_weight: Optional[mx.sym.Symbol] = None,
                  prefix: str = C.RNN_DECODER_PREFIX) -> None:
         # TODO: implement variant without input feeding
         self.config = config
         self.rnn_config = config.rnn_config
         self.attention = rnn_attention.get_attention(config.attention_config, config.max_seq_len_source)
-        self.lexicon = lexicon
         self.prefix = prefix
 
         self.num_hidden = self.rnn_config.num_hidden
@@ -492,7 +442,7 @@ class RecurrentDecoder(Decoder):
                                   "output dimensions do not match.")
 
         # Stacked RNN
-        if self.rnn_config.num_layers == 1 or not self.rnn_config.attention_in_upper_layers:
+        if self.rnn_config.num_layers == 1 or not self.config.attention_in_upper_layers:
             self.rnn_pre_attention = rnn.get_stacked_rnn(self.rnn_config, self.prefix, parallel_inputs=False)
             self.rnn_post_attention = None
         else:
@@ -512,31 +462,13 @@ class RecurrentDecoder(Decoder):
                                                      prefix="%shidden_norm" % prefix) \
             if self.config.layer_normalization else None
 
-        # Embedding & output parameters
-        if embed_weight is None:
-            embed_weight = encoder.Embedding.get_embed_weight(self.config.vocab_size,
-                                                              self.config.num_embed,
-                                                              C.TARGET_EMBEDDING_PREFIX)
-        self.embedding = encoder.Embedding(self.config.num_embed,
-                                           self.config.vocab_size,
-                                           prefix=C.TARGET_EMBEDDING_PREFIX,
-                                           dropout=config.embed_dropout,
-                                           embed_weight=embed_weight)
-
-        self.output_layer = layers.OutputLayer(num_hidden=self.num_hidden,
-                                               num_embed=self.config.num_embed,
-                                               vocab_size=self.config.vocab_size,
-                                               weight_tying=self.config.weight_tying,
-                                               embed_weight=embed_weight,
-                                               weight_normalization=self.config.weight_normalization,
-                                               prefix=prefix)
-
     def _create_state_init_parameters(self):
         """
         Creates parameters for encoder last state transformation into decoder layer initial states.
         """
         self.init_ws, self.init_bs, self.init_norms = [], [], []
-        state_shapes = self.rnn_pre_attention.state_shape
+        # shallow copy of the state shapes:
+        state_shapes = list(self.rnn_pre_attention.state_shape)
         if self.rnn_post_attention:
             state_shapes += self.rnn_post_attention.state_shape
         for state_idx, (_, init_num_hidden) in enumerate(state_shapes):
@@ -551,32 +483,23 @@ class RecurrentDecoder(Decoder):
                         source_encoded: mx.sym.Symbol,
                         source_encoded_lengths: mx.sym.Symbol,
                         source_encoded_max_length: int,
-                        target: mx.sym.Symbol,
-                        target_lengths: mx.sym.Symbol,
-                        target_max_length: int,
-                        source_lexicon: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
+                        target_embed: mx.sym.Symbol,
+                        target_embed_lengths: mx.sym.Symbol,
+                        target_embed_max_length: int) -> mx.sym.Symbol:
         """
-        Decodes given a known target sequence and returns logits
-        with batch size and target length dimensions collapsed.
-        Used for training.
+        Decodes a sequence of embedded target words and returns sequence of last decoder
+        representations for each time step.
 
         :param source_encoded: Encoded source: (source_encoded_max_length, batch_size, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
-        :param target: Target sequence. Shape: (batch_size, target_max_length).
-        :param target_lengths: Lengths of target sequences. Shape: (batch_size,).
-        :param target_max_length: Size of target sequence dimension.
-        :param source_lexicon: Lexical biases for current sentence.
-               Shape: (batch_size, target_vocab_size, source_seq_len)
-        :return: Logits of next-word predictions for target sequence.
-                 Shape: (batch_size * target_max_length, target_vocab_size)
+        :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
+        :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
+        :param target_embed_max_length: Dimension of the embedded target sequence.
+        :return: Decoder data. Shape: (batch_size, target_embed_max_length, decoder_depth).
         """
-        # embed and slice target words
-        # target_embed: (batch_size, target_seq_len, num_target_embed)
-        target_embed, target_lengths, target_max_length = self.embedding.encode(target, target_lengths,
-                                                                                target_max_length)
         # target_embed: target_seq_len * (batch_size, num_target_embed)
-        target_embed = mx.sym.split(data=target_embed, num_outputs=target_max_length, axis=1, squeeze_axis=True)
+        target_embed = mx.sym.split(data=target_embed, num_outputs=target_embed_max_length, axis=1, squeeze_axis=True)
 
         # get recurrent attention function conditioned on source
         source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
@@ -591,71 +514,44 @@ class RecurrentDecoder(Decoder):
 
         # hidden_all: target_seq_len * (batch_size, 1, rnn_num_hidden)
         hidden_all = []
-
         # TODO: possible alternative: feed back the context vector instead of the hidden (see lamtram)
-
-        lexical_biases = []
-
         self.reset()
-
-        for seq_idx in range(target_max_length):
+        for seq_idx in range(target_embed_max_length):
             # hidden: (batch_size, rnn_num_hidden)
             state, attention_state = self._step(target_embed[seq_idx],
                                                 state,
                                                 attention_func,
                                                 attention_state,
                                                 seq_idx)
-
             # hidden_expanded: (batch_size, 1, rnn_num_hidden)
             hidden_all.append(mx.sym.expand_dims(data=state.hidden, axis=1))
-
-            if source_lexicon is not None:
-                assert self.lexicon is not None, "source_lexicon should not be None if no lexicon available"
-                lexical_biases.append(self.lexicon.calculate_lex_bias(source_lexicon, attention_state.probs))
 
         # concatenate along time axis
         # hidden_concat: (batch_size, target_seq_len, rnn_num_hidden)
         hidden_concat = mx.sym.concat(*hidden_all, dim=1, name="%shidden_concat" % self.prefix)
-        # hidden_concat: (batch_size * target_seq_len, rnn_num_hidden)
-        hidden_concat = mx.sym.reshape(data=hidden_concat, shape=(-1, self.num_hidden))
-
-        # logits: (batch_size * target_seq_len, target_vocab_size)
-        logits = self.output_layer(hidden_concat)
-
-        if source_lexicon is not None:
-            # lexical_biases_concat: (batch_size, target_seq_len, target_vocab_size)
-            lexical_biases_concat = mx.sym.concat(*lexical_biases, dim=1, name='lex_bias_concat')
-            # lexical_biases_concat: (batch_size * target_seq_len, target_vocab_size)
-            lexical_biases_concat = mx.sym.reshape(data=lexical_biases_concat, shape=(-1, self.config.vocab_size))
-            logits = mx.sym.broadcast_add(lhs=logits, rhs=lexical_biases_concat,
-                                          name='%s_plus_lex_bias' % C.LOGITS_NAME)
-
-        return logits
+        return hidden_concat
 
     def decode_step(self,
-                    target: mx.sym.Symbol,
-                    target_max_length: int,
+                    target_embed: mx.sym.Symbol,
+                    target_embed_lengths: mx.sym.Symbol,
+                    target_embed_max_length: int,
+                    target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol) \
-            -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
-        Decodes a single time step given the previous word ids in target and previous decoder states.
-        Returns logit inputs, logits, attention probabilities, and next decoder states.
+        Decodes a single time step given the embedded target sequence and previous decoder states.
+        Returns decoder representation for the next prediction, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param target: Previous target word ids. Shape: (batch_size, target_max_length).
-        :param target_max_length: Size of time dimension in prev_word_ids.
+        :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
+        :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
+        :param target_embed_max_length: Size of embedded target sequence dimension.
+        :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
-        :return: logit inputs, logits, attention probabilities, next decoder states.
+        :return: logit inputs, attention probabilities, next decoder states.
         """
         source_encoded, prev_dynamic_source, source_encoded_length, prev_hidden, *layer_states = states
-
-        # indices: (batch_size,)
-        indices = utils.compute_lengths(target) - 1  # type: mx.sym.Symbol
-        prev_word_id = mx.sym.pick(target, indices, axis=1)
-
-        word_vec_prev, _, _ = self.embedding.encode(prev_word_id, None, 1)
 
         attention_func = self.attention.on(source_encoded, source_encoded_length, source_encoded_max_length)
 
@@ -666,30 +562,25 @@ class RecurrentDecoder(Decoder):
         # state.hidden: (batch_size, rnn_num_hidden)
         # attention_state.dynamic_source: (batch_size, source_seq_len, coverage_num_hidden)
         # attention_state.probs: (batch_size, source_seq_len)
-        state, attention_state = self._step(word_vec_prev,
+        state, attention_state = self._step(target_embed_prev,
                                             prev_state,
                                             attention_func,
                                             prev_attention_state)
-
-        # logit inputs aka state.hidden: (batch_size, rnn_num_hidden)
-        logit_inputs = mx.sym.identity(state.hidden, name=C.LOGIT_INPUTS_NAME)
-
-        # logits: (batch_size, target_vocab_size)
-        logits = self.output_layer(state.hidden)
 
         new_states = [source_encoded,
                       attention_state.dynamic_source,
                       source_encoded_length,
                       state.hidden] + state.layer_states
 
-        return logit_inputs, logits, attention_state.probs, new_states
+        return state.hidden, attention_state.probs, new_states
 
     def reset(self):
         """
         Calls reset on the RNN cell.
         """
         self.rnn_pre_attention.reset()
-        cells_to_reset = self.rnn_pre_attention._cells
+        # Shallow copy of cells
+        cells_to_reset = list(self.rnn_pre_attention._cells)
         if self.rnn_post_attention:
             self.rnn_post_attention.reset()
             cells_to_reset += self.rnn_post_attention._cells
@@ -698,6 +589,12 @@ class RecurrentDecoder(Decoder):
             if isinstance(cell, mx.rnn.ModifierCell):
                 cell.base_cell.reset()
             cell.reset()
+
+    def get_num_hidden(self) -> int:
+        """
+        :return: The representation size of this decoder.
+        """
+        return self.num_hidden
 
     def init_states(self,
                     source_encoded: mx.sym.Symbol,
@@ -940,44 +837,29 @@ class ConvolutionalDecoderConfig(Config):
     Convolutional decoder configuration.
 
     :param cnn_config: Configuration for the convolution block.
-    :param vocab_size: Target vocabulary size.
     :param max_seq_len_target: Maximum target sequence length.
     :param num_embed: Target word embedding size.
     :param encoder_num_hidden: Number of hidden units of the encoder.
     :param num_layers: The number of convolutional layers.
     :param positional_embedding_type: The type of positional embedding.
-    :param weight_tying: Whether to share embedding and prediction parameter matrices.
-    :param weight_normalization: Weight normalization.
-    :param embed_dropout: Dropout probability for target embeddings.
     :param hidden_dropout: Dropout probability on next decoder hidden state.
     """
 
     def __init__(self,
                  cnn_config: convolution.ConvolutionConfig,
-                 vocab_size: int,
                  max_seq_len_target: int,
                  num_embed: int,
                  encoder_num_hidden: int,
                  num_layers: int,
                  positional_embedding_type: str,
-                 weight_tying: bool,
-                 weight_normalization: bool = False,
-                 embed_dropout: float = .0,
                  hidden_dropout: float = .0) -> None:
         super().__init__()
-        if embed_dropout > 0 and hidden_dropout > 0:
-            logger.warning("Setting cnn encoder dropout AND hidden dropout > 0 leads to "
-                           "two dropout layers on top of each other.")
         self.cnn_config = cnn_config
-        self.vocab_size = vocab_size
         self.max_seq_len_target = max_seq_len_target
         self.num_embed = num_embed
         self.encoder_num_hidden = encoder_num_hidden
         self.num_layers = num_layers
         self.positional_embedding_type = positional_embedding_type
-        self.weight_tying = weight_tying
-        self.weight_normalization = weight_normalization
-        self.embed_dropout = embed_dropout
         self.hidden_dropout = hidden_dropout
 
 
@@ -997,14 +879,13 @@ class ConvolutionalDecoder(Decoder):
        several projection matrices)
 
     :param config: Configuration for convolutional decoder.
-    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new target embedding.
     :param prefix: Name prefix for symbols of this decoder.
     """
 
     def __init__(self,
                  config: ConvolutionalDecoderConfig,
-                 embed_weight: Optional[mx.sym.Symbol] = None,
                  prefix: str = C.DECODER_PREFIX) -> None:
+        super().__init__()
         self.config = config
         self.prefix = prefix
 
@@ -1013,19 +894,11 @@ class ConvolutionalDecoder(Decoder):
                               "We need to have the same number of hidden units in the decoder "
                               "as we have in the encoder")
 
-        if embed_weight is None:
-            embed_weight = encoder.Embedding.get_embed_weight(self.config.vocab_size,
-                                                              self.config.num_embed,
-                                                              C.TARGET_EMBEDDING_PREFIX)
-
-        self.embedding = encoder.Embedding(self.config.num_embed,
-                                           self.config.vocab_size,
-                                           prefix=C.TARGET_EMBEDDING_PREFIX,
-                                           embed_weight=embed_weight,
-                                           dropout=config.embed_dropout)
         self.pos_embedding = encoder.get_positional_embedding(config.positional_embedding_type,
-                                                              config.num_embed,
+                                                              num_embed=config.num_embed,
                                                               max_seq_len=config.max_seq_len_target,
+                                                              fixed_pos_embed_scale_up_input=False,
+                                                              fixed_pos_embed_scale_down_positions=False,
                                                               prefix=C.TARGET_POSITIONAL_EMBEDDING_PREFIX)
 
         self.layers = [convolution.ConvolutionBlock(
@@ -1035,78 +908,56 @@ class ConvolutionalDecoder(Decoder):
 
         self.i2h_weight = mx.sym.Variable('%si2h_weight' % prefix)
 
-        self.output_layer = layers.OutputLayer(num_hidden=self.config.cnn_config.num_hidden,
-                                               num_embed=self.config.num_embed,
-                                               vocab_size=self.config.vocab_size,
-                                               weight_tying=self.config.weight_tying,
-                                               embed_weight=embed_weight,
-                                               weight_normalization=self.config.weight_normalization,
-                                               prefix=prefix)
-
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
                         source_encoded_lengths: mx.sym.Symbol,
                         source_encoded_max_length: int,
-                        target: mx.sym.Symbol,
-                        target_lengths: mx.sym.Symbol,
-                        target_max_length: int,
-                        source_lexicon: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
+                        target_embed: mx.sym.Symbol,
+                        target_embed_lengths: mx.sym.Symbol,
+                        target_embed_max_length: int) -> mx.sym.Symbol:
         """
-        Decodes given a known target sequence and returns logits
-        with batch size and target length dimensions collapsed.
-        Used for training.
+        Decodes a sequence of embedded target words and returns sequence of last decoder
+        representations for each time step.
 
         :param source_encoded: Encoded source: (source_encoded_max_length, batch_size, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
-        :param target: Target sequence. Shape: (batch_size, target_max_length).
-        :param target_lengths: Lengths of target sequences. Shape: (batch_size,).
-        :param target_max_length: Size of target sequence dimension.
-        :param source_lexicon: Lexical biases for current sentence.
-               Shape: (batch_size, target_vocab_size, source_seq_len)
-        :return: Logits of next-word predictions for target sequence.
-                 Shape: (batch_size * target_max_length, target_vocab_size)
+        :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
+        :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
+        :param target_embed_max_length: Dimension of the embedded target sequence.
+        :return: Decoder data. Shape: (batch_size, target_embed_max_length, decoder_depth).
         """
-
-        check_condition(source_lexicon is None, "Source lexicon not supported.")
-
         # (batch_size, source_encoded_max_length, encoder_depth).
         source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
 
+        # (batch_size, target_seq_len, num_hidden)
         target_hidden = self._decode(source_encoded=source_encoded_batch_major,
                                      source_encoded_lengths=source_encoded_lengths,
-                                     target=target,
-                                     target_lengths=target_lengths,
-                                     target_max_length=target_max_length)
+                                     target_embed=target_embed,
+                                     target_embed_lengths=target_embed_lengths,
+                                     target_embed_max_length=target_embed_max_length)
 
-        # (batch_size * target_seq_len, num_hidden)
-        target_hidden = mx.sym.reshape(data=target_hidden, shape=(-3, 0))
-        # (batch_size * target_seq_len, target_vocab_size)
-        logits = self.output_layer(target_hidden)
-        return logits
+        return target_hidden
 
     def _decode(self,
                 source_encoded: mx.sym.Symbol,
                 source_encoded_lengths: mx.sym.Symbol,
-                target: mx.sym.Symbol,
-                target_lengths: mx.sym.Symbol,
-                target_max_length: int) -> mx.sym.Symbol:
+                target_embed: mx.sym.Symbol,
+                target_embed_lengths: mx.sym.Symbol,
+                target_embed_max_length: int) -> mx.sym.Symbol:
         """
         Decode the target and produce a sequence of hidden states.
 
         :param source_encoded:  Shape: (batch_size, source_encoded_max_length, encoder_depth).
         :param source_encoded_lengths: Shape: (batch_size,).
-        :param target: Target sequence. Shape: (batch_size, target_max_length).
-        :param target_lengths: Lengths of target sequences. Shape: (batch_size,).
-        :param target_max_length: Size of target sequence dimension.
+        :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length).
+        :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
+        :param target_embed_max_length: Size of embedded target sequence dimension.
         :return: The target hidden states. Shape: (batch_size, target_seq_len, num_hidden).
         """
-        # target_embed: (batch_size, target_seq_len, num_target_embed)
-        target_embed, target_lengths, target_max_length = self.embedding.encode(target, target_lengths,
-                                                                                target_max_length)
-        target_embed, target_lengths, target_max_length = self.pos_embedding.encode(target_embed,
-                                                                                    target_lengths,
-                                                                                    target_max_length)
+        target_embed, target_embed_lengths, target_embed_max_length = self.pos_embedding.encode(target_embed,
+                                                                                                target_embed_lengths,
+                                                                                                target_embed_max_length)
         # target_hidden: (batch_size, target_seq_len, num_hidden)
         target_hidden = mx.sym.FullyConnected(data=target_embed,
                                               num_hidden=self.config.cnn_config.num_hidden,
@@ -1120,12 +971,13 @@ class ConvolutionalDecoder(Decoder):
         for layer in self.layers:
             # (batch_size, target_seq_len, num_hidden)
             target_hidden = layer(mx.sym.Dropout(target_hidden, p=drop_prob) if drop_prob > 0 else target_hidden,
-                                  target_lengths, target_max_length)
+                                  target_embed_lengths, target_embed_max_length)
 
             # (batch_size, target_seq_len, num_embed)
             context = layers.dot_attention(queries=target_hidden,
-                                           keys=source_encoded, values=source_encoded,
-                                           length=source_encoded_lengths)
+                                           keys=source_encoded,
+                                           values=source_encoded,
+                                           lengths=source_encoded_lengths)
 
             # residual connection:
             target_hidden = target_hidden_prev + target_hidden + context
@@ -1134,26 +986,26 @@ class ConvolutionalDecoder(Decoder):
         return target_hidden
 
     def decode_step(self,
-                    target: mx.sym.Symbol,
-                    target_max_length: int,
+                    target_embed: mx.sym.Symbol,
+                    target_embed_lengths: mx.sym.Symbol,
+                    target_embed_max_length: int,
+                    target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol) \
-            -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
-        Decodes a single time step given the previous word ids in target and previous decoder states.
-        Returns logit inputs, logits, attention probabilities, and next decoder states.
+        Decodes a single time step given the embedded target sequence and previous decoder states.
+        Returns decoder representation for the next prediction, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param target: Previous target word ids. Shape: (batch_size, target_max_length).
-        :param target_max_length: Size of time dimension in prev_word_ids.
+        :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
+        :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
+        :param target_embed_max_length: Size of embedded target sequence dimension.
+        :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
-        :return: logit inputs, logits, attention probabilities, next decoder states.
+        :return: logit inputs, attention probabilities, next decoder states.
         """
-
-        # (batch_size,)
-        target_lengths = utils.compute_lengths(target)
-        indices = target_lengths - 1  # type: mx.sym.Symbol
+        indices = target_embed_lengths - 1  # type: mx.sym.Symbol
 
         # Source_encoded: (batch_size, source_encoded_max_length, encoder_depth)
         source_encoded, source_encoded_lengths, *layer_states = states
@@ -1168,18 +1020,11 @@ class ConvolutionalDecoder(Decoder):
 
         new_layer_states = []
 
-        # (batch_size,)
-        prev_word_id = mx.sym.pick(target, indices, axis=1)
-
         # (batch_size, num_embed)
-        target_embed, _, target_max_length = self.embedding.encode(prev_word_id,
-                                                                   None,
-                                                                   target_max_length)
-        # (batch_size, num_embed)
-        target_embed = self.pos_embedding.encode_positions(indices, target_embed)
+        target_embed_prev = self.pos_embedding.encode_positions(indices, target_embed_prev)
 
         # (batch_size, num_hidden)
-        target_hidden_step = mx.sym.FullyConnected(data=target_embed,
+        target_hidden_step = mx.sym.FullyConnected(data=target_embed_prev,
                                                    num_hidden=self.config.cnn_config.num_hidden,
                                                    no_bias=True,
                                                    weight=self.i2h_weight)
@@ -1202,8 +1047,9 @@ class ConvolutionalDecoder(Decoder):
 
             # (batch_size, 1, num_embed)
             context_step = layers.dot_attention(queries=target_hidden_step,
-                                                keys=source_encoded, values=source_encoded,
-                                                length=source_encoded_lengths)
+                                                keys=source_encoded,
+                                                values=source_encoded,
+                                                lengths=source_encoded_lengths)
             # residual connection:
             target_hidden_step = target_hidden_step_prev + target_hidden_step + context_step
             target_hidden_step_prev = target_hidden_step
@@ -1225,15 +1071,16 @@ class ConvolutionalDecoder(Decoder):
                                                            axis=2, begin=0, end=1),
                                          shape=(0, -1))
 
-        # logit inputs aka target_hidden
-        logit_inputs = mx.sym.identity(target_hidden, name=C.LOGIT_INPUTS_NAME)
-
-        # (batch_size, vocab_size)
-        logits = self.output_layer(target_hidden)
-        return logit_inputs, logits, attention_probs, [source_encoded, source_encoded_lengths] + new_layer_states
+        return target_hidden, attention_probs, [source_encoded, source_encoded_lengths] + new_layer_states
 
     def reset(self):
         pass
+
+    def get_num_hidden(self) -> int:
+        """
+        :return: The representation size of this decoder.
+        """
+        return self.config.cnn_config.num_hidden
 
     def init_states(self,
                     source_encoded: mx.sym.Symbol,

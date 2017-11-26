@@ -256,7 +256,7 @@ class TopKLexicon:
         """
         Lookup possible target ids for input sequence of source ids.
 
-        :param source: Sequence(s) of source ids (any shape).
+        :param src_ids: Sequence(s) of source ids (any shape).
         :return: Possible target ids for source (unique sorted, always includes special symbols).
         """
         # TODO: When MXNet adds support for set operations, we can migrate to avoid conversions to/from NumPy.

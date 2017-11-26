@@ -21,10 +21,10 @@ import time
 from typing import Dict, Optional
 
 import mxnet as mx
-import numpy as np
 
-from sacrebleu import raw_corpus_bleu
 import sockeye.output_handler
+from . import evaluate
+from . import chrf
 from . import constants as C
 from . import data_io
 from . import inference
@@ -146,5 +146,10 @@ class CheckpointDecoder:
         avg_time = trans_wall_time / len(self.input_sentences)
 
         # TODO(fhieber): eventually add more metrics (METEOR etc.)
-        return {C.BLEU_VAL: raw_corpus_bleu(translations, [self.target_sentences], 0.01).score,
+        return {C.BLEU_VAL: evaluate.raw_corpus_bleu(hypotheses=translations,
+                                                     references=self.target_sentences,
+                                                     offset=0.01),
+                C.CHRF_VAL: chrf.corpus_chrf(hypotheses=translations,
+                                             references=self.target_sentences,
+                                             trim_whitespaces=True),
                 C.AVG_TIME: avg_time}

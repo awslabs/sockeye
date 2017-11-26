@@ -11,14 +11,15 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import pytest
 from random import random
 
 import mxnet.ndarray as nd
+import pytest
 from mxnet import optimizer as opt
 
 import sockeye.constants as C
 from sockeye.optimizers import BatchState, CheckpointState, SockeyeOptimizer
+
 
 @pytest.mark.parametrize("optimizer, optimizer_params",
                          ((C.OPTIMIZER_ADAM, {}),

@@ -41,9 +41,8 @@ class InferenceModel(model.SockeyeModel):
 
     :param model_folder: Folder to load model from.
     :param context: MXNet context to bind modules to.
-    :param fused: Whether to use FusedRNNCell (CuDNN). Only works with GPU context.
-    :param max_input_len: Maximum input length.
     :param beam_size: Beam size.
+    :param batch_size: Batch size.
     :param checkpoint: Checkpoint to load. If None, finds best parameters in model_folder.
     :param softmax_temperature: Optional parameter to control steepness of softmax distribution.
     :param max_output_length_num_stds: Number of standard deviations as safety margin for maximum output length.
@@ -55,7 +54,6 @@ class InferenceModel(model.SockeyeModel):
     def __init__(self,
                  model_folder: str,
                  context: mx.context.Context,
-                 fused: bool,
                  beam_size: int,
                  batch_size: int,
                  checkpoint: Optional[int] = None,
@@ -80,7 +78,7 @@ class InferenceModel(model.SockeyeModel):
         self.batch_size = batch_size
         self.context = context
 
-        self._build_model_components(fused)
+        self._build_model_components()
 
         self.max_input_length, self.get_max_output_length = get_max_input_output_length([self],
                                                                                         max_output_length_num_stds)
@@ -137,15 +135,15 @@ class InferenceModel(model.SockeyeModel):
         self.decoder_module.init_params(arg_params=self.params, allow_missing=False)
 
         if self.cache_output_layer_w_b:
-            if self.decoder.output_layer.weight_normalization:
+            if self.output_layer.weight_normalization:
                 # precompute normalized output layer weight imperatively
-                assert self.decoder.output_layer.weight_norm is not None
-                weight = self.params[self.decoder.output_layer.weight_norm.weight.name].as_in_context(self.context)
-                scale = self.params[self.decoder.output_layer.weight_norm.scale.name].as_in_context(self.context)
-                self.output_layer_w = self.decoder.output_layer.weight_norm(weight, scale)
+                assert self.output_layer.weight_norm is not None
+                weight = self.params[self.output_layer.weight_norm.weight.name].as_in_context(self.context)
+                scale = self.params[self.output_layer.weight_norm.scale.name].as_in_context(self.context)
+                self.output_layer_w = self.output_layer.weight_norm(weight, scale)
             else:
-                self.output_layer_w = self.params[self.decoder.output_layer.w.name].as_in_context(self.context)
-            self.output_layer_b = self.params[self.decoder.output_layer.b.name].as_in_context(self.context)
+                self.output_layer_w = self.params[self.output_layer.w.name].as_in_context(self.context)
+            self.output_layer_b = self.params[self.output_layer.b.name].as_in_context(self.context)
 
     def _get_encoder_module(self) -> Tuple[mx.mod.BucketingModule, int]:
         """
@@ -160,9 +158,19 @@ class InferenceModel(model.SockeyeModel):
             source = mx.sym.Variable(C.SOURCE_NAME)
             source_length = utils.compute_lengths(source)
 
+            # source embedding
+            (source_embed,
+             source_embed_length,
+             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
+
+            # encoder
+            # source_encoded: (source_encoded_length, batch_size, encoder_depth)
             (source_encoded,
              source_encoded_length,
-             source_encoded_seq_len) = self.encoder.encode(source, source_length, source_seq_len)
+             source_encoded_seq_len) = self.encoder.encode(source_embed,
+                                                           source_embed_length,
+                                                           source_embed_seq_len)
+            # source_encoded: (batch_size, source_encoded_length, encoder_depth)
             # TODO(fhieber): Consider standardizing encoders to return batch-major data to avoid this line.
             source_encoded = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
 
@@ -197,28 +205,47 @@ class InferenceModel(model.SockeyeModel):
             Returns either softmax output (probs over target vocabulary) or inputs to logit
             computation, controlled by decoder_return_logit_inputs
             """
-            source_max_len, target_max_len = bucket_key
-            source_encoded_seq_len = self.encoder.get_encoded_seq_len(source_max_len)
+            source_seq_len, target_seq_len = bucket_key
+            source_embed_seq_len = self.embedding_source.get_encoded_seq_len(source_seq_len)
+            source_encoded_seq_len = self.encoder.get_encoded_seq_len(source_embed_seq_len)
 
             self.decoder.reset()
-            prev_word_ids = mx.sym.Variable(C.TARGET_NAME)
+            target = mx.sym.Variable(C.TARGET_NAME)
+            target_lengths = utils.compute_lengths(target)
             states = self.decoder.state_variables()
             state_names = [state.name for state in states]
 
-            (logit_inputs,
-             logits,
+            # target embedding
+            # target_embed: (batch_size, target_embed_seq_len).
+            # TODO target embedding. Possible optimization: only embed the last and cache the previous target embed vectors by returning them in the states list.
+            (target_embed,
+             targed_embed_length,
+             target_embed_seq_len) = self.embedding_target.encode(target, target_lengths, target_seq_len)
+
+            # embedding vector for previous word id
+            indices = target_lengths - 1  # type: mx.sym.Symbol
+            target_prev = mx.sym.pick(target, indices, axis=1)
+            target_embed_prev, _, _ = self.embedding_target.encode(target_prev, None, 1)
+
+            # decoder
+            # target_decoded: (batch_size, decoder_depth)
+            (target_decoded,
              attention_probs,
-             states) = self.decoder.decode_step(prev_word_ids,
-                                                target_max_len,
+             states) = self.decoder.decode_step(target_embed,
+                                                targed_embed_length,
+                                                target_embed_seq_len,
+                                                target_embed_prev,
                                                 source_encoded_seq_len,
                                                 *states)
-            if self.softmax_temperature is not None:
-                logits /= self.softmax_temperature
 
-            # Return logit inputs or softmax over target vocab
             if self.decoder_return_logit_inputs:
-                outputs = logit_inputs
+                # skip output layer in graph
+                outputs = mx.sym.identity(target_decoded, name=C.LOGIT_INPUTS_NAME)
             else:
+                # logits: (batch_size, target_vocab_size)
+                logits = self.output_layer(target_decoded)
+                if self.softmax_temperature is not None:
+                    logits /= self.softmax_temperature
                 outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
 
             data_names = [C.TARGET_NAME] + state_names
@@ -291,7 +318,7 @@ class InferenceModel(model.SockeyeModel):
         """
         Runs forward pass of the single-step decoder.
 
-        :return: Probability distribution over next word, attention scores, updated model state.
+        :return: Decoder stack output (logit inputs or probability distribution), attention scores, updated model state.
         """
         batch = mx.io.DataBatch(
             data=[sequences.as_in_context(self.context)] + model_state.states,
@@ -299,8 +326,8 @@ class InferenceModel(model.SockeyeModel):
             bucket_key=bucket_key,
             provide_data=self._get_decoder_data_shapes(bucket_key))
         self.decoder_module.forward(data_batch=batch, is_train=False)
-        probs, attention_probs, *model_state.states = self.decoder_module.get_outputs()
-        return probs, attention_probs, model_state
+        out, attention_probs, *model_state.states = self.decoder_module.get_outputs()
+        return out, attention_probs, model_state
 
     @property
     def training_max_seq_len_source(self) -> int:
@@ -372,7 +399,6 @@ def load_models(context: mx.context.Context,
         target_vocabs.append(vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_TRG_NAME)))
         model = InferenceModel(model_folder=model_folder,
                                context=context,
-                               fused=False,
                                beam_size=beam_size,
                                batch_size=batch_size,
                                softmax_temperature=softmax_temperature,
@@ -751,7 +777,7 @@ class Translator:
         """
         Returns NDArray of source ids (shape=(batch_size, bucket_key)) and corresponding bucket_key.
 
-        :param tokens: List of lists of input tokens.
+        :param sequences: List of lists of input tokens.
         :return NDArray of source ids and bucket key.
         """
         bucket_key = data_io.get_bucket(max(len(tokens) for tokens in sequences), self.buckets_source)
@@ -859,7 +885,7 @@ class Translator:
             decoder_outputs, attention_probs, state = model.run_decoder(sequences, bucket_key, state)
             # Compute logits and softmax with restricted vocabulary
             if self.restrict_lexicon:
-                logits = model.decoder.output_layer(decoder_outputs, out_w, out_b)
+                logits = model.output_layer(decoder_outputs, out_w, out_b)
                 probs = mx.nd.softmax(logits)
             else:
                 # Otherwise decoder outputs are already target vocab probs
@@ -957,7 +983,7 @@ class Translator:
                                vocab_slice_ids.shape[0], self.beam_size)
                 n = self.beam_size - vocab_slice_ids.shape[0] + 1
                 vocab_slice_ids = mx.nd.concat(vocab_slice_ids,
-                                               mx.nd.full((n,), val=self.vocab_target[C.EOS_SYMBOL]),
+                                               mx.nd.full((n,), val=self.vocab_target[C.EOS_SYMBOL], ctx=self.context),
                                                dim=0)
 
             pad_dist = mx.nd.full((self.batch_size * self.beam_size, vocab_slice_ids.shape[0]),
@@ -1026,8 +1052,8 @@ class Translator:
 
             # (5) update best hypotheses, their attention lists and lengths (only for non-finished hyps)
             # pylint: disable=unsupported-assignment-operation
-            sequences[:, t] = mx.nd.expand_dims(best_word_indices, axis=1)
-            attentions[:, t, :] = mx.nd.expand_dims(attention_scores, axis=1)
+            sequences[:, t] = best_word_indices
+            attentions[:, t, :] = attention_scores
             lengths += mx.nd.cast(1 - mx.nd.expand_dims(finished, axis=1), dtype='float32')
 
             # (6) determine which hypotheses in the beam are now finished

@@ -11,9 +11,11 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import pytest
-import sacrebleu
 from collections import namedtuple
+
+import pytest
+
+from contrib import sacrebleu
 
 EPSILON = 1e-8
 
@@ -37,9 +39,8 @@ test_case_statistics = [("am I am a character sequence", "I am a symbol string s
 test_case_scoring = [((Statistics([9, 7, 5, 3], [10, 8, 6, 4]), 11, 11), 0.8375922397)]
 
 test_case_effective_order = [(["test"], ["a test"], 0.3678794411714425),
-                        (["a test"], ["a test"], 1.0),
-                        (["a little test"], ["a test"], 0.03218297948685433)]
-
+                             (["a test"], ["a test"], 1.0),
+                             (["a little test"], ["a test"], 0.03218297948685433)]
 
 # testing that right score is returned for null statistics and different offsets
 # format: stat, offset, expected score
@@ -85,7 +86,9 @@ def test_offset(hypothesis, reference, expected_with_offset, expected_without_of
     score_with_offset = sacrebleu.raw_corpus_bleu(hypothesis, reference, 0.1).score / 100
     assert abs(expected_with_offset - score_with_offset) < EPSILON
 
+
 @pytest.mark.parametrize("statistics, offset, expected_score", test_case_degenerate_stats)
 def test_degenerate_statistics(statistics, offset, expected_score):
-    score = sacrebleu.compute_bleu(statistics[0].common, statistics[0].total, statistics[1], statistics[2], smooth='floor', smooth_floor=offset).score / 100
+    score = sacrebleu.compute_bleu(statistics[0].common, statistics[0].total, statistics[1], statistics[2],
+                                   smooth='floor', smooth_floor=offset).score / 100
     assert score == expected_score

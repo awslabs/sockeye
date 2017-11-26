@@ -13,11 +13,11 @@
 
 import logging
 from typing import Optional, Tuple, Union
-from . import constants as C
 
 import mxnet as mx
 import numpy as np
 
+from . import constants as C
 from . import utils
 
 logger = logging.getLogger(__name__)
@@ -55,25 +55,27 @@ class LayerNormalization:
     @staticmethod
     def moments(inputs: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
         """
-        Computes mean and variance of a Symbol across axis 1.
+        Computes mean and variance of the last dimension of a Symbol.
 
-        :param inputs: Shape(batch_size, hidden).
-        :return: mean, var: Shape(batch_size, 1).
+        :param inputs: Shape: (d0, ..., dn, hidden).
+        :return: mean, var: Shape: (d0, ..., dn, 1).
         """
-        mean = mx.sym.mean(data=inputs, axis=1, keepdims=True)
+        mean = mx.sym.mean(data=inputs, axis=-1, keepdims=True)
         # TODO(fhieber): MXNet should have this.
-        var = mx.sym.mean(mx.sym.square(mx.sym.broadcast_minus(inputs, mean)), axis=1, keepdims=True)
+        var = mx.sym.mean(mx.sym.square(mx.sym.broadcast_minus(inputs, mean)), axis=-1, keepdims=True)
         return mean, var
 
     def normalize(self, inputs: mx.sym.Symbol, eps: float = 0.000001) -> mx.sym.Symbol:
         """
-        Normalizes hidden units of inputs as follows::
+        Normalizes hidden units of inputs as follows:
 
         inputs = scale * (inputs - mean) / sqrt(var + eps) + shift
 
-        :param inputs: Inputs to normalize. Shape(batch_size, num_hidden).
+        Normalization is performed over the last dimension of the input data.
+
+        :param inputs: Inputs to normalize. Shape: (d0, ..., dn, num_hidden).
         :param eps: Variance epsilon.
-        :return: inputs_norm: Normalized inputs. Shape(batch_size, num_hidden).
+        :return: inputs_norm: Normalized inputs. Shape: (d0, ..., dn, num_hidden).
         """
         mean, var = self.moments(inputs)
         inputs_norm = mx.sym.broadcast_minus(inputs, mean, name='%sinp_minus_mean' % self.prefix)
@@ -121,35 +123,25 @@ class OutputLayer:
     """
     Defines the output layer of Sockeye decoders. Supports weight tying and weight normalization.
 
-    :param num_hidden: Number of hidden units in layer input (decoder representation).
-    :param num_embed: Target embedding size.
+    :param hidden_size: Decoder hidden size.
     :param vocab_size: Target vocabulary size.
-    :param weight_tying: Whether to use target embedding parameters as output layer parameters.
-    :param embed_weight: Optional embedding matrix. Required if weight_tying == True.
     :param weight_normalization: Whether to apply weight normalization.
     :param prefix: Prefix used for naming.
     """
 
     def __init__(self,
-                 num_hidden: int,
-                 num_embed: int,
+                 hidden_size: int,
                  vocab_size: int,
-                 weight_tying: bool,
-                 embed_weight: Optional[mx.sym.Symbol],
+                 weight: Optional[mx.sym.Symbol],
                  weight_normalization: bool,
-                 prefix: str = '') -> None:
+                 prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX) -> None:
         self.vocab_size = vocab_size
+        self.prefix = prefix
 
-        if weight_tying:
-            utils.check_condition(num_hidden == num_embed,
-                                  "Weight tying requires target embedding size and decoder hidden size " +
-                                  "to be equal: %d vs. %d" % (num_embed, num_hidden))
-
-            logger.info("Tying the target embeddings and prediction matrix.")
-            assert embed_weight is not None, "Must provide embed_weight if weight_tying == True"
-            self.w = embed_weight
+        if weight is None:
+            self.w = mx.sym.Variable("%sweight" % self.prefix, shape=(vocab_size, hidden_size))
         else:
-            self.w = mx.sym.Variable("%scls_weight" % prefix, shape=(vocab_size, num_hidden))
+            self.w = weight
 
         self.weight_normalization = weight_normalization
         if weight_normalization:
@@ -157,10 +149,10 @@ class OutputLayer:
             self.weight_norm = WeightNormalization(self.w,
                                                    num_hidden=vocab_size,
                                                    ndim=2,
-                                                   prefix="%scls_" % prefix)
+                                                   prefix=self.prefix)
             self.w = self.weight_norm()
 
-        self.b = mx.sym.Variable("%scls_bias" % prefix)
+        self.b = mx.sym.Variable("%sbias" % self.prefix)
 
     def __call__(self,
                  hidden: Union[mx.sym.Symbol, mx.nd.NDArray],
@@ -173,6 +165,7 @@ class OutputLayer:
         :return: Logits. Shape(n, self.vocab_size).
         """
         if isinstance(hidden, mx.sym.Symbol):
+            # TODO dropout?
             return mx.sym.FullyConnected(data=hidden,
                                          num_hidden=self.vocab_size,
                                          weight=self.w,
@@ -184,6 +177,7 @@ class OutputLayer:
         assert isinstance(hidden, mx.nd.NDArray)
         utils.check_condition(weight is not None and bias is not None,
                               "OutputLayer NDArray implementation requires passing weight and bias NDArrays.")
+
         return mx.nd.FullyConnected(data=hidden,
                                     num_hidden=bias.shape[0],
                                     weight=weight,
@@ -215,7 +209,7 @@ def combine_heads(x: mx.sym.Symbol, length: int, heads: int) -> mx.sym.Symbol:
     :param x: Symbol of shape (batch * heads, length, depth_per_head).
     :param length: Sequence length.
     :param heads: Number of heads.
-    :return: Symbol of shape (batch * length, depth).
+    :return: Symbol of shape (batch, length, depth).
     """
     # (batch, heads, length, depth_per_head)
     x = mx.sym.reshape(data=x, shape=(-4, -1, heads, length, 0))
@@ -245,7 +239,7 @@ def broadcast_to_heads(x: mx.sym.Symbol, heads: int) -> mx.sym.Symbol:
 def dot_attention(queries: mx.sym.Symbol,
                   keys: mx.sym.Symbol,
                   values: mx.sym.Symbol,
-                  length: mx.sym.Symbol,
+                  lengths: Optional[mx.sym.Symbol] = None,
                   dropout: float = 0.0,
                   bias: Optional[mx.sym.Symbol] = None):
     """
@@ -254,23 +248,27 @@ def dot_attention(queries: mx.sym.Symbol,
     :param queries: Attention queries. Shape: (n, lq, d).
     :param keys: Attention keys. Shape: (n, lk, d).
     :param values: Attention values. Shape: (n, lk, dv).
-    :param length: Sequence lengths of the keys. Shape: (n,).
+    :param lengths: Optional sequence lengths of the keys. Shape: (n,).
     :param dropout: Dropout probability.
     :param bias: Optional bias tensor. Shape: (1, lq, lk).
     :return: 'Context' vectors for each query. Shape: (n, lq, dv).
     """
+    utils.check_condition(lengths is not None or bias is not None,
+                          "Must provide either length or bias argument for masking")
+
     # (n, lq, lk)
     logits = mx.sym.batch_dot(lhs=queries, rhs=keys, transpose_b=True)
 
-    # mask lk dimension
-    # (lk, n, lq)
-    logits = mx.sym.transpose(data=logits, axes=(2, 0, 1))
-    logits = mx.sym.SequenceMask(data=logits,
-                                 use_sequence_length=True,
-                                 sequence_length=length,
-                                 value=-99999999.)
-    # (n, lq, lk)
-    logits = mx.sym.transpose(data=logits, axes=(1, 2, 0))
+    if lengths is not None:
+        # mask lk dimension
+        # (lk, n, lq)
+        logits = mx.sym.transpose(data=logits, axes=(2, 0, 1))
+        logits = mx.sym.SequenceMask(data=logits,
+                                     use_sequence_length=True,
+                                     sequence_length=lengths,
+                                     value=-99999999.)
+        # (n, lq, lk)
+        logits = mx.sym.transpose(data=logits, axes=(1, 2, 0))
 
     if bias is not None:
         logits = mx.sym.broadcast_add(logits, bias)
@@ -314,9 +312,9 @@ class MultiHeadAttentionBase:
                 queries: mx.sym.Symbol,
                 keys: mx.sym.Symbol,
                 values: mx.sym.Symbol,
-                lengths: mx.sym.Symbol,
                 queries_max_length: int,
                 memory_max_length: int,
+                lengths: Optional[mx.sym.Symbol] = None,
                 bias: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
         # scale by sqrt(depth_per_head)
         queries = queries * (self.depth_per_head ** -0.5)
@@ -325,21 +323,21 @@ class MultiHeadAttentionBase:
         queries = split_heads(queries, queries_max_length, self.heads)
         keys = split_heads(keys, memory_max_length, self.heads)
         values = split_heads(values, memory_max_length, self.heads)
-        lengths = broadcast_to_heads(lengths, self.heads)
+        lengths = broadcast_to_heads(lengths, self.heads) if lengths is not None else lengths
 
         # (batch*heads, queries_max_length, depth_per_head)
-        contexts = dot_attention(queries, keys, values, lengths, dropout=self.dropout, bias=bias)
+        contexts = dot_attention(queries, keys, values, lengths=lengths, dropout=self.dropout, bias=bias)
 
         # (batch, queries_max_length, depth)
         contexts = combine_heads(contexts, queries_max_length, self.heads)
 
-        if self.depth_out != self.depth:
-            # contexts: (batch, queries_max_length, output_depth)
-            contexts = mx.sym.FullyConnected(data=contexts,
-                                             weight=self.w_h2o,
-                                             bias=self.b_h2o,
-                                             num_hidden=self.depth_out,
-                                             flatten=False)
+        # contexts: (batch, queries_max_length, output_depth)
+        contexts = mx.sym.FullyConnected(data=contexts,
+                                         weight=self.w_h2o,
+                                         bias=self.b_h2o,
+                                         num_hidden=self.depth_out,
+                                         flatten=False)
+
         return contexts
 
 
@@ -367,16 +365,16 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
 
     def __call__(self,
                  inputs: mx.sym.Symbol,
-                 lengths: mx.sym.Symbol,
                  max_length: int,
+                 lengths: Optional[mx.sym.Symbol] = None,
                  bias: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
         """
         Returns a symbol of shape (batch, max_length, output_depth).
 
         :param inputs: Symbol of shape (batch, max_length, input_depth).
-        :param lengths: Symbol of shape (batch, 1).
         :param max_length: Size of time dimension.
-        :param bias: Symbol of shape (1, max_length, max_length).
+        :param lengths: Optional lengths of inputs. Symbol of shape (batch, 1).
+        :param bias: Optional (auto-regressive bias). Symbol of shape (1, max_length, max_length).
         :return: Symbol of shape (batch, max_length, output_depth).
         """
         # combined: (batch, max_length, depth * 3)
@@ -394,9 +392,9 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         return self._attend(queries,
                             keys,
                             values,
-                            lengths,
                             queries_max_length=max_length,
                             memory_max_length=max_length,
+                            lengths=lengths,
                             bias=bias)
 
 
@@ -464,9 +462,9 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         return self._attend(queries,
                             keys,
                             values,
-                            memory_lengths,
                             queries_max_length=queries_max_length,
                             memory_max_length=memory_max_length,
+                            lengths=memory_lengths,
                             bias=None)
 
 

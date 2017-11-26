@@ -13,6 +13,8 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+VERSION = '1.1.6'
+
 """
 SacréBLEU provides hassle-free computation of shareable, comparable, and reproducible BLEU scores.
 Inspired by Rico Sennrich's `multi-bleu-detok.perl`, it produces the official WMT scores but works with plain text.
@@ -83,7 +85,15 @@ Sacré BLEU.
 
 # VERSION HISTORY
 
-- 1.1.4
+- 1.1.6 (15 November 2017)
+   - bugfix for tokenization warning
+
+- 1.1.5 (12 November 2017)
+   - added -b option (only output the BLEU score)
+   - removed fi-en from list of WMT16/17 systems with more than one reference
+   - added WMT16/tworefs and WMT17/tworefs for scoring with both en-fi references
+
+- 1.1.4 (10 November 2017)
    - added effective order for sentence-level BLEU computation
    - added unit tests from sockeye
 
@@ -148,8 +158,6 @@ try:
 except ImportError:
     logging.warn('Could not import signal.SIGPIPE (this is expected on Windows machines)')
 
-VERSION = '1.1.4'
-
 # Where to store downloaded test sets.
 # Define the environment variable $SACREBLEU, or use the default of ~/.sacrebleu.
 #
@@ -192,7 +200,11 @@ data = {
         'data': 'http://data.statmt.org/wmt17/translation-task/test.tgz',
         'description': 'Additional reference for EN-FI and FI-EN.',
         'en-fi': ['test/newstestB2017-enfi-src.en.sgm', 'test/newstestB2017-enfi-ref.fi.sgm'],
-        'fi-en': ['test/newstestB2017-fien-src.fi.sgm', 'test/newstestB2017-fien-ref.en.sgm'],
+    },
+    'wmt17/tworefs': {
+        'data': 'http://data.statmt.org/wmt17/translation-task/test.tgz',
+        'description': 'Systems with two references.',
+        'en-fi': ['test/newstest2017-enfi-src.en.sgm', 'test/newstest2017-enfi-ref.fi.sgm', 'test/newstestB2017-enfi-ref.fi.sgm'],
     },
     'wmt17/improved': {
         'data': 'http://data.statmt.org/wmt17/translation-task/test-update-1.tgz',
@@ -219,7 +231,12 @@ data = {
     'wmt16/B': {
         'data': 'http://data.statmt.org/wmt16/translation-task/test.tgz',
         'description': 'Additional reference for EN-FI.',
-        'en-fi': ['test/newstestB2016-enfi-src.en.sgm', 'test/newstestB2016-enfi-ref.fi.sgm'],
+        'en-fi': ['test/newstest2016-enfi-src.en.sgm', 'test/newstestB2016-enfi-ref.fi.sgm'],
+    },
+    'wmt16/tworefs': {
+        'data': 'http://data.statmt.org/wmt16/translation-task/test.tgz',
+        'description': 'EN-FI with two references.',
+        'en-fi': ['test/newstest2016-enfi-src.en.sgm', 'test/newstest2016-enfi-ref.fi.sgm', 'test/newstestB2016-enfi-ref.fi.sgm'],
     },
     'wmt15': {
         'data': 'http://statmt.org/wmt15/test.tgz',
@@ -687,10 +704,14 @@ def download_test_set(test_set, langpair=None):
         process_to_text(rawfile, outfile)
         found.append(outfile)
 
-        rawfile = os.path.join(rawdir, data[test_set][pair][1])
-        outfile = os.path.join(outdir, '{}.{}'.format(pair, tgt))
-        process_to_text(rawfile, outfile)
-        found.append(outfile)
+        for i, ref in enumerate(data[test_set][pair][1:]):
+            rawfile = os.path.join(rawdir, ref)
+            if len(data[test_set][pair][1:]) >= 2:
+                outfile = os.path.join(outdir, '{}.{}.{}'.format(pair, tgt, i))
+            else:
+                outfile = os.path.join(outdir, '{}.{}'.format(pair, tgt))
+            process_to_text(rawfile, outfile)
+            found.append(outfile)
 
     return found
 
@@ -779,14 +800,13 @@ def corpus_bleu(sys_stream, ref_streams, smooth='exp', smooth_floor=0.0, force=F
         if lc:
             lines = [x.lower() for x in lines]
 
-        if (tokenize == 'none' or not force) and lines[0].rstrip().endswith(' .'):
+        if (not force or tokenize != 'none') and lines[0].rstrip().endswith(' .'):
             tokenized_count += 1
 
-            if tokenized_count > 100:
-                logging.error('FATAL: That\'s > 100 lines that end in a tokenized period (\'.\')')
-                logging.error('It looks like you forgot to detokenize your test data, which will hurt your score.')
-                logging.error('If you insist your data is tokenized, rerun with \'--force\'.')
-                sys.exit(1)
+            if tokenized_count == 100:
+                logging.warning('That\'s > 100 lines that end in a tokenized period (\'.\')')
+                logging.warning('It looks like you forgot to detokenize your test data, which may hurt your score.')
+                logging.warning('If you insist your data is tokenized, you can suppress this message with \'--force\'.')
 
         output, *refs = [tokenizers[tokenize](x.rstrip()) for x in lines]
 
@@ -805,7 +825,7 @@ def corpus_bleu(sys_stream, ref_streams, smooth='exp', smooth_floor=0.0, force=F
     return compute_bleu(correct, total, sys_len, ref_len, smooth, smooth_floor, use_effective_order)
 
 
-def raw_corpus_bleu(sys_stream, ref_streams, smooth_floor=0.01):
+def raw_corpus_bleu(sys_stream, ref_streams, smooth_floor=0.01) -> BLEU:
     """Convenience function that wraps corpus_bleu().
     This is convenient if you're using sacrebleu as a library, say for scoring on dev.
     It uses no tokenization and 'floor' smoothing, with the floor default to 0 (no smoothing).
@@ -822,29 +842,31 @@ def main():
                                          '    cat output.detok.de | ./sacreBLEU -t wmt14 -l en-de')
     arg_parser.add_argument('--test-set', '-t', type=str, default=None,
                             choices=data.keys(),
-                            help='The test set to use')
+                            help='the test set to use')
     arg_parser.add_argument('-lc', action='store_true', default=False,
-                            help='Use case-insensitive BLEU (default: actual case)')
+                            help='use case-insensitive BLEU (default: actual case)')
     arg_parser.add_argument('--smooth', '-s', choices=['exp', 'floor', 'none'], default='exp',
-                            help='Smoothing method: exponential decay (default), floor (0 count -> 0.01), or none')
+                            help='smoothing method: exponential decay (default), floor (0 count -> 0.01), or none')
     arg_parser.add_argument('--tokenize', '-tok', choices=['13a', 'zh'], default='13a',
-                            help='Tokenization method to use.')
+                            help='tokenization method to use')
     arg_parser.add_argument('--language-pair', '-l', dest='langpair', default=None,
                             help='source-target language pair (2-char ISO639-1 codes)')
     arg_parser.add_argument('--download', type=str, default=None,
-                            help='Download a test set and quit')
+                            help='download a test set and quit')
     arg_parser.add_argument('--echo', choices=['src', 'ref'], type=str, default=None,
-                            help='Output the source or reference to STDOUT and quit.')
+                            help='output the source or reference to STDOUT and quit')
     arg_parser.add_argument('refs', nargs='*', default=[],
-                            help='Optional list of references (for backwards-compatibility with older scripts).')
+                            help='optional list of references (for backwards-compatibility with older scripts)')
     arg_parser.add_argument('--short', default=False, action='store_true',
-                            help='Produce a shorter (less human readable) signature.')
+                            help='produce a shorter (less human readable) signature')
+    arg_parser.add_argument('--score-only', '-b', default=False, action='store_true',
+                            help='output only the BLEU score')
     arg_parser.add_argument('--force', default=False, action='store_true',
-                            help='Insist that your tokenized input is actually detokenized.')
+                            help='insist that your tokenized input is actually detokenized')
     arg_parser.add_argument('--quiet', '-q', default=False, action='store_true',
-                            help='Suppress informative output.')
+                            help='suppress informative output')
     arg_parser.add_argument('--encoding', '-e', type=str, default='utf-8',
-                            help='Open text files with specified encoding (default: %(default)s)')
+                            help='open text files with specified encoding (default: %(default)s)')
     arg_parser.add_argument('-V', '--version', action='version',
                             version='%(prog)s {}'.format(VERSION))
     args = arg_parser.parse_args()
@@ -863,7 +885,10 @@ def main():
         sys.exit(1)
 
     if args.test_set and (args.langpair is None or args.langpair not in data[args.test_set]):
-        logging.error('I need a language pair (-l).')
+        if args.langpair is None:
+            logging.error('I need a language pair (-l).')
+        elif args.langpair not in data[args.test_set]:
+            logging.error('No such language pair "%s"', args.langpair)
         logging.error('Available language pairs for test set "{}": {}'.format(args.test_set, ', '.join(filter(lambda x: '-' in x, data[args.test_set].keys()))))
         sys.exit(1)
 
@@ -875,18 +900,17 @@ def main():
         sys.exit(0)
 
     if args.test_set is None and len(args.refs) == 0:
-        logging.error('I need either -t (test set) or a list of references')
+        logging.error('I need either a predefined test set (-t) or a list of references')
         logging.error('The available test sets are: ')
         for ts in sorted(data.keys(), reverse=True):
             logging.error('  {}: {}'.format(ts, data[ts].get('description', '')))
         sys.exit(1)
     elif args.test_set is not None and len(args.refs) > 0:
-        logging.error('I need x-either a test set (-t) or a list of references')
+        logging.error('I need exactly one of (a) a predefined test set (-t) or (b) a list of references')
         sys.exit(1)
 
     if args.test_set:
-        src, ref = download_test_set(args.test_set, args.langpair)
-        refs = [ref]
+        src, *refs = download_test_set(args.test_set, args.langpair)
     else:
         refs = args.refs
 
@@ -902,7 +926,10 @@ def main():
 
     version_str = build_signature(args, len(refs))
 
-    print('BLEU+{} = {:.2f} {:.1f}/{:.1f}/{:.1f}/{:.1f} (BP = {:.3f} ratio = {:.3f} hyp_len = {:d} ref_len = {:d})'.format(version_str, bleu.score, bleu.precisions[0], bleu.precisions[1], bleu.precisions[2], bleu.precisions[3], bleu.bp, bleu.sys_len / bleu.ref_len, bleu.sys_len, bleu.ref_len))
+    if args.score_only:
+        print('{:.2f}'.format(bleu.score))
+    else:
+        print('BLEU+{} = {:.2f} {:.1f}/{:.1f}/{:.1f}/{:.1f} (BP = {:.3f} ratio = {:.3f} hyp_len = {:d} ref_len = {:d})'.format(version_str, bleu.score, bleu.precisions[0], bleu.precisions[1], bleu.precisions[2], bleu.precisions[3], bleu.bp, bleu.sys_len / bleu.ref_len, bleu.sys_len, bleu.ref_len))
 
 
 if __name__ == '__main__':

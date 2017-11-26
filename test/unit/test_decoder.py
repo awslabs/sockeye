@@ -69,9 +69,7 @@ def test_step(cell_type, context_gating,
                                        residual=False,
                                        forget_bias=0.)
 
-    config_decoder = sockeye.decoder.RecurrentDecoderConfig(vocab_size=vocab_size,
-                                                            max_seq_len_source=source_seq_len,
-                                                            num_embed=num_embed,
+    config_decoder = sockeye.decoder.RecurrentDecoderConfig(max_seq_len_source=source_seq_len,
                                                             rnn_config=config_rnn,
                                                             attention_config=config_attention,
                                                             context_gating=context_gating)
@@ -82,6 +80,8 @@ def test_step(cell_type, context_gating,
         layer_states = [gaussian_vector(shape=states_shape, return_symbol=True) for _ in range(config_rnn.num_layers)]
     elif cell_type == C.LSTM_TYPE:
         layer_states = [gaussian_vector(shape=states_shape, return_symbol=True) for _ in range(config_rnn.num_layers*2)]
+    else:
+        raise ValueError
 
     state, attention_state = decoder._step(word_vec_prev=word_vec_prev,
                                            state=sockeye.decoder.RecurrentDecoderState(hidden_prev, layer_states),

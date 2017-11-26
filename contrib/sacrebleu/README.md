@@ -67,6 +67,14 @@ Sacré BLEU.
 
 # VERSION HISTORY
 
+- 1.1.6 (15 November 2017)
+   - bugfix for tokenization warning
+
+- 1.1.5 (12 November 2017)
+   - added -b option (only output the BLEU score)
+   - removed fi-en from list of WMT16/17 systems with more than one reference
+   - added WMT16/tworefs and WMT17/tworefs for scoring with both en-fi references
+
 - 1.1.4 (10 November 2017)
    - added effective order for sentence-level BLEU computation
    - added unit tests from sockeye
