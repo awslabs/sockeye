@@ -66,7 +66,7 @@ _SEED_DEV = 17
      " --decoder transformer --batch-size 16"
      " --loss cross-entropy --optimized-metric perplexity --max-updates 3000"
      " --transformer-attention-heads 4 --transformer-model-size 32"
-     " --transformer-feed-forward-num-hidden 64"
+     " --transformer-feed-forward-num-hidden 64 --transformer-activation-type swish1"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
      1.01,
@@ -142,7 +142,7 @@ def test_seq_copy(name, train_params, translate_params, perplexity_thresh, bleu_
      " --decoder transformer --batch-size 16 --transformer-model-size 32"
      " --loss cross-entropy --optimized-metric perplexity --max-updates 7000"
      " --transformer-attention-heads 4"
-     " --transformer-feed-forward-num-hidden 64"
+     " --transformer-feed-forward-num-hidden 64 --transformer-activation-type swish1"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
      1.02,

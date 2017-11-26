@@ -136,6 +136,8 @@ RELU = "relu"
 SOFT_RELU = "softrelu"
 SIGMOID = "sigmoid"
 TANH = "tanh"
+SWISH1 = "swish1"
+TRANSFORMER_ACTIVATION_TYPES = [RELU, SWISH1]
 CNN_ACTIVATION_TYPES = [GLU, RELU, SOFT_RELU, SIGMOID, TANH]
 
 # Convolutional block pad types:

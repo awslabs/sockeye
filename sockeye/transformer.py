@@ -16,6 +16,7 @@ from typing import Optional
 import mxnet as mx
 import numpy as np
 from . import config
+from . import constants as C
 from . import layers
 
 
@@ -25,9 +26,10 @@ class TransformerConfig(config.Config):
                  model_size: int,
                  attention_heads: int,
                  feed_forward_num_hidden: int,
+                 act_type: str,
                  num_layers: int,
                  dropout_attention: float,
-                 dropout_relu: float,
+                 dropout_act: float,
                  dropout_prepost: float,
                  positional_embedding_type: str,
                  preprocess_sequence: str,
@@ -39,9 +41,10 @@ class TransformerConfig(config.Config):
         self.model_size = model_size
         self.attention_heads = attention_heads
         self.feed_forward_num_hidden = feed_forward_num_hidden
+        self.act_type = act_type
         self.num_layers = num_layers
         self.dropout_attention = dropout_attention
-        self.dropout_relu = dropout_relu
+        self.dropout_act = dropout_act
         self.dropout_prepost = dropout_prepost
         self.positional_embedding_type = positional_embedding_type
         self.preprocess_sequence = preprocess_sequence
@@ -80,7 +83,8 @@ class TransformerEncoderBlock:
                                               prefix="%sff_pre_" % prefix)
         self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
                                          num_model=config.model_size,
-                                         dropout=config.dropout_relu,
+                                         act_type=config.act_type,
+                                         dropout=config.dropout_act,
                                          prefix="%sff_" % prefix)
         self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                num_hidden=config.model_size,
@@ -142,7 +146,8 @@ class TransformerDecoderBlock:
                                               prefix="%sff_pre_" % prefix)
         self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
                                          num_model=config.model_size,
-                                         dropout=config.dropout_relu,
+                                         act_type=config.act_type,
+                                         dropout=config.dropout_act,
                                          prefix="%sff_" % prefix)
         self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                num_hidden=config.model_size,
@@ -236,18 +241,24 @@ class TransformerProcessBlock:
 
 class TransformerFeedForward:
     """
-    Position-wise feed-forward network with ReLU activation.
+    Position-wise feed-forward network with activation.
+    Supported activation types include:
+    * ReLU (used in original transformer paper)
+    * Swish-1, also called SiLU: Ramachandran et al. (https://arxiv.org/pdf/1710.05941.pdf),
+      Elfwing et al. (https://arxiv.org/pdf/1702.03118.pdf)
     """
 
     def __init__(self,
                  num_hidden: int,
                  num_model: int,
+                 act_type: str,
                  dropout: float,
                  prefix: str) -> None:
         self.num_hidden = num_hidden
         self.num_model = num_model
         self.dropout = dropout
         self.prefix = prefix
+        self.act_type = act_type
         self.w_i2h = mx.sym.Variable('%si2h_weight' % prefix)
         self.b_i2h = mx.sym.Variable('%si2h_bias' % prefix)
         self.w_h2o = mx.sym.Variable('%sh2o_weight' % prefix)
@@ -255,15 +266,22 @@ class TransformerFeedForward:
 
     def __call__(self, x) -> mx.sym.Symbol:
         """
-        Position-wise feed-forward network with ReLU activation.
+        Position-wise feed-forward network with activation.
 
         :param x: Symbol of shape (batch_size, seq_len, num_hidden)
         :return: Symbol of shape (batch_size, seq_len, num_hidden)
         """
         h = mx.sym.FullyConnected(data=x, num_hidden=self.num_hidden, weight=self.w_i2h, bias=self.b_i2h, flatten=False)
-        h = mx.sym.Activation(h, act_type="relu")
+
+        if self.act_type == C.SWISH1:
+            # TODO: Contribute to MXNet?  For now it appears that registered activation types must be implemented in C++.
+            h = h * mx.sym.Activation(h, act_type="sigmoid")
+        else:
+            h = mx.sym.Activation(h, act_type=self.act_type)
+
         if self.dropout > 0.0:
             h = mx.sym.Dropout(h, p=self.dropout)
+
         y = mx.sym.FullyConnected(data=h, num_hidden=self.num_model, weight=self.w_h2o, bias=self.b_h2o, flatten=False)
         return y
 

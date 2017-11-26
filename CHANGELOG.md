@@ -10,16 +10,20 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.15.0]
+### Added
+- Added support for Swish-1 (SiLU) activation to transformer models ([Ramachandran et al. 2017: Searching for Activation Functions](https://arxiv.org/pdf/1710.05941.pdf), [Elfwing et al. 2017: Sigmoid-Weighted Linear Units for Neural Network Function Approximation in Reinforcement Learning](https://arxiv.org/pdf/1702.03118.pdf)).  Use `--transformer-activation-type swish1`.
+
 ## [1.14.0]
 ### Changed
  - Downscaled fixed positional embeddings for CNN models.
  - Renamed `--monitor-bleu` flag to `--decode-and-evaluate` to illustrate that it computes
  other metrics in addition to BLEU.
- 
+
 ### Added
  - `--decode-and-evaluate-use-cpu` flag to use CPU for decoding validation data.
  - `--decode-and-evaluate-device-id` flag to use a separate GPU device for validation decoding. If not specified, the
- existing and still default behavior is to use the last acquired GPU for training.  
+ existing and still default behavior is to use the last acquired GPU for training.
 
 ## [1.13.2]
 ### Added
@@ -40,8 +44,8 @@ sockeye.evaluate now accepts `bleu` and `chrf` as values for `--metrics`
 ### Removed
  - Removed RNN parameter (un-)packing and support for FusedRNNCells (removed `--use-fused-rnns` flag).
  These were not used, not correctly initialized, and performed worse than regular RNN cells. Moreover,
- they made the code much more complex. RNN models trained with previous versions are no longer compatible. 
- - Removed the lexical biasing functionality (Arthur ETAL'16) (removed arguments `--lexical-bias`
+ they made the code much more complex. RNN models trained with previous versions are no longer compatible.
+- Removed the lexical biasing functionality (Arthur ETAL'16) (removed arguments `--lexical-bias`
  and `--learn-lexical-bias`).
 
 ## [1.12.2]
@@ -149,7 +153,7 @@ sockeye.evaluate now accepts `bleu` and `chrf` as values for `--metrics`
  - Convolutional decoder.
  - Weight normalization (for CNN only so far).
  - Learned positional embeddings for the transformer.
- 
+
 ### Changed
  - `--attention-*` CLI params renamed to `--rnn-attention-*`.
  - `--transformer-no-positional-encodings` generalized to `--transformer-positional-embedding-type`.

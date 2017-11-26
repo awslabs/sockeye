@@ -447,6 +447,10 @@ def add_model_parameters(params):
                               default=2048,
                               help='Number of hidden units in feed forward layers when using transformer. '
                                    'Default: %(default)s.')
+    model_params.add_argument('--transformer-activation-type',
+                              choices=C.TRANSFORMER_ACTIVATION_TYPES,
+                              default=C.RELU,
+                              help="Type activation to use for each feed forward layer. Default: %(default)s.")
     model_params.add_argument('--transformer-positional-embedding-type',
                               choices=C.POSITIONAL_EMBEDDING_TYPES,
                               default=C.FIXED_POSITIONAL_EMBEDDING,
@@ -649,10 +653,10 @@ def add_training_args(params):
                               type=float,
                               default=0.,
                               help='Dropout probability for multi-head attention. Default: %(default)s.')
-    train_params.add_argument('--transformer-dropout-relu',
+    train_params.add_argument('--transformer-dropout-act',
                               type=float,
                               default=0.,
-                              help='Dropout probability before relu in feed-forward block. Default: %(default)s.')
+                              help='Dropout probability before activation in feed-forward block. Default: %(default)s.')
     train_params.add_argument('--transformer-dropout-prepost',
                               type=float,
                               default=0.,
