@@ -96,7 +96,7 @@ Sacré BLEU.
 
 - 1.0.3 (4 November 2017).
    - Contributions from Christian Federmann:
-      - Added explicit support for encoding  
+      - Added explicit support for encoding
       - Fixed Windows support
       - Bugfix in handling reference length with multiple refs
 
