@@ -68,6 +68,7 @@ Sacré BLEU.
 # VERSION HISTORY
 
 - 1.1.7 (27 November 2017)
+   - corpus_bleu() now raises an exception if input streams are different lengths
    - thanks to Martin Popel for:
       - small bugfix in tokenization_13a (not affecting WMT references)
       - adding `--tok intl` (international tokenization)

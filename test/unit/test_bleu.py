@@ -94,12 +94,6 @@ def test_degenerate_statistics(statistics, offset, expected_score):
     assert score == expected_score
 
 
-@pytest.mark.parametrize("hypotheses, references, expected_bleu", test_cases)
-def test_bleu(hypotheses, references, expected_bleu):
-    bleu = sacrebleu.raw_corpus_bleu(hypotheses, [references], .01).score / 100
-    assert abs(bleu - expected_bleu) < EPSILON
-
-
 @pytest.mark.parametrize("hypotheses, references", test_cases_uneven)
 def test_degenerate_uneven(hypotheses, references):
     with pytest.raises(EOFError, match=r'.*stream.*'):

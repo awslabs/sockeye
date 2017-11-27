@@ -915,7 +915,7 @@ def main():
                             help='use case-insensitive BLEU (default: actual case)')
     arg_parser.add_argument('--smooth', '-s', choices=['exp', 'floor', 'none'], default='exp',
                             help='smoothing method: exponential decay (default), floor (0 count -> 0.01), or none')
-    arg_parser.add_argument('--tokenize', '-tok', choices=list(filter(lambda x: x != 'none', TOKENIZERS.keys())), default='13a',
+    arg_parser.add_argument('--tokenize', '-tok', choices=[x for x in TOKENIZERS.keys() if x != 'none'], default='13a',
                             help='tokenization method to use')
     arg_parser.add_argument('--language-pair', '-l', dest='langpair', default=None,
                             help='source-target language pair (2-char ISO639-1 codes)')
