@@ -25,4 +25,4 @@ script:
   - pylint --rcfile=pylintrc test -E
   - mypy --ignore-missing-imports --follow-imports=silent @typechecked-files
   - check-manifest --ignore sockeye/git_version.py
-  #- python -m pytest test/system
+  - python -m pytest test/system
