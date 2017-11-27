@@ -85,9 +85,11 @@ Sacré BLEU.
 
 # VERSION HISTORY
 
-- 1.1.7 (22 November 2017)
-   - small bugfix in tokenization_13a (not affecting WMT references)
-     thanks to Martin Popel
+- 1.1.7 (27 November 2017)
+   - thanks to Martin Popel for:
+      - small bugfix in tokenization_13a (not affecting WMT references)
+      - adding `--tok intl` (international tokenization)
+   - added wmt17/dev and wmt17/dev sets (for languages intro'd those years)
 
 - 1.1.6 (15 November 2017)
    - bugfix for tokenization warning
@@ -112,9 +114,9 @@ Sacré BLEU.
 
 - 1.0.3 (4 November 2017).
    - Contributions from Christian Federmann:
-   - Added explicit support for encoding  
-   - Fixed Windows support
-   - Bugfix in handling reference length with multiple refs
+      - Added explicit support for encoding  
+      - Fixed Windows support
+      - Bugfix in handling reference length with multiple refs
 
 - version 1.0.1 (1 November 2017).
    - Small bugfix affecting some versions of Python.
@@ -216,6 +218,14 @@ data = {
         'en-zh': ['newstest2017-enzh-src.en.sgm', 'newstest2017-enzh-ref.zh.sgm'],
         'zh-en': ['newstest2017-zhen-src.zh.sgm', 'newstest2017-zhen-ref.en.sgm'],
     },
+    'wmt17/dev': {
+        'data': 'http://data.statmt.org/wmt17/translation-task/dev.tgz',
+        'description': 'Development sets released for new languages in 2017.',
+        'en-lv': ['dev/newsdev2017-enlv-src.en.sgm', 'dev/newsdev2017-enlv-ref.lv.sgm'], 
+        'en-zh': ['dev/newsdev2017-enzh-src.en.sgm', 'dev/newsdev2017-enzh-ref.zh.sgm'],
+        'lv-en': ['dev/newsdev2017-lven-src.lv.sgm', 'dev/newsdev2017-lven-ref.en.sgm'],
+        'zh-en': ['dev/newsdev2017-zhen-src.zh.sgm', 'dev/newsdev2017-zhen-ref.en.sgm'],
+    },
     'wmt16': {
         'data': 'http://data.statmt.org/wmt16/translation-task/test.tgz',
         'description': 'Official evaluation data.',
@@ -241,6 +251,14 @@ data = {
         'data': 'http://data.statmt.org/wmt16/translation-task/test.tgz',
         'description': 'EN-FI with two references.',
         'en-fi': ['test/newstest2016-enfi-src.en.sgm', 'test/newstest2016-enfi-ref.fi.sgm', 'test/newstestB2016-enfi-ref.fi.sgm'],
+    },
+    'wmt16/dev': {
+        'data': 'http://data.statmt.org/wmt16/translation-task/dev.tgz',
+        'description': 'Development sets released for new languages in 2016.',
+        'en-ro': ['dev/newsdev2016-enro-src.en.sgm', 'dev/newsdev2016-enro-ref.ro.sgm'],
+        'en-tr': ['dev/newsdev2016-entr-src.en.sgm', 'dev/newsdev2016-entr-ref.tr.sgm'],
+        'ro-en': ['dev/newsdev2016-roen-src.ro.sgm', 'dev/newsdev2016-roen-ref.en.sgm'],
+        'tr-en': ['dev/newsdev2016-tren-src.tr.sgm', 'dev/newsdev2016-tren-ref.en.sgm']
     },
     'wmt15': {
         'data': 'http://statmt.org/wmt15/test.tgz',
