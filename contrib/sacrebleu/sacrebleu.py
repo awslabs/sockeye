@@ -84,6 +84,7 @@ Sacré BLEU.
 # VERSION HISTORY
 
 - 1.1.7 (27 November 2017)
+   - corpus_bleu() now raises an exception if input streams are different lengths
    - thanks to Martin Popel for:
       - small bugfix in tokenization_13a (not affecting WMT references)
       - adding `--tok intl` (international tokenization)
@@ -150,6 +151,7 @@ import argparse
 import unicodedata
 
 from collections import Counter, namedtuple
+from itertools import zip_longest
 from typing import List
 
 VERSION = '1.1.7'
@@ -798,7 +800,7 @@ def compute_bleu(correct: List[int], total: List[int], sys_len: int, ref_len: in
 
     precisions = [0 for x in range(NGRAM_ORDER)]
 
-    smooth_mteval = 1
+    smooth_mteval = 1.
     effective_order = NGRAM_ORDER
     for n in range(NGRAM_ORDER):
         if total[n] == 0:
@@ -859,7 +861,10 @@ def corpus_bleu(sys_stream, ref_streams, smooth='exp', smooth_floor=0.0, force=F
     tokenized_count = 0
 
     fhs = [sys_stream] + ref_streams
-    for lines in zip(*fhs):
+    for lines in zip_longest(*fhs):
+        if None in lines:
+            raise EOFError("Source and reference streams have different lengths!")
+
         if lowercase:
             lines = [x.lower() for x in lines]
 
@@ -985,7 +990,17 @@ def main():
         if target == 'zh' and args.tokenize != 'zh':
             logging.warning('You should also pass "--tok zh" when scoring Chinese...')
 
-    bleu = corpus_bleu(sys.stdin, refs, smooth=args.smooth, force=args.force, lowercase=args.lc, tokenize=args.tokenize)
+    try:
+        bleu = corpus_bleu(sys.stdin, refs, smooth=args.smooth, force=args.force, lowercase=args.lc, tokenize=args.tokenize)
+    except EOFError:
+        logging.error('The input and reference stream(s) were of different lengths.\n'
+                      'This could be a problem with your system output, or with sacreBLEU\'s reference database.\n'
+                      'If the latter, you can clean out the references cache by typing:\n'
+                      '\n'
+                      '    rm -r %s/%s\n'
+                      '\n'
+                      'They will be downloaded automatically again the next time you run sacreBLEU.', SACREBLEU, args.test_set)
+        sys.exit(1)
 
     version_str = build_signature(args, len(refs))
 
