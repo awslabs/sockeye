@@ -186,7 +186,7 @@ def add_extract_args(params):
     extract_params.add_argument("input",
                                 metavar="INPUT",
                                 type=str,
-                                help="either a model directory (using params.best) or a specific params.x file.")
+                                help="Either a model directory (using params.best) or a specific params.x file.")
     extract_params.add_argument('--names', '-n',
                                 nargs='*',
                                 default=[],

@@ -103,8 +103,8 @@ def main():
     ext_params = extract(param_paths, args.names, args.list_all)
     
     if len(ext_params) > 0:
-        assert args.output != None
-        logger.info("Writting Extracted parameters to '%s'", args.output)
+        utils.check_condition(args.output != None, "An output filename must be specified. (Use --output)")
+        logger.info("Writting extracted parameters to '%s'", args.output)
         np.savez_compressed(args.output, **ext_params)
 
 
