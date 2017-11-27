@@ -1,6 +1,13 @@
 sudo: required
 language: python
 
+env:
+  - OMP_NUM_THREADS=2
+  - OPENBLAS_NUM_THREADS=2
+  - MXNET_CPU_WORKER_NTHREADS=1
+  - MXNET_CPU_PRIORITY_NTHREADS=1
+  - MXNET_CPU_NNPACK_NTHREADS=1
+
 services:
   - docker
 
