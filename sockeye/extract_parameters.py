@@ -43,7 +43,7 @@ def _extract(param_names: List[str],
     remaining_param_names = list(param_names)
     for name in param_names:
         if name in params:
-            logger.info("\tFound '%s'", name)
+            logger.info("\tFound '%s': shape=%s", name, str(params[name].shape))
             ext_params[name] = params[name].asnumpy() 
             remaining_param_names.remove(name)
     return remaining_param_names
@@ -97,10 +97,10 @@ def main():
     args = params.parse_args()
 
     if os.path.isdir(args.input):
-        param_paths = os.path.join(args.input, C.PARAMS_BEST_NAME)
+        param_path = os.path.join(args.input, C.PARAMS_BEST_NAME)
     else:
-        param_paths = args.input
-    ext_params = extract(param_paths, args.names, args.list_all)
+        param_path = args.input
+    ext_params = extract(param_path, args.names, args.list_all)
     
     if len(ext_params) > 0:
         utils.check_condition(args.output != None, "An output filename must be specified. (Use --output)")
