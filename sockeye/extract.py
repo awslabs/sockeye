@@ -63,7 +63,7 @@ def extract(param_path: str,
     logger.info("Loading parameters from '%s'", param_path)
     arg_params, aux_params = utils.load_params(param_path)
 
-    ext_params = {}
+    ext_params = {} # type: Dict[str, np.ndarray]
     param_names = _extract(param_names, arg_params, ext_params)
     param_names = _extract(param_names, aux_params, ext_params)
 
