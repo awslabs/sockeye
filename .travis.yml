@@ -25,4 +25,8 @@ script:
   - pylint --rcfile=pylintrc test -E
   - mypy --ignore-missing-imports --follow-imports=silent @typechecked-files
   - check-manifest --ignore sockeye/git_version.py
-  #- python -m pytest test/system
+  - if [ "$TRAVIS_EVENT_TYPE" != "cron" ]; then python -m pytest -k "Copy:lstm:lstm" test/system; fi
+  - if [ "$TRAVIS_EVENT_TYPE" != "cron" ]; then python -m pytest -k "Copy:transformer:transformer" test/system; fi
+  - if [ "$TRAVIS_EVENT_TYPE" != "cron" ]; then python -m pytest -k "Copy:cnn:cnn" test/system; fi
+  - if [ "$TRAVIS_EVENT_TYPE" = "cron" ]; then python -m pytest test/system; fi
+
