@@ -480,16 +480,29 @@ def get_max_input_output_length(models: List[InferenceModel], num_stds: int,
     return max_input_len, get_max_output_length
 
 
+Tokens = List[str]
 TranslatorInput = NamedTuple('TranslatorInput', [
     ('id', int),
     ('sentence', str),
-    ('tokens', List[str]),
+    ('tokens', Tokens),
 ])
 """
 Required input for Translator.
 
 :param id: Sentence id.
 :param sentence: Input sentence.
+:param tokens: List of input tokens.
+"""
+
+InputChunk = NamedTuple("InputChunk",
+                        [("id", int),
+                         ("chunk_id", int),
+                         ("tokens", Tokens)])
+"""
+A chunk of a TranslatorInput.
+
+:param id: Sentence id.
+:param chunk_id: The id of the chunk.
 :param tokens: List of input tokens.
 """
 
@@ -516,6 +529,19 @@ Translation = NamedTuple('Translation', [
     ('attention_matrix', np.ndarray),
     ('score', float)
 ])
+
+TranslatedChunk = NamedTuple('TranslatedChunk', [
+    ('id', int),
+    ('chunk_id', int),
+    ('translation', Translation),
+])
+"""
+Translation of a chunk of a sentence.
+
+:param id: Id of the sentence.
+:param chunk_id: Id of the chunk.
+:param translation: The translation of the input chunk.
+"""
 
 
 class ModelState:
@@ -718,59 +744,61 @@ class Translator:
         :param trans_inputs: List of TranslatorInputs as returned by make_input().
         :return: List of translation results.
         """
-        # keep input ids to be able to concatenate translated sentence chunks back
-        chunk_markers = []
-        input_chunks = []
+        translated_chunks = []
 
-        # prepare chunks, keeping track of empty or splitted inputs
-        for trans_input in trans_inputs:
-            if not trans_input.tokens:  # empty input?
-                continue
-            elif len(trans_input.tokens) > self.max_input_length:  # oversized input?
+        # split into chunks
+        input_chunks = [] # type: List[InputChunk]
+        for input_idx, trans_input in enumerate(trans_inputs):
+            if len(trans_input.tokens) == 0:
+                empty_translation = Translation(target_ids=[],
+                                                attention_matrix=np.asarray([[0]]),
+                                                score=-np.inf)
+                translated_chunks.append(TranslatedChunk(id=input_idx,
+                                                         chunk_id=0,
+                                                         translation=empty_translation))
+            elif len(trans_input.tokens) > self.max_input_length:
                 logger.debug(
                     "Input %d has length (%d) that exceeds max input length (%d). Splitting into chunks of size %d.",
                     trans_input.id, len(trans_input.tokens), self.buckets_source[-1], self.max_input_length)
-                token_chunks = list(utils.chunks(trans_input.tokens, self.max_input_length))
-                input_chunks.extend(token_chunks)
-                chunk_markers.extend([trans_input.id] * len(token_chunks))
+                token_chunks = utils.chunks(trans_input.tokens, self.max_input_length)
+                input_chunks.extend(InputChunk(input_idx, chunk_id, chunk)
+                                    for chunk_id, chunk in enumerate(token_chunks))
             else:
-                input_chunks.append(trans_input.tokens)
-                chunk_markers.append(trans_input.id)
+                input_chunks.append(InputChunk(input_idx, 0, trans_input.tokens))
+        # Sort longest to shortest (to rather fill batches of shorter than longer sequences)
+        input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.tokens), reverse=True)
 
         # translate in batch-sized blocks over input chunks
-        translations = []  # type: List[Translation]
-        for batch_id, batch in enumerate(utils.grouper(input_chunks, self.batch_size)):
+        for batch_id, chunks in enumerate(utils.grouper(input_chunks, self.batch_size)):
+            batch = [chunk.tokens for chunk in chunks]
             logger.debug("Translating batch %d", batch_id)
             # underfilled batch will be filled to a full batch size with copies of the 1st input
             rest = self.batch_size - len(batch)
             if rest > 0:
                 logger.debug("Extending the last batch to the full batch size (%d)", self.batch_size)
                 batch = batch + [batch[0]] * rest
-            translated_batch = self.translate_nd(*self._get_inference_input(batch))
-            # truncate to remove duplicated translations
+            batch_translations = self.translate_nd(*self._get_inference_input(batch))
+            # truncate to remove filler translations
             if rest > 0:
-                translated_batch = translated_batch[:-rest]
-            translations.extend(translated_batch)
+                batch_translations = batch_translations[:-rest]
+            for chunk, translation in zip(chunks, batch_translations):
+                translated_chunks.append(TranslatedChunk(chunk.id, chunk.chunk_id, translation))
+        # Sort by input idx and then chunk id
+        translated_chunks = sorted(translated_chunks)
 
-        # concatenate translations with the same input id into a dict of complete translations
-        concat_translations = dict()
-        for idx, translations_and_markers in itertools.groupby(zip(translations, chunk_markers), key=lambda x: x[1]):
-            trans_to_concat = [trans for trans, _ in translations_and_markers]
-            concat_translations[idx] = trans_to_concat[0] if len(trans_to_concat) == 1 else \
-                                       self._concat_translations(trans_to_concat)
-
-        # create translation outputs inserting empty ones when necessary
-        results = []  # type: List[TranslatorOutput]
-        for trans_input in trans_inputs:
-            if trans_input.id not in concat_translations:
-                results.append(TranslatorOutput(id=trans_input.id,
-                                                translation="",
-                                                tokens=[""],
-                                                attention_matrix=np.asarray([[0]]),
-                                                score=-np.inf))
+        # Concatenate results
+        results = []
+        chunks_by_input_idx = itertools.groupby(translated_chunks, key=lambda translation: translation.id)
+        for trans_input, (input_idx, chunks) in zip(trans_inputs, chunks_by_input_idx):
+            chunks = list(chunks)
+            if len(chunks) == 1:
+                translation = chunks[0].translation
             else:
-                results.append(self._make_result(trans_input,
-                                                 concat_translations[trans_input.id]))
+                translations_to_concat = [translated_chunk.translation for translated_chunk in chunks]
+                translation = self._concat_translations(translations_to_concat)
+
+            results.append(self._make_result(trans_input, translation))
+
         return results
 
     def _get_inference_input(self, sequences: List[List[str]]) -> Tuple[mx.nd.NDArray, int]:
@@ -835,7 +863,7 @@ class Translator:
         :param source: Source ids. Shape: (batch_size, bucket_key).
         :param source_length: Bucket key.
 
-        :return: Sequence of translated ids, attention matrix, length-normalized negative log probability.
+        :return: Sequence of translations.
         """
         return self._get_best_from_beam(*self._beam_search(source, source_length))
 

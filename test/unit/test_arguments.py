@@ -185,7 +185,7 @@ def test_training_arg(test_params, expected_params):
                       models=['model'],
                       beam_size=5,
                       batch_size=1,
-                      chunk_size=1,
+                      chunk_size=None,
                       ensemble_mode='linear',
                       bucket_width=(10, 2),
                       max_input_len=None,

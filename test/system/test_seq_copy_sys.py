@@ -22,6 +22,9 @@ from test.common import tmp_digits_dataset, run_train_translate
 _TRAIN_LINE_COUNT = 10000
 _DEV_LINE_COUNT = 100
 _LINE_MAX_LENGTH = 10
+_TEST_LINE_COUNT = 110
+_TEST_LINE_COUNT_EMPTY = 10
+_TEST_MAX_LENGTH = 11
 _SEED_TRAIN = 13
 _SEED_DEV = 17
 
@@ -92,7 +95,8 @@ _SEED_DEV = 17
 def test_seq_copy(name, train_params, translate_params, perplexity_thresh, bleu_thresh):
     """Task: copy short sequences of digits"""
     with tmp_digits_dataset("test_seq_copy.", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT,
-                            _LINE_MAX_LENGTH, seed_train=_SEED_TRAIN, seed_dev=_SEED_DEV) as data:
+                            _LINE_MAX_LENGTH, _TEST_LINE_COUNT, _TEST_LINE_COUNT_EMPTY, _TEST_MAX_LENGTH,
+                            seed_train=_SEED_TRAIN, seed_dev=_SEED_DEV) as data:
         # Test model configuration
         perplexity, bleu, bleu_restrict, chrf = run_train_translate(train_params,
                                                                     translate_params,
@@ -101,6 +105,8 @@ def test_seq_copy(name, train_params, translate_params, perplexity_thresh, bleu_
                                                                     data['target'],
                                                                     data['validation_source'],
                                                                     data['validation_target'],
+                                                                    data['test_source'],
+                                                                    data['test_target'],
                                                                     max_seq_len=_LINE_MAX_LENGTH + 1,
                                                                     restrict_lexicon=True,
                                                                     work_dir=data['work_dir'])
@@ -167,8 +173,9 @@ def test_seq_copy(name, train_params, translate_params, perplexity_thresh, bleu_
 ])
 def test_seq_sort(name, train_params, translate_params, perplexity_thresh, bleu_thresh):
     """Task: sort short sequences of digits"""
-    with tmp_digits_dataset("test_seq_sort.", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT,
-                            _LINE_MAX_LENGTH, sort_target=True, seed_train=_SEED_TRAIN, seed_dev=_SEED_DEV) as data:
+    with tmp_digits_dataset("test_seq_sort.", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT, _LINE_MAX_LENGTH,
+                            _TEST_LINE_COUNT, _TEST_LINE_COUNT, _TEST_LINE_COUNT_EMPTY,
+                            sort_target=True, seed_train=_SEED_TRAIN, seed_dev=_SEED_DEV) as data:
         # Test model configuration
         perplexity, bleu, bleu_restrict, chrf = run_train_translate(train_params,
                                                                     translate_params,
@@ -177,6 +184,8 @@ def test_seq_sort(name, train_params, translate_params, perplexity_thresh, bleu_
                                                                     data['target'],
                                                                     data['validation_source'],
                                                                     data['validation_target'],
+                                                                    data['test_source'],
+                                                                    data['test_target'],
                                                                     max_seq_len=_LINE_MAX_LENGTH + 1,
                                                                     restrict_lexicon=True,
                                                                     work_dir=data['work_dir'])
