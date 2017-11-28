@@ -132,7 +132,7 @@ the file `wmt_model/metrics`. Here you find all relevant metrics that were calcu
 
 [tensorboard](https://github.com/dmlc/tensorboard) allows for monitoring training and validation metrics in a browser.
 In the training command above we enabled tracking of metrics in a tensorboard compatible way
-by specifying `--use-tensboard`. With this we can simply point tensorboard to the model directory or any of it's parent
+by specifying `--use-tensorboard`. With this we can simply point tensorboard to the model directory or any of its parent
 directories:
 
 ```bash
@@ -188,7 +188,7 @@ echo "er ist so ein toller Kerl und ein Familienvater ." | \
   python -m sockeye.translate -m wmt_model --output-type align_plot
 ```
 
-This will create a file `align_1.png` that looks similar this:
+This will create a file `align_1.png` that looks similar to this:
 
 ![Alignment plot](align.png "Alignment plot")
 
@@ -200,7 +200,7 @@ Additionally you can see the special end-of-sentence symbol `</s>` being added t
 ### Model ensembling
 
 Deep learning models usually profit from model ensembling.
-In model ensembling we train multiple models with different seeds (`--seed`).
+In model ensembling we train multiple models with different seeds (`sockeye.train` has an argument `--seed`).
 After that we can just provide these models to the Sockeye translation CLI:
 
 ```bash
@@ -225,7 +225,7 @@ he is a great guy and a family father .
 ```
 
 Internally Sockeye will run each one of the models and combine the predictions.
-If all the models are the same you will of course get the some predictions at the expense of running the same model
+If all the models are the same you will of course get the same predictions at the expense of running the same model
 multiple times. However, the point is mainly to show how one would run an ensemble model.
 
 
