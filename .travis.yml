@@ -1,6 +1,9 @@
 sudo: required
 language: python
 
+env:
+  - OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 MXNET_CPU_WORKER_NTHREADS=1 MXNET_CPU_PRIORITY_NTHREADS=1 MXNET_CPU_NNPACK_NTHREADS=1
+
 services:
   - docker
 
@@ -25,4 +28,4 @@ script:
   - pylint --rcfile=pylintrc test -E
   - mypy --ignore-missing-imports --follow-imports=silent @typechecked-files
   - check-manifest --ignore sockeye/git_version.py
-  #- python -m pytest test/system
+  - python -m pytest test/system
