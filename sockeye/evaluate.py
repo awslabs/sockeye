@@ -46,6 +46,7 @@ def main():
     params = argparse.ArgumentParser(description='Evaluate translations by calculating metrics with '
                                                  'respect to a reference set.')
     arguments.add_evaluate_args(params)
+    arguments.add_logging_args(params)
     args = params.parse_args()
 
     if args.quiet:

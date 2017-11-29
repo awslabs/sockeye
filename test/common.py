@@ -14,6 +14,7 @@
 import os
 import random
 import sys
+import logging
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 from typing import Optional, Tuple
@@ -32,6 +33,8 @@ import sockeye.utils
 
 from sockeye.evaluate import raw_corpus_bleu
 from sockeye.chrf import corpus_chrf
+
+logger = logging.getLogger(__name__)
 
 
 def gaussian_vector(shape, return_symbol=False):
@@ -116,7 +119,7 @@ def generate_fast_align_lex(lex_path: str):
             print("{0}\t{0}\t0".format(digit), file=lex_out)
 
 
-_LEXICON_PARAMS_COMMON = "-i {input} -m {model} -k 1 -o {json}"
+_LEXICON_PARAMS_COMMON = "-i {input} -m {model} -k 1 -o {json} {quiet}"
 
 
 @contextmanager
@@ -144,13 +147,13 @@ def tmp_digits_dataset(prefix: str,
 
 
 _TRAIN_PARAMS_COMMON = "--use-cpu --max-seq-len {max_len} --source {train_source} --target {train_target}" \
-                       " --validation-source {dev_source} --validation-target {dev_target} --output {model}"
+                       " --validation-source {dev_source} --validation-target {dev_target} --output {model} {quiet}"
 
-_TRANSLATE_PARAMS_COMMON = "--use-cpu --models {model} --input {input} --output {output}"
+_TRANSLATE_PARAMS_COMMON = "--use-cpu --models {model} --input {input} --output {output} {quiet}"
 
 _TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {json}"
 
-_EVAL_PARAMS_COMMON = "--hypotheses {hypotheses} --references {references} --metrics {metrics}"
+_EVAL_PARAMS_COMMON = "--hypotheses {hypotheses} --references {references} --metrics {metrics} {quiet}"
 
 
 def run_train_translate(train_params: str,
@@ -162,7 +165,8 @@ def run_train_translate(train_params: str,
                         dev_target_path: str,
                         max_seq_len: int = 10,
                         restrict_lexicon: bool = False,
-                        work_dir: Optional[str] = None) -> Tuple[float, float, float, float]:
+                        work_dir: Optional[str] = None,
+                        quiet: bool = False) -> Tuple[float, float, float, float]:
     """
     Train a model and translate a dev set.  Report validation perplexity and BLEU.
 
@@ -176,8 +180,13 @@ def run_train_translate(train_params: str,
     :param max_seq_len: The maximum sequence length.
     :param restrict_lexicon: Additional translation run with top-k lexicon-based vocabulary restriction.
     :param work_dir: The directory to store the model and other outputs in.
+    :param quiet: Suppress the console output of training and decoding.
     :return: A tuple containing perplexity, bleu scores for standard and reduced vocab decoding, chrf score.
     """
+    if quiet:
+        quiet_arg = "--quiet"
+    else:
+        quiet_arg = ""
     with TemporaryDirectory(dir=work_dir, prefix="test_train_translate.") as work_dir:
         # Train model
         model_path = os.path.join(work_dir, "model")
@@ -187,17 +196,21 @@ def run_train_translate(train_params: str,
                                                                dev_source=dev_source_path,
                                                                dev_target=dev_target_path,
                                                                model=model_path,
-                                                               max_len=max_seq_len),
+                                                               max_len=max_seq_len,
+                                                               quiet=quiet_arg),
                                    train_params)
+        logger.info("Starting training with parameters %s.", train_params)
         with patch.object(sys, "argv", params.split()):
             sockeye.train.main()
 
+        logger.info("Translating with parameters %s.", translate_params)
         # Translate corpus with the 1st params
         out_path = os.path.join(work_dir, "out.txt")
         params = "{} {} {}".format(sockeye.translate.__file__,
                                    _TRANSLATE_PARAMS_COMMON.format(model=model_path,
                                                                    input=dev_source_path,
-                                                                   output=out_path),
+                                                                   output=out_path,
+                                                                   quiet=quiet_arg),
                                    translate_params)
         with patch.object(sys, "argv", params.split()):
             sockeye.translate.main()
@@ -208,7 +221,8 @@ def run_train_translate(train_params: str,
             params = "{} {} {}".format(sockeye.translate.__file__,
                                        _TRANSLATE_PARAMS_COMMON.format(model=model_path,
                                                                        input=dev_source_path,
-                                                                       output=out_path_equiv),
+                                                                       output=out_path_equiv,
+                                                                       quiet=quiet_arg),
                                        translate_params_equiv)
             with patch.object(sys, "argv", params.split()):
                 sockeye.translate.main()
@@ -231,14 +245,16 @@ def run_train_translate(train_params: str,
             params = "{} {}".format(sockeye.lexicon.__file__,
                                     _LEXICON_PARAMS_COMMON.format(input=lex_path,
                                                                   model=model_path,
-                                                                  json=json_path))
+                                                                  json=json_path,
+                                                                  quiet=quiet_arg))
             with patch.object(sys, "argv", params.split()):
                 sockeye.lexicon.main()
             # Translate corpus with restrict-lexicon
             params = "{} {} {} {}".format(sockeye.translate.__file__,
                                           _TRANSLATE_PARAMS_COMMON.format(model=model_path,
                                                                           input=dev_source_path,
-                                                                          output=out_restrict_path),
+                                                                          output=out_restrict_path,
+                                                                          quiet=quiet_arg),
                                           translate_params,
                                           _TRANSLATE_PARAMS_RESTRICT.format(json=json_path))
             with patch.object(sys, "argv", params.split()):
@@ -253,9 +269,9 @@ def run_train_translate(train_params: str,
         averaged_params = sockeye.average.average(points)
         assert averaged_params
 
-        # get last validation perplexity
+        # get best validation perplexity
         metrics = sockeye.utils.read_metrics_file(path=os.path.join(model_path, C.METRICS_NAME))
-        perplexity = metrics[-1][C.PERPLEXITY + '-val']
+        perplexity = min(m[C.PERPLEXITY + '-val'] for m in metrics)
 
         hypotheses = open(out_path, "r").readlines()
         references = open(dev_target_path, "r").readlines()
@@ -272,7 +288,8 @@ def run_train_translate(train_params: str,
         eval_params = "{} {} ".format(sockeye.evaluate.__file__,
                                       _EVAL_PARAMS_COMMON.format(hypotheses=out_path,
                                                                  references=dev_target_path,
-                                                                 metrics="bleu chrf"), )
+                                                                 metrics="bleu chrf",
+                                                                 quiet=quiet_arg))
         with patch.object(sys, "argv", eval_params.split()):
             sockeye.evaluate.main()
 

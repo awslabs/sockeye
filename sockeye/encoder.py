@@ -143,7 +143,7 @@ def get_convolutional_encoder(config: ConvolutionalEncoderConfig) -> 'Encoder':
                                              config.num_embed,
                                              max_seq_len=config.max_seq_len_source,
                                              fixed_pos_embed_scale_up_input=False,
-                                             fixed_pos_embed_scale_down_positions=False,
+                                             fixed_pos_embed_scale_down_positions=True,
                                              prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
     encoders.append(ConvolutionalEncoder(config=config))
     encoders.append(BatchMajor2TimeMajor())
