@@ -242,12 +242,7 @@ class TransformerProcessBlock:
 class TransformerFeedForward:
     """
     Position-wise feed-forward network with activation.
-    Supported activation types include:
-    * ReLU (used in original transformer paper)
-    * Swish-1, also called SiLU: Ramachandran et al. (https://arxiv.org/pdf/1710.05941.pdf),
-      Elfwing et al. (https://arxiv.org/pdf/1702.03118.pdf)
     """
-
     def __init__(self,
                  num_hidden: int,
                  num_model: int,
@@ -272,16 +267,9 @@ class TransformerFeedForward:
         :return: Symbol of shape (batch_size, seq_len, num_hidden)
         """
         h = mx.sym.FullyConnected(data=x, num_hidden=self.num_hidden, weight=self.w_i2h, bias=self.b_i2h, flatten=False)
-
-        if self.act_type == C.SWISH1:
-            # TODO: Contribute to MXNet?  For now it appears that registered activation types must be implemented in C++.
-            h = h * mx.sym.Activation(h, act_type="sigmoid")
-        else:
-            h = mx.sym.Activation(h, act_type=self.act_type)
-
+        h = layers.activation(h, act_type=self.act_type)
         if self.dropout > 0.0:
             h = mx.sym.Dropout(h, p=self.dropout)
-
         y = mx.sym.FullyConnected(data=h, num_hidden=self.num_model, weight=self.w_h2o, bias=self.b_h2o, flatten=False)
         return y
 

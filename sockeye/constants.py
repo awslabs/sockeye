@@ -131,14 +131,18 @@ TRANSFORMER_DECODER_PREFIX = DECODER_PREFIX + "transformer_"
 CNN_DECODER_PREFIX = DECODER_PREFIX + "cnn_"
 
 # Activation types
+# Gaussian Error Linear Unit (https://arxiv.org/pdf/1606.08415.pdf)
+GELU = "gelu"
+# Gated Linear Unit (https://arxiv.org/pdf/1705.03122.pdf)
 GLU = "glu"
 RELU = "relu"
-SOFT_RELU = "softrelu"
 SIGMOID = "sigmoid"
-TANH = "tanh"
+SOFT_RELU = "softrelu"
+# Swish-1/SiLU (https://arxiv.org/pdf/1710.05941.pdf, https://arxiv.org/pdf/1702.03118.pdf)
 SWISH1 = "swish1"
-TRANSFORMER_ACTIVATION_TYPES = [RELU, SWISH1]
-CNN_ACTIVATION_TYPES = [GLU, RELU, SOFT_RELU, SIGMOID, TANH]
+TANH = "tanh"
+TRANSFORMER_ACTIVATION_TYPES = [GELU, RELU, SWISH1]
+CNN_ACTIVATION_TYPES = [GLU, RELU, SIGMOID, SOFT_RELU, TANH]
 
 # Convolutional block pad types:
 CNN_PAD_LEFT = "left"

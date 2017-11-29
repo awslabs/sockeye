@@ -12,6 +12,7 @@
 # permissions and limitations under the License.
 
 import logging
+import math
 from typing import Optional, Tuple, Union
 
 import mxnet as mx
@@ -21,6 +22,32 @@ from . import constants as C
 from . import utils
 
 logger = logging.getLogger(__name__)
+
+
+def activation(data: mx.sym.Symbol, act_type: str) -> mx.sym.Symbol:
+    """
+    Apply custom or standard activation.
+
+    Custom activation types include:
+    - Swish-1, also called Sigmoid-Weighted Linear Unit (SiLU): Ramachandran et
+      al. (https://arxiv.org/pdf/1710.05941.pdf), Elfwing et al.
+      (https://arxiv.org/pdf/1702.03118.pdf)
+    - Gaussian Error Linear Unit (GELU): Hendrycks and Gimpel
+      (https://arxiv.org/pdf/1606.08415.pdf)
+
+    :param data: input Symbol of any shape.
+    :param act_type: Type of activation.
+    :return: output Symbol with same shape as input.
+    """
+    # TODO: Contribute these to MXNet?  For now it appears that registered activation types must be implemented in C++.
+    if act_type == C.SWISH1:
+        return data * mx.sym.Activation(data, act_type="sigmoid")
+    elif act_type == C.GELU:
+        # Approximation of x * gaussian_cdf(x) used by Hendrycks and Gimpel
+        return 0.5 * data * (1 + mx.sym.Activation((math.sqrt(2 / math.pi) * (data + (0.044715 * (data**3)))),
+                                                   act_type="tanh"))
+    else:
+        return mx.sym.Activation(data, act_type=act_type)
 
 
 class LayerNormalization:
