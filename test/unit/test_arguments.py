@@ -168,7 +168,9 @@ def test_model_parameters(test_params, expected_params):
               cnn_hidden_dropout=0.0,
               rnn_forget_bias=0.0,
               rnn_h2h_init=C.RNN_INIT_ORTHOGONAL,
-              monitor_bleu=0,
+              decode_and_evaluate=0,
+              decode_and_evaluate_use_cpu=False,
+              decode_and_evaluate_device_id=None,
               seed=13,
               keep_last_params=-1)),
 ])
@@ -238,7 +240,7 @@ def test_inference_args(test_params, expected_params):
      '--rnn-num-hidden 512 '
      '--rnn-attention-type dot '
      '--max-seq-len 60 '
-     '--monitor-bleu 500 '
+     '--decode-and-evaluate 500 '
      '--use-tensorboard '
      '--use-cpu '
      '-o wmt_mode',
@@ -251,7 +253,7 @@ def test_inference_args(test_params, expected_params):
          rnn_num_hidden=512,
          rnn_attention_type='dot',
          max_seq_len=(60, 60),
-         monitor_bleu=500,
+         decode_and_evaluate=500,
          use_tensorboard=True,
          use_cpu=True,
          # Arguments mentioned in the text, should be renamed in the tutorial if they change:
@@ -264,7 +266,7 @@ def test_inference_args(test_params, expected_params):
       "batch_size",
       "learning_rate_schedule",
       "optimized_metric",
-      "monitor_bleu",
+      "decode_and_evaluate",
       "seed"])
 ])
 def test_tutorial_train_args(test_params, expected_params, expected_params_present):
