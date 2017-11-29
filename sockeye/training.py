@@ -197,7 +197,8 @@ class TrainingModel(model.SockeyeModel):
             max_num_not_improved: int = 3,
             min_num_epochs: Optional[int] = None,
             max_num_epochs: Optional[int] = None,
-            monitor_bleu: int = 0,
+            decode_and_evaluate: int = 0,
+            decode_and_evaluate_context: Optional[mx.Context] = None,
             use_tensorboard: bool = False,
             mxmonitor_pattern: Optional[str] = None,
             mxmonitor_stat_func: Optional[str] = None,
@@ -223,7 +224,7 @@ class TrainingModel(model.SockeyeModel):
                -1: do not use early stopping.
         :param min_num_epochs: Optional minimum number of epochs to train, even if validation scores did not improve.
         :param max_num_epochs: Optional maximum number of epochs to train.
-        :param monitor_bleu: Monitor BLEU during training (0: off, >=0: the number of sentences to decode for BLEU
+        :param decode_and_evaluate: Monitor BLEU during training (0: off, >=0: the number of sentences to decode for BLEU
                evaluation, -1: decode the full validation set.).
         :param use_tensorboard: If True write tensorboard compatible logs for monitoring training and
                validation metrics.
@@ -251,12 +252,12 @@ class TrainingModel(model.SockeyeModel):
 
         self.module.init_optimizer(kvstore=kvstore, optimizer=optimizer, optimizer_params=optimizer_params)
 
-        cp_decoder = checkpoint_decoder.CheckpointDecoder(self.context[-1],
+        cp_decoder = checkpoint_decoder.CheckpointDecoder(decode_and_evaluate_context,
                                                           self.config.config_data.validation_source,
                                                           self.config.config_data.validation_target,
                                                           output_folder,
-                                                          sample_size=monitor_bleu) \
-            if monitor_bleu else None
+                                                          sample_size=decode_and_evaluate) \
+            if decode_and_evaluate else None
 
         logger.info("Training started.")
         self.training_monitor = callback.TrainingMonitor(train_iter.batch_size, output_folder,

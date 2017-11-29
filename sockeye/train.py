@@ -155,7 +155,7 @@ def determine_context(args: argparse.Namespace, exit_stack: ExitStack) -> List[m
     :return: A list with the context(s) to run on.
     """
     if args.use_cpu:
-        logger.info("Device: CPU")
+        logger.info("Training Device: CPU")
         context = [mx.cpu()]
     else:
         num_gpus = utils.get_num_gpus()
@@ -171,9 +171,55 @@ def determine_context(args: argparse.Namespace, exit_stack: ExitStack) -> List[m
             check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
                                                                  "divisible by the number of devices. Choose a batch "
                                                                  "size that is a multiple of %d." % len(context))
-        logger.info("Device(s): GPU %s", context)
+        logger.info("Training Device(s): GPU %s", context)
         context = [mx.gpu(gpu_id) for gpu_id in context]
     return context
+
+
+def determine_decode_and_evaluate_context(args: argparse.Namespace,
+                                          exit_stack: ExitStack,
+                                          train_context: List[mx.Context]) -> Tuple[int, Optional[mx.Context]]:
+    """
+    Determine the number of sentences to decode and the context we should run on (CPU or GPU).
+
+    :param args: Arguments as returned by argparse.
+    :param exit_stack: An ExitStack from contextlib.
+    :param train_context: Context for training.
+    :return: The number of sentences to decode and a list with the context(s) to run on.
+    """
+    num_to_decode = args.decode_and_evaluate
+    if args.optimized_metric == C.BLEU and num_to_decode == 0:
+        logger.info("You chose BLEU as the optimized metric, will turn on BLEU monitoring during training. "
+                    "To control how many validation sentences are used for calculating bleu use "
+                    "the --decode-and-evaluate argument.")
+        num_to_decode = -1
+
+    if num_to_decode == 0:
+        return 0, None
+
+    if args.use_cpu or args.decode_and_evaluate_use_cpu:
+        context = mx.cpu()
+    elif args.decode_and_evaluate_device_id is not None:
+        # decode device is defined from the commandline
+        num_gpus = utils.get_num_gpus()
+        check_condition(num_gpus >= 1,
+                        "No GPUs found, consider running on the CPU with --use-cpu "
+                        "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
+                        "binary isn't on the path).")
+
+        if args.disable_device_locking:
+            context = utils.expand_requested_device_ids([args.decode_and_evaluate_device_id])
+        else:
+            context = exit_stack.enter_context(utils.acquire_gpus([args.decode_and_evaluate_device_id],
+                                                                  lock_dir=args.lock_dir))
+        context = mx.gpu(context[0])
+
+    else:
+        # default decode context is the last training device
+        context = train_context[-1]
+
+    logger.info("Decode and Evaluate Device(s): %s", context)
+    return num_to_decode, context
 
 
 def load_or_create_vocabs(args: argparse.Namespace, resume_training: bool, output_folder: str) -> Tuple[Dict, Dict]:
@@ -636,13 +682,9 @@ def main():
             min_num_epochs = None
             max_num_epochs = None
 
-        monitor_bleu = args.monitor_bleu
-        # Turn on BLEU monitoring when the optimized metric is BLEU and it hasn't been enabled yet
-        if args.optimized_metric == C.BLEU and monitor_bleu == 0:
-            logger.info("You chose BLEU as the optimized metric, will turn on BLEU monitoring during training. "
-                        "To control how many validation sentences are used for calculating bleu use "
-                        "the --monitor-bleu argument.")
-            monitor_bleu = -1
+        decode_and_evaluate, decode_and_evaluate_context = determine_decode_and_evaluate_context(args,
+                                                                                                 exit_stack,
+                                                                                                 context)
 
         training_model.fit(train_iter, eval_iter,
                            output_folder=output_folder,
@@ -657,7 +699,8 @@ def main():
                            max_num_not_improved=max_num_checkpoint_not_improved,
                            min_num_epochs=min_num_epochs,
                            max_num_epochs=max_num_epochs,
-                           monitor_bleu=monitor_bleu,
+                           decode_and_evaluate=decode_and_evaluate,
+                           decode_and_evaluate_context=decode_and_evaluate_context,
                            use_tensorboard=args.use_tensorboard,
                            mxmonitor_pattern=args.monitor_pattern,
                            mxmonitor_stat_func=args.monitor_stat_func,
