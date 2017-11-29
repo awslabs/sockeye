@@ -181,6 +181,24 @@ def add_average_args(params):
         help="selection method. Default: %(default)s.")
 
 
+def add_extract_args(params):
+    extract_params = params.add_argument_group("Extracting")
+    extract_params.add_argument("input",
+                                metavar="INPUT",
+                                type=str,
+                                help="Either a model directory (using params.best) or a specific params.x file.")
+    extract_params.add_argument('--names', '-n',
+                                nargs='*',
+                                default=[],
+                                help='Names of parameters to be extracted.')
+    extract_params.add_argument('--list-all', '-l',
+                                action='store_true',
+                                help='List names of all available parameters.')
+    extract_params.add_argument('--output', '-o', 
+                                type=str,
+                                help="File to write extracted parameters to (in .npz format).")
+
+
 def add_lexicon_args(params):
     lexicon_params = params.add_argument_group("Lexicon")
     lexicon_params.add_argument(

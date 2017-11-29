@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.13.2]
+### Added
+ - A tool that extracts specified parameters from params.x into a .npz file for downstream applications or analysis.
+
 ## [1.13.1]
 ### Added
 - Added chrF metric
