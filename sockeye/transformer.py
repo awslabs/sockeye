@@ -15,7 +15,9 @@ from typing import Dict, Optional
 
 import mxnet as mx
 import numpy as np
+
 from . import config
+from . import constants as C
 from . import layers
 
 
@@ -87,11 +89,10 @@ class TransformerEncoderBlock:
                                                dropout=config.dropout_prepost,
                                                prefix="%sff_post_" % prefix)
 
-    def __call__(self, data: mx.sym.Symbol, lengths: mx.sym.Symbol) -> mx.sym.Symbol:
+    def __call__(self, data: mx.sym.Symbol, bias: mx.sym.Symbol) -> mx.sym.Symbol:
         # self-attention
         data_self_att = self.self_attention(inputs=self.pre_self_attention(data, None),
-                                            input_lengths=lengths,
-                                            bias=None,
+                                            bias=bias,
                                             cache=None)
         data = self.post_self_attention(data_self_att, data)
 
@@ -157,7 +158,7 @@ class TransformerDecoderBlock:
                  target: mx.sym.Symbol,
                  target_bias: mx.sym.Symbol,
                  source: mx.sym.Symbol,
-                 source_lengths: mx.sym.Symbol,
+                 source_bias: mx.sym.Symbol,
                  cache: Optional[Dict[str, Optional[mx.sym.Symbol]]] = None) -> mx.sym.Symbol:
 
         # self-attention
@@ -170,7 +171,7 @@ class TransformerDecoderBlock:
         # encoder attention
         target_enc_att = self.enc_attention(queries=self.pre_enc_attention(target, None),
                                             memory=source,
-                                            memory_lengths=source_lengths)
+                                            bias=source_bias)
         target = self.post_enc_attention(target_enc_att, target)
 
         # feed-forward
@@ -267,6 +268,80 @@ class TransformerFeedForward:
             h = mx.sym.Dropout(h, p=self.dropout)
         y = mx.sym.FullyConnected(data=h, num_hidden=self.num_model, weight=self.w_h2o, bias=self.b_h2o, flatten=False)
         return y
+
+
+class VariableLengthBias(mx.operator.CustomOp):
+    """
+    Returns bias/mask given a vector of sequence lengths.
+    """
+
+    def __init__(self, max_length: int) -> None:
+        super().__init__()
+        self.max_length = max_length
+
+    def forward(self, is_train, req, in_data, out_data, aux):
+        # lengths: (batch_size,)
+        lengths = in_data[0]
+
+        # (max_length, batch_size)
+        data = mx.nd.zeros((self.max_length, lengths.shape[0]), ctx=lengths.context)
+        data = mx.nd.SequenceMask(data=data,
+                                  use_sequence_length=True,
+                                  sequence_length=lengths,
+                                  value=C.LARGE_NEGATIVE_VALUE)
+        # (batch_size, max_length)
+        data = mx.nd.swapaxes(data, dim1=0, dim2=1)
+        self.assign(out_data[0], req[0], data)
+
+    def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
+        pass
+
+
+@mx.operator.register("variable_length_bias")
+class VariableLengthBiasProp(mx.operator.CustomOpProp):
+
+    def __init__(self, max_length: str) -> None:
+        super().__init__()
+        self.max_length = int(max_length)
+
+    def list_arguments(self):
+        return ['data']
+
+    def list_outputs(self):
+        return ['output']
+
+    def infer_shape(self, in_shape):
+        batch_size = in_shape[0][0]
+        return in_shape, [(batch_size, self.max_length)], []
+
+    def infer_type(self, in_type):
+        return in_type, [np.float32], []
+
+    def create_operator(self, ctx, shapes, dtypes):
+        return VariableLengthBias(max_length=self.max_length)
+
+
+def get_variable_length_bias(lengths: mx.sym.Symbol,
+                             max_length: int,
+                             num_heads: Optional[int] = None,
+                             fold_heads: bool = True,
+                             name: str = '') -> mx.sym.Symbol:
+    """
+    Returns bias/mask for variable sequence lengths.
+
+    :param lengths: Sequence lengths. Shape: (batch,).
+    :param max_length: Maximum sequence length.
+    :param num_heads: Number of attention heads.
+    :param fold_heads: Whether to fold heads dimension into batch dimension.
+    :param name: Name of symbol.
+    :return: Bias symbol.
+    """
+    # (batch_size, max_length)
+    x = mx.symbol.Custom(data=lengths, max_length=max_length, op_type='variable_length_bias')
+    if num_heads is not None:
+        # (batch_size, heads, max_length) if fold_heads == False else (batch_size * heads, max_length)
+        x = layers.broadcast_to_heads(x, num_heads, ndim=2, fold_heads=fold_heads)
+    return mx.sym.BlockGrad(x, name='%sbias' % name)
 
 
 def get_autoregressive_bias(max_length: int, name: str) -> mx.sym.Symbol:

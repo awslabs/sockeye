@@ -218,22 +218,17 @@ class TransformerDecoder(Decoder):
         # (batch_size, source_max_length, num_source_embed)
         source_encoded = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
 
-        # (batch_size, target_max_length, model_size)
-        return self._decode(source_encoded, source_encoded_lengths, target_embed, target_embed_max_length)
-
-    def _decode(self, source_encoded, source_encoded_lengths, target_embed, target_embed_max_length):
-        """
-        Runs stacked decoder transformer blocks.
-
-        :param source_encoded: Batch-major encoded source: (batch_size, source_encoded_max_length, encoder_depth).
-        :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
-        :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length).
-        :param target_embed_max_length: Size of embedded target sequence dimension.
-        :return: Result of stacked transformer blocks.
-        """
+        # (batch_size * heads, max_length)
+        source_bias = transformer.get_variable_length_bias(lengths=source_encoded_lengths,
+                                                           max_length=source_encoded_max_length,
+                                                           num_heads=self.config.attention_heads,
+                                                           fold_heads=True,
+                                                           name="%ssource_bias" % self.prefix)
+        # (batch_size * heads, 1, max_length)
+        source_bias = mx.sym.expand_dims(source_bias, axis=1)
 
         # (1, target_max_length, target_max_length)
-        target_bias = transformer.get_autoregressive_bias(target_embed_max_length, name="%sbias" % self.prefix)
+        target_bias = transformer.get_autoregressive_bias(target_embed_max_length, name="%starget_bias" % self.prefix)
 
         # target: (batch_size, target_max_length, model_size)
         target, _, target_max_length = self.pos_embedding.encode(target_embed, None, target_embed_max_length)
@@ -245,7 +240,7 @@ class TransformerDecoder(Decoder):
             target = layer(target=target,
                            target_bias=target_bias,
                            source=source_encoded,
-                           source_lengths=source_encoded_lengths)
+                           source_bias=source_bias)
         target = self.final_process(data=target, prev=None)
 
         return target
@@ -275,6 +270,15 @@ class TransformerDecoder(Decoder):
         # (batch_size, 1, num_embed)
         target = mx.sym.expand_dims(target_embed_prev, axis=1)
 
+        # (batch_size * heads, max_length)
+        source_bias = transformer.get_variable_length_bias(lengths=source_encoded_lengths,
+                                                           max_length=source_encoded_max_length,
+                                                           num_heads=self.config.attention_heads,
+                                                           fold_heads=True,
+                                                           name="%ssource_bias" % self.prefix)
+        # (batch_size * heads, 1, max_length)
+        source_bias = mx.sym.expand_dims(source_bias, axis=1)
+
         # auto-regressive bias for last position in sequence
         # (1, target_max_length, target_max_length)
         target_bias = transformer.get_autoregressive_bias(step, name="%sbias" % self.prefix)
@@ -291,7 +295,7 @@ class TransformerDecoder(Decoder):
             target = layer(target=target,
                            target_bias=target_bias,
                            source=source_encoded,
-                           source_lengths=source_encoded_lengths,
+                           source_bias=source_bias,
                            cache=layer_cache)
             new_cache += [layer_cache['k'], layer_cache['v']]
 
@@ -338,7 +342,7 @@ class TransformerDecoder(Decoder):
         :return: List of symbolic variables.
         """
         variables = [mx.sym.Variable(C.SOURCE_ENCODED_NAME),
-                mx.sym.Variable(C.SOURCE_LENGTH_NAME)]
+                     mx.sym.Variable(C.SOURCE_LENGTH_NAME)]
         if target_max_length > 1:  # no cache for initial decoder step
             for layer in self.layers:
                 variables += [mx.sym.Variable('%skeys' % layer.prefix),

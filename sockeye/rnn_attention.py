@@ -432,7 +432,7 @@ class MultiHeadDotAttention(Attention):
             attention_scores = mx.sym.batch_dot(lhs=keys, rhs=query, name="%sdot" % self.prefix)
 
             # (batch*heads, 1)
-            lengths = layers.broadcast_to_heads(source_length, self.heads)
+            lengths = layers.broadcast_to_heads(source_length, self.heads, ndim=1, fold_heads=True)
 
             # context: (batch*heads, num_hidden/head)
             # attention_probs: (batch*heads, length)

@@ -794,9 +794,16 @@ class TransformerEncoder(Encoder):
         if self.config.dropout_prepost > 0.0:
             data = mx.sym.Dropout(data=data, p=self.config.dropout_prepost)
 
+        # (batch_size * heads, 1, max_length)
+        bias = mx.sym.expand_dims(transformer.get_variable_length_bias(lengths=data_length,
+                                                                       max_length=seq_len,
+                                                                       num_heads=self.config.attention_heads,
+                                                                       fold_heads=True,
+                                                                       name="%sbias"% self.prefix), axis=1)
+
         for i, layer in enumerate(self.layers):
             # (batch_size, seq_len, config.model_size)
-            data = layer(data, data_length)
+            data = layer(data, bias)
         data = self.final_process(data=data, prev=None)
         return data, data_length, seq_len
 

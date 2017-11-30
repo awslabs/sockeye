@@ -219,21 +219,28 @@ def combine_heads(x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.S
     return mx.sym.reshape(x, shape=(-1, 0, depth_per_head * heads))
 
 
-def broadcast_to_heads(x: mx.sym.Symbol, heads: int) -> mx.sym.Symbol:
+def broadcast_to_heads(x: mx.sym.Symbol, num_heads: int, ndim: int, fold_heads: bool = True) -> mx.sym.Symbol:
     """
-    Broadcasts a 1d vector of shape (batch,) to (batch*heads, 1).
+    Broadcasts batch-major input of shape (batch, d1 ... dn-1) to (batch*heads, d1 ... dn-1).
 
-    :param x: Symbol(batch,)
-    :param heads: Number of heads.
-    :return: Symbol(batch * heads, 1)
+    :param x: Batch-major input. Shape: (batch, d1 ... dn-1).
+    :param num_heads: Number of heads.
+    :param ndim: Number of dimensions in x.
+    :param fold_heads: Whether to fold heads dimension into batch dimension.
+    :return: Tensor with each sample repeated heads-many times.
+             Shape: (batch * heads, d1 ... dn-1) if fold_heads == True, (batch, heads, d1 ... dn-1) else.
     """
+    dims = [0] * (ndim - 1)
     # x: (batch, 1)
     x = mx.sym.expand_dims(x, axis=1)
-    # x: (batch, heads)
-    x = mx.sym.broadcast_to(x, shape=(0, heads))
-    # x: (batch * heads, 1)
-    x = mx.sym.reshape(x, shape=(-3,))
-    return x
+    # x: (batch, heads, dims...)
+    x = mx.sym.broadcast_to(x, shape=[0, num_heads] + dims)
+    if fold_heads:
+        # (batch * heads, dims...)
+        return mx.sym.reshape(x, shape=[-3] + dims)
+    else:
+        # x: (batch, heads, dims...)
+        return x
 
 
 def dot_attention(queries: mx.sym.Symbol,
@@ -241,7 +248,8 @@ def dot_attention(queries: mx.sym.Symbol,
                   values: mx.sym.Symbol,
                   lengths: Optional[mx.sym.Symbol] = None,
                   dropout: float = 0.0,
-                  bias: Optional[mx.sym.Symbol] = None):
+                  bias: Optional[mx.sym.Symbol] = None,
+                  prefix: Optional[str] = ''):
     """
     Computes dot attention for a set of queries, keys, and values.
 
@@ -250,14 +258,15 @@ def dot_attention(queries: mx.sym.Symbol,
     :param values: Attention values. Shape: (n, lk, dv).
     :param lengths: Optional sequence lengths of the keys. Shape: (n,).
     :param dropout: Dropout probability.
-    :param bias: Optional bias tensor. Shape: (1, lq, lk).
+    :param bias: Optional 3d bias tensor.
+    :param prefix: Optional prefix
     :return: 'Context' vectors for each query. Shape: (n, lq, dv).
     """
     utils.check_condition(lengths is not None or bias is not None,
                           "Must provide either length or bias argument for masking")
 
     # (n, lq, lk)
-    logits = mx.sym.batch_dot(lhs=queries, rhs=keys, transpose_b=True, name='dot_att')
+    logits = mx.sym.batch_dot(lhs=queries, rhs=keys, transpose_b=True, name='%sdot' % prefix)
 
     if lengths is not None:
         # mask lk dimension
@@ -271,13 +280,13 @@ def dot_attention(queries: mx.sym.Symbol,
         logits = mx.sym.transpose(data=logits, axes=(1, 2, 0))
 
     if bias is not None:
-        logits = mx.sym.broadcast_add(logits, bias)
+        logits = mx.sym.broadcast_add(logits, bias, name='%sbias_add' % prefix)
 
     probs = mx.sym.softmax(logits, axis=-1)
     probs = mx.sym.Dropout(probs, p=dropout) if dropout > 0.0 else probs
 
     # (n, lq, lk) x (n, lk, dv) -> (n, lq, dv)
-    return mx.sym.batch_dot(lhs=probs, rhs=values)
+    return mx.sym.batch_dot(lhs=probs, rhs=values, name='%scontexts' % prefix)
 
 
 class MultiHeadAttentionBase:
@@ -320,8 +329,8 @@ class MultiHeadAttentionBase:
         :param queries: Query tensor. Shape: (batch_size, query_max_length, depth).
         :param keys: Keys. Shape: (batch_size, memory_max_length, depth).
         :param values: Values. Shape: (batch_size, memory_max_length, depth).
-        :param lengths: Optional lengths of keys. Shape: (batch_size, 1).
-        :param bias: Optional bias. Shape: (batch_size, query_max_length, memory_max_length).
+        :param lengths: Optional lengths of keys. Shape: (batch_size,).
+        :param bias: Optional 3d bias.
         :return: Context vectors. Shape: (batch_size, query_max_length, output_depth).
         """
         # scale by sqrt(depth_per_head)
@@ -331,10 +340,11 @@ class MultiHeadAttentionBase:
         queries = split_heads(queries, self.depth_per_head, self.heads)
         keys = split_heads(keys, self.depth_per_head, self.heads)
         values = split_heads(values, self.depth_per_head, self.heads)
-        lengths = broadcast_to_heads(lengths, self.heads) if lengths is not None else lengths
+        lengths = broadcast_to_heads(lengths, self.heads, ndim=1, fold_heads=True) if lengths is not None else lengths
 
         # (batch*heads, query_max_length, depth_per_head)
-        contexts = dot_attention(queries, keys, values, lengths=lengths, dropout=self.dropout, bias=bias)
+        contexts = dot_attention(queries, keys, values,
+                                 lengths=lengths, dropout=self.dropout, bias=bias, prefix=self.prefix)
 
         # (batch, query_max_length, depth)
         contexts = combine_heads(contexts, self.depth_per_head, self.heads)
@@ -382,7 +392,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
 
         :param inputs: Symbol of shape (batch, max_length, input_depth).
         :param input_lengths: Optional lengths of inputs. Symbol of shape (batch, 1).
-        :param bias: Optional (auto-regressive bias). Symbol of shape (1, max_length, max_length).
+        :param bias: Optional 3d bias tensor.
         :param cache: Optional dictionary of previously computed keys and values.
         :return: Symbol of shape (batch, max_length, output_depth).
         """
@@ -436,7 +446,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
     def __call__(self,
                  queries: mx.sym.Symbol,
                  memory: mx.sym.Symbol,
-                 memory_lengths: mx.sym.Symbol) -> mx.sym.Symbol:
+                 bias: mx.sym.Symbol) -> mx.sym.Symbol:
         """
         Computes multi-head attention for queries given a memory tensor.
         Does not use an auto-regressive bias.
@@ -444,7 +454,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
 
         :param queries: Symbol of shape (batch, query_max_length, input_depth).
         :param memory: Symbol of shape (batch, memory_max_length, input_depth).
-        :param memory_lengths: Lengths of memory sequences. Used for masking. Symbol of shape (batch, 1).
+        :param bias: 3d bias. TODO Optional
         :return: Symbol of shape (batch, query_seq_len, output_depth).
         """
         # (batch, memory_max_length, depth * 2)
@@ -471,8 +481,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         return self._attend(queries,
                             keys,
                             values,
-                            lengths=memory_lengths,
-                            bias=None)
+                            bias=bias)
 
 
 class PositionalEncodings(mx.operator.CustomOp):
