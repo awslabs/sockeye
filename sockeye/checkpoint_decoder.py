@@ -124,15 +124,15 @@ class CheckpointDecoder:
                                                                    [checkpoint],
                                                                    softmax_temperature=self.softmax_temperature,
                                                                    max_output_length_num_stds=self.max_output_length_num_stds)
-        translator = inference.Translator(self.context,
-                                          self.ensemble_mode,
-                                          self.bucket_width_source,
-                                          self.bucket_width_target,
-                                          inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
-                                          0.0,
-                                          models,
-                                          vocab_source,
-                                          vocab_target)
+        translator = inference.Translator(context=self.context,
+                                          ensemble_mode=self.ensemble_mode,
+                                          bucket_source_width=self.bucket_width_source,
+                                          bucket_target_width=self.bucket_width_target,
+                                          length_penalty=inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
+                                          beam_prune=0.0,
+                                          models=models,
+                                          vocab_source=vocab_source,
+                                          vocab_target=vocab_target)
         trans_wall_time = 0.0
         translations = []
         with data_io.smart_open(output_name, 'w') as output:

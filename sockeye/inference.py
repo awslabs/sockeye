@@ -1102,8 +1102,6 @@ class Translator:
             for ms in model_states:
                 ms.sort_state(best_hyp_indices)
 
-        logger.info("Finished after %d / %d steps.", t, max_output_length)
-
         return sequences, attentions, scores_accumulated, lengths
 
     def _get_best_from_beam(self,

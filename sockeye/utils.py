@@ -220,7 +220,6 @@ def smallest_k(matrix: np.ndarray, k: int) -> Tuple[Tuple[np.ndarray, np.ndarray
 
     :param matrix: Any matrix.
     :param k: The number of smallest elements to return.
-    :param only_first_row: If true the search is constrained to the first row of the matrix.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
     flatten = matrix.flatten()
@@ -233,19 +232,14 @@ def smallest_k(matrix: np.ndarray, k: int) -> Tuple[Tuple[np.ndarray, np.ndarray
     return np.unravel_index(args, matrix.shape), flatten[args]
 
 
-def smallest_k_mx(matrix: mx.nd.NDArray, k: int,
-                  only_first_row: bool = False) -> Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]:
+def smallest_k_mx(matrix: mx.nd.NDArray, k: int) -> Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]:
     """
     Find the smallest elements in a NDarray.
 
     :param matrix: Any matrix.
     :param k: The number of smallest elements to return.
-    :param only_first_row: If True the search is constrained to the first row of the matrix.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
-    if only_first_row:
-        matrix = mx.nd.reshape(matrix[0], shape=(1, -1))
-
     # pylint: disable=unbalanced-tuple-unpacking
     values, indices = mx.nd.topk(matrix, axis=None, k=k, ret_typ='both', is_ascend=True)
 
