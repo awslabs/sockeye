@@ -84,6 +84,7 @@ def main():
                                                   bucket_target_width,
                                                   sockeye.inference.LengthPenalty(args.length_penalty_alpha,
                                                                                   args.length_penalty_beta),
+                                                  args.beam_prune,
                                                   models,
                                                   vocab_source,
                                                   vocab_target,

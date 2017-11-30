@@ -842,6 +842,11 @@ def add_inference_args(params):
                                type=int_greater_or_equal(1),
                                default=5,
                                help='Size of the beam. Default: %(default)s.')
+    decode_params.add_argument('--beam-prune', '-p',
+                               type=float,
+                               default=0,
+                               help='Pruning threshold for beam search. All hypotheses with unnormalized scores less than '
+                               'this amount below the best (unnormalized) hypothesis are discarded (0 = off).')
     decode_params.add_argument('--batch-size',
                                type=int_greater_or_equal(1),
                                default=1,

@@ -214,8 +214,7 @@ class Accuracy(mx.metric.EvalMetric):
             self.num_inst += n
 
 
-def smallest_k(matrix: np.ndarray, k: int,
-               only_first_row: bool = False) -> Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]:
+def smallest_k(matrix: np.ndarray, k: int) -> Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]:
     """
     Find the smallest elements in a numpy matrix.
 
@@ -224,10 +223,7 @@ def smallest_k(matrix: np.ndarray, k: int,
     :param only_first_row: If true the search is constrained to the first row of the matrix.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
-    if only_first_row:
-        flatten = matrix[:1, :].flatten()
-    else:
-        flatten = matrix.flatten()
+    flatten = matrix.flatten()
 
     # args are the indices in flatten of the k smallest elements
     args = np.argpartition(flatten, k)[:k]

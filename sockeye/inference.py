@@ -625,6 +625,7 @@ class Translator:
     :param context: MXNet context to bind modules to.
     :param ensemble_mode: Ensemble mode: linear or log_linear combination.
     :param length_penalty: Length penalty instance.
+    :param beam_prune: Beam pruning difference threshold.
     :param models: List of models.
     :param vocab_source: Source vocabulary.
     :param vocab_target: Target vocabulary.
@@ -637,12 +638,14 @@ class Translator:
                  bucket_source_width: int,
                  bucket_target_width: int,
                  length_penalty: LengthPenalty,
+                 beam_prune: float,
                  models: List[InferenceModel],
                  vocab_source: Dict[str, int],
                  vocab_target: Dict[str, int],
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None) -> None:
         self.context = context
         self.length_penalty = length_penalty
+        self.beam_prune = beam_prune
         self.vocab_source = vocab_source
         self.vocab_target = vocab_target
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
@@ -995,8 +998,9 @@ class Translator:
         # (0) encode source sentence, returns a list
         model_states = self._encode(source, source_length)
 
+        # Records the size of the active beam for each sentence (which permits filtering)
+        active_beam_size = [1] * self.batch_size
         for t in range(1, max_output_length):
-
             # (1) obtain next predictions and advance models' state
             # scores: (batch_size * beam_size, target_vocab_size)
             # attention_scores: (batch_size * beam_size, bucket_key)
@@ -1009,29 +1013,25 @@ class Translator:
                                                                        models_output_layer_w,
                                                                        models_output_layer_b)
 
-            # (2) compute length-normalized accumulated scores in place
-            if t == 1 and self.batch_size == 1:  # only one hypothesis at t==1
-                scores = scores[:1] / self.length_penalty(lengths[:1])
-            else:
-                # renormalize scores by length ...
-                scores = (scores + scores_accumulated * self.length_penalty(lengths - 1)) / self.length_penalty(lengths)
-                # ... but not for finished hyps.
-                # their predicted distribution is set to their accumulated scores at C.PAD_ID.
+            # (2) Replace finished rows with inf in all columns except column 0, which has the
+            # accumulated model score
+            if t > 1:
+                scores = scores + scores_accumulated
                 pad_dist[:, C.PAD_ID] = scores_accumulated
-                # this is equivalent to doing this in numpy:
-                #   pad_dist[finished, :] = np.inf
-                #   pad_dist[finished, C.PAD_ID] = scores_accumulated[finished]
                 scores = mx.nd.where(finished, pad_dist, scores)
 
-            # (3) get beam_size winning hypotheses for each sentence block separately
-            # TODO(fhieber): once mx.nd.topk is sped-up no numpy conversion necessary anymore.
+            # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
+            # far as the active beam size for each sentence. TODO(fhieber): once mx.nd.topk is
+            # sped-up no numpy conversion necessary anymore.
             scores = scores.asnumpy()  # convert to numpy once to minimize cross-device copying
-            for sent in range(self.batch_size):
-                rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
-                sliced_scores = scores if t == 1 and self.batch_size == 1 else scores[rows]
+            for sentno in range(self.batch_size):
+                rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
+                active_rows = slice(sentno * self.beam_size, sentno * self.beam_size + active_beam_size[sentno])
+                sliced_scores = scores[active_rows]
                 # TODO we could save some tiny amount of time here by not running smallest_k for a finished sent
                 (best_hyp_indices_np[rows], best_word_indices_np[rows]), \
-                    scores_accumulated_np[rows] = utils.smallest_k(sliced_scores, self.beam_size, t == 1)
+                    scores_accumulated_np[rows] = utils.smallest_k(sliced_scores, self.beam_size)
+
                 # offsetting since the returned smallest_k() indices were slice-relative
                 best_hyp_indices_np[rows] += rows.start
 
@@ -1043,27 +1043,66 @@ class Translator:
             if self.restrict_lexicon:
                 best_word_indices[:] = vocab_slice_ids.take(best_word_indices)
 
-            # (4) get hypotheses and their properties for beam_size winning hypotheses (ascending)
+            # (4) Normalize the scores of newly finished hypotheses
+            newly_finished = (best_word_indices == self.vocab_target[C.EOS_SYMBOL]).expand_dims(axis=1)
+            scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
+
+            # (5) Prune out low-probability hypotheses
+            for sentno in range(self.batch_size):
+
+                # Set the active beam size to full. It will get reduced if items are filtered.
+                active_beam_size[sentno] = self.beam_size
+
+                rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
+                if self.beam_prune > 0.0:
+                    ones_array = mx.nd.ones((self.beam_size,), ctx=self.context, dtype='int32')
+                    zeros_array = mx.nd.zeros((self.beam_size,), ctx=self.context, dtype='int32')
+                    inf_array = mx.nd.full((self.beam_size,1), val=np.inf, ctx=self.context, dtype='float32')
+                    if mx.nd.sum(finished[rows]) > 0:
+                        best_score = mx.nd.min(mx.nd.where(finished[rows].expand_dims(axis=1), scores_accumulated[rows], inf_array))
+
+                        over_thresh = mx.nd.cast(scores_accumulated[rows,0] - best_score > self.beam_prune, dtype='int32')
+                        to_remove = over_thresh
+                        scores_accumulated[rows] = mx.nd.where(to_remove, inf_array, scores_accumulated[rows])
+                        best_word_indices[rows] = mx.nd.where(to_remove, zeros_array, best_word_indices[rows])
+
+                        num_removing = int(mx.nd.sum(to_remove).asscalar())
+                        active_beam_size[sentno] = self.beam_size - num_removing
+
+                        # mark removed ones as finished so they won't block early exiting
+                        finished[rows] = finished[rows] + to_remove
+
+                # Resort the hypotheses
+                sorted_indices = mx.nd.argsort(scores_accumulated[rows,0])
+                best_hyp_indices[rows] = mx.nd.take(best_hyp_indices[rows], sorted_indices)
+                best_word_indices[rows] = mx.nd.take(best_word_indices[rows], sorted_indices)
+                scores_accumulated[rows] = mx.nd.take(scores_accumulated[rows,0], sorted_indices.expand_dims(axis=1))
+
+            # (6) get hypotheses and their properties for beam_size winning hypotheses (ascending)
             sequences = mx.nd.take(sequences, best_hyp_indices)
             lengths = mx.nd.take(lengths, best_hyp_indices)
             finished = mx.nd.take(finished, best_hyp_indices)
             attention_scores = mx.nd.take(attention_scores, best_hyp_indices)
             attentions = mx.nd.take(attentions, best_hyp_indices)
 
-            # (5) update best hypotheses, their attention lists and lengths (only for non-finished hyps)
+            # (7) update best hypotheses, their attention lists and lengths (only for non-finished hyps)
             # pylint: disable=unsupported-assignment-operation
             sequences[:, t] = best_word_indices
             attentions[:, t, :] = attention_scores
             lengths += mx.nd.cast(1 - mx.nd.expand_dims(finished, axis=1), dtype='float32')
 
-            # (6) determine which hypotheses in the beam are now finished
             finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
+
+            self.print_beam(sequences, scores_accumulated, finished, active_beam_size, t)
+
             if mx.nd.sum(finished).asscalar() == self.batch_size * self.beam_size:  # all finished
                 break
 
-            # (7) update models' state with winning hypotheses (ascending)
+            # (8) update models' state with winning hypotheses (ascending)
             for ms in model_states:
                 ms.sort_state(best_hyp_indices)
+
+        logger.info("Finished after %d / %d steps.", t, max_output_length)
 
         return sequences, attentions, scores_accumulated, lengths
 
@@ -1096,3 +1135,16 @@ class Translator:
             score = accumulated_scores[idx].asscalar()
             result.append(Translation(sequence, attention_matrix, score))
         return result
+
+    def print_beam(self, sequences, scores, finished, active, timestep):
+        print('BEAM AT TIME STEP', timestep)
+        for sentno in range(self.batch_size):
+            idx = sentno * self.beam_size
+            for i in range(self.beam_size):
+                word_ids = [int(x.asscalar()) for x in sequences[idx + i]]
+                hypothesis = ' '.join([self.vocab_target_inv[x] for x in word_ids if x != 0])
+                score = scores[idx + i].asscalar()
+                if i < active[sentno]:
+                    print(i, finished[idx + i].asscalar(), score, hypothesis)
+                else:
+                    print(i, finished[idx + i].asscalar(), score, '----------')

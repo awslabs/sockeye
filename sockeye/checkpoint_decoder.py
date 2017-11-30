@@ -129,6 +129,7 @@ class CheckpointDecoder:
                                           self.bucket_width_source,
                                           self.bucket_width_target,
                                           inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
+                                          0.0,
                                           models,
                                           vocab_source,
                                           vocab_target)
