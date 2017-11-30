@@ -998,6 +998,10 @@ class Translator:
         # (0) encode source sentence, returns a list
         model_states = self._encode(source, source_length)
 
+        # more data structures
+        zeros_array = mx.nd.zeros((self.beam_size,), ctx=self.context, dtype='int32')
+        inf_array = mx.nd.full((self.beam_size,1), val=np.inf, ctx=self.context, dtype='float32')
+
         # Records the size of the active beam for each sentence (which permits filtering)
         active_beam_size = [1] * self.batch_size
         for t in range(1, max_output_length):
@@ -1055,14 +1059,10 @@ class Translator:
 
                 rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
                 if self.beam_prune > 0.0:
-                    ones_array = mx.nd.ones((self.beam_size,), ctx=self.context, dtype='int32')
-                    zeros_array = mx.nd.zeros((self.beam_size,), ctx=self.context, dtype='int32')
-                    inf_array = mx.nd.full((self.beam_size,1), val=np.inf, ctx=self.context, dtype='float32')
                     if mx.nd.sum(finished[rows]) > 0:
                         best_score = mx.nd.min(mx.nd.where(finished[rows].expand_dims(axis=1), scores_accumulated[rows], inf_array))
 
-                        over_thresh = mx.nd.cast(scores_accumulated[rows,0] - best_score > self.beam_prune, dtype='int32')
-                        to_remove = over_thresh
+                        to_remove = mx.nd.cast(scores_accumulated[rows,0] - best_score > self.beam_prune, dtype='int32')
                         scores_accumulated[rows] = mx.nd.where(to_remove, inf_array, scores_accumulated[rows])
                         best_word_indices[rows] = mx.nd.where(to_remove, zeros_array, best_word_indices[rows])
 
@@ -1093,7 +1093,7 @@ class Translator:
 
             finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
 
-            self.print_beam(sequences, scores_accumulated, finished, active_beam_size, t)
+#            self.print_beam(sequences, scores_accumulated, finished, active_beam_size, t)
 
             if mx.nd.sum(finished).asscalar() == self.batch_size * self.beam_size:  # all finished
                 break
