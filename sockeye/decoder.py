@@ -260,7 +260,7 @@ class TransformerDecoder(Decoder):
         :param states: Arbitrary list of decoder states.
         :return: logit inputs, attention probabilities, next decoder states.
         """
-        source_encoded, source_encoded_lengths = states[:2]
+        source_encoded, source_encoded_lengths = states[:2]  # pylint: disable=unbalanced-tuple-unpacking
 
         symbolic_step = mx.sym.arange(start=step - 1, stop=step, step=1, name='symbolic_step')
         # (batch_size, num_embed)
