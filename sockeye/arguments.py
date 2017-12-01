@@ -852,8 +852,13 @@ def add_inference_args(params):
                                     'simultaneously. Default: %(default)s.')
     decode_params.add_argument('--chunk-size',
                                type=int_greater_or_equal(1),
-                               default=1,
-                               help='Size of the chunks to be read from input at once. Default: %(default)s.')
+                               default=None,
+                               help='Size of the chunks to be read from input at once. The chunks are sorted and then '
+                                    'split into batches. Therefore the larger the chunk size the better the grouping '
+                                    'of segments of similar length and therefore the higher the increase in throughput.'
+                                    ' Default: %d without batching '
+                                    'and %d * batch_size with batching.' % (C.CHUNK_SIZE_NO_BATCHING,
+                                                                            C.CHUNK_SIZE_PER_BATCH_SEGMENT))
     decode_params.add_argument('--ensemble-mode',
                                type=str,
                                default='linear',

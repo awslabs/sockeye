@@ -92,7 +92,7 @@ def main():
 
 
 def read_and_translate(translator: sockeye.inference.Translator, output_handler: sockeye.output_handler.OutputHandler,
-                       chunk_size: int, source: Optional[str] = None) -> None:
+                       chunk_size: Optional[int], source: Optional[str] = None) -> None:
     """
     Reads from either a file or stdin and translates each line, calling the output_handler with the result.
 
@@ -102,6 +102,20 @@ def read_and_translate(translator: sockeye.inference.Translator, output_handler:
     :param source: Path to file which will be translated line-by-line if included, if none use stdin.
     """
     source_data = sys.stdin if source is None else sockeye.data_io.smart_open(source)
+
+    batch_size = translator.batch_size
+    if chunk_size is None:
+        if translator.batch_size == 1:
+            # No batching, therefore there is not need to read segments in chunks.
+            chunk_size = C.CHUNK_SIZE_NO_BATCHING
+        else:
+            # Get a constant number of batches per call to Translator.translate.
+            chunk_size = C.CHUNK_SIZE_PER_BATCH_SEGMENT * translator.batch_size
+    else:
+        if chunk_size < translator.batch_size:
+            logger.warning("You specified a chunk size (%d) smaller than the batch size (%d). This will lead to "
+                           "a degregation of translation speed. Consider choosing a larger chunk size." % (chunk_size,
+                                                                                                           batch_size))
 
     logger.info("Translating...")
 
@@ -113,7 +127,7 @@ def read_and_translate(translator: sockeye.inference.Translator, output_handler:
 
     if total_lines != 0:
         logger.info("Processed %d lines in %d batches. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",
-                    total_lines, ceil(total_lines / translator.batch_size), total_time,
+                    total_lines, ceil(total_lines / batch_size), total_time,
                     total_time / total_lines, total_lines / total_time)
     else:
         logger.info("Processed 0 lines.")

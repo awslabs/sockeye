@@ -137,11 +137,15 @@ def test_get_training_data_iters():
     train_max_length = 30
     dev_line_count = 20
     dev_max_length = 30
+    test_line_count = 20
+    test_line_count_empty = 0
+    test_max_length = 30
     expected_mean = 1.1476392401276574
     expected_std = 0.2318455878853099
     batch_size = 5
     with tmp_digits_dataset("tmp_corpus",
-                            train_line_count, train_max_length, dev_line_count, dev_max_length) as data:
+                            train_line_count, train_max_length, dev_line_count, dev_max_length,
+                            test_line_count, test_line_count_empty, test_max_length) as data:
         # tmp common vocab
         vcb = vocab.build_from_paths([data['source'], data['target']])
 
