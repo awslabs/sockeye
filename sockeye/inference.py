@@ -966,7 +966,6 @@ class Translator:
 
         best_hyp_indices_np = np.empty((self.batch_size * self.beam_size,), dtype='int32')
         best_word_indices_np = np.empty((self.batch_size * self.beam_size,), dtype='int32')
-        scores_accumulated_np = np.empty((self.batch_size * self.beam_size,))
 
         # reset all padding distribution cells to np.inf
         self.pad_dist[:] = np.inf
@@ -1030,21 +1029,18 @@ class Translator:
                 scores = mx.nd.where(finished, pad_dist, scores)
 
             # (3) get beam_size winning hypotheses for each sentence block separately
-            # TODO(fhieber): once mx.nd.topk is sped-up no numpy conversion necessary anymore.
-            scores = scores.asnumpy()  # convert to numpy once to minimize cross-device copying
             for sent in range(self.batch_size):
                 rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
                 sliced_scores = scores if t == 1 and self.batch_size == 1 else scores[rows]
                 # TODO we could save some tiny amount of time here by not running smallest_k for a finished sent
                 (best_hyp_indices_np[rows], best_word_indices_np[rows]), \
-                    scores_accumulated_np[rows] = utils.smallest_k(sliced_scores, self.beam_size, t == 1)
+                    scores_accumulated[rows] = utils.smallest_k_mx(sliced_scores, self.beam_size, t == 1)
                 # offsetting since the returned smallest_k() indices were slice-relative
                 best_hyp_indices_np[rows] += rows.start
 
             # convert back to mx.ndarray again
             best_hyp_indices[:] = best_hyp_indices_np
             best_word_indices[:] = best_word_indices_np
-            scores_accumulated[:] = np.expand_dims(scores_accumulated_np, axis=1)
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
                 best_word_indices[:] = vocab_slice_ids.take(best_word_indices)

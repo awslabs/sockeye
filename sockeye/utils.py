@@ -253,7 +253,7 @@ def smallest_k_mx(matrix: mx.nd.NDArray, k: int,
     # pylint: disable=unbalanced-tuple-unpacking
     values, indices = mx.nd.topk(matrix, axis=None, k=k, ret_typ='both', is_ascend=True)
 
-    return np.unravel_index(indices.astype(np.int32).asnumpy(), matrix.shape), values
+    return np.unravel_index(indices.astype(np.int32).asnumpy(), matrix.shape), values.expand_dims(axis=1)
 
 
 def chunks(some_list: List, n: int) -> Iterable[List]:
