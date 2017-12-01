@@ -188,6 +188,7 @@ class TrainingModel(model.SockeyeModel):
             max_params_files_to_keep: int,
             metrics: List[AnyStr],
             initializer: mx.initializer.Initializer,
+            allow_missing_params: bool,
             max_updates: Optional[int],
             checkpoint_frequency: int,
             optimizer: str,
@@ -214,6 +215,7 @@ class TrainingModel(model.SockeyeModel):
         :param max_params_files_to_keep: Maximum number of params files to keep in the output folder (last n are kept).
         :param metrics: The metrics that will be evaluated during training.
         :param initializer: The parameter initializer.
+        :param allow_missing_params: Allow misssing parameters when initializing model parameters from file.
         :param max_updates: Optional maximum number of batches to process.
         :param checkpoint_frequency: Frequency of checkpointing in number of updates.
         :param optimizer: The MXNet optimizer that will update the parameters.
@@ -247,7 +249,7 @@ class TrainingModel(model.SockeyeModel):
         self.module.symbol.save(os.path.join(output_folder, C.SYMBOL_NAME))
 
         self.module.init_params(initializer=initializer, arg_params=self.params, aux_params=None,
-                                allow_missing=False, force_init=False)
+                                allow_missing=allow_missing_params, force_init=False)
         self._log_params()
 
         self.module.init_optimizer(kvstore=kvstore, optimizer=optimizer, optimizer_params=optimizer_params)
