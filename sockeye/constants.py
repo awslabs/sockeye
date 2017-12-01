@@ -170,7 +170,10 @@ MONITOR_STAT_FUNCS = {STAT_FUNC_DEFAULT: None,
                       STAT_FUNC_MAX: lambda x: mx.nd.max(x),
                       STAT_FUNC_MEAN: lambda x: mx.nd.mean(x)}
 
+# Inference constants
 DEFAULT_BEAM_SIZE = 5
+CHUNK_SIZE_NO_BATCHING = 1
+CHUNK_SIZE_PER_BATCH_SEGMENT = 500
 
 VERSION_NAME = "version"
 CONFIG_NAME = "config"
