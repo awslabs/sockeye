@@ -898,7 +898,7 @@ class ConvolutionalDecoder(Decoder):
                                                               num_embed=config.num_embed,
                                                               max_seq_len=config.max_seq_len_target,
                                                               fixed_pos_embed_scale_up_input=False,
-                                                              fixed_pos_embed_scale_down_positions=False,
+                                                              fixed_pos_embed_scale_down_positions=True,
                                                               prefix=C.TARGET_POSITIONAL_EMBEDDING_PREFIX)
 
         self.layers = [convolution.ConvolutionBlock(

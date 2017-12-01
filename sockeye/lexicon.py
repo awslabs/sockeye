@@ -269,12 +269,14 @@ def main():
     """
     Commandline interface for building top-k lexicons using during decoding.
     """
-    logger = setup_main_logger(__name__, console=True, file_logging=False)
-    log_sockeye_version(logger)
 
     params = argparse.ArgumentParser(description="Build a top-k lexicon for use during decoding.")
     arguments.add_lexicon_args(params)
+    arguments.add_logging_args(params)
     args = params.parse_args()
+
+    logger = setup_main_logger(__name__, console=not args.quiet, file_logging=False)
+    log_sockeye_version(logger)
 
     logger.info("Reading source and target vocab from \"%s\"", args.model)
     vocab_source = vocab.vocab_from_json_or_pickle(os.path.join(args.model, C.VOCAB_SRC_NAME))

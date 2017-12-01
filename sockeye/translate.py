@@ -45,7 +45,10 @@ def main():
 
     if args.output is not None:
         global logger
-        logger = setup_main_logger(__name__, file_logging=True, path="%s.%s" % (args.output, C.LOG_NAME))
+        logger = setup_main_logger(__name__,
+                                   console=not args.quiet,
+                                   file_logging=True,
+                                   path="%s.%s" % (args.output, C.LOG_NAME))
 
     if args.checkpoints is not None:
         check_condition(len(args.checkpoints) == len(args.models), "must provide checkpoints for each model")

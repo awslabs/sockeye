@@ -51,6 +51,8 @@ test_case_degenerate_stats = [((Statistics([0, 0, 0, 0], [4, 4, 2, 1]), 0, 1), 0
                               ((Statistics([0, 0, 0, 0], [0, 0, 0, 0]), 0, 0), 0.1, 0.0),
                               ((Statistics([0, 0, 0, 0], [0, 0, 0, 0]), 1, 5), 0.01, 0.0)]
 
+test_cases_uneven = [(["I am one sentence"], ["But I", "am two"]),
+                     (["And I", "am a number of sentences", "three actually"], ["Compared to just one reference"])]
 
 @pytest.mark.parametrize("hypotheses, references, expected_bleu", test_cases)
 def test_bleu(hypotheses, references, expected_bleu):
@@ -92,3 +94,9 @@ def test_degenerate_statistics(statistics, offset, expected_score):
     score = sacrebleu.compute_bleu(statistics[0].common, statistics[0].total, statistics[1], statistics[2],
                                    smooth='floor', smooth_floor=offset).score / 100
     assert score == expected_score
+
+
+@pytest.mark.parametrize("hypotheses, references", test_cases_uneven)
+def test_degenerate_uneven(hypotheses, references):
+    with pytest.raises(EOFError, match=r'.*stream.*'):
+        sacrebleu.raw_corpus_bleu(hypotheses, references)

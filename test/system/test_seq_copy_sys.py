@@ -27,7 +27,7 @@ _SEED_DEV = 17
 
 
 @pytest.mark.parametrize("name, train_params, translate_params, perplexity_thresh, bleu_thresh", [
-    ("Copy:lstm",
+    ("Copy:lstm:lstm",
      "--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
@@ -80,7 +80,7 @@ _SEED_DEV = 17
      "--beam-size 1",
      1.01,
      0.999),
-    ("Copy:cnn",
+    ("Copy:cnn:cnn",
      "--encoder cnn --decoder cnn "
      " --batch-size 16 --num-layers 3 --max-updates 3000"
      " --cnn-num-hidden 32 --cnn-positional-embedding-type fixed"
@@ -154,7 +154,7 @@ def test_seq_copy(name, train_params, translate_params, perplexity_thresh, bleu_
      " --transformer-feed-forward-num-hidden 64"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 1",
-     1.01,
+     1.02,
      0.99),
     ("Sort:cnn",
      "--encoder cnn --decoder cnn "
@@ -162,8 +162,8 @@ def test_seq_copy(name, train_params, translate_params, perplexity_thresh, bleu_
      " --cnn-num-hidden 32 --cnn-positional-embedding-type fixed"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 1",
-     1.10,
-     0.93)
+     1.05,
+     0.97)
 ])
 def test_seq_sort(name, train_params, translate_params, perplexity_thresh, bleu_thresh):
     """Task: sort short sequences of digits"""

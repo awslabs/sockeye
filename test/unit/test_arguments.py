@@ -20,6 +20,7 @@ import sockeye.constants as C
 
 from itertools import zip_longest
 
+
 @pytest.mark.parametrize("test_params, expected_params", [
     # mandatory parameters
     ('--source test_src --target test_tgt '
@@ -28,7 +29,7 @@ from itertools import zip_longest
      dict(source='test_src', target='test_tgt', limit=None,
           validation_source='test_validation_src', validation_target='test_validation_tgt',
           output='test_output', overwrite_output=False,
-          source_vocab=None, target_vocab=None, use_tensorboard=False, quiet=False,
+          source_vocab=None, target_vocab=None, use_tensorboard=False,
           monitor_pattern=None, monitor_stat_func='mx_default')),
 
     # all parameters
@@ -36,25 +37,32 @@ from itertools import zip_longest
      '--validation-source test_validation_src --validation-target test_validation_tgt '
      '--output test_output '
      '--source-vocab test_src_vocab --target-vocab test_tgt_vocab '
-     '--use-tensorboard --overwrite-output --quiet',
+     '--use-tensorboard --overwrite-output',
      dict(source='test_src', target='test_tgt', limit=10,
           validation_source='test_validation_src', validation_target='test_validation_tgt',
           output='test_output', overwrite_output=True,
-          source_vocab='test_src_vocab', target_vocab='test_tgt_vocab', use_tensorboard=True, quiet=True,
+          source_vocab='test_src_vocab', target_vocab='test_tgt_vocab', use_tensorboard=True,
           monitor_pattern=None, monitor_stat_func='mx_default')),
 
     # short parameters
     ('-s test_src -t test_tgt '
      '-vs test_validation_src -vt test_validation_tgt '
-     '-o test_output -q',
+     '-o test_output',
      dict(source='test_src', target='test_tgt', limit=None,
           validation_source='test_validation_src', validation_target='test_validation_tgt',
           output='test_output', overwrite_output=False,
-          source_vocab=None, target_vocab=None, use_tensorboard=False, quiet=True,
+          source_vocab=None, target_vocab=None, use_tensorboard=False,
           monitor_pattern=None, monitor_stat_func='mx_default'))
 ])
 def test_io_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_io_args)
+
+
+@pytest.mark.parametrize("test_params, expected_params", [
+    ('', dict(quiet=False)),
+])
+def test_logging_args(test_params, expected_params):
+    _test_args(test_params, expected_params, arguments.add_logging_args)
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
@@ -160,7 +168,9 @@ def test_model_parameters(test_params, expected_params):
               cnn_hidden_dropout=0.0,
               rnn_forget_bias=0.0,
               rnn_h2h_init=C.RNN_INIT_ORTHOGONAL,
-              monitor_bleu=0,
+              decode_and_evaluate=0,
+              decode_and_evaluate_use_cpu=False,
+              decode_and_evaluate_device_id=None,
               seed=13,
               keep_last_params=-1)),
 ])
@@ -230,7 +240,7 @@ def test_inference_args(test_params, expected_params):
      '--rnn-num-hidden 512 '
      '--rnn-attention-type dot '
      '--max-seq-len 60 '
-     '--monitor-bleu 500 '
+     '--decode-and-evaluate 500 '
      '--use-tensorboard '
      '--use-cpu '
      '-o wmt_mode',
@@ -243,7 +253,7 @@ def test_inference_args(test_params, expected_params):
          rnn_num_hidden=512,
          rnn_attention_type='dot',
          max_seq_len=(60, 60),
-         monitor_bleu=500,
+         decode_and_evaluate=500,
          use_tensorboard=True,
          use_cpu=True,
          # Arguments mentioned in the text, should be renamed in the tutorial if they change:
@@ -256,7 +266,7 @@ def test_inference_args(test_params, expected_params):
       "batch_size",
       "learning_rate_schedule",
       "optimized_metric",
-      "monitor_bleu",
+      "decode_and_evaluate",
       "seed"])
 ])
 def test_tutorial_train_args(test_params, expected_params, expected_params_present):

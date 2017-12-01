@@ -23,6 +23,7 @@ from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
 from . import constants as C
 from . import data_io
 
+
 def regular_file() -> Callable:
     """
     Returns a method that can be used in argument parsing to check the argument is a regular file or a symbolic link,
@@ -226,6 +227,14 @@ def add_lexicon_args(params):
         help="Number of target translations to keep per source. Default: %(default)s.")
 
 
+def add_logging_args(params):
+    logging_params = params.add_argument_group("Logging")
+    logging_params.add_argument('--quiet', '-q',
+                                default=False,
+                                action="store_true",
+                                help='Suppress console logging.')
+
+
 def add_io_args(params):
     data_params = params.add_argument_group("Data & I/O")
 
@@ -282,11 +291,6 @@ def add_io_args(params):
                              choices=list(C.MONITOR_STAT_FUNCS.keys()),
                              help="Statistics function to run on monitored outputs/weights/gradients. "
                                   "Default: %(default)s.")
-
-    data_params.add_argument('--quiet', '-q',
-                             default=False,
-                             action="store_true",
-                             help='Suppress console logging.')
 
 
 def add_device_args(params):
@@ -768,11 +772,21 @@ def add_training_args(params):
                               choices=[C.RNN_INIT_ORTHOGONAL, C.RNN_INIT_ORTHOGONAL_STACKED, C.RNN_INIT_DEFAULT],
                               help="Initialization method for RNN parameters. Default: %(default)s.")
 
-    train_params.add_argument('--monitor-bleu',
+    train_params.add_argument('--decode-and-evaluate',
                               default=0,
                               type=int,
-                              help='x>0: sample and decode x sentences from validation data and monitor BLEU score. '
-                                   'x==-1: use full validation data. Default: %(default)s.')
+                              help='x>0: decode x sampled sentences from validation data and '
+                                   'compute evaluation metrics. x==-1: use full validation data. Default: %(default)s.')
+    train_params.add_argument('--decode-and-evaluate-use-cpu',
+                              action='store_true',
+                              help='Use CPU for decoding validation data. Overrides --decode-and-evaluate-device-id. '
+                                   'Default: %(default)s.')
+    train_params.add_argument('--decode-and-evaluate-device-id',
+                              default=None,
+                              type=int,
+                              help='Separate device for decoding validation data. '
+                                   'Use a negative number to automatically acquire a GPU. '
+                                   'Use a positive number to acquire a specific GPU. Default: %(default)s.')
 
     train_params.add_argument('--seed',
                               type=int,
@@ -790,11 +804,13 @@ def add_train_cli_args(params):
     add_model_parameters(params)
     add_training_args(params)
     add_device_args(params)
+    add_logging_args(params)
 
 
 def add_translate_cli_args(params):
     add_inference_args(params)
     add_device_args(params)
+    add_logging_args(params)
 
 
 def add_inference_args(params):
@@ -896,9 +912,6 @@ def add_evaluate_args(params):
                              type=file_or_stdin(),
                              default=sys.stdin,
                              help="File with hypotheses. If none will read from stdin. Default: %(default)s.")
-    eval_params.add_argument('--quiet', '-q',
-                             action="store_true",
-                             help="Do not print logging information.")
     eval_params.add_argument('--metrics',
                              nargs='+',
                              default=[C.BLEU, C.CHRF],
