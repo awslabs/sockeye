@@ -260,6 +260,7 @@ class TransformerDecoder(Decoder):
         :param states: Arbitrary list of decoder states.
         :return: logit inputs, attention probabilities, next decoder states.
         """
+        # for step > 1, states contains source_encoded, source_encoded_lengths, and a cache tensor
         source_encoded, source_encoded_lengths = states[:2]  # pylint: disable=unbalanced-tuple-unpacking
 
         symbolic_step = mx.sym.arange(start=step - 1, stop=step, step=1, name='symbolic_step')
@@ -282,6 +283,7 @@ class TransformerDecoder(Decoder):
         target_bias = transformer.get_autoregressive_bias(step, name="%sbias" % self.prefix)
         target_bias = mx.sym.slice_axis(target_bias, axis=1, begin=-1, end=step)
 
+        # retrieve precomputed self-attention keys & values for each layer from states.
         layer_caches = self._get_layer_caches_from_states(list(states))
         cache = []  # type: List[mx.sym.Symbol]
         for layer, layer_cache in zip(self.layers, layer_caches):
@@ -290,6 +292,8 @@ class TransformerDecoder(Decoder):
                            source=source_encoded,
                            source_bias=source_bias,
                            cache=layer_cache)
+            # store updated keys and values in the cache.
+            # (layer.__call__() has the side-effect of updating contents of layer_cache)
             cache += [layer_cache['k'], layer_cache['v']]
         cache = mx.sym.concat(*cache, dim=1, name='new_cache')
 
