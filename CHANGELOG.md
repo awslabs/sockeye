@@ -10,14 +10,31 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.15.2]
+### Added
+ - New CLI `sockeye.prepare_data` for preprocessing the training data only once before training,
+ potentially splitting large datasets into shards. At training time only one shard is loaded into memory at a time,
+ limiting the maximum memory usage.
+ 
+### Changed
+ - Instead of using the ```--source``` and ```--target``` arguments ```sockeye.train``` now accepts a
+ ```--prepared-data``` argument pointing to the folder containing the preprocessed and sharded data. Using the raw
+ training data is still possible and now consumes less memory.
+
+
 ## [1.15.1]
 ### Added
  - A tool that initializes embedding weights with pretrained word representations, `sockeye.init_embedding`.
 
 ## [1.15.0]
 ### Added
-- Added support for Swish-1 (SiLU) activation to transformer models ([Ramachandran et al. 2017: Searching for Activation Functions](https://arxiv.org/pdf/1710.05941.pdf), [Elfwing et al. 2017: Sigmoid-Weighted Linear Units for Neural Network Function Approximation in Reinforcement Learning](https://arxiv.org/pdf/1702.03118.pdf)).  Use `--transformer-activation-type swish1`.
-- Added support for GELU activation to transformer models ([Hendrycks and Gimpel 2016: Bridging Nonlinearities and Stochastic Regularizers with Gaussian Error Linear Units](https://arxiv.org/pdf/1606.08415.pdf).  Use `--transformer-activation-type gelu`.
+- Added support for Swish-1 (SiLU) activation to transformer models
+([Ramachandran et al. 2017: Searching for Activation Functions](https://arxiv.org/pdf/1710.05941.pdf),
+[Elfwing et al. 2017: Sigmoid-Weighted Linear Units for Neural Network Function Approximation
+in Reinforcement Learning](https://arxiv.org/pdf/1702.03118.pdf)).  Use `--transformer-activation-type swish1`.
+- Added support for GELU activation to transformer models ([Hendrycks and Gimpel 2016: Bridging Nonlinearities and
+Stochastic Regularizers with Gaussian Error Linear Units](https://arxiv.org/pdf/1606.08415.pdf).
+Use `--transformer-activation-type gelu`.
 
 ## [1.14.3]
 ### Changed

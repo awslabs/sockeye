@@ -14,6 +14,7 @@
 import os
 import tempfile
 
+import math
 import mxnet as mx
 import numpy as np
 import pytest
@@ -32,6 +33,7 @@ def test_chunks(some_list, expected):
     chunk_size = 3
     chunked_list = list(utils.chunks(some_list, chunk_size))
     assert chunked_list == expected
+
 
 def test_get_alignments():
     attention_matrix = np.asarray([[0.1, 0.4, 0.5],
@@ -192,6 +194,44 @@ def test_check_version_checks_major():
     with pytest.raises(utils.SockeyeError) as e:
         utils.check_version(version)
     assert "Given major version (%s) does not match major code version (%s)" % (version, __version__) == str(e.value)
+
+
+@pytest.mark.parametrize("samples,expected_mean, expected_variance",
+                         [
+                             ([1, 2], 1.5, 0.25),
+                             ([4., 100., 12., -3, 1000, 1., -200], 130.57142857142858, 132975.38775510204),
+                         ])
+def test_online_mean_and_variance(samples, expected_mean, expected_variance):
+    mean_and_variance = utils.OnlineMeanAndVariance()
+    for sample in samples:
+        mean_and_variance.update(sample)
+
+    assert np.isclose(mean_and_variance.mean, expected_mean)
+    assert np.isclose(mean_and_variance.variance, expected_variance)
+
+
+@pytest.mark.parametrize("samples,expected_mean",
+                         [
+                             ([], 0.),
+                             ([5.], 5.),
+                         ])
+def test_online_mean_and_variance_nan(samples, expected_mean):
+    mean_and_variance = utils.OnlineMeanAndVariance()
+    for sample in samples:
+        mean_and_variance.update(sample)
+
+    assert np.isclose(mean_and_variance.mean, expected_mean)
+    assert math.isnan(mean_and_variance.variance)
+
+
+get_tokens_tests = [("this is a line  \n", ["this", "is", "a", "line"]),
+                    (" a  \tb \r \n", ["a", "b"])]
+
+
+@pytest.mark.parametrize("line, expected_tokens", get_tokens_tests)
+def test_get_tokens(line, expected_tokens):
+    tokens = list(utils.get_tokens(line))
+    assert tokens == expected_tokens
 
 
 def test_average_arrays():

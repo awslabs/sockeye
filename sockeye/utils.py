@@ -26,6 +26,7 @@ import subprocess
 import sys
 import time
 import itertools
+import gzip
 from contextlib import contextmanager, ExitStack
 from typing import Mapping, NamedTuple, Any, List, Iterator, Iterable, Set, TextIO, Tuple, Dict, Optional
 
@@ -95,15 +96,15 @@ def log_basic_info(args) -> None:
     logger.info("Arguments: %s", args)
 
 
-def seedRNGs(args: argparse.Namespace) -> None:
+def seedRNGs(seed: int) -> None:
     """
     Seed the random number generators (Python, Numpy and MXNet)
 
-    :param args: Arguments as returned by argparse.
+    :param seed: The random seed.
     """
-    np.random.seed(args.seed)
-    random.seed(args.seed)
-    mx.random.seed(args.seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    mx.random.seed(seed)
 
 
 def check_condition(condition: bool, error_message: str):
@@ -214,6 +215,36 @@ class Accuracy(mx.metric.EvalMetric):
             self.num_inst += n
 
 
+class OnlineMeanAndVariance:
+    def __init__(self):
+        pass
+        self._count = 0
+        self._mean = 0.
+        self._M2 = 0.
+
+    def update(self, value):
+        self._count += 1
+        delta = value - self._mean
+        self._mean += delta / self._count
+        delta2 = value - self._mean
+        self._M2 += delta * delta2
+
+    @property
+    def count(self):
+        return self._count
+
+    @property
+    def mean(self):
+        return self._mean
+
+    @property
+    def variance(self):
+        if self._count < 2:
+            return float('nan')
+        else:
+            return self._M2 / self._count
+
+
 def smallest_k(matrix: np.ndarray, k: int,
                only_first_row: bool = False) -> Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]:
     """
@@ -260,6 +291,39 @@ def chunks(some_list: List, n: int) -> Iterable[List]:
     """Yield successive n-sized chunks from l."""
     for i in range(0, len(some_list), n):
         yield some_list[i:i + n]
+
+
+def get_tokens(line: str) -> Iterator[str]:
+    """
+    Yields tokens from input string.
+
+    :param line: Input string.
+    :return: Iterator over tokens.
+    """
+    for token in line.rstrip().split():
+        if len(token) > 0:
+            yield token
+
+
+def smart_open(filename: str, mode: str = "rt", ftype: str = "auto", errors: str = 'replace'):
+    """
+    Returns a file descriptor for filename with UTF-8 encoding.
+    If mode is "rt", file is opened read-only.
+    If ftype is "auto", uses gzip iff filename endswith .gz.
+    If ftype is {"gzip","gz"}, uses gzip.
+
+    Note: encoding error handling defaults to "replace"
+
+    :param filename: The filename to open.
+    :param mode: Reader mode.
+    :param ftype: File type. If 'auto' checks filename suffix for gz to try gzip.open
+    :param errors: Encoding error handling during reading. Defaults to 'replace'
+    :return: File descriptor
+    """
+    if ftype == 'gzip' or ftype == 'gz' or (ftype == 'auto' and filename.endswith(".gz")):
+        return gzip.open(filename, mode=mode, encoding='utf-8', errors=errors)
+    else:
+        return open(filename, mode=mode, encoding='utf-8', errors=errors)
 
 
 def plot_attention(attention_matrix: np.ndarray, source_tokens: List[str], target_tokens: List[str], filename: str):

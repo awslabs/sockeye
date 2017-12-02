@@ -60,7 +60,8 @@ def test_translate_by_file(mock_file, mock_translator, mock_output_handler):
 def test_translate_by_stdin_chunk2(mock_translator, mock_output_handler):
     mock_translator.translate.return_value = ['', '']
     mock_translator.batch_size = 1
-    sockeye.translate.read_and_translate(translator=mock_translator, output_handler=mock_output_handler,
+    sockeye.translate.read_and_translate(translator=mock_translator,
+                                         output_handler=mock_output_handler,
                                          chunk_size=2)
 
     # Ensure that our translator has the correct input passed to it.

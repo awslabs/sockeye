@@ -322,16 +322,16 @@ class InferenceModel(model.SockeyeModel):
     @property
     def training_max_seq_len_source(self) -> int:
         """ The maximum sequence length on the source side during training. """
-        if self.config.config_data.max_observed_source_seq_len is not None:
-            return self.config.config_data.max_observed_source_seq_len
+        if self.config.config_data.data_statistics.max_observed_len_source is not None:
+            return self.config.config_data.data_statistics.max_observed_len_source
         else:
             return self.config.max_seq_len_source
 
     @property
     def training_max_seq_len_target(self) -> int:
         """ The maximum sequence length on the target side during training. """
-        if self.config.config_data.max_observed_target_seq_len is not None:
-            return self.config.config_data.max_observed_target_seq_len
+        if self.config.config_data.data_statistics.max_observed_len_target is not None:
+            return self.config.config_data.data_statistics.max_observed_len_target
         else:
             return self.config.max_seq_len_target
 
@@ -347,11 +347,11 @@ class InferenceModel(model.SockeyeModel):
 
     @property
     def length_ratio_mean(self) -> float:
-        return self.config.config_data.length_ratio_mean
+        return self.config.config_data.data_statistics.length_ratio_mean
 
     @property
     def length_ratio_std(self) -> float:
-        return self.config.config_data.length_ratio_std
+        return self.config.config_data.data_statistics.length_ratio_std
 
 
 def load_models(context: mx.context.Context,
@@ -397,10 +397,8 @@ def load_models(context: mx.context.Context,
                                cache_output_layer_w_b=cache_output_layer_w_b)
         models.append(model)
 
-    utils.check_condition(all(set(vocab.items()) == set(source_vocabs[0].items()) for vocab in source_vocabs),
-                          "Source vocabulary ids do not match")
-    utils.check_condition(all(set(vocab.items()) == set(target_vocabs[0].items()) for vocab in target_vocabs),
-                          "Target vocabulary ids do not match")
+    utils.check_condition(vocab.are_identical(*source_vocabs), "Source vocabulary ids do not match")
+    utils.check_condition(vocab.are_identical(*target_vocabs), "Target vocabulary ids do not match")
 
     # set a common max_output length for all models.
     max_input_len, get_max_output_length = get_max_input_output_length(models,
@@ -465,7 +463,15 @@ def get_max_input_output_length(models: List[InferenceModel], num_stds: int,
             max_input_len = training_max_seq_len_source
 
     def get_max_output_length(input_length: int):
-        return int(np.ceil(factor * input_length))
+        """
+        Returns the maximum output length for inference given the input length.
+        Explicitly includes space for BOS and EOS sentence symbols in the target sequence, because we assume
+        that the mean length ratio computed on the training data do not include these special symbols.
+        (see data_io.analyze_sequence_lengths)
+        """
+        space_for_bos = 1
+        space_for_eos = 1
+        return int(np.ceil(factor * input_length)) + space_for_bos + space_for_eos
 
     return max_input_len, get_max_output_length
 
