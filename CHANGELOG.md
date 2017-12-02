@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.15]
+### Fixed
+- Fixed a bug during beam search stopping. Instead of stopping when all the `beam_size` hypothesis were finished, the model was continuing to decode due to losing track of when they had all finished. Now the models translate faster and quality also improved.
+
 ## [1.14.1]
 ### Changed
  - Sorting sentences during decoding before splitting them into batches.
