@@ -118,7 +118,7 @@ args = dict(
             'sockeye-vocab = sockeye.vocab:main',
             'sockeye-lexicon = sockeye.lexicon:main',
             'sockeye-extract = sockeye.extract_parameters:main',
-			'sockeye-init-embed = sockeye.init_embedding:main'
+            'sockeye-init-embed = sockeye.init_embedding:main'
         ],
     },
 
