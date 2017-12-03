@@ -14,6 +14,7 @@ sockeye/embeddings.py
 sockeye/encoder.py
 sockeye/extract_parameters.py
 sockeye/inference.py
+sockeye/init_embedding.py
 sockeye/initializer.py
 sockeye/layers.py
 sockeye/lexicon.py
