@@ -340,7 +340,9 @@ def add_model_parameters(params):
                               help='Initialize model parameters from file. Overrides random initializations.')
     model_params.add_argument('--allow-missing-params',
                               action="store_true",
-                              help="Allow misssing parameters when initializing model parameters from file.")
+                              default=False,
+                              help="Allow misssing parameters when initializing model parameters from file. "
+                                   "Default: %(default)s.")
 
     add_vocab_args(model_params)
 
