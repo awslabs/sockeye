@@ -387,12 +387,14 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
                  cache: Optional[Dict[str, Optional[mx.sym.Symbol]]] = None) -> mx.sym.Symbol:
         """
         Computes multi-head attention on a set of inputs, serving as queries, keys, and values.
-        May use an auto-regressive bias and a cache of previously computed inputs.
+        If sequence lengths are provided, they will be used to mask the attention scores.
+        A bias mask may also be used to mask the attention scores.
+        May also use a cache of previously computed inputs.
         Returns a symbol of shape (batch, max_length, output_depth).
 
-        :param inputs: Symbol of shape (batch, max_length, input_depth).
-        :param input_lengths: Optional lengths of inputs. Symbol of shape (batch, 1).
-        :param bias: Optional 3d bias tensor.
+        :param inputs: Input Data. Shape: (batch, max_length, input_depth).
+        :param input_lengths: Optional lengths of inputs to mask attention scores. Shape: (batch, 1).
+        :param bias: Optional 3d bias tensor to mask attention scores.
         :param cache: Optional dictionary of previously computed keys and values.
         :return: Symbol of shape (batch, max_length, output_depth).
         """
@@ -446,15 +448,18 @@ class MultiHeadAttention(MultiHeadAttentionBase):
     def __call__(self,
                  queries: mx.sym.Symbol,
                  memory: mx.sym.Symbol,
-                 bias: mx.sym.Symbol) -> mx.sym.Symbol:
+                 memory_lengths: Optional[mx.sym.Symbol] = None,
+                 bias: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
         """
         Computes multi-head attention for queries given a memory tensor.
-        Does not use an auto-regressive bias.
+        If sequence lengths are provided, they will be used to mask the attention scores.
+        A bias mask may also be used to mask the attention scores.
         Returns a symbol of shape (batch, max_length, output_depth).
 
-        :param queries: Symbol of shape (batch, query_max_length, input_depth).
-        :param memory: Symbol of shape (batch, memory_max_length, input_depth).
-        :param bias: 3d bias. TODO Optional
+        :param queries: Query tensor. Shape: (batch, query_max_length, input_depth).
+        :param memory: Memory data to attend to. Shape: (batch, memory_max_length, input_depth).
+        :param memory_lengths: Optional lengths of memory to mask attention scores. Shape: (batch, 1).
+        :param bias: Optional 3d bias tensor to mask attention scores.
         :return: Symbol of shape (batch, query_seq_len, output_depth).
         """
         # (batch, memory_max_length, depth * 2)

@@ -163,7 +163,6 @@ class TransformerDecoderBlock:
 
         # self-attention
         target_self_att = self.self_attention(inputs=self.pre_self_attention(target, None),
-                                              input_lengths=None,
                                               bias=target_bias,
                                               cache=cache)
         target = self.post_self_attention(target_self_att, target)
