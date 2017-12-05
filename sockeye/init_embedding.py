@@ -53,6 +53,7 @@ Optional arguments:
 
 import argparse
 import sys
+from typing import Dict
 
 import numpy as np
 import mxnet as mx
@@ -63,6 +64,28 @@ from . import utils
 from . import vocab
 
 logger = setup_main_logger(__name__, console=True, file_logging=False)
+
+def init_embedding(embed: np.ndarray,
+                   vocab_in: Dict[str, int],
+                   vocab_out: Dict[str, int],
+                   initializer: mx.initializer.Initializer=mx.init.Constant(value=0.0)) -> mx.nd.NDArray:
+    """
+    Initialize embedding weight by existing word representations given input and output vocabularies.
+
+    :param embed: Input embedding weight.
+    :param vocab_in: Input vocabulary.
+    :param vocab_out: Output vocabulary.
+    :param initializer: MXNet initializer.
+    :return: Initialized output embedding weight.
+    """
+    embed_init = mx.nd.empty((len(vocab_out), embed.shape[1]), dtype='float32')
+    embed_desc = mx.init.InitDesc("embed_weight")
+    initializer(embed_desc, embed_init)
+    for token in vocab_out:
+        if token in vocab_in:
+            embed_init[vocab_out[token]] = embed[vocab_in[token]]
+    return embed_init
+
 
 def main():
     """
@@ -82,7 +105,7 @@ def main():
        len(args.embeddings) != len(args.vocabularies_out) or \
        len(args.embeddings) != len(args.names):
            logger.error("Exactly the same number of 'input embedding weights', 'input vocabularies', "
-                         "'output vocabularies' and 'Sockeye parameter names' should be provided.")
+                        "'output vocabularies' and 'Sockeye parameter names' should be provided.")
            sys.exit(1)
 
     params = {} # type: Dict[str, mx.nd.NDArray]
@@ -94,11 +117,8 @@ def main():
         vocab_in = vocab.vocab_from_json(vocab_in_file, encoding=args.encoding)
         vocab_out = vocab.vocab_from_json(vocab_out_file)
         logger.info('Initializing parameter: %s', name)
-        embed_init = np.random.normal(scale=np.std(embed), size=(len(vocab_out), embed.shape[1]))
-        for token in vocab_out:
-            if token in vocab_in:
-                embed_init[vocab_out[token]] = embed[vocab_in[token]]
-        params[name] = mx.nd.array(embed_init, dtype='float32')
+        initializer = mx.init.Normal(sigma=np.std(embed))
+        params[name] = init_embedding(embed, vocab_in, vocab_out, initializer)
 
     logger.info('Saving initialized parameters to %s', args.file)
     utils.save_params(params, args.file)

@@ -12,7 +12,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.14.2]
 ### Added
- - A tool that initializes embedding weights with pretrained word representations.
+ - A tool that initializes embedding weights with pretrained word representations, `sockeye.init_embedding`.
 
 ## [1.14.1]
 ### Changed

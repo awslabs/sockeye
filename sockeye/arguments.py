@@ -955,6 +955,6 @@ def add_init_embedding_args(params):
     params.add_argument('--names', '-n', required=True, nargs='+',
                         help='List of Sockeye parameter names for embedding weights.')
     params.add_argument('--file', '-f', required=True,
-                        help='File to write initialized parameters.')
+                        help='File to write initialized parameters to.')
     params.add_argument('--encoding', '-c', type=str, default=C.VOCAB_ENCODING,
                         help='Open input vocabularies with specified encoding. Default: %(default)s.')
