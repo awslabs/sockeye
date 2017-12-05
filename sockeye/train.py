@@ -588,7 +588,7 @@ def create_training_model(model_config: model.ModelConfig,
     return training_model
 
 
-def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict, str]:
+def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict, str, str, float]:
     """
     Defines the optimizer to use and its parameters.
 
@@ -601,9 +601,17 @@ def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict, str]:
                         "learning_rate": args.initial_learning_rate}
     if lr_scheduler_instance is not None:
         optimizer_params["lr_scheduler"] = lr_scheduler_instance
-    clip_gradient = none_if_negative(args.clip_gradient)
-    if clip_gradient is not None:
-        optimizer_params["clip_gradient"] = clip_gradient
+    gradient_clipping_threshold = none_if_negative(args.gradient_clipping_threshold)
+    if gradient_clipping_threshold is None:
+        logger.info("Gradient clipping threshold set to negative value. Will not perform gradient clipping.")
+        gradient_clipping_type = C.GRADIENT_CLIPPING_TYPE_NONE
+    else:
+        gradient_clipping_type = args.gradient_clipping_type
+
+    # Note: for 'abs' we use the implementation inside of MXNet's optimizer and 'norm_*' we implement ourselves
+    # inside the TrainingModel.
+    if gradient_clipping_threshold is not None and gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_ABS:
+        optimizer_params["clip_gradient"] = gradient_clipping_threshold
     if args.momentum is not None:
         optimizer_params["momentum"] = args.momentum
     if args.loss_normalization_type == C.LOSS_NORM_VALID:
@@ -619,7 +627,7 @@ def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict, str]:
     logger.info("Optimizer Parameters: %s", optimizer_params)
     logger.info("kvstore: %s", args.kvstore)
 
-    return optimizer, optimizer_params, args.kvstore
+    return optimizer, optimizer_params, args.kvstore, gradient_clipping_type, gradient_clipping_threshold
 
 
 def main():
@@ -665,7 +673,7 @@ def main():
             embed_init_sigma=vocab_source_size ** -0.5,  # TODO
             rnn_init_type=args.rnn_h2h_init)
 
-        optimizer, optimizer_params, kvstore = define_optimizer(args, lr_scheduler_instance)
+        optimizer, optimizer_params, kvstore, gradient_clipping_type, gradient_clipping_threshold = define_optimizer(args, lr_scheduler_instance)
 
         # Handle options that override training settings
         max_updates = args.max_updates
@@ -696,6 +704,8 @@ def main():
                            checkpoint_frequency=args.checkpoint_frequency,
                            optimizer=optimizer, optimizer_params=optimizer_params,
                            optimized_metric=args.optimized_metric,
+                           gradient_clipping_type=gradient_clipping_type,
+                           clip_gradient_threshold=gradient_clipping_threshold,
                            kvstore=kvstore,
                            max_num_not_improved=max_num_checkpoint_not_improved,
                            min_num_epochs=min_num_epochs,

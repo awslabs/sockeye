@@ -62,7 +62,6 @@ class CheckpointDecoder:
                  max_input_len: Optional[int] = None,
                  beam_size: int = C.DEFAULT_BEAM_SIZE,
                  bucket_width_source: int = 10,
-                 bucket_width_target: int = 10,
                  length_penalty_alpha: float = 1.0,
                  length_penalty_beta: float = 0.0,
                  softmax_temperature: Optional[float] = None,
@@ -76,7 +75,6 @@ class CheckpointDecoder:
         self.ensemble_mode = ensemble_mode
         self.beam_size = beam_size
         self.bucket_width_source = bucket_width_source
-        self.bucket_width_target = bucket_width_target
         self.length_penalty_alpha = length_penalty_alpha
         self.length_penalty_beta = length_penalty_beta
         self.softmax_temperature = softmax_temperature
@@ -127,7 +125,6 @@ class CheckpointDecoder:
         translator = inference.Translator(self.context,
                                           self.ensemble_mode,
                                           self.bucket_width_source,
-                                          self.bucket_width_target,
                                           inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
                                           models,
                                           vocab_source,

@@ -10,16 +10,27 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [1.14.2]
+## [1.14.4]
 ### Added
  - A tool that initializes embedding weights with pretrained word representations, `sockeye.init_embedding`.
+
+## [1.14.3]
+### Changed
+- Fast decoding for transformer models. Caches keys and values of self-attention before softmax.
+Changed decoding flag `--bucket-width` to apply only to source length.
+
+## [1.14.2]
+### Added
+ - Gradient norm clipping (`--gradient-clipping-type`) and monitoring.
+### Changed
+ - Changed `--clip-gradient` to `--gradient-clipping-threshold` for consistency.
 
 ## [1.14.1]
 ### Changed
  - Sorting sentences during decoding before splitting them into batches.
  - Default chunk size: The default chunk size when batching is enabled is now batch_size * 500 during decoding to avoid
   users accidentally forgetting to increase the chunk size.
-  
+
 ## [1.14.0]
 ### Changed
  - Downscaled fixed positional embeddings for CNN models.
