@@ -721,11 +721,15 @@ def add_training_args(params):
                               type=float,
                               default=None,
                               help='Momentum constant. Default: %(default)s.')
-    train_params.add_argument('--clip-gradient',
+    train_params.add_argument('--gradient-clipping-threshold',
                               type=float,
                               default=1.0,
                               help='Clip absolute gradients values greater than this value. '
                                    'Set to negative to disable. Default: %(default)s.')
+    train_params.add_argument('--gradient-clipping-type',
+                              choices=C.GRADIENT_CLIPPING_TYPES,
+                              default=C.GRADIENT_CLIPPING_TYPE_ABS,
+                              help='The type of gradient clipping. Default: %(default)s.')
 
     train_params.add_argument('--learning-rate-scheduler-type',
                               default=C.LR_SCHEDULER_PLATEAU_REDUCE,
@@ -853,17 +857,22 @@ def add_inference_args(params):
                                     'simultaneously. Default: %(default)s.')
     decode_params.add_argument('--chunk-size',
                                type=int_greater_or_equal(1),
-                               default=1,
-                               help='Size of the chunks to be read from input at once. Default: %(default)s.')
+                               default=None,
+                               help='Size of the chunks to be read from input at once. The chunks are sorted and then '
+                                    'split into batches. Therefore the larger the chunk size the better the grouping '
+                                    'of segments of similar length and therefore the higher the increase in throughput.'
+                                    ' Default: %d without batching '
+                                    'and %d * batch_size with batching.' % (C.CHUNK_SIZE_NO_BATCHING,
+                                                                            C.CHUNK_SIZE_PER_BATCH_SEGMENT))
     decode_params.add_argument('--ensemble-mode',
                                type=str,
                                default='linear',
                                choices=['linear', 'log_linear'],
                                help='Ensemble mode. Default: %(default)s.')
     decode_params.add_argument('--bucket-width',
-                               type=multiple_values(2, greater_or_equal=0, data_type=int),
-                               default=(10, 2),
-                               help='Bucket width for decoder steps. 0 means no bucketing. Default: %(default)s.')
+                               type=int_greater_or_equal(0),
+                               default=10,
+                               help='Bucket width for encoder steps. 0 means no bucketing. Default: %(default)s.')
     decode_params.add_argument('--max-input-len', '-n',
                                type=int,
                                default=None,

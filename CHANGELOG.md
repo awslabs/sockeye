@@ -15,6 +15,23 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 - Added support for Swish-1 (SiLU) activation to transformer models ([Ramachandran et al. 2017: Searching for Activation Functions](https://arxiv.org/pdf/1710.05941.pdf), [Elfwing et al. 2017: Sigmoid-Weighted Linear Units for Neural Network Function Approximation in Reinforcement Learning](https://arxiv.org/pdf/1702.03118.pdf)).  Use `--transformer-activation-type swish1`.
 - Added support for GELU activation to transformer models ([Hendrycks and Gimpel 2016: Bridging Nonlinearities and Stochastic Regularizers with Gaussian Error Linear Units](https://arxiv.org/pdf/1606.08415.pdf).  Use `--transformer-activation-type gelu`.
 
+## [1.14.3]
+### Changed
+- Fast decoding for transformer models. Caches keys and values of self-attention before softmax.
+Changed decoding flag `--bucket-width` to apply only to source length.
+
+## [1.14.2]
+### Added
+ - Gradient norm clipping (`--gradient-clipping-type`) and monitoring.
+### Changed
+ - Changed `--clip-gradient` to `--gradient-clipping-threshold` for consistency.
+
+## [1.14.1]
+### Changed
+ - Sorting sentences during decoding before splitting them into batches.
+ - Default chunk size: The default chunk size when batching is enabled is now batch_size * 500 during decoding to avoid
+  users accidentally forgetting to increase the chunk size.
+
 ## [1.14.0]
 ### Changed
  - Downscaled fixed positional embeddings for CNN models.

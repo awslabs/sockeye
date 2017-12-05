@@ -120,18 +120,18 @@ class TrainingMonitor(object):
 
     def checkpoint_callback(self,
                             checkpoint: int,
-                            train_metric: mx.metric.EvalMetric,
+                            train_metric: Dict[str, float],
                             memory_data: Optional[Dict[int, Tuple[int, int]]] = None):
         """
         Callback function when a model checkpoint is performed.
         If TrainingMonitor uses Tensorboard, training metrics are written to the Tensorboard event file.
 
         :param checkpoint: Current checkpoint.
-        :param train_metric: Evaluation metric for training data.
+        :param train_metric: A dictionary of training metrics.
         :param memory_data: Optional data about memory usage.
         """
         metrics = {}
-        for name, value in train_metric.get_name_value():
+        for name, value in train_metric.items():
             metrics[name + "-train"] = value
         if memory_data is not None:
             utils.log_gpu_memory_usage(memory_data)
