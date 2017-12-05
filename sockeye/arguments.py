@@ -866,9 +866,9 @@ def add_inference_args(params):
                                choices=['linear', 'log_linear'],
                                help='Ensemble mode. Default: %(default)s.')
     decode_params.add_argument('--bucket-width',
-                               type=multiple_values(2, greater_or_equal=0, data_type=int),
-                               default=(10, 2),
-                               help='Bucket width for decoder steps. 0 means no bucketing. Default: %(default)s.')
+                               type=int_greater_or_equal(0),
+                               default=10,
+                               help='Bucket width for encoder steps. 0 means no bucketing. Default: %(default)s.')
     decode_params.add_argument('--max-input-len', '-n',
                                type=int,
                                default=None,
