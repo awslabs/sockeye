@@ -89,7 +89,7 @@ class Decoder(ABC):
         Returns decoder representation for the next prediction, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param step: Global step of inference procedure.
+        :param step: Global step of inference procedure, starts with 1.
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
@@ -254,7 +254,7 @@ class TransformerDecoder(Decoder):
         Returns decoder representation for the next prediction, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param step: Global step of inference procedure.
+        :param step: Global step of inference procedure, starts with 1.
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
@@ -263,9 +263,10 @@ class TransformerDecoder(Decoder):
         # for step > 1, states contains source_encoded, source_encoded_lengths, and a cache tensor
         source_encoded, source_encoded_lengths = states[:2]  # pylint: disable=unbalanced-tuple-unpacking
 
-        symbolic_step = mx.sym.arange(start=step - 1, stop=step, step=1, name='symbolic_step')
+        # symbolic indices of the previous word
+        indices = mx.sym.arange(start=step - 1, stop=step, step=1, name='indices')
         # (batch_size, num_embed)
-        target_embed_prev = self.pos_embedding.encode_positions(symbolic_step, target_embed_prev)
+        target_embed_prev = self.pos_embedding.encode_positions(indices, target_embed_prev)
         # (batch_size, 1, num_embed)
         target = mx.sym.expand_dims(target_embed_prev, axis=1)
 
@@ -586,7 +587,7 @@ class RecurrentDecoder(Decoder):
         Returns decoder representation for the next prediction, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param step: Global step of inference procedure.
+        :param step: Global step of inference procedure, starts with 1.
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
@@ -1040,7 +1041,7 @@ class ConvolutionalDecoder(Decoder):
         Returns decoder representation for the next prediction, attention probabilities, and next decoder states.
         Implementations can maintain an arbitrary number of states.
 
-        :param step: Global step of inference procedure.
+        :param step: Global step of inference procedure, starts with 1.
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
@@ -1059,9 +1060,10 @@ class ConvolutionalDecoder(Decoder):
 
         new_layer_states = []
 
+        # symbolic indices of the previous word
         # (batch_size, num_embed)
-        symbolic_step = mx.sym.arange(start=step - 1, stop=step, step=1, name='symbolic_step')
-        target_embed_prev = self.pos_embedding.encode_positions(symbolic_step, target_embed_prev)
+        indices = mx.sym.arange(start=step - 1, stop=step, step=1, name='indices')
+        target_embed_prev = self.pos_embedding.encode_positions(indices, target_embed_prev)
 
         # (batch_size, num_hidden)
         target_hidden_step = mx.sym.FullyConnected(data=target_embed_prev,

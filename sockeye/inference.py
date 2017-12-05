@@ -1063,8 +1063,7 @@ class Translator:
             lengths += mx.nd.cast(1 - mx.nd.expand_dims(finished, axis=1), dtype='float32')
 
             # (6) determine which hypotheses in the beam are now finished
-            finished += ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
-            finished = mx.nd.clip(finished, a_min=0, a_max=1)
+            finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
             if mx.nd.sum(finished).asscalar() == self.batch_size * self.beam_size:  # all finished
                 break
 

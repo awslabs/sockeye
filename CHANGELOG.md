@@ -15,7 +15,6 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 - Fast decoding for transformer models. Caches keys and values of self-attention before softmax.
 Changed decoding flag `--bucket-width` to apply only to source length.
 
-
 ## [1.14.2]
 ### Added
  - Gradient norm clipping (`--gradient-clipping-type`) and monitoring.
