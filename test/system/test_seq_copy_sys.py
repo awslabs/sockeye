@@ -37,7 +37,7 @@ _SEED_DEV = 17
      " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --max-updates 4000 --weight-normalization"
      " --gradient-clipping-type norm --gradient-clipping-threshold 10",
      "--beam-size 5 ",
-     1.01,
+     1.02,
      0.99),
     ("Copy:chunking",
      "--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
@@ -83,15 +83,15 @@ _SEED_DEV = 17
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 1",
      1.01,
-     0.999),
+     0.99),
     ("Copy:cnn:cnn",
      "--encoder cnn --decoder cnn "
      " --batch-size 16 --num-layers 3 --max-updates 3000"
      " --cnn-num-hidden 32 --cnn-positional-embedding-type fixed"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 1",
-     1.01,
-     0.99)
+     1.02,
+     0.98)
 ])
 def test_seq_copy(name, train_params, translate_params, perplexity_thresh, bleu_thresh):
     """Task: copy short sequences of digits"""
@@ -169,13 +169,13 @@ def test_seq_copy(name, train_params, translate_params, perplexity_thresh, bleu_
      " --cnn-num-hidden 32 --cnn-positional-embedding-type fixed"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 1",
-     1.05,
-     0.97)
+     1.07,
+     0.96)
 ])
 def test_seq_sort(name, train_params, translate_params, perplexity_thresh, bleu_thresh):
     """Task: sort short sequences of digits"""
     with tmp_digits_dataset("test_seq_sort.", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT, _LINE_MAX_LENGTH,
-                            _TEST_LINE_COUNT, _TEST_LINE_COUNT, _TEST_LINE_COUNT_EMPTY,
+                            _TEST_LINE_COUNT, _TEST_LINE_COUNT_EMPTY, _TEST_MAX_LENGTH,
                             sort_target=True, seed_train=_SEED_TRAIN, seed_dev=_SEED_DEV) as data:
         # Test model configuration
         perplexity, bleu, bleu_restrict, chrf = run_train_translate(train_params,
