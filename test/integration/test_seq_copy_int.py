@@ -52,7 +52,7 @@ ENCODER_DECODER_SETTINGS = [
     # Transformer encoder, GRU decoder, mhdot attention
     ("--encoder transformer --num-layers 2:1 --rnn-cell-type gru --rnn-num-hidden 16 --num-embed 8:16"
      " --transformer-attention-heads 2 --transformer-model-size 8"
-     " --transformer-feed-forward-num-hidden 32"
+     " --transformer-feed-forward-num-hidden 32 --transformer-activation-type gelu"
      " --rnn-attention-type mhdot --rnn-attention-mhdot-heads 4 --rnn-attention-num-hidden 16 --batch-size 8 "
      " --max-updates 10 --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01"
      " --weight-init-xavier-factor-type avg --weight-init-scale 3.0 --embed-weight-init normal",
@@ -61,7 +61,7 @@ ENCODER_DECODER_SETTINGS = [
     # LSTM encoder, Transformer decoder
     ("--encoder rnn --decoder transformer --num-layers 2:2 --rnn-cell-type lstm --rnn-num-hidden 16 --num-embed 16"
      " --transformer-attention-heads 2 --transformer-model-size 16"
-     " --transformer-feed-forward-num-hidden 32"
+     " --transformer-feed-forward-num-hidden 32 --transformer-activation-type swish1"
      " --batch-size 8 --max-updates 10"
      " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 3",
