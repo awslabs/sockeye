@@ -900,8 +900,8 @@ class Translator:
             model_probs.append(probs)
             model_attention_probs.append(attention_probs)
             model_states.append(state)
-        probs, attention_probs = self._combine_predictions(model_probs, model_attention_probs)
-        return probs, attention_probs, model_states
+        neg_logprobs, attention_probs = self._combine_predictions(model_probs, model_attention_probs)
+        return neg_logprobs, attention_probs, model_states
 
     def _combine_predictions(self,
                              probs: List[mx.nd.NDArray],
@@ -911,7 +911,7 @@ class Translator:
 
         :param probs: List of Shape(beam_size, target_vocab_size).
         :param attention_probs: List of Shape(beam_size, bucket_key).
-        :return: Combined probabilities, averaged attention scores.
+        :return: Combined negative log probabilities, averaged attention scores.
         """
         # average attention prob scores. TODO: is there a smarter way to do this?
         attention_prob_score = utils.average_arrays(attention_probs)

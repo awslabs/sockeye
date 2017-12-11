@@ -10,3 +10,6 @@ until you can check this box.
 - [ ] Updated major/minor version in `sockeye/__init__.py`. Major version bump if this is a backwards incompatible change.
 - [ ] Updated CHANGELOG.md
 
+
+By submitting this pull request, I confirm that my contribution is made under the terms of the Apache 2.0 license.
+
