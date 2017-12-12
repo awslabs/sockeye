@@ -1100,7 +1100,7 @@ class ParallelDataSet(Sized):
 
         return ParallelDataSet(source, target, label)
 
-    def permute(self, permutations: List[mx.nd.ndarray]) -> ParallelDataSet:
+    def permute(self, permutations: List[mx.nd.NDArray]) -> 'ParallelDataSet':
         assert len(self) == len(permutations)
         source = []
         target = []
@@ -1119,7 +1119,7 @@ class ParallelDataSet(Sized):
         return ParallelDataSet(source, target, label)
 
 
-def get_permutations(bucket_counts: List[int]) -> Tuple[List[mx.nd.array], List[mx.nd.array]]:
+def get_permutations(bucket_counts: List[int]) -> Tuple[List[mx.nd.NDArray], List[mx.nd.NDArray]]:
     """
     Returns the indices of a random permutation for each bucket and the corresponding inverse permutations that can
     restore the original order of the data if applied to the permuted data.
@@ -1127,8 +1127,8 @@ def get_permutations(bucket_counts: List[int]) -> Tuple[List[mx.nd.array], List[
     :param bucket_counts: The number of elements per bucket.
     :return: For each bucket a permutation and inverse permutation is returned.
     """
-    data_permutations = []  # type: List[mx.nd.array]
-    inverse_data_permutations = []  # type: List[mx.nd.array]
+    data_permutations = []  # type: List[mx.nd.NDArray]
+    inverse_data_permutations = []  # type: List[mx.nd.NDArray]
     for num_samples in bucket_counts:
         if num_samples == 0:
             num_samples = 1
@@ -1239,7 +1239,7 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
 class ShardedParallelSampleIter(BaseParallelSampleIter):
     """
     Goes through the data one shard at a time. The memory consumption is limited by the memory consumption of the
-    largest shard. The order in which shards are traverse is changed with each reset.
+    largest shard. The order in which shards are traversed is changed with each reset.
     """
 
     def __init__(self,
@@ -1276,6 +1276,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
         random.shuffle(self.shards_fnames)
         self.shard_index = 0
         self._load_shard()
+
 
     def iter_next(self) -> bool:
         next_shard_index = self.shard_index + 1
