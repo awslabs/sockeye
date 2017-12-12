@@ -279,10 +279,8 @@ class DataStatisticsAccumulator:
         self.num_sents += 1
         self.num_tokens_source += source_len
         self.num_tokens_target += target_len
-        if source_len > self.max_observed_len_source:
-            self.max_observed_len_source = source_len
-        if target_len > self.max_observed_len_target:
-            self.max_observed_len_target = target_len
+        self.max_observed_len_source = max(source_len, self.max_observed_len_source)
+        self.max_observed_len_target = max(target_len, self.max_observed_len_target)
 
         self.num_unks_source += source.count(self.unk_id_source)
         self.num_unks_target += target.count(self.unk_id_target)
@@ -396,12 +394,10 @@ class RawParallelDatasetLoader:
                  buckets: List[Tuple[int, int]],
                  eos_id: int,
                  pad_id: int,
-                 unk_id: int,
                  dtype: str = 'float32') -> None:
         self.buckets = buckets
         self.eos_id = eos_id
         self.pad_id = pad_id
-        self.unk_id = unk_id
         self.dtype = dtype
 
     def load(self,
@@ -521,8 +517,7 @@ def prepare_data(source: str, target: str,
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=vocab_target[C.EOS_SYMBOL],
-                                           pad_id=C.PAD_ID,
-                                           unk_id=vocab_target[C.UNK_SYMBOL])
+                                           pad_id=C.PAD_ID)
 
     # 3. convert each shard to serialized ndarrays
     for shard_idx, (shard_source, shard_target, shard_stats) in enumerate(shards):
@@ -606,8 +601,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=vocab_target[C.EOS_SYMBOL],
-                                           pad_id=C.PAD_ID,
-                                           unk_id=vocab_target[C.UNK_SYMBOL])
+                                           pad_id=C.PAD_ID)
 
     logger.info("=================================")
     logger.info("Creating validation data iterator")
@@ -722,8 +716,7 @@ def get_training_data_iters(source: str, target: str,
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=vocab_target[C.EOS_SYMBOL],
-                                           pad_id=C.PAD_ID,
-                                           unk_id=vocab_target[C.UNK_SYMBOL])
+                                           pad_id=C.PAD_ID)
 
     training_data = data_loader.load(source_sentences, target_sentences,
                                      data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes, fill_up)
@@ -1107,7 +1100,7 @@ class ParallelDataSet(Sized):
 
         return ParallelDataSet(source, target, label)
 
-    def permute(self, permutations):
+    def permute(self, permutations: List[mx.nd.ndarray]) -> ParallelDataSet:
         assert len(self) == len(permutations)
         source = []
         target = []
@@ -1127,6 +1120,13 @@ class ParallelDataSet(Sized):
 
 
 def get_permutations(bucket_counts: List[int]) -> Tuple[List[mx.nd.array], List[mx.nd.array]]:
+    """
+    Returns the indices of a random permutation for each bucket and the corresponding inverse permutations that can
+    restore the original order of the data if applied to the permuted data.
+
+    :param bucket_counts: The number of elements per bucket.
+    :return: For each bucket a permutation and inverse permutation is returned.
+    """
     data_permutations = []  # type: List[mx.nd.array]
     inverse_data_permutations = []  # type: List[mx.nd.array]
     for num_samples in bucket_counts:
@@ -1238,7 +1238,8 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
 
 class ShardedParallelSampleIter(BaseParallelSampleIter):
     """
-    Goes through the data one shard at a time.
+    Goes through the data one shard at a time. The memory consumption is limited by the memory consumption of the
+    largest shard. The order in which shards are traverse is changed with each reset.
     """
 
     def __init__(self,
