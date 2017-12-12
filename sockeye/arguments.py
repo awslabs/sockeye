@@ -346,18 +346,18 @@ def add_prepare_data_cli_args(params):
 
     params.add_argument('--num-samples-per-shard',
                         default=1000000,
-                        help='The approximate number of samples per shard.')
+                        help='The approximate number of samples per shard. Default: %(default)s.')
 
     params.add_argument('--min-num-shards',
                         default=1,
                         type=int_greater_or_equal(1),
                         help='The minimum number of shards to use, even if they would not '
-                             'reach the desired number of samples per shard.')
+                             'reach the desired number of samples per shard. Default: %(default)s.')
 
     params.add_argument('--seed',
                         type=int,
                         default=13,
-                        help='Random seed used that makes shard assignments deterministic.')
+                        help='Random seed used that makes shard assignments deterministic. Default: %(default)s.')
 
     params.add_argument('--output', '-o',
                         required=True,
@@ -403,7 +403,7 @@ def add_vocab_args(params):
                         action='store_true',
                         default=False,
                         help='Share source and target vocabulary. '
-                             'Will be automatically turned on when using weight tying.')
+                             'Will be automatically turned on when using weight tying. Default: %(default)s.')
     params.add_argument('--num-words',
                         type=multiple_values(num_values=2, greater_or_equal=0),
                         default=(50000, 50000),

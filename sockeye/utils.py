@@ -28,7 +28,7 @@ import time
 import itertools
 import gzip
 from contextlib import contextmanager, ExitStack
-from typing import Mapping, NamedTuple, Any, List, Iterator, Iterable, Set, TextIO, Tuple, Dict, Optional
+from typing import Mapping, NamedTuple, Any, List, Iterator, Iterable, Set, TextIO, Tuple, Dict, Optional, Union
 
 import mxnet as mx
 import numpy as np
@@ -216,13 +216,12 @@ class Accuracy(mx.metric.EvalMetric):
 
 
 class OnlineMeanAndVariance:
-    def __init__(self):
-        pass
+    def __init__(self) -> None:
         self._count = 0
         self._mean = 0.
         self._M2 = 0.
 
-    def update(self, value):
+    def update(self, value: Union[float, int]) -> None:
         self._count += 1
         delta = value - self._mean
         self._mean += delta / self._count
@@ -230,15 +229,15 @@ class OnlineMeanAndVariance:
         self._M2 += delta * delta2
 
     @property
-    def count(self):
+    def count(self) -> int:
         return self._count
 
     @property
-    def mean(self):
+    def mean(self) -> float:
         return self._mean
 
     @property
-    def variance(self):
+    def variance(self) -> float:
         if self._count < 2:
             return float('nan')
         else:

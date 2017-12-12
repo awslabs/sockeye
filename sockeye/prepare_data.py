@@ -14,12 +14,12 @@
 import argparse
 import os
 
-from .log import setup_main_logger
-from . import utils
 from . import arguments
-from . import data_io
-from . import vocab
 from . import constants as C
+from . import data_io
+from . import utils
+from . import vocab
+from .log import setup_main_logger
 
 logger = setup_main_logger(__name__, file_logging=False, console=True)
 

@@ -21,7 +21,7 @@ import pickle
 import shutil
 import sys
 from contextlib import ExitStack
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, cast
 
 import mxnet as mx
 
@@ -322,13 +322,14 @@ def create_data_iters_and_vocab(args: argparse.Namespace,
                               either_raw_or_prepared_error_msg)
 
         if resume_training:
-            # TODO: should we make sure it's shared?
-            # just load the vocab
+            # Load the existing vocab created when starting the training run.
             vocab_source = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_SRC_NAME + C.JSON_SUFFIX))
             vocab_target = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_TRG_NAME + C.JSON_SUFFIX))
 
-            vocab_source_path = None
-            vocab_target_path = None
+            # Recover the vocabulary path from the existing config file:
+            orig_config = cast(model.ModelConfig, Config.load(os.path.join(output_folder, C.CONFIG_NAME)))
+            vocab_source_path = orig_config.config_data.vocab_source
+            vocab_target_path = orig_config.config_data.vocab_target
         else:
             # Load vocab:
             vocab_source_path = args.source_vocab
