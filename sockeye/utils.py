@@ -25,8 +25,7 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager, ExitStack
-from typing import Mapping, Any, List, Iterator, Iterable, Set, TextIO, Tuple, Dict, Optional, Union
-
+from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO
 
 import fcntl
 import mxnet as mx
@@ -603,7 +602,7 @@ class GpuFileLock:
     def __init__(self, candidates: List[int], lock_dir: str) -> None:
         self.candidates = candidates
         self.lock_dir = lock_dir
-        self.lock_file = None  # type: Optional[TextIO]
+        self.lock_file = None  # type: Optional[IO[Any]]
         self.lock_file_path = None  # type: Optional[str]
         self.gpu_id = None  # type: Optional[int]
         self._acquired_lock = False

@@ -1343,9 +1343,9 @@ class ParallelSampleIter(BaseParallelSampleIter):
         self.curr_batch_index = 0
 
         self.inverse_data_permutations = [mx.nd.arange(0, max(1, self.data.source[i].shape[0]))
-                                          for i in range(len(self.data))]  # type: List[Optional[mx.nd.array]]
+                                          for i in range(len(self.data))]
         self.data_permutations = [mx.nd.arange(0, max(1, self.data.source[i].shape[0]))
-                                  for i in range(len(self.data))]  # type: List[Optional[mx.nd.array]]
+                                  for i in range(len(self.data))]
 
         self.reset()
 
