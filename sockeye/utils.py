@@ -14,10 +14,9 @@
 """
 A set of utility methods.
 """
-import argparse
-import collections
 import errno
-import fcntl
+import gzip
+import itertools
 import logging
 import os
 import random
@@ -25,11 +24,10 @@ import shutil
 import subprocess
 import sys
 import time
-import itertools
-import gzip
 from contextlib import contextmanager, ExitStack
-from typing import Mapping, NamedTuple, Any, List, Iterator, Iterable, Set, TextIO, Tuple, Dict, Optional, Union
+from typing import Mapping, Any, List, Iterator, Iterable, Set, TextIO, Tuple, Dict, Optional, Union, ContextManager
 
+import fcntl
 import mxnet as mx
 import numpy as np
 
@@ -592,7 +590,7 @@ def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
         time.sleep(retry_wait_actual)
 
 
-class GpuFileLock:
+class GpuFileLock(ContextManager):
     """
     Acquires a single GPU by locking a file (therefore this assumes that everyone using GPUs calls this method and
     shares the lock directory). Sets target to a GPU id or None if none is available.
@@ -645,25 +643,6 @@ class GpuFileLock:
                 fcntl.flock(self.lock_file, fcntl.LOCK_UN)
             self.lock_file.close()
             os.remove(self.lockfile_path)
-
-
-def namedtuple_with_defaults(typename, field_names, default_values: Mapping[str, Any] = ()) -> NamedTuple:
-    """
-    Create a named tuple with default values.
-
-    :param typename: The name of the new type.
-    :param field_names: The fields the type will have.
-    :param default_values: A mapping from field names to default values.
-    :return: The new named tuple with default values.
-    """
-    T = collections.namedtuple(typename, field_names)
-    T.__new__.__defaults__ = (None,) * len(T._fields)
-    if isinstance(default_values, collections.Mapping):
-        prototype = T(**default_values)
-    else:
-        prototype = T(*default_values)
-    T.__new__.__defaults__ = tuple(prototype)
-    return T
 
 
 def read_metrics_file(path: str) -> List[Dict[str, Any]]:
@@ -725,7 +704,7 @@ class PrintValue(mx.operator.CustomOp):
     the system logger and 'print_grad=True' for printing information about the
     gradient (out_grad, i.e. "upper part" of the graph).
     """
-    def __init__(self, print_name, print_grad: str, use_logger: str):
+    def __init__(self, print_name, print_grad: str, use_logger: str) -> None:
         super().__init__()
         self.print_name = print_name
         # Note that all the parameters are serialized as strings
@@ -753,7 +732,7 @@ class PrintValue(mx.operator.CustomOp):
 
 @mx.operator.register("PrintValue")
 class PrintValueProp(mx.operator.CustomOpProp):
-    def __init__(self, print_name: str, print_grad: bool = False, use_logger: bool = False):
+    def __init__(self, print_name: str, print_grad: bool = False, use_logger: bool = False) -> None:
         super().__init__(need_top_grad=True)
         self.print_name = print_name
         self.print_grad = print_grad
