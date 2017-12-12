@@ -25,7 +25,8 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager, ExitStack
-from typing import Mapping, Any, List, Iterator, Iterable, Set, TextIO, Tuple, Dict, Optional, Union, ContextManager
+from typing import Mapping, Any, List, Iterator, Iterable, Set, TextIO, Tuple, Dict, Optional, Union
+
 
 import fcntl
 import mxnet as mx
@@ -565,7 +566,7 @@ def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
             acquired_gpus = []  # type: List[int]
             any_failed = False
             for candidates in candidates_to_request:
-                gpu_id = exit_stack.enter_context(GpuFileLock(candidates=candidates, lock_dir=lock_dir))
+                gpu_id = exit_stack.enter_context(GpuFileLock(candidates=candidates, lock_dir=lock_dir))  # type: ignore
                 if gpu_id is not None:
                     acquired_gpus.append(gpu_id)
                 else:
@@ -590,7 +591,7 @@ def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
         time.sleep(retry_wait_actual)
 
 
-class GpuFileLock(ContextManager):
+class GpuFileLock:
     """
     Acquires a single GPU by locking a file (therefore this assumes that everyone using GPUs calls this method and
     shares the lock directory). Sets target to a GPU id or None if none is available.
