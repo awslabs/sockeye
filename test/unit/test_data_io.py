@@ -14,6 +14,7 @@
 import os
 import random
 from tempfile import TemporaryDirectory
+from typing import Optional, List, Tuple
 
 import mxnet as mx
 import numpy as np
@@ -180,8 +181,24 @@ def test_word_based_define_bucket_batch_sizes():
         assert bbs.average_words_per_batch == expected_average_words_per_batch
 
 
-def _get_random_bucketed_data(buckets, min_count, max_count):
-    bucket_counts = [random.randint(min_count, max_count) for bucket in buckets]
+def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
+                              min_count: int,
+                              max_count: int,
+                              bucket_counts: Optional[List[Optional[int]]] = None):
+    """
+    Get random bucket data.
+
+    :param buckets: The list of buckets.
+    :param min_count: The minimum number of samples that will be sampled if no exact count is given.
+    :param max_count: The maximum number of samples that will be sampled if no exact count is given.
+    :param bucket_counts: For each bucket an optional exact example count can be given. If it is not given it will be
+                         sampled.
+    :return: The random source, target and label arrays.
+    """
+    if bucket_counts is None:
+        bucket_counts = [None for _ in buckets]
+    bucket_counts = [random.randint(min_count, max_count) if given_count is None else given_count
+                     for given_count in bucket_counts]
     source = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(1, bucket[0])))) for count, bucket in
               zip(bucket_counts, buckets)]
     target = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(1, bucket[1])))) for count, bucket in
@@ -431,16 +448,18 @@ def _data_batches_equal(db1, db2):
 
 
 def test_parallel_sample_iter():
-    # TODO: potentially add empty buckets to data
     batch_size = 2
     buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    # The first bucket is going to be empty:
+    bucket_counts = [0] + [None] * (len(buckets) - 1)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_by_words=False,
                                                            batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
 
-    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5))
+    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
+                                                                 bucket_counts=bucket_counts))
     it = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes)
 
     with TemporaryDirectory() as work_dir:
@@ -487,17 +506,20 @@ def test_parallel_sample_iter():
 
 
 def test_sharded_parallel_sample_iter():
-    # TODO: potentially add empty buckets to data
     batch_size = 2
     buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    # The first bucket is going to be empty:
+    bucket_counts = [0] + [None] * (len(buckets) - 1)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_by_words=False,
                                                            batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
 
-    dataset1 = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5))
-    dataset2 = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5))
+    dataset1 = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
+                                                                  bucket_counts=bucket_counts))
+    dataset2 = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
+                                                                  bucket_counts=bucket_counts))
 
     with TemporaryDirectory() as work_dir:
         shard1_fname = os.path.join(work_dir, 'shard1')
@@ -554,6 +576,86 @@ def test_sharded_parallel_sample_iter():
             assert not it_loaded.iter_next()
 
 
+def test_sharded_parallel_sample_iter_num_batches():
+    num_shards = 2
+    batch_size = 2
+    num_batches_per_bucket = 10
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    bucket_counts = [batch_size * num_batches_per_bucket for _ in buckets]
+    num_batches_per_shard = num_batches_per_bucket * len(buckets)
+    num_batches = num_shards * num_batches_per_shard
+    bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
+                                                           batch_size,
+                                                           batch_by_words=False,
+                                                           batch_num_devices=1,
+                                                           data_target_average_len=[None] * len(buckets))
+
+    dataset1 = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
+                                                                  bucket_counts=bucket_counts))
+    dataset2 = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
+                                                                  bucket_counts=bucket_counts))
+    with TemporaryDirectory() as work_dir:
+        shard1_fname = os.path.join(work_dir, 'shard1')
+        shard2_fname = os.path.join(work_dir, 'shard2')
+        dataset1.save(shard1_fname)
+        dataset2.save(shard2_fname)
+        shard_fnames = [shard1_fname, shard2_fname]
+
+        it = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
+                                               'replicate')
+
+        num_batches_seen = 0
+        while it.iter_next():
+            it.next()
+            num_batches_seen += 1
+        assert num_batches_seen == num_batches
 
 
+def test_sharded_and_parallel_iter_same_num_batches():
+    """ Tests that a sharded data iterator with just a single shard produces as many shards as an iterator directly
+    using the same dataset. """
+    batch_size = 2
+    num_batches_per_bucket = 10
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    bucket_counts = [batch_size * num_batches_per_bucket for _ in buckets]
+    num_batches = num_batches_per_bucket * len(buckets)
+    bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
+                                                           batch_size,
+                                                           batch_by_words=False,
+                                                           batch_num_devices=1,
+                                                           data_target_average_len=[None] * len(buckets))
 
+    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
+                                                                 bucket_counts=bucket_counts))
+
+    with TemporaryDirectory() as work_dir:
+        shard_fname = os.path.join(work_dir, 'shard1')
+        dataset.save(shard_fname)
+        shard_fnames = [shard_fname]
+
+        it_sharded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
+                                                       'replicate')
+
+        it_parallel = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes)
+
+        num_batches_seen = 0
+        while it_parallel.iter_next():
+            assert it_sharded.iter_next()
+            it_parallel.next()
+            it_sharded.next()
+            num_batches_seen += 1
+        assert num_batches_seen == num_batches
+
+        print("Resetting...")
+        it_sharded.reset()
+        it_parallel.reset()
+
+        num_batches_seen = 0
+        while it_parallel.iter_next():
+            assert it_sharded.iter_next()
+            it_parallel.next()
+            it_sharded.next()
+
+            num_batches_seen += 1
+
+        assert num_batches_seen == num_batches

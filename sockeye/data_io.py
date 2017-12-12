@@ -1069,6 +1069,7 @@ class ParallelDataSet(Sized):
 
         :param bucket_batch_sizes: Bucket batch sizes.
         :param fill_up: Fill-up strategy.
+        :param seed: The random seed used for sampling sentences to fill up.
         :return: New dataset with buckets filled up to the next multiple of batch size
         """
         source = list(self.source)
@@ -1290,7 +1291,9 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
             self.shard_index = 0
             self._load_shard()
         else:
-            self.shard_index = 0
+            if self.shard_index < 0:
+                self.shard_index = 0
+                self._load_shard()
             # We can just reset the shard_iter as we only have a single shard
             self.shard_iter.reset()
 
