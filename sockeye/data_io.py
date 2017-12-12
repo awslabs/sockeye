@@ -1256,7 +1256,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                          source_data_name, target_data_name, label_name, dtype)
         assert len(shards_fnames) > 0
         self.shards_fnames = list(shards_fnames)
-        self.shard_index = 0
+        self.shard_index = -1
         self.fill_up = fill_up
 
         self.reset()
@@ -1273,10 +1273,26 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                                              self.bucket_batch_sizes)
 
     def reset(self):
-        random.shuffle(self.shards_fnames)
-        self.shard_index = 0
-        self._load_shard()
+        if len(self.shards_fnames) > 1:
+            logger.info("Shuffeling the shards.")
+            # Making sure to not repeat a shard:
+            if self.shard_index < 0:
+                current_shard_fname = ""
+            else:
+                current_shard_fname = self.shards_fnames[self.shard_index]
+            remaining_shards = [shard for shard in self.shards_fnames if shard != current_shard_fname]
+            next_shard_fname = random.choice(remaining_shards)
+            remaining_shards = [shard for shard in self.shards_fnames if shard != next_shard_fname]
+            random.shuffle(remaining_shards)
 
+            self.shards_fnames = [next_shard_fname] + remaining_shards
+
+            self.shard_index = 0
+            self._load_shard()
+        else:
+            self.shard_index = 0
+            # We can just reset the shard_iter as we only have a single shard
+            self.shard_iter.reset()
 
     def iter_next(self) -> bool:
         next_shard_index = self.shard_index + 1
