@@ -76,6 +76,7 @@ def test_device_args(test_params, expected_params):
 
 @pytest.mark.parametrize("test_params, expected_params", [
     ('', dict(params=None,
+              allow_missing_params=False,
               num_words=(50000, 50000),
               word_min_count=(1, 1),
               num_layers=(1, 1),

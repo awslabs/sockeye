@@ -701,6 +701,7 @@ def main():
                            max_params_files_to_keep=args.keep_last_params,
                            metrics=args.metrics,
                            initializer=weight_initializer,
+                           allow_missing_params=args.allow_missing_params,
                            max_updates=max_updates,
                            checkpoint_frequency=args.checkpoint_frequency,
                            optimizer=optimizer, optimizer_params=optimizer_params,

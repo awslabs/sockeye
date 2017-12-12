@@ -338,6 +338,11 @@ def add_model_parameters(params):
                               type=str,
                               default=None,
                               help='Initialize model parameters from file. Overrides random initializations.')
+    model_params.add_argument('--allow-missing-params',
+                              action="store_true",
+                              default=False,
+                              help="Allow misssing parameters when initializing model parameters from file. "
+                                   "Default: %(default)s.")
 
     add_vocab_args(model_params)
 
@@ -946,3 +951,18 @@ def add_build_vocab_args(params):
     params.add_argument('-i', '--inputs', required=True, nargs='+', help='List of text files to build vocabulary from.')
     params.add_argument('-o', '--output', required=True, type=str, help="Output filename to write vocabulary to.")
     add_vocab_args(params)
+
+
+def add_init_embedding_args(params):
+    params.add_argument('--embeddings', '-e', required=True, nargs='+',
+                        help='List of input embedding weights in .npy format.')
+    params.add_argument('--vocabularies-in', '-i', required=True, nargs='+',
+                        help='List of input vocabularies as token-index dictionaries in .json format.')
+    params.add_argument('--vocabularies-out', '-o', required=True, nargs='+',
+                        help='List of output vocabularies as token-index dictionaries in .json format.')
+    params.add_argument('--names', '-n', required=True, nargs='+',
+                        help='List of Sockeye parameter names for embedding weights.')
+    params.add_argument('--file', '-f', required=True,
+                        help='File to write initialized parameters to.')
+    params.add_argument('--encoding', '-c', type=str, default=C.VOCAB_ENCODING,
+                        help='Open input vocabularies with specified encoding. Default: %(default)s.')

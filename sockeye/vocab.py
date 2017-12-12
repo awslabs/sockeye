@@ -130,14 +130,14 @@ def vocab_from_pickle(path: str) -> Dict:
         return vocab
 
 
-def vocab_from_json(path: str) -> Dict:
+def vocab_from_json(path: str, encoding: str = C.VOCAB_ENCODING) -> Dict:
     """
     Saves vocabulary in json format.
 
     :param path: Path to json file containing the vocabulary.
     :return: The loaded vocabulary.
     """
-    with open(path, encoding=C.VOCAB_ENCODING) as inp:
+    with open(path, encoding=encoding) as inp:
         vocab = json.load(inp)
         logger.info('Vocabulary (%d words) loaded from "%s"', len(vocab), path)
         return vocab

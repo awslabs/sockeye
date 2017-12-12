@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.15.1]
+### Added
+ - A tool that initializes embedding weights with pretrained word representations, `sockeye.init_embedding`.
+
 ## [1.15.0]
 ### Added
 - Added support for Swish-1 (SiLU) activation to transformer models ([Ramachandran et al. 2017: Searching for Activation Functions](https://arxiv.org/pdf/1710.05941.pdf), [Elfwing et al. 2017: Sigmoid-Weighted Linear Units for Neural Network Function Approximation in Reinforcement Learning](https://arxiv.org/pdf/1702.03118.pdf)).  Use `--transformer-activation-type swish1`.
