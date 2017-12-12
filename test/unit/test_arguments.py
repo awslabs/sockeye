@@ -21,8 +21,6 @@ import sockeye.constants as C
 from itertools import zip_longest
 
 
-# TODO: add test for new prepare_data CLI
-
 # note that while --prepared-data and --source/--target are mutually exclusive this is not the case at the CLI level
 @pytest.mark.parametrize("test_params, expected_params", [
     # mandatory parameters
@@ -303,9 +301,16 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
 @pytest.mark.parametrize("test_params, expected_params", [
     ('--source test_src --target test_tgt --output prepared_data ',
      dict(source='test_src', target='test_tgt',
-          source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1,1),
-          no_bucketing=False, bucket_width=10, max_seq_len=(100, 100),
-          min_num_shards=1, num_samples_per_shard=1000000,
+          source_vocab=None,
+          target_vocab=None,
+          shared_vocab=False,
+          num_words=(50000, 50000),
+          word_min_count=(1,1),
+          no_bucketing=False,
+          bucket_width=10,
+          max_seq_len=(100, 100),
+          min_num_shards=1,
+          num_samples_per_shard=1000000,
           seed=13,
           output='prepared_data'
           ))
@@ -353,7 +358,6 @@ def _delete_argument_values_that_must_be_files_or_dirs(to_unlink):
 def _test_args(test_params, expected_params, args_func):
     test_parser = argparse.ArgumentParser()
     args_func(test_parser)
-    # TODO: create temporary directory?
     created = _create_argument_values_that_must_be_files_or_dirs(test_params)
     try:
         parsed_params = test_parser.parse_args(test_params.split())
