@@ -1322,6 +1322,10 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
 
 
 class ParallelSampleIter(BaseParallelSampleIter):
+    """
+    Data iterator on a bucketed ParallelDataSet. Shuffles data at every reset and supports saving and loading the
+    iterator state.
+    """
 
     def __init__(self,
                  data: ParallelDataSet,
