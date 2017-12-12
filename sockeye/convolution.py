@@ -35,7 +35,7 @@ class ConvolutionConfig(Config):
                  kernel_width: int,
                  num_hidden: int,
                  act_type: str = C.GLU,
-                 weight_normalization: bool = False):
+                 weight_normalization: bool = False) -> None:
         super().__init__()
         self.kernel_width = kernel_width
         self.num_hidden = num_hidden
