@@ -579,7 +579,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                                               "preparing the data." % C.VOCAB_ARG_SHARED_VOCAB)
 
     vocab_source = vocab.vocab_from_json(source_vocab_fname)
-    vocab_target = vocab.vocab_from_json(source_vocab_fname)
+    vocab_target = vocab.vocab_from_json(target_vocab_fname)
 
     buckets = data_config.data_statistics.buckets
     max_seq_len_source = data_config.max_seq_len_source
