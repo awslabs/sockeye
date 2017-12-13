@@ -70,8 +70,10 @@ def build_vocab(data: Iterable[str], num_words: int = 50000, min_count: int = 1)
     vocab = islice((w for c, w in pruned_vocab), num_words)
 
     word_to_id = {word: idx for idx, word in enumerate(chain(C.VOCAB_SYMBOLS, vocab))}
-    logger.info("Vocabulary: number of types: initial %d min_pruned %d max_pruned %d (min_frequency=%d, max_num_types=%d)",
-                len(raw_vocab), len(pruned_vocab), len(word_to_id), min_count, num_words)
+    logger.info("Vocabulary: types: %d/%d/%d/%d (initial/min_pruned/max_pruned/+special) " +
+                "[min_frequency=%d, max_num_types=%d]",
+                len(raw_vocab), len(pruned_vocab), len(word_to_id) - len(C.VOCAB_SYMBOLS),
+                len(word_to_id), min_count, num_words)
 
     # Important: pad symbol becomes index 0
     assert word_to_id[C.PAD_SYMBOL] == C.PAD_ID
