@@ -547,6 +547,67 @@ def prepare_data(source: str, target: str,
     config_data.save(data_config_fname)
 
 
+def get_data_statistics(source_sentences: Iterable[List[int]],
+                        target_sentences: Iterable[List[int]],
+                        buckets: List[Tuple[int, int]],
+                        length_ratio_mean: float,
+                        length_ratio_std: float,
+                        vocab_source: vocab.Vocab,
+                        vocab_target: vocab.Vocab) -> 'DataStatistics':
+    data_stats_accumulator = DataStatisticsAccumulator(buckets, vocab_source, vocab_target,
+                                                       length_ratio_mean, length_ratio_std)
+
+    for source, target in zip(source_sentences, target_sentences):
+        buck_idx, buck = get_parallel_bucket(buckets, len(source), len(target))
+        data_stats_accumulator.sequence_pair(source, target, buck_idx)
+
+    return data_stats_accumulator.statistics
+
+
+def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
+                             validation_source: str,
+                             validation_target: str,
+                             buckets: List[Tuple[int, int]],
+                             bucket_batch_sizes: List[BucketBatchSize],
+                             vocab_source: vocab.Vocab,
+                             vocab_target: vocab.Vocab,
+                             max_seq_len_source: int,
+                             max_seq_len_target: int,
+                             batch_size: int,
+                             fill_up: str) -> 'ParallelSampleIter':
+    """
+    Returns a ParallelSampleIter for the validation data.
+    """
+    logger.info("=================================")
+    logger.info("Creating validation data iterator")
+    logger.info("=================================")
+    validation_length_statistics = analyze_sequence_lengths(validation_source, validation_target,
+                                                            vocab_source, vocab_target,
+                                                            max_seq_len_source, max_seq_len_target)
+
+    validation_source_sentences = SequenceReader(validation_source, vocab_source, add_bos=False, limit=None)
+    validation_target_sentences = SequenceReader(validation_target, vocab_target, add_bos=True, limit=None)
+
+    validation_data_statistics = get_data_statistics(validation_source_sentences,
+                                                     validation_target_sentences,
+                                                     buckets,
+                                                     validation_length_statistics.length_ratio_mean,
+                                                     validation_length_statistics.length_ratio_std,
+                                                     vocab_source, vocab_target)
+
+    validation_data_statistics.log(bucket_batch_sizes)
+
+    validation_data = data_loader.load(validation_source_sentences,
+                                       validation_target_sentences,
+                                       validation_data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes,
+                                                                                                fill_up)
+
+    return ParallelSampleIter(data=validation_data,
+                              buckets=buckets,
+                              batch_size=batch_size,
+                              bucket_batch_sizes=bucket_batch_sizes)
+
+
 def get_prepared_data_iters(prepared_data_dir: str,
                             validation_source: str, validation_target: str,
                             shared_vocab: bool,
@@ -603,48 +664,19 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                            eos_id=vocab_target[C.EOS_SYMBOL],
                                            pad_id=C.PAD_ID)
 
-    logger.info("=================================")
-    logger.info("Creating validation data iterator")
-    logger.info("=================================")
-    validation_length_statistics = analyze_sequence_lengths(validation_source, validation_target,
-                                                            vocab_source, vocab_target,
-                                                            max_seq_len_source, max_seq_len_target)
-
-    validation_source_sentences = SequenceReader(validation_source, vocab_source, add_bos=False, limit=None)
-    validation_target_sentences = SequenceReader(validation_target, vocab_target, add_bos=True, limit=None)
-
-    validation_data_statistics = get_data_statistics(validation_source_sentences,
-                                                     validation_target_sentences,
-                                                     buckets,
-                                                     validation_length_statistics.length_ratio_mean,
-                                                     validation_length_statistics.length_ratio_std,
-                                                     vocab_source, vocab_target)
-
-    validation_data_statistics.log(bucket_batch_sizes)
-
-    validation_data = data_loader.load(validation_source_sentences,
-                                       validation_target_sentences,
-                                       validation_data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes,
-                                                                                                fill_up)
-
-    validation_iter = ParallelSampleIter(validation_data,
-                                         buckets,
-                                         batch_size,
-                                         bucket_batch_sizes)
+    validation_iter = get_validation_data_iter(data_loader=data_loader,
+                                               validation_source=validation_source,
+                                               validation_target=validation_target,
+                                               buckets=buckets,
+                                               bucket_batch_sizes=bucket_batch_sizes,
+                                               vocab_source=vocab_source,
+                                               vocab_target=vocab_target,
+                                               max_seq_len_source=max_seq_len_source,
+                                               max_seq_len_target=max_seq_len_target,
+                                               batch_size=batch_size,
+                                               fill_up=fill_up)
 
     return train_iter, validation_iter, data_config, vocab_source, vocab_target
-
-
-def get_data_statistics(source_sentences, target_sentences, buckets,
-                        length_ratio_mean: float, length_ratio_std: float, vocab_source, vocab_target):
-    data_stats_accumulator = DataStatisticsAccumulator(buckets, vocab_source, vocab_target,
-                                                       length_ratio_mean, length_ratio_std)
-
-    for source, target in zip(source_sentences, target_sentences):
-        buck_idx, buck = get_parallel_bucket(buckets, len(source), len(target))
-        data_stats_accumulator.sequence_pair(source, target, buck_idx)
-
-    return data_stats_accumulator.statistics
 
 
 def get_training_data_iters(source: str, target: str,
@@ -687,9 +719,6 @@ def get_training_data_iters(source: str, target: str,
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
-
-    # training data
-
     # Pass 1: get target/source length ratios.
     length_statistics = analyze_sequence_lengths(source, target, vocab_source, vocab_target,
                                                  max_seq_len_source, max_seq_len_target)
@@ -736,34 +765,17 @@ def get_training_data_iters(source: str, target: str,
                                     batch_size,
                                     bucket_batch_sizes)
 
-    logger.info("=================================")
-    logger.info("Creating validation data iterator")
-    logger.info("=================================")
-    validation_length_statistics = analyze_sequence_lengths(validation_source, validation_target,
-                                                            vocab_source, vocab_target,
-                                                            max_seq_len_source, max_seq_len_target)
-
-    validation_source_sentences = SequenceReader(validation_source, vocab_source, add_bos=False, limit=None)
-    validation_target_sentences = SequenceReader(validation_target, vocab_target, add_bos=True, limit=None)
-
-    validation_data_statistics = get_data_statistics(validation_source_sentences,
-                                                     validation_target_sentences,
-                                                     buckets,
-                                                     validation_length_statistics.length_ratio_mean,
-                                                     validation_length_statistics.length_ratio_std,
-                                                     vocab_source, vocab_target)
-
-    validation_data_statistics.log(bucket_batch_sizes)
-
-    validation_data = data_loader.load(validation_source_sentences,
-                                       validation_target_sentences,
-                                       validation_data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes,
-                                                                                                fill_up)
-
-    validation_iter = ParallelSampleIter(validation_data,
-                                         buckets,
-                                         batch_size,
-                                         bucket_batch_sizes)
+    validation_iter = get_validation_data_iter(data_loader=data_loader,
+                                               validation_source=validation_source,
+                                               validation_target=validation_target,
+                                               buckets=buckets,
+                                               bucket_batch_sizes=bucket_batch_sizes,
+                                               vocab_source=vocab_source,
+                                               vocab_target=vocab_target,
+                                               max_seq_len_source=max_seq_len_source,
+                                               max_seq_len_target=max_seq_len_target,
+                                               batch_size=batch_size,
+                                               fill_up=fill_up)
 
     return train_iter, validation_iter, config_data
 
