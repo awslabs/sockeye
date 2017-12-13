@@ -22,7 +22,6 @@ from itertools import chain, islice
 from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
 from . import utils
-from . import arguments
 from . import constants as C
 from . import log
 
@@ -197,6 +196,7 @@ def are_identical(*vocabs: Vocab):
 
 
 def main():
+    from . import arguments
     params = argparse.ArgumentParser(description='CLI to build source and target vocab(s).')
     arguments.add_build_vocab_args(params)
     args = params.parse_args()

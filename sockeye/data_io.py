@@ -28,10 +28,10 @@ import math
 import mxnet as mx
 import numpy as np
 
-from sockeye import vocab
-from sockeye.utils import check_condition, smart_open, get_tokens, OnlineMeanAndVariance
 from . import config
 from . import constants as C
+from . import vocab
+from .utils import check_condition, smart_open, get_tokens, OnlineMeanAndVariance
 
 logger = logging.getLogger(__name__)
 
