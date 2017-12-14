@@ -840,9 +840,7 @@ class Translator:
         utils.check_condition(C.PAD_ID == 0, "pad id should be 0")
         source = mx.nd.zeros((len(sequences), bucket_key))
         for j, tokens in enumerate(sequences):
-            ids = data_io.tokens2ids(tokens, self.vocab_source)
-            for i, wid in enumerate(ids):
-                source[j, i] = wid
+            source[j, :len(tokens)] = data_io.tokens2ids(tokens, self.vocab_source)
         return source, bucket_key
 
     def _make_result(self,
