@@ -29,7 +29,7 @@ _SEED_TRAIN = 13
 _SEED_DEV = 17
 
 
-@pytest.mark.parametrize("name, train_params, translate_params, perplexity_thresh, bleu_thresh", [
+@pytest.mark.parametrize("name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh", [
     ("Copy:lstm:lstm",
      "--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity"
@@ -126,7 +126,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
         assert bleu_restrict >= bleu_thresh
 
 
-@pytest.mark.parametrize("name, train_params, translate_params, perplexity_thresh, bleu_thresh", [
+@pytest.mark.parametrize("name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh", [
     ("Sort:lstm",
      "--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity"
