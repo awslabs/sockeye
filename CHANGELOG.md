@@ -98,10 +98,17 @@ sockeye.evaluate now accepts `bleu` and `chrf` as values for `--metrics`
  - Fixed an issue with the use of `ignore` in `CrossEntropyMetric::cross_entropy_smoothed`. This was affecting
  runs with Eve optimizer and label smoothing. Thanks @kobenaxie for reporting.
 
+## [1.11.1]
+### Added
+ - Exposing the xavier random number generator through --weight-init-xavier-rand-type.
+
 ## [1.11.0]
 ### Added
  - Lexicon-based target vocabulary restriction for faster decoding. New CLI for top-k lexicon creation, sockeye.lexicon.
  New translate CLI argument `--restrict-lexicon`.
+
+### Changed
+ - Bleu computation based on Sacrebleu.
 
 ## [1.10.5]
 ### Fixed

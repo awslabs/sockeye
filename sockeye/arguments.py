@@ -707,6 +707,11 @@ def add_training_args(params):
                               default='in',
                               choices=['in', 'out', 'avg'],
                               help='Xavier factor type. Default: %(default)s.')
+    train_params.add_argument('--weight-init-xavier-rand-type',
+                              type=str,
+                              default=C.RAND_TYPE_UNIFORM,
+                              choices=[C.RAND_TYPE_UNIFORM, C.RAND_TYPE_GAUSSIAN],
+                              help='Xavier random number generator type. Default: %(default)s.')
     train_params.add_argument('--embed-weight-init',
                               type=str,
                               default=C.EMBED_INIT_DEFAULT,
