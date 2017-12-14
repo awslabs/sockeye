@@ -195,7 +195,7 @@ def add_extract_args(params):
     extract_params.add_argument('--list-all', '-l',
                                 action='store_true',
                                 help='List names of all available parameters.')
-    extract_params.add_argument('--output', '-o', 
+    extract_params.add_argument('--output', '-o',
                                 type=str,
                                 help="File to write extracted parameters to (in .npz format).")
 
@@ -607,7 +607,7 @@ def add_training_args(params):
                               type=int,
                               default=None,
                               help='Maximum number of updates/batches to process. Default: %(default)s.')
-    train_params.add_argument('--checkpoint-frequency',
+    train_params.add_argument(C.TRAIN_ARGS_CHECKPOINT_FREQUENCY,
                               type=int_greater_or_equal(1),
                               default=1000,
                               help='Checkpoint and evaluate every x updates/batches. Default: %(default)s.')
@@ -785,7 +785,7 @@ def add_training_args(params):
                               choices=[C.RNN_INIT_ORTHOGONAL, C.RNN_INIT_ORTHOGONAL_STACKED, C.RNN_INIT_DEFAULT],
                               help="Initialization method for RNN parameters. Default: %(default)s.")
 
-    train_params.add_argument('--decode-and-evaluate',
+    train_params.add_argument(C.TRAIN_ARGS_MONITOR_BLEU,
                               default=0,
                               type=int,
                               help='x>0: decode x sampled sentences from validation data and '
