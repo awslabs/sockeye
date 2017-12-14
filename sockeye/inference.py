@@ -908,7 +908,6 @@ class Translator:
                      sequences: mx.nd.NDArray,
                      step: int,
                      source_length: int,
-                     max_output_length: int,
                      states: List[ModelState],
                      models_output_layer_w: List[mx.nd.NDArray],
                      models_output_layer_b: List[mx.nd.NDArray]) \
@@ -919,7 +918,6 @@ class Translator:
         :param sequences: Sequences of current hypotheses. Shape: (batch_size * beam_size, max_output_length).
         :param step: Beam search iteration.
         :param source_length: Length of the input sequence.
-        :param max_output_length: Maximum output length.
         :param states: List of model states.
         :param models_output_layer_w: Custom model weights for logit computation (empty for none).
         :param models_output_layer_b: Custom model biases for logit computation (empty for none).
@@ -1049,7 +1047,6 @@ class Translator:
             scores, attention_scores, model_states = self._decode_step(sequences,
                                                                        t,
                                                                        source_length,
-                                                                       max_output_length,
                                                                        model_states,
                                                                        models_output_layer_w,
                                                                        models_output_layer_b)
