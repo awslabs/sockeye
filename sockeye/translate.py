@@ -165,13 +165,13 @@ def _setup_context(args, exit_stack):
         check_condition(len(args.device_ids) == 1, "cannot run on multiple devices for now")
         gpu_id = args.device_ids[0]
         if args.disable_device_locking:
-            # without locking and a negative device id we just take the first device
-            gpu_id = 0
-        else:
             if gpu_id < 0:
-                # get a single (!) gpu id automatically:
-                gpu_ids = exit_stack.enter_context(acquire_gpus([-1], lock_dir=args.lock_dir))
-                gpu_id = gpu_ids[0]
+                # without locking and a negative device id we just take the first device
+                gpu_id = 0
+        else:
+            gpu_ids = exit_stack.enter_context(acquire_gpus([gpu_id], lock_dir=args.lock_dir))
+            gpu_id = gpu_ids[0]
+
         context = mx.gpu(gpu_id)
     return context
 
