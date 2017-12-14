@@ -1066,7 +1066,7 @@ class Translator:
                 scores = (scores + scores_accumulated * self.length_penalty(lengths - 1)) / self.length_penalty(lengths)
                 # ... but not for finished hyps.
                 # their predicted distribution is set to their accumulated scores at C.PAD_ID.
-                pad_dist[:, C.PAD_ID] = scores_accumulated
+                pad_dist[:, C.PAD_ID] = scores_accumulated[:, 0]
                 # this is equivalent to doing this in numpy:
                 #   pad_dist[finished, :] = np.inf
                 #   pad_dist[finished, C.PAD_ID] = scores_accumulated[finished]
@@ -1087,7 +1087,7 @@ class Translator:
             # convert back to mx.ndarray again
             best_hyp_indices[:] = best_hyp_indices_np
             best_word_indices[:] = best_word_indices_np
-            scores_accumulated[:] = np.expand_dims(scores_accumulated_np, axis=1)
+            scores_accumulated[:, 0] = scores_accumulated_np
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
                 best_word_indices[:] = vocab_slice_ids.take(best_word_indices)
