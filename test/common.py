@@ -216,7 +216,7 @@ def run_train_translate(train_params: str,
     with TemporaryDirectory(dir=work_dir, prefix="test_train_translate.") as work_dir:
         # Optionally create prepared data directory
         if use_prepared_data:
-            prepared_data_path = os.path.join(work_dir, "prepared_Data")
+            prepared_data_path = os.path.join(work_dir, "prepared_data")
             params = "{} {}".format(sockeye.prepare_data.__file__,
                                     _PREPARE_DATA_COMMON.format(train_source=train_source_path,
                                                                 train_target=train_target_path,
