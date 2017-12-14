@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.15.3]
+### Added
+ - Exposing the xavier random number generator through --weight-init-xavier-rand-type.
+
 ## [1.15.2]
 ### Added
  - Exposing MXNet's Nesterov Accelerated Gradient, Adadelta and Adadelta optimizers.
@@ -97,10 +101,6 @@ sockeye.evaluate now accepts `bleu` and `chrf` as values for `--metrics`
 ### Fixed
  - Fixed an issue with the use of `ignore` in `CrossEntropyMetric::cross_entropy_smoothed`. This was affecting
  runs with Eve optimizer and label smoothing. Thanks @kobenaxie for reporting.
-
-## [1.11.1]
-### Added
- - Exposing the xavier random number generator through --weight-init-xavier-rand-type.
 
 ## [1.11.0]
 ### Added
