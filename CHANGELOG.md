@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.15.4]
+### Added
+ - A warning will be printed if the checkpoint decoder slows down training.
+
 ## [1.15.3]
 ### Added
  - Exposing the xavier random number generator through --weight-init-xavier-rand-type.
