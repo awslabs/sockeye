@@ -539,12 +539,12 @@ class ProjectedDotAttention:
                  memory: mx.sym.Symbol,
                  memory_lengths: mx.sym.Symbol) -> mx.sym.Symbol:
         """
-        Returns a symbol of shape (batch, max_length, output_depth).
+        Apply project, apply dot attention and return new context vectors.
 
-        :param queries: Symbol of shape (batch, queries_max_length, input_depth).
-        :param memory: Symbol of shape (batch, memory_max_length, input_depth).
+        :param queries: Symbol of shape (batch, queries_max_length, input_num_hidden).
+        :param memory: Symbol of shape (batch, memory_max_length, input_num_hidden).
         :param memory_lengths: Symbol of shape (batch, 1).
-        :return: Symbol of shape (batch, queries_max_length, output_depth).
+        :return: Symbol of shape (batch, queries_max_length, num_hidden).
         """
         # (batch, memory_max_length, num_hidden * 2)
         combined = mx.sym.FullyConnected(data=memory,
