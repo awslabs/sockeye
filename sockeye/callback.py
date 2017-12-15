@@ -46,7 +46,6 @@ class TrainingMonitor(object):
     :param optimized_metric: Name of the metric that controls early stopping.
     :param use_tensorboard: Whether to use Tensorboard logging of metrics.
     :param cp_decoder: Optional CheckpointDecoder instance for BLEU monitoring.
-    :param num_concurrent_decodes: Number of concurrent subprocesses to decode validation data.
     """
 
     def __init__(self,
@@ -54,8 +53,7 @@ class TrainingMonitor(object):
                  output_folder: str,
                  optimized_metric: str = C.PERPLEXITY,
                  use_tensorboard: bool = False,
-                 cp_decoder: Optional[checkpoint_decoder.CheckpointDecoder] = None,
-                 num_concurrent_decodes: int = 1) -> None:
+                 cp_decoder: Optional[checkpoint_decoder.CheckpointDecoder] = None) -> None:
         self.output_folder = output_folder
         # stores dicts of metric names & values for each checkpoint
         self.metrics = []  # type: List[Dict]
@@ -72,10 +70,9 @@ class TrainingMonitor(object):
             logger.info("Logging training events for Tensorboard at '%s'", log_dir)
             self.summary_writer = tensorboard.FileWriter(log_dir)
         self.cp_decoder = cp_decoder
-        self.ctx = mp.get_context('spawn') # type: ignore
-        self.num_concurrent_decodes = num_concurrent_decodes
+        self.ctx = mp.get_context('spawn')  # type: ignore
         self.decoder_metric_queue = self.ctx.Queue()
-        self.decoder_processes = []  # type: List[mp.Process]
+        self.decoder_process = None  # type: Optional[mp.Process]
         # TODO(fhieber): MXNet Speedometer uses root logger. How to fix this?
         self.speedometer = mx.callback.Speedometer(batch_size=batch_size,
                                                    frequent=C.MEASURE_SPEED_EVERY,
@@ -164,6 +161,7 @@ class TrainingMonitor(object):
             write_tensorboard(self.summary_writer, metrics, checkpoint)
 
         if self.cp_decoder:
+            self._wait_for_decoder_to_finish()
             self._empty_decoder_metric_queue()
             self._start_decode_process(checkpoint)
 
@@ -196,7 +194,7 @@ class TrainingMonitor(object):
         return has_improved, self.best_checkpoint
 
     def _start_decode_process(self, checkpoint):
-        self._wait_for_decode_slot()
+        assert self.decoder_process is None
         output_name = os.path.join(self.output_folder, C.DECODE_OUT_NAME % checkpoint)
         process = self.ctx.Process(
             target=_decode_and_evaluate,
@@ -207,7 +205,7 @@ class TrainingMonitor(object):
         process.name = 'Decoder-%d' % checkpoint
         logger.info("Starting process: %s", process.name)
         process.start()
-        self.decoder_processes.append(process)
+        self.decoder_process = process
 
     def _empty_decoder_metric_queue(self):
         """
@@ -222,20 +220,32 @@ class TrainingMonitor(object):
                 write_tensorboard(self.summary_writer, decoder_metrics,
                                   decoded_checkpoint)
 
-    def _wait_for_decode_slot(self, timeout: int = 5):
-        while len(self.decoder_processes) == self.num_concurrent_decodes:
-            self.decoder_processes = [p for p in self.decoder_processes
-                                      if p.is_alive()]
-            time.sleep(timeout)
+    def _wait_for_decoder_to_finish(self, check_interval: int = 5):
+        if self.decoder_process is None:
+            return
+        if not self.decoder_process.is_alive():
+            self.decoder_process = None
+            return
+        # Wait for the decoder to finish
+        wait_start = time.time()
+        while self.decoder_process.is_alive():
+            time.sleep(check_interval)
+        self.decoder_process = None
+
+        wait_time = int(time.time() - wait_start)
+        logger.warning("Had to wait %d seconds for the checkpoint decoder to finish. Consider increasing the "
+                       "checkpoint frequency (updates between checkpoints, see %s) or reducing the size of the "
+                       "validation samples that are decoded (see %s)." % (wait_time,
+                                                                          C.TRAIN_ARGS_CHECKPOINT_FREQUENCY,
+                                                                          C.TRAIN_ARGS_MONITOR_BLEU))
 
     def stop_fit_callback(self):
         """
         Callback function when fitting is stopped. Collects results from decoder processes and writes their results.
         """
-        for process in self.decoder_processes:
-            if process.is_alive():
-                logger.info("Waiting for %s process to finish." % process.name)
-            process.join()
+        if self.decoder_process is not None and self.decoder_process.is_alive():
+            logger.info("Waiting for %s process to finish." % self.decoder_process.name)
+            self.decoder_process.join()
         self._empty_decoder_metric_queue()
         utils.write_metrics_file(self.metrics, self.metrics_filename)
 

@@ -22,14 +22,15 @@ import sockeye.constants as C
 logger = logging.getLogger(__name__)
 
 
-def get_initializer(default_init_type: str, default_init_scale: float, default_init_xavier_factor_type: str,
-                    embed_init_type: str, embed_init_sigma: float,
+def get_initializer(default_init_type: str, default_init_scale: float, default_init_xavier_rand_type: str,
+                    default_init_xavier_factor_type: str, embed_init_type: str, embed_init_sigma: float,
                     rnn_init_type: str) -> mx.initializer.Initializer:
     """
     Returns a mixed MXNet initializer.
 
     :param default_init_type: The default weight initializer type.
     :param default_init_scale: The scale used for default weight initialization (only used with uniform initialization).
+    :param default_init_xavier_rand_type: Xavier random number generator type.
     :param default_init_xavier_factor_type: Xavier factor type.
     :param embed_init_type: Embedding matrix initialization type.
     :param embed_init_sigma: Sigma for normal initialization of embedding matrix.
@@ -39,7 +40,7 @@ def get_initializer(default_init_type: str, default_init_scale: float, default_i
     # default initializer
     if default_init_type == C.INIT_XAVIER:
         default_init = [(C.DEFAULT_INIT_PATTERN,
-                         mx.init.Xavier(rnd_type="uniform",
+                         mx.init.Xavier(rnd_type=default_init_xavier_rand_type,
                                         factor_type=default_init_xavier_factor_type,
                                         magnitude=default_init_scale))]
     elif default_init_type == C.INIT_UNIFORM:

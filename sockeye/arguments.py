@@ -676,7 +676,7 @@ def add_training_args(params):
                               type=int,
                               default=None,
                               help='Maximum number of updates/batches to process. Default: %(default)s.')
-    train_params.add_argument('--checkpoint-frequency',
+    train_params.add_argument(C.TRAIN_ARGS_CHECKPOINT_FREQUENCY,
                               type=int_greater_or_equal(1),
                               default=1000,
                               help='Checkpoint and evaluate every x updates/batches. Default: %(default)s.')
@@ -776,6 +776,11 @@ def add_training_args(params):
                               default='in',
                               choices=['in', 'out', 'avg'],
                               help='Xavier factor type. Default: %(default)s.')
+    train_params.add_argument('--weight-init-xavier-rand-type',
+                              type=str,
+                              default=C.RAND_TYPE_UNIFORM,
+                              choices=[C.RAND_TYPE_UNIFORM, C.RAND_TYPE_GAUSSIAN],
+                              help='Xavier random number generator type. Default: %(default)s.')
     train_params.add_argument('--embed-weight-init',
                               type=str,
                               default=C.EMBED_INIT_DEFAULT,
@@ -854,7 +859,7 @@ def add_training_args(params):
                               choices=[C.RNN_INIT_ORTHOGONAL, C.RNN_INIT_ORTHOGONAL_STACKED, C.RNN_INIT_DEFAULT],
                               help="Initialization method for RNN parameters. Default: %(default)s.")
 
-    train_params.add_argument('--decode-and-evaluate',
+    train_params.add_argument(C.TRAIN_ARGS_MONITOR_BLEU,
                               default=0,
                               type=int,
                               help='x>0: decode x sampled sentences from validation data and '
