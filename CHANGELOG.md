@@ -12,6 +12,11 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.15.2]
 ### Added
+ - Optionally apply query, key and value projections to the source and target hidden vectors in the CNN model
+ before applying the attention mechanism. CLI parameter: `--cnn-project-qkv`.
+
+## [1.15.2]
+### Added
  - Exposing MXNet's Nesterov Accelerated Gradient, Adadelta and Adadelta optimizers.
 
 ## [1.15.1]
