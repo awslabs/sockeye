@@ -319,4 +319,6 @@ SHARD_NAME = "shard.%05d"
 SHARD_SOURCE = SHARD_NAME + ".source"
 SHARD_TARGET = SHARD_NAME + ".target"
 DATA_CONFIG = "data.config"
+PREPARED_DATA_VERSION_FILE = "data.version"
+PREPARED_DATA_VERSION = 1
 

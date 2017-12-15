@@ -546,6 +546,11 @@ def prepare_data(source: str, target: str,
     logger.info("Writing data config to '%s'", data_config_fname)
     config_data.save(data_config_fname)
 
+    version_file = os.path.join(output_prefix, C.PREPARED_DATA_VERSION_FILE)
+
+    with open(version_file, "w") as version_out:
+        version_out.write(str(C.PREPARED_DATA_VERSION))
+
 
 def get_data_statistics(source_sentences: Iterable[List[int]],
                         target_sentences: Iterable[List[int]],
@@ -620,6 +625,13 @@ def get_prepared_data_iters(prepared_data_dir: str,
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
+
+    version_file = os.path.join(prepared_data_dir, C.PREPARED_DATA_VERSION_FILE)
+    with open(version_file) as version_in:
+        version = int(version_in.read())
+        check_condition(version == C.PREPARED_DATA_VERSION,
+                        "The dataset %s was written in an old and incompatible format. Please rerun data "
+                        "preparation with a current version of Sockeye." % prepared_data_dir)
     config_file = os.path.join(prepared_data_dir, C.DATA_CONFIG)
     check_condition(os.path.exists(config_file),
                     "Could not find data config %s. Are you sure %s is a directory created with "
