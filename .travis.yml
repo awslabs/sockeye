@@ -30,3 +30,15 @@ script:
   - if [ "$TRAVIS_EVENT_TYPE" != "cron" ]; then python -m pytest -k "Copy:cnn:cnn" test/system; fi
   - if [ "$TRAVIS_EVENT_TYPE" = "cron" ]; then python -m pytest test/system; fi
 
+# Deploy all tagged versions to PyPI
+deploy:
+  provider: pypi
+  distributions: sdist bdist_wheel
+  skip_cleanup: true
+  user: tdomhan
+  password:
+    secure: rt023V0dxRa8M3A8qxokDoacS0lrWW8kerbbxijgGH1XKk0cFW4EWat9IlckpGchaLLpVa0mSl/c15l+uZYsxN13DcI/2Yck9uYLUMUMC6VxUtyxX/sSVR+d7NIzfZjPNeiSeJU7SYAMNbtnt03+1jmLrmsvF1j48IkLWqYnvVfXgsmQuCUjid7FX8RV1RIZxV+n4amIRFmeiA4loFtiupSvZyndYOckmsN/rNJGbqZJi8QdaqYDbhzOM9/kMJ0W0koosVIH5OXmuPWpC0x1lJXaN+PLXu5rT2R+nWjfOH3zM7k0Mx41TCa1serCdQ7RjaC5wYFjQpDWy7NdAzhauPTc7qFOoJgupfCoYIL6ZU2GZ8FAFZw3qeWEPS56eHSABSfqc1FfY+4QdbUU+TIcu9iRtYrNf6Ai4yPYY9x2M9o1c6D2fL0e7XUPM8h4B/DA4rq5wHb6vgIfsR7fT6xzyXw/x553s0IDEBfG1OVTuRYeEW6a40aeLkxYIwUvhygBRuzZTB0MfMum3JTnv7YXhNmy62osmSFjXOgWUuligdEUuqboZMNSaU4KVb466XfZxKKkkcVsH86d1+237p5jI5TLHKouPXmiChfO1joSKDsY32Cw3q3luNQQYRXJTwgegoIgAfeth9C791JyiIzI3lOzkwaT31J4bpMwEt10jmc=
+  on:
+    tags: true
+    python: "3.6"
+
