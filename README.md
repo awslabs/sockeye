@@ -11,7 +11,8 @@ It implements state-of-the-art encoder-decoder architectures, such as
 
 If you use Sockeye, please cite:
 
-Felix Hieber, Tobias Domhan, Michael Denkowski, David Vilar, Artem Sokolov, Ann Clifton and Matt Post (2017):[Sockeye: A Toolkit for Neural Machine Translation](https://arxiv.org/abs/1712.05690). In eprint arXiv:cs-CL/1712.05690.
+Felix Hieber, Tobias Domhan, Michael Denkowski, David Vilar, Artem Sokolov, Ann Clifton and Matt Post (2017): 
+[Sockeye: A Toolkit for Neural Machine Translation](https://arxiv.org/abs/1712.05690). In eprint arXiv:cs-CL/1712.05690.
 
 ```
 @article{Sockeye:17,
@@ -22,7 +23,9 @@ Felix Hieber, Tobias Domhan, Michael Denkowski, David Vilar, Artem Sokolov, Ann 
 archivePrefix = "arXiv",
    eprint = {1712.05690},
  primaryClass = "cs.CL",
- keywords = {Computer Science - Computation and Language, Computer Science - Learning, Statistics - Machine Learning},
+ keywords = {Computer Science - Computation and Language,
+             Computer Science - Learning,
+             Statistics - Machine Learning},
      year = 2017,
     month = dec,
       url = {https://arxiv.org/abs/1712.05690}
