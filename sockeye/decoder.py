@@ -957,7 +957,7 @@ class ConvolutionalDecoder(Decoder):
                                                                   self.config.cnn_config.num_hidden)
                                      for i in range(config.num_layers)]
         else:
-            self.attention_layers = [layers.PlainDotAttention() for i in range(config.num_layers)]
+            self.attention_layers = [layers.PlainDotAttention() for _ in range(config.num_layers)]  # type: ignore
 
         self.i2h_weight = mx.sym.Variable('%si2h_weight' % prefix)
 
