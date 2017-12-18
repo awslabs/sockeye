@@ -14,10 +14,9 @@
 """
 A set of utility methods.
 """
-import argparse
-import collections
 import errno
-import fcntl
+import gzip
+import itertools
 import logging
 import os
 import random
@@ -25,10 +24,10 @@ import shutil
 import subprocess
 import sys
 import time
-import itertools
 from contextlib import contextmanager, ExitStack
-from typing import Mapping, NamedTuple, Any, List, Iterator, Iterable, Set, TextIO, Tuple, Dict, Optional
+from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO
 
+import fcntl
 import mxnet as mx
 import numpy as np
 
@@ -95,15 +94,15 @@ def log_basic_info(args) -> None:
     logger.info("Arguments: %s", args)
 
 
-def seedRNGs(args: argparse.Namespace) -> None:
+def seedRNGs(seed: int) -> None:
     """
     Seed the random number generators (Python, Numpy and MXNet)
 
-    :param args: Arguments as returned by argparse.
+    :param seed: The random seed.
     """
-    np.random.seed(args.seed)
-    random.seed(args.seed)
-    mx.random.seed(args.seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    mx.random.seed(seed)
 
 
 def check_condition(condition: bool, error_message: str):
@@ -214,6 +213,35 @@ class Accuracy(mx.metric.EvalMetric):
             self.num_inst += n
 
 
+class OnlineMeanAndVariance:
+    def __init__(self) -> None:
+        self._count = 0
+        self._mean = 0.
+        self._M2 = 0.
+
+    def update(self, value: Union[float, int]) -> None:
+        self._count += 1
+        delta = value - self._mean
+        self._mean += delta / self._count
+        delta2 = value - self._mean
+        self._M2 += delta * delta2
+
+    @property
+    def count(self) -> int:
+        return self._count
+
+    @property
+    def mean(self) -> float:
+        return self._mean
+
+    @property
+    def variance(self) -> float:
+        if self._count < 2:
+            return float('nan')
+        else:
+            return self._M2 / self._count
+
+
 def smallest_k(matrix: np.ndarray, k: int,
                only_first_row: bool = False) -> Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]:
     """
@@ -260,6 +288,39 @@ def chunks(some_list: List, n: int) -> Iterable[List]:
     """Yield successive n-sized chunks from l."""
     for i in range(0, len(some_list), n):
         yield some_list[i:i + n]
+
+
+def get_tokens(line: str) -> Iterator[str]:
+    """
+    Yields tokens from input string.
+
+    :param line: Input string.
+    :return: Iterator over tokens.
+    """
+    for token in line.rstrip().split():
+        if len(token) > 0:
+            yield token
+
+
+def smart_open(filename: str, mode: str = "rt", ftype: str = "auto", errors: str = 'replace'):
+    """
+    Returns a file descriptor for filename with UTF-8 encoding.
+    If mode is "rt", file is opened read-only.
+    If ftype is "auto", uses gzip iff filename endswith .gz.
+    If ftype is {"gzip","gz"}, uses gzip.
+
+    Note: encoding error handling defaults to "replace"
+
+    :param filename: The filename to open.
+    :param mode: Reader mode.
+    :param ftype: File type. If 'auto' checks filename suffix for gz to try gzip.open
+    :param errors: Encoding error handling during reading. Defaults to 'replace'
+    :return: File descriptor
+    """
+    if ftype == 'gzip' or ftype == 'gz' or (ftype == 'auto' and filename.endswith(".gz")):
+        return gzip.open(filename, mode=mode, encoding='utf-8', errors=errors)
+    else:
+        return open(filename, mode=mode, encoding='utf-8', errors=errors)
 
 
 def plot_attention(attention_matrix: np.ndarray, source_tokens: List[str], target_tokens: List[str], filename: str):
@@ -504,7 +565,7 @@ def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
             acquired_gpus = []  # type: List[int]
             any_failed = False
             for candidates in candidates_to_request:
-                gpu_id = exit_stack.enter_context(GpuFileLock(candidates=candidates, lock_dir=lock_dir))
+                gpu_id = exit_stack.enter_context(GpuFileLock(candidates=candidates, lock_dir=lock_dir))  # type: ignore
                 if gpu_id is not None:
                     acquired_gpus.append(gpu_id)
                 else:
@@ -541,7 +602,7 @@ class GpuFileLock:
     def __init__(self, candidates: List[int], lock_dir: str) -> None:
         self.candidates = candidates
         self.lock_dir = lock_dir
-        self.lock_file = None  # type: Optional[TextIO]
+        self.lock_file = None  # type: Optional[IO[Any]]
         self.lock_file_path = None  # type: Optional[str]
         self.gpu_id = None  # type: Optional[int]
         self._acquired_lock = False
@@ -582,25 +643,6 @@ class GpuFileLock:
                 fcntl.flock(self.lock_file, fcntl.LOCK_UN)
             self.lock_file.close()
             os.remove(self.lockfile_path)
-
-
-def namedtuple_with_defaults(typename, field_names, default_values: Mapping[str, Any] = ()) -> NamedTuple:
-    """
-    Create a named tuple with default values.
-
-    :param typename: The name of the new type.
-    :param field_names: The fields the type will have.
-    :param default_values: A mapping from field names to default values.
-    :return: The new named tuple with default values.
-    """
-    T = collections.namedtuple(typename, field_names)
-    T.__new__.__defaults__ = (None,) * len(T._fields)
-    if isinstance(default_values, collections.Mapping):
-        prototype = T(**default_values)
-    else:
-        prototype = T(*default_values)
-    T.__new__.__defaults__ = tuple(prototype)
-    return T
 
 
 def read_metrics_file(path: str) -> List[Dict[str, Any]]:
@@ -662,7 +704,7 @@ class PrintValue(mx.operator.CustomOp):
     the system logger and 'print_grad=True' for printing information about the
     gradient (out_grad, i.e. "upper part" of the graph).
     """
-    def __init__(self, print_name, print_grad: str, use_logger: str):
+    def __init__(self, print_name, print_grad: str, use_logger: str) -> None:
         super().__init__()
         self.print_name = print_name
         # Note that all the parameters are serialized as strings
@@ -690,7 +732,7 @@ class PrintValue(mx.operator.CustomOp):
 
 @mx.operator.register("PrintValue")
 class PrintValueProp(mx.operator.CustomOpProp):
-    def __init__(self, print_name: str, print_grad: bool = False, use_logger: bool = False):
+    def __init__(self, print_name: str, print_grad: bool = False, use_logger: bool = False) -> None:
         super().__init__(need_top_grad=True)
         self.print_name = print_name
         self.print_grad = print_grad

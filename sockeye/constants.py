@@ -222,6 +222,12 @@ ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet",
                    "keep_last_params"]
 
 # Other argument constants
+TRAINING_ARG_SOURCE = "--source"
+TRAINING_ARG_TARGET = "--target"
+TRAINING_ARG_PREPARED_DATA = "--prepared-data"
+
+VOCAB_ARG_SHARED_VOCAB = "--shared-vocab"
+
 INFERENCE_ARG_INPUT_LONG = "--input"
 INFERENCE_ARG_INPUT_SHORT = "-i"
 INFERENCE_ARG_OUTPUT_LONG = "--output"
@@ -316,3 +322,12 @@ DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH = 2
 
 LARGE_POSITIVE_VALUE = 99999999.
 LARGE_NEGATIVE_VALUE = -LARGE_POSITIVE_VALUE
+
+# data sharding
+SHARD_NAME = "shard.%05d"
+SHARD_SOURCE = SHARD_NAME + ".source"
+SHARD_TARGET = SHARD_NAME + ".target"
+DATA_CONFIG = "data.config"
+PREPARED_DATA_VERSION_FILE = "data.version"
+PREPARED_DATA_VERSION = 1
+

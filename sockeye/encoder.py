@@ -18,7 +18,7 @@ Encoders for sequence-to-sequence models.
 import logging
 from math import ceil, floor
 from abc import ABC, abstractmethod
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Union
 
 import mxnet as mx
 
@@ -30,9 +30,10 @@ from . import transformer
 from . import utils
 
 logger = logging.getLogger(__name__)
+EncoderConfigs = Union['RecurrentEncoderConfig', transformer.TransformerConfig, 'ConvolutionalEncoderConfig']
 
 
-def get_encoder(config: Config):
+def get_encoder(config: EncoderConfigs) -> 'Encoder':
     if isinstance(config, RecurrentEncoderConfig):
         return get_recurrent_encoder(config)
     elif isinstance(config, transformer.TransformerConfig):

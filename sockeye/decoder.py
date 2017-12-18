@@ -16,7 +16,7 @@ Decoders for sequence-to-sequence models.
 """
 import logging
 from abc import ABC, abstractmethod
-from typing import Callable, Dict, List, NamedTuple, Tuple
+from typing import Callable, Dict, List, NamedTuple, Tuple, Union
 from typing import Optional
 
 import mxnet as mx
@@ -32,9 +32,10 @@ from . import transformer
 from . import utils
 
 logger = logging.getLogger(__name__)
+DecoderConfig = Union['RecurrentDecoderConfig', transformer.TransformerConfig, 'ConvolutionalDecoderConfig']
 
 
-def get_decoder(config: Config) -> 'Decoder':
+def get_decoder(config: DecoderConfig) -> 'Decoder':
     if isinstance(config, RecurrentDecoderConfig):
         return RecurrentDecoder(config=config, prefix=C.RNN_DECODER_PREFIX)
     elif isinstance(config, ConvolutionalDecoderConfig):

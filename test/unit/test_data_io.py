@@ -11,13 +11,22 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import os
+import random
+from tempfile import TemporaryDirectory
+from typing import Optional, List, Tuple
+
+import mxnet as mx
 import numpy as np
 import pytest
 
 from sockeye import constants as C
 from sockeye import data_io
 from sockeye import vocab
+from sockeye.utils import SockeyeError, get_tokens, seedRNGs
 from test.common import tmp_digits_dataset
+
+seedRNGs(12)
 
 define_bucket_tests = [(50, 10, [10, 20, 30, 40, 50]),
                        (50, 20, [20, 40, 50]),
@@ -74,16 +83,6 @@ def test_get_bucket(buckets, length, expected_bucket):
     assert bucket == expected_bucket
 
 
-get_tokens_tests = [("this is a line  \n", ["this", "is", "a", "line"]),
-                    (" a  \tb \r \n", ["a", "b"])]
-
-
-@pytest.mark.parametrize("line, expected_tokens", get_tokens_tests)
-def test_get_tokens(line, expected_tokens):
-    tokens = list(data_io.get_tokens(line))
-    assert tokens == expected_tokens
-
-
 tokens2ids_tests = [(["a", "b", "c"], {"a": 1, "b": 0, "c": 300, C.UNK_SYMBOL: 12}, [1, 0, 300]),
                     (["a", "x", "c"], {"a": 1, "b": 0, "c": 300, C.UNK_SYMBOL: 12}, [1, 12, 300])]
 
@@ -92,6 +91,238 @@ tokens2ids_tests = [(["a", "b", "c"], {"a": 1, "b": 0, "c": 300, C.UNK_SYMBOL: 1
 def test_tokens2ids(tokens, vocab, expected_ids):
     ids = data_io.tokens2ids(tokens, vocab)
     assert ids == expected_ids
+
+
+@pytest.mark.parametrize("tokens, expected_ids", [(["1", "2", "3", "0"], [1, 2, 3, 0]), ([], [])])
+def test_strids2ids(tokens, expected_ids):
+    ids = data_io.strids2ids(tokens)
+    assert ids == expected_ids
+
+
+@pytest.mark.parametrize("ids, expected_string", [([1, 2, 3, 0], "1 2 3 0"), ([], "")])
+def test_ids2strids(ids, expected_string):
+    string = data_io.ids2strids(ids)
+    assert string == expected_string
+
+
+sequence_reader_tests = [(["1 2 3", "2", "14", "2 2 2"], False, False),
+                         (["a b c", "c"], True, False),
+                         (["a b c", "c"], True, True)]
+
+
+@pytest.mark.parametrize("sequences, use_vocab, add_bos", sequence_reader_tests)
+def test_sequence_reader(sequences, use_vocab, add_bos):
+    with TemporaryDirectory() as work_dir:
+        path = os.path.join(work_dir, 'input')
+        with open(path, 'w') as f:
+            for sequence in sequences:
+                f.write(sequence + "\n")
+
+        vocabulary = vocab.build_vocab(sequences) if use_vocab else None
+
+        reader = data_io.SequenceReader(path, vocab=vocabulary, add_bos=add_bos)
+
+        read_sequences = [s for s in reader]
+        assert reader.is_done()
+        assert len(read_sequences) == reader.count
+
+        if vocabulary is None:
+            with pytest.raises(SockeyeError) as e:
+                _ = data_io.SequenceReader(path, vocab=vocabulary, add_bos=True)
+            assert str(e.value) == "Adding a BOS symbol requires a vocabulary"
+
+            expected_sequences = [data_io.strids2ids(get_tokens(s)) for s in sequences]
+            assert read_sequences == expected_sequences
+        else:
+            expected_sequences = [data_io.tokens2ids(get_tokens(s), vocabulary) for s in sequences]
+            if add_bos:
+                expected_sequences = [[vocabulary[C.BOS_SYMBOL]] + s for s in expected_sequences]
+            assert read_sequences == expected_sequences
+
+        # check raise for multiple concurrent iters
+        _ = iter(reader)
+        with pytest.raises(SockeyeError) as e:
+            iter(reader)
+        assert str(e.value) == "Can not iterate multiple times simultaneously."
+
+
+def test_sample_based_define_bucket_batch_sizes():
+    batch_by_words = False
+    batch_size = 32
+    max_seq_len = 100
+    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, 1.5)
+    bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets=buckets,
+                                                           batch_size=batch_size,
+                                                           batch_by_words=batch_by_words,
+                                                           batch_num_devices=1,
+                                                           data_target_average_len=[None] * len(buckets))
+    for bbs in bucket_batch_sizes:
+        assert bbs.batch_size == batch_size
+        assert bbs.average_words_per_batch == bbs.bucket[1] * batch_size
+
+
+def test_word_based_define_bucket_batch_sizes():
+    batch_by_words = True
+    batch_num_devices = 1
+    batch_size = 200
+    max_seq_len = 100
+    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, 1.5)
+    bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets=buckets,
+                                                           batch_size=batch_size,
+                                                           batch_by_words=batch_by_words,
+                                                           batch_num_devices=batch_num_devices,
+                                                           data_target_average_len=[None] * len(buckets))
+    # last bucket batch size is different
+    for bbs in bucket_batch_sizes[:-1]:
+        expected_batch_size = round((batch_size / bbs.bucket[1]) / batch_num_devices)
+        assert bbs.batch_size == expected_batch_size
+        expected_average_words_per_batch = expected_batch_size * bbs.bucket[1]
+        assert bbs.average_words_per_batch == expected_average_words_per_batch
+
+
+def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
+                              min_count: int,
+                              max_count: int,
+                              bucket_counts: Optional[List[Optional[int]]] = None):
+    """
+    Get random bucket data.
+
+    :param buckets: The list of buckets.
+    :param min_count: The minimum number of samples that will be sampled if no exact count is given.
+    :param max_count: The maximum number of samples that will be sampled if no exact count is given.
+    :param bucket_counts: For each bucket an optional exact example count can be given. If it is not given it will be
+                         sampled.
+    :return: The random source, target and label arrays.
+    """
+    if bucket_counts is None:
+        bucket_counts = [None for _ in buckets]
+    bucket_counts = [random.randint(min_count, max_count) if given_count is None else given_count
+                     for given_count in bucket_counts]
+    source = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(1, bucket[0])))) for count, bucket in
+              zip(bucket_counts, buckets)]
+    target = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(1, bucket[1])))) for count, bucket in
+              zip(bucket_counts, buckets)]
+    label = target
+    return source, target, label
+
+
+def test_parallel_data_set():
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    source, target, label = _get_random_bucketed_data(buckets, min_count=0, max_count=5)
+
+    def check_equal(arrays1, arrays2):
+        assert len(arrays1) == len(arrays2)
+        for a1, a2 in zip(arrays1, arrays2):
+            assert np.array_equal(a1.asnumpy(), a2.asnumpy())
+
+    with TemporaryDirectory() as work_dir:
+        dataset = data_io.ParallelDataSet(source, target, label)
+        fname = os.path.join(work_dir, 'dataset')
+        dataset.save(fname)
+        dataset_loaded = data_io.ParallelDataSet.load(fname)
+        check_equal(dataset.source, dataset_loaded.source)
+        check_equal(dataset.target, dataset_loaded.target)
+        check_equal(dataset.label, dataset_loaded.label)
+
+
+def test_parallel_data_set_fill_up():
+    batch_size = 32
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
+                                                           batch_size,
+                                                           batch_by_words=False,
+                                                           batch_num_devices=1,
+                                                           data_target_average_len=[None] * len(buckets))
+    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=1, max_count=5))
+
+    dataset_filled_up = dataset.fill_up(bucket_batch_sizes, 'replicate')
+    assert len(dataset_filled_up.source) == len(dataset.source)
+    assert len(dataset_filled_up.target) == len(dataset.target)
+    assert len(dataset_filled_up.label) == len(dataset.label)
+    for bidx in range(len(dataset)):
+        bucket_batch_size = bucket_batch_sizes[bidx].batch_size
+        assert dataset_filled_up.source[bidx].shape[0] == bucket_batch_size
+        assert dataset_filled_up.target[bidx].shape[0] == bucket_batch_size
+        assert dataset_filled_up.label[bidx].shape[0] == bucket_batch_size
+
+
+def test_get_permutations():
+    data = [list(range(3)), list(range(1)), list(range(7)), []]
+    bucket_counts = [len(d) for d in data]
+
+    permutation, inverse_permutation = data_io.get_permutations(bucket_counts)
+    assert len(permutation) == len(inverse_permutation) == len(bucket_counts) == len(data)
+
+    for d, p, pi in zip(data, permutation, inverse_permutation):
+        p = p.asnumpy().astype(np.int)
+        pi = pi.asnumpy().astype(np.int)
+        p_set = set(p)
+        pi_set = set(pi)
+        assert len(p_set) == len(p)
+        assert len(pi_set) == len(pi)
+        assert p_set - pi_set == set()
+        if d:
+            d = np.array(d)
+            assert (d[p][pi] == d).all()
+        else:
+            assert len(p_set) == 1
+
+
+def test_parallel_data_set_permute():
+    batch_size = 5
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
+                                                           batch_size,
+                                                           batch_by_words=False,
+                                                           batch_num_devices=1,
+                                                           data_target_average_len=[None] * len(buckets))
+    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5)).fill_up(
+        bucket_batch_sizes, 'replicate')
+
+    permutations, inverse_permutations = data_io.get_permutations(dataset.get_bucket_counts())
+
+    assert len(permutations) == len(inverse_permutations) == len(dataset)
+    dataset_restored = dataset.permute(permutations).permute(inverse_permutations)
+    assert len(dataset) == len(dataset_restored)
+    for buck_idx in range(len(dataset)):
+        num_samples = dataset.source[buck_idx].shape[0]
+        if num_samples:
+            assert (dataset.source[buck_idx] == dataset_restored.source[buck_idx]).asnumpy().all()
+            assert (dataset.target[buck_idx] == dataset_restored.target[buck_idx]).asnumpy().all()
+            assert (dataset.label[buck_idx] == dataset_restored.label[buck_idx]).asnumpy().all()
+        else:
+            assert not dataset_restored.source[buck_idx]
+            assert not dataset_restored.target[buck_idx]
+            assert not dataset_restored.label[buck_idx]
+
+
+def test_get_batch_indices():
+    max_bucket_size = 50
+    batch_size = 10
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
+                                                           batch_size,
+                                                           batch_by_words=False,
+                                                           batch_num_devices=1,
+                                                           data_target_average_len=[None] * len(buckets))
+    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets=buckets,
+                                                                 min_count=1,
+                                                                 max_count=max_bucket_size))
+
+    indices = data_io.get_batch_indices(dataset, bucket_batch_sizes=bucket_batch_sizes)
+
+    # check for valid indices
+    for buck_idx, start_pos in indices:
+        assert 0 <= buck_idx < len(dataset)
+        assert 0 <= start_pos < len(dataset.source[buck_idx]) - batch_size + 1
+
+    # check that all indices are used for a filled-up dataset
+    dataset = dataset.fill_up(bucket_batch_sizes, fill_up='replicate')
+    indices = data_io.get_batch_indices(dataset, bucket_batch_sizes=bucket_batch_sizes)
+    all_bucket_indices = set(list(range(len(dataset))))
+    computed_bucket_indices = set([i for i, j in indices])
+
+    assert not all_bucket_indices - computed_bucket_indices
 
 
 @pytest.mark.parametrize("buckets, expected_default_bucket_key",
@@ -119,17 +350,19 @@ def test_get_parallel_bucket(buckets, source_length, target_length, expected_buc
     assert bucket == expected_bucket
 
 
-@pytest.mark.parametrize("source, target, expected_mean, expected_std",
+@pytest.mark.parametrize("source, target, expected_num_sents, expected_mean, expected_std",
                          [([[1, 1, 1], [2, 2, 2], [3, 3, 3]],
-                           [[1, 1, 1], [2, 2, 2], [3, 3, 3]], 1.0, 0.0),
+                           [[1, 1, 1], [2, 2, 2], [3, 3, 3]], 3, 1.0, 0.0),
                           ([[1, 1], [2, 2], [3, 3]],
-                           [[1, 1, 1], [2, 2, 2], [3, 3, 3]], 1.5, 0.0),
-                          ([[1, 1, 1], [2, 2]],
-                           [[1, 1, 1], [2], [3, 3, 3]], 0.75, 0.25)])
-def test_length_statistics(source, target, expected_mean, expected_std):
-    mean, std = data_io.length_statistics(source, target)
-    assert np.isclose(mean, expected_mean)
-    assert np.isclose(std, expected_std)
+                           [[1, 1, 1], [2, 2, 2], [3, 3, 3]], 3, 1.5, 0.0),
+                          ([[1, 1, 1], [2, 2], [3, 3, 3, 3, 3, 3, 3]],
+                           [[1, 1, 1], [2], [3, 3, 3]], 2, 0.75, 0.25)])
+def test_calculate_length_statistics(source, target, expected_num_sents, expected_mean, expected_std):
+    length_statistics = data_io.calculate_length_statistics(source, target, 5, 5)
+    assert len(source) == len(target)
+    assert length_statistics.num_sents == expected_num_sents
+    assert np.isclose(length_statistics.length_ratio_mean, expected_mean)
+    assert np.isclose(length_statistics.length_ratio_std, expected_std)
 
 
 def test_get_training_data_iters():
@@ -137,11 +370,11 @@ def test_get_training_data_iters():
     train_max_length = 30
     dev_line_count = 20
     dev_max_length = 30
+    expected_mean = 1.0
+    expected_std = 0.0
     test_line_count = 20
     test_line_count_empty = 0
     test_max_length = 30
-    expected_mean = 1.1476392401276574
-    expected_std = 0.2318455878853099
     batch_size = 5
     with tmp_digits_dataset("tmp_corpus",
                             train_line_count, train_max_length, dev_line_count, dev_max_length,
@@ -156,6 +389,7 @@ def test_get_training_data_iters():
                                                                             vocab_target=vcb,
                                                                             vocab_source_path=None,
                                                                             vocab_target_path=None,
+                                                                            shared_vocab=True,
                                                                             batch_size=batch_size,
                                                                             batch_by_words=False,
                                                                             batch_num_devices=1,
@@ -164,27 +398,23 @@ def test_get_training_data_iters():
                                                                             max_seq_len_target=train_max_length,
                                                                             bucketing=True,
                                                                             bucket_width=10)
+        assert isinstance(train_iter, data_io.ParallelSampleIter)
+        assert isinstance(val_iter, data_io.ParallelSampleIter)
+        assert isinstance(config_data, data_io.DataConfig)
         assert config_data.source == data['source']
         assert config_data.target == data['target']
-        assert config_data.validation_source == data['validation_source']
-        assert config_data.validation_target == data['validation_target']
         assert config_data.vocab_source is None
         assert config_data.vocab_target is None
-        assert config_data.max_observed_source_seq_len == train_max_length - 1
-        assert config_data.max_observed_target_seq_len == train_max_length
-        assert np.isclose(config_data.length_ratio_mean, expected_mean)
-        assert np.isclose(config_data.length_ratio_std, expected_std)
+        assert config_data.data_statistics.max_observed_len_source == train_max_length - 1
+        assert config_data.data_statistics.max_observed_len_target == train_max_length
+        assert np.isclose(config_data.data_statistics.length_ratio_mean, expected_mean)
+        assert np.isclose(config_data.data_statistics.length_ratio_std, expected_std)
 
         assert train_iter.batch_size == batch_size
         assert val_iter.batch_size == batch_size
         assert train_iter.default_bucket_key == (train_max_length, train_max_length)
         assert val_iter.default_bucket_key == (dev_max_length, dev_max_length)
-        assert train_iter.max_observed_source_len == config_data.max_observed_source_seq_len
-        assert train_iter.max_observed_target_len == config_data.max_observed_target_seq_len
-        assert train_iter.pad_id == vcb[C.PAD_SYMBOL]
         assert train_iter.dtype == 'float32'
-        assert not train_iter.batch_by_words
-        assert train_iter.fill_up == 'replicate'
 
         # test some batches
         bos_id = vcb[C.BOS_SYMBOL]
@@ -198,9 +428,7 @@ def test_get_training_data_iters():
                 source = batch.data[0].asnumpy()
                 target = batch.data[1].asnumpy()
                 label = batch.label[0].asnumpy()
-                assert source.shape[0] == batch_size
-                assert target.shape[0] == batch_size
-                assert label.shape[0] == batch_size
+                assert source.shape[0] == target.shape[0] == label.shape[0] == batch_size
                 # target first symbol should be BOS
                 assert np.array_equal(target[:, 0], expected_first_target_symbols)
                 # label first symbol should be 2nd target symbol
@@ -208,3 +436,225 @@ def test_get_training_data_iters():
                 # each label sequence contains one EOS symbol
                 assert np.sum(label == vcb[C.EOS_SYMBOL]) == batch_size
             train_iter.reset()
+
+
+def _data_batches_equal(db1, db2):
+    # We just compare the data, should probably be enough
+    equal = True
+    for data1, data2 in zip(db1.data, db2.data):
+        equal = equal and np.allclose(data1.asnumpy(), data2.asnumpy())
+    return equal
+
+
+def test_parallel_sample_iter():
+    batch_size = 2
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    # The first bucket is going to be empty:
+    bucket_counts = [0] + [None] * (len(buckets) - 1)
+    bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
+                                                           batch_size,
+                                                           batch_by_words=False,
+                                                           batch_num_devices=1,
+                                                           data_target_average_len=[None] * len(buckets))
+
+    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
+                                                                 bucket_counts=bucket_counts))
+    it = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes)
+
+    with TemporaryDirectory() as work_dir:
+        # Test 1
+        it.next()
+        expected_batch = it.next()
+
+        fname = os.path.join(work_dir, "saved_iter")
+        it.save_state(fname)
+
+        it_loaded = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes)
+        it_loaded.reset()
+        it_loaded.load_state(fname)
+        loaded_batch = it_loaded.next()
+        assert _data_batches_equal(expected_batch, loaded_batch)
+
+        # Test 2
+        it.reset()
+        expected_batch = it.next()
+        it.save_state(fname)
+
+        it_loaded = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes)
+        it_loaded.reset()
+        it_loaded.load_state(fname)
+
+        loaded_batch = it_loaded.next()
+        assert _data_batches_equal(expected_batch, loaded_batch)
+
+        # Test 3
+        it.reset()
+        expected_batch = it.next()
+        it.save_state(fname)
+        it_loaded = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes)
+        it_loaded.reset()
+        it_loaded.load_state(fname)
+
+        loaded_batch = it_loaded.next()
+        assert _data_batches_equal(expected_batch, loaded_batch)
+
+        while it.iter_next():
+            it.next()
+            it_loaded.next()
+        assert not it_loaded.iter_next()
+
+
+def test_sharded_parallel_sample_iter():
+    batch_size = 2
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    # The first bucket is going to be empty:
+    bucket_counts = [0] + [None] * (len(buckets) - 1)
+    bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
+                                                           batch_size,
+                                                           batch_by_words=False,
+                                                           batch_num_devices=1,
+                                                           data_target_average_len=[None] * len(buckets))
+
+    dataset1 = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
+                                                                  bucket_counts=bucket_counts))
+    dataset2 = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
+                                                                  bucket_counts=bucket_counts))
+
+    with TemporaryDirectory() as work_dir:
+        shard1_fname = os.path.join(work_dir, 'shard1')
+        shard2_fname = os.path.join(work_dir, 'shard2')
+        dataset1.save(shard1_fname)
+        dataset2.save(shard2_fname)
+        shard_fnames = [shard1_fname, shard2_fname]
+
+        it = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes, 'replicate')
+
+        with TemporaryDirectory() as work_dir:
+            # Test 1
+            it.next()
+            expected_batch = it.next()
+
+            fname = os.path.join(work_dir, "saved_iter")
+            it.save_state(fname)
+
+            it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
+                                                          'replicate')
+            it_loaded.reset()
+            it_loaded.load_state(fname)
+            loaded_batch = it_loaded.next()
+            assert _data_batches_equal(expected_batch, loaded_batch)
+
+            # Test 2
+            it.reset()
+            expected_batch = it.next()
+            it.save_state(fname)
+
+            it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
+                                                          'replicate')
+            it_loaded.reset()
+            it_loaded.load_state(fname)
+
+            loaded_batch = it_loaded.next()
+            assert _data_batches_equal(expected_batch, loaded_batch)
+
+            # Test 3
+            it.reset()
+            expected_batch = it.next()
+            it.save_state(fname)
+            it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
+                                                          'replicate')
+            it_loaded.reset()
+            it_loaded.load_state(fname)
+
+            loaded_batch = it_loaded.next()
+            assert _data_batches_equal(expected_batch, loaded_batch)
+
+            while it.iter_next():
+                it.next()
+                it_loaded.next()
+            assert not it_loaded.iter_next()
+
+
+def test_sharded_parallel_sample_iter_num_batches():
+    num_shards = 2
+    batch_size = 2
+    num_batches_per_bucket = 10
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    bucket_counts = [batch_size * num_batches_per_bucket for _ in buckets]
+    num_batches_per_shard = num_batches_per_bucket * len(buckets)
+    num_batches = num_shards * num_batches_per_shard
+    bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
+                                                           batch_size,
+                                                           batch_by_words=False,
+                                                           batch_num_devices=1,
+                                                           data_target_average_len=[None] * len(buckets))
+
+    dataset1 = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
+                                                                  bucket_counts=bucket_counts))
+    dataset2 = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
+                                                                  bucket_counts=bucket_counts))
+    with TemporaryDirectory() as work_dir:
+        shard1_fname = os.path.join(work_dir, 'shard1')
+        shard2_fname = os.path.join(work_dir, 'shard2')
+        dataset1.save(shard1_fname)
+        dataset2.save(shard2_fname)
+        shard_fnames = [shard1_fname, shard2_fname]
+
+        it = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
+                                               'replicate')
+
+        num_batches_seen = 0
+        while it.iter_next():
+            it.next()
+            num_batches_seen += 1
+        assert num_batches_seen == num_batches
+
+
+def test_sharded_and_parallel_iter_same_num_batches():
+    """ Tests that a sharded data iterator with just a single shard produces as many shards as an iterator directly
+    using the same dataset. """
+    batch_size = 2
+    num_batches_per_bucket = 10
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    bucket_counts = [batch_size * num_batches_per_bucket for _ in buckets]
+    num_batches = num_batches_per_bucket * len(buckets)
+    bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
+                                                           batch_size,
+                                                           batch_by_words=False,
+                                                           batch_num_devices=1,
+                                                           data_target_average_len=[None] * len(buckets))
+
+    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
+                                                                 bucket_counts=bucket_counts))
+
+    with TemporaryDirectory() as work_dir:
+        shard_fname = os.path.join(work_dir, 'shard1')
+        dataset.save(shard_fname)
+        shard_fnames = [shard_fname]
+
+        it_sharded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
+                                                       'replicate')
+
+        it_parallel = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes)
+
+        num_batches_seen = 0
+        while it_parallel.iter_next():
+            assert it_sharded.iter_next()
+            it_parallel.next()
+            it_sharded.next()
+            num_batches_seen += 1
+        assert num_batches_seen == num_batches
+
+        print("Resetting...")
+        it_sharded.reset()
+        it_parallel.reset()
+
+        num_batches_seen = 0
+        while it_parallel.iter_next():
+            assert it_sharded.iter_next()
+            it_parallel.next()
+            it_sharded.next()
+
+            num_batches_seen += 1
+
+        assert num_batches_seen == num_batches

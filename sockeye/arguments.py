@@ -41,6 +41,22 @@ def regular_file() -> Callable:
     return check_regular_file
 
 
+def regular_folder() -> Callable:
+    """
+    Returns a method that can be used in argument parsing to check the argument is a directory.
+
+    :return: A method that can be used as a type in argparse.
+    """
+
+    def check_regular_directory(value_to_check):
+        value_to_check = str(value_to_check)
+        if not os.path.isdir(value_to_check):
+            raise argparse.ArgumentTypeError("must be a directory.")
+        return value_to_check
+
+    return check_regular_directory
+
+
 def int_greater_or_equal(threshold: int) -> Callable:
     """
     Returns a method that can be used in argument parsing to check that the argument is greater or equal to `threshold`.
@@ -235,62 +251,117 @@ def add_logging_args(params):
                                 help='Suppress console logging.')
 
 
-def add_io_args(params):
-    data_params = params.add_argument_group("Data & I/O")
+def add_training_data_args(params, required=False):
+    params.add_argument(C.TRAINING_ARG_SOURCE, '-s',
+                        required=required,
+                        type=regular_file(),
+                        help='Source side of parallel training data.')
+    params.add_argument(C.TRAINING_ARG_TARGET, '-t',
+                        required=required,
+                        type=regular_file(),
+                        help='Target side of parallel training data.')
 
-    data_params.add_argument('--source', '-s',
-                             required=True,
-                             type=regular_file(),
-                             help='Source side of parallel training data.')
-    data_params.add_argument('--target', '-t',
-                             required=True,
-                             type=regular_file(),
-                             help='Target side of parallel training data.')
-    data_params.add_argument('--limit',
-                             default=None,
-                             type=int,
-                             help="Maximum number of training sequences to read. Default: %(default)s.")
 
-    data_params.add_argument('--validation-source', '-vs',
-                             required=True,
-                             type=regular_file(),
-                             help='Source side of validation data.')
-    data_params.add_argument('--validation-target', '-vt',
-                             required=True,
-                             type=regular_file(),
-                             help='Target side of validation data.')
+def add_validation_data_params(params):
+    params.add_argument('--validation-source', '-vs',
+                        required=True,
+                        type=regular_file(),
+                        help='Source side of validation data.')
+    params.add_argument('--validation-target', '-vt',
+                        required=True,
+                        type=regular_file(),
+                        help='Target side of validation data.')
 
-    data_params.add_argument('--output', '-o',
-                             required=True,
-                             help='Folder where model & training results are written to.')
-    data_params.add_argument('--overwrite-output',
-                             action='store_true',
-                             help='Delete all contents of the model directory if it already exists.')
 
-    data_params.add_argument('--source-vocab',
-                             required=False,
-                             default=None,
-                             help='Existing source vocabulary (JSON)')
-    data_params.add_argument('--target-vocab',
-                             required=False,
-                             default=None,
-                             help='Existing target vocabulary (JSON)')
+def add_prepared_data_args(params):
+    params.add_argument(C.TRAINING_ARG_PREPARED_DATA, '-d',
+                        type=regular_folder(),
+                        help='Prepared training data directory created through python -m sockeye.prepare_data.')
 
-    data_params.add_argument('--use-tensorboard',
-                             action='store_true',
-                             help='Track metrics through tensorboard. Requires installed tensorboard.')
 
-    data_params.add_argument('--monitor-pattern',
-                             default=None,
-                             type=str,
-                             help="Pattern to match outputs/weights/gradients to monitor. '.*' monitors everything. "
-                                  "Default: %(default)s.")
+def add_monitoring_args(params):
+    params.add_argument('--use-tensorboard',
+                        action='store_true',
+                        help='Track metrics through tensorboard. Requires installed tensorboard.')
 
-    data_params.add_argument('--monitor-stat-func',
-                             default=C.STAT_FUNC_DEFAULT,
-                             choices=list(C.MONITOR_STAT_FUNCS.keys()),
-                             help="Statistics function to run on monitored outputs/weights/gradients. "
-                                  "Default: %(default)s.")
+    params.add_argument('--monitor-pattern',
+                        default=None,
+                        type=str,
+                        help="Pattern to match outputs/weights/gradients to monitor. '.*' monitors everything. "
+                             "Default: %(default)s.")
+
+    params.add_argument('--monitor-stat-func',
+                        default=C.STAT_FUNC_DEFAULT,
+                        choices=list(C.MONITOR_STAT_FUNCS.keys()),
+                        help="Statistics function to run on monitored outputs/weights/gradients. "
+                             "Default: %(default)s.")
+
+
+def add_training_output_args(params):
+    params.add_argument('--output', '-o',
+                        required=True,
+                        help='Folder where model & training results are written to.')
+    params.add_argument('--overwrite-output',
+                        action='store_true',
+                        help='Delete all contents of the model directory if it already exists.')
+
+
+def add_training_io_args(params):
+    params = params.add_argument_group("Data & I/O")
+
+    # Unfortunately we must set --source/--target to not required as we either accept these parameters
+    # or --prepared-data which can not easily be encoded in argparse.
+    add_training_data_args(params, required=False)
+    add_prepared_data_args(params)
+    add_validation_data_params(params)
+    add_bucketing_args(params)
+    add_vocab_args(params)
+    add_training_output_args(params)
+    add_monitoring_args(params)
+
+
+def add_bucketing_args(params):
+    params.add_argument('--no-bucketing',
+                        action='store_true',
+                        help='Disable bucketing: always unroll the graph to --max-seq-len. Default: %(default)s.')
+
+    params.add_argument('--bucket-width',
+                        type=int_greater_or_equal(1),
+                        default=10,
+                        help='Width of buckets in tokens. Default: %(default)s.')
+
+    params.add_argument('--max-seq-len',
+                        type=multiple_values(num_values=2, greater_or_equal=1),
+                        default=(100, 100),
+                        help='Maximum sequence length in tokens. Note that the target side will be extended by '
+                             'the <BOS> (beginning of sentence) token, increasing the effective target length. '
+                             'Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
+
+
+def add_prepare_data_cli_args(params):
+    params = params.add_argument_group("Data preparation.")
+    add_training_data_args(params, required=True)
+    add_vocab_args(params)
+    add_bucketing_args(params)
+
+    params.add_argument('--num-samples-per-shard',
+                        default=1000000,
+                        help='The approximate number of samples per shard. Default: %(default)s.')
+
+    params.add_argument('--min-num-shards',
+                        default=1,
+                        type=int_greater_or_equal(1),
+                        help='The minimum number of shards to use, even if they would not '
+                             'reach the desired number of samples per shard. Default: %(default)s.')
+
+    params.add_argument('--seed',
+                        type=int,
+                        default=13,
+                        help='Random seed used that makes shard assignments deterministic. Default: %(default)s.')
+
+    params.add_argument('--output', '-o',
+                        required=True,
+                        help='Folder where the prepared and possibly sharded data is written to.')
 
 
 def add_device_args(params):
@@ -319,16 +390,29 @@ def add_device_args(params):
                                     'write permissions.')
 
 
-def add_vocab_args(model_params):
-    model_params.add_argument('--num-words',
-                              type=multiple_values(num_values=2, greater_or_equal=0),
-                              default=(50000, 50000),
-                              help='Maximum vocabulary size. Use "x:x" to specify separate values for src&tgt. '
-                                   'Default: %(default)s.')
-    model_params.add_argument('--word-min-count',
-                              type=multiple_values(num_values=2, greater_or_equal=1),
-                              default=(1, 1),
-                              help='Minimum frequency of words to be included in vocabularies. Default: %(default)s.')
+def add_vocab_args(params):
+    params.add_argument('--source-vocab',
+                        required=False,
+                        default=None,
+                        help='Existing source vocabulary (JSON).')
+    params.add_argument('--target-vocab',
+                        required=False,
+                        default=None,
+                        help='Existing target vocabulary (JSON).')
+    params.add_argument(C.VOCAB_ARG_SHARED_VOCAB,
+                        action='store_true',
+                        default=False,
+                        help='Share source and target vocabulary. '
+                             'Will be automatically turned on when using weight tying. Default: %(default)s.')
+    params.add_argument('--num-words',
+                        type=multiple_values(num_values=2, greater_or_equal=0),
+                        default=(50000, 50000),
+                        help='Maximum vocabulary size. Use "x:x" to specify separate values for src&tgt. '
+                             'Default: %(default)s.')
+    params.add_argument('--word-min-count',
+                        type=multiple_values(num_values=2, greater_or_equal=1),
+                        default=(1, 1),
+                        help='Minimum frequency of words to be included in vocabularies. Default: %(default)s.')
 
 
 def add_model_parameters(params):
@@ -343,8 +427,6 @@ def add_model_parameters(params):
                               default=False,
                               help="Allow misssing parameters when initializing model parameters from file. "
                                    "Default: %(default)s.")
-
-    add_vocab_args(model_params)
 
     model_params.add_argument('--encoder',
                               choices=C.ENCODERS,
@@ -539,12 +621,6 @@ def add_model_parameters(params):
                               help='The type of weight tying. source embeddings=src, target embeddings=trg, '
                                    'target softmax weight matrix=softmax. Default: %(default)s.')
 
-    model_params.add_argument('--max-seq-len',
-                              type=multiple_values(num_values=2, greater_or_equal=1),
-                              default=(100, 100),
-                              help='Maximum sequence length in tokens. '
-                                   'Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
-
     model_params.add_argument('--layer-normalization', action="store_true",
                               help="Adds layer normalization before non-linear activations. "
                                    "This includes MLP attention, RNN decoder state initialization, "
@@ -576,13 +652,6 @@ def add_training_args(params):
                               type=str,
                               default='replicate',
                               help=argparse.SUPPRESS)
-    train_params.add_argument('--no-bucketing',
-                              action='store_true',
-                              help='Disable bucketing: always unroll to the max_len.')
-    train_params.add_argument('--bucket-width',
-                              type=int_greater_or_equal(1),
-                              default=10,
-                              help='Width of buckets in tokens. Default: %(default)s.')
 
     train_params.add_argument('--loss',
                               default=C.CROSS_ENTROPY,
@@ -824,7 +893,7 @@ def add_training_args(params):
 
 
 def add_train_cli_args(params):
-    add_io_args(params)
+    add_training_io_args(params)
     add_model_parameters(params)
     add_training_args(params)
     add_device_args(params)

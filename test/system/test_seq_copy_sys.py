@@ -29,7 +29,7 @@ _SEED_TRAIN = 13
 _SEED_DEV = 17
 
 
-@pytest.mark.parametrize("name, train_params, translate_params, perplexity_thresh, bleu_thresh", [
+@pytest.mark.parametrize("name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh", [
     ("Copy:lstm:lstm",
      "--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity"
@@ -37,6 +37,7 @@ _SEED_DEV = 17
      " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --max-updates 4000 --weight-normalization"
      " --gradient-clipping-type norm --gradient-clipping-threshold 10",
      "--beam-size 5 ",
+     True,
      1.02,
      0.99),
     ("Copy:chunking",
@@ -45,6 +46,7 @@ _SEED_DEV = 17
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
      " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --max-updates 5000",
      "--beam-size 5 --max-input-len 4",
+     False,
      1.01,
      0.99),
     ("Copy:word-based-batching",
@@ -53,6 +55,7 @@ _SEED_DEV = 17
      " --optimized-metric perplexity --max-updates 5000 --checkpoint-frequency 1000 --optimizer adam "
      " --initial-learning-rate 0.001 --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --layer-normalization",
      "--beam-size 5",
+     True,
      1.01,
      0.99),
     ("Copy:transformer:lstm",
@@ -63,6 +66,7 @@ _SEED_DEV = 17
      " --transformer-feed-forward-num-hidden 64 --transformer-activation-type gelu"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
+     False,
      1.01,
      0.99),
     ("Copy:lstm:transformer",
@@ -73,6 +77,7 @@ _SEED_DEV = 17
      " --transformer-feed-forward-num-hidden 64 --transformer-activation-type swish1"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
+     True,
      1.01,
      0.98),
     ("Copy:transformer:transformer",
@@ -82,6 +87,7 @@ _SEED_DEV = 17
      " --transformer-feed-forward-num-hidden 64 --num-embed 32"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 1",
+     False,
      1.01,
      0.99),
     ("Copy:cnn:cnn",
@@ -90,10 +96,11 @@ _SEED_DEV = 17
      " --cnn-num-hidden 32 --cnn-positional-embedding-type fixed --cnn-project-qkv "
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 1",
+     True,
      1.02,
      0.98)
 ])
-def test_seq_copy(name, train_params, translate_params, perplexity_thresh, bleu_thresh):
+def test_seq_copy(name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh):
     """Task: copy short sequences of digits"""
     with tmp_digits_dataset("test_seq_copy.", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT,
                             _LINE_MAX_LENGTH, _TEST_LINE_COUNT, _TEST_LINE_COUNT_EMPTY, _TEST_MAX_LENGTH,
@@ -108,6 +115,7 @@ def test_seq_copy(name, train_params, translate_params, perplexity_thresh, bleu_
                                                                     data['validation_target'],
                                                                     data['test_source'],
                                                                     data['test_target'],
+                                                                    use_prepared_data=use_prepared_data,
                                                                     max_seq_len=_LINE_MAX_LENGTH + 1,
                                                                     restrict_lexicon=True,
                                                                     work_dir=data['work_dir'])
@@ -118,12 +126,13 @@ def test_seq_copy(name, train_params, translate_params, perplexity_thresh, bleu_
         assert bleu_restrict >= bleu_thresh
 
 
-@pytest.mark.parametrize("name, train_params, translate_params, perplexity_thresh, bleu_thresh", [
+@pytest.mark.parametrize("name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh", [
     ("Sort:lstm",
      "--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity"
      " --max-updates 5000 --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
+     True,
      1.04,
      0.98),
     ("Sort:word-based-batching",
@@ -132,6 +141,7 @@ def test_seq_copy(name, train_params, translate_params, perplexity_thresh, bleu_
      " --optimized-metric perplexity --max-updates 5000 --checkpoint-frequency 1000 --optimizer adam "
      " --initial-learning-rate 0.001 --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0",
      "--beam-size 5",
+     False,
      1.01,
      0.99),
     ("Sort:transformer:lstm",
@@ -142,6 +152,7 @@ def test_seq_copy(name, train_params, translate_params, perplexity_thresh, bleu_
      " --transformer-feed-forward-num-hidden 64 --transformer-activation-type gelu"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
+     True,
      1.02,
      0.99),
     ("Sort:lstm:transformer",
@@ -152,6 +163,7 @@ def test_seq_copy(name, train_params, translate_params, perplexity_thresh, bleu_
      " --transformer-feed-forward-num-hidden 64 --transformer-activation-type swish1"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
+     False,
      1.02,
      0.99),
     ("Sort:transformer",
@@ -161,6 +173,7 @@ def test_seq_copy(name, train_params, translate_params, perplexity_thresh, bleu_
      " --transformer-feed-forward-num-hidden 64"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 1",
+     True,
      1.02,
      0.99),
     ("Sort:cnn",
@@ -169,10 +182,11 @@ def test_seq_copy(name, train_params, translate_params, perplexity_thresh, bleu_
      " --cnn-num-hidden 32 --cnn-positional-embedding-type fixed"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 1",
+     False,
      1.07,
      0.96)
 ])
-def test_seq_sort(name, train_params, translate_params, perplexity_thresh, bleu_thresh):
+def test_seq_sort(name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh):
     """Task: sort short sequences of digits"""
     with tmp_digits_dataset("test_seq_sort.", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT, _LINE_MAX_LENGTH,
                             _TEST_LINE_COUNT, _TEST_LINE_COUNT_EMPTY, _TEST_MAX_LENGTH,
@@ -187,6 +201,7 @@ def test_seq_sort(name, train_params, translate_params, perplexity_thresh, bleu_
                                                                     data['validation_target'],
                                                                     data['test_source'],
                                                                     data['test_target'],
+                                                                    use_prepared_data=use_prepared_data,
                                                                     max_seq_len=_LINE_MAX_LENGTH + 1,
                                                                     restrict_lexicon=True,
                                                                     work_dir=data['work_dir'])

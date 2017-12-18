@@ -11,10 +11,10 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import logging
 import os
 import random
 import sys
-import logging
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 from typing import Optional, Tuple
@@ -27,12 +27,12 @@ import sockeye.average
 import sockeye.constants as C
 import sockeye.evaluate
 import sockeye.lexicon
+import sockeye.prepare_data
 import sockeye.train
 import sockeye.translate
 import sockeye.utils
-
-from sockeye.evaluate import raw_corpus_bleu
 from sockeye.chrf import corpus_chrf
+from sockeye.evaluate import raw_corpus_bleu
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +164,12 @@ def tmp_digits_dataset(prefix: str,
 _TRAIN_PARAMS_COMMON = "--use-cpu --max-seq-len {max_len} --source {train_source} --target {train_target}" \
                        " --validation-source {dev_source} --validation-target {dev_target} --output {model} {quiet}"
 
+_PREPARE_DATA_COMMON = " --max-seq-len {max_len} --source {train_source} --target {train_target}" \
+                       " --output {output} {quiet}"
+
+_TRAIN_PARAMS_PREPARED_DATA_COMMON = "--use-cpu --max-seq-len {max_len} --prepared-data {prepared_data}" \
+                                     " --validation-source {dev_source} --validation-target {dev_target} --output {model} {quiet}"
+
 _TRANSLATE_PARAMS_COMMON = "--use-cpu --models {model} --input {input} --output {output} {quiet}"
 
 _TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {json}"
@@ -180,6 +186,7 @@ def run_train_translate(train_params: str,
                         dev_target_path: str,
                         test_source_path: str,
                         test_target_path: str,
+                        use_prepared_data: bool = False,
                         max_seq_len: int = 10,
                         restrict_lexicon: bool = False,
                         work_dir: Optional[str] = None,
@@ -207,20 +214,46 @@ def run_train_translate(train_params: str,
     else:
         quiet_arg = ""
     with TemporaryDirectory(dir=work_dir, prefix="test_train_translate.") as work_dir:
-        # Train model
-        model_path = os.path.join(work_dir, "model")
-        params = "{} {} {}".format(sockeye.train.__file__,
-                                   _TRAIN_PARAMS_COMMON.format(train_source=train_source_path,
-                                                               train_target=train_target_path,
-                                                               dev_source=dev_source_path,
-                                                               dev_target=dev_target_path,
-                                                               model=model_path,
-                                                               max_len=max_seq_len,
-                                                               quiet=quiet_arg),
-                                   train_params)
-        logger.info("Starting training with parameters %s.", train_params)
-        with patch.object(sys, "argv", params.split()):
-            sockeye.train.main()
+        # Optionally create prepared data directory
+        if use_prepared_data:
+            prepared_data_path = os.path.join(work_dir, "prepared_data")
+            params = "{} {}".format(sockeye.prepare_data.__file__,
+                                    _PREPARE_DATA_COMMON.format(train_source=train_source_path,
+                                                                train_target=train_target_path,
+                                                                output=prepared_data_path,
+                                                                max_len=max_seq_len,
+                                                                quiet=quiet_arg))
+            logger.info("Creating prepared data folder.")
+            with patch.object(sys, "argv", params.split()):
+                sockeye.prepare_data.main()
+            # Train model
+            model_path = os.path.join(work_dir, "model")
+            params = "{} {} {}".format(sockeye.train.__file__,
+                                       _TRAIN_PARAMS_PREPARED_DATA_COMMON.format(prepared_data=prepared_data_path,
+                                                                                 dev_source=dev_source_path,
+                                                                                 dev_target=dev_target_path,
+                                                                                 model=model_path,
+                                                                                 max_len=max_seq_len,
+                                                                                 quiet=quiet_arg),
+                                       train_params)
+            logger.info("Starting training with parameters %s.", train_params)
+            with patch.object(sys, "argv", params.split()):
+                sockeye.train.main()
+        else:
+            # Train model
+            model_path = os.path.join(work_dir, "model")
+            params = "{} {} {}".format(sockeye.train.__file__,
+                                       _TRAIN_PARAMS_COMMON.format(train_source=train_source_path,
+                                                                   train_target=train_target_path,
+                                                                   dev_source=dev_source_path,
+                                                                   dev_target=dev_target_path,
+                                                                   model=model_path,
+                                                                   max_len=max_seq_len,
+                                                                   quiet=quiet_arg),
+                                       train_params)
+            logger.info("Starting training with parameters %s.", train_params)
+            with patch.object(sys, "argv", params.split()):
+                sockeye.train.main()
 
         logger.info("Translating with parameters %s.", translate_params)
         # Translate corpus with the 1st params
