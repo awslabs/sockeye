@@ -1299,7 +1299,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
 
     def reset(self):
         if len(self.shards_fnames) > 1:
-            logger.info("Shuffeling the shards.")
+            logger.info("Shuffling the shards.")
             # Making sure to not repeat a shard:
             if self.shard_index < 0:
                 current_shard_fname = ""
