@@ -17,7 +17,7 @@ features, benefitting the beam search implementation.
 - `--kvstore` now accepts 'nccl' value. Only works if MXNet was compiled with `USE_NCCL=1`
 
 ### Added
-- `--gctype` and `--gcthreshold` flags to use gradient compression.
+- `--gradient-compression-type` and `--gradient-compression-threshold` flags to use gradient compression.
   See [MXNet FAQ on Gradient Compression](https://mxnet.incubator.apache.org/versions/master/faq/gradient_compression.html).
 
 ## [1.15.8]

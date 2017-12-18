@@ -666,10 +666,10 @@ def gradient_compression_params(args: argparse.Namespace) -> Optional[Dict[str, 
     :param args: Arguments as returned by argparse.
     :return: Gradient compression parameters or None.
     """
-    if args.gctype is None:
+    if args.gradient_compression_type is None:
         return None
     else:
-        return {'type': args.gctype, 'threshold': args.gcthreshold}
+        return {'type': args.gradient_compression_type, 'threshold': args.gradient_compression_threshold}
 
 
 def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict, str, str, float]:
