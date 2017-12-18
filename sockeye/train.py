@@ -501,6 +501,7 @@ def create_decoder_config(args: argparse.Namespace,  encoder_num_hidden: int) ->
                                                             encoder_num_hidden=encoder_num_hidden,
                                                             num_layers=decoder_num_layers,
                                                             positional_embedding_type=args.cnn_positional_embedding_type,
+                                                            project_qkv=args.cnn_project_qkv,
                                                             hidden_dropout=args.cnn_hidden_dropout)
 
     else:

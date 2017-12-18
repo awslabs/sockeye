@@ -93,7 +93,7 @@ _SEED_DEV = 17
     ("Copy:cnn:cnn",
      "--encoder cnn --decoder cnn "
      " --batch-size 16 --num-layers 3 --max-updates 3000"
-     " --cnn-num-hidden 32 --cnn-positional-embedding-type fixed"
+     " --cnn-num-hidden 32 --cnn-positional-embedding-type fixed --cnn-project-qkv "
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 1",
      True,
