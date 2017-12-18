@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 For each item we will potentially have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.12.3]
+### Added
+ - Optionally apply query, key and value projections to the source and target hidden vectors in the CNN model
+ before applying the attention mechanism. CLI parameter: `--cnn-project-qkv`.
+
 ## [1.12.2]
 ### Changed
  - Updated to [MXNet 0.12.1](https://github.com/apache/incubator-mxnet/releases/tag/0.12.1), which includes an important

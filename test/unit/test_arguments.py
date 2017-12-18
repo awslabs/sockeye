@@ -100,6 +100,7 @@ def test_device_args(test_params, expected_params):
               cnn_kernel_width=(3, 5),
               cnn_num_hidden=512,
               cnn_positional_embedding_type="learned",
+              cnn_project_qkv=False,
               layer_normalization=False,
               weight_normalization=False,
               encoder=C.RNN_NAME,

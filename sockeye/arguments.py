@@ -381,6 +381,12 @@ def add_model_parameters(params):
                               choices=C.POSITIONAL_EMBEDDING_TYPES,
                               default=C.LEARNED_POSITIONAL_EMBEDDING,
                               help='The type of positional embedding. Default: %(default)s.')
+    model_params.add_argument('--cnn-project-qkv',
+                              action='store_true',
+                              default=False,
+                              help="Optionally apply query, key and value projections to the source and target hidden "
+                                   "vectors before applying the attention mechanism.")
+
 
     # rnn arguments
     model_params.add_argument('--rnn-cell-type',
