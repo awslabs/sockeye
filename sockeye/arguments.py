@@ -767,6 +767,15 @@ def add_training_args(params):
                               help="The MXNet kvstore to use. 'device' is recommended for single process training. "
                                    "Use any of 'dist_sync', 'dist_device_sync' and 'dist_async' for distributed "
                                    "training. Default: %(default)s.")
+    train_params.add_argument("--gctype",
+                              type=str,
+                              default=None,
+                              choices=[None, "2bit"],
+                              help='Type of gradient compression to use. Choose "2bit" or None. Default: %(default)s.')
+    train_params.add_argument("--gcthreshold",
+                              type=float,
+                              default=0.5,
+                              help="Threshold for gradient compression if --gctype is '2bit'. Default: %(default)s.")
 
     train_params.add_argument('--weight-init',
                               type=str,

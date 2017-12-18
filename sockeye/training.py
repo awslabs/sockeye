@@ -22,7 +22,7 @@ import random
 import shutil
 import time
 from functools import reduce
-from typing import AnyStr, List, Optional
+from typing import Any, AnyStr, Dict, List, Optional
 from math import sqrt
 
 import mxnet as mx
@@ -78,6 +78,7 @@ class TrainingModel(model.SockeyeModel):
     :param bucketing: If True bucketing will be used, if False the computation graph will always be
             unrolled to the full length.
     :param lr_scheduler: The scheduler that lowers the learning rate during training.
+    :param gradient_compression_params: Gradient compression parameters.
     """
 
     def __init__(self,
@@ -85,11 +86,13 @@ class TrainingModel(model.SockeyeModel):
                  context: List[mx.context.Context],
                  train_iter: data_io.BaseParallelSampleIter,
                  bucketing: bool,
-                 lr_scheduler) -> None:
+                 lr_scheduler,
+                 gradient_compression_params: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
         self.context = context
         self.lr_scheduler = lr_scheduler
         self.bucketing = bucketing
+        self.gradient_compression_params = gradient_compression_params
         self._build_model_components()
         self.module = self._build_module(train_iter)
         self.training_monitor = None  # type: Optional[callback.TrainingMonitor]
@@ -156,7 +159,8 @@ class TrainingModel(model.SockeyeModel):
             return mx.mod.BucketingModule(sym_gen=sym_gen,
                                           logger=logger,
                                           default_bucket_key=train_iter.default_bucket_key,
-                                          context=self.context)
+                                          context=self.context,
+                                          compression_params=self.gradient_compression_params)
         else:
             logger.info("No bucketing. Unrolled to (%d,%d)",
                         self.config.max_seq_len_source, self.config.max_seq_len_target)
@@ -165,7 +169,8 @@ class TrainingModel(model.SockeyeModel):
                                  data_names=data_names,
                                  label_names=label_names,
                                  logger=logger,
-                                 context=self.context)
+                                 context=self.context,
+                                 compression_params=self.gradient_compression_params)
 
     @staticmethod
     def create_eval_metric(metric_name: AnyStr) -> mx.metric.EvalMetric:
