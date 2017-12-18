@@ -163,6 +163,7 @@ def test_model_parameters(test_params, expected_params):
               learning_rate_decay_optimizer_states_reset='off',
               weight_init='xavier',
               weight_init_scale=2.34,
+              weight_init_xavier_rand_type='uniform',
               weight_init_xavier_factor_type='in',
               embed_weight_init='default',
               rnn_dropout_inputs=(.0, .0),

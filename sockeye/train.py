@@ -671,6 +671,7 @@ def main():
         weight_initializer = initializer.get_initializer(
             default_init_type=args.weight_init,
             default_init_scale=args.weight_init_scale,
+            default_init_xavier_rand_type=args.weight_init_xavier_rand_type,
             default_init_xavier_factor_type=args.weight_init_xavier_factor_type,
             embed_init_type=args.embed_weight_init,
             embed_init_sigma=vocab_source_size ** -0.5,  # TODO
