@@ -267,12 +267,12 @@ class DataStatisticsAccumulator:
                       source: List[int],
                       target: List[int],
                       bucket_idx: Optional[int]):
-        source_len = len(source)
-        target_len = len(target)
-
         if bucket_idx is None:
             self.num_discarded += 1
             return
+
+        source_len = len(source)
+        target_len = len(target)
 
         self._mean_len_target_per_bucket[bucket_idx].update(target_len)
 
