@@ -23,6 +23,7 @@ import shutil
 import time
 from functools import reduce
 from typing import AnyStr, List, Optional
+from math import sqrt
 
 import mxnet as mx
 import numpy as np
@@ -38,6 +39,12 @@ from . import model
 from . import utils
 
 logger = logging.getLogger(__name__)
+
+
+def global_norm(ndarrays: List[mx.nd.NDArray]) -> float:
+    # accumulate in a list, as asscalar is blocking and this way we can run the norm calculation in parallel.
+    norms = [mx.nd.square(mx.nd.norm(arr)) for arr in ndarrays if arr is not None]
+    return sqrt(sum(norm.asscalar() for norm in norms))
 
 
 class _TrainingState:
@@ -76,7 +83,7 @@ class TrainingModel(model.SockeyeModel):
     def __init__(self,
                  config: model.ModelConfig,
                  context: List[mx.context.Context],
-                 train_iter: data_io.ParallelBucketSentenceIter,
+                 train_iter: data_io.BaseParallelSampleIter,
                  bucketing: bool,
                  lr_scheduler) -> None:
         super().__init__(config)
@@ -87,11 +94,11 @@ class TrainingModel(model.SockeyeModel):
         self.module = self._build_module(train_iter)
         self.training_monitor = None  # type: Optional[callback.TrainingMonitor]
 
-    def _build_module(self, train_iter: data_io.ParallelBucketSentenceIter):
+    def _build_module(self, train_iter: data_io.BaseParallelSampleIter):
         """
         Initializes model components, creates training symbol and module, and binds it.
         """
-        utils.check_condition(train_iter.pad_id == C.PAD_ID == 0, "pad id should be 0")
+        #utils.check_condition(train_iter.pad_id == C.PAD_ID == 0, "pad id should be 0")
         source = mx.sym.Variable(C.SOURCE_NAME)
         source_length = utils.compute_lengths(source)
         target = mx.sym.Variable(C.TARGET_NAME)
@@ -182,22 +189,27 @@ class TrainingModel(model.SockeyeModel):
         return mx.metric.create(metrics)
 
     def fit(self,
-            train_iter: data_io.ParallelBucketSentenceIter,
-            val_iter: data_io.ParallelBucketSentenceIter,
+            train_iter: data_io.BaseParallelSampleIter,
+            val_iter: data_io.BaseParallelSampleIter,
             output_folder: str,
             max_params_files_to_keep: int,
             metrics: List[AnyStr],
             initializer: mx.initializer.Initializer,
+            allow_missing_params: bool,
             max_updates: Optional[int],
             checkpoint_frequency: int,
             optimizer: str,
             optimizer_params: dict,
             optimized_metric: str = "perplexity",
+            gradient_clipping_type: str = "abs",
+            clip_gradient_threshold: float = 1.0,
             kvstore: str = C.KVSTORE_DEVICE,
             max_num_not_improved: int = 3,
             min_num_epochs: Optional[int] = None,
             max_num_epochs: Optional[int] = None,
             decode_and_evaluate: int = 0,
+            decode_and_evaluate_fname_source: Optional[str] = None,
+            decode_and_evaluate_fname_target: Optional[str] = None,
             decode_and_evaluate_context: Optional[mx.Context] = None,
             use_tensorboard: bool = False,
             mxmonitor_pattern: Optional[str] = None,
@@ -214,6 +226,7 @@ class TrainingModel(model.SockeyeModel):
         :param max_params_files_to_keep: Maximum number of params files to keep in the output folder (last n are kept).
         :param metrics: The metrics that will be evaluated during training.
         :param initializer: The parameter initializer.
+        :param allow_missing_params: Allow misssing parameters when initializing model parameters from file.
         :param max_updates: Optional maximum number of batches to process.
         :param checkpoint_frequency: Frequency of checkpointing in number of updates.
         :param optimizer: The MXNet optimizer that will update the parameters.
@@ -226,6 +239,9 @@ class TrainingModel(model.SockeyeModel):
         :param max_num_epochs: Optional maximum number of epochs to train.
         :param decode_and_evaluate: Monitor BLEU during training (0: off, >=0: the number of sentences to decode for BLEU
                evaluation, -1: decode the full validation set.).
+        :param decode_and_evaluate_fname_source: Filename of source data to decode and evaluate.
+        :param decode_and_evaluate_fname_target: Filename of target data (references) to decode and evaluate.
+        :param decode_and_evaluate_context: Optional MXNet context for decode and evaluate.
         :param use_tensorboard: If True write tensorboard compatible logs for monitoring training and
                validation metrics.
         :param mxmonitor_pattern: Optional pattern to match to monitor weights/gradients/outputs
@@ -242,19 +258,22 @@ class TrainingModel(model.SockeyeModel):
         if 'dist' in kvstore:
             self._check_dist_kvstore_requirements(lr_decay_opt_states_reset, lr_decay_param_reset, optimizer)
 
+        utils.check_condition(gradient_clipping_type in C.GRADIENT_CLIPPING_TYPES,
+                              "Unknown gradient clipping type %s" % gradient_clipping_type)
+
         self.module.bind(data_shapes=train_iter.provide_data, label_shapes=train_iter.provide_label,
                          for_training=True, force_rebind=True, grad_req='write')
         self.module.symbol.save(os.path.join(output_folder, C.SYMBOL_NAME))
 
         self.module.init_params(initializer=initializer, arg_params=self.params, aux_params=None,
-                                allow_missing=False, force_init=False)
+                                allow_missing=allow_missing_params, force_init=False)
         self._log_params()
 
         self.module.init_optimizer(kvstore=kvstore, optimizer=optimizer, optimizer_params=optimizer_params)
 
         cp_decoder = checkpoint_decoder.CheckpointDecoder(decode_and_evaluate_context,
-                                                          self.config.config_data.validation_source,
-                                                          self.config.config_data.validation_target,
+                                                          decode_and_evaluate_fname_source,
+                                                          decode_and_evaluate_fname_target,
                                                           output_folder,
                                                           sample_size=decode_and_evaluate) \
             if decode_and_evaluate else None
@@ -281,6 +300,8 @@ class TrainingModel(model.SockeyeModel):
                   metrics=metrics,
                   max_updates=max_updates,
                   checkpoint_frequency=checkpoint_frequency,
+                  gradient_clipping_type=gradient_clipping_type,
+                  clip_gradient_threshold=clip_gradient_threshold,
                   max_num_not_improved=max_num_not_improved,
                   min_num_epochs=min_num_epochs,
                   max_num_epochs=max_num_epochs,
@@ -306,15 +327,29 @@ class TrainingModel(model.SockeyeModel):
         utils.check_condition(not lr_decay_opt_states_reset, "Optimizer state reset when the learning rate decays "
                                                              "not supported with distributed training.")
 
+    def _get_curr_module(self):
+        # As the BucketingModule does not expose all methods of the underlying Module we need to directly access
+        # the currently active module, when we use bucketing.
+        return self.module._curr_module if self.bucketing else self.module
+
+    def _get_executors(self):
+        return self._get_curr_module()._exec_group.execs
+
+    def _get_optimizer(self):
+        # TODO: Push update to MXNet to expose the optimizer (Module should have a get_optimizer method)
+        return self._get_curr_module()._optimizer
+
     def _fit(self,
-             train_iter: data_io.ParallelBucketSentenceIter,
-             val_iter: data_io.ParallelBucketSentenceIter,
+             train_iter: data_io.BaseParallelSampleIter,
+             val_iter: data_io.BaseParallelSampleIter,
              output_folder: str,
              kvstore: str,
              max_params_files_to_keep: int,
              metrics: List[AnyStr],
              max_updates: Optional[int],
              checkpoint_frequency: int,
+             gradient_clipping_type: str,
+             clip_gradient_threshold: float,
              max_num_not_improved: int,
              min_num_epochs: Optional[int] = None,
              max_num_epochs: Optional[int] = None,
@@ -340,8 +375,7 @@ class TrainingModel(model.SockeyeModel):
         :param lr_decay_param_reset: Reset parameters to previous best after learning rate decay.
         :param lr_decay_opt_states_reset: How to reset optimizer states after learning rate decay.
         """
-        # TODO: Push update to MXNet to expose the optimizer (Module should have a get_optimizer method)
-        optimizer = self.module._curr_module._optimizer if self.bucketing else self.module._optimizer
+        optimizer = self._get_optimizer()
         if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_INITIAL:
             self.save_optimizer_states(os.path.join(output_folder, C.OPT_STATES_INITIAL))
 
@@ -393,6 +427,19 @@ class TrainingModel(model.SockeyeModel):
             # Forward-backward to get outputs, gradients
             self.module.forward_backward(batch)
 
+            gradient_norm = None
+            if train_state.updates > 0 and train_state.updates % checkpoint_frequency == 0:
+                # compute values for logging to metrics (before rescaling...)
+                gradient_norm = self.get_global_grad_norm()
+
+            # note: C.GRADIENT_CLIPPING_TYPE_ABS is handled by the mxnet optimizer directly
+            if gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
+                if gradient_norm is None:
+                    gradient_norm = self.get_global_grad_norm()
+                if gradient_norm > clip_gradient_threshold:
+                    ratio = clip_gradient_threshold / gradient_norm
+                    self.rescale_grad(ratio)
+
             # Update aggregate training loss
             self.module.update_metric(metric_train, batch.label)
 
@@ -429,7 +476,10 @@ class TrainingModel(model.SockeyeModel):
                 self._save_params(output_folder, train_state.checkpoint)
                 cleanup_params_files(output_folder, max_params_files_to_keep,
                                      train_state.checkpoint, self.training_monitor.get_best_checkpoint())
-                self.training_monitor.checkpoint_callback(train_state.checkpoint, metric_train,
+                metric_train_dict = {k: v for k, v in metric_train.get_name_value()}
+                if gradient_norm is not None:
+                    metric_train_dict['gradient-norm'] = gradient_norm
+                self.training_monitor.checkpoint_callback(train_state.checkpoint, metric_train_dict,
                                                           memory_data=utils.get_gpu_memory_usage(self.context))
 
                 toc = time.time()
@@ -527,7 +577,7 @@ class TrainingModel(model.SockeyeModel):
         info = []
         for name, array in sorted(arg_params.items()):
             info.append("%s: %s" % (name, array.shape))
-            total_parameters += reduce(lambda x, y: x*y, array.shape)
+            total_parameters += reduce(lambda x, y: x * y, array.shape)
         logger.info("Model parameters: %s", ", ".join(info))
         logger.info("Total # of parameters: %d", total_parameters)
 
@@ -566,7 +616,7 @@ class TrainingModel(model.SockeyeModel):
         return self.training_monitor.eval_end_callback(training_state.checkpoint, val_metric)
 
     def _checkpoint(self, training_state: _TrainingState, output_folder: str,
-                    train_iter: data_io.ParallelBucketSentenceIter):
+                    train_iter: data_io.BaseParallelSampleIter):
         """
         Saves checkpoint. Note that the parameters are saved in _save_params.
         """
@@ -647,15 +697,7 @@ class TrainingModel(model.SockeyeModel):
 
         :param fname: File name to save optimizer states to.
         """
-        if self.bucketing:
-            # This is a bit hacky, as BucketingModule does not provide a
-            # save_optimizer_states call. We take the current active module and
-            # save its state. This should work, as the individual modules in
-            # BucketingModule share the same optimizer through
-            # borrow_optimizer.
-            self.module._curr_module.save_optimizer_states(fname)
-        else:
-            self.module.save_optimizer_states(fname)
+        self._get_curr_module().save_optimizer_states(fname)
 
     def load_optimizer_states(self, fname: str):
         """
@@ -663,13 +705,9 @@ class TrainingModel(model.SockeyeModel):
 
         :param fname: File name to load optimizer states from.
         """
-        if self.bucketing:
-            # Same hacky solution as for saving the state
-            self.module._curr_module.load_optimizer_states(fname)
-        else:
-            self.module.load_optimizer_states(fname)
+        self._get_curr_module().load_optimizer_states(fname)
 
-    def load_checkpoint(self, directory: str, train_iter: data_io.ParallelBucketSentenceIter) -> _TrainingState:
+    def load_checkpoint(self, directory: str, train_iter: data_io.BaseParallelSampleIter) -> _TrainingState:
         """
         Loads the full training state from disk. This includes optimizer,
         random number generators and everything needed.  Note that params
@@ -698,6 +736,22 @@ class TrainingModel(model.SockeyeModel):
 
         # And our own state
         return self.load_state(os.path.join(directory, C.TRAINING_STATE_NAME))
+
+    def get_global_grad_norm(self) -> float:
+        executors = self._get_executors()
+        rescale_grad = self._get_optimizer().rescale_grad
+        # average norm across executors:
+        exec_norms = [global_norm([arr for arr in exe.grad_arrays if arr is not None]) for exe in executors]
+        norm_val = sum(exec_norms) / float(len(exec_norms))
+        norm_val *= rescale_grad
+        return norm_val
+
+    def rescale_grad(self, scale: float):
+        for exe in self._get_executors():
+            for arr in exe.grad_arrays:
+                if arr is None:
+                    continue
+                arr *= scale
 
 
 def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int):

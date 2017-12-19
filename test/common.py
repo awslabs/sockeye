@@ -11,10 +11,10 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import logging
 import os
 import random
 import sys
-import logging
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 from typing import Optional, Tuple
@@ -27,12 +27,12 @@ import sockeye.average
 import sockeye.constants as C
 import sockeye.evaluate
 import sockeye.lexicon
+import sockeye.prepare_data
 import sockeye.train
 import sockeye.translate
 import sockeye.utils
-
-from sockeye.evaluate import raw_corpus_bleu
 from sockeye.chrf import corpus_chrf
+from sockeye.evaluate import raw_corpus_bleu
 
 logger = logging.getLogger(__name__)
 
@@ -97,11 +97,19 @@ def generate_digits_file(source_path: str,
                          line_count: int = 100,
                          line_length: int = 9,
                          sort_target: bool = False,
+                         line_count_empty: int = 0,
                          seed=13):
+    assert line_count_empty <= line_count
     random_gen = random.Random(seed)
     with open(source_path, "w") as source_out, open(target_path, "w") as target_out:
-        for _ in range(line_count):
+        all_digits = []
+        for _ in range(line_count - line_count_empty):
             digits = [random_gen.choice(_DIGITS) for _ in range(random_gen.randint(1, line_length))]
+            all_digits.append(digits)
+        for _ in range(line_count_empty):
+            all_digits.append([])
+        random_gen.shuffle(all_digits)
+        for digits in all_digits:
             print(" ".join(digits), file=source_out)
             if sort_target:
                 digits.sort()
@@ -126,6 +134,7 @@ _LEXICON_PARAMS_COMMON = "-i {input} -m {model} -k 1 -o {json} {quiet}"
 def tmp_digits_dataset(prefix: str,
                        train_line_count: int, train_max_length: int,
                        dev_line_count: int, dev_max_length: int,
+                       test_line_count: int, test_line_count_empty: int, test_max_length: int,
                        sort_target: bool = False,
                        seed_train: int = 13, seed_dev: int = 13):
     with TemporaryDirectory(prefix=prefix) as work_dir:
@@ -134,20 +143,32 @@ def tmp_digits_dataset(prefix: str,
         train_target_path = os.path.join(work_dir, "train.tgt")
         dev_source_path = os.path.join(work_dir, "dev.src")
         dev_target_path = os.path.join(work_dir, "dev.tgt")
-        generate_digits_file(train_source_path, train_target_path, train_line_count, train_max_length,
-                             sort_target=sort_target, seed=seed_train)
+        test_source_path = os.path.join(work_dir, "test.src")
+        test_target_path = os.path.join(work_dir, "test.tgt")
+        generate_digits_file(train_source_path, train_target_path, train_line_count,
+                             train_max_length, sort_target=sort_target, seed=seed_train)
         generate_digits_file(dev_source_path, dev_target_path, dev_line_count, dev_max_length, sort_target=sort_target,
                              seed=seed_dev)
+        generate_digits_file(test_source_path, test_target_path, test_line_count, test_max_length,
+                             line_count_empty=test_line_count_empty, sort_target=sort_target, seed=seed_dev)
         data = {'work_dir': work_dir,
                 'source': train_source_path,
                 'target': train_target_path,
                 'validation_source': dev_source_path,
-                'validation_target': dev_target_path}
+                'validation_target': dev_target_path,
+                'test_source': test_source_path,
+                'test_target': test_target_path}
         yield data
 
 
 _TRAIN_PARAMS_COMMON = "--use-cpu --max-seq-len {max_len} --source {train_source} --target {train_target}" \
                        " --validation-source {dev_source} --validation-target {dev_target} --output {model} {quiet}"
+
+_PREPARE_DATA_COMMON = " --max-seq-len {max_len} --source {train_source} --target {train_target}" \
+                       " --output {output} {quiet}"
+
+_TRAIN_PARAMS_PREPARED_DATA_COMMON = "--use-cpu --max-seq-len {max_len} --prepared-data {prepared_data}" \
+                                     " --validation-source {dev_source} --validation-target {dev_target} --output {model} {quiet}"
 
 _TRANSLATE_PARAMS_COMMON = "--use-cpu --models {model} --input {input} --output {output} {quiet}"
 
@@ -163,6 +184,9 @@ def run_train_translate(train_params: str,
                         train_target_path: str,
                         dev_source_path: str,
                         dev_target_path: str,
+                        test_source_path: str,
+                        test_target_path: str,
+                        use_prepared_data: bool = False,
                         max_seq_len: int = 10,
                         restrict_lexicon: bool = False,
                         work_dir: Optional[str] = None,
@@ -177,6 +201,9 @@ def run_train_translate(train_params: str,
     :param train_target_path: Path to the target file.
     :param dev_source_path: Path to the development source file.
     :param dev_target_path: Path to the development target file.
+    :param test_source_path: Path to the test source file.
+    :param test_target_path: Path to the test target file.
+    :param use_prepared_data: Whether to use the prepared data functionality.
     :param max_seq_len: The maximum sequence length.
     :param restrict_lexicon: Additional translation run with top-k lexicon-based vocabulary restriction.
     :param work_dir: The directory to store the model and other outputs in.
@@ -188,27 +215,53 @@ def run_train_translate(train_params: str,
     else:
         quiet_arg = ""
     with TemporaryDirectory(dir=work_dir, prefix="test_train_translate.") as work_dir:
-        # Train model
-        model_path = os.path.join(work_dir, "model")
-        params = "{} {} {}".format(sockeye.train.__file__,
-                                   _TRAIN_PARAMS_COMMON.format(train_source=train_source_path,
-                                                               train_target=train_target_path,
-                                                               dev_source=dev_source_path,
-                                                               dev_target=dev_target_path,
-                                                               model=model_path,
-                                                               max_len=max_seq_len,
-                                                               quiet=quiet_arg),
-                                   train_params)
-        logger.info("Starting training with parameters %s.", train_params)
-        with patch.object(sys, "argv", params.split()):
-            sockeye.train.main()
+        # Optionally create prepared data directory
+        if use_prepared_data:
+            prepared_data_path = os.path.join(work_dir, "prepared_data")
+            params = "{} {}".format(sockeye.prepare_data.__file__,
+                                    _PREPARE_DATA_COMMON.format(train_source=train_source_path,
+                                                                train_target=train_target_path,
+                                                                output=prepared_data_path,
+                                                                max_len=max_seq_len,
+                                                                quiet=quiet_arg))
+            logger.info("Creating prepared data folder.")
+            with patch.object(sys, "argv", params.split()):
+                sockeye.prepare_data.main()
+            # Train model
+            model_path = os.path.join(work_dir, "model")
+            params = "{} {} {}".format(sockeye.train.__file__,
+                                       _TRAIN_PARAMS_PREPARED_DATA_COMMON.format(prepared_data=prepared_data_path,
+                                                                                 dev_source=dev_source_path,
+                                                                                 dev_target=dev_target_path,
+                                                                                 model=model_path,
+                                                                                 max_len=max_seq_len,
+                                                                                 quiet=quiet_arg),
+                                       train_params)
+            logger.info("Starting training with parameters %s.", train_params)
+            with patch.object(sys, "argv", params.split()):
+                sockeye.train.main()
+        else:
+            # Train model
+            model_path = os.path.join(work_dir, "model")
+            params = "{} {} {}".format(sockeye.train.__file__,
+                                       _TRAIN_PARAMS_COMMON.format(train_source=train_source_path,
+                                                                   train_target=train_target_path,
+                                                                   dev_source=dev_source_path,
+                                                                   dev_target=dev_target_path,
+                                                                   model=model_path,
+                                                                   max_len=max_seq_len,
+                                                                   quiet=quiet_arg),
+                                       train_params)
+            logger.info("Starting training with parameters %s.", train_params)
+            with patch.object(sys, "argv", params.split()):
+                sockeye.train.main()
 
         logger.info("Translating with parameters %s.", translate_params)
         # Translate corpus with the 1st params
         out_path = os.path.join(work_dir, "out.txt")
         params = "{} {} {}".format(sockeye.translate.__file__,
                                    _TRANSLATE_PARAMS_COMMON.format(model=model_path,
-                                                                   input=dev_source_path,
+                                                                   input=test_source_path,
                                                                    output=out_path,
                                                                    quiet=quiet_arg),
                                    translate_params)
@@ -220,7 +273,7 @@ def run_train_translate(train_params: str,
             out_path_equiv = os.path.join(work_dir, "out_equiv.txt")
             params = "{} {} {}".format(sockeye.translate.__file__,
                                        _TRANSLATE_PARAMS_COMMON.format(model=model_path,
-                                                                       input=dev_source_path,
+                                                                       input=test_source_path,
                                                                        output=out_path_equiv,
                                                                        quiet=quiet_arg),
                                        translate_params_equiv)
@@ -252,7 +305,7 @@ def run_train_translate(train_params: str,
             # Translate corpus with restrict-lexicon
             params = "{} {} {} {}".format(sockeye.translate.__file__,
                                           _TRANSLATE_PARAMS_COMMON.format(model=model_path,
-                                                                          input=dev_source_path,
+                                                                          input=test_source_path,
                                                                           output=out_restrict_path,
                                                                           quiet=quiet_arg),
                                           translate_params,
@@ -274,7 +327,8 @@ def run_train_translate(train_params: str,
         perplexity = min(m[C.PERPLEXITY + '-val'] for m in metrics)
 
         hypotheses = open(out_path, "r").readlines()
-        references = open(dev_target_path, "r").readlines()
+        references = open(test_target_path, "r").readlines()
+        assert len(hypotheses) == len(references)
 
         # compute metrics
         bleu = raw_corpus_bleu(hypotheses=hypotheses, references=references, offset=0.01)
@@ -287,9 +341,9 @@ def run_train_translate(train_params: str,
         # Run BLEU cli
         eval_params = "{} {} ".format(sockeye.evaluate.__file__,
                                       _EVAL_PARAMS_COMMON.format(hypotheses=out_path,
-                                                                 references=dev_target_path,
+                                                                 references=test_target_path,
                                                                  metrics="bleu chrf",
-                                                                 quiet=quiet_arg))
+                                                                 quiet=quiet_arg), )
         with patch.object(sys, "argv", eval_params.split()):
             sockeye.evaluate.main()
 

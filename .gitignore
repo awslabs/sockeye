@@ -16,3 +16,4 @@
 .*.swp
 .mypy_cache
 tags
+sockeye/__pycache__

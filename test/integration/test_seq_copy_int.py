@@ -17,7 +17,10 @@ from test.common import run_train_translate, tmp_digits_dataset
 
 _TRAIN_LINE_COUNT = 100
 _DEV_LINE_COUNT = 10
+_TEST_LINE_COUNT = 10
+_TEST_LINE_COUNT_EMPTY = 2
 _LINE_MAX_LENGTH = 9
+_TEST_MAX_LENGTH = 20
 
 ENCODER_DECODER_SETTINGS = [
     # "Vanilla" LSTM encoder-decoder with attention
@@ -49,7 +52,7 @@ ENCODER_DECODER_SETTINGS = [
     # Transformer encoder, GRU decoder, mhdot attention
     ("--encoder transformer --num-layers 2:1 --rnn-cell-type gru --rnn-num-hidden 16 --num-embed 8:16"
      " --transformer-attention-heads 2 --transformer-model-size 8"
-     " --transformer-feed-forward-num-hidden 32"
+     " --transformer-feed-forward-num-hidden 32 --transformer-activation-type gelu"
      " --rnn-attention-type mhdot --rnn-attention-mhdot-heads 4 --rnn-attention-num-hidden 16 --batch-size 8 "
      " --max-updates 10 --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01"
      " --weight-init-xavier-factor-type avg --weight-init-scale 3.0 --embed-weight-init normal",
@@ -58,7 +61,7 @@ ENCODER_DECODER_SETTINGS = [
     # LSTM encoder, Transformer decoder
     ("--encoder rnn --decoder transformer --num-layers 2:2 --rnn-cell-type lstm --rnn-num-hidden 16 --num-embed 16"
      " --transformer-attention-heads 2 --transformer-model-size 16"
-     " --transformer-feed-forward-num-hidden 32"
+     " --transformer-feed-forward-num-hidden 32 --transformer-activation-type swish1"
      " --batch-size 8 --max-updates 10"
      " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 3",
@@ -85,8 +88,9 @@ ENCODER_DECODER_SETTINGS = [
 @pytest.mark.parametrize("train_params, translate_params, restrict_lexicon", ENCODER_DECODER_SETTINGS)
 def test_seq_copy(train_params: str, translate_params: str, restrict_lexicon: bool):
     """Task: copy short sequences of digits"""
-    with tmp_digits_dataset("test_seq_copy", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT,
-                            _LINE_MAX_LENGTH) as data:
+    with tmp_digits_dataset("test_seq_copy", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH,
+                            _DEV_LINE_COUNT, _LINE_MAX_LENGTH,
+                            _TEST_LINE_COUNT, _TEST_LINE_COUNT_EMPTY, _TEST_MAX_LENGTH) as data:
         # Test model configuration, including the output equivalence of batch and no-batch decoding
         translate_params_batch = translate_params + " --batch-size 2"
         # Ignore return values (perplexity and BLEU) for integration test
@@ -97,6 +101,8 @@ def test_seq_copy(train_params: str, translate_params: str, restrict_lexicon: bo
                             data['target'],
                             data['validation_source'],
                             data['validation_target'],
+                            data['test_source'],
+                            data['test_target'],
                             max_seq_len=_LINE_MAX_LENGTH + 1,
                             restrict_lexicon=restrict_lexicon,
                             work_dir=data['work_dir'])

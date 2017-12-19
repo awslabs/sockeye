@@ -14,7 +14,7 @@
 import copy
 import logging
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import cast, Dict, Optional, Tuple
 
 import mxnet as mx
 
@@ -56,8 +56,8 @@ class ModelConfig(Config):
                  max_seq_len_target: int,
                  vocab_source_size: int,
                  vocab_target_size: int,
-                 config_embed_source: Config,
-                 config_embed_target: Config,
+                 config_embed_source: encoder.EmbeddingConfig,
+                 config_embed_target: encoder.EmbeddingConfig,
                  config_encoder: Config,
                  config_decoder: Config,
                  config_loss: loss.LossConfig,
@@ -130,7 +130,7 @@ class SockeyeModel:
         """
         config = ModelConfig.load(fname)
         logger.info('ModelConfig loaded from "%s"', fname)
-        return config  # type: ignore
+        return cast(ModelConfig, config)  # type: ignore
 
     def save_params_to_file(self, fname: str):
         """
@@ -172,8 +172,6 @@ class SockeyeModel:
 
         :return: Tuple of source and target parameter symbols.
         """
-        assert isinstance(self.config.config_embed_source, encoder.EmbeddingConfig)
-        assert isinstance(self.config.config_embed_target, encoder.EmbeddingConfig)
         w_embed_source = mx.sym.Variable(C.SOURCE_EMBEDDING_PREFIX + "weight",
                                          shape=(self.config.config_embed_source.vocab_size,
                                                 self.config.config_embed_source.num_embed))
@@ -211,8 +209,6 @@ class SockeyeModel:
 
         # source & target embeddings
         embed_weight_source, embed_weight_target, out_weight_target = self._get_embed_weights()
-        assert isinstance(self.config.config_embed_source, encoder.EmbeddingConfig)
-        assert isinstance(self.config.config_embed_target, encoder.EmbeddingConfig)
         self.embedding_source = encoder.Embedding(self.config.config_embed_source,
                                                   prefix=C.SOURCE_EMBEDDING_PREFIX,
                                                   embed_weight=embed_weight_source)

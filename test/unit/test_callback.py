@@ -33,8 +33,7 @@ test_constants = [('perplexity', np.inf,
                    [{'accuracy': 200.0}, {'accuracy': 100.0}, {'accuracy': 100.001}, {'accuracy': 99.99}],
                    [True, False, False, False])]
 
-
-class DummyMetric(object):
+class DummyMetric:
     def __init__(self, metric_dict):
         self.metric_dict = metric_dict
 
@@ -57,7 +56,7 @@ def test_callback(optimized_metric, initial_best, train_metrics, eval_metrics, i
 
         for checkpoint, (train_metric, eval_metric, expected_improved) in enumerate(
                 zip(train_metrics, eval_metrics, improved_seq), 1):
-            monitor.checkpoint_callback(checkpoint, DummyMetric(train_metric))
+            monitor.checkpoint_callback(checkpoint, train_metric)
             assert len(monitor.metrics) == checkpoint
             assert monitor.metrics[-1] == {k + "-train": v for k, v in train_metric.items()}
             improved, best_checkpoint = monitor.eval_end_callback(checkpoint, DummyMetric(eval_metric))

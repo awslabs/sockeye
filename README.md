@@ -9,6 +9,29 @@ It implements state-of-the-art encoder-decoder architectures, such as
 - Transformer Models with self-attention [[Vaswani et al, '17](https://arxiv.org/abs/1706.03762)]
 - Fully convolutional sequence-to-sequence models [[Gehring et al, '17](https://arxiv.org/abs/1705.03122)]
 
+If you use Sockeye, please cite:
+
+Felix Hieber, Tobias Domhan, Michael Denkowski, David Vilar, Artem Sokolov, Ann Clifton and Matt Post (2017): 
+[Sockeye: A Toolkit for Neural Machine Translation](https://arxiv.org/abs/1712.05690). In eprint arXiv:cs-CL/1712.05690.
+
+```
+@article{Sockeye:17,
+   author = {Hieber, Felix and Domhan, Tobias and Denkowski, Michael
+           and Vilar, David and Sokolov, Artem, and Clifton, Ann and Post, Matt},
+    title = "{Sockeye: A Toolkit for Neural Machine Translation}",
+  journal = {ArXiv e-prints},
+archivePrefix = "arXiv",
+   eprint = {1712.05690},
+ primaryClass = "cs.CL",
+ keywords = {Computer Science - Computation and Language,
+             Computer Science - Learning,
+             Statistics - Machine Learning},
+     year = 2017,
+    month = dec,
+      url = {https://arxiv.org/abs/1712.05690}
+}
+```
+
 If you are interested in collaborating or have any questions, please submit a pull request or issue.
 You can also send questions to *sockeye-dev-at-amazon-dot-com*.
 

@@ -42,7 +42,7 @@ class LearningRateScheduler:
         fraction = (num_updates + 1) * self.base_lr / (self.warmup + 1)
         if num_updates > self.last_warmup_log and num_updates % self.log_warmup_every_t == 0:
             self.last_warmup_log = num_updates
-            logger.info("Learning rate %.0f%% warmed up", fraction * 100)
+            logger.info("Learning rate warmup: %3.0f%%", fraction/self.base_lr * 100.0)
         return fraction
 
 
@@ -150,7 +150,7 @@ class LearningRateSchedulerInvSqrtT(LearningRateScheduler):
         self.log_every_t = int(half_life * updates_per_checkpoint)
 
     def __call__(self, num_updates: int):
-        lr = min(self.base_lr / sqrt(1 + num_updates * self.factor), self._warmup(num_updates) if self.warmup > 0 else 99999)
+        lr = min(self.base_lr / sqrt(1 + num_updates * self.factor), self._warmup(num_updates) if self.warmup > 0 else C.LARGE_POSITIVE_VALUE)
         # Note: this method is called once per parameter for the same t. Making sure to just log once.
         if num_updates > self.t_last_log and num_updates % self.log_every_t == 0:
             logger.info("Learning rate currently at %1.2e", lr)
@@ -180,7 +180,7 @@ class LearningRateSchedulerInvT(LearningRateScheduler):
         self.log_every_t = int(half_life * updates_per_checkpoint)
 
     def __call__(self, num_updates: int):
-        lr = min(self.base_lr / (1 + num_updates * self.factor), self._warmup(num_updates) if self.warmup > 0 else 99999)
+        lr = min(self.base_lr / (1 + num_updates * self.factor), self._warmup(num_updates) if self.warmup > 0 else C.LARGE_POSITIVE_VALUE)
         # Note: this method is called once per parameter for the same t. Making sure to just log once.
         if num_updates > self.t_last_log and num_updates % self.log_every_t == 0:
             logger.info("Learning rate currently at %1.2e", lr)

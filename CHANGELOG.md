@@ -10,16 +10,79 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.15.7]
+### Fixed
+- fixed a problem with `--num-samples-per-shard` flag not being parsed as int.
+
+## [1.15.6]
+### Added
+ - New CLI `sockeye.prepare_data` for preprocessing the training data only once before training,
+ potentially splitting large datasets into shards. At training time only one shard is loaded into memory at a time,
+ limiting the maximum memory usage.
+ 
+### Changed
+ - Instead of using the ```--source``` and ```--target``` arguments ```sockeye.train``` now accepts a
+ ```--prepared-data``` argument pointing to the folder containing the preprocessed and sharded data. Using the raw
+ training data is still possible and now consumes less memory.
+
+## [1.15.5]
+### Added
+ - Optionally apply query, key and value projections to the source and target hidden vectors in the CNN model
+ before applying the attention mechanism. CLI parameter: `--cnn-project-qkv`.
+
+## [1.15.4]
+### Added
+ - A warning will be printed if the checkpoint decoder slows down training.
+
+## [1.15.3]
+### Added
+ - Exposing the xavier random number generator through `--weight-init-xavier-rand-type`.
+
+## [1.15.2]
+### Added
+ - Exposing MXNet's Nesterov Accelerated Gradient, Adadelta and Adadelta optimizers.
+
+## [1.15.1]
+### Added
+ - A tool that initializes embedding weights with pretrained word representations, `sockeye.init_embedding`.
+
+## [1.15.0]
+### Added
+- Added support for Swish-1 (SiLU) activation to transformer models
+([Ramachandran et al. 2017: Searching for Activation Functions](https://arxiv.org/pdf/1710.05941.pdf),
+[Elfwing et al. 2017: Sigmoid-Weighted Linear Units for Neural Network Function Approximation
+in Reinforcement Learning](https://arxiv.org/pdf/1702.03118.pdf)).  Use `--transformer-activation-type swish1`.
+- Added support for GELU activation to transformer models ([Hendrycks and Gimpel 2016: Bridging Nonlinearities and
+Stochastic Regularizers with Gaussian Error Linear Units](https://arxiv.org/pdf/1606.08415.pdf).
+Use `--transformer-activation-type gelu`.
+
+## [1.14.3]
+### Changed
+- Fast decoding for transformer models. Caches keys and values of self-attention before softmax.
+Changed decoding flag `--bucket-width` to apply only to source length.
+
+## [1.14.2]
+### Added
+ - Gradient norm clipping (`--gradient-clipping-type`) and monitoring.
+### Changed
+ - Changed `--clip-gradient` to `--gradient-clipping-threshold` for consistency.
+
+## [1.14.1]
+### Changed
+ - Sorting sentences during decoding before splitting them into batches.
+ - Default chunk size: The default chunk size when batching is enabled is now batch_size * 500 during decoding to avoid
+  users accidentally forgetting to increase the chunk size.
+
 ## [1.14.0]
 ### Changed
  - Downscaled fixed positional embeddings for CNN models.
  - Renamed `--monitor-bleu` flag to `--decode-and-evaluate` to illustrate that it computes
  other metrics in addition to BLEU.
- 
+
 ### Added
  - `--decode-and-evaluate-use-cpu` flag to use CPU for decoding validation data.
  - `--decode-and-evaluate-device-id` flag to use a separate GPU device for validation decoding. If not specified, the
- existing and still default behavior is to use the last acquired GPU for training.  
+ existing and still default behavior is to use the last acquired GPU for training.
 
 ## [1.13.2]
 ### Added
@@ -40,8 +103,8 @@ sockeye.evaluate now accepts `bleu` and `chrf` as values for `--metrics`
 ### Removed
  - Removed RNN parameter (un-)packing and support for FusedRNNCells (removed `--use-fused-rnns` flag).
  These were not used, not correctly initialized, and performed worse than regular RNN cells. Moreover,
- they made the code much more complex. RNN models trained with previous versions are no longer compatible. 
- - Removed the lexical biasing functionality (Arthur ETAL'16) (removed arguments `--lexical-bias`
+ they made the code much more complex. RNN models trained with previous versions are no longer compatible.
+- Removed the lexical biasing functionality (Arthur ETAL'16) (removed arguments `--lexical-bias`
  and `--learn-lexical-bias`).
 
 ## [1.12.2]
@@ -72,6 +135,9 @@ sockeye.evaluate now accepts `bleu` and `chrf` as values for `--metrics`
 ### Added
  - Lexicon-based target vocabulary restriction for faster decoding. New CLI for top-k lexicon creation, sockeye.lexicon.
  New translate CLI argument `--restrict-lexicon`.
+
+### Changed
+ - Bleu computation based on Sacrebleu.
 
 ## [1.10.5]
 ### Fixed
@@ -149,7 +215,7 @@ sockeye.evaluate now accepts `bleu` and `chrf` as values for `--metrics`
  - Convolutional decoder.
  - Weight normalization (for CNN only so far).
  - Learned positional embeddings for the transformer.
- 
+
 ### Changed
  - `--attention-*` CLI params renamed to `--rnn-attention-*`.
  - `--transformer-no-positional-encodings` generalized to `--transformer-positional-embedding-type`.

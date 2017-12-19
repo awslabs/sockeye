@@ -11,11 +11,13 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-from typing import Optional
+from typing import Dict, Optional
 
 import mxnet as mx
 import numpy as np
+
 from . import config
+from . import constants as C
 from . import layers
 
 
@@ -25,9 +27,10 @@ class TransformerConfig(config.Config):
                  model_size: int,
                  attention_heads: int,
                  feed_forward_num_hidden: int,
+                 act_type: str,
                  num_layers: int,
                  dropout_attention: float,
-                 dropout_relu: float,
+                 dropout_act: float,
                  dropout_prepost: float,
                  positional_embedding_type: str,
                  preprocess_sequence: str,
@@ -39,9 +42,10 @@ class TransformerConfig(config.Config):
         self.model_size = model_size
         self.attention_heads = attention_heads
         self.feed_forward_num_hidden = feed_forward_num_hidden
+        self.act_type = act_type
         self.num_layers = num_layers
         self.dropout_attention = dropout_attention
-        self.dropout_relu = dropout_relu
+        self.dropout_act = dropout_act
         self.dropout_prepost = dropout_prepost
         self.positional_embedding_type = positional_embedding_type
         self.preprocess_sequence = preprocess_sequence
@@ -80,16 +84,19 @@ class TransformerEncoderBlock:
                                               prefix="%sff_pre_" % prefix)
         self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
                                          num_model=config.model_size,
-                                         dropout=config.dropout_relu,
+                                         act_type=config.act_type,
+                                         dropout=config.dropout_act,
                                          prefix="%sff_" % prefix)
         self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                num_hidden=config.model_size,
                                                dropout=config.dropout_prepost,
                                                prefix="%sff_post_" % prefix)
 
-    def __call__(self, data: mx.sym.Symbol, lengths: mx.sym.Symbol, max_length: int) -> mx.sym.Symbol:
+    def __call__(self, data: mx.sym.Symbol, bias: mx.sym.Symbol) -> mx.sym.Symbol:
         # self-attention
-        data_self_att = self.self_attention(self.pre_self_attention(data, None), max_length, lengths=lengths, bias=None)
+        data_self_att = self.self_attention(inputs=self.pre_self_attention(data, None),
+                                            bias=bias,
+                                            cache=None)
         data = self.post_self_attention(data_self_att, data)
 
         # feed-forward
@@ -108,6 +115,7 @@ class TransformerDecoderBlock:
     def __init__(self,
                  config: TransformerConfig,
                  prefix: str) -> None:
+        self.prefix = prefix
         self.pre_self_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                           num_hidden=config.model_size,
                                                           dropout=config.dropout_prepost,
@@ -142,7 +150,8 @@ class TransformerDecoderBlock:
                                               prefix="%sff_pre_" % prefix)
         self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
                                          num_model=config.model_size,
-                                         dropout=config.dropout_relu,
+                                         act_type=config.act_type,
+                                         dropout=config.dropout_act,
                                          prefix="%sff_" % prefix)
         self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                num_hidden=config.model_size,
@@ -151,25 +160,21 @@ class TransformerDecoderBlock:
 
     def __call__(self,
                  target: mx.sym.Symbol,
-                 target_max_length: int,
                  target_bias: mx.sym.Symbol,
                  source: mx.sym.Symbol,
-                 source_lengths: mx.sym.Symbol,
-                 source_max_length: int) -> mx.sym.Symbol:
+                 source_bias: mx.sym.Symbol,
+                 cache: Optional[Dict[str, Optional[mx.sym.Symbol]]] = None) -> mx.sym.Symbol:
 
         # self-attention
-        target_self_att = self.self_attention(self.pre_self_attention(target, None),
-                                              target_max_length,
-                                              lengths=None,
-                                              bias=target_bias)
+        target_self_att = self.self_attention(inputs=self.pre_self_attention(target, None),
+                                              bias=target_bias,
+                                              cache=cache)
         target = self.post_self_attention(target_self_att, target)
 
         # encoder attention
-        target_enc_att = self.enc_attention(self.pre_enc_attention(target, None),
-                                            target_max_length,
-                                            source,
-                                            source_lengths,
-                                            source_max_length)
+        target_enc_att = self.enc_attention(queries=self.pre_enc_attention(target, None),
+                                            memory=source,
+                                            bias=source_bias)
         target = self.post_enc_attention(target_enc_att, target)
 
         # feed-forward
@@ -236,18 +241,19 @@ class TransformerProcessBlock:
 
 class TransformerFeedForward:
     """
-    Position-wise feed-forward network with ReLU activation.
+    Position-wise feed-forward network with activation.
     """
-
     def __init__(self,
                  num_hidden: int,
                  num_model: int,
+                 act_type: str,
                  dropout: float,
                  prefix: str) -> None:
         self.num_hidden = num_hidden
         self.num_model = num_model
         self.dropout = dropout
         self.prefix = prefix
+        self.act_type = act_type
         self.w_i2h = mx.sym.Variable('%si2h_weight' % prefix)
         self.b_i2h = mx.sym.Variable('%si2h_bias' % prefix)
         self.w_h2o = mx.sym.Variable('%sh2o_weight' % prefix)
@@ -255,17 +261,91 @@ class TransformerFeedForward:
 
     def __call__(self, x) -> mx.sym.Symbol:
         """
-        Position-wise feed-forward network with ReLU activation.
+        Position-wise feed-forward network with activation.
 
         :param x: Symbol of shape (batch_size, seq_len, num_hidden)
         :return: Symbol of shape (batch_size, seq_len, num_hidden)
         """
         h = mx.sym.FullyConnected(data=x, num_hidden=self.num_hidden, weight=self.w_i2h, bias=self.b_i2h, flatten=False)
-        h = mx.sym.Activation(h, act_type="relu")
+        h = layers.activation(h, act_type=self.act_type)
         if self.dropout > 0.0:
             h = mx.sym.Dropout(h, p=self.dropout)
         y = mx.sym.FullyConnected(data=h, num_hidden=self.num_model, weight=self.w_h2o, bias=self.b_h2o, flatten=False)
         return y
+
+
+class VariableLengthBias(mx.operator.CustomOp):
+    """
+    Returns bias/mask given a vector of sequence lengths.
+    """
+
+    def __init__(self, max_length: int) -> None:
+        super().__init__()
+        self.max_length = max_length
+
+    def forward(self, is_train, req, in_data, out_data, aux):
+        # lengths: (batch_size,)
+        lengths = in_data[0]
+
+        # (max_length, batch_size)
+        data = mx.nd.zeros((self.max_length, lengths.shape[0]), ctx=lengths.context)
+        data = mx.nd.SequenceMask(data=data,
+                                  use_sequence_length=True,
+                                  sequence_length=lengths,
+                                  value=C.LARGE_NEGATIVE_VALUE)
+        # (batch_size, max_length)
+        data = mx.nd.swapaxes(data, dim1=0, dim2=1)
+        self.assign(out_data[0], req[0], data)
+
+    def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
+        pass
+
+
+@mx.operator.register("variable_length_bias")
+class VariableLengthBiasProp(mx.operator.CustomOpProp):
+
+    def __init__(self, max_length: str) -> None:
+        super().__init__()
+        self.max_length = int(max_length)
+
+    def list_arguments(self):
+        return ['data']
+
+    def list_outputs(self):
+        return ['output']
+
+    def infer_shape(self, in_shape):
+        batch_size = in_shape[0][0]
+        return in_shape, [(batch_size, self.max_length)], []
+
+    def infer_type(self, in_type):
+        return in_type, [np.float32], []
+
+    def create_operator(self, ctx, shapes, dtypes):
+        return VariableLengthBias(max_length=self.max_length)
+
+
+def get_variable_length_bias(lengths: mx.sym.Symbol,
+                             max_length: int,
+                             num_heads: Optional[int] = None,
+                             fold_heads: bool = True,
+                             name: str = '') -> mx.sym.Symbol:
+    """
+    Returns bias/mask for variable sequence lengths.
+
+    :param lengths: Sequence lengths. Shape: (batch,).
+    :param max_length: Maximum sequence length.
+    :param num_heads: Number of attention heads.
+    :param fold_heads: Whether to fold heads dimension into batch dimension.
+    :param name: Name of symbol.
+    :return: Bias symbol.
+    """
+    # (batch_size, max_length)
+    x = mx.symbol.Custom(data=lengths, max_length=max_length, op_type='variable_length_bias')
+    if num_heads is not None:
+        # (batch_size, heads, max_length) if fold_heads == False else (batch_size * heads, max_length)
+        x = layers.broadcast_to_heads(x, num_heads, ndim=2, fold_heads=fold_heads)
+    return mx.sym.BlockGrad(x, name='%sbias' % name)
 
 
 def get_autoregressive_bias(max_length: int, name: str) -> mx.sym.Symbol:

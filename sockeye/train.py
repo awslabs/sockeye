@@ -21,7 +21,7 @@ import pickle
 import shutil
 import sys
 from contextlib import ExitStack
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, cast
 
 import mxnet as mx
 
@@ -53,16 +53,6 @@ logger = setup_main_logger(__name__, file_logging=False, console=True)
 def none_if_negative(val):
     return None if val < 0 else val
 
-
-def _build_or_load_vocab(existing_vocab_path: Optional[str], data_paths: List[str], num_words: int,
-                         word_min_count: int) -> Dict:
-    if existing_vocab_path is None:
-        vocabulary = vocab.build_from_paths(paths=data_paths,
-                                            num_words=num_words,
-                                            min_count=word_min_count)
-    else:
-        vocabulary = vocab.vocab_from_json(existing_vocab_path)
-    return vocabulary
 
 
 def _list_to_tuple(v):
@@ -99,7 +89,6 @@ def check_arg_compatibility(args: argparse.Namespace):
         check_condition(args.transformer_model_size == args.num_embed[1],
                         "Target embedding size must match transformer model size: %s vs. %s"
                         % (args.transformer_model_size, args.num_embed[1]))
-
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> Tuple[bool, str]:
@@ -250,48 +239,129 @@ def load_or_create_vocabs(args: argparse.Namespace, resume_training: bool, outpu
                                                 num_words_source, word_min_count_source)
             vocab_target = _build_or_load_vocab(args.target_vocab, [args.target],
                                                 num_words_target, word_min_count_target)
-
-        # write vocabularies
-        vocab.vocab_to_json(vocab_source, os.path.join(output_folder, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
-        vocab.vocab_to_json(vocab_target, os.path.join(output_folder, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX)
-
     return vocab_source, vocab_target
 
 
-def create_data_iters(args: argparse.Namespace,
-                      vocab_source: Dict,
-                      vocab_target: Dict) -> Tuple['data_io.ParallelBucketSentenceIter',
-                                                   'data_io.ParallelBucketSentenceIter',
-                                                   'data_io.DataConfig']:
+def _build_or_load_vocab(existing_vocab_path: Optional[str], data_paths: List[str],
+                         num_words: int, word_min_count: int) -> vocab.Vocab:
+    if existing_vocab_path is None:
+        vocabulary = vocab.build_from_paths(paths=data_paths,
+                                            num_words=num_words,
+                                            min_count=word_min_count)
+    else:
+        vocabulary = vocab.vocab_from_json(existing_vocab_path)
+    return vocabulary
+
+
+def use_shared_vocab(args: argparse.Namespace) -> bool:
+    """ Determine whether the source and target vocabulary should be shared. """
+    weight_tying = args.weight_tying
+    weight_tying_type = args.weight_tying_type
+    shared_vocab = args.shared_vocab
+    if weight_tying and C.WEIGHT_TYING_SRC in weight_tying_type and C.WEIGHT_TYING_TRG in weight_tying_type:
+        if not shared_vocab:
+            logger.info("A shared source/target vocabulary will be used as weight tying source/target weight tying "
+                        "is enabled")
+        shared_vocab = True
+    return shared_vocab
+
+
+def create_data_iters_and_vocab(args: argparse.Namespace,
+                                shared_vocab: bool,
+                                resume_training: bool,
+                                output_folder: str) -> Tuple['data_io.BaseParallelSampleIter',
+                                                             'data_io.BaseParallelSampleIter',
+                                                             'data_io.DataConfig', Dict, Dict]:
     """
-    Create the data iterators.
+    Create the data iterators and the vocabularies.
 
     :param args: Arguments as returned by argparse.
-    :param vocab_source: The source vocabulary.
-    :param vocab_target: The target vocabulary.
-    :return: The data iterators (train, validation, config_data).
+    :param shared_vocab: Whether to create a shared vocabulary.
+    :param resume_training: Whether to resume training.
+    :param output_folder: Output folder.
+    :return: The data iterators (train, validation, config_data) as well as the source and target vocabularies.
     """
+
     max_seq_len_source, max_seq_len_target = args.max_seq_len
+    num_words_source, num_words_target = args.num_words
+    word_min_count_source, word_min_count_target = args.word_min_count
     batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
-    return data_io.get_training_data_iters(source=os.path.abspath(args.source),
-                                           target=os.path.abspath(args.target),
-                                           validation_source=os.path.abspath(
-                                               args.validation_source),
-                                           validation_target=os.path.abspath(
-                                               args.validation_target),
-                                           vocab_source=vocab_source,
-                                           vocab_target=vocab_target,
-                                           vocab_source_path=args.source_vocab,
-                                           vocab_target_path=args.target_vocab,
-                                           batch_size=args.batch_size,
-                                           batch_by_words=args.batch_type == C.BATCH_TYPE_WORD,
-                                           batch_num_devices=batch_num_devices,
-                                           fill_up=args.fill_up,
-                                           max_seq_len_source=max_seq_len_source,
-                                           max_seq_len_target=max_seq_len_target,
-                                           bucketing=not args.no_bucketing,
-                                           bucket_width=args.bucket_width,
-                                           sequence_limit=args.limit)
+    batch_by_words = args.batch_type == C.BATCH_TYPE_WORD
+
+    either_raw_or_prepared_error_msg = "Either specify a raw training corpus with %s and %s or a preprocessed corpus " \
+                                       "with %s." % (C.TRAINING_ARG_SOURCE,
+                                                     C.TRAINING_ARG_TARGET,
+                                                     C.TRAINING_ARG_PREPARED_DATA)
+    if args.prepared_data is not None:
+        utils.check_condition(args.source is None and args.target is None, either_raw_or_prepared_error_msg)
+        if not resume_training:
+            utils.check_condition(args.source_vocab is None and args.target_vocab is None,
+                                  "You are using a prepared data folder, which is tied to a vocabulary. "
+                                  "To change it you need to rerun data preparation with a different vocabulary.")
+        train_iter, validation_iter, data_config, vocab_source, vocab_target = data_io.get_prepared_data_iters(
+            prepared_data_dir=args.prepared_data,
+            validation_source=os.path.abspath(args.validation_source),
+            validation_target=os.path.abspath(args.validation_target),
+            shared_vocab=shared_vocab,
+            batch_size=args.batch_size,
+            batch_by_words=batch_by_words,
+            batch_num_devices=batch_num_devices,
+            fill_up=args.fill_up)
+        if resume_training:
+            # resuming training. Making sure the vocabs in the model and in the prepared data match up
+            model_vocab_source = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_SRC_NAME + C.JSON_SUFFIX))
+            model_vocab_target = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_TRG_NAME + C.JSON_SUFFIX))
+            utils.check_condition(vocab.are_identical(vocab_source, model_vocab_source),
+                                  "Prepared data and resumed model source vocabs do not match.")
+            utils.check_condition(vocab.are_identical(vocab_target, model_vocab_target),
+                                  "Prepared data and resumed model target vocabs do not match.")
+
+        return train_iter, validation_iter, data_config, vocab_source, vocab_target
+    else:
+        utils.check_condition(args.prepared_data is None and args.source is not None and args.target is not None,
+                              either_raw_or_prepared_error_msg)
+
+        if resume_training:
+            # Load the existing vocab created when starting the training run.
+            vocab_source = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_SRC_NAME + C.JSON_SUFFIX))
+            vocab_target = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_TRG_NAME + C.JSON_SUFFIX))
+
+            # Recover the vocabulary path from the existing config file:
+            orig_config = cast(model.ModelConfig, Config.load(os.path.join(output_folder, C.CONFIG_NAME)))
+            vocab_source_path = orig_config.config_data.vocab_source
+            vocab_target_path = orig_config.config_data.vocab_target
+        else:
+            # Load vocab:
+            vocab_source_path = args.source_vocab
+            vocab_target_path = args.target_vocab
+            vocab_source, vocab_target = vocab.load_or_create_vocabs(source=args.source, target=args.target,
+                                                                     source_vocab_path=vocab_source_path,
+                                                                     target_vocab_path=vocab_target_path,
+                                                                     shared_vocab=shared_vocab,
+                                                                     num_words_source=num_words_source,
+                                                                     num_words_target=num_words_target,
+                                                                     word_min_count_source=word_min_count_source,
+                                                                     word_min_count_target=word_min_count_target)
+
+        train_iter, validation_iter, config_data = data_io.get_training_data_iters(
+            source=os.path.abspath(args.source),
+            target=os.path.abspath(args.target),
+            validation_source=os.path.abspath(args.validation_source),
+            validation_target=os.path.abspath(args.validation_target),
+            vocab_source=vocab_source,
+            vocab_target=vocab_target,
+            vocab_source_path=vocab_source_path,
+            vocab_target_path=vocab_target_path,
+            shared_vocab=shared_vocab,
+            batch_size=args.batch_size,
+            batch_by_words=batch_by_words,
+            batch_num_devices=batch_num_devices,
+            fill_up=args.fill_up,
+            max_seq_len_source=max_seq_len_source,
+            max_seq_len_target=max_seq_len_target,
+            bucketing=not args.no_bucketing,
+            bucket_width=args.bucket_width)
+        return train_iter, validation_iter, config_data, vocab_source, vocab_target
 
 
 def create_lr_scheduler(args: argparse.Namespace, resume_training: bool,
@@ -341,9 +411,10 @@ def create_encoder_config(args: argparse.Namespace,
             model_size=args.transformer_model_size,
             attention_heads=args.transformer_attention_heads,
             feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
+            act_type=args.transformer_activation_type,
             num_layers=encoder_num_layers,
             dropout_attention=args.transformer_dropout_attention,
-            dropout_relu=args.transformer_dropout_relu,
+            dropout_act=args.transformer_dropout_act,
             dropout_prepost=args.transformer_dropout_prepost,
             positional_embedding_type=args.transformer_positional_embedding_type,
             preprocess_sequence=encoder_transformer_preprocess,
@@ -406,9 +477,10 @@ def create_decoder_config(args: argparse.Namespace,  encoder_num_hidden: int) ->
             model_size=args.transformer_model_size,
             attention_heads=args.transformer_attention_heads,
             feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
+            act_type=args.transformer_activation_type,
             num_layers=decoder_num_layers,
             dropout_attention=args.transformer_dropout_attention,
-            dropout_relu=args.transformer_dropout_relu,
+            dropout_act=args.transformer_dropout_act,
             dropout_prepost=args.transformer_dropout_prepost,
             positional_embedding_type=args.transformer_positional_embedding_type,
             preprocess_sequence=decoder_transformer_preprocess,
@@ -429,6 +501,7 @@ def create_decoder_config(args: argparse.Namespace,  encoder_num_hidden: int) ->
                                                             encoder_num_hidden=encoder_num_hidden,
                                                             num_layers=decoder_num_layers,
                                                             positional_embedding_type=args.cnn_positional_embedding_type,
+                                                            project_qkv=args.cnn_project_qkv,
                                                             hidden_dropout=args.cnn_hidden_dropout)
 
     else:
@@ -554,7 +627,7 @@ def create_model_config(args: argparse.Namespace,
 def create_training_model(model_config: model.ModelConfig,
                           args: argparse.Namespace,
                           context: List[mx.Context],
-                          train_iter: data_io.ParallelBucketSentenceIter,
+                          train_iter: data_io.BaseParallelSampleIter,
                           lr_scheduler_instance: lr_scheduler.LearningRateScheduler,
                           resume_training: bool,
                           training_state_dir: str) -> training.TrainingModel:
@@ -588,7 +661,7 @@ def create_training_model(model_config: model.ModelConfig,
     return training_model
 
 
-def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict, str]:
+def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict, str, str, float]:
     """
     Defines the optimizer to use and its parameters.
 
@@ -601,9 +674,17 @@ def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict, str]:
                         "learning_rate": args.initial_learning_rate}
     if lr_scheduler_instance is not None:
         optimizer_params["lr_scheduler"] = lr_scheduler_instance
-    clip_gradient = none_if_negative(args.clip_gradient)
-    if clip_gradient is not None:
-        optimizer_params["clip_gradient"] = clip_gradient
+    gradient_clipping_threshold = none_if_negative(args.gradient_clipping_threshold)
+    if gradient_clipping_threshold is None:
+        logger.info("Gradient clipping threshold set to negative value. Will not perform gradient clipping.")
+        gradient_clipping_type = C.GRADIENT_CLIPPING_TYPE_NONE
+    else:
+        gradient_clipping_type = args.gradient_clipping_type
+
+    # Note: for 'abs' we use the implementation inside of MXNet's optimizer and 'norm_*' we implement ourselves
+    # inside the TrainingModel.
+    if gradient_clipping_threshold is not None and gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_ABS:
+        optimizer_params["clip_gradient"] = gradient_clipping_threshold
     if args.momentum is not None:
         optimizer_params["momentum"] = args.momentum
     if args.loss_normalization_type == C.LOSS_NORM_VALID:
@@ -619,7 +700,7 @@ def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict, str]:
     logger.info("Optimizer Parameters: %s", optimizer_params)
     logger.info("kvstore: %s", args.kvstore)
 
-    return optimizer, optimizer_params, args.kvstore
+    return optimizer, optimizer_params, args.kvstore, gradient_clipping_type, gradient_clipping_threshold
 
 
 def main():
@@ -627,7 +708,7 @@ def main():
     arguments.add_train_cli_args(params)
     args = params.parse_args()
 
-    utils.seedRNGs(args)
+    utils.seedRNGs(args.seed)
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
@@ -643,11 +724,22 @@ def main():
 
     with ExitStack() as exit_stack:
         context = determine_context(args, exit_stack)
-        vocab_source, vocab_target = load_or_create_vocabs(args, resume_training, output_folder)
+
+        shared_vocab = use_shared_vocab(args)
+
+        train_iter, eval_iter, config_data, vocab_source, vocab_target = create_data_iters_and_vocab(
+            args=args,
+            shared_vocab=shared_vocab,
+            resume_training=resume_training,
+            output_folder=output_folder)
+
+        if not resume_training:
+            vocab.vocab_to_json(vocab_source, os.path.join(output_folder, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
+            vocab.vocab_to_json(vocab_target, os.path.join(output_folder, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX)
+
         vocab_source_size = len(vocab_source)
         vocab_target_size = len(vocab_target)
         logger.info("Vocabulary sizes: source=%d target=%d", vocab_source_size, vocab_target_size)
-        train_iter, eval_iter, config_data = create_data_iters(args, vocab_source, vocab_target)
         lr_scheduler_instance = create_lr_scheduler(args, resume_training, training_state_dir)
 
         model_config = create_model_config(args, vocab_source_size, vocab_target_size, config_data)
@@ -660,12 +752,13 @@ def main():
         weight_initializer = initializer.get_initializer(
             default_init_type=args.weight_init,
             default_init_scale=args.weight_init_scale,
+            default_init_xavier_rand_type=args.weight_init_xavier_rand_type,
             default_init_xavier_factor_type=args.weight_init_xavier_factor_type,
             embed_init_type=args.embed_weight_init,
             embed_init_sigma=vocab_source_size ** -0.5,  # TODO
             rnn_init_type=args.rnn_h2h_init)
 
-        optimizer, optimizer_params, kvstore = define_optimizer(args, lr_scheduler_instance)
+        optimizer, optimizer_params, kvstore, gradient_clipping_type, gradient_clipping_threshold = define_optimizer(args, lr_scheduler_instance)
 
         # Handle options that override training settings
         max_updates = args.max_updates
@@ -691,15 +784,20 @@ def main():
                            max_params_files_to_keep=args.keep_last_params,
                            metrics=args.metrics,
                            initializer=weight_initializer,
+                           allow_missing_params=args.allow_missing_params,
                            max_updates=max_updates,
                            checkpoint_frequency=args.checkpoint_frequency,
                            optimizer=optimizer, optimizer_params=optimizer_params,
                            optimized_metric=args.optimized_metric,
+                           gradient_clipping_type=gradient_clipping_type,
+                           clip_gradient_threshold=gradient_clipping_threshold,
                            kvstore=kvstore,
                            max_num_not_improved=max_num_checkpoint_not_improved,
                            min_num_epochs=min_num_epochs,
                            max_num_epochs=max_num_epochs,
                            decode_and_evaluate=decode_and_evaluate,
+                           decode_and_evaluate_fname_source=args.validation_source,
+                           decode_and_evaluate_fname_target=args.validation_target,
                            decode_and_evaluate_context=decode_and_evaluate_context,
                            use_tensorboard=args.use_tensorboard,
                            mxmonitor_pattern=args.monitor_pattern,

@@ -62,7 +62,6 @@ def main():
     with ExitStack() as exit_stack:
         context = _setup_context(args, exit_stack)
 
-        bucket_source_width, bucket_target_width = args.bucket_width
         models, vocab_source, vocab_target = sockeye.inference.load_models(
             context,
             args.max_input_len,
@@ -80,8 +79,7 @@ def main():
             restrict_lexicon.load(args.restrict_lexicon)
         translator = sockeye.inference.Translator(context,
                                                   args.ensemble_mode,
-                                                  bucket_source_width,
-                                                  bucket_target_width,
+                                                  args.bucket_width,
                                                   sockeye.inference.LengthPenalty(args.length_penalty_alpha,
                                                                                   args.length_penalty_beta),
                                                   args.beam_prune,
@@ -93,7 +91,7 @@ def main():
 
 
 def read_and_translate(translator: sockeye.inference.Translator, output_handler: sockeye.output_handler.OutputHandler,
-                       chunk_size: int, source: Optional[str] = None) -> None:
+                       chunk_size: Optional[int], source: Optional[str] = None) -> None:
     """
     Reads from either a file or stdin and translates each line, calling the output_handler with the result.
 
@@ -103,6 +101,20 @@ def read_and_translate(translator: sockeye.inference.Translator, output_handler:
     :param source: Path to file which will be translated line-by-line if included, if none use stdin.
     """
     source_data = sys.stdin if source is None else sockeye.data_io.smart_open(source)
+
+    batch_size = translator.batch_size
+    if chunk_size is None:
+        if translator.batch_size == 1:
+            # No batching, therefore there is not need to read segments in chunks.
+            chunk_size = C.CHUNK_SIZE_NO_BATCHING
+        else:
+            # Get a constant number of batches per call to Translator.translate.
+            chunk_size = C.CHUNK_SIZE_PER_BATCH_SEGMENT * translator.batch_size
+    else:
+        if chunk_size < translator.batch_size:
+            logger.warning("You specified a chunk size (%d) smaller than the batch size (%d). This will lead to "
+                           "a degregation of translation speed. Consider choosing a larger chunk size." % (chunk_size,
+                                                                                                           batch_size))
 
     logger.info("Translating...")
 
@@ -114,7 +126,7 @@ def read_and_translate(translator: sockeye.inference.Translator, output_handler:
 
     if total_lines != 0:
         logger.info("Processed %d lines in %d batches. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",
-                    total_lines, ceil(total_lines / translator.batch_size), total_time,
+                    total_lines, ceil(total_lines / batch_size), total_time,
                     total_time / total_lines, total_lines / total_time)
     else:
         logger.info("Processed 0 lines.")
@@ -154,13 +166,13 @@ def _setup_context(args, exit_stack):
         check_condition(len(args.device_ids) == 1, "cannot run on multiple devices for now")
         gpu_id = args.device_ids[0]
         if args.disable_device_locking:
-            # without locking and a negative device id we just take the first device
-            gpu_id = 0
-        else:
             if gpu_id < 0:
-                # get a single (!) gpu id automatically:
-                gpu_ids = exit_stack.enter_context(acquire_gpus([-1], lock_dir=args.lock_dir))
-                gpu_id = gpu_ids[0]
+                # without locking and a negative device id we just take the first device
+                gpu_id = 0
+        else:
+            gpu_ids = exit_stack.enter_context(acquire_gpus([gpu_id], lock_dir=args.lock_dir))
+            gpu_id = gpu_ids[0]
+
         context = mx.gpu(gpu_id)
     return context
 

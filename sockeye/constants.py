@@ -85,6 +85,9 @@ INIT_XAVIER='xavier'
 INIT_UNIFORM='uniform'
 INIT_TYPES=[INIT_XAVIER, INIT_UNIFORM]
 
+RAND_TYPE_UNIFORM = 'uniform'
+RAND_TYPE_GAUSSIAN= 'gaussian'
+
 # Embedding init types
 EMBED_INIT_PATTERN = '(%s|%s|%s)weight' % (SOURCE_EMBEDDING_PREFIX, TARGET_EMBEDDING_PREFIX, SHARED_EMBEDDING_PREFIX)
 EMBED_INIT_DEFAULT = 'default'
@@ -131,12 +134,18 @@ TRANSFORMER_DECODER_PREFIX = DECODER_PREFIX + "transformer_"
 CNN_DECODER_PREFIX = DECODER_PREFIX + "cnn_"
 
 # Activation types
+# Gaussian Error Linear Unit (https://arxiv.org/pdf/1606.08415.pdf)
+GELU = "gelu"
+# Gated Linear Unit (https://arxiv.org/pdf/1705.03122.pdf)
 GLU = "glu"
 RELU = "relu"
-SOFT_RELU = "softrelu"
 SIGMOID = "sigmoid"
+SOFT_RELU = "softrelu"
+# Swish-1/SiLU (https://arxiv.org/pdf/1710.05941.pdf, https://arxiv.org/pdf/1702.03118.pdf)
+SWISH1 = "swish1"
 TANH = "tanh"
-CNN_ACTIVATION_TYPES = [GLU, RELU, SOFT_RELU, SIGMOID, TANH]
+TRANSFORMER_ACTIVATION_TYPES = [GELU, RELU, SWISH1]
+CNN_ACTIVATION_TYPES = [GLU, RELU, SIGMOID, SOFT_RELU, TANH]
 
 # Convolutional block pad types:
 CNN_PAD_LEFT = "left"
@@ -170,7 +179,10 @@ MONITOR_STAT_FUNCS = {STAT_FUNC_DEFAULT: None,
                       STAT_FUNC_MAX: lambda x: mx.nd.max(x),
                       STAT_FUNC_MEAN: lambda x: mx.nd.mean(x)}
 
+# Inference constants
 DEFAULT_BEAM_SIZE = 5
+CHUNK_SIZE_NO_BATCHING = 1
+CHUNK_SIZE_PER_BATCH_SEGMENT = 500
 
 VERSION_NAME = "version"
 CONFIG_NAME = "config"
@@ -210,10 +222,18 @@ ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet",
                    "keep_last_params"]
 
 # Other argument constants
+TRAINING_ARG_SOURCE = "--source"
+TRAINING_ARG_TARGET = "--target"
+TRAINING_ARG_PREPARED_DATA = "--prepared-data"
+
+VOCAB_ARG_SHARED_VOCAB = "--shared-vocab"
+
 INFERENCE_ARG_INPUT_LONG = "--input"
 INFERENCE_ARG_INPUT_SHORT = "-i"
 INFERENCE_ARG_OUTPUT_LONG = "--output"
 INFERENCE_ARG_OUTPUT_SHORT = "-o"
+TRAIN_ARGS_MONITOR_BLEU = "--decode-and-evaluate"
+TRAIN_ARGS_CHECKPOINT_FREQUENCY = "--checkpoint-frequency"
 
 
 # data layout strings
@@ -236,7 +256,11 @@ OPTIMIZER_EVE = "eve"
 OPTIMIZER_NADAM = "nadam"
 OPTIMIZER_RMSPROP = "rmsprop"
 OPTIMIZER_SGD = "sgd"
-OPTIMIZERS = [OPTIMIZER_ADAM, OPTIMIZER_EVE, OPTIMIZER_NADAM, OPTIMIZER_RMSPROP, OPTIMIZER_SGD]
+OPTIMIZER_NAG = "nag"
+OPTIMIZER_ADAGRAD = "adagrad"
+OPTIMIZER_ADADELTA = "adadelta"
+OPTIMIZERS = [OPTIMIZER_ADAM, OPTIMIZER_EVE, OPTIMIZER_NADAM, OPTIMIZER_RMSPROP, OPTIMIZER_SGD, OPTIMIZER_NAG,
+              OPTIMIZER_ADAGRAD, OPTIMIZER_ADADELTA]
 
 LR_SCHEDULER_FIXED_RATE_INV_SQRT_T = "fixed-rate-inv-sqrt-t"
 LR_SCHEDULER_FIXED_RATE_INV_T = "fixed-rate-inv-t"
@@ -253,6 +277,11 @@ LR_DECAY_OPT_STATES_RESET_BEST = 'best'
 LR_DECAY_OPT_STATES_RESET_CHOICES = [LR_DECAY_OPT_STATES_RESET_OFF,
                                      LR_DECAY_OPT_STATES_RESET_INITIAL,
                                      LR_DECAY_OPT_STATES_RESET_BEST]
+
+GRADIENT_CLIPPING_TYPE_ABS = 'abs'
+GRADIENT_CLIPPING_TYPE_NORM = 'norm'
+GRADIENT_CLIPPING_TYPE_NONE = 'none'
+GRADIENT_CLIPPING_TYPES = [GRADIENT_CLIPPING_TYPE_ABS, GRADIENT_CLIPPING_TYPE_NORM, GRADIENT_CLIPPING_TYPE_NONE]
 
 # output handler
 OUTPUT_HANDLER_TRANSLATION = "translation"
@@ -290,3 +319,15 @@ LOSS_NORM_VALID = "valid"
 
 TARGET_MAX_LENGTH_FACTOR = 2
 DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH = 2
+
+LARGE_POSITIVE_VALUE = 99999999.
+LARGE_NEGATIVE_VALUE = -LARGE_POSITIVE_VALUE
+
+# data sharding
+SHARD_NAME = "shard.%05d"
+SHARD_SOURCE = SHARD_NAME + ".source"
+SHARD_TARGET = SHARD_NAME + ".target"
+DATA_CONFIG = "data.config"
+PREPARED_DATA_VERSION_FILE = "data.version"
+PREPARED_DATA_VERSION = 1
+
