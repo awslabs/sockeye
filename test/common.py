@@ -203,6 +203,7 @@ def run_train_translate(train_params: str,
     :param dev_target_path: Path to the development target file.
     :param test_source_path: Path to the test source file.
     :param test_target_path: Path to the test target file.
+    :param use_prepared_data: Whether to use the prepared data functionality.
     :param max_seq_len: The maximum sequence length.
     :param restrict_lexicon: Additional translation run with top-k lexicon-based vocabulary restriction.
     :param work_dir: The directory to store the model and other outputs in.

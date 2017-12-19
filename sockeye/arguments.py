@@ -345,6 +345,7 @@ def add_prepare_data_cli_args(params):
     add_bucketing_args(params)
 
     params.add_argument('--num-samples-per-shard',
+                        type=int_greater_or_equal(1),
                         default=1000000,
                         help='The approximate number of samples per shard. Default: %(default)s.')
 

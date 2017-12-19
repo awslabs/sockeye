@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.15.7]
+### Fixed
+- fixed a problem with `--num-samples-per-shard` flag not being parsed as int.
+
 ## [1.15.6]
 ### Added
  - New CLI `sockeye.prepare_data` for preprocessing the training data only once before training,
