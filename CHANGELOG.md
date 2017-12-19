@@ -14,7 +14,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Changed
 - Update to [MXNet 1.0.0](https://github.com/apache/incubator-mxnet/tree/1.0.0) which adds more advanced indexing
 features, benefitting the beam search implementation.
-- `--kvstore` now accepts 'nccl' value. Only works if MXNet was compiled with `USE_NCCL=1`
+- `--kvstore` now accepts 'nccl' value. Only works if MXNet was compiled with `USE_NCCL=1`.
 
 ### Added
 - `--gradient-compression-type` and `--gradient-compression-threshold` flags to use gradient compression.
