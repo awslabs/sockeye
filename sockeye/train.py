@@ -398,6 +398,7 @@ def create_decoder_config(args: argparse.Namespace, vocab_target_size: int, enco
                                                             encoder_num_hidden=encoder_num_hidden,
                                                             num_layers=decoder_num_layers,
                                                             positional_embedding_type=args.cnn_positional_embedding_type,
+                                                            project_qkv=args.cnn_project_qkv,
                                                             weight_tying=decoder_weight_tying,
                                                             embed_dropout=decoder_embed_dropout,
                                                             weight_normalization=args.weight_normalization,
