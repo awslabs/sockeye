@@ -10,6 +10,16 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.16.0]
+### Changed
+- Update to [MXNet 1.0.0](https://github.com/apache/incubator-mxnet/tree/1.0.0) which adds more advanced indexing
+features, benefitting the beam search implementation.
+- `--kvstore` now accepts 'nccl' value. Only works if MXNet was compiled with `USE_NCCL=1`.
+
+### Added
+- `--gradient-compression-type` and `--gradient-compression-threshold` flags to use gradient compression.
+  See [MXNet FAQ on Gradient Compression](https://mxnet.incubator.apache.org/versions/master/faq/gradient_compression.html).
+
 ## [1.15.8]
 ### Fixed
  - Taking the BOS and EOS tag into account when calculating the maximum input length at inference.

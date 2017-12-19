@@ -134,6 +134,8 @@ def test_model_parameters(test_params, expected_params):
               optimizer='adam',
               optimizer_params=None,
               kvstore='device',
+              gradient_compression_type=None,
+              gradient_compression_threshold=0.5,
               min_num_epochs=None,
               max_num_epochs=None,
               initial_learning_rate=0.0003,

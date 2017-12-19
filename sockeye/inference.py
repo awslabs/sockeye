@@ -840,9 +840,7 @@ class Translator:
         utils.check_condition(C.PAD_ID == 0, "pad id should be 0")
         source = mx.nd.zeros((len(sequences), bucket_key))
         for j, tokens in enumerate(sequences):
-            ids = data_io.tokens2ids(tokens, self.vocab_source)
-            for i, wid in enumerate(ids):
-                source[j, i] = wid
+            source[j, :len(tokens)] = data_io.tokens2ids(tokens, self.vocab_source)
         return source, bucket_key
 
     def _make_result(self,
@@ -908,7 +906,6 @@ class Translator:
                      sequences: mx.nd.NDArray,
                      step: int,
                      source_length: int,
-                     max_output_length: int,
                      states: List[ModelState],
                      models_output_layer_w: List[mx.nd.NDArray],
                      models_output_layer_b: List[mx.nd.NDArray]) \
@@ -919,7 +916,6 @@ class Translator:
         :param sequences: Sequences of current hypotheses. Shape: (batch_size * beam_size, max_output_length).
         :param step: Beam search iteration.
         :param source_length: Length of the input sequence.
-        :param max_output_length: Maximum output length.
         :param states: List of model states.
         :param models_output_layer_w: Custom model weights for logit computation (empty for none).
         :param models_output_layer_b: Custom model biases for logit computation (empty for none).
@@ -1007,10 +1003,6 @@ class Translator:
         # scores_accumulated: chosen smallest scores in scores (ascending).
         scores_accumulated = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context)
 
-        best_hyp_indices_np = np.empty((self.batch_size * self.beam_size,), dtype='int32')
-        best_word_indices_np = np.empty((self.batch_size * self.beam_size,), dtype='int32')
-        scores_accumulated_np = np.empty((self.batch_size * self.beam_size,))
-
         # reset all padding distribution cells to np.inf
         self.pad_dist[:] = np.inf
 
@@ -1053,7 +1045,6 @@ class Translator:
             scores, attention_scores, model_states = self._decode_step(sequences,
                                                                        t,
                                                                        source_length,
-                                                                       max_output_length,
                                                                        model_states,
                                                                        models_output_layer_w,
                                                                        models_output_layer_b)
@@ -1066,7 +1057,7 @@ class Translator:
                 scores = (scores + scores_accumulated * self.length_penalty(lengths - 1)) / self.length_penalty(lengths)
                 # ... but not for finished hyps.
                 # their predicted distribution is set to their accumulated scores at C.PAD_ID.
-                pad_dist[:, C.PAD_ID] = scores_accumulated
+                pad_dist[:, C.PAD_ID] = scores_accumulated[:, 0]
                 # this is equivalent to doing this in numpy:
                 #   pad_dist[finished, :] = np.inf
                 #   pad_dist[finished, C.PAD_ID] = scores_accumulated[finished]
@@ -1079,15 +1070,11 @@ class Translator:
                 rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
                 sliced_scores = scores if t == 1 and self.batch_size == 1 else scores[rows]
                 # TODO we could save some tiny amount of time here by not running smallest_k for a finished sent
-                (best_hyp_indices_np[rows], best_word_indices_np[rows]), \
-                scores_accumulated_np[rows] = utils.smallest_k(sliced_scores, self.beam_size, t == 1)
+                (best_hyp_indices[rows], best_word_indices[rows]), \
+                scores_accumulated[rows, 0] = utils.smallest_k(sliced_scores, self.beam_size, t == 1)
                 # offsetting since the returned smallest_k() indices were slice-relative
-                best_hyp_indices_np[rows] += rows.start
+                best_hyp_indices[rows] += rows.start
 
-            # convert back to mx.ndarray again
-            best_hyp_indices[:] = best_hyp_indices_np
-            best_word_indices[:] = best_word_indices_np
-            scores_accumulated[:] = np.expand_dims(scores_accumulated_np, axis=1)
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
                 best_word_indices[:] = vocab_slice_ids.take(best_word_indices)
