@@ -168,7 +168,8 @@ _PREPARE_DATA_COMMON = " --max-seq-len {max_len} --source {train_source} --targe
                        " --output {output} {quiet}"
 
 _TRAIN_PARAMS_PREPARED_DATA_COMMON = "--use-cpu --max-seq-len {max_len} --prepared-data {prepared_data}" \
-                                     " --validation-source {dev_source} --validation-target {dev_target} --output {model} {quiet}"
+                                     " --validation-source {dev_source} --validation-target {dev_target} " \
+                                     "--output {model} {quiet}"
 
 _TRANSLATE_PARAMS_COMMON = "--use-cpu --models {model} --input {input} --output {output} {quiet}"
 

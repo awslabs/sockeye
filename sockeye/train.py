@@ -21,7 +21,7 @@ import pickle
 import shutil
 import sys
 from contextlib import ExitStack
-from typing import Optional, Dict, List, Tuple, cast
+from typing import Any, cast, Optional, Dict, List, Tuple
 
 import mxnet as mx
 
@@ -29,8 +29,8 @@ from sockeye.config import Config
 from sockeye.log import setup_main_logger
 from sockeye.utils import check_condition
 from . import arguments
-from . import rnn_attention
 from . import constants as C
+from . import convolution
 from . import coverage
 from . import data_io
 from . import decoder
@@ -40,7 +40,7 @@ from . import loss
 from . import lr_scheduler
 from . import model
 from . import rnn
-from . import convolution
+from . import rnn_attention
 from . import training
 from . import transformer
 from . import utils
@@ -52,7 +52,6 @@ logger = setup_main_logger(__name__, file_logging=False, console=True)
 
 def none_if_negative(val):
     return None if val < 0 else val
-
 
 
 def _list_to_tuple(v):
@@ -638,7 +637,7 @@ def create_training_model(model_config: model.ModelConfig,
     :param args: Arguments as returned by argparse.
     :param context: The context(s) to run on.
     :param train_iter: The training data iterator.
-    :param lr_scheduler: The learning rate scheduler.
+    :param lr_scheduler_instance: The learning rate scheduler.
     :param resume_training: When True, the model will be loaded from disk.
     :param training_state_dir: Directory where the training state is stored.
     :return: The training model.
@@ -647,7 +646,8 @@ def create_training_model(model_config: model.ModelConfig,
                                             context=context,
                                             train_iter=train_iter,
                                             bucketing=not args.no_bucketing,
-                                            lr_scheduler=lr_scheduler_instance)
+                                            lr_scheduler=lr_scheduler_instance,
+                                            gradient_compression_params=gradient_compression_params(args))
 
     # We may consider loading the params in TrainingModule, for consistency
     # with the training state saving
@@ -661,12 +661,23 @@ def create_training_model(model_config: model.ModelConfig,
     return training_model
 
 
+def gradient_compression_params(args: argparse.Namespace) -> Optional[Dict[str, Any]]:
+    """
+    :param args: Arguments as returned by argparse.
+    :return: Gradient compression parameters or None.
+    """
+    if args.gradient_compression_type is None:
+        return None
+    else:
+        return {'type': args.gradient_compression_type, 'threshold': args.gradient_compression_threshold}
+
+
 def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict, str, str, float]:
     """
     Defines the optimizer to use and its parameters.
 
     :param args: Arguments as returned by argparse.
-    :param lr_scheduler: The learning rate scheduler.
+    :param lr_scheduler_instance: The learning rate scheduler.
     :return: The optimizer type and its parameters as well as the kvstore.
     """
     optimizer = args.optimizer
@@ -699,6 +710,7 @@ def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict, str, str, 
     logger.info("Optimizer: %s", optimizer)
     logger.info("Optimizer Parameters: %s", optimizer_params)
     logger.info("kvstore: %s", args.kvstore)
+    logger.info("Gradient Compression: %s", gradient_compression_params(args))
 
     return optimizer, optimizer_params, args.kvstore, gradient_clipping_type, gradient_clipping_threshold
 

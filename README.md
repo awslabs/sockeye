@@ -41,7 +41,7 @@ Recent developments and changes are tracked in our [changelog](https://github.co
 
 Sockeye requires:
 - **Python3**
-- [MXNet-0.12.1](https://github.com/apache/incubator-mxnet/tree/0.12.1)
+- [MXNet-1.0.0](https://github.com/apache/incubator-mxnet/tree/1.0.0)
 - numpy
 
 ## Installation

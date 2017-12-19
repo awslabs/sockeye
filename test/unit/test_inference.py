@@ -13,9 +13,9 @@
 
 import mxnet as mx
 import numpy as np
+import pytest
 
 import sockeye.inference
-
 
 _BOS = 0
 _EOS = -1
@@ -26,7 +26,7 @@ def test_concat_translations():
     NUM_SRC = 7
 
     def length_penalty(length):
-        return 1./length
+        return 1. / length
 
     expected_score = (1 + 2 + 3) / length_penalty(len(expected_target_ids))
 
@@ -53,7 +53,7 @@ def test_length_penalty_default():
 def test_length_penalty():
     lengths = mx.nd.array([[1], [2], [3]])
     length_penalty = sockeye.inference.LengthPenalty(.2, 5.0)
-    expected_lp = np.array([[6**0.2/6**0.2], [7**0.2/6**0.2], [8**0.2/6**0.2]])
+    expected_lp = np.array([[6 ** 0.2 / 6 ** 0.2], [7 ** 0.2 / 6 ** 0.2], [8 ** 0.2 / 6 ** 0.2]])
 
     assert np.isclose(length_penalty(lengths).asnumpy(), expected_lp).all()
 
@@ -61,8 +61,55 @@ def test_length_penalty():
 def test_length_penalty_int_input():
     length = 1
     length_penalty = sockeye.inference.LengthPenalty(.2, 5.0)
-    expected_lp = [6**0.2/6**0.2]
+    expected_lp = [6 ** 0.2 / 6 ** 0.2]
 
     assert np.isclose(np.asarray([length_penalty(length)]),
                       np.asarray(expected_lp)).all()
+
+
+@pytest.mark.parametrize("supported_max_seq_len_source, supported_max_seq_len_target, training_max_seq_len_source, "
+                         "forced_max_input_len, length_ratio_mean, length_ratio_std, "
+                         "expected_max_input_len, expected_max_output_len",
+                         [
+                             (100, 100, 100, None, 0.9, 0.2, 89, 100),
+                             (100, 100, 100, None, 1.1, 0.2, 75, 100),
+                             # No source length constraints.
+                             (None, 100, 100, None, 0.9, 0.1, 98, 100),
+                             # No target length constraints.
+                             (80, None, 100, None, 1.1, 0.4, 80, 122),
+                             # No source/target length constraints. Source is max observed during training and target
+                             # based on length ratios.
+                             (None, None, 100, None, 1.0, 0.1, 100, 113),
+                             # Force a maximum input length.
+                             (100, 100, 100, 50, 1.1, 0.2, 50, 67),
+                         ])
+def test_get_max_input_output_length(
+        supported_max_seq_len_source,
+        supported_max_seq_len_target,
+        training_max_seq_len_source,
+        forced_max_input_len,
+        length_ratio_mean,
+        length_ratio_std,
+        expected_max_input_len,
+        expected_max_output_len):
+
+    max_input_len, get_max_output_len = sockeye.inference.get_max_input_output_length(
+        supported_max_seq_len_source=supported_max_seq_len_source,
+        supported_max_seq_len_target=supported_max_seq_len_target,
+        training_max_seq_len_source=training_max_seq_len_source,
+        forced_max_input_len=forced_max_input_len,
+        length_ratio_mean=length_ratio_mean,
+        length_ratio_std=length_ratio_std,
+        num_stds=1)
+    max_output_len = get_max_output_len(max_input_len)
+
+    if supported_max_seq_len_source is not None:
+        assert max_input_len <= supported_max_seq_len_source
+    if supported_max_seq_len_target is not None:
+        assert max_output_len <= supported_max_seq_len_target
+    if expected_max_input_len is not None:
+        assert max_input_len == expected_max_input_len
+    if expected_max_output_len is not None:
+        assert max_output_len == expected_max_output_len
+
 

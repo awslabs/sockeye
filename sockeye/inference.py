@@ -81,8 +81,8 @@ class InferenceModel(model.SockeyeModel):
 
         self._build_model_components()
 
-        self.max_input_length, self.get_max_output_length = get_max_input_output_length([self],
-                                                                                        max_output_length_num_stds)
+        self.max_input_length, self.get_max_output_length = models_max_input_output_length([self],
+                                                                                           max_output_length_num_stds)
 
         self.encoder_module = None  # type: Optional[mx.mod.BucketingModule]
         self.encoder_default_bucket_key = None  # type: Optional[int]
@@ -402,17 +402,18 @@ def load_models(context: mx.context.Context,
     utils.check_condition(vocab.are_identical(*target_vocabs), "Target vocabulary ids do not match")
 
     # set a common max_output length for all models.
-    max_input_len, get_max_output_length = get_max_input_output_length(models,
-                                                                       max_output_length_num_stds,
-                                                                       max_input_len)
+    max_input_len, get_max_output_length = models_max_input_output_length(models,
+                                                                          max_output_length_num_stds,
+                                                                          max_input_len)
     for model in models:
         model.initialize(max_input_len, get_max_output_length)
 
     return models, source_vocabs[0], target_vocabs[0]
 
 
-def get_max_input_output_length(models: List[InferenceModel], num_stds: int,
-                                max_input_len: Optional[int] = None) -> Tuple[int, Callable]:
+def models_max_input_output_length(models: List[InferenceModel],
+                                   num_stds: int,
+                                   forced_max_input_len: Optional[int] = None) -> Tuple[int, Callable]:
     """
     Returns a function to compute maximum output length given a fixed number of standard deviations as a
     safety margin, and the current input length.
@@ -422,16 +423,11 @@ def get_max_input_output_length(models: List[InferenceModel], num_stds: int,
     :param models: List of models.
     :param num_stds: Number of standard deviations to add as a safety margin. If -1, returned maximum output lengths
                      will always be 2 * input_length.
-    :param max_input_len: An optional overwrite of the maximum input length.
+    :param forced_max_input_len: An optional overwrite of the maximum input length.
     :return: The maximum input length and a function to get the output length given the input length.
     """
     max_mean = max(model.length_ratio_mean for model in models)
     max_std = max(model.length_ratio_std for model in models)
-
-    if num_stds < 0:
-        factor = C.TARGET_MAX_LENGTH_FACTOR  # type: float
-    else:
-        factor = max_mean + (max_std * num_stds)
 
     supported_max_seq_len_source = min((model.max_supported_seq_len_source for model in models
                                         if model.max_supported_seq_len_source is not None),
@@ -439,29 +435,71 @@ def get_max_input_output_length(models: List[InferenceModel], num_stds: int,
     supported_max_seq_len_target = min((model.max_supported_seq_len_target for model in models
                                         if model.max_supported_seq_len_target is not None),
                                        default=None)
-
     training_max_seq_len_source = min(model.training_max_seq_len_source for model in models)
 
-    if max_input_len is None:
+    return get_max_input_output_length(supported_max_seq_len_source,
+                                       supported_max_seq_len_target,
+                                       training_max_seq_len_source,
+                                       forced_max_input_len=forced_max_input_len,
+                                       length_ratio_mean=max_mean,
+                                       length_ratio_std=max_std,
+                                       num_stds=num_stds)
+
+
+def get_max_input_output_length(supported_max_seq_len_source: Optional[int],
+                                supported_max_seq_len_target: Optional[int],
+                                training_max_seq_len_source: Optional[int],
+                                forced_max_input_len: Optional[int],
+                                length_ratio_mean: float,
+                                length_ratio_std: float,
+                                num_stds: int) -> Tuple[int, Callable]:
+    """
+    Returns a function to compute maximum output length given a fixed number of standard deviations as a
+    safety margin, and the current input length. It takes into account optional maximum source and target lengths.
+
+    :param supported_max_seq_len_source: The maximum source length supported by the models.
+    :param supported_max_seq_len_target: The maximum target length supported by the models.
+    :param training_max_seq_len_source: The maximum source length observed during training.
+    :param forced_max_input_len: An optional overwrite of the maximum input length.
+    :param length_ratio_mean: The mean of the length ratio that was calculated on the raw sequences with special
+           symbols such as EOS or BOS.
+    :param length_ratio_std: The standard deviation of the length ratio.
+    :param num_stds: The number of standard deviations the target length may exceed the mean target length (as long as
+           the supported maximum length allows for this).
+    :return: The maximum input length and a function to get the output length given the input length.
+    """
+    space_for_bos = 1
+    space_for_eos = 1
+
+    if num_stds < 0:
+        factor = C.TARGET_MAX_LENGTH_FACTOR  # type: float
+    else:
+        factor = length_ratio_mean + (length_ratio_std * num_stds)
+
+    if forced_max_input_len is None:
         # Make sure that if there is a hard constraint on the maximum source or target length we never exceed this
         # constraint. This is for example the case for learned positional embeddings, which are only defined for the
         # maximum source and target sequence length observed during training.
         if supported_max_seq_len_source is not None and supported_max_seq_len_target is None:
             max_input_len = supported_max_seq_len_source
         elif supported_max_seq_len_source is None and supported_max_seq_len_target is not None:
-            if np.ceil(factor * training_max_seq_len_source) > supported_max_seq_len_target:
-                max_input_len = int(np.floor(supported_max_seq_len_target / factor))
+            max_output_len = supported_max_seq_len_target - space_for_bos - space_for_eos
+            if np.ceil(factor * training_max_seq_len_source) > max_output_len:
+                max_input_len = int(np.floor(max_output_len / factor))
             else:
                 max_input_len = training_max_seq_len_source
         elif supported_max_seq_len_source is not None or supported_max_seq_len_target is not None:
-            if np.ceil(factor * supported_max_seq_len_source) > supported_max_seq_len_target:
-                max_input_len = int(np.floor(supported_max_seq_len_target / factor))
+            max_output_len = supported_max_seq_len_target - space_for_bos - space_for_eos
+            if np.ceil(factor * supported_max_seq_len_source) > max_output_len:
+                max_input_len = int(np.floor(max_output_len / factor))
             else:
                 max_input_len = supported_max_seq_len_source
         else:
             # Any source/target length is supported and max_input_len was not manually set, therefore we use the
             # maximum length from training.
             max_input_len = training_max_seq_len_source
+    else:
+        max_input_len = forced_max_input_len
 
     def get_max_output_length(input_length: int):
         """
@@ -470,8 +508,7 @@ def get_max_input_output_length(models: List[InferenceModel], num_stds: int,
         that the mean length ratio computed on the training data do not include these special symbols.
         (see data_io.analyze_sequence_lengths)
         """
-        space_for_bos = 1
-        space_for_eos = 1
+
         return int(np.ceil(factor * input_length)) + space_for_bos + space_for_eos
 
     return max_input_len, get_max_output_length
@@ -777,7 +814,7 @@ class Translator:
         translated_chunks = []
 
         # split into chunks
-        input_chunks = [] # type: List[InputChunk]
+        input_chunks = []  # type: List[InputChunk]
         for input_idx, trans_input in enumerate(trans_inputs):
             if len(trans_input.tokens) == 0:
                 empty_translation = Translation(target_ids=[],
@@ -843,9 +880,7 @@ class Translator:
         utils.check_condition(C.PAD_ID == 0, "pad id should be 0")
         source = mx.nd.zeros((len(sequences), bucket_key))
         for j, tokens in enumerate(sequences):
-            ids = data_io.tokens2ids(tokens, self.vocab_source)
-            for i, wid in enumerate(ids):
-                source[j, i] = wid
+            source[j, :len(tokens)] = data_io.tokens2ids(tokens, self.vocab_source)
         return source, bucket_key
 
     def _make_result(self,
@@ -911,7 +946,6 @@ class Translator:
                      sequences: mx.nd.NDArray,
                      step: int,
                      source_length: int,
-                     max_output_length: int,
                      states: List[ModelState],
                      models_output_layer_w: List[mx.nd.NDArray],
                      models_output_layer_b: List[mx.nd.NDArray]) \
@@ -922,7 +956,6 @@ class Translator:
         :param sequences: Sequences of current hypotheses. Shape: (batch_size * beam_size, max_output_length).
         :param step: Beam search iteration.
         :param source_length: Length of the input sequence.
-        :param max_output_length: Maximum output length.
         :param states: List of model states.
         :param models_output_layer_w: Custom model weights for logit computation (empty for none).
         :param models_output_layer_b: Custom model biases for logit computation (empty for none).
@@ -1010,10 +1043,6 @@ class Translator:
         # scores_accumulated: chosen smallest scores in scores (ascending).
         scores_accumulated = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context)
 
-        best_hyp_indices_np = np.empty((self.batch_size * self.beam_size,), dtype='int32')
-        best_word_indices_np = np.empty((self.batch_size * self.beam_size,), dtype='int32')
-        scores_accumulated_np = np.empty((self.batch_size * self.beam_size,))
-
         # reset all padding distribution cells to np.inf
         self.pad_dist[:] = np.inf
 
@@ -1061,7 +1090,6 @@ class Translator:
             scores, attention_scores, model_states = self._decode_step(sequences,
                                                                        t,
                                                                        source_length,
-                                                                       max_output_length,
                                                                        model_states,
                                                                        models_output_layer_w,
                                                                        models_output_layer_b)
@@ -1085,16 +1113,12 @@ class Translator:
                 active_rows = slice(sentno * self.beam_size, sentno * self.beam_size + active_beam_size[sentno])
                 sliced_scores = scores[active_rows]
                 # TODO we could save some tiny amount of time here by not running smallest_k for a finished sent
-                (best_hyp_indices_np[rows], best_word_indices_np[rows]), \
-                    scores_accumulated_np[rows] = utils.smallest_k(sliced_scores, self.beam_size)
+                (best_hyp_indices[rows], best_word_indices[rows]), \
+                    scores_accumulated[rows, 0] = utils.smallest_k(sliced_scores, self.beam_size)
 
                 # offsetting since the returned smallest_k() indices were slice-relative
-                best_hyp_indices_np[rows] += rows.start
+                best_hyp_indices[rows] += rows.start
 
-            # convert back to mx.ndarray again
-            best_hyp_indices[:] = best_hyp_indices_np
-            best_word_indices[:] = best_word_indices_np
-            scores_accumulated[:] = np.expand_dims(scores_accumulated_np, axis=1)
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
                 best_word_indices[:] = vocab_slice_ids.take(best_word_indices)
