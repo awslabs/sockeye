@@ -1033,6 +1033,9 @@ class Translator:
             # accumulated model score
             if t > 1:
                 scores = scores + scores_accumulated
+                # this is equivalent to doing this in numpy:
+                #   pad_dist[finished, :] = np.inf
+                #   pad_dist[finished, C.PAD_ID] = scores_accumulated[finished]
                 pad_dist[:, C.PAD_ID] = scores_accumulated
                 scores = mx.nd.where(finished, pad_dist, scores)
 
