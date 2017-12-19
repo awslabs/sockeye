@@ -453,6 +453,8 @@ def get_max_input_output_length(supported_max_seq_len_source: Optional[int],
                                 length_ratio_std: float,
                                 num_stds: int) -> Tuple[int, Callable]:
     """
+    Returns a function to compute maximum output length given a fixed number of standard deviations as a
+    safety margin, and the current input length. It takes into account optional maximum source and target lengths.
 
     :param supported_max_seq_len_source: The maximum source length supported by the models.
     :param supported_max_seq_len_target: The maximum target length supported by the models.
