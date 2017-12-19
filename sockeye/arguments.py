@@ -1004,7 +1004,14 @@ def add_inference_args(params):
                                type=float,
                                help='Beta factor for the length penalty used in beam search: '
                                     '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
-
+    decode_params.add_argument('--coverage-penalty-beta',
+                               default=0.0,
+                               type=float,
+                               help='Beta factor for the coverage penalty used in beam search: %(default)s ')
+    decode_params.add_argument('--stop',
+                               choices='all first'.split(),
+                               default='all',
+                               help='Stopping criteria. Quit when (all) hypotheses are finished (default) or when a finished hypothesis is in (first) position')
 
 def add_evaluate_args(params):
     eval_params = params.add_argument_group("Evaluate parameters")
