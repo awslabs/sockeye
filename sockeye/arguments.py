@@ -769,9 +769,9 @@ def add_training_args(params):
                                    "training. Default: %(default)s.")
     train_params.add_argument("--gradient-compression-type",
                               type=str,
-                              default=None,
-                              choices=[None, "2bit"],
-                              help='Type of gradient compression to use. Choose "2bit" or None. Default: %(default)s.')
+                              default=C.GRADIENT_COMPRESSION_NONE,
+                              choices=C.GRADIENT_COMPRESSION_TYPES,
+                              help='Type of gradient compression to use. Default: %(default)s.')
     train_params.add_argument("--gradient-compression-threshold",
                               type=float,
                               default=0.5,
