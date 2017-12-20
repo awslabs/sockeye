@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.16.2]
+### Changed
+ - Changed to a custom speedometer that tracks samples/sec AND words/sec. The original MXNet speedometer did not take
+ variable batch sizes due to word-based batching into account.
+
 ## [1.16.1]
 ### Fixed
  - Fixed entry points in `setup.py`.

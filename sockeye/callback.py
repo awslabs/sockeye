@@ -73,10 +73,6 @@ class TrainingMonitor(object):
         self.ctx = mp.get_context('spawn')  # type: ignore
         self.decoder_metric_queue = self.ctx.Queue()
         self.decoder_process = None  # type: Optional[mp.Process]
-        # TODO(fhieber): MXNet Speedometer uses root logger. How to fix this?
-        self.speedometer = mx.callback.Speedometer(batch_size=batch_size,
-                                                   frequent=C.MEASURE_SPEED_EVERY,
-                                                   auto_reset=False)
         utils.check_condition(optimized_metric in C.METRICS, "Unsupported metric: %s" % optimized_metric)
         if optimized_metric == C.BLEU:
             utils.check_condition(self.cp_decoder is not None, "%s requires CheckpointDecoder" % C.BLEU)
@@ -102,18 +98,6 @@ class TrainingMonitor(object):
             return value > self.validation_best
         else:
             return value < self.validation_best
-
-    def batch_end_callback(self, epoch: int, nbatch: int, metric: mx.metric.EvalMetric):
-        """
-        Callback function when processing of a data bach is completed.
-
-        :param epoch: Current epoch.
-        :param nbatch: Current batch.
-        :param metric: Evaluation metric for training data.
-        """
-        self.speedometer(
-            mx.model.BatchEndParam(
-                epoch=epoch, nbatch=nbatch, eval_metric=metric, locals=None))
 
     def checkpoint_callback(self,
                             checkpoint: int,
@@ -297,3 +281,5 @@ def write_tensorboard(summary_writer,
         summary_writer.add_summary(
             scalar(
                 name=name, scalar=value), global_step=checkpoint)
+
+
