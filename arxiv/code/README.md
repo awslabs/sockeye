@@ -18,9 +18,14 @@ the comparisons in the paper:
     }
 
 The top-level script, `prepare_train.sh`, will download and preprocess
-the data as was done for our experiments. It also makes use of
-`prepare_devtest.sh`, which applies preprocessing and BPE to dev and
-test data.
+the data as was done for our experiments. You'll have to download the
+official datasets from the
+[WMT download page](http://statmt.org/wmt17/translation-task.html);
+you can match them to the source prefixes listed in `train.en-de.txt`
+and `train.lv-en.txt`. These prefixes are used directly by
+`prepare_train.sh`, so you may also have to adjust paths. It also
+makes use of `prepare_devtest.sh`, which applies preprocessing and BPE
+to dev and test data.
 
 The training scripts are parameterized to load a file in the current
 directory, `env.sh`, which defines a single environment variable,

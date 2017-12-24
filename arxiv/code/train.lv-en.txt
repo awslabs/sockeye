@@ -1,0 +1,5 @@
+dcep
+europarl-v8.lv-en
+farewell
+leta
+rapid2016.en-lv
