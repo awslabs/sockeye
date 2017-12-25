@@ -11,8 +11,9 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-from abc import ABC, abstractmethod
+import json
 import sys
+from abc import ABC, abstractmethod
 from typing import Optional
 
 import sockeye.constants as C
@@ -47,6 +48,8 @@ def get_output_handler(output_type: str,
         return AlignPlotHandler(plot_prefix="align" if output_fname is None else output_fname)
     elif output_type == C.OUTPUT_HANDLER_ALIGN_TEXT:
         return AlignTextHandler(sure_align_threshold)
+    elif output_type == C.OUTPUT_HANDLER_BEAM_STORE:
+        return BeamStoringHandler(output_stream)
     else:
         raise ValueError("unknown output type")
 
@@ -267,3 +270,33 @@ class AlignTextHandler(OutputHandler):
                              t_input.tokens,
                              t_output.tokens,
                              self.threshold)
+
+
+class BeamStoringHandler(OutputHandler):
+    """
+    Output handler to store beam histories in JSON format.
+
+    :param stream: Stream to write translations to (e.g. sys.stdout).
+    """
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    def handle(self,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
+               t_walltime: float = 0.):
+        """
+        :param t_input: Translator input.
+        :param t_output: Translator output.
+        :param t_walltime: Total wall-clock time for translation.
+        """
+        assert len(t_output.beam_histories) >= 1, "Translator output should  contain beam histories."
+        # If the sentence was max_len split, we may have more than one history
+        for h in t_output.beam_histories:
+            # Add the number of steps in each beam
+            h["number_steps"] = len(h["predicted_tokens"]) # type: ignore
+            # Some outputs can have more than one beam, add the id for bookkeeping
+            h["id"] = t_output.id # type: ignore
+            self.stream.write("%s\n" % json.dumps(h, sort_keys=True))
+        self.stream.flush()
