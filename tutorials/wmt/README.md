@@ -92,7 +92,7 @@ python -m sockeye.train -s corpus.tc.BPE.de \
                         --rnn-num-hidden 512 \
                         --rnn-attention-type dot \
                         --max-seq-len 60 \
-                        --monitor-bleu 500 \
+                        --decode-and-evaluate 500 \
                         --use-tensorboard \
                         --use-cpu \
                         -o wmt_model
@@ -110,11 +110,11 @@ Additionally, you can control the batch size (`--batch-size`), the learning rate
 and other parameters relevant for training.
 
 Training will run until the validation perplexity stops improving.
-Alternatively, you can track BLEU on the validation set (`--optimized-metric bleu`).
+Alternatively, you can track BLEU on the validation set and stop early based on BLEU scores (`--optimized-metric bleu`).
 Sockeye will then at every checkpoint start a decoder in a separate process running on the same device as training.
 To make sure the decoder finishes before the next checkpoint one can subsample the validation set for
 BLEU score calculation.
-For example `--monitor-bleu 500` will calculate BLEU on a random subset of 500 sentences.
+For example `--decode-and-evaluate 500` will decode and evaluate BLEU on a random subset of 500 sentences.
 We sample the random subset once and keep it the same during training and also across trainings by
 fixing the random seed.
 Therefore, validation BLEU scores across training runs are comparable.

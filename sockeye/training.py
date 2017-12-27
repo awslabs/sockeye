@@ -54,11 +54,11 @@ class _TrainingState:
     """
 
     def __init__(self,
-                 num_not_improved,
-                 epoch,
-                 checkpoint,
-                 updates,
-                 samples):
+                 num_not_improved: int,
+                 epoch: int,
+                 checkpoint: int,
+                 updates: int,
+                 samples: int) -> None:
         self.num_not_improved = num_not_improved
         self.epoch = epoch
         self.checkpoint = checkpoint
@@ -403,15 +403,11 @@ class TrainingModel(model.SockeyeModel):
 
             train_state = self.load_checkpoint(training_state_dir, train_iter)
         else:
-            train_state = _TrainingState(
-                num_not_improved=0,
-                epoch=0,
-                checkpoint=0,
-                updates=0,
-                samples=0
-            )
+            train_state = _TrainingState(num_not_improved=0, epoch=0, checkpoint=0, updates=0, samples=0)
 
         next_data_batch = train_iter.next()
+
+        speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
 
         while True:
             if not train_iter.iter_next():
@@ -472,9 +468,12 @@ class TrainingModel(model.SockeyeModel):
                 next_data_batch = train_iter.next()
                 self.module.prepare(next_data_batch)
 
-            self.training_monitor.batch_end_callback(train_state.epoch, train_state.updates, metric_train)
+            batch_num_samples = batch.data[0].shape[0]
+            batch_num_tokens = batch.data[0].shape[1] * batch_num_samples
+
             train_state.updates += 1
-            train_state.samples += train_iter.batch_size
+            train_state.samples += batch_num_samples
+            speedometer(train_state.epoch, train_state.updates, batch_num_samples, batch_num_tokens, metric_train)
 
             if train_state.updates > 0 and train_state.updates % checkpoint_frequency == 0:
                 train_state.checkpoint += 1
@@ -777,3 +776,48 @@ def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, 
             param_fname_n = params_name_with_dir % n
             if param_fname_n in existing_files:
                 os.remove(param_fname_n)
+
+
+class Speedometer:
+    """
+    Custom Speedometer to log samples and words per second.
+    """
+
+    def __init__(self, frequency: int = 50, auto_reset: bool = True) -> None:
+        self.frequency = frequency
+        self.init = False
+        self.tic = 0.0
+        self.last_count = 0
+        self.auto_reset = auto_reset
+        self.samples = 0
+        self.tokens = 0
+        self.msg = 'Epoch[%d] Batch [%d]\tSpeed: %.2f samples/sec %.2f tokens/sec'
+
+    def __call__(self, epoch: int, updates: int, samples: int, tokens: int, metric: Optional[mx.metric.EvalMetric]):
+        count = updates
+        if self.last_count > count:
+            self.init = False
+        self.last_count = count
+        self.samples += samples
+        self.tokens += tokens
+
+        if self.init:
+            if count % self.frequency == 0:
+                samples_per_sec = self.samples / (time.time() - self.tic)
+                tokens_per_sec = self.tokens / (time.time() - self.tic)
+                self.samples = 0
+                self.tokens = 0
+
+                if metric is not None:
+                    name_value = metric.get_name_value()
+                    if self.auto_reset:
+                        metric.reset()
+                    logger.info(self.msg + '\t%s=%f' * len(name_value),
+                                epoch, count, samples_per_sec, tokens_per_sec, *sum(name_value, ()))
+                else:
+                    logger.info(self.msg, epoch, count, samples_per_sec)
+
+                self.tic = time.time()
+        else:
+            self.init = True
+            self.tic = time.time()
