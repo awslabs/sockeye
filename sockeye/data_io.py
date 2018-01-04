@@ -598,10 +598,12 @@ def get_data_statistics(source_sentences: Iterable[List[int]],
 def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
                              validation_source: str,
                              validation_target: str,
+                             validation_source_factors: List[str],
                              buckets: List[Tuple[int, int]],
                              bucket_batch_sizes: List[BucketBatchSize],
                              vocab_source: vocab.Vocab,
                              vocab_target: vocab.Vocab,
+                             source_factor_vocabs: List[vocab.Vocab],
                              max_seq_len_source: int,
                              max_seq_len_target: int,
                              batch_size: int,
@@ -612,12 +614,14 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
     logger.info("=================================")
     logger.info("Creating validation data iterator")
     logger.info("=================================")
+
     validation_length_statistics = analyze_sequence_lengths(validation_source, validation_target,
                                                             vocab_source, vocab_target,
                                                             max_seq_len_source, max_seq_len_target)
 
     validation_source_sentences = SequenceReader(validation_source, vocab_source, add_bos=False, limit=None)
     validation_target_sentences = SequenceReader(validation_target, vocab_target, add_bos=True, limit=None)
+    validation_source_factor_sentences = [SequenceReader(f, v, add_bos=False, limit=None) for f,v in zip(validation_source_factors, source_factor_vocabs)]
 
     validation_data_statistics = get_data_statistics(validation_source_sentences,
                                                      validation_target_sentences,
@@ -630,24 +634,28 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
 
     validation_data = data_loader.load(validation_source_sentences,
                                        validation_target_sentences,
+                                       validation_source_factor_sentences,
                                        validation_data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes,
                                                                                                 fill_up)
 
     return ParallelSampleIter(data=validation_data,
                               buckets=buckets,
                               batch_size=batch_size,
-                              bucket_batch_sizes=bucket_batch_sizes)
+                              bucket_batch_sizes=bucket_batch_sizes,
+                              num_factors=len(validation_source_factors))
 
 
 def get_prepared_data_iters(prepared_data_dir: str,
-                            validation_source: str, validation_target: str,
+                            validation_source: str,
+                            validation_target: str,
+                            validation_source_factors: List[str],
                             shared_vocab: bool,
                             batch_size: int,
                             batch_by_words: bool,
                             batch_num_devices: int,
                             fill_up: str) -> Tuple['BaseParallelSampleIter',
                                                    'BaseParallelSampleIter',
-                                                   'DataConfig', vocab.Vocab, vocab.Vocab]:
+                                                   'DataConfig', List[vocab.Vocab], List[vocab.Vocab]]:
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
@@ -668,8 +676,12 @@ def get_prepared_data_iters(prepared_data_dir: str,
     for shard_fname in shard_fnames:
         check_condition(os.path.exists(shard_fname), "Shard %s does not exist." % shard_fname)
 
-    source_vocab_fname = os.path.join(prepared_data_dir, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX
-    target_vocab_fname = os.path.join(prepared_data_dir, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX
+    # MJP: Why was this hard-coded instead of reading from the data config?
+    # source_vocab_fname = os.path.join(prepared_data_dir, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX
+    # target_vocab_fname = os.path.join(prepared_data_dir, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX
+    source_vocab_fname = data_config.vocab_source
+    target_vocab_fname = data_config.vocab_target
+
     check_condition(bool(source_vocab_fname), "Source vocabulary %s does not exist." % source_vocab_fname)
     check_condition(bool(target_vocab_fname), "Target vocabulary %s does not exist." % target_vocab_fname)
 
@@ -679,6 +691,11 @@ def get_prepared_data_iters(prepared_data_dir: str,
 
     vocab_source = vocab.vocab_from_json(source_vocab_fname)
     vocab_target = vocab.vocab_from_json(target_vocab_fname)
+    source_factor_vocabs = [vocab.vocab_from_json(sfv) for sfv in data_config.source_factor_vocabs]
+
+    check_condition(len(source_factor_vocabs) == len(validation_source_factors),
+                    "Wrong number of validation source factors (found %d, needed %d)" % (len(validation_source_factors),
+                                                                                         len(source_factor_vocabs)))
 
     buckets = data_config.data_statistics.buckets
     max_seq_len_source = data_config.max_seq_len_source
@@ -696,7 +713,8 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                            buckets,
                                            batch_size,
                                            bucket_batch_sizes,
-                                           fill_up)
+                                           fill_up,
+                                           num_factors = len(data_config.source_factor_vocabs))
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=vocab_target[C.EOS_SYMBOL],
@@ -705,20 +723,24 @@ def get_prepared_data_iters(prepared_data_dir: str,
     validation_iter = get_validation_data_iter(data_loader=data_loader,
                                                validation_source=validation_source,
                                                validation_target=validation_target,
+                                               validation_source_factors=validation_source_factors,
                                                buckets=buckets,
                                                bucket_batch_sizes=bucket_batch_sizes,
                                                vocab_source=vocab_source,
                                                vocab_target=vocab_target,
+                                               source_factor_vocabs=source_factor_vocabs,
                                                max_seq_len_source=max_seq_len_source,
                                                max_seq_len_target=max_seq_len_target,
                                                batch_size=batch_size,
                                                fill_up=fill_up)
 
-    return train_iter, validation_iter, data_config, vocab_source, vocab_target
+    return train_iter, validation_iter, data_config, vocab_source, vocab_target, source_factor_vocabs
 
 
 def get_training_data_iters(source: str, target: str,
+                            source_factors: Optional[List[str]], target_factors: Optional[List[str]],
                             validation_source: str, validation_target: str,
+                            validation_source_factors: Optional[List[str]],
                             vocab_source: vocab.Vocab, vocab_target: vocab.Vocab,
                             vocab_source_path: Optional[str], vocab_target_path: Optional[str],
                             shared_vocab: bool,
@@ -806,10 +828,12 @@ def get_training_data_iters(source: str, target: str,
     validation_iter = get_validation_data_iter(data_loader=data_loader,
                                                validation_source=validation_source,
                                                validation_target=validation_target,
+                                               validate_source_factors=validation_source_factors,
                                                buckets=buckets,
                                                bucket_batch_sizes=bucket_batch_sizes,
                                                vocab_source=vocab_source,
                                                vocab_target=vocab_target,
+                                               source_factor_vocabs=source_factor_vocabs,
                                                max_seq_len_source=max_seq_len_source,
                                                max_seq_len_target=max_seq_len_target,
                                                batch_size=batch_size,
@@ -1087,8 +1111,8 @@ class ParallelDataSet(Sized):
                         "Number of buckets for source/target/label must match. %d %d %d" % (len(source), len(target), len(label)))
         self.source = source
         self.target = target
-        self.source_factors = source_factors
         self.label = label
+        self.source_factors = source_factors
 
     def __len__(self) -> int:
         return len(self.source)
@@ -1113,14 +1137,17 @@ class ParallelDataSet(Sized):
         The first 1..num_source streams are the source and the next num_target are the target.
         The last stream is the set of labels.
         """
+        print("LOADING WITH", num_source_factors, "source factors")
         data = mx.nd.load(fname)
-        num_parts = num_source_fators + 3
+        num_parts = num_source_factors + 3
         part_size = len(data) // num_parts
         source = data[:part_size]
         target = data[part_size:2 * part_size]
         label = data[2 * part_size:3 * part_size]
-        source_factors = [data[part_size * (3+i): part_size(3+i+1)] for i in range(num_source_factors)]
+        source_factors = [data[part_size * (3+i): part_size*(3+i+1)] for i in range(num_source_factors)]
         assert len(source) == len(target) == len(label)
+        for factor in source_factors:
+            assert len(source) == len(factor)
         return ParallelDataSet(source, target, label, source_factors = source_factors)
 
     def fill_up(self,
@@ -1138,8 +1165,7 @@ class ParallelDataSet(Sized):
         source = list(self.source)
         target = list(self.target)
         label = list(self.label)
-        if self.source_factors is not None:
-            source_factors = [list(self.source_factors[i]) for i in range(len(self.source_factors))]
+        source_factors = [list(self.source_factors[i]) for i in range(len(self.source_factors))]
 
         rs = np.random.RandomState(seed)
 
@@ -1167,13 +1193,14 @@ class ParallelDataSet(Sized):
                 else:
                     raise NotImplementedError('Unknown fill-up strategy')
 
-        return ParallelDataSet(source, target, source_factors, label)
+        return ParallelDataSet(source, target, label, source_factors)
 
     def permute(self, permutations: List[mx.nd.NDArray]) -> 'ParallelDataSet':
         assert len(self) == len(permutations)
         source = []
         target = []
         label = []
+        source_factors = [[] for i in range(len(self.source_factors))]
         for buck_idx in range(len(self)):
             num_samples = self.source[buck_idx].shape[0]
             if num_samples:  # not empty bucket
@@ -1181,11 +1208,16 @@ class ParallelDataSet(Sized):
                 source.append(self.source[buck_idx].take(permutation))
                 target.append(self.target[buck_idx].take(permutation))
                 label.append(self.label[buck_idx].take(permutation))
+                for i in range(len(self.source_factors)):
+                    source_factors[i].append(self.source_factors[i][buck_idx].take(permutation))
             else:
                 source.append(self.source[buck_idx])
                 target.append(self.target[buck_idx])
                 label.append(self.label[buck_idx])
-        return ParallelDataSet(source, target, label)
+                for i in range(len(self.source_factors)):
+                    source_factors[i].append(self.source_factors[i][buck_idx])
+
+        return ParallelDataSet(source, target, label, source_factors)
 
 
 def get_permutations(bucket_counts: List[int]) -> Tuple[List[mx.nd.NDArray], List[mx.nd.NDArray]]:
@@ -1246,6 +1278,7 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
                  buckets,
                  batch_size,
                  bucket_batch_sizes,
+                 num_factors,
                  source_data_name,
                  target_data_name,
                  label_name,
@@ -1259,6 +1292,8 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
         self.source_data_name = source_data_name
         self.target_data_name = target_data_name
         self.label_name = label_name
+        self.num_factors = num_factors
+        self.source_factor_data_names = self._factor_names(num_factors) if self.num_factors > 0 else []
 
         self.dtype = dtype
 
@@ -1276,13 +1311,20 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
             mx.io.DataDesc(name=self.target_data_name,
                            shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[1]),
                            layout=C.BATCH_MAJOR)]
+        self.provide_data += [
+            mx.io.DataDesc(name=self.source_factor_data_names[i],
+                           shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[0]),
+                           layout=C.BATCH_MAJOR) for i in range(len(self.source_factor_data_names))]
         self.provide_label = [
             mx.io.DataDesc(name=self.label_name,
                            shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[1]),
                            layout=C.BATCH_MAJOR)]
 
-        self.data_names = [self.source_data_name, self.target_data_name]
+        self.data_names = [self.source_data_name, self.target_data_name, *self.source_factor_data_names]
         self.label_names = [self.label_name]
+
+    def _factor_names(self, num_factors, prefix=C.SOURCE_NAME):
+        return [prefix + '_factor_' + str(i) for i in range(num_factors)]
 
     @abstractmethod
     def reset(self):
@@ -1317,11 +1359,12 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                  batch_size,
                  bucket_batch_sizes,
                  fill_up: str,
+                 num_factors,
                  source_data_name=C.SOURCE_NAME,
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
                  dtype='float32') -> None:
-        super().__init__(buckets, batch_size, bucket_batch_sizes,
+        super().__init__(buckets, batch_size, bucket_batch_sizes, num_factors,
                          source_data_name, target_data_name, label_name, dtype)
         assert len(shards_fnames) > 0
         self.shards_fnames = list(shards_fnames)
@@ -1333,7 +1376,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
     def _load_shard(self):
         shard_fname = self.shards_fnames[self.shard_index]
         logger.info("Loading shard %s.", shard_fname)
-        dataset = ParallelDataSet.load(self.shards_fnames[self.shard_index]).fill_up(self.bucket_batch_sizes,
+        dataset = ParallelDataSet.load(self.shards_fnames[self.shard_index], self.num_factors).fill_up(self.bucket_batch_sizes,
                                                                                      self.fill_up,
                                                                                      seed=self.shard_index)
         self.shard_iter = ParallelSampleIter(dataset,
@@ -1403,15 +1446,16 @@ class ParallelSampleIter(BaseParallelSampleIter):
                  buckets,
                  batch_size,
                  bucket_batch_sizes,
+                 num_factors=0,
                  source_data_name=C.SOURCE_NAME,
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
                  dtype='float32') -> None:
-        super().__init__(buckets, batch_size, bucket_batch_sizes,
+        super().__init__(buckets, batch_size, bucket_batch_sizes, num_factors,
                          source_data_name, target_data_name, label_name, dtype)
 
         # create independent lists to be shuffled
-        self.data = ParallelDataSet(list(data.source), list(data.target), list(data.label))
+        self.data = ParallelDataSet(list(data.source), list(data.target), list(data.label), list(data.source_factors))
 
         # create index tuples (buck_idx, batch_start_pos) into buckets. These will be shuffled.
         self.batch_indices = get_batch_indices(self.data, bucket_batch_sizes)
