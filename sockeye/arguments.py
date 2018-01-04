@@ -256,7 +256,7 @@ def add_training_data_args(params, required=False):
                         required=required,
                         type=regular_file(),
                         help='Source side of parallel training data.')
-    params.add_argument('--source-factors',
+    params.add_argument('--source-factors', '-sf',
                         required=False,
                         nargs='+',
                         type=regular_file(),

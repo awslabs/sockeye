@@ -326,6 +326,11 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         utils.check_condition(args.prepared_data is None and args.source is not None and args.target is not None,
                               either_raw_or_prepared_error_msg)
 
+        utils.check_condition(len(args.source_factors) == len(args.validation_source_factors),
+                              'Training and validation data must have the same number of factors'
+                              ' (found %d and %d, respectively)' % (len(args.source_factors), len(args.validation_source_factors)))
+
+
         if args.source_factors is not None:
             source_factor_sources = args.source_factors
 
@@ -345,10 +350,10 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 
         else:
             # Load vocab:
-            vocab_source_path = args.source_vocab
-            vocab_target_path = args.target_vocab
+            vocab_names = [args.source_vocab or C.VOCAB_SRC_NAME, args.target_vocab or C.VOCAB_TRG_NAME]
             if args.source_factors is not None:
-                source_factor_vocab_paths += [None] * len(args.source_factors)
+                vocab_names += [C.VOCAB_SRC_NAME + '.' + str(i) for i in range(len(args.source_factors))]
+            vocab_source_path, vocab_target_path, *source_factor_vocab_paths = [os.path.join(output_folder, name) + C.JSON_SUFFIX for name in vocab_names]
 
             vocab_source, vocab_target, *source_factor_vocabs = vocab.load_or_create_vocabs(
                 source=args.source, target=args.target,
@@ -365,14 +370,15 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         train_iter, validation_iter, config_data = data_io.get_training_data_iters(
             source=os.path.abspath(args.source),
             target=os.path.abspath(args.target),
+            source_factors=list(map(os.path.abspath, args.source_factors)),
             validation_source=os.path.abspath(args.validation_source),
             validation_target=os.path.abspath(args.validation_target),
+            validation_source_factors=list(map(os.path.abspath, args.validation_source_factors)),
             vocab_source=vocab_source,
             vocab_target=vocab_target,
             vocab_source_path=vocab_source_path,
             vocab_target_path=vocab_target_path,
             shared_vocab=shared_vocab,
-            source_factor_sources=source_factor_sources,
             source_factor_vocabs=source_factor_vocabs,
             source_factor_vocab_paths=source_factor_vocab_paths,
             batch_size=args.batch_size,

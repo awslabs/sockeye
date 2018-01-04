@@ -738,11 +738,13 @@ def get_prepared_data_iters(prepared_data_dir: str,
 
 
 def get_training_data_iters(source: str, target: str,
-                            source_factors: Optional[List[str]], target_factors: Optional[List[str]],
+                            source_factors: Optional[List[str]],
                             validation_source: str, validation_target: str,
                             validation_source_factors: Optional[List[str]],
                             vocab_source: vocab.Vocab, vocab_target: vocab.Vocab,
                             vocab_source_path: Optional[str], vocab_target_path: Optional[str],
+                            source_factor_vocabs: Optional[List[str]],
+                            source_factor_vocab_paths: Optional[List[str]],
                             shared_vocab: bool,
                             batch_size: int,
                             batch_by_words: bool,
@@ -789,6 +791,7 @@ def get_training_data_iters(source: str, target: str,
 
     source_sentences = SequenceReader(source, vocab_source, add_bos=False)
     target_sentences = SequenceReader(target, vocab_target, add_bos=True)
+    source_factor_sentences = [SequenceReader(f, v, add_bos=False) for f,v in zip(source_factors, source_factor_vocabs)]
 
     # 2. pass: Get data statistics
     data_statistics = get_data_statistics(source_sentences, target_sentences, buckets,
@@ -807,7 +810,7 @@ def get_training_data_iters(source: str, target: str,
                                            eos_id=vocab_target[C.EOS_SYMBOL],
                                            pad_id=C.PAD_ID)
 
-    training_data = data_loader.load(source_sentences, target_sentences,
+    training_data = data_loader.load(source_sentences, target_sentences, source_factor_sentences,
                                      data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes, fill_up)
 
     config_data = DataConfig(source=source,
@@ -815,6 +818,8 @@ def get_training_data_iters(source: str, target: str,
                              vocab_source=vocab_source_path,
                              vocab_target=vocab_target_path,
                              shared_vocab=shared_vocab,
+                             source_factors=list(map(os.path.abspath, source_factors)),
+                             source_factor_vocabs=source_factor_vocab_paths,
                              num_shards=1,
                              data_statistics=data_statistics,
                              max_seq_len_source=max_seq_len_source,
@@ -828,7 +833,7 @@ def get_training_data_iters(source: str, target: str,
     validation_iter = get_validation_data_iter(data_loader=data_loader,
                                                validation_source=validation_source,
                                                validation_target=validation_target,
-                                               validate_source_factors=validation_source_factors,
+                                               validation_source_factors=validation_source_factors,
                                                buckets=buckets,
                                                bucket_batch_sizes=bucket_batch_sizes,
                                                vocab_source=vocab_source,
