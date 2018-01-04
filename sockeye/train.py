@@ -265,12 +265,13 @@ def use_shared_vocab(args: argparse.Namespace) -> bool:
     return shared_vocab
 
 
-def create_data_iters_and_vocab(args: argparse.Namespace,
-                                shared_vocab: bool,
-                                resume_training: bool,
-                                output_folder: str) -> Tuple['data_io.BaseParallelSampleIter',
-                                                             'data_io.BaseParallelSampleIter',
-                                                             'data_io.DataConfig', Dict, Dict]:
+def create_data_iters_and_vocabs(args: argparse.Namespace,
+                                 shared_vocab: bool,
+                                 resume_training: bool,
+                                 output_folder: str) -> Tuple['data_io.BaseParallelSampleIter',
+                                                              'data_io.BaseParallelSampleIter',
+                                                              'data_io.DataConfig',
+                                                              Dict, Dict, List[Dict]]:
     """
     Create the data iterators and the vocabularies.
 
@@ -568,14 +569,15 @@ def check_encoder_decoder_args(args) -> None:
 
 
 def create_model_config(args: argparse.Namespace,
-                        vocab_source_size: int, vocab_target_size: int,
+                        vocab_source_sizes: List[int],
+                        vocab_target_sizes: List[int],
                         config_data: data_io.DataConfig) -> model.ModelConfig:
     """
     Create a ModelConfig from the argument given in the command line.
 
     :param args: Arguments as returned by argparse.
-    :param vocab_source_size: The size of the source vocabulary.
-    :param vocab_target_size: The size of the target vocabulary.
+    :param vocab_source_sizes: The source vocabulary sizes.
+    :param vocab_target_sizes: The target vocabulary sizes.
     :param config_data: Data config.
     :return: The model configuration.
     """

@@ -151,35 +151,67 @@ def load_or_create_vocab(data: str, vocab_path: Optional[str],
                             min_count=word_min_count) if vocab_path is None else vocab_from_json(vocab_path)
 
 
-def load_or_create_vocabs(source: str, target: str, source_vocab_path: Optional[str], target_vocab_path: Optional[str],
+def load_or_create_vocabs(source: str,
+                          target: str,
+                          source_vocab_path: Optional[str],
+                          target_vocab_path: Optional[str],
+                          source_factor_sources: Optional[List[str]],
+                          source_factor_vocab_paths: Optional[List[str]],
                           shared_vocab: bool,
                           num_words_source: int, word_min_count_source: int,
-                          num_words_target: int, word_min_count_target: int) -> Tuple[Vocab, Vocab]:
+                          num_words_target: int, word_min_count_target: int) -> List[Vocab]:
+    """
+    Returns vocabularies for each of source, target, and source_factors_sources.
+    If the respective vocabulary paths exist, the vocab is read from the path and returned.
+    Otherwise, it is first built from the support and saved to the path.
+
+    NOTE: existence test is new. This used to test the vocab_paths not for existence, but for non-None variables.
+
+    :param source: The source text.
+    :param source_vocab_path: The source vocabulary path.
+    :param target: The target text.
+    :param target_vocab_path: The target vocabulary path.
+    :param source_factor_sources: The source texts for any factors.
+    :param source_factor_vocab_paths: The vocabularies for any factors.
+    :param vocab_paths: List (parallel to vocab_support) of vocabulary paths.
+    :param shared_vocab: Whether the vocabulary is shared.
+    :param num_words_source:
+    :param word_min_count_source:
+    :param num_words_target:
+    :param word_min_count_target:
+    :param first_target_vocab_index: Indicates where the target vocabularies start.
+    :return: Vocabularies for each entry in vocab_paths.
+    """
+
+    vocabs = []
+    vocab_paths = [source_vocab_path, target_vocab_path] + source_factor_vocab_paths
+
     if shared_vocab:
-        if source_vocab_path and target_vocab_path:
+        if all(os.path.exists, [vocab_paths]):
             vocab_source = vocab_from_json(source_vocab_path)
             vocab_target = vocab_from_json(target_vocab_path)
-            utils.check_condition(are_identical(vocab_source, vocab_target),
-                                  "Shared vocabulary requires identical source and target vocabularies. "
-                                  "The vocabularies in %s and %s are not identical." % (source_vocab_path,
-                                                                                        target_vocab_path))
-        elif source_vocab_path is None and target_vocab_path is None:
+            vocabs = [vocab_from_json(x) for x in vocab_paths]
+            utils.check_condition(are_identical(vocabs),
+                                  "Shared vocabulary requires identical vocabularies across source, target, and source factors. "
+                                  "The provided vocabularies (%s) are not identical." % (', '.join([source_vocab_path, target_vocab_path])))
+        else:
             utils.check_condition(num_words_source == num_words_target,
                                   "A shared vocabulary requires the number of source and target words to be the same.")
             utils.check_condition(word_min_count_source == word_min_count_target,
                                   "A shared vocabulary requires the minimum word count for source and target "
                                   "to be the same.")
-            vocab_source = vocab_target = build_from_paths(paths=[source, target],
-                                                           num_words=num_words_source,
-                                                           min_count=word_min_count_source)
-        else:
-            vocab_path = source_vocab_path if source_vocab_path is not None else target_vocab_path
-            logger.info("Using %s as a shared source/target vocabulary." % vocab_path)
-            vocab_source = vocab_target = vocab_from_json(vocab_path)
+            shared_vocab = build_from_paths(paths=vocab_paths,
+                                            num_words=num_words_source,
+                                            min_count=word_min_count_source)
+            vocabs = [shared_vocab] * len(vocab_paths)
+
     else:
-        vocab_source = load_or_create_vocab(source, source_vocab_path, num_words_source, word_min_count_source)
-        vocab_target = load_or_create_vocab(target, target_vocab_path, num_words_target, word_min_count_target)
-    return vocab_source, vocab_target
+        vocabs = [load_or_create_vocab(source, None, num_words_source, word_min_count_source),
+                  load_or_create_vocab(target, None, num_words_target, word_min_count_target)]
+        if source_factor_sources is not None:
+            vocabs += [load_or_create_vocab(dataset, None, num_words_source, word_min_count_source) for dataset in source_factor_sources]
+
+    return vocabs
 
 
 def reverse_vocab(vocab: Mapping) -> InverseVocab:
