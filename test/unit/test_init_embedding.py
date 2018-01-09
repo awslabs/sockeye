@@ -25,7 +25,7 @@ import sockeye.init_embedding as init_embedding
          {'w2': 0, 'w3': 1, 'w4': 2, 'w5': 3},
          mx.nd.array([[2, 2, 2], [3, 3, 3], [0, 0, 0], [0, 0, 0]]))
 ])
-def test_init_embedding(embed, vocab_in, vocab_out, expected_embed_init):
-    embed_init = init_embedding.init_embedding(embed, vocab_in, vocab_out)
+def test_init_weight(embed, vocab_in, vocab_out, expected_embed_init):
+    embed_init = init_embedding.init_weight(embed, vocab_in, vocab_out)
 
     assert (embed_init == expected_embed_init).asnumpy().all()

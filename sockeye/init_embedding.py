@@ -15,10 +15,11 @@
 
 """
 Initializing Sockeye embedding weights with pretrained word representations.
+It also supports updating vocabulary-sized weights for a new vocabulary.
 
 Quick usage:
 
-    python3 -m contrib.utils.init_embedding        \
+    python3 -m sockeye.init_embedding        \
             -e embed-in-src.npy embed-in-tgt.npy    \
             -i vocab-in-src.json vocab-in-tgt.json   \
             -o vocab-out-src.json vocab-out-tgt.json  \
@@ -28,8 +29,11 @@ Quick usage:
 Optional arguments:
 
     --embeddings, -e
-        list of input embedding weights in .npy format
-        shape=(vocab-in-size, embedding-size)
+        list of input (embedding) weights in .npy, .npz or Sockeye parameter format
+        .npy: a single array with shape=(vocab-in-size, embedding-size)
+        .npz: a dictionary of {parameter_name: array}
+              parameter_name is given by "--names"
+        Sockeye parameter: the parameter name is given by "--names"
 
     --vocabularies-in, -i
         list of input vocabularies as token-index dictionaries in .json format
@@ -39,8 +43,9 @@ Optional arguments:
         They can be generated using sockeye.vocab before actual Sockeye training.
 
     --names, -n
-        list of Sockeye parameter names for embedding weights
-        Most common ones are source_embed_weight, target_embed_weight and source_target_embed_weight.
+        list of Sockeye parameter names for embedding weights (or other vocabulary-sized weights)
+        Most common ones are source_embed_weight, target_embed_weight, source_target_embed_weight,
+        target_output_weight and target_output_bias.
 
     Sizes of above 4 lists should be exactly the same - they are vertically aligned.
 
@@ -65,26 +70,28 @@ from . import vocab
 
 logger = setup_main_logger(__name__, console=True, file_logging=False)
 
-def init_embedding(embed: np.ndarray,
-                   vocab_in: Dict[str, int],
-                   vocab_out: Dict[str, int],
-                   initializer: mx.initializer.Initializer=mx.init.Constant(value=0.0)) -> mx.nd.NDArray:
+def init_weight(weight: np.ndarray,
+                vocab_in: Dict[str, int],
+                vocab_out: Dict[str, int],
+                initializer: mx.initializer.Initializer=mx.init.Constant(value=0.0)) -> mx.nd.NDArray:
     """
-    Initialize embedding weight by existing word representations given input and output vocabularies.
+    Initialize vocabulary-sized weight by existing values given input and output vocabularies.
 
-    :param embed: Input embedding weight.
+    :param weight: Input weight.
     :param vocab_in: Input vocabulary.
     :param vocab_out: Output vocabulary.
     :param initializer: MXNet initializer.
-    :return: Initialized output embedding weight.
+    :return: Initialized output weight.
     """
-    embed_init = mx.nd.empty((len(vocab_out), embed.shape[1]), dtype='float32')
-    embed_desc = mx.init.InitDesc("embed_weight")
-    initializer(embed_desc, embed_init)
+    shape = list(weight.shape)
+    shape[0] = len(vocab_out)
+    weight_init = mx.nd.empty(tuple(shape), dtype='float32')
+    weight_desc = mx.init.InitDesc("vocabulary_sized_weight")
+    initializer(weight_desc, weight_init)
     for token in vocab_out:
         if token in vocab_in:
-            embed_init[vocab_out[token]] = embed[vocab_in[token]]
-    return embed_init
+            weight_init[vocab_out[token]] = weight[vocab_in[token]]
+    return weight_init
 
 
 def main():
@@ -92,7 +99,7 @@ def main():
     Commandline interface to initialize Sockeye embedding weights with pretrained word representations.
     """
     log_sockeye_version(logger)
-    params = argparse.ArgumentParser(description='Quick usage: python3 -m contrib.utils.init_embedding '
+    params = argparse.ArgumentParser(description='Quick usage: python3 -m sockeye.init_embedding '
                                                  '-e embed-in-src.npy embed-in-tgt.npy '
                                                  '-i vocab-in-src.json vocab-in-tgt.json '
                                                  '-o vocab-out-src.json vocab-out-tgt.json '
@@ -104,21 +111,26 @@ def main():
     if len(args.embeddings) != len(args.vocabularies_in) or \
        len(args.embeddings) != len(args.vocabularies_out) or \
        len(args.embeddings) != len(args.names):
-           logger.error("Exactly the same number of 'input embedding weights', 'input vocabularies', "
+           logger.error("Exactly the same number of 'input weights', 'input vocabularies', "
                         "'output vocabularies' and 'Sockeye parameter names' should be provided.")
            sys.exit(1)
 
     params = {} # type: Dict[str, mx.nd.NDArray]
-    for embed_file, vocab_in_file, vocab_out_file, name in zip(args.embeddings, args.vocabularies_in, \
+    for weight_file, vocab_in_file, vocab_out_file, name in zip(args.embeddings, args.vocabularies_in, \
                                                                args.vocabularies_out, args.names):
-        logger.info('Loading input embedding weight: %s', embed_file)
-        embed = np.load(embed_file)
+        logger.info('Loading input weight: %s', weight_file)
+        if weight_file.endswith(".npy"):
+            weight = np.load(weight_file)
+        elif weight_file.endswith(".npz"):
+            weight = np.load(weight_file)[name]
+        else:
+            weight = mx.nd.load(weight_file)['arg:%s' % name].asnumpy()
         logger.info('Loading input/output vocabularies: %s %s', vocab_in_file, vocab_out_file)
         vocab_in = vocab.vocab_from_json(vocab_in_file, encoding=args.encoding)
         vocab_out = vocab.vocab_from_json(vocab_out_file)
         logger.info('Initializing parameter: %s', name)
-        initializer = mx.init.Normal(sigma=np.std(embed))
-        params[name] = init_embedding(embed, vocab_in, vocab_out, initializer)
+        initializer = mx.init.Normal(sigma=np.std(weight))
+        params[name] = init_weight(weight, vocab_in, vocab_out, initializer)
 
     logger.info('Saving initialized parameters to %s', args.file)
     utils.save_params(params, args.file)
