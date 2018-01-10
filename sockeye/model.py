@@ -14,7 +14,7 @@
 import copy
 import logging
 import os
-from typing import cast, Dict, Optional, Tuple
+from typing import cast, Dict, Optional, Tuple, List
 
 import mxnet as mx
 
@@ -42,6 +42,8 @@ class ModelConfig(Config):
     :param max_seq_len_target: Maximum target sequence length to unroll during training.
     :param vocab_source_size: Source vocabulary size.
     :param vocab_target_size: Target vocabulary size.
+    :param num_factors: The number of source factors.
+    :param source_factor_vocab_sizes: The list vocabulary sizes for source factors.
     :param config_embed_source: Embedding config for source.
     :param config_embed_target: Embedding config for target.
     :param config_encoder: Encoder configuration.
@@ -57,6 +59,8 @@ class ModelConfig(Config):
                  max_seq_len_target: int,
                  vocab_source_size: int,
                  vocab_target_size: int,
+                 num_factors: int,
+                 source_factor_vocab_sizes: List[int],
                  config_embed_source: encoder.EmbeddingConfig,
                  config_embed_target: encoder.EmbeddingConfig,
                  config_encoder: encoder.EncoderConfig,
@@ -71,6 +75,7 @@ class ModelConfig(Config):
         self.max_seq_len_target = max_seq_len_target
         self.vocab_source_size = vocab_source_size
         self.vocab_target_size = vocab_target_size
+        self.num_factors = num_factors
         self.config_embed_source = config_embed_source
         self.config_embed_target = config_embed_target
         self.config_encoder = config_encoder
@@ -170,6 +175,8 @@ class SockeyeModel:
     def _get_embed_weights(self) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol]:
         """
         Returns embedding parameters for source and target.
+        When source and target embeddings are shared, they are created here and passed in to each side,
+        instead of being created in the Embedding constructors.
 
         :return: Tuple of source and target parameter symbols.
         """
@@ -210,14 +217,17 @@ class SockeyeModel:
 
         # source & target embeddings
         embed_weight_source, embed_weight_target, out_weight_target = self._get_embed_weights()
-        # if self.config.config_data.source_factors:
-        #     self.embedding_source = encoder.FactoredEmbedding(self.config.config_embed_source,
-        #                                                       prefix=C.SOURCE_EMBEDDING_PREFIX,
-        #                                                       embed_weight=embed_weight_source)
-        # else:
-        self.embedding_source = encoder.Embedding(self.config.config_embed_source,
-                                                  prefix=C.SOURCE_EMBEDDING_PREFIX,
-                                                  embed_weight=embed_weight_source)
+        if self.config.num_factors == 0:
+            self.embedding_source = encoder.Embedding(self.config.config_embed_source,
+                                                      prefix=C.SOURCE_EMBEDDING_PREFIX,
+                                                      embed_weight=embed_weight_source)
+        else:
+            self.embedding_source = encoder.FactoredEmbedding(self.config.config_embed_source,
+                                                              prefix=C.SOURCE_EMBEDDING_PREFIX,
+                                                              factor_vocab_sizes=self.config.config_embed_source.source_factor_vocab_sizes,
+                                                              factor_output_dims=self.config.config_embed_source.source_factor_dims,
+                                                              embed_weight=embed_weight_source)
+
         self.embedding_target = encoder.Embedding(self.config.config_embed_target,
                                                   prefix=C.TARGET_EMBEDDING_PREFIX,
                                                   embed_weight=embed_weight_target)

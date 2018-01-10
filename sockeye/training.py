@@ -108,6 +108,8 @@ class TrainingModel(model.SockeyeModel):
         target_length = utils.compute_lengths(target)
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
 
+        source_factors = [mx.sym.Variable(C.SOURCE_NAME + "_factor_" + str(i)) for i in range(self.config.num_factors)]
+
         model_loss = loss.get_loss(self.config.config_loss)
 
         data_names = [x[0] for x in train_iter.provide_data]
@@ -121,9 +123,15 @@ class TrainingModel(model.SockeyeModel):
             source_seq_len, target_seq_len = seq_lens
 
             # source embedding
-            (source_embed,
-             source_embed_length,
-             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
+            if self.config.num_factors == 0:
+                (source_embed,
+                 source_embed_length,
+                 source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
+            else:
+                (source_embed,
+                 source_embed_length,
+                 source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len, source_factors)
+
 
             # target embedding
             (target_embed,

@@ -828,7 +828,8 @@ def get_training_data_iters(source: str, target: str,
     train_iter = ParallelSampleIter(training_data,
                                     buckets,
                                     batch_size,
-                                    bucket_batch_sizes)
+                                    bucket_batch_sizes,
+                                    num_factors=len(source_factors))
 
     validation_iter = get_validation_data_iter(data_loader=data_loader,
                                                validation_source=validation_source,
@@ -1142,7 +1143,6 @@ class ParallelDataSet(Sized):
         The first 1..num_source streams are the source and the next num_target are the target.
         The last stream is the set of labels.
         """
-        print("LOADING WITH", num_source_factors, "source factors")
         data = mx.nd.load(fname)
         num_parts = num_source_factors + 3
         part_size = len(data) // num_parts
@@ -1508,6 +1508,9 @@ class ParallelSampleIter(BaseParallelSampleIter):
         source = self.data.source[i][j:j + batch_size]
         target = self.data.target[i][j:j + batch_size]
         data = [source, target]
+
+        for fi, factor in enumerate(self.data.source_factors):
+            data.append(factor[i][j:j + batch_size])
 
         label = [self.data.label[i][j:j + batch_size]]
 

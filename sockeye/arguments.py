@@ -260,7 +260,7 @@ def add_training_data_args(params, required=False):
                         required=False,
                         nargs='+',
                         type=regular_file(),
-                        default=None,
+                        default=[],
                         help='Source side factors.')
     params.add_argument(C.TRAINING_ARG_TARGET, '-t',
                         required=required,
@@ -277,7 +277,7 @@ def add_validation_data_params(params):
                         required=False,
                         type=regular_file(),
                         nargs='+',
-                        default=None,
+                        default=[],
                         help='Source side factors for validation data.')
     params.add_argument('--validation-target', '-vt',
                         required=True,
@@ -588,6 +588,11 @@ def add_model_parameters(params):
                               default=(512, 512),
                               help='Embedding size for source and target tokens. '
                                    'Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
+    model_params.add_argument('--source-factor-dims',
+                              type=int,
+                              nargs='+',
+                              default=[],
+                              help='Source factor dimensions')
 
     # attention arguments
     model_params.add_argument('--rnn-attention-type',

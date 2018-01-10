@@ -599,14 +599,16 @@ def check_encoder_decoder_args(args) -> None:
 def create_model_config(args: argparse.Namespace,
                         vocab_source_size: int,
                         vocab_target_size: int,
-                        config_data: data_io.DataConfig) -> model.ModelConfig:
+                        config_data: data_io.DataConfig,
+                        source_factor_vocab_sizes: Optional[List[int]]) -> model.ModelConfig:
     """
     Create a ModelConfig from the argument given in the command line.
 
     :param args: Arguments as returned by argparse.
-    :param vocab_source_size: The size of the source vocabulary.
+    :param vocab_source_size: The sizes of the source vocabularies.
     :param vocab_target_size: The size of the target vocabulary.
     :param config_data: Data config.
+    :param source_factor_vocab_sizes: Size of source factor vocabularies.
     :return: The model configuration.
     """
     max_seq_len_source, max_seq_len_target = args.max_seq_len
@@ -627,15 +629,12 @@ def create_model_config(args: argparse.Namespace,
     config_encoder, encoder_num_hidden = create_encoder_config(args, config_conv)
     config_decoder = create_decoder_config(args, encoder_num_hidden)
 
-    # if args.source_factors:
-    #     config_embed_source = encoder.FactoredEmbeddingConfig(vocab_size=vocab_source_size,
-    #                                                           num_embed=num_embed_source,
-    #                                                           dims=args.factor_dims,
-    #                                                           dropout=embed_dropout_source)
-    # else:
-    config_embed_source = encoder.EmbeddingConfig(vocab_size=vocab_source_size,
-                                                  num_embed=num_embed_source,
-                                                  dropout=embed_dropout_source)
+    config_embed_source = encoder.FactoredEmbeddingConfig(vocab_size=vocab_source_size,
+                                                          num_embed=num_embed_source,
+                                                          dropout=embed_dropout_source,
+                                                          source_factor_dims=args.source_factor_dims,
+                                                          source_factor_vocab_sizes=source_factor_vocab_sizes)
+
     config_embed_target = encoder.EmbeddingConfig(vocab_size=vocab_target_size,
                                                   num_embed=num_embed_target,
                                                   dropout=embed_dropout_target)
@@ -650,6 +649,8 @@ def create_model_config(args: argparse.Namespace,
                                      max_seq_len_target=max_seq_len_target,
                                      vocab_source_size=vocab_source_size,
                                      vocab_target_size=vocab_target_size,
+                                     num_factors=len(source_factor_vocab_sizes),
+                                     source_factor_vocab_sizes=source_factor_vocab_sizes,
                                      config_embed_source=config_embed_source,
                                      config_embed_target=config_embed_target,
                                      config_encoder=config_encoder,
@@ -777,7 +778,7 @@ def main():
 
         shared_vocab = use_shared_vocab(args)
 
-        train_iter, eval_iter, config_data, vocab_source, vocab_target, *source_factor_vocabs = create_data_iters_and_vocabs(
+        train_iter, eval_iter, config_data, vocab_source, vocab_target, source_factor_vocabs = create_data_iters_and_vocabs(
             args=args,
             shared_vocab=shared_vocab,
             resume_training=resume_training,
@@ -789,13 +790,14 @@ def main():
             for i, v in enumerate(source_factor_vocabs):
                 vocab.vocab_to_json(v, os.path.join(output_folder, C.VOCAB_SRC_NAME) + "." + str(i) + C.JSON_SUFFIX)
 
-        source_vocab_sizes = [len(v) for v in [vocab_source] + source_factor_vocabs]
+        vocab_source_size = len(vocab_source)
         vocab_target_size = len(vocab_target)
+        source_factor_vocab_sizes = [len(v) for v in source_factor_vocabs]
         logger.info("Vocabulary sizes: source (%s) target (%s)",
-                    ', '.join([str(size) for size in source_vocab_sizes]), vocab_target_size)
+                    ', '.join([str(size) for size in [vocab_source_size] + source_factor_vocab_sizes]), vocab_target_size)
         lr_scheduler_instance = create_lr_scheduler(args, resume_training, training_state_dir)
 
-        model_config = create_model_config(args, source_vocab_sizes, vocab_target_size, config_data)
+        model_config = create_model_config(args, vocab_source_size, vocab_target_size, config_data, source_factor_vocab_sizes)
         model_config.freeze()
 
         training_model = create_training_model(model_config, args,
