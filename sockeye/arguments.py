@@ -805,6 +805,17 @@ def add_training_args(params):
                               type=int,
                               default=-1,
                               help='Keep only the last n params files, use -1 to keep all files. Default: %(default)s')
+    train_params.add_argument('--scheduled-sampling-type',
+                              choices=C.SAMPLING_SCHEDULES,
+                              default=None,
+                              help="Use scheduled sampling as target side in training rather than teacher forcing."
+                                   "Default: %(default).")
+    train_params.add_argument('--scheduled-sampling-params',
+                              nargs='+',
+                              type=float,
+                              default=None,
+                              help="Parameters of the scheduled sampling decay strategy (Bengio NIPS '15).")
+
 
 
 def add_train_cli_args(params):
