@@ -547,6 +547,8 @@ def create_model_config(args: argparse.Namespace,
                                      config_encoder=config_encoder,
                                      config_decoder=config_decoder,
                                      config_loss=config_loss,
+                                     scheduled_sampling_type=args.scheduled_sampling_type,
+                                     scheduled_sampling_params=args.scheduled_sampling_params,
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
                                      weight_normalization=args.weight_normalization)
@@ -559,7 +561,8 @@ def create_training_model(model_config: model.ModelConfig,
                           train_iter: data_io.ParallelBucketSentenceIter,
                           lr_scheduler_instance: lr_scheduler.LearningRateScheduler,
                           resume_training: bool,
-                          training_state_dir: str) -> training.TrainingModel:
+                          training_state_dir: str,
+                          state_names: List[str]) -> training.TrainingModel:
     """
     Create a training model and load the parameters from disk if needed.
 
@@ -576,7 +579,8 @@ def create_training_model(model_config: model.ModelConfig,
                                             context=context,
                                             train_iter=train_iter,
                                             bucketing=not args.no_bucketing,
-                                            lr_scheduler=lr_scheduler_instance)
+                                            lr_scheduler=lr_scheduler_instance,
+                                            state_names=state_names)
 
     # We may consider loading the params in TrainingModule, for consistency
     # with the training state saving
@@ -663,9 +667,13 @@ def main():
         model_config = create_model_config(args, vocab_source_size, vocab_target_size, config_data)
         model_config.freeze()
 
+        logger.info("in train: %s", model_config)
+
+        state_names = ['updates'] if args.scheduled_sampling_type is not None else []
+
         training_model = create_training_model(model_config, args,
                                                context, train_iter, lr_scheduler_instance,
-                                               resume_training, training_state_dir)
+                                               resume_training, training_state_dir, state_names)
 
         weight_initializer = initializer.get_initializer(
             default_init_type=args.weight_init,

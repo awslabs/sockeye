@@ -263,6 +263,11 @@ LR_DECAY_OPT_STATES_RESET_CHOICES = [LR_DECAY_OPT_STATES_RESET_OFF,
                                      LR_DECAY_OPT_STATES_RESET_INITIAL,
                                      LR_DECAY_OPT_STATES_RESET_BEST]
 
+# Scheduled sampling decay rates
+SAMPLING_SCHEDULES = ["linear-decay", "exponential-decay", "inv-sigmoid-decay"]
+COMPUTE_LOG_PROB_EPSILON = 1e-10
+
+
 GRADIENT_CLIPPING_TYPE_ABS = 'abs'
 GRADIENT_CLIPPING_TYPE_NORM = 'norm'
 GRADIENT_CLIPPING_TYPE_NONE = 'none'

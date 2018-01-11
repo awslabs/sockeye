@@ -46,6 +46,35 @@ def global_norm(ndarrays: List[mx.nd.NDArray]) -> float:
     norms = [mx.nd.square(mx.nd.norm(arr)) for arr in ndarrays if arr is not None]
     return sqrt(sum(norm.asscalar() for norm in norms))
 
+def check_scheduled_sampling_params(scheduled_sampling_type: str, scheduled_sampling_params: List[float]) -> None:
+    if scheduled_sampling_type == 'inv-sigmoid-decay':
+        assert len(scheduled_sampling_params) == 2, \
+            ('The inverse sigmoid decaying option for scheduled sampling requires 2 parameters,'
+             ' but given {}.').format(len(scheduled_sampling_params))
+
+        k, lower_bound = scheduled_sampling_params
+        assert k >= 1, 'Offset should be greater than or equal to 1.'
+        assert lower_bound >= 0 and lower_bound < 1, 'Lower bound should be 0 or greater and less than 1.'
+
+    elif scheduled_sampling_type == 'exponential-decay':
+        assert len(scheduled_sampling_params) == 1, \
+            ('The exponential decaying option for scheduled sampling requires 1 parameter,'
+             ' but given {}.').format(len(scheduled_sampling_params))
+
+        k = scheduled_sampling_params[0]
+        assert k < 1, 'Offset for the exponential decay should be less than 1.'
+
+    elif scheduled_sampling_type == 'linear-decay':
+        assert len(scheduled_sampling_params) == 3, \
+            ('The linear decaying option for scheduled sampling requires 3 parameters,'
+             ' but given {}').format(len(scheduled_sampling_params))
+
+        k, epsilon, slope = scheduled_sampling_params
+        assert k <= 1, 'Offset for the linear decay should be less than 1.'
+        assert epsilon >= 0, 'Epsilon for the linear decay should be greater than or equal to 0.'
+
+
+
 
 class _TrainingState:
     """
@@ -85,14 +114,39 @@ class TrainingModel(model.SockeyeModel):
                  context: List[mx.context.Context],
                  train_iter: data_io.ParallelBucketSentenceIter,
                  bucketing: bool,
-                 lr_scheduler) -> None:
+                 lr_scheduler,
+                 state_names: Optional[List[str]]) -> None:
         super().__init__(config)
+        self._get_sampling_threshold = self._get_sampling_scheduler()
         self.context = context
         self.lr_scheduler = lr_scheduler
         self.bucketing = bucketing
+        self.state_names = state_names if state_names is not None else []
         self._build_model_components()
         self.module = self._build_module(train_iter)
         self.training_monitor = None  # type: Optional[callback.TrainingMonitor]
+
+    def _get_sampling_scheduler(self):
+        """
+        Computes the threshold over which we train against model samples rather than gold targets
+        """
+        i = mx.sym.Variable('updates')
+
+        check_scheduled_sampling_params(self.config.scheduled_sampling_type, self.config.scheduled_sampling_params)
+
+        if self.config.scheduled_sampling_type == 'inv-sigmoid-decay':
+            k, lower_bound = self.config.scheduled_sampling_params
+            sampling_scheduler = lambda: k / (k + mx.sym.exp(i / k) - 1) * (1 - lower_bound) + lower_bound
+        elif self.config.scheduled_sampling_type == 'exponential-decay':
+            k = self.config.scheduled_sampling_params[0]
+            sampling_scheduler = lambda: pow(k, i)
+        elif self.config.scheduled_sampling_type == 'linear-decay':
+            k, epsilon, slope = self.config.scheduled_sampling_params
+            sampling_scheduler = lambda: mx.sym.clip(k - slope * i, epsilon, k)
+        else:
+            sampling_scheduler = lambda: 1
+
+        return sampling_scheduler
 
     def _build_module(self, train_iter: data_io.ParallelBucketSentenceIter):
         """
@@ -103,8 +157,8 @@ class TrainingModel(model.SockeyeModel):
         source_length = utils.compute_lengths(source)
         target = mx.sym.Variable(C.TARGET_NAME)
         target_length = utils.compute_lengths(target)
-        labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
 
+        labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
         model_loss = loss.get_loss(self.config.config_loss)
 
         data_names = [x[0] for x in train_iter.provide_data]
@@ -122,10 +176,6 @@ class TrainingModel(model.SockeyeModel):
              source_embed_length,
              source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
 
-            # target embedding
-            (target_embed,
-             target_embed_length,
-             target_embed_seq_len) = self.embedding_target.encode(target, target_length, target_seq_len)
 
             # encoder
             # source_encoded: (source_encoded_length, batch_size, encoder_depth)
@@ -135,17 +185,73 @@ class TrainingModel(model.SockeyeModel):
                                                            source_embed_length,
                                                            source_embed_seq_len)
 
-            # decoder
-            # target_decoded: (batch-size, target_len, decoder_depth)
-            target_decoded = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
+            # target embedding
+            (target_embed,
+             target_embed_length,
+             target_embed_seq_len) = self.embedding_target.encode(target, target_length, target_seq_len)
+
+            if self.config.scheduled_sampling_type is not None:
+                # use scheduled sampling: decode iteratively per-token
+
+                # logits_all: target_seq_len * (batch_size, target_vocab_size)
+                logits_all = []
+
+                # threshold over which we draw samples instead of using the gold target previous word history
+                threshold = self._get_sampling_threshold()
+
+                self.decoder.reset()
+                source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1,
+                                                             name='source_encoded_batch_major')
+                states = self.decoder.init_states(source_encoded_batch_major,
+                                                               source_encoded_length,
+                                                               source_encoded_seq_len)
+
+                # slice target words
+                # target: target_seq_len * (batch_size)
+                target_sliced = mx.sym.split(data=target, num_outputs=target_seq_len, axis=1, squeeze_axis=True)
+
+                for seq_idx in range(target_embed_seq_len):
+                    if seq_idx == 0:
+                        target_prev = target_sliced[seq_idx]
+
+                    else:
+                        rand_val = mx.sym.random_uniform(low=0, high=1.0, shape=1)[0]
+                        target_prev = mx.sym.where(rand_val < threshold,
+                                                     mx.sym.cast(target_sliced[seq_idx], dtype='int32'), sampled_word)
+
+                    target_embed_prev, _, _ = self.embedding_target.encode(target_prev, None, 1)
+
+                    # target_decoded: (batch-size, target_len, decoder_depth)
+                    (target_decoded,
+                     attention_probs,
+                     states) = self.decoder.decode_step(seq_idx, target_embed_prev, source_encoded_seq_len, *states)
+
+                    # logit: (batch_size, target_vocab_size)
+                    logit = self.output_layer(target_decoded)
+                    logits_all.append(logit)
+
+                    prob = mx.sym.softmax(logit)
+                    sampled_word = mx.sym.sample_multinomial(prob)
+                    sampled_word = mx.sym.BlockGrad(sampled_word)
+
+                # logits: (batch_size, target_seq_len, target_vocab_size)
+                logits = mx.sym.concat(*logits_all, dim=1, name='logits')
+                # logits: (batch_size * target_seq_len, target_vocab_size)
+                logits = mx.sym.reshape(data=logits, shape=(-1, self.config.vocab_target_size))
+
+            else:
+
+                # decoder
+                # target_decoded: (batch-size, target_len, decoder_depth)
+                target_decoded = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
                                                           target_embed, target_embed_length, target_embed_seq_len)
 
-            # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
-            target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
+                # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
+                target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
 
-            # output layer
-            # logits: (batch_size * target_seq_len, target_vocab_size)
-            logits = self.output_layer(target_decoded)
+                # output layer
+                # logits: (batch_size * target_seq_len, target_vocab_size)
+                logits = self.output_layer(target_decoded)
 
             probs = model_loss.get_loss(logits, labels)
 
@@ -154,6 +260,7 @@ class TrainingModel(model.SockeyeModel):
         if self.bucketing:
             logger.info("Using bucketing. Default max_seq_len=%s", train_iter.default_bucket_key)
             return mx.mod.BucketingModule(sym_gen=sym_gen,
+                                          state_names=self.state_names,
                                           logger=logger,
                                           default_bucket_key=train_iter.default_bucket_key,
                                           context=self.context)
@@ -164,6 +271,7 @@ class TrainingModel(model.SockeyeModel):
             return mx.mod.Module(symbol=symbol,
                                  data_names=data_names,
                                  label_names=label_names,
+                                 state_names=self.state_names,
                                  logger=logger,
                                  context=self.context)
 
@@ -187,6 +295,14 @@ class TrainingModel(model.SockeyeModel):
         """
         metrics = [TrainingModel.create_eval_metric(metric_name) for metric_name in metric_names]
         return mx.metric.create(metrics)
+
+    def _set_states(self, state_names, values):
+        states = self.module.get_states(merge_multi_context=False)
+        for state_name, state, value in zip(state_names, states, values):
+            # ACCLIFT: this is something that existed in the previous initial implementation.
+            # question: why do we need state_names here?
+            for state_per_dev in state:
+                state_per_dev[:] = value
 
     def fit(self,
             train_iter: data_io.ParallelBucketSentenceIter,
@@ -418,7 +534,8 @@ class TrainingModel(model.SockeyeModel):
                 mxmonitor.tic()
 
             # Forward-backward to get outputs, gradients
-            self.module.forward_backward(batch)
+            # performed in _compute_gradients along with updating the value of 'updates'
+            self._compute_gradients(batch, train_state)
 
             gradient_norm = None
             if train_state.updates > 0 and train_state.updates % checkpoint_frequency == 0:
@@ -599,6 +716,12 @@ class TrainingModel(model.SockeyeModel):
         val_iter.reset()
         val_metric.reset()
 
+        state_names = ['training_state.updates']
+        states = self.module.get_states(merge_multi_context=False)
+        for state_name, state in zip(state_names, states):
+            for state_per_dev in state:
+                state_per_dev[:] = 0
+
         for nbatch, eval_batch in enumerate(val_iter):
             self.module.forward(eval_batch, is_train=False)
             self.module.update_metric(val_metric, eval_batch.label)
@@ -745,6 +868,13 @@ class TrainingModel(model.SockeyeModel):
                 if arr is None:
                     continue
                 arr *= scale
+
+    def _compute_gradients(self, batch: mx.io.DataBatch, train_state):
+        if self.state_names is not None:
+            # update the internal state ('update') which is used for scheduled sampling
+            self._set_states(self.state_names, [train_state.updates])
+
+        self.module.forward_backward(batch)
 
 
 def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int):

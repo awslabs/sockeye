@@ -61,6 +61,8 @@ class ModelConfig(Config):
                  config_encoder: Config,
                  config_decoder: Config,
                  config_loss: loss.LossConfig,
+                 scheduled_sampling_type: Optional[str] = None,
+                 scheduled_sampling_params: Optional[list] = None,
                  weight_tying: bool = False,
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
                  weight_normalization: bool = False) -> None:
@@ -75,11 +77,14 @@ class ModelConfig(Config):
         self.config_encoder = config_encoder
         self.config_decoder = config_decoder
         self.config_loss = config_loss
+        self.scheduled_sampling_type = scheduled_sampling_type
+        self.scheduled_sampling_params = scheduled_sampling_params
         self.weight_tying = weight_tying
         self.weight_tying_type = weight_tying_type
         self.weight_normalization = weight_normalization
         if weight_tying and weight_tying_type is None:
             raise RuntimeError("weight_tying_type must be specified when using weight_tying.")
+
 
 
 class SockeyeModel:
