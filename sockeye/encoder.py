@@ -381,7 +381,7 @@ class FactoredEmbedding(Embedding):
                                                output_dim=self.config.source_factor_dims[i],
                                                name=self.prefix + "factor" + str(i) + "_embed"))
 
-        embedding = mx.sym.concat(*embeddings, dim=2, name=self.prefix + "embed_concat")
+        embedding = mx.sym.concat(*embeddings, dim=2, name=self.prefix + "_concat_embed")
 
         return embedding, data_length, seq_len
 

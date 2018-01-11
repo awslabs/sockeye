@@ -300,7 +300,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             utils.check_condition(args.source_vocab is None and args.target_vocab is None,
                                   "You are using a prepared data folder, which is tied to a vocabulary. "
                                   "To change it you need to rerun data preparation with a different vocabulary.")
-        train_iter, validation_iter, data_config, vocab_source, vocab_target, *source_factor_vocabs = data_io.get_prepared_data_iters(
+        train_iter, validation_iter, data_config, vocab_source, vocab_target, source_factor_vocabs = data_io.get_prepared_data_iters(
             prepared_data_dir=args.prepared_data,
             validation_source=os.path.abspath(args.validation_source),
             validation_target=os.path.abspath(args.validation_target),
@@ -366,6 +366,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 num_words_target=num_words_target,
                 word_min_count_source=word_min_count_source,
                 word_min_count_target=word_min_count_target)
+
+        utils.check_condition(len(args.source_factor_dims) == len(source_factor_vocabs),
+                              "The number of source factor data sources (%d) is different from the number of provided source factor embedding dimensions (%d)" % (len(args.source_factor_dims), len(source_factor_vocabs)))
 
         train_iter, validation_iter, config_data = data_io.get_training_data_iters(
             source=os.path.abspath(args.source),
@@ -784,6 +787,7 @@ def main():
             resume_training=resume_training,
             output_folder=output_folder)
 
+        # Dump the vocabularies if we're just staring up
         if not resume_training:
             vocab.vocab_to_json(vocab_source, os.path.join(output_folder, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
             vocab.vocab_to_json(vocab_target, os.path.join(output_folder, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX)

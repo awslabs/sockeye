@@ -144,11 +144,16 @@ def vocab_from_json(path: str, encoding: str = C.VOCAB_ENCODING) -> Vocab:
         return vocab
 
 
-def load_or_create_vocab(data: str, vocab_path: Optional[str],
+def load_or_create_vocab(data: str, vocab_path: str,
                          num_words: int, word_min_count: int):
+    """
+    If the vocabulary path exists, the vocabulary is loaded from the path.
+    Otherwise, it is built from the data file.
+    No writing to disk occurs.
+    """
     return build_from_paths(paths=[data],
                             num_words=num_words,
-                            min_count=word_min_count) if vocab_path is None else vocab_from_json(vocab_path)
+                            min_count=word_min_count) if not os.path.exists(vocab_path) else vocab_from_json(vocab_path)
 
 
 def load_or_create_vocabs(source: str,
@@ -163,9 +168,10 @@ def load_or_create_vocabs(source: str,
     """
     Returns vocabularies for each of source, target, and source_factors_sources.
     If the respective vocabulary paths exist, the vocab is read from the path and returned.
-    Otherwise, it is first built from the support and saved to the path.
+    Otherwise, it is built from the support and saved to the path.
+    No writing to disk is done.
 
-    NOTE: existence test is new. This used to test the vocab_paths not for existence, but for non-None variables.
+    NOTE (MJP): existence test is new. This used to test the vocab_paths not for existence, but for non-None variables.
 
     :param source: The source text.
     :param source_vocab_path: The source vocabulary path.
@@ -187,12 +193,10 @@ def load_or_create_vocabs(source: str,
     vocab_paths = [source_vocab_path, target_vocab_path] + source_factor_vocab_paths
 
     if shared_vocab:
-        if all(os.path.exists, [vocab_paths]):
-            vocab_source = vocab_from_json(source_vocab_path)
-            vocab_target = vocab_from_json(target_vocab_path)
+        if all(map(os.path.exists, vocab_paths)):
             vocabs = [vocab_from_json(x) for x in vocab_paths]
-            utils.check_condition(are_identical(vocabs),
-                                  "Shared vocabulary requires identical vocabularies across source, target, and source factors. "
+            utils.check_condition(are_identical(*vocabs[:2]),
+                                  "Shared vocabulary requires identical vocabularies across source and target."
                                   "The provided vocabularies (%s) are not identical." % (', '.join([source_vocab_path, target_vocab_path])))
         else:
             utils.check_condition(num_words_source == num_words_target,
@@ -200,16 +204,15 @@ def load_or_create_vocabs(source: str,
             utils.check_condition(word_min_count_source == word_min_count_target,
                                   "A shared vocabulary requires the minimum word count for source and target "
                                   "to be the same.")
-            shared_vocab = build_from_paths(paths=vocab_paths,
+            shared_vocab = build_from_paths(paths=[source, target],
                                             num_words=num_words_source,
                                             min_count=word_min_count_source)
-            vocabs = [shared_vocab] * len(vocab_paths)
+            vocabs = [shared_vocab, shared_vocab] + [build_from_paths(paths=[path]) for path in source_factor_sources]
 
     else:
-        vocabs = [load_or_create_vocab(source, None, num_words_source, word_min_count_source),
-                  load_or_create_vocab(target, None, num_words_target, word_min_count_target)]
-        if source_factor_sources is not None:
-            vocabs += [load_or_create_vocab(dataset, None, num_words_source, word_min_count_source) for dataset in source_factor_sources]
+        vocabs = [build_from_paths([source], num_words_source, word_min_count_source),
+                  build_from_paths([target], num_words_target, word_min_count_target)]
+        vocabs += [build_from_paths([dataset]) for dataset in source_factor_sources]
 
     return vocabs
 

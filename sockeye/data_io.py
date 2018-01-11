@@ -655,7 +655,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
                             batch_num_devices: int,
                             fill_up: str) -> Tuple['BaseParallelSampleIter',
                                                    'BaseParallelSampleIter',
-                                                   'DataConfig', List[vocab.Vocab], List[vocab.Vocab]]:
+                                                   'DataConfig', vocab.Vocab, vocab.Vocab, List[vocab.Vocab]]:
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
@@ -1364,7 +1364,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                  batch_size,
                  bucket_batch_sizes,
                  fill_up: str,
-                 num_factors,
+                 num_factors: int,
                  source_data_name=C.SOURCE_NAME,
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
@@ -1387,7 +1387,8 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
         self.shard_iter = ParallelSampleIter(dataset,
                                              self.buckets,
                                              self.batch_size,
-                                             self.bucket_batch_sizes)
+                                             self.bucket_batch_sizes,
+                                             self.num_factors)
 
     def reset(self):
         if len(self.shards_fnames) > 1:
