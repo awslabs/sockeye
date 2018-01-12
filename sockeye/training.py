@@ -273,6 +273,8 @@ class TrainingModel(model.SockeyeModel):
         self.module.init_params(initializer=initializer, arg_params=self.params, aux_params=None,
                                 allow_missing=allow_missing_params, force_init=False)
         self._log_params()
+        initial_params_fname = self._save_params(output_folder, checkpoint=0)
+        os.symlink(initial_params_fname, os.path.join(output_folder, C.PARAMS_BEST_NAME))
 
         self.module.init_optimizer(kvstore=kvstore, optimizer=optimizer, optimizer_params=optimizer_params)
 
@@ -585,15 +587,20 @@ class TrainingModel(model.SockeyeModel):
         logger.info("Model parameters: %s", ", ".join(info))
         logger.info("Total # of parameters: %d", total_parameters)
 
-    def _save_params(self, output_folder: str, checkpoint: int):
+    def _save_params(self, output_folder: str, checkpoint: int) -> str:
         """
         Synchronizes parameters across devices, saves the parameters to disk, and updates self.params.
+
+        :param output_folder: The folder in which the parameters will be serialized in.
+        :param checkpoint: The current checkpoint used for creating a unique parameter file name.
+        :returns: The full path of the parameter file.
         """
         arg_params, aux_params = self.module.get_params()
         self.module.set_params(arg_params, aux_params)
         self.params = arg_params
         params_base_fname = C.PARAMS_NAME % checkpoint
         self.save_params_to_file(os.path.join(output_folder, params_base_fname))
+        return params_base_fname
 
     def _load_params(self, output_folder: str, checkpoint: int):
         """
@@ -771,7 +778,7 @@ def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, 
         return
     existing_files = glob.glob(os.path.join(output_folder, C.PARAMS_PREFIX + "*"))
     params_name_with_dir = os.path.join(output_folder, C.PARAMS_NAME)
-    for n in range(1, max(1, checkpoint - max_to_keep + 1)):
+    for n in range(0, max(1, checkpoint - max_to_keep + 1)):
         if n != best_checkpoint:
             param_fname_n = params_name_with_dir % n
             if param_fname_n in existing_files:
