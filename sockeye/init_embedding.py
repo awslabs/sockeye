@@ -20,7 +20,7 @@ It also supports updating vocabulary-sized weights for a new vocabulary.
 Quick usage:
 
     python3 -m sockeye.init_embedding        \
-            -e embed-in-src.npy embed-in-tgt.npy    \
+            -w embed-in-src.npy embed-in-tgt.npy    \
             -i vocab-in-src.json vocab-in-tgt.json   \
             -o vocab-out-src.json vocab-out-tgt.json  \
             -n source_embed_weight target_embed_weight \
@@ -28,9 +28,9 @@ Quick usage:
 
 Optional arguments:
 
-    --embeddings, -e
-        list of input (embedding) weights in .npy, .npz or Sockeye parameter format
-        .npy: a single array with shape=(vocab-in-size, embedding-size)
+    --weight-files, -w
+        list of input weight files in .npy, .npz or Sockeye parameter format
+        .npy: a single array with shape=(vocab-in-size, embedding-size/hidden-size)
         .npz: a dictionary of {parameter_name: array}
               parameter_name is given by "--names"
         Sockeye parameter: the parameter name is given by "--names"
@@ -94,13 +94,37 @@ def init_weight(weight: np.ndarray,
     return weight_init
 
 
+def load_weight(weight_file: str,
+                weight_name: str,
+                weight_file_cache: Dict[str, Dict]) -> mx.nd.NDArray:
+    """
+    Load wight fron a file or the cache if it was loaded before.
+
+    :param weight_file: Weight file.
+    :param weight_name: Weight name.
+    :param weight_file_cache: Cache of loaded files.
+    :return: Loaded weight.
+    """
+    logger.info('Loading input weight file: %s', weight_file)
+    if weight_file.endswith(".npy"):
+        return np.load(weight_file)
+    elif weight_file.endswith(".npz"):
+        if weight_file not in weight_file_cache:
+            weight_file_cache[weight_file] = np.load(weight_file)
+        return weight_file_cache[weight_file][weight_name]
+    else:
+        if weight_file not in weight_file_cache:
+            weight_file_cache[weight_file] = mx.nd.load(weight_file)
+        return weight_file_cache[weight_file]['arg:%s' % weight_name].asnumpy()
+
+
 def main():
     """
     Commandline interface to initialize Sockeye embedding weights with pretrained word representations.
     """
     log_sockeye_version(logger)
     params = argparse.ArgumentParser(description='Quick usage: python3 -m sockeye.init_embedding '
-                                                 '-e embed-in-src.npy embed-in-tgt.npy '
+                                                 '-w embed-in-src.npy embed-in-tgt.npy '
                                                  '-i vocab-in-src.json vocab-in-tgt.json '
                                                  '-o vocab-out-src.json vocab-out-tgt.json '
                                                  '-n source_embed_weight target_embed_weight '
@@ -108,23 +132,18 @@ def main():
     arguments.add_init_embedding_args(params)
     args = params.parse_args()
 
-    if len(args.embeddings) != len(args.vocabularies_in) or \
-       len(args.embeddings) != len(args.vocabularies_out) or \
-       len(args.embeddings) != len(args.names):
-           logger.error("Exactly the same number of 'input weights', 'input vocabularies', "
+    if len(args.weight_files) != len(args.vocabularies_in) or \
+       len(args.weight_files) != len(args.vocabularies_out) or \
+       len(args.weight_files) != len(args.names):
+           logger.error("Exactly the same number of 'input weight files', 'input vocabularies', "
                         "'output vocabularies' and 'Sockeye parameter names' should be provided.")
            sys.exit(1)
 
     params = {} # type: Dict[str, mx.nd.NDArray]
-    for weight_file, vocab_in_file, vocab_out_file, name in zip(args.embeddings, args.vocabularies_in, \
+    weight_file_cache = {} # type: Dict[str, np.ndarray]
+    for weight_file, vocab_in_file, vocab_out_file, name in zip(args.weight_files, args.vocabularies_in, \
                                                                args.vocabularies_out, args.names):
-        logger.info('Loading input weight: %s', weight_file)
-        if weight_file.endswith(".npy"):
-            weight = np.load(weight_file)
-        elif weight_file.endswith(".npz"):
-            weight = np.load(weight_file)[name]
-        else:
-            weight = mx.nd.load(weight_file)['arg:%s' % name].asnumpy()
+        weight = load_weight(weight_file, name, weight_file_cache)
         logger.info('Loading input/output vocabularies: %s %s', vocab_in_file, vocab_out_file)
         vocab_in = vocab.vocab_from_json(vocab_in_file, encoding=args.encoding)
         vocab_out = vocab.vocab_from_json(vocab_out_file)

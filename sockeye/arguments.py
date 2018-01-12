@@ -1044,8 +1044,8 @@ def add_build_vocab_args(params):
 
 
 def add_init_embedding_args(params):
-    params.add_argument('--embeddings', '-e', required=True, nargs='+',
-                        help='List of input (embedding) weights in .npy, .npz or Sockeye parameter format.')
+    params.add_argument('--weight-files', '-w', required=True, nargs='+',
+                        help='List of input weight files in .npy, .npz or Sockeye parameter format.')
     params.add_argument('--vocabularies-in', '-i', required=True, nargs='+',
                         help='List of input vocabularies as token-index dictionaries in .json format.')
     params.add_argument('--vocabularies-out', '-o', required=True, nargs='+',
