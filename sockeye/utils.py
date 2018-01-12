@@ -610,7 +610,12 @@ class GpuFileLock:
     def __enter__(self) -> Optional[int]:
         for gpu_id in self.candidates:
             lockfile_path = os.path.join(self.lock_dir, "sockeye.gpu%d.lock" % gpu_id)
-            lock_file = open(lockfile_path, 'w')
+            try:
+                lock_file = open(lockfile_path, 'w')
+            except IOError as e:
+                if errno.EACCES:
+                    logger.warning("GPU %d is currently locked by a different process (Permission denied).", gpu_id)
+                    return None
             try:
                 # exclusive non-blocking lock
                 fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -633,6 +638,7 @@ class GpuFileLock:
                     raise
                 else:
                     logger.debug("GPU %d is currently locked.", gpu_id)
+                    return None
         return None
 
     def __exit__(self, exc_type, exc_val, exc_tb):
