@@ -162,7 +162,8 @@ def tmp_digits_dataset(prefix: str,
 
 
 _TRAIN_PARAMS_COMMON = "--use-cpu --max-seq-len {max_len} --source {train_source} --target {train_target}" \
-                       " --validation-source {dev_source} --validation-target {dev_target} --output {model} {quiet}"
+                       " --validation-source {dev_source} --validation-target {dev_target} --output {model} {quiet}" \
+                       " --seed {seed}"
 
 _PREPARE_DATA_COMMON = " --max-seq-len {max_len} --source {train_source} --target {train_target}" \
                        " --output {output} {quiet}"
@@ -191,6 +192,7 @@ def run_train_translate(train_params: str,
                         max_seq_len: int = 10,
                         restrict_lexicon: bool = False,
                         work_dir: Optional[str] = None,
+                        seed: int = 13,
                         quiet: bool = False) -> Tuple[float, float, float, float]:
     """
     Train a model and translate a dev set.  Report validation perplexity and BLEU.
@@ -208,6 +210,7 @@ def run_train_translate(train_params: str,
     :param max_seq_len: The maximum sequence length.
     :param restrict_lexicon: Additional translation run with top-k lexicon-based vocabulary restriction.
     :param work_dir: The directory to store the model and other outputs in.
+    :param seed: The seed used for training.
     :param quiet: Suppress the console output of training and decoding.
     :return: A tuple containing perplexity, bleu scores for standard and reduced vocab decoding, chrf score.
     """
@@ -251,6 +254,7 @@ def run_train_translate(train_params: str,
                                                                    dev_target=dev_target_path,
                                                                    model=model_path,
                                                                    max_len=max_seq_len,
+                                                                   seed=seed,
                                                                    quiet=quiet_arg),
                                        train_params)
             logger.info("Starting training with parameters %s.", train_params)
