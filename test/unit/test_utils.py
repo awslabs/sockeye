@@ -153,13 +153,15 @@ def test_gpu_file_lock_locking(tmpdir):
 
 
 def test_gpu_file_lock_permission_exception(tmpdir):
-    with pytest.raises(PermissionError):
-        tmpdir = tmpdir.mkdir("sub")
-        # remove permissions
-        tmpdir.chmod(0)
+    tmpdir = tmpdir.mkdir("sub")
+    existing_lock = tmpdir.join("sockeye.gpu0.lock")
+    # remove permissions
+    existing_lock.write("")
+    existing_lock.chmod(0)
 
-        with utils.GpuFileLock([0], str(tmpdir)) as lock:
-            assert False, "We expect to raise an exception when aquiring the lock and never reach this code."
+    with utils.GpuFileLock([0, 1], str(tmpdir)) as acquired_lock:
+        # We expect to ignore the file for which we do not have permission and acquire the other device instead
+        assert acquired_lock == 1
 
 
 def test_check_condition_true():
