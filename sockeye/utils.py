@@ -769,3 +769,7 @@ def grouper(iterable: Iterable, size: int) -> Iterable:
         if not chunk:
             return
         yield chunk
+
+
+def mode_dtype(use_fp16: bool):
+    return 'float16' if use_fp16 else 'float32'

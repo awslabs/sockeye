@@ -507,6 +507,8 @@ class RecurrentDecoder(Decoder):
         self.hidden_norm = layers.LayerNormalization(self.num_hidden,
                                                      prefix="%shidden_norm" % prefix) \
             if self.config.layer_normalization else None
+        self.use_fp16 = False
+
 
     def _create_state_init_parameters(self):
         """
@@ -690,18 +692,23 @@ class RecurrentDecoder(Decoder):
         """
         return [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
                                (batch_size, source_encoded_max_length, source_encoded_depth),
+                               dtype=utils.mode_dtype(self.use_fp16),
                                layout=C.BATCH_MAJOR),
                 mx.io.DataDesc(C.SOURCE_DYNAMIC_PREVIOUS_NAME,
                                (batch_size, source_encoded_max_length, self.attention.dynamic_source_num_hidden),
+                               dtype=utils.mode_dtype(self.use_fp16),
                                layout=C.BATCH_MAJOR),
                 mx.io.DataDesc(C.SOURCE_LENGTH_NAME,
                                (batch_size,),
+                               dtype=utils.mode_dtype(self.use_fp16),
                                layout="N"),
                 mx.io.DataDesc(C.HIDDEN_PREVIOUS_NAME,
                                (batch_size, self.num_hidden),
+                               dtype=utils.mode_dtype(self.use_fp16),
                                layout="NC")] + \
                [mx.io.DataDesc("%senc2decinit_%d" % (self.prefix, i),
                                (batch_size, num_hidden),
+                               dtype=utils.mode_dtype(self.use_fp16),
                                layout=C.BATCH_MAJOR) for i, (_, num_hidden) in enumerate(
                    sum([rnn.state_shape for rnn in self.get_rnn_cells()], [])
                )]

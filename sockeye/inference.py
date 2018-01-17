@@ -99,6 +99,7 @@ class InferenceModel(model.SockeyeModel):
         self.output_layer_w = None  # type: mx.nd.NDArray
         self.output_layer_b = None  # type: mx.nd.NDArray
         self.use_fp16 = use_fp16
+        self.decoder.use_fp16 = use_fp16
         logger.info("fp16 mode: %s", self.use_fp16)
 
     @staticmethod
@@ -160,9 +161,9 @@ class InferenceModel(model.SockeyeModel):
         self.encoder_module.init_params(arg_params=self.params, allow_missing=False)
         self.decoder_module.init_params(arg_params=self.params, allow_missing=False)
 
-        # decoder_states = self.encoder_module.get_outputs()
-        # for state in decoder_states:
-        #     print("AHHHH: ", state.dtype)
+        # encoder_states = self.encoder_module.get_outputs()
+        # for name, state in zip(self.encoder_module.output_names, encoder_states):
+        #     print("encoder state:", name, state.dtype)
 
         if self.cache_output_layer_w_b:
             if self.output_layer.weight_normalization:
@@ -1038,19 +1039,19 @@ class Translator:
                                dtype='int32')
         sequences[:, 0] = self.start_id
 
-        lengths = mx.nd.ones((self.batch_size * self.beam_size, 1), ctx=self.context)
+        lengths = mx.nd.ones((self.batch_size * self.beam_size, 1), ctx=self.context, dtype=utils.mode_dtype(self.use_fp16))
         finished = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
 
         # attentions: (batch_size * beam_size, output_length, encoded_source_length)
         attentions = mx.nd.zeros((self.batch_size * self.beam_size, max_output_length, encoded_source_length),
-                                 ctx=self.context)
+                                 ctx=self.context, dtype=utils.mode_dtype(self.use_fp16))
 
         # best_hyp_indices: row indices of smallest scores (ascending).
         best_hyp_indices = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
         # best_word_indices: column indices of smallest scores (ascending).
         best_word_indices = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
         # scores_accumulated: chosen smallest scores in scores (ascending).
-        scores_accumulated = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context)
+        scores_accumulated = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context, dtype=utils.mode_dtype(self.use_fp16))
 
         # reset all padding distribution cells to np.inf
         self.pad_dist[:] = np.inf
@@ -1098,6 +1099,7 @@ class Translator:
                                                                        models_output_layer_w,
                                                                        models_output_layer_b)
 
+            print('==========scores', scores.dtype, lengths.dtype)
             # (2) compute length-normalized accumulated scores in place
             if t == 1 and self.batch_size == 1:  # only one hypothesis at t==1
                 scores = scores[:1] / self.length_penalty(lengths[:1])
