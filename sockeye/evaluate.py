@@ -48,7 +48,7 @@ def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> flo
     :param references: Reference stream.
     :return: chrF score as float between 0 and 1.
     """
-    return sacrebleu.corpus_chrf(hypotheses, references, remove_whitespace=True)
+    return sacrebleu.corpus_chrf(hypotheses, references, order=sacrebleu.CHRF_ORDER, beta=sacrebleu.CHRF_BETA, remove_whitespace=sacrebleu.CHRF_REMOVE_WS)
 
 def main():
     params = argparse.ArgumentParser(description='Evaluate translations by calculating metrics with '
