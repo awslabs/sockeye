@@ -125,8 +125,10 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
         remaining_rnn_config = config.rnn_config.copy(num_layers=config.rnn_config.num_layers - 1,
                                                       first_residual_layer=config.rnn_config.first_residual_layer - 1)
         encoders.append(RecurrentEncoder(rnn_config=remaining_rnn_config,
-                                      prefix=C.STACKEDRNN_PREFIX,
-                                      layout=C.TIME_MAJOR))
+                                         prefix=C.STACKEDRNN_PREFIX,
+                                         layout=C.TIME_MAJOR))
+
+    encoders.append(TimeMajor2BatchMajor())
 
     return EncoderSequence(encoders)
 
@@ -147,7 +149,6 @@ def get_convolutional_encoder(config: ConvolutionalEncoderConfig) -> 'Encoder':
                                              fixed_pos_embed_scale_down_positions=True,
                                              prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
     encoders.append(ConvolutionalEncoder(config=config))
-    encoders.append(BatchMajor2TimeMajor())
     return EncoderSequence(encoders)
 
 
@@ -170,7 +171,6 @@ def get_transformer_encoder(config: transformer.TransformerConfig) -> 'Encoder':
         encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
 
     encoders.append(TransformerEncoder(config))
-    encoders.append(BatchMajor2TimeMajor())
 
     return EncoderSequence(encoders)
 
@@ -232,6 +232,27 @@ class BatchMajor2TimeMajor(Encoder):
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
         with mx.AttrScope(__layout__=C.TIME_MAJOR):
+            return mx.sym.swapaxes(data=data, dim1=0, dim2=1), data_length, seq_len
+
+
+class TimeMajor2BatchMajor(Encoder):
+    """
+    Converts time major data to batch major.
+    """
+
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: Optional[mx.sym.Symbol],
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+        """
+        Encodes data given sequence lengths of individual examples and maximum sequence length.
+
+        :param data: Input data.
+        :param data_length: Vector with sequence lengths.
+        :param seq_len: Maximum sequence length.
+        :return: Encoded versions of input data (data, data_length, seq_len).
+        """
+        with mx.AttrScope(__layout__=C.BATCH_MAJOR):
             return mx.sym.swapaxes(data=data, dim1=0, dim2=1), data_length, seq_len
 
 

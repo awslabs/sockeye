@@ -68,7 +68,7 @@ class Decoder(ABC):
         Decodes a sequence of embedded target words and returns sequence of last decoder
         representations for each time step.
 
-        :param source_encoded: Encoded source: (source_encoded_max_length, batch_size, encoder_depth).
+        :param source_encoded: Encoded source: (batch_size, source_encoded_max_length, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
         :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
@@ -206,7 +206,7 @@ class TransformerDecoder(Decoder):
         Decodes a sequence of embedded target words and returns sequence of last decoder
         representations for each time step.
 
-        :param source_encoded: Encoded source: (source_encoded_max_length, batch_size, encoder_depth).
+        :param source_encoded: Encoded source: (batch_size, source_encoded_max_length, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
         :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
@@ -214,8 +214,6 @@ class TransformerDecoder(Decoder):
         :param target_embed_max_length: Dimension of the embedded target sequence.
         :return: Decoder data. Shape: (batch_size, target_embed_max_length, decoder_depth).
         """
-        # (batch_size, source_max_length, num_source_embed)
-        source_encoded = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
 
         # (batch_size * heads, max_length)
         source_bias = transformer.get_variable_length_bias(lengths=source_encoded_lengths,
@@ -536,7 +534,7 @@ class RecurrentDecoder(Decoder):
         Decodes a sequence of embedded target words and returns sequence of last decoder
         representations for each time step.
 
-        :param source_encoded: Encoded source: (source_encoded_max_length, batch_size, encoder_depth).
+        :param source_encoded: Encoded source: (batch_size, source_encoded_max_length, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
         :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
@@ -544,19 +542,19 @@ class RecurrentDecoder(Decoder):
         :param target_embed_max_length: Dimension of the embedded target sequence.
         :return: Decoder data. Shape: (batch_size, target_embed_max_length, decoder_depth).
         """
+
         # target_embed: target_seq_len * (batch_size, num_target_embed)
         target_embed = mx.sym.split(data=target_embed, num_outputs=target_embed_max_length, axis=1, squeeze_axis=True)
 
         # get recurrent attention function conditioned on source
-        source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
-        attention_func = self.attention.on(source_encoded_batch_major, source_encoded_lengths,
+        attention_func = self.attention.on(source_encoded, source_encoded_lengths,
                                            source_encoded_max_length)
         attention_state = self.attention.get_initial_state(source_encoded_lengths, source_encoded_max_length)
 
         # initialize decoder states
         # hidden: (batch_size, rnn_num_hidden)
         # layer_states: List[(batch_size, state_num_hidden]
-        state = self.get_initial_state(source_encoded, source_encoded_lengths)
+        state = self.get_initial_state(source_encoded_time_major, source_encoded_lengths)
 
         # hidden_all: target_seq_len * (batch_size, 1, rnn_num_hidden)
         hidden_all = []
@@ -652,8 +650,7 @@ class RecurrentDecoder(Decoder):
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
         """
-        source_encoded_time_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
-        hidden, layer_states = self.get_initial_state(source_encoded_time_major, source_encoded_lengths)
+        hidden, layer_states = self.get_initial_state(source_encoded, source_encoded_lengths)
         context, attention_probs, dynamic_source = self.attention.get_initial_state(source_encoded_lengths,
                                                                                     source_encoded_max_length)
         states = [source_encoded, dynamic_source, source_encoded_lengths, hidden] + layer_states
@@ -723,20 +720,26 @@ class RecurrentDecoder(Decoder):
         Optionally, init states for RNN layers are computed using 1 non-linear FC
         with the last state of the encoder as input.
 
-        :param source_encoded: Concatenated encoder states. Shape: (source_seq_len, batch_size, encoder_num_hidden).
+        :param source_encoded: Concatenated encoder states. Shape: (batch_size, source_seq_len, encoder_num_hidden).
         :param source_encoded_length: Lengths of source sequences. Shape: (batch_size,).
         :return: Decoder state.
         """
+        # The mx.sym.Sequence* operators expect time-major data.
+        # TODO (tdomhan): Use the `axis` argument instead of transposing once the new MXNet version becomes available.
+        # (see https://github.com/apache/incubator-mxnet/pull/9306)
+        # (source_encoded_max_length, batch_size, encoder_depth)
+        source_encoded_time_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
+
         # we derive the shape of hidden and layer_states from some input to enable
         # shape inference for the batch dimension during inference.
         # (batch_size, 1)
         zeros = mx.sym.expand_dims(mx.sym.zeros_like(source_encoded_length), axis=1)
         # last encoder state: (batch, num_hidden)
-        source_encoded_last = mx.sym.SequenceLast(data=source_encoded,
+        source_encoded_last = mx.sym.SequenceLast(data=source_encoded_time_major,
                                                   sequence_length=source_encoded_length,
                                                   use_sequence_length=True) \
             if self.config.state_init == C.RNN_DEC_INIT_LAST else None
-        source_masked = mx.sym.SequenceMask(data=source_encoded,
+        source_masked = mx.sym.SequenceMask(data=source_encoded_time_major,
                                             sequence_length=source_encoded_length,
                                             use_sequence_length=True,
                                             value=0.) if self.config.state_init == C.RNN_DEC_INIT_AVG else None
@@ -973,7 +976,7 @@ class ConvolutionalDecoder(Decoder):
         Decodes a sequence of embedded target words and returns sequence of last decoder
         representations for each time step.
 
-        :param source_encoded: Encoded source: (source_encoded_max_length, batch_size, encoder_depth).
+        :param source_encoded: Encoded source: (batch_size, source_encoded_max_length, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
         :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
@@ -981,11 +984,9 @@ class ConvolutionalDecoder(Decoder):
         :param target_embed_max_length: Dimension of the embedded target sequence.
         :return: Decoder data. Shape: (batch_size, target_embed_max_length, decoder_depth).
         """
-        # (batch_size, source_encoded_max_length, encoder_depth).
-        source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
 
         # (batch_size, target_seq_len, num_hidden)
-        target_hidden = self._decode(source_encoded=source_encoded_batch_major,
+        target_hidden = self._decode(source_encoded=source_encoded,
                                      source_encoded_lengths=source_encoded_lengths,
                                      target_embed=target_embed,
                                      target_embed_lengths=target_embed_lengths,
