@@ -131,7 +131,7 @@ def save_graph(symbol: mx.sym.Symbol, filename: str, hide_weights: bool = True):
 
 def compute_lengths(sequence_data: mx.sym.Symbol, dtype='float32') -> mx.sym.Symbol:
     """
-    Computes sequence lenghts of PAD_ID-padded data in sequence_data.
+    Computes sequence lengths of PAD_ID-padded data in sequence_data.
 
     :param sequence_data: Input data. Shape: (batch_size, seq_len).
     :return: Length data. Shape: (batch_size,).

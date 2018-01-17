@@ -142,17 +142,7 @@ class InferenceModel(model.SockeyeModel):
         max_encoder_data_shapes = self._get_encoder_data_shapes(self.encoder_default_bucket_key)
         max_decoder_data_shapes = self._get_decoder_data_shapes(self.decoder_default_bucket_key)
 
-        # print('-------------Monitor setup encoder-----------')
-        # mon = mx.monitor.Monitor(1)
-        # mon.stat_helper = InferenceModel._printing_helper
-
         self.encoder_module.bind(data_shapes=max_encoder_data_shapes, for_training=False, grad_req="null")
-        # self.encoder_module.install_monitor(mon)
-        # logger.info('Encoder outputs %s', self.encoder_module.symbol.list_outputs())
-
-        # print('-------------Monitor setup decoder-----------')
-        # mon = mx.monitor.Monitor(1)
-        # mon.stat_helper = InferenceModel._printing_helper
 
         self.decoder_module.bind(data_shapes=max_decoder_data_shapes, for_training=False, grad_req="null")
         # self.encoder_module.install_monitor(mon)
@@ -160,10 +150,6 @@ class InferenceModel(model.SockeyeModel):
         self.load_params_from_file(self.fname_params, utils.mode_dtype(self.use_fp16))
         self.encoder_module.init_params(arg_params=self.params, allow_missing=False)
         self.decoder_module.init_params(arg_params=self.params, allow_missing=False)
-
-        # encoder_states = self.encoder_module.get_outputs()
-        # for name, state in zip(self.encoder_module.output_names, encoder_states):
-        #     print("encoder state:", name, state.dtype)
 
         if self.cache_output_layer_w_b:
             if self.output_layer.weight_normalization:
@@ -759,8 +745,9 @@ class Translator:
             self.buckets_source = data_io.define_buckets(self.max_input_length, step=bucket_source_width)
         else:
             self.buckets_source = [self.max_input_length]
+
         self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target)), val=np.inf,
-                                   ctx=self.context, dtype='float16')
+                                   ctx=self.context, dtype=utils.mode_dtype(use_fp16))
         self.use_fp16 = use_fp16
         logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s batch_size=%d "
                     "buckets_source=%s use_fp16=%s)",
@@ -1072,7 +1059,7 @@ class Translator:
                                                dim=0)
 
             pad_dist = mx.nd.full((self.batch_size * self.beam_size, vocab_slice_ids.shape[0]),
-                                  val=np.inf, ctx=self.context, dtype='float16')
+                                  val=np.inf, ctx=self.context, dtype=utils.mode_dtype(self.use_fp16))
             for m in self.models:
                 models_output_layer_w.append(m.output_layer_w.take(vocab_slice_ids))
                 models_output_layer_b.append(m.output_layer_b.take(vocab_slice_ids))
@@ -1092,7 +1079,6 @@ class Translator:
                                                                        models_output_layer_w,
                                                                        models_output_layer_b)
 
-            print('==========scores', scores.dtype, lengths.dtype)
             # (2) compute length-normalized accumulated scores in place
             if t == 1 and self.batch_size == 1:  # only one hypothesis at t==1
                 scores = scores[:1] / self.length_penalty(lengths[:1])
@@ -1134,7 +1120,7 @@ class Translator:
             # pylint: disable=unsupported-assignment-operation
             sequences[:, t] = best_word_indices
             attentions[:, t, :] = attention_scores
-            lengths += mx.nd.cast(1 - mx.nd.expand_dims(finished, axis=1), dtype='float16')
+            lengths += mx.nd.cast(1 - mx.nd.expand_dims(finished, axis=1), utils.mode_dtype(self.use_fp16))
 
             # (6) determine which hypotheses in the beam are now finished
             finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
