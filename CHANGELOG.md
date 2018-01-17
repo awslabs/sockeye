@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.16.4]
+### Changed
+ - Internal change: Standardized all data to be batch-major both at training and at inference time.
+
 ## [1.16.3]
 ### Changed
  - When a device lock file exists and the process has no write permissions for the lock file we assume that the device
