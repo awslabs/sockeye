@@ -24,7 +24,6 @@ import mxnet as mx
 
 import sockeye.output_handler
 from . import evaluate
-from . import chrf
 from . import constants as C
 from . import data_io
 from . import inference
@@ -147,7 +146,6 @@ class CheckpointDecoder:
         return {C.BLEU_VAL: evaluate.raw_corpus_bleu(hypotheses=translations,
                                                      references=self.target_sentences,
                                                      offset=0.01),
-                C.CHRF_VAL: chrf.corpus_chrf(hypotheses=translations,
-                                             references=self.target_sentences,
-                                             trim_whitespaces=True),
+                C.CHRF_VAL: evaluate.corpus_chrf(hypotheses=translations,
+                                                 references=self.target_sentences),
                 C.AVG_TIME: avg_time}
