@@ -1008,6 +1008,10 @@ def add_inference_args(params):
                                type=float,
                                help='Beta factor for the length penalty used in beam search: '
                                     '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
+    decode_params.add_argument('--use-fp16',
+                               default=False,
+                               type=bool,
+                               help='Use float 16-bit precision math. Default: %(default)s')
 
 
 def add_evaluate_args(params):
@@ -1044,14 +1048,14 @@ def add_build_vocab_args(params):
 
 
 def add_init_embedding_args(params):
-    params.add_argument('--weight-files', '-w', required=True, nargs='+',
-                        help='List of input weight files in .npy, .npz or Sockeye parameter format.')
+    params.add_argument('--embeddings', '-e', required=True, nargs='+',
+                        help='List of input embedding weights in .npy format.')
     params.add_argument('--vocabularies-in', '-i', required=True, nargs='+',
                         help='List of input vocabularies as token-index dictionaries in .json format.')
     params.add_argument('--vocabularies-out', '-o', required=True, nargs='+',
                         help='List of output vocabularies as token-index dictionaries in .json format.')
     params.add_argument('--names', '-n', required=True, nargs='+',
-                        help='List of Sockeye parameter names for (embedding) weights.')
+                        help='List of Sockeye parameter names for embedding weights.')
     params.add_argument('--file', '-f', required=True,
                         help='File to write initialized parameters to.')
     params.add_argument('--encoding', '-c', type=str, default=C.VOCAB_ENCODING,

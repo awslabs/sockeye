@@ -509,7 +509,6 @@ class RecurrentDecoder(Decoder):
             if self.config.layer_normalization else None
         self.use_fp16 = False
 
-
     def _create_state_init_parameters(self):
         """
         Creates parameters for encoder last state transformation into decoder layer initial states.

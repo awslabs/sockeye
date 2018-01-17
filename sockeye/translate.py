@@ -72,7 +72,8 @@ def main():
             args.softmax_temperature,
             args.max_output_length_num_stds,
             decoder_return_logit_inputs=args.restrict_lexicon is not None,
-            cache_output_layer_w_b=args.restrict_lexicon is not None)
+            cache_output_layer_w_b=args.restrict_lexicon is not None,
+            use_fp16=args.use_fp16)
         restrict_lexicon = None # type: TopKLexicon
         if args.restrict_lexicon:
             restrict_lexicon = TopKLexicon(vocab_source, vocab_target)
@@ -85,7 +86,8 @@ def main():
                                                   models,
                                                   vocab_source,
                                                   vocab_target,
-                                                  restrict_lexicon)
+                                                  restrict_lexicon,
+                                                  use_fp16=args.use_fp16)
         read_and_translate(translator, output_handler, args.chunk_size, args.input)
 
 

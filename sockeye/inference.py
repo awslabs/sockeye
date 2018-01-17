@@ -142,22 +142,22 @@ class InferenceModel(model.SockeyeModel):
         max_encoder_data_shapes = self._get_encoder_data_shapes(self.encoder_default_bucket_key)
         max_decoder_data_shapes = self._get_decoder_data_shapes(self.decoder_default_bucket_key)
 
-        print('-------------Monitor setup encoder-----------')
-        mon = mx.monitor.Monitor(1)
-        mon.stat_helper = InferenceModel._printing_helper
+        # print('-------------Monitor setup encoder-----------')
+        # mon = mx.monitor.Monitor(1)
+        # mon.stat_helper = InferenceModel._printing_helper
 
         self.encoder_module.bind(data_shapes=max_encoder_data_shapes, for_training=False, grad_req="null")
-        self.encoder_module.install_monitor(mon)
-        logger.info('Encoder outputs %s', self.encoder_module.symbol.list_outputs())
+        # self.encoder_module.install_monitor(mon)
+        # logger.info('Encoder outputs %s', self.encoder_module.symbol.list_outputs())
 
-        print('-------------Monitor setup decoder-----------')
-        mon = mx.monitor.Monitor(1)
-        mon.stat_helper = InferenceModel._printing_helper
+        # print('-------------Monitor setup decoder-----------')
+        # mon = mx.monitor.Monitor(1)
+        # mon.stat_helper = InferenceModel._printing_helper
 
         self.decoder_module.bind(data_shapes=max_decoder_data_shapes, for_training=False, grad_req="null")
-        self.encoder_module.install_monitor(mon)
+        # self.encoder_module.install_monitor(mon)
 
-        self.load_params_from_file(self.fname_params)
+        self.load_params_from_file(self.fname_params, utils.mode_dtype(self.use_fp16))
         self.encoder_module.init_params(arg_params=self.params, allow_missing=False)
         self.decoder_module.init_params(arg_params=self.params, allow_missing=False)
 
@@ -187,17 +187,12 @@ class InferenceModel(model.SockeyeModel):
 
         def sym_gen(source_seq_len: int):
             source = mx.sym.Variable(C.SOURCE_NAME)
-            if self.use_fp16:
-                logger.info('Adding Cast float16 layer after %s', source)
-                #source = mx.symbol.Cast(source, dtype='float16')
-                source_length = utils.compute_lengths(source, dtype='float16')
-            else:
-                source_length = utils.compute_lengths(source, dtype='float32')
+            source_length = utils.compute_lengths(source, dtype=utils.mode_dtype(self.use_fp16))
 
             # source embedding
             (source_embed,
              source_embed_length,
-             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
+             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len, self.use_fp16)
 
             # encoder
             # source_encoded: (source_encoded_length, batch_size, encoder_depth)
@@ -205,7 +200,8 @@ class InferenceModel(model.SockeyeModel):
              source_encoded_length,
              source_encoded_seq_len) = self.encoder.encode(source_embed,
                                                            source_embed_length,
-                                                           source_embed_seq_len)
+                                                           source_embed_seq_len,
+                                                           self.use_fp16)
             # source_encoded: (batch_size, source_encoded_length, encoder_depth)
             # TODO(fhieber): Consider standardizing encoders to return batch-major data to avoid this line.
             source_encoded = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
@@ -251,13 +247,10 @@ class InferenceModel(model.SockeyeModel):
             states = self.decoder.state_variables(decode_step)
             state_names = [state.name for state in states]
 
-            if self.use_fp16:
-                logger.info('Adding Cast float16 layer after %s', target_prev)
-                #target_prev = mx.symbol.Cast(target_prev, dtype='float16')
-
             # embedding for previous word
             # (batch_size, num_embed)
-            target_embed_prev, _, _ = self.embedding_target.encode(data=target_prev, data_length=None, seq_len=1)
+            target_embed_prev, _, _ = self.embedding_target.encode(data=target_prev, data_length=None, seq_len=1
+                                                                   , use_fp16=self.use_fp16)
 
             # decoder
             # target_decoded: (batch_size, decoder_depth)
@@ -298,7 +291,7 @@ class InferenceModel(model.SockeyeModel):
         """
         return [mx.io.DataDesc(name=C.SOURCE_NAME,
                                shape=(self.batch_size, bucket_key),
-                               dtype='float16' if self.use_fp16 else 'float32',
+                               dtype=utils.mode_dtype(self.use_fp16),
                                layout=C.BATCH_MAJOR)]
 
     def _get_decoder_data_shapes(self, bucket_key: Tuple[int, int]) -> List[mx.io.DataDesc]:
@@ -315,7 +308,7 @@ class InferenceModel(model.SockeyeModel):
             [mx.io.DataDesc(
                 name=C.TARGET_NAME,
                 shape=(self.batch_size * self.beam_size,),
-                dtype='float16' if self.use_fp16 else 'float32',
+                dtype=utils.mode_dtype(self.use_fp16),
                 layout="NT")] +
             self.decoder.state_shapes(self.batch_size * self.beam_size,
                                       target_max_length,
@@ -888,7 +881,7 @@ class Translator:
         bucket_key = data_io.get_bucket(max(len(tokens) for tokens in sequences), self.buckets_source)
 
         utils.check_condition(C.PAD_ID == 0, "pad id should be 0")
-        source = mx.nd.zeros((len(sequences), bucket_key), dtype='float16' if self.use_fp16 else 'float32')
+        source = mx.nd.zeros((len(sequences), bucket_key), dtype=utils.mode_dtype(self.use_fp16))
         for j, tokens in enumerate(sequences):
             source[j, :len(tokens)] = data_io.tokens2ids(tokens, self.vocab_source)
         return source, bucket_key

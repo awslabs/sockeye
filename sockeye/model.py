@@ -142,7 +142,7 @@ class SockeyeModel:
         utils.save_params(self.params.copy(), fname)
         logging.info('Saved params to "%s"', fname)
 
-    def load_params_from_file(self, fname: str):
+    def load_params_from_file(self, fname: str, dtype=None):
         """
         Loads and sets model parameters from file.
 
@@ -153,7 +153,17 @@ class SockeyeModel:
                                                      "This is either not a model directory or the first training "
                                                      "checkpoint has not happened yet." % fname)
         self.params, _ = utils.load_params(fname)
+        if dtype:
+            logger.info('Converting params to %s', dtype)
+            SockeyeModel.convert_params(self.params, dtype)
         logger.info('Loaded params from "%s"', fname)
+
+    @staticmethod
+    def convert_params(params, dtype):
+        for k, v in params.items():
+            if v.dtype != dtype:
+                logger.info('Converting %s to %s', k, dtype)
+                params[k] = v.astype(dtype=dtype)
 
     @staticmethod
     def save_version(folder: str):
