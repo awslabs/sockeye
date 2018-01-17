@@ -109,7 +109,7 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
         encoders.append(ConvertLayout(C.TIME_MAJOR, num_hidden=0))
 
     if config.reverse_input:
-        encoders.append(ReverseSequence())
+        encoders.append(ReverseSequence(num_hidden=encoders[-1].get_num_hidden()))
 
     if config.rnn_config.residual:
         utils.check_condition(config.rnn_config.first_residual_layer >= 2,
@@ -253,12 +253,18 @@ class ReverseSequence(Encoder):
     Reverses the input sequence. Requires time-major layout.
     """
 
+    def __init__(self, num_hidden: int):
+        self.num_hidden = num_hidden
+
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
                seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         data = mx.sym.SequenceReverse(data=data, sequence_length=data_length, use_sequence_length=True)
         return data, data_length, seq_len
+
+    def get_num_hidden(self):
+        return self.num_hidden
 
 
 class EmbeddingConfig(Config):
