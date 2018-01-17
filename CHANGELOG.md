@@ -10,6 +10,14 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.16.3]
+### Changed
+ - When a device lock file exists and the process has no write permissions for the lock file we assume that the device
+ is locked. Previously this lead to an permission denied exception. Please note that in this scenario we an not detect
+ if the original Sockeye process did not shut down gracefully. This is not an issue when the sockeye process has write
+ permissions on existing lock files as in that case locking is based on file system locks, which cease to exist when a
+ process exits.
+
 ## [1.16.2]
 ### Changed
  - Changed to a custom speedometer that tracks samples/sec AND words/sec. The original MXNet speedometer did not take
