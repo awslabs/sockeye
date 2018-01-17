@@ -114,21 +114,23 @@ class CheckpointDecoder:
         :param output_name: Filename to write translations to. Defaults to /dev/null.
         :return: Mapping of metric names to scores.
         """
-        models, vocab_source, vocab_target = inference.load_models(self.context,
-                                                                   self.max_input_len,
-                                                                   self.beam_size,
-                                                                   self.batch_size,
-                                                                   [self.model],
-                                                                   [checkpoint],
-                                                                   softmax_temperature=self.softmax_temperature,
-                                                                   max_output_length_num_stds=self.max_output_length_num_stds)
+        models, vocab_source, vocab_target, source_factor_vocabs = inference.load_models(
+            self.context,
+            self.max_input_len,
+            self.beam_size,
+            self.batch_size,
+            [self.model],
+            [checkpoint],
+            softmax_temperature=self.softmax_temperature,
+            max_output_length_num_stds=self.max_output_length_num_stds)
         translator = inference.Translator(self.context,
                                           self.ensemble_mode,
                                           self.bucket_width_source,
                                           inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
                                           models,
                                           vocab_source,
-                                          vocab_target)
+                                          vocab_target,
+                                          source_factor_vocabs)
         trans_wall_time = 0.0
         translations = []
         with data_io.smart_open(output_name, 'w') as output:

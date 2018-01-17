@@ -62,7 +62,7 @@ def main():
     with ExitStack() as exit_stack:
         context = _setup_context(args, exit_stack)
 
-        models, vocab_source, vocab_target = sockeye.inference.load_models(
+        models, vocab_source, vocab_target, source_factor_vocabs = sockeye.inference.load_models(
             context,
             args.max_input_len,
             args.beam_size,
@@ -85,6 +85,7 @@ def main():
                                                   models,
                                                   vocab_source,
                                                   vocab_target,
+                                                  source_factor_vocabs,
                                                   restrict_lexicon)
         read_and_translate(translator, output_handler, args.chunk_size, args.input)
 
