@@ -296,7 +296,7 @@ class Embedding(Encoder):
                                      input_dim=self.config.vocab_size,
                                      weight=self.embed_weight,
                                      output_dim=self.config.num_embed,
-                                     name=self.prefix + "embed")
+                                     name=self.prefix + "embed", dtype='float16')
         if self.config.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.config.dropout, name="source_embed_dropout")
 
@@ -604,7 +604,12 @@ class RecurrentEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
-        outputs, _ = self.rnn.unroll(seq_len, inputs=data, merge_outputs=True, layout=self.layout)
+        begin_states = []
+        for _ in range(self.rnn_config.num_layers):
+            begin_states.append(mx.sym.zeros(shape=(0, self.rnn_config.num_hidden), dtype='float16'))
+            begin_states.append(mx.sym.zeros(shape=(0, self.rnn_config.num_hidden), dtype='float16'))
+
+        outputs, _ = self.rnn.unroll(seq_len, begin_state=begin_states, inputs=data, merge_outputs=True, layout=self.layout)
 
         return outputs, data_length, seq_len
 

@@ -732,6 +732,9 @@ class RecurrentDecoder(Decoder):
         # (batch_size, 1)
         zeros = mx.sym.expand_dims(mx.sym.zeros_like(source_encoded_length), axis=1)
         # last encoder state: (batch, num_hidden)
+
+        source_encoded_length = mx.symbol.cast(data=source_encoded_length, dtype='float16')
+
         source_encoded_last = mx.sym.SequenceLast(data=source_encoded,
                                                   sequence_length=source_encoded_length,
                                                   use_sequence_length=True) \
