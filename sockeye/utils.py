@@ -772,4 +772,4 @@ def grouper(iterable: Iterable, size: int) -> Iterable:
 
 
 def mode_dtype(use_fp16: bool):
-    return 'float16' if use_fp16 else 'float32'
+    return np.float16 if use_fp16 else np.float32

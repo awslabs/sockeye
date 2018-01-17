@@ -685,12 +685,12 @@ class BiDirectionalRNNEncoder(Encoder):
         """
         if self.layout[0] == 'N':
             data = mx.sym.swapaxes(data=data, dim1=0, dim2=1)
-        data = self._encode(data, data_length, seq_len)
+        data = self._encode(data, data_length, seq_len, use_fp16)
         if self.layout[0] == 'N':
             data = mx.sym.swapaxes(data=data, dim1=0, dim2=1)
         return data, data_length, seq_len
 
-    def _encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
+    def _encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int, use_fp16: bool = False) -> mx.sym.Symbol:
         """
         Bidirectionally encodes time-major data.
         """
@@ -698,9 +698,9 @@ class BiDirectionalRNNEncoder(Encoder):
         data_reverse = mx.sym.SequenceReverse(data=data, sequence_length=data_length,
                                               use_sequence_length=True)
         # (seq_length, batch, cell_num_hidden)
-        hidden_forward, _, _ = self.forward_rnn.encode(data, data_length, seq_len)
+        hidden_forward, _, _ = self.forward_rnn.encode(data, data_length, seq_len, use_fp16)
         # (seq_length, batch, cell_num_hidden)
-        hidden_reverse, _, _ = self.reverse_rnn.encode(data_reverse, data_length, seq_len)
+        hidden_reverse, _, _ = self.reverse_rnn.encode(data_reverse, data_length, seq_len, use_fp16)
         # (seq_length, batch, cell_num_hidden)
         hidden_reverse = mx.sym.SequenceReverse(data=hidden_reverse, sequence_length=data_length,
                                                 use_sequence_length=True)
