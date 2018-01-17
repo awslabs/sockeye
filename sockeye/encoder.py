@@ -104,8 +104,9 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
                                                           scale_up_input=False,
                                                           scale_down_positions=False,
                                                           prefix="%sadd_positional_encodings" % C.CHAR_SEQ_ENCODER_PREFIX))
-
-    encoders.append(BatchMajor2TimeMajor())
+        encoders.append(ConvertLayout(C.TIME_MAJOR, num_hidden=encoders[-1].get_num_hidden()))
+    else:
+        encoders.append(ConvertLayout(C.TIME_MAJOR, num_hidden=0))
 
     if config.reverse_input:
         encoders.append(ReverseSequence())
@@ -128,7 +129,7 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
                                          prefix=C.STACKEDRNN_PREFIX,
                                          layout=C.TIME_MAJOR))
 
-    encoders.append(TimeMajor2BatchMajor())
+    encoders.append(ConvertLayout(C.BATCH_MAJOR, encoders[-1].get_num_hidden()))
 
     return EncoderSequence(encoders)
 
@@ -195,6 +196,7 @@ class Encoder(ABC):
         """
         pass
 
+    @abstractmethod
     def get_num_hidden(self) -> int:
         """
         :return: The representation size of this encoder.
@@ -214,10 +216,18 @@ class Encoder(ABC):
         return None
 
 
-class BatchMajor2TimeMajor(Encoder):
+class ConvertLayout(Encoder):
     """
-    Converts batch major data to time major.
+    Converts batch major data to time major by swapping the first dimension and setting the __layout__ attribute.
+
+    :param target_layout: The target layout to convert to (C.BATCH_MAJOR or C.TIMEMAJOR).
+    :param num_hidden: The number of hidden units of the previous encoder.
     """
+
+    def __init__(self, target_layout: str, num_hidden: int):
+        assert target_layout == C.BATCH_MAJOR or target_layout == C.TIME_MAJOR
+        self.num_hidden = num_hidden
+        self.target_layout = target_layout
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -231,29 +241,11 @@ class BatchMajor2TimeMajor(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
-        with mx.AttrScope(__layout__=C.TIME_MAJOR):
+        with mx.AttrScope(__layout__=self.target_layout):
             return mx.sym.swapaxes(data=data, dim1=0, dim2=1), data_length, seq_len
 
-
-class TimeMajor2BatchMajor(Encoder):
-    """
-    Converts time major data to batch major.
-    """
-
-    def encode(self,
-               data: mx.sym.Symbol,
-               data_length: Optional[mx.sym.Symbol],
-               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
-        """
-        Encodes data given sequence lengths of individual examples and maximum sequence length.
-
-        :param data: Input data.
-        :param data_length: Vector with sequence lengths.
-        :param seq_len: Maximum sequence length.
-        :return: Encoded versions of input data (data, data_length, seq_len).
-        """
-        with mx.AttrScope(__layout__=C.BATCH_MAJOR):
-            return mx.sym.swapaxes(data=data, dim1=0, dim2=1), data_length, seq_len
+    def get_num_hidden(self) -> int:
+        return self.num_hidden
 
 
 class ReverseSequence(Encoder):
@@ -572,12 +564,7 @@ class EncoderSequence(Encoder):
         """
         Return the representation size of this encoder.
         """
-        if isinstance(self.encoders[-1], BatchMajor2TimeMajor):
-            utils.check_condition(len(self.encoders) > 1,
-                                  "Cannot return num_hidden from a BatchMajor2TimeMajor encoder only")
-            return self.encoders[-2].get_num_hidden()
-        else:
-            return self.encoders[-1].get_num_hidden()
+        return self.encoders[-1].get_num_hidden()
 
     def get_encoded_seq_len(self, seq_len: int) -> int:
         """

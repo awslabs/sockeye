@@ -554,7 +554,7 @@ class RecurrentDecoder(Decoder):
         # initialize decoder states
         # hidden: (batch_size, rnn_num_hidden)
         # layer_states: List[(batch_size, state_num_hidden]
-        state = self.get_initial_state(source_encoded_time_major, source_encoded_lengths)
+        state = self.get_initial_state(source_encoded, source_encoded_lengths)
 
         # hidden_all: target_seq_len * (batch_size, 1, rnn_num_hidden)
         hidden_all = []
