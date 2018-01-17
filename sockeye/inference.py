@@ -767,7 +767,7 @@ class Translator:
         else:
             self.buckets_source = [self.max_input_length]
         self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target)), val=np.inf,
-                                   ctx=self.context)
+                                   ctx=self.context, dtype='float16')
         self.use_fp16 = use_fp16
         logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s batch_size=%d "
                     "buckets_source=%s use_fp16=%s)",
@@ -1079,7 +1079,7 @@ class Translator:
                                                dim=0)
 
             pad_dist = mx.nd.full((self.batch_size * self.beam_size, vocab_slice_ids.shape[0]),
-                                  val=np.inf, ctx=self.context)
+                                  val=np.inf, ctx=self.context, dtype='float16')
             for m in self.models:
                 models_output_layer_w.append(m.output_layer_w.take(vocab_slice_ids))
                 models_output_layer_b.append(m.output_layer_b.take(vocab_slice_ids))
@@ -1141,7 +1141,7 @@ class Translator:
             # pylint: disable=unsupported-assignment-operation
             sequences[:, t] = best_word_indices
             attentions[:, t, :] = attention_scores
-            lengths += mx.nd.cast(1 - mx.nd.expand_dims(finished, axis=1), dtype='float32')
+            lengths += mx.nd.cast(1 - mx.nd.expand_dims(finished, axis=1), dtype='float16')
 
             # (6) determine which hypotheses in the beam are now finished
             finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
