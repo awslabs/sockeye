@@ -743,6 +743,7 @@ class RecurrentDecoder(Decoder):
                                                   sequence_length=source_encoded_length,
                                                   use_sequence_length=True) \
             if self.config.state_init == C.RNN_DEC_INIT_LAST else None
+
         source_masked = mx.sym.SequenceMask(data=source_encoded,
                                             sequence_length=source_encoded_length,
                                             use_sequence_length=True,
@@ -807,7 +808,7 @@ class RecurrentDecoder(Decoder):
 
         # (2) Attention step
         attention_input = self.attention.make_input(seq_idx, word_vec_prev, rnn_pre_attention_output)
-        attention_state = attention_func(attention_input, attention_state)
+        attention_state = attention_func(attention_input, attention_state, self.use_fp16)
 
         # (3) Attention handling (and possibly context gating)
         if self.rnn_post_attention:

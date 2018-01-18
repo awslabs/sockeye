@@ -102,11 +102,19 @@ class InferenceModel(model.SockeyeModel):
         self.decoder.use_fp16 = use_fp16
         logger.info("fp16 mode: %s", self.use_fp16)
 
+    count = 0
     @staticmethod
-    def _printing_helper(name, array):
-        array = ctypes.cast(array, NDArrayHandle)
-        array = mx.nd.NDArray(array, writable=False)
-        print('After layer', py_str(name), 'dtype', array.dtype)
+    def _printing_helper(use_fp16):
+        count = 0
+        def func(name, array):
+            array = ctypes.cast(array, NDArrayHandle)
+            array = mx.nd.NDArray(array, writable=False)
+            name = py_str(name)
+            print('After layer', name, array.shape, array.dtype, array)
+            file_name = 'fp{}/{:05d}-{}'.format('16' if use_fp16 else '32', InferenceModel.count, name)
+            InferenceModel.count += 1
+            mx.nd.save(file_name, array)
+        return func
 
     def initialize(self, max_input_length: int, get_max_output_length_function: Callable):
         """
@@ -143,8 +151,13 @@ class InferenceModel(model.SockeyeModel):
         max_decoder_data_shapes = self._get_decoder_data_shapes(self.decoder_default_bucket_key)
 
         self.encoder_module.bind(data_shapes=max_encoder_data_shapes, for_training=False, grad_req="null")
+        mon = mx.monitor.Monitor(1)
+        mon.stat_helper = InferenceModel._printing_helper(self.use_fp16)
+        #self.encoder_module.install_monitor(mon)
 
         self.decoder_module.bind(data_shapes=max_decoder_data_shapes, for_training=False, grad_req="null")
+        mon = mx.monitor.Monitor(1)
+        mon.stat_helper = InferenceModel._printing_helper(self.use_fp16)
         # self.encoder_module.install_monitor(mon)
 
         self.load_params_from_file(self.fname_params, utils.mode_dtype(self.use_fp16))
@@ -726,6 +739,7 @@ class Translator:
                  vocab_target: Dict[str, int],
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
                  use_fp16: bool = False) -> None:
+        self.use_fp16 = use_fp16
         self.context = context
         self.length_penalty = length_penalty
         self.vocab_source = vocab_source
@@ -748,7 +762,6 @@ class Translator:
 
         self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target)), val=np.inf,
                                    ctx=self.context, dtype=utils.mode_dtype(use_fp16))
-        self.use_fp16 = use_fp16
         logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s batch_size=%d "
                     "buckets_source=%s use_fp16=%s)",
                     len(self.models),
@@ -1125,7 +1138,8 @@ class Translator:
             # (6) determine which hypotheses in the beam are now finished
             finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
             if mx.nd.sum(finished).asscalar() == self.batch_size * self.beam_size:  # all finished
-                break
+                pass
+                #break
 
             # (7) update models' state with winning hypotheses (ascending)
             for ms in model_states:

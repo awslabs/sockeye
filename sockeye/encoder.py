@@ -613,13 +613,7 @@ class RecurrentEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
-        begin_states = None
-        if use_fp16:
-            begin_states = []
-            for _ in range(self.rnn_config.num_layers):
-                begin_states.append(mx.sym.zeros(shape=(0, self.rnn_config.num_hidden), dtype='float16'))
-                begin_states.append(mx.sym.zeros(shape=(0, self.rnn_config.num_hidden), dtype='float16'))
-
+        begin_states = self.rnn.begin_state(dtype=utils.mode_dtype(use_fp16))
         outputs, _ = self.rnn.unroll(seq_len, begin_state=begin_states, inputs=data, merge_outputs=True, layout=self.layout)
 
         return outputs, data_length, seq_len

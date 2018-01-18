@@ -152,7 +152,7 @@ class Attention(object):
         :return: Attention callable.
         """
 
-        def attend(att_input: AttentionInput, att_state: AttentionState) -> AttentionState:
+        def attend(att_input: AttentionInput, att_state: AttentionState, use_fp16:bool = False) -> AttentionState:
             """
             Returns updated attention state given attention input and current attention state.
 
@@ -619,7 +619,7 @@ class MlpAttention(Attention):
                                               flatten=False,
                                               name="%ssource_hidden_fc" % self.prefix)
 
-        def attend(att_input: AttentionInput, att_state: AttentionState) -> AttentionState:
+        def attend(att_input: AttentionInput, att_state: AttentionState, use_fp16: bool = False) -> AttentionState:
             """
             Returns updated attention state given attention input and current attention state.
 
@@ -672,7 +672,7 @@ class MlpAttention(Attention):
                                                      flatten=False,
                                                      name="%sraw_att_score_fc" % self.prefix)
 
-            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores)
+            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores, use_fp16)
 
             dynamic_source = att_state.dynamic_source
             if self.coverage:
@@ -691,7 +691,7 @@ class MlpAttention(Attention):
 
 
 def mask_attention_scores(logits: mx.sym.Symbol,
-                          length: mx.sym.Symbol) -> mx.sym.Symbol:
+                          length: mx.sym.Symbol, use_fp16=False) -> mx.sym.Symbol:
     """
     Masks attention scores according to sequence length.
 
@@ -704,14 +704,14 @@ def mask_attention_scores(logits: mx.sym.Symbol,
     logits = mx.sym.SequenceMask(data=logits,
                                  use_sequence_length=True,
                                  sequence_length=length,
-                                 value=C.LARGE_NEGATIVE_VALUE)
+                                 value=C.LARGE_NEGATIVE_VALUE_FP_16 if use_fp16 else C.LARGE_NEGATIVE_VALUE)
     # (batch_size, seq_len, 1)
     return mx.sym.swapaxes(data=logits, dim1=0, dim2=1)
 
 
 def get_context_and_attention_probs(values: mx.sym.Symbol,
                                     length: mx.sym.Symbol,
-                                    logits: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
+                                    logits: mx.sym.Symbol, use_fp16=False) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
     """
     Returns context vector and attention probabilities
     via a weighted sum over values.
@@ -722,7 +722,7 @@ def get_context_and_attention_probs(values: mx.sym.Symbol,
     :return: context: (batch_size, encoder_num_hidden), attention_probs: (batch_size, seq_len).
     """
     # (batch_size, seq_len, 1)
-    logits = mask_attention_scores(logits, length)
+    logits = mask_attention_scores(logits, length, use_fp16)
 
     # (batch_size, seq_len, 1)
     probs = mx.sym.softmax(logits, axis=1, name='attention_softmax')

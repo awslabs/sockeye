@@ -19,11 +19,28 @@ def convert_params():
 
 def list_params():
     arg_params, aux_params = sockeye.utils.load_params('/home/ec2-user/kellen/data/model/params.best')
-    for k, v in arg_params.items():
-        print('Param', k, v.dtype)
+    for k in sorted(arg_params):
+        print('Param', k, arg_params[k].dtype)
+
+def mse(A, B):
+    return ((A - B) ** 2).mean(axis=None, dtype=np.float64)
+
+def diff_arrays():
+    fp32_outputs = os.listdir('fp32')
+
+    for file_name in sorted(fp32_outputs):
+        fp32_array = mx.nd.load('fp32/' + file_name)[0].asnumpy()
+        fp16_array = mx.nd.load('fp16/' + file_name)[0].asnumpy().astype('float32')
+        error = mse(fp16_array, fp32_array)
+        #if error > 0.001:
+        #if 'softmax' in file_name or 'logits' in file_name:
+        print(file_name, error)
+
 
 def translate():
     context = mx.gpu(0)
+
+    use_fp16 = False
 
     output_handler = sockeye.output_handler.get_output_handler('translation_with_score',
                                                                None,
@@ -40,7 +57,7 @@ def translate():
         2,
         decoder_return_logit_inputs=False,
         cache_output_layer_w_b=False,
-        use_fp16=True)
+        use_fp16=use_fp16)
 
     translator = sockeye.inference.Translator(context,
                                               'linear',
@@ -50,8 +67,8 @@ def translate():
                                               models,
                                               vocab_source,
                                               vocab_target,
-                                              use_fp16=True)
-    sockeye.translate.translate(output_handler, ['Hallo Welt'], translator, 1)
+                                              use_fp16=use_fp16)
+    sockeye.translate.translate(output_handler, ['Hello World'], translator, 1)
     # sockeye.translate.read_and_translate(translator, output_handler, None, None)
 
 
@@ -63,8 +80,10 @@ if __name__ == '__main__':
     mx.profiler.profiler_set_config(mode='all', filename='profile_output.json')
     mx.profiler.profiler_set_state('run')
 
-    list_params()
+    #list_params()
 
+    #diff_arrays()
     translate()
+
 
     mx.profiler.profiler_set_state('stop')
