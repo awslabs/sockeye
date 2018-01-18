@@ -390,7 +390,8 @@ def create_lr_scheduler(args: argparse.Namespace, resume_training: bool,
 
 
 def create_encoder_config(args: argparse.Namespace,
-                          config_conv: Optional[encoder.ConvolutionalEmbeddingConfig]) -> Tuple[Config, int]:
+                          config_conv: Optional[encoder.ConvolutionalEmbeddingConfig]) -> Tuple[encoder.EncoderConfig,
+                                                                                                int]:
     """
     Create the encoder config.
 
@@ -456,11 +457,12 @@ def create_encoder_config(args: argparse.Namespace,
     return config_encoder, encoder_num_hidden
 
 
-def create_decoder_config(args: argparse.Namespace,  encoder_num_hidden: int) -> Config:
+def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int) -> decoder.DecoderConfig:
     """
     Create the config for the decoder.
 
     :param args: Arguments as returned by argparse.
+    :param encoder_num_hidden: Number of hidden units of the Encoder.
     :return: The config for the decoder.
     """
     _, decoder_num_layers = args.num_layers

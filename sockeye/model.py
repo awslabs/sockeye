@@ -50,6 +50,7 @@ class ModelConfig(Config):
     :param weight_tying: Enables weight tying if True.
     :param weight_tying_type: Determines which weights get tied. Must be set if weight_tying is enabled.
     """
+
     def __init__(self,
                  config_data: data_io.DataConfig,
                  max_seq_len_source: int,
@@ -58,8 +59,8 @@ class ModelConfig(Config):
                  vocab_target_size: int,
                  config_embed_source: encoder.EmbeddingConfig,
                  config_embed_target: encoder.EmbeddingConfig,
-                 config_encoder: Config,
-                 config_decoder: Config,
+                 config_encoder: encoder.EncoderConfig,
+                 config_decoder: decoder.DecoderConfig,
                  config_loss: loss.LossConfig,
                  weight_tying: bool = False,
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,

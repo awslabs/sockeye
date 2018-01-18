@@ -598,7 +598,6 @@ class PlainDotAttention:
         return contexts
 
 
-
 class PositionalEncodings(mx.operator.CustomOp):
     """
     Returns a symbol of shape (1, max_seq_len, num_embed)
