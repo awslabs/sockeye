@@ -146,6 +146,6 @@ class CheckpointDecoder:
         return {C.BLEU_VAL: evaluate.raw_corpus_bleu(hypotheses=translations,
                                                      references=self.target_sentences,
                                                      offset=0.01),
-                C.CHRF_VAL: evaluate.corpus_chrf(hypotheses=translations,
-                                                 references=self.target_sentences),
+                C.CHRF_VAL: evaluate.raw_corpus_chrf(hypotheses=translations,
+                                                     references=self.target_sentences),
                 C.AVG_TIME: avg_time}
