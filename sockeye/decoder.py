@@ -441,7 +441,8 @@ class RecurrentDecoderConfig(Config):
                  state_init: str = C.RNN_DEC_INIT_LAST,
                  context_gating: bool = False,
                  layer_normalization: bool = False,
-                 attention_in_upper_layers: bool = False) -> None:
+                 attention_in_upper_layers: bool = False,
+                 use_fp16: bool = False) -> None:
         super().__init__()
         self.max_seq_len_source = max_seq_len_source
         self.rnn_config = rnn_config
@@ -451,6 +452,7 @@ class RecurrentDecoderConfig(Config):
         self.context_gating = context_gating
         self.layer_normalization = layer_normalization
         self.attention_in_upper_layers = attention_in_upper_layers
+        self.use_fp16 = use_fp16
 
 
 class RecurrentDecoder(Decoder):
@@ -507,7 +509,7 @@ class RecurrentDecoder(Decoder):
         self.hidden_norm = layers.LayerNormalization(self.num_hidden,
                                                      prefix="%shidden_norm" % prefix) \
             if self.config.layer_normalization else None
-        self.use_fp16 = False
+        self.use_fp16 = self.config.use_fp16
 
     def _create_state_init_parameters(self):
         """
@@ -808,7 +810,7 @@ class RecurrentDecoder(Decoder):
 
         # (2) Attention step
         attention_input = self.attention.make_input(seq_idx, word_vec_prev, rnn_pre_attention_output)
-        attention_state = attention_func(attention_input, attention_state, self.use_fp16)
+        attention_state = attention_func(attention_input, attention_state)
 
         # (3) Attention handling (and possibly context gating)
         if self.rnn_post_attention:

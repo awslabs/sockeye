@@ -260,6 +260,10 @@ def add_training_data_args(params, required=False):
                         required=required,
                         type=regular_file(),
                         help='Target side of parallel training data.')
+    params.add_argument(C.TRAINING_ARG_DTYPE, '-dt',
+                        required=required,
+                        type=str,
+                        help='Data type to use when training a model, float16 or float32.')
 
 
 def add_validation_data_params(params):

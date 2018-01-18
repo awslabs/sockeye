@@ -87,8 +87,13 @@ class TrainingModel(model.SockeyeModel):
                  train_iter: data_io.BaseParallelSampleIter,
                  bucketing: bool,
                  lr_scheduler,
-                 gradient_compression_params: Optional[Dict[str, Any]] = None) -> None:
+                 gradient_compression_params: Optional[Dict[str, Any]] = None,
+                 dtype: Optional[str] = 'float32') -> None:
         super().__init__(config)
+        if dtype == 'float16':
+            self.use_fp16 = True
+        else:
+            self.use_fp16 = False
         self.context = context
         self.lr_scheduler = lr_scheduler
         self.bucketing = bucketing
@@ -96,6 +101,7 @@ class TrainingModel(model.SockeyeModel):
         self._build_model_components()
         self.module = self._build_module(train_iter)
         self.training_monitor = None  # type: Optional[callback.TrainingMonitor]
+
 
     def _build_module(self, train_iter: data_io.BaseParallelSampleIter):
         """
@@ -123,12 +129,12 @@ class TrainingModel(model.SockeyeModel):
             # source embedding
             (source_embed,
              source_embed_length,
-             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
+             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len, self.use_fp16)
 
             # target embedding
             (target_embed,
              target_embed_length,
-             target_embed_seq_len) = self.embedding_target.encode(target, target_length, target_seq_len)
+             target_embed_seq_len) = self.embedding_target.encode(target, target_length, target_seq_len, self.use_fp16)
 
             # encoder
             # source_encoded: (source_encoded_length, batch_size, encoder_depth)
@@ -136,7 +142,8 @@ class TrainingModel(model.SockeyeModel):
              source_encoded_length,
              source_encoded_seq_len) = self.encoder.encode(source_embed,
                                                            source_embed_length,
-                                                           source_embed_seq_len)
+                                                           source_embed_seq_len,
+                                                           self.use_fp16)
 
             # decoder
             # target_decoded: (batch-size, target_len, decoder_depth)
