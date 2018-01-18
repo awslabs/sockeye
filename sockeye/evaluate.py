@@ -22,7 +22,6 @@ from typing import Iterable, Optional
 from contrib import sacrebleu
 from sockeye.log import setup_main_logger, log_sockeye_version
 from . import arguments
-from . import chrf
 from . import constants as C
 from . import data_io
 from . import utils
@@ -41,6 +40,15 @@ def raw_corpus_bleu(hypotheses: Iterable[str], references: Iterable[str], offset
     """
     return sacrebleu.raw_corpus_bleu(hypotheses, [references], smooth_floor=offset).score / 100
 
+def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> float:
+    """
+    Simple wrapper around sacreBLEU's chrF implementation, without tokenization.
+
+    :param hypotheses: Hypotheses stream.
+    :param references: Reference stream.
+    :return: chrF score as float between 0 and 1.
+    """
+    return sacrebleu.corpus_chrf(hypotheses, references, order=sacrebleu.CHRF_ORDER, beta=sacrebleu.CHRF_BETA, remove_whitespace=sacrebleu.CHRF_REMOVE_WS)
 
 def main():
     params = argparse.ArgumentParser(description='Evaluate translations by calculating metrics with '
@@ -74,7 +82,7 @@ def main():
                 bleu_score = raw_corpus_bleu(hypotheses, references, args.offset)
                 scores.append("%.6f" % bleu_score)
             elif metric == C.CHRF:
-                chrf_score = chrf.corpus_chrf(hypotheses, references, trim_whitespaces=True)
+                chrf_score = raw_corpus_chrf(hypotheses, references)
                 scores.append("%.6f" % chrf_score)
         print("\t".join(scores), file=sys.stdout)
     else:
@@ -85,7 +93,7 @@ def main():
                     bleu = raw_corpus_bleu(h, r, args.offset)
                     scores.append("%.6f" % bleu)
                 elif metric == C.CHRF:
-                    chrf_score = chrf.corpus_chrf(h, r, trim_whitespaces=True)
+                    chrf_score = raw_corpus_chrf(h, r)
                     scores.append("%.6f" % chrf_score)
             print("\t".join(scores), file=sys.stdout)
 

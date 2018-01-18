@@ -31,8 +31,7 @@ import sockeye.prepare_data
 import sockeye.train
 import sockeye.translate
 import sockeye.utils
-from sockeye.chrf import corpus_chrf
-from sockeye.evaluate import raw_corpus_bleu
+from sockeye.evaluate import raw_corpus_bleu, raw_corpus_chrf
 
 logger = logging.getLogger(__name__)
 
@@ -333,7 +332,7 @@ def run_train_translate(train_params: str,
 
         # compute metrics
         bleu = raw_corpus_bleu(hypotheses=hypotheses, references=references, offset=0.01)
-        chrf = corpus_chrf(hypotheses=hypotheses, references=references)
+        chrf = raw_corpus_chrf(hypotheses=hypotheses, references=references)
 
         bleu_restrict = None
         if restrict_lexicon:
