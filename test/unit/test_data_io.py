@@ -383,12 +383,16 @@ def test_get_training_data_iters():
         vcb = vocab.build_from_paths([data['source'], data['target']])
 
         train_iter, val_iter, config_data = data_io.get_training_data_iters(data['source'], data['target'],
+                                                                            [],
                                                                             data['validation_source'],
                                                                             data['validation_target'],
+                                                                            [],
                                                                             vocab_source=vcb,
                                                                             vocab_target=vcb,
                                                                             vocab_source_path=None,
                                                                             vocab_target_path=None,
+                                                                            source_factor_vocabs=[],
+                                                                            source_factor_vocab_paths=[],
                                                                             shared_vocab=True,
                                                                             batch_size=batch_size,
                                                                             batch_by_words=False,

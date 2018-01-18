@@ -343,7 +343,7 @@ def shard_data(source_fname: str,
 
     if source_factors is not None:
         source_factor_shard_fnames = [ [os.path.join(output_prefix, C.SHARD_SOURCE % j) + "." + str(i)
-                                        for j in range(num_shards)]  # type: List[str]
+                                        for j in range(num_shards)]
                                        for i in range(len(source_factors)) ]
 
     data_stats_accumulator = DataStatisticsAccumulator(buckets, vocab_source, vocab_target,
@@ -648,7 +648,7 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
 def get_prepared_data_iters(prepared_data_dir: str,
                             validation_source: str,
                             validation_target: str,
-                            validation_source_factors: List[str],
+                            validation_source_factors: Optional[List[str]],
                             shared_vocab: bool,
                             batch_size: int,
                             batch_by_words: bool,
@@ -737,15 +737,19 @@ def get_prepared_data_iters(prepared_data_dir: str,
     return train_iter, validation_iter, data_config, vocab_source, vocab_target, source_factor_vocabs
 
 
-def get_training_data_iters(source: str, target: str,
+def get_training_data_iters(source: str,
+                            target: str,
                             source_factors: Optional[List[str]],
-                            validation_source: str, validation_target: str,
+                            validation_source: str,
+                            validation_target: str,
                             validation_source_factors: Optional[List[str]],
-                            vocab_source: vocab.Vocab, vocab_target: vocab.Vocab,
-                            vocab_source_path: Optional[str], vocab_target_path: Optional[str],
-                            source_factor_vocabs: Optional[List[str]],
-                            source_factor_vocab_paths: Optional[List[str]],
+                            vocab_source: vocab.Vocab,
+                            vocab_target: vocab.Vocab,
+                            vocab_source_path: Optional[str],
+                            vocab_target_path: Optional[str],
                             shared_vocab: bool,
+                            source_factor_vocabs: Optional[List[Dict[str,int]]],
+                            source_factor_vocab_paths: Optional[List[str]],
                             batch_size: int,
                             batch_by_words: bool,
                             batch_num_devices: int,
@@ -935,7 +939,7 @@ class DataConfig(config.Config):
                  vocab_source: Optional[str],
                  vocab_target: Optional[str],
                  shared_vocab: bool,
-                 source_factors: Optional[List[List[str]]],
+                 source_factors: Optional[List[str]],
                  source_factor_vocabs: Optional[List[str]],
                  num_shards: int,
                  data_statistics: DataStatistics,
@@ -1112,7 +1116,7 @@ class ParallelDataSet(Sized):
                  source: List[mx.nd.array],
                  target: List[mx.nd.array],
                  label: List[mx.nd.array],
-                 source_factors: Optional[List[List[mx.nd.array]]]) -> None:
+                 source_factors: Optional[List[List[mx.nd.array]]] = []) -> None:
         check_condition(len(source) == len(target) == len(label),
                         "Number of buckets for source/target/label must match. %d %d %d" % (len(source), len(target), len(label)))
         self.source = source
@@ -1205,7 +1209,7 @@ class ParallelDataSet(Sized):
         source = []
         target = []
         label = []
-        source_factors = [[] for i in range(len(self.source_factors))]
+        source_factors = [[] for i in range(len(self.source_factors))] # type: List[List]
         for buck_idx in range(len(self)):
             num_samples = self.source[buck_idx].shape[0]
             if num_samples:  # not empty bucket
@@ -1364,7 +1368,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                  batch_size,
                  bucket_batch_sizes,
                  fill_up: str,
-                 num_factors: int,
+                 num_factors: Optional[int] = 0,
                  source_data_name=C.SOURCE_NAME,
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,

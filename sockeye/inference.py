@@ -570,16 +570,19 @@ class TranslatorInput:
         self.factors = factors
         self.num_factors = len(factors)
 
+    def __str__(self):
+        return '[%d.%d] %s' % (self.id, self.chunk_id, self.sentence)
+
     def chunks(self, chunk_size: int):
         """
         Takes a TranslatorInput (itself) and splits it into chunks, in the case where the
         input sentence is greater than the requested chunk_size.
         """
-        for i in range(0, len(self.tokens), chunk_size):
+        for chunk_id, i in enumerate(range(0, len(self.tokens), chunk_size)):
             new_tokens = self.tokens[i:i + chunk_size]
             new_sent = ' '.join(new_tokens)
             new_factors = [self.factors[f][i: i + chunk_size] for f in range(self.num_factors)]
-            yield TranslatorInput(id=self.id, chunk_id=i, sentence=new_sent, tokens=new_tokens, factors=new_factors)
+            yield TranslatorInput(id=self.id, chunk_id=chunk_id, sentence=new_sent, tokens=new_tokens, factors=new_factors)
 
 TranslatorOutput = NamedTuple('TranslatorOutput', [
     ('id', int),
@@ -826,8 +829,8 @@ class Translator:
         translated_chunks = []
 
         # split into chunks
-        input_chunks = []  # type: List[InputChunk]
-        for input_idx, trans_input in enumerate(trans_inputs):
+        input_chunks = []  # type: List[TranslatorInput]
+        for input_idx, trans_input in enumerate(trans_inputs, 1):
             if len(trans_input.tokens) == 0:
                 empty_translation = Translation(target_ids=[],
                                                 attention_matrix=np.asarray([[0]]),

@@ -145,7 +145,7 @@ def vocab_from_json(path: str, encoding: str = C.VOCAB_ENCODING) -> Vocab:
 
 
 def load_or_create_vocab(data: str, vocab_path: str,
-                         num_words: int, word_min_count: int):
+                         num_words: int, word_min_count: int) -> Vocab:
     """
     If the vocabulary path exists, the vocabulary is loaded from the path.
     Otherwise, it is built from the data file.
@@ -189,7 +189,7 @@ def load_or_create_vocabs(source: str,
     :return: Vocabularies for each entry in vocab_paths.
     """
 
-    vocabs = []
+    vocabs = [] # type: List[Vocab]
     vocab_paths = [source_vocab_path, target_vocab_path] + source_factor_vocab_paths
 
     if shared_vocab:
