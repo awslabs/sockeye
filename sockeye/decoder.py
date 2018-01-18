@@ -728,7 +728,7 @@ class RecurrentDecoder(Decoder):
         # TODO (tdomhan): Use the `axis` argument instead of transposing once the new MXNet version becomes available.
         # (see https://github.com/apache/incubator-mxnet/pull/9306)
         # (source_encoded_max_length, batch_size, encoder_depth)
-        source_encoded_time_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
+        source_encoded_time_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_time_major')
 
         # we derive the shape of hidden and layer_states from some input to enable
         # shape inference for the batch dimension during inference.
