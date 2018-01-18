@@ -857,6 +857,7 @@ def main():
                            decode_and_evaluate=decode_and_evaluate,
                            decode_and_evaluate_fname_source=args.validation_source,
                            decode_and_evaluate_fname_target=args.validation_target,
+                           decode_and_evaluate_fname_source_factors=args.validation_source_factors,
                            decode_and_evaluate_context=decode_and_evaluate_context,
                            use_tensorboard=args.use_tensorboard,
                            mxmonitor_pattern=args.monitor_pattern,

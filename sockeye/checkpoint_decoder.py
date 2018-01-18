@@ -18,7 +18,8 @@ import logging
 import os
 import random
 import time
-from typing import Dict, Optional
+from contextlib import ExitStack
+from typing import Dict, Optional, List
 
 import mxnet as mx
 
@@ -40,6 +41,7 @@ class CheckpointDecoder:
     :param inputs: Path to file containing input sentences.
     :param references: Path to file containing references.
     :param model: Model to load.
+    :param input_factors: Path to files containing input factors.
     :param max_input_len: Maximum input length.
     :param beam_size: Size of the beam.
     :param bucket_width_source: Source bucket width.
@@ -58,6 +60,7 @@ class CheckpointDecoder:
                  inputs: str,
                  references: str,
                  model: str,
+                 input_factors: Optional[List[str]] = [],
                  max_input_len: Optional[int] = None,
                  beam_size: int = C.DEFAULT_BEAM_SIZE,
                  bucket_width_source: int = 10,
@@ -79,9 +82,14 @@ class CheckpointDecoder:
         self.length_penalty_beta = length_penalty_beta
         self.softmax_temperature = softmax_temperature
         self.model = model
-        with data_io.smart_open(inputs) as inputs_fin, data_io.smart_open(references) as references_fin:
+        with ExitStack() as exit_stack:
+            inputs_fin = data_io.smart_open(inputs)
+            references_fin = data_io.smart_open(references)
+            factor_fins = [data_io.smart_open(f) for f in input_factors]
+
             input_sentences = inputs_fin.readlines()
             target_sentences = references_fin.readlines()
+            input_sentence_factors = [f.readlines() for f in factor_fins]
             utils.check_condition(len(input_sentences) == len(target_sentences), "Number of sentence pairs do not match")
             if sample_size <= 0:
                 sample_size = len(input_sentences)
@@ -90,14 +98,14 @@ class CheckpointDecoder:
                 # compare metrics across independent runs
                 random_gen = random.Random(random_seed)
                 self.input_sentences, self.target_sentences = zip(
-                    *random_gen.sample(list(zip(input_sentences, target_sentences)),
+                    *random_gen.sample(list(zip(utils.paste(input_sentences, *input_sentence_factors), target_sentences)),
                                        sample_size))
             else:
-                self.input_sentences, self.target_sentences = input_sentences, target_sentences
+                self.input_sentences, self.target_sentences = list(utils.paste(input_sentences, *input_sentence_factors)), target_sentences
 
-        logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d)",
+        logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d, source_factors=%d)",
                     max_input_len if max_input_len is not None else -1,
-                    beam_size, model, len(self.input_sentences))
+                    beam_size, model, len(self.input_sentences), len(input_factors))
 
         with data_io.smart_open(os.path.join(self.model, C.DECODE_REF_NAME), 'w') as trg_out, \
                 data_io.smart_open(os.path.join(self.model, C.DECODE_IN_NAME), 'w') as src_out:

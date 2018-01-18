@@ -774,3 +774,17 @@ def grouper(iterable: Iterable, size: int) -> Iterable:
         if not chunk:
             return
         yield chunk
+
+
+def paste(*streams, add_eol=True) -> Iterable:
+    """
+    Consumes a list of parallel streams, returning a single tab-delimited stream, UNIX paste style.
+    It replaces all tabs in any of the input streams with spaces, to ensure the resulting string
+    has exactly as many tab-delimited fields as there are number of streams. It also removes newlines
+    from the end of each stream (so this is suitable for iterating over parallel files).
+
+    :param streams: A list of iterable input streams.
+    :return: The streams, pasted together as a single string.
+    """
+    for sentences in zip(*streams):
+        yield '\t'.join([x.replace('\t', ' ').rstrip() for x in sentences]) + '\n' if add_eol else ''

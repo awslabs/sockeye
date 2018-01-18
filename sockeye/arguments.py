@@ -275,6 +275,7 @@ def add_validation_data_params(params):
                         help='Source side of validation data.')
     params.add_argument('--validation-source-factors', '-vsf',
                         required=False,
+                        nargs='+',
                         type=regular_file(),
                         default=[],
                         help='Source side factors for validation data.')

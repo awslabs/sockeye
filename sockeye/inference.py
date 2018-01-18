@@ -160,7 +160,7 @@ class InferenceModel(model.SockeyeModel):
             source_length = utils.compute_lengths(source)
 
             # source embedding
-            if self.config.num_factors == 0:
+            if self.num_factors == 0:
                 (source_embed,
                  source_embed_length,
                  source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
@@ -369,13 +369,25 @@ class InferenceModel(model.SockeyeModel):
     def length_ratio_std(self) -> float:
         return self.config.config_data.data_statistics.length_ratio_std
 
+def load_source_factor_vocabs(model_folder: str) -> List[Dict[str,int]]:
+    """
+    Loads source factor vocabs of the form "vocab.src.N" until one can no longer be found.
+    This could alternately be done by first reading the number of factors from the config file.
 
-def load_source_factor_vocabs(model_folder: str):
+    :param model_folder: The location of the model folder
+    :return: The list of source factor vocabs found in the model folder.
     """
-    Determine number of factors from the config file, and then load all factor vocabularies and return them
-    """
-    num_factors = model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME)).num_factors
-    return [vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_SRC_NAME) + "." + str(fi)) for fi in range(num_factors)]
+    factor_i = 0
+    vocabs = []
+    while True:
+        try:
+            vocab_path = os.path.join(model_folder, C.VOCAB_SRC_NAME) + "." + str(factor_i)
+            vocabs.append(vocab.vocab_from_json_or_pickle(vocab_path))
+            factor_i += 1
+        except IOError:
+            break
+
+    return vocabs
 
 
 def load_models(context: mx.context.Context,
@@ -412,15 +424,16 @@ def load_models(context: mx.context.Context,
         source_vocabs.append(vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_SRC_NAME)))
         target_vocabs.append(vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_TRG_NAME)))
         source_factor_vocabs = load_source_factor_vocabs(model_folder)
-        model = InferenceModel(model_folder=model_folder,
-                               context=context,
-                               beam_size=beam_size,
-                               batch_size=batch_size,
-                               softmax_temperature=softmax_temperature,
-                               checkpoint=checkpoint,
-                               decoder_return_logit_inputs=decoder_return_logit_inputs,
-                               cache_output_layer_w_b=cache_output_layer_w_b)
-        models.append(model)
+
+        inf_model = InferenceModel(model_folder=model_folder,
+                                   context=context,
+                                   beam_size=beam_size,
+                                   batch_size=batch_size,
+                                   softmax_temperature=softmax_temperature,
+                                   checkpoint=checkpoint,
+                                   decoder_return_logit_inputs=decoder_return_logit_inputs,
+                                   cache_output_layer_w_b=cache_output_layer_w_b)
+        models.append(inf_model)
 
     utils.check_condition(vocab.are_identical(*source_vocabs), "Source vocabulary ids do not match")
     utils.check_condition(vocab.are_identical(*target_vocabs), "Target vocabulary ids do not match")
@@ -429,8 +442,8 @@ def load_models(context: mx.context.Context,
     max_input_len, get_max_output_length = models_max_input_output_length(models,
                                                                           max_output_length_num_stds,
                                                                           max_input_len)
-    for model in models:
-        model.initialize(max_input_len, get_max_output_length)
+    for inference_model in models:
+        inference_model.initialize(max_input_len, get_max_output_length)
 
     return models, source_vocabs[0], target_vocabs[0], source_factor_vocabs
 
