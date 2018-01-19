@@ -164,7 +164,6 @@ class TransformerDecoderBlock:
                  source: mx.sym.Symbol,
                  source_bias: mx.sym.Symbol,
                  cache: Optional[Dict[str, Optional[mx.sym.Symbol]]] = None) -> mx.sym.Symbol:
-
         # self-attention
         target_self_att = self.self_attention(inputs=self.pre_self_attention(target, None),
                                               bias=target_bias,
@@ -243,6 +242,7 @@ class TransformerFeedForward:
     """
     Position-wise feed-forward network with activation.
     """
+
     def __init__(self,
                  num_hidden: int,
                  num_model: int,

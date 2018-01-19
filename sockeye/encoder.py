@@ -30,10 +30,10 @@ from . import transformer
 from . import utils
 
 logger = logging.getLogger(__name__)
-EncoderConfigs = Union['RecurrentEncoderConfig', transformer.TransformerConfig, 'ConvolutionalEncoderConfig']
+EncoderConfig = Union['RecurrentEncoderConfig', transformer.TransformerConfig, 'ConvolutionalEncoderConfig']
 
 
-def get_encoder(config: EncoderConfigs) -> 'Encoder':
+def get_encoder(config: EncoderConfig) -> 'Encoder':
     if isinstance(config, RecurrentEncoderConfig):
         return get_recurrent_encoder(config)
     elif isinstance(config, transformer.TransformerConfig):
@@ -814,7 +814,7 @@ class TransformerEncoder(Encoder):
                                                                        max_length=seq_len,
                                                                        num_heads=self.config.attention_heads,
                                                                        fold_heads=True,
-                                                                       name="%sbias"% self.prefix), axis=1)
+                                                                       name="%sbias" % self.prefix), axis=1)
 
         for i, layer in enumerate(self.layers):
             # (batch_size, seq_len, config.model_size)
