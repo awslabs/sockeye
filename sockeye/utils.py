@@ -787,4 +787,4 @@ def paste(*streams, add_eol=True) -> Iterable:
     :return: The streams, pasted together as a single string.
     """
     for sentences in zip(*streams):
-        yield '\t'.join([x.replace('\t', ' ').rstrip() for x in sentences]) + '\n' if add_eol else ''
+        yield '\t'.join(x.replace('\t', ' ').rstrip() for x in sentences) + '\n' if add_eol else ''

@@ -160,15 +160,10 @@ class InferenceModel(model.SockeyeModel):
             source_length = utils.compute_lengths(source)
 
             # source embedding
-            if self.num_factors == 0:
-                (source_embed,
-                 source_embed_length,
-                 source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
-            else:
-                source_factors = [mx.sym.Variable(C.SOURCE_NAME + "_factor_" + str(i)) for i in range(self.config.num_factors)]
-                (source_embed,
-                 source_embed_length,
-                 source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len, source_factors)
+            source_factors = [mx.sym.Variable(C.SOURCE_NAME + "_factor_" + str(i)) for i in range(self.config.num_factors)]
+            (source_embed,
+             source_embed_length,
+             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len, source_factors)
 
             # encoder
             # source_encoded: (source_encoded_length, batch_size, encoder_depth)
@@ -369,7 +364,7 @@ class InferenceModel(model.SockeyeModel):
     def length_ratio_std(self) -> float:
         return self.config.config_data.data_statistics.length_ratio_std
 
-def load_source_factor_vocabs(model_folder: str) -> List[Dict[str,int]]:
+def load_source_factor_vocabs(model_folder: str, num_factors: Optional[int] = 0) -> List[Dict[str,int]]:
     """
     Loads source factor vocabs of the form "vocab.src.N" until one can no longer be found.
     This could alternately be done by first reading the number of factors from the config file.
@@ -377,17 +372,7 @@ def load_source_factor_vocabs(model_folder: str) -> List[Dict[str,int]]:
     :param model_folder: The location of the model folder
     :return: The list of source factor vocabs found in the model folder.
     """
-    factor_i = 0
-    vocabs = []
-    while True:
-        try:
-            vocab_path = os.path.join(model_folder, C.VOCAB_SRC_NAME) + "." + str(factor_i)
-            vocabs.append(vocab.vocab_from_json_or_pickle(vocab_path))
-            factor_i += 1
-        except IOError:
-            break
-
-    return vocabs
+    return [vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_SRC_NAME) + "." + str(fi)) for fi in range(num_factors)]
 
 
 def load_models(context: mx.context.Context,
@@ -423,7 +408,8 @@ def load_models(context: mx.context.Context,
     for model_folder, checkpoint in zip(model_folders, checkpoints):
         source_vocabs.append(vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_SRC_NAME)))
         target_vocabs.append(vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_TRG_NAME)))
-        source_factor_vocabs = load_source_factor_vocabs(model_folder)
+        num_factors = model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME)).num_factors
+        source_factor_vocabs = load_source_factor_vocabs(model_folder, num_factors)
 
         inf_model = InferenceModel(model_folder=model_folder,
                                    context=context,

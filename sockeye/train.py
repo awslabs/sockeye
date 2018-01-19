@@ -603,7 +603,7 @@ def create_model_config(args: argparse.Namespace,
                         vocab_source_size: int,
                         vocab_target_size: int,
                         config_data: data_io.DataConfig,
-                        source_factor_vocab_sizes: Optional[List[int]]) -> model.ModelConfig:
+                        source_factor_vocab_sizes: Optional[List[int]] = []) -> model.ModelConfig:
     """
     Create a ModelConfig from the argument given in the command line.
 
@@ -632,11 +632,11 @@ def create_model_config(args: argparse.Namespace,
     config_encoder, encoder_num_hidden = create_encoder_config(args, config_conv)
     config_decoder = create_decoder_config(args, encoder_num_hidden)
 
-    config_embed_source = encoder.FactoredEmbeddingConfig(vocab_size=vocab_source_size,
-                                                          num_embed=num_embed_source,
-                                                          dropout=embed_dropout_source,
-                                                          source_factor_dims=args.source_factor_dims,
-                                                          source_factor_vocab_sizes=source_factor_vocab_sizes)
+    config_embed_source = encoder.EmbeddingConfig(vocab_size=vocab_source_size,
+                                                  num_embed=num_embed_source,
+                                                  dropout=embed_dropout_source,
+                                                  source_factor_dims=args.source_factor_dims,
+                                                  source_factor_vocab_sizes=source_factor_vocab_sizes)
 
     config_embed_target = encoder.EmbeddingConfig(vocab_size=vocab_target_size,
                                                   num_embed=num_embed_target,

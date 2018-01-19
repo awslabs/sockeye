@@ -358,7 +358,7 @@ def shard_data(source_fname: str,
 
         source_iter = SequenceReader(source_fname, vocab_source, add_bos=False)
         target_iter = SequenceReader(target_fname, vocab_target, add_bos=True)
-        source_factor_iters = [SequenceReader(f, v, add_bos=False) for f,v in zip(source_factors, source_factor_vocabs)]
+        source_factor_iters = [SequenceReader(f, v, add_bos=False) for f, v in zip(source_factors, source_factor_vocabs)]
         random_shard_iter = iter(lambda: random.randrange(num_shards), None)
 
         for source, target, random_shard_index, *source_factor_lines in zip(source_iter,
@@ -621,7 +621,7 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
 
     validation_source_sentences = SequenceReader(validation_source, vocab_source, add_bos=False, limit=None)
     validation_target_sentences = SequenceReader(validation_target, vocab_target, add_bos=True, limit=None)
-    validation_source_factor_sentences = [SequenceReader(f, v, add_bos=False, limit=None) for f,v in zip(validation_source_factors, source_factor_vocabs)]
+    validation_source_factor_sentences = [SequenceReader(f, v, add_bos=False, limit=None) for f, v in zip(validation_source_factors, source_factor_vocabs)]
 
     validation_data_statistics = get_data_statistics(validation_source_sentences,
                                                      validation_target_sentences,
@@ -795,7 +795,7 @@ def get_training_data_iters(source: str,
 
     source_sentences = SequenceReader(source, vocab_source, add_bos=False)
     target_sentences = SequenceReader(target, vocab_target, add_bos=True)
-    source_factor_sentences = [SequenceReader(f, v, add_bos=False) for f,v in zip(source_factors, source_factor_vocabs)]
+    source_factor_sentences = [SequenceReader(f, v, add_bos=False) for f, v in zip(source_factors, source_factor_vocabs)]
 
     # 2. pass: Get data statistics
     data_statistics = get_data_statistics(source_sentences, target_sentences, buckets,

@@ -253,22 +253,13 @@ class EmbeddingConfig(Config):
     def __init__(self,
                  vocab_size: int,
                  num_embed: int,
-                 dropout: float) -> None:
+                 dropout: float,
+                 source_factor_vocab_sizes: Optional[List[int]] = [],
+                 source_factor_dims: Optional[List[int]] = []) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
         self.dropout = dropout
-
-
-class FactoredEmbeddingConfig(EmbeddingConfig):
-
-    def __init__(self,
-                 vocab_size: int,
-                 num_embed: int,
-                 dropout: float,
-                 source_factor_vocab_sizes: Optional[List[int]] = [],
-                 source_factor_dims: Optional[List[int]] = []) -> None:
-        super().__init__(vocab_size, num_embed, dropout)
         self.source_factor_vocab_sizes = source_factor_vocab_sizes
         self.source_factor_dims = source_factor_dims
         self.num_factors = len(self.source_factor_dims)
@@ -286,19 +277,32 @@ class Embedding(Encoder):
     def __init__(self,
                  config: EmbeddingConfig,
                  prefix: str,
-                 embed_weight: mx.sym.Symbol) -> None:
+                 embed_weight: Optional[mx.sym.Symbol] = None,
+                 factor_vocab_sizes: Optional[List[int]] = [],
+                 factor_output_dims: Optional[List[int]] = []) -> None:
         self.config = config
         self.prefix = prefix
         self.embed_weight = embed_weight
+        self.factor_vocab_sizes = factor_vocab_sizes
+        self.factor_output_dims = factor_output_dims
+        self.num_factors = len(self.factor_vocab_sizes)
 
         if self.embed_weight is None:
             self.embed_weight = mx.sym.Variable(prefix + "weight",
                                                 shape=(self.config.vocab_size, self.config.num_embed))
 
+        # Factors weights aren't shared so they're not passed in and we create them here.
+        self.embed_factor_weights = [
+            mx.sym.Variable(prefix + "factor" + str(i) +  "_weight",
+                            shape=(self.factor_vocab_sizes[i],
+                                   self.factor_output_dims[i]))
+            for i in range(self.num_factors)]
+
     def encode(self,
                data: mx.sym.Symbol,
                data_length: Optional[mx.sym.Symbol],
-               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int,
+               factors: Optional[List[mx.sym.Symbol]] = []) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -314,6 +318,16 @@ class Embedding(Encoder):
                                      output_dim=self.config.num_embed,
                                      name=self.prefix + "embed")
 
+        if self.num_factors > 0:
+            factor_embeddings = []
+            for i in range(self.num_factors):
+                factor_embeddings.append(mx.sym.Embedding(data=factors[i],
+                                                          input_dim=self.config.source_factor_vocab_sizes[i],
+                                                          weight=self.embed_factor_weights[i],
+                                                          output_dim=self.config.source_factor_dims[i],
+                                                          name=self.prefix + "factor" + str(i) + "_embed"))
+            embedding = mx.sym.concat(embedding, *factor_embeddings, dim=2, name=self.prefix + "_concat_embed")
+
         if self.config.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.config.dropout, name="source_embed_dropout")
 
@@ -324,66 +338,6 @@ class Embedding(Encoder):
         Return the representation size of this encoder.
         """
         return self.config.num_embed
-
-
-class FactoredEmbedding(Embedding):
-    """
-    Thin wrapper around MXNet's Embedding symbol. Works with both time- and batch-major data layouts.
-    Assumes the main word embedding weights are passed in, allowed them to be shared with the target.
-    Builds the embeddings for the source factors.
-
-    :param config: Embedding config.
-    :param prefix: Name prefix for symbols of this encoder.
-    :param factor_vocab_sizes: List of source factor vocabulary sizes.
-    :param factor_output_dims: List of source factor output dimensions.
-    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
-    """
-
-    def __init__(self,
-                 config: FactoredEmbeddingConfig,
-                 prefix: str,
-                 factor_vocab_sizes: List[int],
-                 factor_output_dims: List[int],
-                 embed_weight: Optional[mx.sym.Symbol] = None) -> None:
-        super().__init__(config, prefix, embed_weight)
-
-        self.factor_vocab_sizes = factor_vocab_sizes
-        self.factor_output_dims = factor_output_dims
-        self.num_factors = len(self.factor_vocab_sizes)
-
-        # Factors weights aren't shared so they're not passed in and we create them here.
-        self.embed_factor_weights = [
-            mx.sym.Variable(prefix + "factor" + str(i) +  "_weight",
-                            shape=(self.factor_vocab_sizes[i],
-                                   self.factor_output_dims[i]))
-            for i in range(self.num_factors)]
-
-    def encode(self,
-               data: mx.sym.Symbol,
-               data_length: mx.sym.Symbol,
-               seq_len: int,
-               factors: List[mx.sym.Symbol]) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
-        """
-        Encodes data given sequence lengths of individual examples and maximum sequence length.
-
-        :param data: Input data.
-        :param data_length: Vector with sequence lengths.
-        :param seq_len: Maximum sequence length.
-        :param factors: The factors to encode.
-        :return: Encoded versions of input data (data, data_length, seq_len).
-        """
-
-        embeddings = [ super().encode(data, data_length, seq_len)[0] ]
-        for i in range(self.num_factors):
-            embeddings.append(mx.sym.Embedding(data=factors[i],
-                                               input_dim=self.config.source_factor_vocab_sizes[i],
-                                               weight=self.embed_factor_weights[i],
-                                               output_dim=self.config.source_factor_dims[i],
-                                               name=self.prefix + "factor" + str(i) + "_embed"))
-
-        embedding = mx.sym.concat(*embeddings, dim=2, name=self.prefix + "_concat_embed")
-
-        return embedding, data_length, seq_len
 
 
 class PositionalEncoder(Encoder):
