@@ -224,7 +224,7 @@ class ConvertLayout(Encoder):
     :param num_hidden: The number of hidden units of the previous encoder.
     """
 
-    def __init__(self, target_layout: str, num_hidden: int):
+    def __init__(self, target_layout: str, num_hidden: int) -> None:
         assert target_layout == C.BATCH_MAJOR or target_layout == C.TIME_MAJOR
         self.num_hidden = num_hidden
         self.target_layout = target_layout
@@ -253,7 +253,7 @@ class ReverseSequence(Encoder):
     Reverses the input sequence. Requires time-major layout.
     """
 
-    def __init__(self, num_hidden: int):
+    def __init__(self, num_hidden: int) -> None:
         self.num_hidden = num_hidden
 
     def encode(self,
