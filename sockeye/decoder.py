@@ -724,6 +724,7 @@ class RecurrentDecoder(Decoder):
         :param source_encoded_length: Lengths of source sequences. Shape: (batch_size,).
         :return: Decoder state.
         """
+        # TODO (tdomhan): Due to a bug in swapaxes we need to avoid in-place gradient additions, see: TODO (link to PR).
         source_encoded = mx.sym.identity(source_encoded)
         # The mx.sym.Sequence* operators expect time-major data.
         # TODO (tdomhan): Use the `axis` argument instead of transposing once the new MXNet version becomes available.
