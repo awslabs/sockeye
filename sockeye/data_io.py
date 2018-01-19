@@ -503,10 +503,10 @@ def prepare_data(source: str, target: str,
     logger.info("Preparing data.")
 
     # write vocabularies
-    vocabs = [vocab_source, vocab_target] + source_factor_vocabs
-    vocab_paths = [vocab_source_path, vocab_target_path] + source_factor_vocab_paths
-    for vocab_dict, vocab_path in zip(vocabs, vocab_paths):
-        vocab.vocab_to_json(vocab_dict, vocab_path)
+    vocab.vocab_to_json(vocab_source, os.path.join(output_prefix, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
+    vocab.vocab_to_json(vocab_target, os.path.join(output_prefix, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX)
+    for i, v in enumerate(source_factor_vocabs):
+        vocab.vocab_to_json(v, os.path.join(output_prefix, C.VOCAB_SRC_NAME) + "." + str(i) + C.JSON_SUFFIX)
 
     # Pass 1: get target/source length ratios.
     length_statistics = analyze_sequence_lengths(source, target, vocab_source, vocab_target,
@@ -676,11 +676,9 @@ def get_prepared_data_iters(prepared_data_dir: str,
     for shard_fname in shard_fnames:
         check_condition(os.path.exists(shard_fname), "Shard %s does not exist." % shard_fname)
 
-    # MJP: Why was this hard-coded instead of reading from the data config?
-    # source_vocab_fname = os.path.join(prepared_data_dir, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX
-    # target_vocab_fname = os.path.join(prepared_data_dir, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX
-    source_vocab_fname = data_config.vocab_source
-    target_vocab_fname = data_config.vocab_target
+    source_vocab_fname = os.path.join(prepared_data_dir, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX
+    target_vocab_fname = os.path.join(prepared_data_dir, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX
+    source_factor_vocab_fnames = [os.path.join(prepared_data_dir, C.VOCAB_SRC_NAME) + "." + str(i)+ C.JSON_SUFFIX for i in range(len(data_config.source_factors))]
 
     check_condition(bool(source_vocab_fname), "Source vocabulary %s does not exist." % source_vocab_fname)
     check_condition(bool(target_vocab_fname), "Target vocabulary %s does not exist." % target_vocab_fname)
@@ -691,7 +689,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
 
     vocab_source = vocab.vocab_from_json(source_vocab_fname)
     vocab_target = vocab.vocab_from_json(target_vocab_fname)
-    source_factor_vocabs = [vocab.vocab_from_json(sfv) for sfv in data_config.source_factor_vocabs]
+    source_factor_vocabs = [vocab.vocab_from_json(sfv) for sfv in source_factor_vocab_fnames]
 
     check_condition(len(source_factor_vocabs) == len(validation_source_factors),
                     "Wrong number of validation source factors (found %d, needed %d)" % (len(validation_source_factors),
