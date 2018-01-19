@@ -724,6 +724,7 @@ class RecurrentDecoder(Decoder):
         :param source_encoded_length: Lengths of source sequences. Shape: (batch_size,).
         :return: Decoder state.
         """
+        source_encoded = mx.sym.identity(source_encoded)
         # The mx.sym.Sequence* operators expect time-major data.
         # TODO (tdomhan): Use the `axis` argument instead of transposing once the new MXNet version becomes available.
         # (see https://github.com/apache/incubator-mxnet/pull/9306)
