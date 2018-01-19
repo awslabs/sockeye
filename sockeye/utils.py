@@ -332,7 +332,10 @@ def plot_attention(attention_matrix: np.ndarray, source_tokens: List[str], targe
     :param target_tokens: A list of target tokens.
     :param filename: The file to which the attention visualization will be written to.
     """
-    import matplotlib
+    try:
+        import matplotlib
+    except ImportError:
+        raise RuntimeError("Please install matplotlib.")
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     assert attention_matrix.shape[0] == len(target_tokens)
