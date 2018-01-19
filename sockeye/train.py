@@ -349,11 +349,10 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             source_factor_vocab_paths = list(orig_config.config_data.source_factor_vocabs)
 
         else:
-            # Load vocab:
-            vocab_names = [args.source_vocab or C.VOCAB_SRC_NAME, args.target_vocab or C.VOCAB_TRG_NAME]
-            if args.source_factors is not None:
-                vocab_names += [C.VOCAB_SRC_NAME + '.' + str(i) for i in range(len(args.source_factors))]
-            vocab_source_path, vocab_target_path, *source_factor_vocab_paths = [os.path.join(output_folder, name) + C.JSON_SUFFIX for name in vocab_names]
+            # Load vocabs
+            vocab_source_path = args.source_vocab
+            vocab_target_path = args.target_vocab
+            source_factor_vocab_paths = [None] * len(args.source_factors)
 
             vocab_source, vocab_target, *source_factor_vocabs = vocab.load_or_create_vocabs(
                 source=args.source, target=args.target,
@@ -787,7 +786,7 @@ def main():
             resume_training=resume_training,
             output_folder=output_folder)
 
-        # Dump the vocabularies if we're just staring up
+        # Dump the vocabularies if we're just starting up
         if not resume_training:
             vocab.vocab_to_json(vocab_source, os.path.join(output_folder, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
             vocab.vocab_to_json(vocab_target, os.path.join(output_folder, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX)
