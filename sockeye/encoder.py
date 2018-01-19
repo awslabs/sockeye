@@ -104,11 +104,12 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
                                                           scale_up_input=False,
                                                           scale_down_positions=False,
                                                           prefix="%sadd_positional_encodings" % C.CHAR_SEQ_ENCODER_PREFIX))
-
-    encoders.append(BatchMajor2TimeMajor())
+        encoders.append(ConvertLayout(C.TIME_MAJOR, num_hidden=encoders[-1].get_num_hidden()))
+    else:
+        encoders.append(ConvertLayout(C.TIME_MAJOR, num_hidden=0))
 
     if config.reverse_input:
-        encoders.append(ReverseSequence())
+        encoders.append(ReverseSequence(num_hidden=encoders[-1].get_num_hidden()))
 
     if config.rnn_config.residual:
         utils.check_condition(config.rnn_config.first_residual_layer >= 2,
@@ -127,6 +128,8 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
         encoders.append(RecurrentEncoder(rnn_config=remaining_rnn_config,
                                          prefix=C.STACKEDRNN_PREFIX,
                                          layout=C.TIME_MAJOR))
+
+    encoders.append(ConvertLayout(C.BATCH_MAJOR, encoders[-1].get_num_hidden()))
 
     return EncoderSequence(encoders)
 
@@ -147,7 +150,6 @@ def get_convolutional_encoder(config: ConvolutionalEncoderConfig) -> 'Encoder':
                                              fixed_pos_embed_scale_down_positions=True,
                                              prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
     encoders.append(ConvolutionalEncoder(config=config))
-    encoders.append(BatchMajor2TimeMajor())
     return EncoderSequence(encoders)
 
 
@@ -170,7 +172,6 @@ def get_transformer_encoder(config: transformer.TransformerConfig) -> 'Encoder':
         encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
 
     encoders.append(TransformerEncoder(config))
-    encoders.append(BatchMajor2TimeMajor())
 
     return EncoderSequence(encoders)
 
@@ -195,6 +196,7 @@ class Encoder(ABC):
         """
         pass
 
+    @abstractmethod
     def get_num_hidden(self) -> int:
         """
         :return: The representation size of this encoder.
@@ -214,10 +216,18 @@ class Encoder(ABC):
         return None
 
 
-class BatchMajor2TimeMajor(Encoder):
+class ConvertLayout(Encoder):
     """
-    Converts batch major data to time major.
+    Converts batch major data to time major by swapping the first dimension and setting the __layout__ attribute.
+
+    :param target_layout: The target layout to convert to (C.BATCH_MAJOR or C.TIMEMAJOR).
+    :param num_hidden: The number of hidden units of the previous encoder.
     """
+
+    def __init__(self, target_layout: str, num_hidden: int) -> None:
+        assert target_layout == C.BATCH_MAJOR or target_layout == C.TIME_MAJOR
+        self.num_hidden = num_hidden
+        self.target_layout = target_layout
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -231,8 +241,11 @@ class BatchMajor2TimeMajor(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
-        with mx.AttrScope(__layout__=C.TIME_MAJOR):
+        with mx.AttrScope(__layout__=self.target_layout):
             return mx.sym.swapaxes(data=data, dim1=0, dim2=1), data_length, seq_len
+
+    def get_num_hidden(self) -> int:
+        return self.num_hidden
 
 
 class ReverseSequence(Encoder):
@@ -240,12 +253,18 @@ class ReverseSequence(Encoder):
     Reverses the input sequence. Requires time-major layout.
     """
 
+    def __init__(self, num_hidden: int) -> None:
+        self.num_hidden = num_hidden
+
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
                seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         data = mx.sym.SequenceReverse(data=data, sequence_length=data_length, use_sequence_length=True)
         return data, data_length, seq_len
+
+    def get_num_hidden(self):
+        return self.num_hidden
 
 
 class EmbeddingConfig(Config):
@@ -551,12 +570,7 @@ class EncoderSequence(Encoder):
         """
         Return the representation size of this encoder.
         """
-        if isinstance(self.encoders[-1], BatchMajor2TimeMajor):
-            utils.check_condition(len(self.encoders) > 1,
-                                  "Cannot return num_hidden from a BatchMajor2TimeMajor encoder only")
-            return self.encoders[-2].get_num_hidden()
-        else:
-            return self.encoders[-1].get_num_hidden()
+        return self.encoders[-1].get_num_hidden()
 
     def get_encoded_seq_len(self, seq_len: int) -> int:
         """
