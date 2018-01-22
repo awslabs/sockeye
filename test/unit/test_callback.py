@@ -46,9 +46,7 @@ class DummyMetric:
                          test_constants)
 def test_callback(optimized_metric, initial_best, train_metrics, eval_metrics, improved_seq):
     with tempfile.TemporaryDirectory() as tmpdir:
-        batch_size = 32
-        monitor = callback.TrainingMonitor(batch_size=batch_size,
-                                           output_folder=tmpdir,
+        monitor = callback.TrainingMonitor(output_folder=tmpdir,
                                            optimized_metric=optimized_metric)
         assert monitor.optimized_metric == optimized_metric
         assert monitor.get_best_validation_score() == initial_best
@@ -78,8 +76,7 @@ def _compare_metrics(a, b):
 
 def test_bleu_requires_checkpoint_decoder():
     with pytest.raises(utils.SockeyeError) as e, tempfile.TemporaryDirectory() as tmpdir:
-        callback.TrainingMonitor(batch_size=1,
-                                 output_folder=tmpdir,
+        callback.TrainingMonitor(output_folder=tmpdir,
                                  optimized_metric='bleu',
                                  cp_decoder=None)
     assert "bleu requires CheckpointDecoder" == str(e.value)
