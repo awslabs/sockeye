@@ -489,10 +489,10 @@ class TrainingModel(model.SockeyeModel):
                                                           memory_data=utils.get_gpu_memory_usage(self.context))
 
                 toc = time.time()
-                logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f",
+                time_cost = toc - tic
+                logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f Updates/sec=%.3f",
                             train_state.checkpoint, train_state.updates, train_state.epoch,
-                            train_state.samples, (toc - tic))
-                tic = time.time()
+                            train_state.samples, time_cost, checkpoint_frequency/time_cost)
 
                 for name, val in metric_train.get_name_value():
                     logger.info('Checkpoint [%d]\tTrain-%s=%f', train_state.checkpoint, name, val)
@@ -559,6 +559,8 @@ class TrainingModel(model.SockeyeModel):
                         break
 
                 self._checkpoint(train_state, output_folder, train_iter)
+
+                tic = time.time()
 
         cleanup_params_files(output_folder, max_params_files_to_keep,
                              train_state.checkpoint, self.training_monitor.get_best_checkpoint())
