@@ -51,7 +51,7 @@ def main():
     source_factor_vocab_paths = [None] * len(args.source_factors)
 
     # Remove existing vocab files, so they will be created when load_or_create is called
-    map(os.unlink, [vocab_source_path, vocab_target_path, *source_factor_vocab_paths])
+    os.unlink(path_i) for path_i in [vocab_source_path, vocab_target_path, *source_factor_vocab_paths]
 
     vocabs = vocab.load_or_create_vocabs(source=args.source,
                                          target=args.target,

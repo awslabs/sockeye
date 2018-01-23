@@ -634,8 +634,7 @@ def create_model_config(args: argparse.Namespace,
     config_embed_source = encoder.EmbeddingConfig(vocab_size=vocab_source_size,
                                                   num_embed=num_embed_source,
                                                   dropout=embed_dropout_source,
-                                                  source_factor_dims=args.source_factor_dims,
-                                                  source_factor_vocab_sizes=source_factor_vocab_sizes)
+                                                  factor_configs = [encoder.FactorConfig(size, dim) for size, dim in zip(source_factor_vocab_sizes, args.source_factor_dims)])
 
     config_embed_target = encoder.EmbeddingConfig(vocab_size=vocab_target_size,
                                                   num_embed=num_embed_target,

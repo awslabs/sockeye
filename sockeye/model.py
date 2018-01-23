@@ -219,9 +219,7 @@ class SockeyeModel:
         embed_weight_source, embed_weight_target, out_weight_target = self._get_embed_weights()
         self.embedding_source = encoder.Embedding(self.config.config_embed_source,
                                                   prefix=C.SOURCE_EMBEDDING_PREFIX,
-                                                  embed_weight=embed_weight_source,
-                                                  factor_vocab_sizes=self.config.config_embed_source.source_factor_vocab_sizes,
-                                                  factor_output_dims=self.config.config_embed_source.source_factor_dims)
+                                                  embed_weight=embed_weight_source)
 
         self.embedding_target = encoder.Embedding(self.config.config_embed_target,
                                                   prefix=C.TARGET_EMBEDDING_PREFIX,

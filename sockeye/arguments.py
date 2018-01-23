@@ -261,7 +261,7 @@ def add_training_data_args(params, required=False):
                         nargs='+',
                         type=regular_file(),
                         default=[],
-                        help='Source side factors.')
+                        help='File(s) containing token-parallel source side factors. Default: %(default)s.')
     params.add_argument(C.TRAINING_ARG_TARGET, '-t',
                         required=required,
                         type=regular_file(),

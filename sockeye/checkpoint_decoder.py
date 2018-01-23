@@ -41,7 +41,7 @@ class CheckpointDecoder:
     :param inputs: Path to file containing input sentences.
     :param references: Path to file containing references.
     :param model: Model to load.
-    :param input_factors: Path to files containing input factors.
+    :param input_factors: Paths to files containing input factors.
     :param max_input_len: Maximum input length.
     :param beam_size: Size of the beam.
     :param bucket_width_source: Source bucket width.

@@ -157,10 +157,9 @@ class InferenceModel(model.SockeyeModel):
 
         def sym_gen(source_seq_len: int):
             source = mx.sym.Variable(C.SOURCE_NAME)
+            source_factors = [mx.sym.Variable('%s_factor_%d' % (C.SOURCE_NAME,i)) for i in range(self.config.num_factors)]
             source_length = utils.compute_lengths(source)
 
-            # source embedding
-            source_factors = [mx.sym.Variable(C.SOURCE_NAME + "_factor_" + str(i)) for i in range(self.config.num_factors)]
             (source_embed,
              source_embed_length,
              source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len, source_factors)
@@ -372,7 +371,7 @@ def load_source_factor_vocabs(model_folder: str, num_factors: Optional[int] = 0)
     :param model_folder: The location of the model folder
     :return: The list of source factor vocabs found in the model folder.
     """
-    return [vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_SRC_NAME) + "." + str(fi)) for fi in range(num_factors)]
+    return [vocab.vocab_from_json_or_pickle('%s.%d' % (os.path.join(model_folder, C.VOCAB_SRC_NAME), fi)) for fi in range(num_factors)]
 
 
 def load_models(context: mx.context.Context,
@@ -402,14 +401,12 @@ def load_models(context: mx.context.Context,
                                    restrict lexicon).
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
-    models, source_vocabs, target_vocabs = [], [], []
+    models, source_vocabs, source_factor_vocabs, target_vocabs  = [], [], [], []
     if checkpoints is None:
         checkpoints = [None] * len(model_folders)
     for model_folder, checkpoint in zip(model_folders, checkpoints):
         source_vocabs.append(vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_SRC_NAME)))
         target_vocabs.append(vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_TRG_NAME)))
-        num_factors = model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME)).num_factors
-        source_factor_vocabs = load_source_factor_vocabs(model_folder, num_factors)
 
         inf_model = InferenceModel(model_folder=model_folder,
                                    context=context,
@@ -421,8 +418,16 @@ def load_models(context: mx.context.Context,
                                    cache_output_layer_w_b=cache_output_layer_w_b)
         models.append(inf_model)
 
+        source_factor_vocab.append(load_source_factor_vocabs(model_folder, inf_model.num_factors))
+
     utils.check_condition(vocab.are_identical(*source_vocabs), "Source vocabulary ids do not match")
     utils.check_condition(vocab.are_identical(*target_vocabs), "Target vocabulary ids do not match")
+
+    # sanity check on source factor vocabs
+    if len(source_factor_vocabs) > 0:
+        for fi in range(len(source_factor_vocabs[0])):
+            utils.check_condition(vocab.are_identical(*[source_factor_vocabs[i][fi] for i in range(fi)]),
+                                  "Source factor vocabs do not match")
 
     # set a common max_output length for all models.
     max_input_len, get_max_output_length = models_max_input_output_length(models,
@@ -543,13 +548,13 @@ class TranslatorInput:
     """
     Required input for Translator.
 
-    :param id: Sentence id.
+    :param sent_id: Sentence id.
     :param sentence: Input sentence.
     :param tokens: List of input tokens.
     :param factors: List of zero or more input factors.
     """
-    def __init__(self, id, sentence, tokens, chunk_id = 0, factors = []):
-        self.id = id
+    def __init__(self, sent_id, sentence, tokens, chunk_id = 0, factors = []):
+        self.id = sent_id
         self.chunk_id = chunk_id
         self.sentence = sentence
         self.tokens = tokens
@@ -559,10 +564,13 @@ class TranslatorInput:
     def __str__(self):
         return '[%d.%d] %s' % (self.id, self.chunk_id, self.sentence)
 
-    def chunks(self, chunk_size: int):
+    def chunks(self, chunk_size: int) -> TranslatorInput:
         """
         Takes a TranslatorInput (itself) and splits it into chunks, in the case where the
         input sentence is greater than the requested chunk_size.
+
+        :param chunk_size: The maximum size of a chunk.
+        :return: A generator of TranslatorInputs, one for each chunk created.
         """
         for chunk_id, i in enumerate(range(0, len(self.tokens), chunk_size)):
             new_tokens = self.tokens[i:i + chunk_size]

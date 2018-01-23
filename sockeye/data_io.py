@@ -314,8 +314,8 @@ def shard_data(source_fname: str,
                target_fname: str,
                vocab_source: Dict[str, int],
                vocab_target: Dict[str, int],
-               source_factors: List[str],
-               source_factor_vocabs: List[Dict[str, int]],
+               source_factors: Optional[List[str]],
+               source_factor_vocabs: Optional[List[Dict[str, int]]],
                num_shards: int,
                buckets: List[Tuple[int, int]],
                length_ratio_mean: float,
@@ -328,6 +328,7 @@ def shard_data(source_fname: str,
     :param target_fname: The file name of the target file.
     :param vocab_source: Source vocabulary.
     :param vocab_target: Target vocabulary.
+    :param source_factors: List of files containing source-side factors.
     :param num_shards: The total number of shards.
     :param buckets: Bucket list.
     :param length_ratio_mean: Mean length ratio.
@@ -409,7 +410,7 @@ class RawParallelDatasetLoader:
     def load(self,
              source_sentences: Iterable[List[Any]],
              target_sentences: Iterable[List[Any]],
-             source_factor_sentences: List[Iterable[List[Any]]],
+             source_factor_sentences: Optional[List[Iterable[List[Any]]]],
              num_samples_per_bucket: List[int]) -> 'ParallelDataSet':
 
         assert len(num_samples_per_bucket) == len(self.buckets)
@@ -1134,16 +1135,14 @@ class ParallelDataSet(Sized):
         """
         sources = self.source + self.target + self.label
         if self.source_factors is not None:
-            for i in range(len(self.source_factors)):
-                sources += self.source_factors[i]
+            sources += self.source_factors
         mx.nd.save(fname, sources)
 
     @staticmethod
     def load(fname: str, num_source_factors: int = 0) -> 'ParallelDataSet':
         """
         Loads a dataset from a binary .npy file.
-        The first 1..num_source streams are the source and the next num_target are the target.
-        The last stream is the set of labels.
+        First are the source and target streams, followed by the set of labels, and all source factor streams.
         """
         data = mx.nd.load(fname)
         num_parts = num_source_factors + 3
@@ -1207,7 +1206,7 @@ class ParallelDataSet(Sized):
         source = []
         target = []
         label = []
-        source_factors = [[] for i in range(len(self.source_factors))] # type: List[List]
+        source_factors = [[] for i in range(len(self.source_factors))]  # type: List[List]
         for buck_idx in range(len(self)):
             num_samples = self.source[buck_idx].shape[0]
             if num_samples:  # not empty bucket
@@ -1512,7 +1511,7 @@ class ParallelSampleIter(BaseParallelSampleIter):
         target = self.data.target[i][j:j + batch_size]
         data = [source, target]
 
-        for fi, factor in enumerate(self.data.source_factors):
+        for factor in self.data.source_factors:
             data.append(factor[i][j:j + batch_size])
 
         label = [self.data.label[i][j:j + batch_size]]
