@@ -1,4 +1,4 @@
 pyyaml
-mxnet-cu90==1.0.0
+mxnet-cu90>=1.0.0,<1.0.1
 numpy>=1.12
 typing
