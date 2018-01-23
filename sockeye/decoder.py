@@ -47,6 +47,16 @@ def get_decoder(config: DecoderConfig) -> 'Decoder':
 
 
 class Decoder(ABC):
+
+    @property
+    def dtype(self):
+        return self._dtype
+
+    @dtype.setter
+    def dtype(self, dtype):
+        self._dtype = dtype
+        logger.info("Decoder %s dtype %s", self.__class__.__name__, dtype.__name__)
+
     """
     Generic decoder interface.
     A decoder needs to implement code to decode a target sequence known in advance (decode_sequence),
@@ -509,7 +519,6 @@ class RecurrentDecoder(Decoder):
         self.hidden_norm = layers.LayerNormalization(self.num_hidden,
                                                      prefix="%shidden_norm" % prefix) \
             if self.config.layer_normalization else None
-        self.use_fp16 = self.config.use_fp16
 
     def _create_state_init_parameters(self):
         """
@@ -693,23 +702,23 @@ class RecurrentDecoder(Decoder):
         """
         return [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
                                (batch_size, source_encoded_max_length, source_encoded_depth),
-                               dtype=utils.mode_dtype(self.use_fp16),
+                               dtype=self.dtype,
                                layout=C.BATCH_MAJOR),
                 mx.io.DataDesc(C.SOURCE_DYNAMIC_PREVIOUS_NAME,
                                (batch_size, source_encoded_max_length, self.attention.dynamic_source_num_hidden),
-                               dtype=utils.mode_dtype(self.use_fp16),
+                               dtype=self.dtype,
                                layout=C.BATCH_MAJOR),
                 mx.io.DataDesc(C.SOURCE_LENGTH_NAME,
                                (batch_size,),
-                               dtype=utils.mode_dtype(self.use_fp16),
+                               dtype=self.dtype,
                                layout="N"),
                 mx.io.DataDesc(C.HIDDEN_PREVIOUS_NAME,
                                (batch_size, self.num_hidden),
-                               dtype=utils.mode_dtype(self.use_fp16),
+                               dtype=self.dtype,
                                layout="NC")] + \
                [mx.io.DataDesc("%senc2decinit_%d" % (self.prefix, i),
                                (batch_size, num_hidden),
-                               dtype=utils.mode_dtype(self.use_fp16),
+                               dtype=self.dtype,
                                layout=C.BATCH_MAJOR) for i, (_, num_hidden) in enumerate(
                    sum([rnn.state_shape for rnn in self.get_rnn_cells()], [])
                )]
@@ -810,7 +819,7 @@ class RecurrentDecoder(Decoder):
 
         # (2) Attention step
         attention_input = self.attention.make_input(seq_idx, word_vec_prev, rnn_pre_attention_output)
-        attention_state = attention_func(attention_input, attention_state)
+        attention_state = attention_func(attention_input, attention_state, self.dtype)
 
         # (3) Attention handling (and possibly context gating)
         if self.rnn_post_attention:

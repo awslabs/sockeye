@@ -37,10 +37,8 @@ def diff_arrays():
         print(file_name, error)
 
 
-def translate():
+def translate(encoder_fp16=False, decoder_fp16=False):
     context = mx.gpu(0)
-
-    use_fp16 = False
 
     output_handler = sockeye.output_handler.get_output_handler('translation_with_score',
                                                                None,
@@ -57,7 +55,8 @@ def translate():
         2,
         decoder_return_logit_inputs=False,
         cache_output_layer_w_b=False,
-        use_fp16=use_fp16)
+        encoder_dtype=np.float16 if encoder_fp16 else np.float32,
+        decoder_dtype=np.float16 if decoder_fp16 else np.float32)
 
     translator = sockeye.inference.Translator(context,
                                               'linear',
@@ -66,8 +65,7 @@ def translate():
                                                                               0.0),
                                               models,
                                               vocab_source,
-                                              vocab_target,
-                                              use_fp16=use_fp16)
+                                              vocab_target)
     sockeye.translate.translate(output_handler, ['Hello World'], translator, 1)
     # sockeye.translate.read_and_translate(translator, output_handler, None, None)
 
@@ -83,7 +81,7 @@ if __name__ == '__main__':
     #list_params()
 
     #diff_arrays()
-    translate()
+    translate(True, False)
 
 
     mx.profiler.profiler_set_state('stop')

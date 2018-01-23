@@ -1012,10 +1012,18 @@ def add_inference_args(params):
                                type=float,
                                help='Beta factor for the length penalty used in beam search: '
                                     '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
-    decode_params.add_argument('--use-fp16',
-                               default=False,
-                               type=bool,
-                               help='Use float 16-bit precision math. Default: %(default)s')
+
+    decode_params.add_argument('--encoder-dtype',
+                               default='float32',
+                               choices=['float16', 'float32'],
+                               type=str,
+                               help='Encoder data type. Default: %(default)s')
+
+    decode_params.add_argument('--decoder-dtype',
+                               default='float32',
+                               choices=['float16', 'float32'],
+                               type=str,
+                               help='Decoder data type. Default: %(default)s')
 
 
 def add_evaluate_args(params):

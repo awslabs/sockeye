@@ -65,12 +65,15 @@ class InferenceModel(model.SockeyeModel):
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  decoder_return_logit_inputs: bool = False,
                  cache_output_layer_w_b: bool = False,
-                 use_fp16: bool = False) -> None:
+                 encoder_dtype=np.float32,
+                 decoder_dtype=np.float32) -> None:
         self.model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
         logger.info("Model version: %s", self.model_version)
         utils.check_version(self.model_version)
 
         config = model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
+        config.encoder_dtype = encoder_dtype
+        config.decoder_dtype = decoder_dtype
         super().__init__(config)
 
         self.fname_params = os.path.join(model_folder, C.PARAMS_NAME % checkpoint if checkpoint else C.PARAMS_BEST_NAME)
@@ -98,20 +101,18 @@ class InferenceModel(model.SockeyeModel):
         self.cache_output_layer_w_b = cache_output_layer_w_b
         self.output_layer_w = None  # type: mx.nd.NDArray
         self.output_layer_b = None  # type: mx.nd.NDArray
-        self.use_fp16 = use_fp16
-        self.decoder.use_fp16 = use_fp16
-        logger.info("fp16 mode: %s", self.use_fp16)
 
     count = 0
+
     @staticmethod
-    def _printing_helper(use_fp16):
-        count = 0
+    def _printing_helper(dtype):
+
         def func(name, array):
             array = ctypes.cast(array, NDArrayHandle)
             array = mx.nd.NDArray(array, writable=False)
             name = py_str(name)
-            print('After layer', name, array.shape, array.dtype, array)
-            file_name = 'fp{}/{:05d}-{}'.format('16' if use_fp16 else '32', InferenceModel.count, name)
+            print('After layer', name, array.shape, array.dtype, array.asnumpy())
+            file_name = '{}/{:05d}-{}'.format(dtype.__name__, InferenceModel.count, name)
             InferenceModel.count += 1
             mx.nd.save(file_name, array)
         return func
@@ -152,15 +153,15 @@ class InferenceModel(model.SockeyeModel):
 
         self.encoder_module.bind(data_shapes=max_encoder_data_shapes, for_training=False, grad_req="null")
         mon = mx.monitor.Monitor(1)
-        mon.stat_helper = InferenceModel._printing_helper(self.use_fp16)
+        mon.stat_helper = InferenceModel._printing_helper(self.encoder.dtype)
         #self.encoder_module.install_monitor(mon)
 
         self.decoder_module.bind(data_shapes=max_decoder_data_shapes, for_training=False, grad_req="null")
         mon = mx.monitor.Monitor(1)
-        mon.stat_helper = InferenceModel._printing_helper(self.use_fp16)
-        # self.encoder_module.install_monitor(mon)
+        mon.stat_helper = InferenceModel._printing_helper(self.decoder.dtype)
+        #self.decoder_module.install_monitor(mon)
 
-        self.load_params_from_file(self.fname_params, utils.mode_dtype(self.use_fp16))
+        self.load_params_from_file(self.fname_params, dtype=None) # disable conversion
         self.encoder_module.init_params(arg_params=self.params, allow_missing=False)
         self.decoder_module.init_params(arg_params=self.params, allow_missing=False)
 
@@ -186,12 +187,12 @@ class InferenceModel(model.SockeyeModel):
 
         def sym_gen(source_seq_len: int):
             source = mx.sym.Variable(C.SOURCE_NAME)
-            source_length = utils.compute_lengths(source, dtype=utils.mode_dtype(self.use_fp16))
+            source_length = utils.compute_lengths(source, dtype=self.encoder.dtype)
 
             # source embedding
             (source_embed,
              source_embed_length,
-             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len, self.use_fp16)
+             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
 
             # encoder
             # source_encoded: (source_encoded_length, batch_size, encoder_depth)
@@ -199,8 +200,7 @@ class InferenceModel(model.SockeyeModel):
              source_encoded_length,
              source_encoded_seq_len) = self.encoder.encode(source_embed,
                                                            source_embed_length,
-                                                           source_embed_seq_len,
-                                                           self.use_fp16)
+                                                           source_embed_seq_len)
             # source_encoded: (batch_size, source_encoded_length, encoder_depth)
             # TODO(fhieber): Consider standardizing encoders to return batch-major data to avoid this line.
             source_encoded = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
@@ -248,8 +248,7 @@ class InferenceModel(model.SockeyeModel):
 
             # embedding for previous word
             # (batch_size, num_embed)
-            target_embed_prev, _, _ = self.embedding_target.encode(data=target_prev, data_length=None, seq_len=1
-                                                                   , use_fp16=self.use_fp16)
+            target_embed_prev, _, _ = self.embedding_target.encode(data=target_prev, data_length=None, seq_len=1)
 
             # decoder
             # target_decoded: (batch_size, decoder_depth)
@@ -290,7 +289,7 @@ class InferenceModel(model.SockeyeModel):
         """
         return [mx.io.DataDesc(name=C.SOURCE_NAME,
                                shape=(self.batch_size, bucket_key),
-                               dtype=utils.mode_dtype(self.use_fp16),
+                               dtype=self.encoder.dtype,
                                layout=C.BATCH_MAJOR)]
 
     def _get_decoder_data_shapes(self, bucket_key: Tuple[int, int]) -> List[mx.io.DataDesc]:
@@ -307,7 +306,7 @@ class InferenceModel(model.SockeyeModel):
             [mx.io.DataDesc(
                 name=C.TARGET_NAME,
                 shape=(self.batch_size * self.beam_size,),
-                dtype=utils.mode_dtype(self.use_fp16),
+                dtype=self.decoder.dtype,
                 layout="NT")] +
             self.decoder.state_shapes(self.batch_size * self.beam_size,
                                       target_max_length,
@@ -401,7 +400,8 @@ def load_models(context: mx.context.Context,
                 max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                 decoder_return_logit_inputs: bool = False,
                 cache_output_layer_w_b: bool = False,
-                use_fp16: bool = False) -> Tuple[List[InferenceModel], Dict[str, int], Dict[str, int]]:
+                encoder_dtype=np.float32,
+                decoder_dtype=np.float32) -> Tuple[List[InferenceModel], Dict[str, int], Dict[str, int]]:
     """
     Loads a list of models for inference.
 
@@ -433,7 +433,8 @@ def load_models(context: mx.context.Context,
                                checkpoint=checkpoint,
                                decoder_return_logit_inputs=decoder_return_logit_inputs,
                                cache_output_layer_w_b=cache_output_layer_w_b,
-                               use_fp16=use_fp16)
+                               encoder_dtype=encoder_dtype,
+                               decoder_dtype=decoder_dtype)
         models.append(model)
 
     utils.check_condition(vocab.are_identical(*source_vocabs), "Source vocabulary ids do not match")
@@ -737,9 +738,7 @@ class Translator:
                  models: List[InferenceModel],
                  vocab_source: Dict[str, int],
                  vocab_target: Dict[str, int],
-                 restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
-                 use_fp16: bool = False) -> None:
-        self.use_fp16 = use_fp16
+                 restrict_lexicon: Optional[lexicon.TopKLexicon] = None) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.vocab_source = vocab_source
@@ -761,15 +760,14 @@ class Translator:
             self.buckets_source = [self.max_input_length]
 
         self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target)), val=np.inf,
-                                   ctx=self.context, dtype=utils.mode_dtype(use_fp16))
+                                   ctx=self.context, dtype=self.models[0].decoder.dtype)
         logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s batch_size=%d "
-                    "buckets_source=%s use_fp16=%s)",
+                    "buckets_source=%s)",
                     len(self.models),
                     self.beam_size,
                     "None" if len(self.models) == 1 else ensemble_mode,
                     self.batch_size,
-                    self.buckets_source,
-                    self.use_fp16)
+                    self.buckets_source)
 
     @staticmethod
     def _get_interpolation_func(ensemble_mode):
@@ -881,7 +879,7 @@ class Translator:
         bucket_key = data_io.get_bucket(max(len(tokens) for tokens in sequences), self.buckets_source)
 
         utils.check_condition(C.PAD_ID == 0, "pad id should be 0")
-        source = mx.nd.zeros((len(sequences), bucket_key), dtype=utils.mode_dtype(self.use_fp16))
+        source = mx.nd.zeros((len(sequences), bucket_key), dtype=self.models[0].encoder.dtype)
         for j, tokens in enumerate(sequences):
             source[j, :len(tokens)] = data_io.tokens2ids(tokens, self.vocab_source)
         return source, bucket_key
@@ -1032,19 +1030,19 @@ class Translator:
                                dtype='int32')
         sequences[:, 0] = self.start_id
 
-        lengths = mx.nd.ones((self.batch_size * self.beam_size, 1), ctx=self.context, dtype=utils.mode_dtype(self.use_fp16))
+        lengths = mx.nd.ones((self.batch_size * self.beam_size, 1), ctx=self.context, dtype=self.models[0].decoder.dtype)
         finished = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
 
         # attentions: (batch_size * beam_size, output_length, encoded_source_length)
         attentions = mx.nd.zeros((self.batch_size * self.beam_size, max_output_length, encoded_source_length),
-                                 ctx=self.context, dtype=utils.mode_dtype(self.use_fp16))
+                                 ctx=self.context, dtype=self.models[0].decoder.dtype)
 
         # best_hyp_indices: row indices of smallest scores (ascending).
         best_hyp_indices = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
         # best_word_indices: column indices of smallest scores (ascending).
         best_word_indices = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
         # scores_accumulated: chosen smallest scores in scores (ascending).
-        scores_accumulated = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context, dtype=utils.mode_dtype(self.use_fp16))
+        scores_accumulated = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context, dtype=self.models[0].decoder.dtype)
 
         # reset all padding distribution cells to np.inf
         self.pad_dist[:] = np.inf
@@ -1072,7 +1070,7 @@ class Translator:
                                                dim=0)
 
             pad_dist = mx.nd.full((self.batch_size * self.beam_size, vocab_slice_ids.shape[0]),
-                                  val=np.inf, ctx=self.context, dtype=utils.mode_dtype(self.use_fp16))
+                                  val=np.inf, ctx=self.context, dtype=self.models[0].decoder.dtype)
             for m in self.models:
                 models_output_layer_w.append(m.output_layer_w.take(vocab_slice_ids))
                 models_output_layer_b.append(m.output_layer_b.take(vocab_slice_ids))
@@ -1133,11 +1131,12 @@ class Translator:
             # pylint: disable=unsupported-assignment-operation
             sequences[:, t] = best_word_indices
             attentions[:, t, :] = attention_scores
-            lengths += mx.nd.cast(1 - mx.nd.expand_dims(finished, axis=1), utils.mode_dtype(self.use_fp16))
+            lengths += mx.nd.cast(1 - mx.nd.expand_dims(finished, axis=1), dtype=self.models[0].decoder.dtype)
 
             # (6) determine which hypotheses in the beam are now finished
             finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
             if mx.nd.sum(finished).asscalar() == self.batch_size * self.beam_size:  # all finished
+                # forces computation graphs to be the same
                 pass
                 #break
 

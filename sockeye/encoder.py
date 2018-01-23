@@ -178,6 +178,16 @@ def get_transformer_encoder(config: transformer.TransformerConfig) -> 'Encoder':
 
 
 class Encoder(ABC):
+
+    @property
+    def dtype(self):
+        return self._dtype
+
+    @dtype.setter
+    def dtype(self, dtype):
+        self._dtype = dtype
+        logger.info("Encoder %s dtype %s", self.__class__.__name__, dtype.__name__)
+
     """
     Generic encoder interface.
     """
@@ -186,8 +196,7 @@ class Encoder(ABC):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: Optional[mx.sym.Symbol],
-               seq_len: int,
-               use_fp16: bool = False) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -225,8 +234,7 @@ class BatchMajor2TimeMajor(Encoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: Optional[mx.sym.Symbol],
-               seq_len: int,
-               use_fp16: bool = False) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -247,8 +255,7 @@ class ReverseSequence(Encoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
-               seq_len: int,
-               use_fp16: bool = False) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         data = mx.sym.SequenceReverse(data=data, sequence_length=data_length, use_sequence_length=True)
         return data, data_length, seq_len
 
@@ -288,8 +295,7 @@ class Embedding(Encoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: Optional[mx.sym.Symbol],
-               seq_len: int,
-               use_fp16: bool = False) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -302,7 +308,8 @@ class Embedding(Encoder):
                                      input_dim=self.config.vocab_size,
                                      weight=self.embed_weight,
                                      output_dim=self.config.num_embed,
-                                     name=self.prefix + "embed", dtype=utils.mode_dtype(use_fp16))
+                                     name=self.prefix + "embed",
+                                     dtype=self.dtype)
         if self.config.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.config.dropout, name="source_embed_dropout")
 
@@ -354,8 +361,7 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: Optional[mx.sym.Symbol],
-               seq_len: int,
-               use_fp16: bool = False) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         :param data: (batch_size, source_seq_len, num_embed)
         :param data_length: (batch_size,)
@@ -440,8 +446,7 @@ class AddLearnedPositionalEmbeddings(PositionalEncoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: Optional[mx.sym.Symbol],
-               seq_len: int,
-               use_fp16: bool = False) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         :param data: (batch_size, source_seq_len, num_embed)
         :param data_length: (batch_size,)
@@ -496,8 +501,7 @@ class NoOpPositionalEmbeddings(PositionalEncoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: Optional[mx.sym.Symbol],
-               seq_len: int,
-               use_fp16: bool = False) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         return data, data_length, seq_len
 
     def encode_positions(self,
@@ -536,15 +540,19 @@ class EncoderSequence(Encoder):
 
     :param encoders: List of encoders.
     """
-
     def __init__(self, encoders: List[Encoder]) -> None:
         self.encoders = encoders
+
+    @Encoder.dtype.setter
+    def dtype(self, dtype):
+        Encoder.dtype.fset(self, dtype)
+        for encoder in self.encoders:
+            encoder.dtype = self.dtype
 
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
-               seq_len: int,
-               use_fp16: bool = False) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -554,7 +562,7 @@ class EncoderSequence(Encoder):
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
         for encoder in self.encoders:
-            data, data_length, seq_len = encoder.encode(data, data_length, seq_len, use_fp16)
+            data, data_length, seq_len = encoder.encode(data, data_length, seq_len)
         return data, data_length, seq_len
 
     def get_num_hidden(self) -> int:
@@ -605,8 +613,7 @@ class RecurrentEncoder(Encoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: Optional[mx.sym.Symbol],
-               seq_len: int,
-               use_fp16: bool = False) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -615,7 +622,7 @@ class RecurrentEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
-        begin_states = self.rnn.begin_state(dtype=utils.mode_dtype(use_fp16))
+        begin_states = self.rnn.begin_state(dtype=self.dtype)
         outputs, _ = self.rnn.unroll(seq_len, begin_state=begin_states, inputs=data, merge_outputs=True, layout=self.layout)
 
         return outputs, data_length, seq_len
@@ -666,11 +673,16 @@ class BiDirectionalRNNEncoder(Encoder):
         self.layout = layout
         self.prefix = prefix
 
+    @Encoder.dtype.setter
+    def dtype(self, dtype):
+        Encoder.dtype.fset(self, dtype)
+        self.forward_rnn.dtype = self.dtype
+        self.reverse_rnn.dtype = self.dtype
+
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
-               seq_len: int,
-               use_fp16: bool = False) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -681,12 +693,12 @@ class BiDirectionalRNNEncoder(Encoder):
         """
         if self.layout[0] == 'N':
             data = mx.sym.swapaxes(data=data, dim1=0, dim2=1)
-        data = self._encode(data, data_length, seq_len, use_fp16)
+        data = self._encode(data, data_length, seq_len)
         if self.layout[0] == 'N':
             data = mx.sym.swapaxes(data=data, dim1=0, dim2=1)
         return data, data_length, seq_len
 
-    def _encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int, use_fp16: bool = False) -> mx.sym.Symbol:
+    def _encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
         """
         Bidirectionally encodes time-major data.
         """
@@ -694,9 +706,9 @@ class BiDirectionalRNNEncoder(Encoder):
         data_reverse = mx.sym.SequenceReverse(data=data, sequence_length=data_length,
                                               use_sequence_length=True)
         # (seq_length, batch, cell_num_hidden)
-        hidden_forward, _, _ = self.forward_rnn.encode(data, data_length, seq_len, use_fp16)
+        hidden_forward, _, _ = self.forward_rnn.encode(data, data_length, seq_len)
         # (seq_length, batch, cell_num_hidden)
-        hidden_reverse, _, _ = self.reverse_rnn.encode(data_reverse, data_length, seq_len, use_fp16)
+        hidden_reverse, _, _ = self.reverse_rnn.encode(data_reverse, data_length, seq_len)
         # (seq_length, batch, cell_num_hidden)
         hidden_reverse = mx.sym.SequenceReverse(data=hidden_reverse, sequence_length=data_length,
                                                 use_sequence_length=True)
@@ -744,8 +756,7 @@ class ConvolutionalEncoder(Encoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
-               seq_len: int,
-               use_fp16: bool = False) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data with a stack of Convolution+GLU blocks given sequence lengths of individual examples
         and maximum sequence length.
@@ -797,8 +808,7 @@ class TransformerEncoder(Encoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
-               seq_len: int,
-               use_fp16: bool = False) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -914,8 +924,7 @@ class ConvolutionalEmbeddingEncoder(Encoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
-               seq_len: int,
-               use_fp16: bool = False) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 

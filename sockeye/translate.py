@@ -21,6 +21,7 @@ from math import ceil
 from contextlib import ExitStack
 from typing import Optional, Iterable
 
+import numpy as np
 import mxnet as mx
 
 import sockeye
@@ -73,7 +74,8 @@ def main():
             args.max_output_length_num_stds,
             decoder_return_logit_inputs=args.restrict_lexicon is not None,
             cache_output_layer_w_b=args.restrict_lexicon is not None,
-            use_fp16=args.use_fp16)
+            encoder_dtype=np.dtype(args.encoder_dtype).type,
+            decoder_dtype=np.dtype(args.encoder_dtype).type)
         restrict_lexicon = None # type: TopKLexicon
         if args.restrict_lexicon:
             restrict_lexicon = TopKLexicon(vocab_source, vocab_target)
@@ -86,8 +88,7 @@ def main():
                                                   models,
                                                   vocab_source,
                                                   vocab_target,
-                                                  restrict_lexicon,
-                                                  use_fp16=args.use_fp16)
+                                                  restrict_lexicon)
         read_and_translate(translator, output_handler, args.chunk_size, args.input)
 
 
