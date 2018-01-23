@@ -451,7 +451,8 @@ class RecurrentDecoderConfig(Config):
                  state_init: str = C.RNN_DEC_INIT_LAST,
                  context_gating: bool = False,
                  layer_normalization: bool = False,
-                 attention_in_upper_layers: bool = False) -> None:
+                 attention_in_upper_layers: bool = False,
+                 use_fp16: bool = False) -> None:
         super().__init__()
         self.max_seq_len_source = max_seq_len_source
         self.rnn_config = rnn_config
@@ -461,6 +462,7 @@ class RecurrentDecoderConfig(Config):
         self.context_gating = context_gating
         self.layer_normalization = layer_normalization
         self.attention_in_upper_layers = attention_in_upper_layers
+        self.use_fp16 = use_fp16
 
 
 class RecurrentDecoder(Decoder):

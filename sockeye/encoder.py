@@ -56,11 +56,13 @@ class RecurrentEncoderConfig(Config):
     def __init__(self,
                  rnn_config: rnn.RNNConfig,
                  conv_config: Optional['ConvolutionalEmbeddingConfig'] = None,
-                 reverse_input: bool = False) -> None:
+                 reverse_input: bool = False,
+                 use_fp16: bool = False) -> None:
         super().__init__()
         self.rnn_config = rnn_config
         self.conv_config = conv_config
         self.reverse_input = reverse_input
+        self.use_fp16 = use_fp16
 
 
 class ConvolutionalEncoderConfig(Config):

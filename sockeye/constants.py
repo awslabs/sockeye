@@ -224,6 +224,7 @@ ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet",
 # Other argument constants
 TRAINING_ARG_SOURCE = "--source"
 TRAINING_ARG_TARGET = "--target"
+TRAINING_ARG_DTYPE = "--dtype"
 TRAINING_ARG_PREPARED_DATA = "--prepared-data"
 
 VOCAB_ARG_SHARED_VOCAB = "--shared-vocab"
