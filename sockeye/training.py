@@ -286,7 +286,7 @@ class TrainingModel(model.SockeyeModel):
             if decode_and_evaluate else None
 
         logger.info("Training started.")
-        self.training_monitor = callback.TrainingMonitor(train_iter.batch_size, output_folder,
+        self.training_monitor = callback.TrainingMonitor(output_folder,
                                                          optimized_metric=optimized_metric,
                                                          use_tensorboard=use_tensorboard,
                                                          cp_decoder=cp_decoder)
