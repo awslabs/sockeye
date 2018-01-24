@@ -41,9 +41,23 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
+def get_symbol_fc():
+    x = mx.sym.Variable(name='x')
+    x = mx.sym.flatten(data=x)
+    sym = mx.sym.FullyConnected(data=x, weight=x, no_bias=True, flatten=True, num_hidden=1)
+    return sym
+
+norm_symbol = get_symbol_fc()
+
+# no fp16 support for mx.nd.norm
+def sym_norm(arr):
+    result = norm_symbol.eval(ctx=mx.gpu(0), x=arr.expand_dims(axis=0))[0]
+    return result.reshape((1,))
+
+
 def global_norm(ndarrays: List[mx.nd.NDArray]) -> float:
     # accumulate in a list, as asscalar is blocking and this way we can run the norm calculation in parallel.
-    norms = [mx.nd.square(mx.nd.norm(arr)) for arr in ndarrays if arr is not None]
+    norms = [sym_norm(arr) for arr in ndarrays if arr is not None]
     return sqrt(sum(norm.asscalar() for norm in norms))
 
 
