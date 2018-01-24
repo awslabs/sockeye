@@ -153,7 +153,7 @@ class Attention(object):
         :return: Attention callable.
         """
 
-        def attend(att_input: AttentionInput, att_state: AttentionState, dtype) -> AttentionState:
+        def attend(att_input: AttentionInput, att_state: AttentionState) -> AttentionState:
             """
             Returns updated attention state given attention input and current attention state.
 
@@ -250,7 +250,7 @@ class BilinearAttention(Attention):
             # out: (batch_size, source_seq_len, 1).
             attention_scores = mx.sym.batch_dot(lhs=source_hidden, rhs=query, name="%sbatch_dot" % self.prefix)
 
-            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores)
+            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores, self.dtype)
 
             return AttentionState(context=context,
                                   probs=attention_probs,
@@ -344,7 +344,7 @@ class DotAttention(Attention):
             attention_scores = mx.sym.batch_dot(lhs=source_hidden, rhs=expanded_decoder_state,
                                                 name="%sbatch_dot" % self.prefix)
 
-            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores)
+            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores, self.dtype)
             return AttentionState(context=context,
                                   probs=attention_probs,
                                   dynamic_source=att_state.dynamic_source)
@@ -437,7 +437,7 @@ class MultiHeadDotAttention(Attention):
 
             # context: (batch*heads, num_hidden/head)
             # attention_probs: (batch*heads, length)
-            context, attention_probs = get_context_and_attention_probs(values, lengths, attention_scores)
+            context, attention_probs = get_context_and_attention_probs(values, lengths, attention_scores, self.dtype)
 
             # combine heads
             # (batch*heads, 1, num_hidden/head)
@@ -544,7 +544,7 @@ class LocationAttention(Attention):
             # attention_scores: (batch_size, seq_len, 1)
             attention_scores = mx.sym.expand_dims(data=attention_scores, axis=2)
 
-            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores)
+            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores, self.dtype)
             return AttentionState(context=context,
                                   probs=attention_probs,
                                   dynamic_source=att_state.dynamic_source)
@@ -620,7 +620,7 @@ class MlpAttention(Attention):
                                               flatten=False,
                                               name="%ssource_hidden_fc" % self.prefix)
 
-        def attend(att_input: AttentionInput, att_state: AttentionState, dtype) -> AttentionState:
+        def attend(att_input: AttentionInput, att_state: AttentionState) -> AttentionState:
             """
             Returns updated attention state given attention input and current attention state.
 
@@ -673,7 +673,7 @@ class MlpAttention(Attention):
                                                      flatten=False,
                                                      name="%sraw_att_score_fc" % self.prefix)
 
-            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores, dtype)
+            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores, self.dtype)
 
             dynamic_source = att_state.dynamic_source
             if self.coverage:

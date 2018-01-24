@@ -87,13 +87,8 @@ class TrainingModel(model.SockeyeModel):
                  train_iter: data_io.BaseParallelSampleIter,
                  bucketing: bool,
                  lr_scheduler,
-                 gradient_compression_params: Optional[Dict[str, Any]] = None,
-                 dtype: Optional[str] = 'float32') -> None:
+                 gradient_compression_params: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
-        if dtype == 'float16':
-            self.use_fp16 = True
-        else:
-            self.use_fp16 = False
         self.context = context
         self.lr_scheduler = lr_scheduler
         self.bucketing = bucketing
@@ -102,16 +97,15 @@ class TrainingModel(model.SockeyeModel):
         self.module = self._build_module(train_iter)
         self.training_monitor = None  # type: Optional[callback.TrainingMonitor]
 
-
     def _build_module(self, train_iter: data_io.BaseParallelSampleIter):
         """
         Initializes model components, creates training symbol and module, and binds it.
         """
         #utils.check_condition(train_iter.pad_id == C.PAD_ID == 0, "pad id should be 0")
         source = mx.sym.Variable(C.SOURCE_NAME)
-        source_length = utils.compute_lengths(source)
+        source_length = utils.compute_lengths(source, dtype=self.encoder.dtype)
         target = mx.sym.Variable(C.TARGET_NAME)
-        target_length = utils.compute_lengths(target)
+        target_length = utils.compute_lengths(target, dtype=self.decoder.dtype)
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
 
         model_loss = loss.get_loss(self.config.config_loss)
@@ -129,12 +123,12 @@ class TrainingModel(model.SockeyeModel):
             # source embedding
             (source_embed,
              source_embed_length,
-             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len, self.use_fp16)
+             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
 
             # target embedding
             (target_embed,
              target_embed_length,
-             target_embed_seq_len) = self.embedding_target.encode(target, target_length, target_seq_len, self.use_fp16)
+             target_embed_seq_len) = self.embedding_target.encode(target, target_length, target_seq_len)
 
             # encoder
             # source_encoded: (source_encoded_length, batch_size, encoder_depth)
@@ -142,8 +136,7 @@ class TrainingModel(model.SockeyeModel):
              source_encoded_length,
              source_encoded_seq_len) = self.encoder.encode(source_embed,
                                                            source_embed_length,
-                                                           source_embed_seq_len,
-                                                           self.use_fp16)
+                                                           source_embed_seq_len)
 
             # decoder
             # target_decoded: (batch-size, target_len, decoder_depth)
@@ -309,6 +302,11 @@ class TrainingModel(model.SockeyeModel):
             self.module.install_monitor(monitor)
             logger.info("Installed MXNet monitor; pattern='%s'; statistics_func='%s'",
                         mxmonitor_pattern, mxmonitor_stat_func)
+
+        #import sockeye
+        #mon = mx.monitor.Monitor(1)
+        #mon.stat_helper = sockeye.inference.InferenceModel._printing_helper(self.encoder.dtype)
+        #self.module.install_monitor(mon)
 
         self._fit(train_iter, val_iter, output_folder,
                   kvstore=kvstore,

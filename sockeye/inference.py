@@ -72,8 +72,10 @@ class InferenceModel(model.SockeyeModel):
         utils.check_version(self.model_version)
 
         config = model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
-        config.encoder_dtype = encoder_dtype
-        config.decoder_dtype = decoder_dtype
+        config.config_encoder.dtype = encoder_dtype
+        config.config_decoder.dtype = decoder_dtype
+        # config.encoder_dtype = encoder_dtype
+        # config.decoder_dtype = decoder_dtype
         super().__init__(config)
 
         self.fname_params = os.path.join(model_folder, C.PARAMS_NAME % checkpoint if checkpoint else C.PARAMS_BEST_NAME)

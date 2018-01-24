@@ -23,6 +23,7 @@ import sys
 from contextlib import ExitStack
 from typing import Any, cast, Optional, Dict, List, Tuple
 
+import numpy as np
 import mxnet as mx
 
 from sockeye.config import Config
@@ -305,7 +306,8 @@ def create_data_iters_and_vocab(args: argparse.Namespace,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
             batch_num_devices=batch_num_devices,
-            fill_up=args.fill_up)
+            fill_up=args.fill_up,
+            dtype=np.dtype(args.dtype).type)
         if resume_training:
             # resuming training. Making sure the vocabs in the model and in the prepared data match up
             model_vocab_source = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_SRC_NAME + C.JSON_SUFFIX))
@@ -360,7 +362,7 @@ def create_data_iters_and_vocab(args: argparse.Namespace,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
             bucket_width=args.bucket_width,
-            dtype=args.dtype)
+            dtype=np.dtype(args.dtype).type)
         return train_iter, validation_iter, config_data, vocab_source, vocab_target
 
 
@@ -440,9 +442,6 @@ def create_encoder_config(args: argparse.Namespace,
         encoder_rnn_dropout_inputs, _ = args.rnn_dropout_inputs
         encoder_rnn_dropout_states, _ = args.rnn_dropout_states
         encoder_rnn_dropout_recurrent, _ = args.rnn_dropout_recurrent
-        use_fp16 = False
-        if args.dtype == 'float16':
-            use_fp16 = True
         config_encoder = encoder.RecurrentEncoderConfig(
             rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
                                      num_hidden=args.rnn_num_hidden,
@@ -454,8 +453,7 @@ def create_encoder_config(args: argparse.Namespace,
                                      first_residual_layer=args.rnn_first_residual_layer,
                                      forget_bias=args.rnn_forget_bias),
             conv_config=config_conv,
-            reverse_input=args.rnn_encoder_reverse_input,
-            use_fp16=use_fp16)
+            reverse_input=args.rnn_encoder_reverse_input)
         encoder_num_hidden = args.rnn_num_hidden
 
     return config_encoder, encoder_num_hidden
@@ -527,9 +525,6 @@ def create_decoder_config(args: argparse.Namespace,  encoder_num_hidden: int) ->
         _, decoder_rnn_dropout_inputs = args.rnn_dropout_inputs
         _, decoder_rnn_dropout_states = args.rnn_dropout_states
         _, decoder_rnn_dropout_recurrent = args.rnn_dropout_recurrent
-        use_fp16 = False
-        if args.dtype == 'float16':
-            use_fp16 = True
 
         config_decoder = decoder.RecurrentDecoderConfig(
             max_seq_len_source=max_seq_len_source,
@@ -547,8 +542,7 @@ def create_decoder_config(args: argparse.Namespace,  encoder_num_hidden: int) ->
             state_init=args.rnn_decoder_state_init,
             context_gating=args.rnn_context_gating,
             layer_normalization=args.layer_normalization,
-            attention_in_upper_layers=args.rnn_attention_in_upper_layers,
-            use_fp16=use_fp16)
+            attention_in_upper_layers=args.rnn_attention_in_upper_layers)
 
     return config_decoder
 
@@ -576,7 +570,7 @@ def check_encoder_decoder_args(args) -> None:
 
 def create_model_config(args: argparse.Namespace,
                         vocab_source_size: int, vocab_target_size: int,
-                        config_data: data_io.DataConfig, use_fp16: bool = False) -> model.ModelConfig:
+                        config_data: data_io.DataConfig) -> model.ModelConfig:
     """
     Create a ModelConfig from the argument given in the command line.
 
@@ -656,8 +650,7 @@ def create_training_model(model_config: model.ModelConfig,
                                             train_iter=train_iter,
                                             bucketing=not args.no_bucketing,
                                             lr_scheduler=lr_scheduler_instance,
-                                            gradient_compression_params=gradient_compression_params(args),
-                                            dtype=args.dtype)
+                                            gradient_compression_params=gradient_compression_params(args))
 
     # We may consider loading the params in TrainingModule, for consistency
     # with the training state saving
@@ -666,7 +659,7 @@ def create_training_model(model_config: model.ModelConfig,
         training_model.load_params_from_file(os.path.join(training_state_dir, C.TRAINING_STATE_PARAMS_NAME))
     elif args.params:
         logger.info("Training will initialize from parameters loaded from '%s'", args.params)
-        training_model.load_params_from_file(args.params, dtype=args.dtype)
+        training_model.load_params_from_file(args.params)
 
     return training_model
 
@@ -717,6 +710,10 @@ def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict, str, str, 
     # Manually specified params
     if args.optimizer_params:
         optimizer_params.update(args.optimizer_params)
+
+    if args.dtype == 'float16':
+        optimizer_params['multi_precision'] = True
+
     logger.info("Optimizer: %s", optimizer)
     logger.info("Optimizer Parameters: %s", optimizer_params)
     logger.info("kvstore: %s", args.kvstore)
@@ -764,7 +761,9 @@ def main():
         logger.info("Vocabulary sizes: source=%d target=%d", vocab_source_size, vocab_target_size)
         lr_scheduler_instance = create_lr_scheduler(args, resume_training, training_state_dir)
 
-        model_config = create_model_config(args, vocab_source_size, vocab_target_size, config_data, True)
+        model_config = create_model_config(args, vocab_source_size, vocab_target_size, config_data)
+        model_config.config_encoder.dtype = np.dtype(args.dtype).type
+        model_config.config_decoder.dtype = np.dtype(args.dtype).type
         model_config.freeze()
 
         training_model = create_training_model(model_config, args,

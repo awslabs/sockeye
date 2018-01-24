@@ -215,9 +215,9 @@ class SockeyeModel:
         """
         # encoder & decoder first (to know the decoder depth)
         self.encoder = encoder.get_encoder(self.config.config_encoder)
-        self.encoder.dtype = self.config.encoder_dtype
+        self.encoder.dtype = self.config.config_encoder.dtype
         self.decoder = decoder.get_decoder(self.config.config_decoder)
-        self.decoder.dtype = self.config.decoder_dtype
+        self.decoder.dtype = self.config.config_decoder.dtype
         logger.info('Encoder %s dtype: %s', type(self.encoder).__name__, self.encoder.dtype.__name__)
         logger.info('Decoder %s dtype: %s', type(self.decoder).__name__, self.decoder.dtype.__name__)
 

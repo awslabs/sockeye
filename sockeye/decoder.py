@@ -481,6 +481,7 @@ class RecurrentDecoder(Decoder):
         self.config = config
         self.rnn_config = config.rnn_config
         self.attention = rnn_attention.get_attention(config.attention_config, config.max_seq_len_source)
+        self.attention.dtype = self.config.dtype
         self.prefix = prefix
 
         self.num_hidden = self.rnn_config.num_hidden
@@ -819,7 +820,7 @@ class RecurrentDecoder(Decoder):
 
         # (2) Attention step
         attention_input = self.attention.make_input(seq_idx, word_vec_prev, rnn_pre_attention_output)
-        attention_state = attention_func(attention_input, attention_state, self.dtype)
+        attention_state = attention_func(attention_input, attention_state)
 
         # (3) Attention handling (and possibly context gating)
         if self.rnn_post_attention:
