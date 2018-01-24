@@ -22,6 +22,7 @@ from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union, Set
 import ctypes
 
 import mxnet as mx
+import numpy
 import numpy as np
 
 from mxnet.base import NDArrayHandle, py_str
@@ -151,6 +152,7 @@ class InferenceModel(model.SockeyeModel):
 
         self.decoder_data_shapes_cache = dict()  # bucket_key -> shape cache
         max_encoder_data_shapes = self._get_encoder_data_shapes(self.encoder_default_bucket_key)
+        max_encoder_data_shapes[0].dtype = numpy.int32
         max_decoder_data_shapes = self._get_decoder_data_shapes(self.decoder_default_bucket_key)
 
         self.encoder_module.bind(data_shapes=max_encoder_data_shapes, for_training=False, grad_req="null")
@@ -189,12 +191,15 @@ class InferenceModel(model.SockeyeModel):
 
         def sym_gen(source_seq_len: int):
             source = mx.sym.Variable(C.SOURCE_NAME)
-            source_length = utils.compute_lengths(source, dtype=self.encoder.dtype)
+            source_length = utils.compute_lengths(source, dtype=numpy.int32)
 
             # source embedding
             (source_embed,
              source_embed_length,
              source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
+
+            source_embed = mx.sym.cast(source_embed, self.encoder.dtype)
+            source_embed_length = mx.sym.cast(source_embed_length, self.encoder.dtype)
 
             # encoder
             # source_encoded: (source_encoded_length, batch_size, encoder_depth)
@@ -291,7 +296,7 @@ class InferenceModel(model.SockeyeModel):
         """
         return [mx.io.DataDesc(name=C.SOURCE_NAME,
                                shape=(self.batch_size, bucket_key),
-                               dtype=self.encoder.dtype,
+                               dtype=numpy.int32,
                                layout=C.BATCH_MAJOR)]
 
     def _get_decoder_data_shapes(self, bucket_key: Tuple[int, int]) -> List[mx.io.DataDesc]:

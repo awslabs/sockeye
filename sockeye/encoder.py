@@ -309,7 +309,7 @@ class Embedding(Encoder):
                                      weight=self.embed_weight,
                                      output_dim=self.config.num_embed,
                                      name=self.prefix + "embed",
-                                     dtype=self.dtype)
+                                     dtype='int32')
         if self.config.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.config.dropout, name="source_embed_dropout")
 
