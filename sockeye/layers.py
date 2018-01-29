@@ -513,7 +513,8 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         return self._attend(queries,
                             keys,
                             values,
-                            bias=bias)
+                            bias=bias,
+                            lengths=memory_lengths)
 
 
 class ProjectedDotAttention:
