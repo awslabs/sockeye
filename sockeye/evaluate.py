@@ -38,7 +38,8 @@ def raw_corpus_bleu(hypotheses: Iterable[str], references: Iterable[str], offset
     :param offset: Smoothing constant.
     :return: BLEU score as float between 0 and 1.
     """
-    return sacrebleu.raw_corpus_bleu(hypotheses, [references], smooth_floor=offset).score / 100
+    return sacrebleu.raw_corpus_bleu(hypotheses, [references], smooth_floor=offset).score / 100.0
+
 
 def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> float:
     """
@@ -48,7 +49,9 @@ def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> flo
     :param references: Reference stream.
     :return: chrF score as float between 0 and 1.
     """
-    return sacrebleu.corpus_chrf(hypotheses, references, order=sacrebleu.CHRF_ORDER, beta=sacrebleu.CHRF_BETA, remove_whitespace=sacrebleu.CHRF_REMOVE_WS)
+    return sacrebleu.corpus_chrf(hypotheses, references, order=sacrebleu.CHRF_ORDER, beta=sacrebleu.CHRF_BETA,
+                                 remove_whitespace=sacrebleu.CHRF_REMOVE_WS)
+
 
 def main():
     params = argparse.ArgumentParser(description='Evaluate translations by calculating metrics with '
@@ -90,7 +93,7 @@ def main():
             scores = []
             for metric in args.metrics:
                 if metric == C.BLEU:
-                    bleu = raw_corpus_bleu(h, r, args.offset)
+                    bleu = raw_corpus_bleu([h], [r], args.offset)
                     scores.append("%.6f" % bleu)
                 elif metric == C.CHRF:
                     chrf_score = raw_corpus_chrf(h, r)
