@@ -579,7 +579,8 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
                              max_seq_len_source: int,
                              max_seq_len_target: int,
                              batch_size: int,
-                             fill_up: str) -> 'ParallelSampleIter':
+                             fill_up: str,
+                             dtype: str = 'float32') -> 'ParallelSampleIter':
     """
     Returns a ParallelSampleIter for the validation data.
     """
@@ -610,7 +611,8 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
     return ParallelSampleIter(data=validation_data,
                               buckets=buckets,
                               batch_size=batch_size,
-                              bucket_batch_sizes=bucket_batch_sizes)
+                              bucket_batch_sizes=bucket_batch_sizes,
+                              dtype=dtype)
 
 
 def get_prepared_data_iters(prepared_data_dir: str,
@@ -619,7 +621,8 @@ def get_prepared_data_iters(prepared_data_dir: str,
                             batch_size: int,
                             batch_by_words: bool,
                             batch_num_devices: int,
-                            fill_up: str) -> Tuple['BaseParallelSampleIter',
+                            fill_up: str,
+                            dtype: str = 'float32') -> Tuple['BaseParallelSampleIter',
                                                    'BaseParallelSampleIter',
                                                    'DataConfig', vocab.Vocab, vocab.Vocab]:
     logger.info("===============================")
@@ -670,11 +673,12 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                            buckets,
                                            batch_size,
                                            bucket_batch_sizes,
-                                           fill_up)
+                                           fill_up, dtype=dtype)
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=vocab_target[C.EOS_SYMBOL],
-                                           pad_id=C.PAD_ID)
+                                           pad_id=C.PAD_ID,
+                                           dtype=dtype)
 
     validation_iter = get_validation_data_iter(data_loader=data_loader,
                                                validation_source=validation_source,
@@ -686,7 +690,8 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                                max_seq_len_source=max_seq_len_source,
                                                max_seq_len_target=max_seq_len_target,
                                                batch_size=batch_size,
-                                               fill_up=fill_up)
+                                               fill_up=fill_up,
+                                               dtype=dtype)
 
     return train_iter, validation_iter, data_config, vocab_source, vocab_target
 
@@ -703,7 +708,8 @@ def get_training_data_iters(source: str, target: str,
                             max_seq_len_source: int,
                             max_seq_len_target: int,
                             bucketing: bool,
-                            bucket_width: int) -> Tuple['BaseParallelSampleIter',
+                            bucket_width: int,
+                            dtype: str='float32') -> Tuple['BaseParallelSampleIter',
                                                         'BaseParallelSampleIter',
                                                         'DataConfig']:
     """
@@ -757,7 +763,8 @@ def get_training_data_iters(source: str, target: str,
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=vocab_target[C.EOS_SYMBOL],
-                                           pad_id=C.PAD_ID)
+                                           pad_id=C.PAD_ID,
+                                           dtype=dtype)
 
     training_data = data_loader.load(source_sentences, target_sentences,
                                      data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes, fill_up)
@@ -775,7 +782,8 @@ def get_training_data_iters(source: str, target: str,
     train_iter = ParallelSampleIter(training_data,
                                     buckets,
                                     batch_size,
-                                    bucket_batch_sizes)
+                                    bucket_batch_sizes,
+                                    dtype=dtype)
 
     validation_iter = get_validation_data_iter(data_loader=data_loader,
                                                validation_source=validation_source,
@@ -787,7 +795,8 @@ def get_training_data_iters(source: str, target: str,
                                                max_seq_len_source=max_seq_len_source,
                                                max_seq_len_target=max_seq_len_target,
                                                batch_size=batch_size,
-                                               fill_up=fill_up)
+                                               fill_up=fill_up,
+                                               dtype=dtype)
 
     return train_iter, validation_iter, config_data
 
@@ -1228,14 +1237,14 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
         self.provide_data = [
             mx.io.DataDesc(name=self.source_data_name,
                            shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[0]),
-                           layout=C.BATCH_MAJOR),
+                           layout=C.BATCH_MAJOR, dtype=dtype),
             mx.io.DataDesc(name=self.target_data_name,
                            shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[1]),
-                           layout=C.BATCH_MAJOR)]
+                           layout=C.BATCH_MAJOR, dtype=dtype)]
         self.provide_label = [
             mx.io.DataDesc(name=self.label_name,
                            shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[1]),
-                           layout=C.BATCH_MAJOR)]
+                           layout=C.BATCH_MAJOR, dtype=dtype)]
 
         self.data_names = [self.source_data_name, self.target_data_name]
         self.label_names = [self.label_name]
@@ -1418,9 +1427,9 @@ class ParallelSampleIter(BaseParallelSampleIter):
 
         label = [self.data.label[i][j:j + batch_size]]
 
-        provide_data = [mx.io.DataDesc(name=n, shape=x.shape, layout=C.BATCH_MAJOR) for n, x in
+        provide_data = [mx.io.DataDesc(name=n, shape=x.shape, layout=C.BATCH_MAJOR, dtype=self.dtype) for n, x in
                         zip(self.data_names, data)]
-        provide_label = [mx.io.DataDesc(name=n, shape=x.shape, layout=C.BATCH_MAJOR) for n, x in
+        provide_label = [mx.io.DataDesc(name=n, shape=x.shape, layout=C.BATCH_MAJOR, dtype=self.dtype) for n, x in
                          zip(self.label_names, label)]
 
         # TODO: num pad examples is not set here if fillup strategy would be padding

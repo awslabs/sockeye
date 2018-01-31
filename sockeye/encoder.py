@@ -56,11 +56,13 @@ class RecurrentEncoderConfig(Config):
     def __init__(self,
                  rnn_config: rnn.RNNConfig,
                  conv_config: Optional['ConvolutionalEmbeddingConfig'] = None,
-                 reverse_input: bool = False) -> None:
+                 reverse_input: bool = False,
+                 use_fp16: bool = False) -> None:
         super().__init__()
         self.rnn_config = rnn_config
         self.conv_config = conv_config
         self.reverse_input = reverse_input
+        self.use_fp16 = use_fp16
 
 
 class ConvolutionalEncoderConfig(Config):
@@ -177,6 +179,16 @@ def get_transformer_encoder(config: transformer.TransformerConfig) -> 'Encoder':
 
 
 class Encoder(ABC):
+
+    @property
+    def dtype(self):
+        return self._dtype
+
+    @dtype.setter
+    def dtype(self, dtype):
+        self._dtype = dtype
+        logger.info("Encoder %s dtype %s", self.__class__.__name__, dtype.__name__)
+
     """
     Generic encoder interface.
     """
@@ -315,7 +327,9 @@ class Embedding(Encoder):
                                      input_dim=self.config.vocab_size,
                                      weight=self.embed_weight,
                                      output_dim=self.config.num_embed,
-                                     name=self.prefix + "embed")
+                                     name=self.prefix + "embed",
+                                     dtype=self.dtype # weights are floats, output should be float as well
+                                     )
         if self.config.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.config.dropout, name="source_embed_dropout")
 
@@ -546,9 +560,14 @@ class EncoderSequence(Encoder):
 
     :param encoders: List of encoders.
     """
-
     def __init__(self, encoders: List[Encoder]) -> None:
         self.encoders = encoders
+
+    @Encoder.dtype.setter
+    def dtype(self, dtype):
+        Encoder.dtype.fset(self, dtype)
+        for encoder in self.encoders:
+            encoder.dtype = self.dtype
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -618,7 +637,8 @@ class RecurrentEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
-        outputs, _ = self.rnn.unroll(seq_len, inputs=data, merge_outputs=True, layout=self.layout)
+        begin_states = self.rnn.begin_state(dtype=self.dtype)
+        outputs, _ = self.rnn.unroll(seq_len, begin_state=begin_states, inputs=data, merge_outputs=True, layout=self.layout)
 
         return outputs, data_length, seq_len
 
@@ -667,6 +687,12 @@ class BiDirectionalRNNEncoder(Encoder):
                                          layout=C.TIME_MAJOR)
         self.layout = layout
         self.prefix = prefix
+
+    @Encoder.dtype.setter
+    def dtype(self, dtype):
+        Encoder.dtype.fset(self, dtype)
+        self.forward_rnn.dtype = self.dtype
+        self.reverse_rnn.dtype = self.dtype
 
     def encode(self,
                data: mx.sym.Symbol,
