@@ -485,7 +485,9 @@ class TrainingModel(model.SockeyeModel):
                 metric_train_dict = {k: v for k, v in metric_train.get_name_value()}
                 if gradient_norm is not None:
                     metric_train_dict['gradient-norm'] = gradient_norm
-                self.training_monitor.checkpoint_callback(train_state.checkpoint, metric_train_dict,
+                self.training_monitor.checkpoint_callback(train_state.checkpoint,
+                                                          train_state.epoch,
+                                                          metric_train_dict,
                                                           memory_data=utils.get_gpu_memory_usage(self.context))
 
                 toc = time.time()

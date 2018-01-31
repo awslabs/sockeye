@@ -21,7 +21,7 @@ import os
 import pickle
 import shutil
 import time
-from typing import List, Optional, Tuple, Dict
+from typing import Dict, List, Optional, Tuple, Union
 
 import mxnet as mx
 
@@ -102,6 +102,7 @@ class TrainingMonitor(object):
 
     def checkpoint_callback(self,
                             checkpoint: int,
+                            epoch: int,
                             train_metric: Dict[str, float],
                             memory_data: Optional[Dict[int, Tuple[int, int]]] = None):
         """
@@ -109,10 +110,11 @@ class TrainingMonitor(object):
         If TrainingMonitor uses Tensorboard, training metrics are written to the Tensorboard event file.
 
         :param checkpoint: Current checkpoint.
+        :param epoch: Current epoch.
         :param train_metric: A dictionary of training metrics.
         :param memory_data: Optional data about memory usage.
         """
-        metrics = {}
+        metrics = {"epoch": epoch}  # type: Dict[str, Union[float, int]]
         for name, value in train_metric.items():
             metrics[name + "-train"] = value
         if memory_data is not None:
@@ -137,7 +139,7 @@ class TrainingMonitor(object):
         :return: Tuple of boolean indicating if model improved on validation data according to the.
                  optimized metric, and the (updated) best checkpoint.
         """
-        metrics = {}
+        metrics = {}  # type: Dict[str, Union[float, int]]
         for name, value in val_metric.get_name_value():
             metrics[name + "-val"] = value
         metrics['time-elapsed'] = time.time() - self.start_tic
@@ -268,7 +270,7 @@ def _decode_and_evaluate(checkpoint_decoder: checkpoint_decoder.CheckpointDecode
 
 
 def write_tensorboard(summary_writer,
-                      metrics: Dict[str, float],
+                      metrics: Dict[str, Union[float, int]],
                       checkpoint: int):
     """
     Writes a Tensorboard scalar event to the given SummaryWriter.

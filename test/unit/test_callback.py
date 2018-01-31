@@ -33,6 +33,7 @@ test_constants = [('perplexity', np.inf,
                    [{'accuracy': 200.0}, {'accuracy': 100.0}, {'accuracy': 100.001}, {'accuracy': 99.99}],
                    [True, False, False, False])]
 
+
 class DummyMetric:
     def __init__(self, metric_dict):
         self.metric_dict = metric_dict
@@ -51,12 +52,15 @@ def test_callback(optimized_metric, initial_best, train_metrics, eval_metrics, i
         assert monitor.optimized_metric == optimized_metric
         assert monitor.get_best_validation_score() == initial_best
         metrics_fname = os.path.join(tmpdir, C.METRICS_NAME)
+        epoch = 1
 
         for checkpoint, (train_metric, eval_metric, expected_improved) in enumerate(
                 zip(train_metrics, eval_metrics, improved_seq), 1):
-            monitor.checkpoint_callback(checkpoint, train_metric)
+            monitor.checkpoint_callback(checkpoint, epoch, train_metric)
             assert len(monitor.metrics) == checkpoint
-            assert monitor.metrics[-1] == {k + "-train": v for k, v in train_metric.items()}
+            expected_train_metrics = {k + "-train": v for k, v in train_metric.items()}
+            expected_train_metrics['epoch'] = epoch
+            assert monitor.metrics[-1] == expected_train_metrics
             improved, best_checkpoint = monitor.eval_end_callback(checkpoint, DummyMetric(eval_metric))
             assert {k + "-val" for k in eval_metric.keys()} <= monitor.metrics[-1].keys()
             assert improved == expected_improved
