@@ -102,6 +102,7 @@ class TrainingMonitor(object):
 
     def checkpoint_callback(self,
                             checkpoint: int,
+                            epoch: int,
                             train_metric: Dict[str, float],
                             memory_data: Optional[Dict[int, Tuple[int, int]]] = None):
         """
@@ -109,10 +110,11 @@ class TrainingMonitor(object):
         If TrainingMonitor uses Tensorboard, training metrics are written to the Tensorboard event file.
 
         :param checkpoint: Current checkpoint.
+        :param epoch: Current epoch.
         :param train_metric: A dictionary of training metrics.
         :param memory_data: Optional data about memory usage.
         """
-        metrics = {}
+        metrics = {"epoch": epoch}
         for name, value in train_metric.items():
             metrics[name + "-train"] = value
         if memory_data is not None:
