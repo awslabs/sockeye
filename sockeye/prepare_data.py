@@ -42,31 +42,25 @@ def main():
     bucket_width = args.bucket_width
 
     shared_vocab = args.shared_vocab
+    vocab_source_path = args.source_vocab
+    vocab_target_path = args.target_vocab
+    source_factor_vocab_paths = [None] * len(args.source_factors)
     num_words_source, num_words_target = args.num_words
     word_min_count_source, word_min_count_target = args.word_min_count
     max_len_source, max_len_target = args.max_seq_len
 
-    vocab_source_path = args.source_vocab
-    vocab_target_path = args.target_vocab
-    source_factor_vocab_paths = [None] * len(args.source_factors)
-
-    # Remove existing vocab files, so they will be created when load_or_create is called
-    for path_i in [vocab_source_path, vocab_target_path, *source_factor_vocab_paths]:
-        os.unlink(path_i)
-
-    vocabs = vocab.load_or_create_vocabs(source=args.source,
-                                         target=args.target,
-                                         source_vocab_path=vocab_source_path,
-                                         target_vocab_path=vocab_target_path,
-                                         shared_vocab=args.shared_vocab,
-                                         source_factor_sources=args.source_factors,
-                                         source_factor_vocab_paths=source_factor_vocab_paths,
-                                         num_words_source=num_words_source,
-                                         word_min_count_source=word_min_count_source,
-                                         num_words_target=num_words_target,
-                                         word_min_count_target=word_min_count_target)
-
-    vocab_source, vocab_target, *source_factor_vocabs = vocabs
+    vocab_source, vocab_target, *source_factor_vocabs = vocab.load_or_create_vocabs(
+        source=args.source,
+        target=args.target,
+        source_vocab_path=vocab_source_path,
+        target_vocab_path=vocab_target_path,
+        shared_vocab=args.shared_vocab,
+        source_factor_sources=args.source_factors,
+        source_factor_vocab_paths=source_factor_vocab_paths,
+        num_words_source=num_words_source,
+        word_min_count_source=word_min_count_source,
+        num_words_target=num_words_target,
+        word_min_count_target=word_min_count_target)
 
     data_io.prepare_data(args.source, args.target,
                          vocab_source, vocab_target,
