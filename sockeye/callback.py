@@ -103,6 +103,7 @@ class TrainingMonitor(object):
     def checkpoint_callback(self,
                             checkpoint: int,
                             epoch: int,
+                            learning_rate: float,
                             train_metric: Dict[str, float],
                             memory_data: Optional[Dict[int, Tuple[int, int]]] = None):
         """
@@ -111,10 +112,12 @@ class TrainingMonitor(object):
 
         :param checkpoint: Current checkpoint.
         :param epoch: Current epoch.
+        :param learning_rate: Current learning rate.
         :param train_metric: A dictionary of training metrics.
         :param memory_data: Optional data about memory usage.
         """
-        metrics = {"epoch": epoch}  # type: Dict[str, Union[float, int]]
+        metrics = {"epoch": epoch,
+                   "learning-rate": learning_rate}  # type: Dict[str, Union[float, int]]
         for name, value in train_metric.items():
             metrics[name + "-train"] = value
         if memory_data is not None:
