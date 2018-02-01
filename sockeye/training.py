@@ -803,7 +803,7 @@ class Speedometer:
         self.auto_reset = auto_reset
         self.samples = 0
         self.tokens = 0
-        self.msg = 'Epoch[%d] Batch [%d]\tSpeed: %.2f samples/sec %.2f tokens/sec'
+        self.msg = 'Epoch[%d] Batch [%d]\tSpeed: %.2f samples/sec %.2f tokens/sec %.2f updates/sec'
 
     def __call__(self, epoch: int, updates: int, samples: int, tokens: int, metric: Optional[mx.metric.EvalMetric]):
         count = updates
@@ -815,8 +815,10 @@ class Speedometer:
 
         if self.init:
             if count % self.frequency == 0:
-                samples_per_sec = self.samples / (time.time() - self.tic)
-                tokens_per_sec = self.tokens / (time.time() - self.tic)
+                toc = (time.time() - self.tic)
+                updates_per_sec = self.frequency / toc
+                samples_per_sec = self.samples / toc
+                tokens_per_sec = self.tokens / toc
                 self.samples = 0
                 self.tokens = 0
 
@@ -825,7 +827,7 @@ class Speedometer:
                     if self.auto_reset:
                         metric.reset()
                     logger.info(self.msg + '\t%s=%f' * len(name_value),
-                                epoch, count, samples_per_sec, tokens_per_sec, *sum(name_value, ()))
+                                epoch, count, samples_per_sec, tokens_per_sec, updates_per_sec, *sum(name_value, ()))
                 else:
                     logger.info(self.msg, epoch, count, samples_per_sec)
 
