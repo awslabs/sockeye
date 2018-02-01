@@ -1135,7 +1135,8 @@ class ParallelDataSet(Sized):
         """
         sources = self.source + self.target + self.label
         if self.source_factors is not None:
-            sources += self.source_factors
+            for i in range(len(self.source_factors)):
+                sources += self.source_factors[i]
         mx.nd.save(fname, sources)
 
     @staticmethod
