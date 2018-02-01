@@ -53,13 +53,15 @@ def test_callback(optimized_metric, initial_best, train_metrics, eval_metrics, i
         assert monitor.get_best_validation_score() == initial_best
         metrics_fname = os.path.join(tmpdir, C.METRICS_NAME)
         epoch = 1
+        learning_rate = 0.1
 
         for checkpoint, (train_metric, eval_metric, expected_improved) in enumerate(
                 zip(train_metrics, eval_metrics, improved_seq), 1):
-            monitor.checkpoint_callback(checkpoint, epoch, train_metric)
+            monitor.checkpoint_callback(checkpoint, epoch, learning_rate, train_metric)
             assert len(monitor.metrics) == checkpoint
             expected_train_metrics = {k + "-train": v for k, v in train_metric.items()}
             expected_train_metrics['epoch'] = epoch
+            expected_train_metrics['learning-rate'] = learning_rate
             assert monitor.metrics[-1] == expected_train_metrics
             improved, best_checkpoint = monitor.eval_end_callback(checkpoint, DummyMetric(eval_metric))
             assert {k + "-val" for k in eval_metric.keys()} <= monitor.metrics[-1].keys()

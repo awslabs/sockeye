@@ -342,7 +342,7 @@ class TrainingModel(model.SockeyeModel):
     def _get_executors(self):
         return self._get_curr_module()._exec_group.execs
 
-    def _get_optimizer(self):
+    def _get_optimizer(self) -> mx.optimizer.Optimizer:
         # TODO: Push update to MXNet to expose the optimizer (Module should have a get_optimizer method)
         return self._get_curr_module()._optimizer
 
@@ -487,6 +487,7 @@ class TrainingModel(model.SockeyeModel):
                     metric_train_dict['gradient-norm'] = gradient_norm
                 self.training_monitor.checkpoint_callback(train_state.checkpoint,
                                                           train_state.epoch,
+                                                          optimizer.learning_rate,
                                                           metric_train_dict,
                                                           memory_data=utils.get_gpu_memory_usage(self.context))
 
