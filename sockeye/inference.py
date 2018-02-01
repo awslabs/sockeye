@@ -404,6 +404,8 @@ def load_models(context: mx.context.Context,
     models, source_vocabs, source_factor_vocabs, target_vocabs  = [], [], [], []
     if checkpoints is None:
         checkpoints = [None] * len(model_folders)
+
+    source_factor_vocabs = []
     for model_folder, checkpoint in zip(model_folders, checkpoints):
         source_vocabs.append(vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_SRC_NAME)))
         target_vocabs.append(vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_TRG_NAME)))
@@ -418,7 +420,7 @@ def load_models(context: mx.context.Context,
                                    cache_output_layer_w_b=cache_output_layer_w_b)
         models.append(inf_model)
 
-        source_factor_vocab.append(load_source_factor_vocabs(model_folder, inf_model.num_factors))
+        source_factor_vocabs.append(load_source_factor_vocabs(model_folder, inf_model.num_factors))
 
     utils.check_condition(vocab.are_identical(*source_vocabs), "Source vocabulary ids do not match")
     utils.check_condition(vocab.are_identical(*target_vocabs), "Target vocabulary ids do not match")
@@ -426,7 +428,7 @@ def load_models(context: mx.context.Context,
     # sanity check on source factor vocabs
     if len(source_factor_vocabs) > 0:
         for fi in range(len(source_factor_vocabs[0])):
-            utils.check_condition(vocab.are_identical(*[source_factor_vocabs[i][fi] for i in range(fi)]),
+            utils.check_condition(vocab.are_identical(*[source_factor_vocabs[i][fi] for i in range(len(source_factor_vocabs))]),
                                   "Source factor vocabs do not match")
 
     # set a common max_output length for all models.
@@ -436,7 +438,7 @@ def load_models(context: mx.context.Context,
     for inference_model in models:
         inference_model.initialize(max_input_len, get_max_output_length)
 
-    return models, source_vocabs[0], target_vocabs[0], source_factor_vocabs
+    return models, source_vocabs[0], target_vocabs[0], source_factor_vocabs[0]
 
 
 def models_max_input_output_length(models: List[InferenceModel],
@@ -553,8 +555,8 @@ class TranslatorInput:
     :param tokens: List of input tokens.
     :param factors: List of zero or more input factors.
     """
-    def __init__(self, sent_id, sentence, tokens, chunk_id = 0, factors = []):
-        self.id = sent_id
+    def __init__(self, id: int, sentence: str, tokens: List[str], chunk_id: Optional[int] = 0, factors: Optional[List[List[str]]] = []):
+        self.id = id
         self.chunk_id = chunk_id
         self.sentence = sentence
         self.tokens = tokens
@@ -564,7 +566,7 @@ class TranslatorInput:
     def __str__(self):
         return '[%d.%d] %s' % (self.id, self.chunk_id, self.sentence)
 
-    def chunks(self, chunk_size: int) -> TranslatorInput:
+    def chunks(self, chunk_size: int) -> 'TranslatorInput':
         """
         Takes a TranslatorInput (itself) and splits it into chunks, in the case where the
         input sentence is greater than the requested chunk_size.
