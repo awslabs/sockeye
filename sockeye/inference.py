@@ -401,7 +401,7 @@ def load_models(context: mx.context.Context,
                                    restrict lexicon).
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
-    models, source_vocabs, source_factor_vocabs, target_vocabs  = [], [], [], []
+    models, source_vocabs, source_factor_vocabs, target_vocabs = [], [], [], []
     if checkpoints is None:
         checkpoints = [None] * len(model_folders)
 
@@ -555,7 +555,7 @@ class TranslatorInput:
     :param tokens: List of input tokens.
     :param factors: List of zero or more input factors.
     """
-    def __init__(self, id: int, sentence: str, tokens: List[str], chunk_id: Optional[int] = 0, factors: Optional[List[List[str]]] = []):
+    def __init__(self, id: int, sentence: str, tokens: List[str], chunk_id: Optional[int] = 0, factors: Optional[List[List[str]]] = []) -> None:
         self.id = id
         self.chunk_id = chunk_id
         self.sentence = sentence

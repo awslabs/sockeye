@@ -386,7 +386,7 @@ def test_get_training_data_iters():
                                                                             source_factors=[],
                                                                             validation_source=data['validation_source'],
                                                                             validation_target=data['validation_target'],
-                                                                            validation_source_factor=[],
+                                                                            validation_source_factors=[],
                                                                             vocab_source=vcb,
                                                                             vocab_target=vcb,
                                                                             vocab_source_path=None,
