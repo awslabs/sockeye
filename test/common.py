@@ -47,17 +47,18 @@ def gaussian_vector(shape, return_symbol=False):
     return mx.sym.random_normal(shape=shape) if return_symbol else np.random.normal(size=shape)
 
 
-def integer_vector(shape, max_value, return_symbol=False):
+def integer_vector(shape, max_value, min_value=1, return_symbol=False):
     """
     Generates a random positive integer tensor
 
     :param shape: shape of the tensor.
     :param max_value: maximum integer value.
+    :param min_value: minimum integer value.
     :param return_symbol: True if the result should be a Symbol, False if it should be an Numpy array.
     :return: A random integer tensor.
     """
-    return mx.sym.round(mx.sym.random_uniform(shape=shape) * max_value) if return_symbol \
-        else np.round(np.random.uniform(size=shape) * max_value)
+    return mx.sym.round(mx.sym.random.uniform(low=min_value, high=max_value, shape=shape)) if return_symbol \
+        else np.random.randint(low=min_value, high=max_value, size=shape)
 
 
 def uniform_vector(shape, min_value=0, max_value=1, return_symbol=False):
@@ -70,7 +71,7 @@ def uniform_vector(shape, min_value=0, max_value=1, return_symbol=False):
     :param return_symbol: True if the result should be a mx.sym.Symbol, False if it should be a Numpy array
     :return:
     """
-    return mx.sym.random_uniform(low=min_value, high=max_value, shape=shape) if return_symbol \
+    return mx.sym.random.uniform(low=min_value, high=max_value, shape=shape) if return_symbol \
         else np.random.uniform(low=min_value, high=max_value, size=shape)
 
 

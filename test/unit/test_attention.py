@@ -15,9 +15,9 @@ import mxnet as mx
 import numpy as np
 import pytest
 
-import sockeye.rnn_attention
 import sockeye.constants as C
 import sockeye.coverage
+import sockeye.rnn_attention
 from test.common import gaussian_vector, integer_vector
 
 attention_types = [C.ATT_BILINEAR, C.ATT_DOT, C.ATT_DOT_SCALED, C.ATT_LOC, C.ATT_MLP]
@@ -119,7 +119,7 @@ def test_coverage_attention(attention_coverage_type,
     attention_prob_result = exec_output[1].asnumpy()
     dynamic_source_result = exec_output[2].asnumpy()
 
-    expected_probs = (1 / source_length_vector).reshape((batch_size, 1))
+    expected_probs = (1. / source_length_vector).reshape((batch_size, 1))
 
     assert context_result.shape == (batch_size, encoder_num_hidden)
     assert attention_prob_result.shape == (batch_size, source_seq_len)
