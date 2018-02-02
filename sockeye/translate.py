@@ -90,40 +90,30 @@ def main():
         read_and_translate(translator, output_handler, args.chunk_size, args.input, args.input_factors)
 
 
-def merge_factors(source: str,
-                  source_factors: Optional[List[str]] = None):
+def merge_factors(*streams: Iterable[str]) -> Iterable[str]:
     """
     This function merges multiple factor streams into a single stream with Moses-style factors present on each token.
+    No error checking is done (since only the model knows what factors are required).
+    This function makes it easy to stream in factors from multiple files and merge them into the inference-time format used by Moses.
 
-    Background:
-    Decoding from the command line can take input from either STDIN or from a file (`--input`).
-    When adding source factors, the input format from STDIN is a sequence of tokens, with factors attached to each word
-    in order and delimited by |, Moses style. If instead using `--input`, factors are passed via `--input-factors`,
-    which will contain a list of token-parallel files.
-
-    :param source: The source file.
-    :param source_factors: A list of source factor files.
+    :param streams: A list of input streams.
     :return: A single stream with the factors merged into the source stream.
     """
 
-    num_streams = 1 + len(source_factors)
+    for factors in zip(*streams):
+        tokens = [f.rstrip().split() for f in factors]
+        source_len = len(tokens[0])
+        for i, toks in enumerate(tokens[1:]):
+            check_condition(len(toks) == source_len,
+                            'Factor {:d} has the wrong number of tokens (found {:d}, needed {:d})'.format(
+                                i, len(toks), source_len))
 
-    with ExitStack() as exit_stack:
-        fhs = [ sockeye.data_io.smart_open(x) for x in [source] + source_factors ]
-        for factors in zip(*fhs):
-            tokens = [f.rstrip().split() for f in factors]
-            source_len = len(tokens[0])
-            for i, toks in enumerate(tokens[1:]):
-                check_condition(len(toks) == source_len,
-                                'Factor {:d} has the wrong number of tokens (found {:d}, needed {:d})'.format(
-                                    i, len(toks), source_len))
+        # Single-line nested comprehensions are unreadable
+        merged = []
+        for i in range(source_len):
+            merged.append(C.FACTOR_DELIM.join([tokens[j][i] for j in range(len(streams))]))
 
-            # Single-line nested comprehensions are unreadable
-            merged = []
-            for i in range(source_len):
-                merged.append(C.FACTOR_DELIM.join([tokens[j][i] for j in range(num_streams)]))
-
-            yield ' '.join(merged)
+        yield ' '.join(merged)
 
 
 def read_and_translate(translator: sockeye.inference.Translator, output_handler: sockeye.output_handler.OutputHandler,
@@ -136,7 +126,7 @@ def read_and_translate(translator: sockeye.inference.Translator, output_handler:
     :param chunk_size: The size of the portion to read at a time from the input.
     :param source: Path to file which will be translated line-by-line if included, if none use stdin.
     """
-    source_data = sys.stdin if source is None else merge_factors(source, source_factors)
+    source_data = sys.stdin if source is None else merge_factors(*[sockeye.data_io.smart_open(x) for x in [source] + source_factors])
 
     batch_size = translator.batch_size
     if chunk_size is None:

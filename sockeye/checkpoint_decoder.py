@@ -24,6 +24,7 @@ from typing import Dict, Optional, List
 import mxnet as mx
 
 import sockeye.output_handler
+import sockeye.translate
 from . import evaluate
 from . import constants as C
 from . import data_io
@@ -98,10 +99,10 @@ class CheckpointDecoder:
                 # compare metrics across independent runs
                 random_gen = random.Random(random_seed)
                 self.input_sentences, self.target_sentences = zip(
-                    *random_gen.sample(list(zip(utils.paste(input_sentences, *input_sentence_factors), target_sentences)),
+                    *random_gen.sample(list(zip(sockeye.translate.merge_factors(input_sentences, *input_sentence_factors), target_sentences)),
                                        sample_size))
             else:
-                self.input_sentences, self.target_sentences = list(utils.paste(input_sentences, *input_sentence_factors)), target_sentences
+                self.input_sentences, self.target_sentences = list(sockeye.translate.merge_factors(input_sentences, *input_sentence_factors)), target_sentences
 
         logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d, source_factors=%d)",
                     max_input_len if max_input_len is not None else -1,
@@ -109,8 +110,10 @@ class CheckpointDecoder:
 
         with data_io.smart_open(os.path.join(self.model, C.DECODE_REF_NAME), 'w') as trg_out, \
                 data_io.smart_open(os.path.join(self.model, C.DECODE_IN_NAME), 'w') as src_out:
-            [trg_out.write(s) for s in self.target_sentences]
-            [src_out.write(s) for s in self.input_sentences]
+            for s in self.target_sentences:
+                print(s.rstrip(), file=trg_out)
+            for s in self.input_sentences:
+                print(s.rstrip(), file=src_out)
 
     def decode_and_evaluate(self,
                             checkpoint: Optional[int] = None,
