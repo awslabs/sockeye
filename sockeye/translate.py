@@ -19,7 +19,7 @@ import sys
 import time
 from math import ceil
 from contextlib import ExitStack
-from typing import Optional, Iterable
+from typing import Optional, Iterable, List, Dict
 
 import mxnet as mx
 
@@ -87,11 +87,47 @@ def main():
                                                   vocab_target,
                                                   source_factor_vocabs,
                                                   restrict_lexicon)
-        read_and_translate(translator, output_handler, args.chunk_size, args.input)
+        read_and_translate(translator, output_handler, args.chunk_size, args.input, args.input_factors)
+
+
+def merge_factors(source: str,
+                  source_factors: Optional[List[str]] = None):
+    """
+    This function merges multiple factor streams into a single stream with Moses-style factors present on each token.
+
+    Background:
+    Decoding from the command line can take input from either STDIN or from a file (`--input`).
+    When adding source factors, the input format from STDIN is a sequence of tokens, with factors attached to each word
+    in order and delimited by |, Moses style. If instead using `--input`, factors are passed via `--input-factors`,
+    which will contain a list of token-parallel files.
+
+    :param source: The source file.
+    :param source_factors: A list of source factor files.
+    :return: A single stream with the factors merged into the source stream.
+    """
+
+    num_streams = 1 + len(source_factors)
+
+    with ExitStack() as exit_stack:
+        fhs = [ sockeye.data_io.smart_open(x) for x in [source] + source_factors ]
+        for factors in zip(*fhs):
+            tokens = [f.rstrip().split() for f in factors]
+            source_len = len(tokens[0])
+            for i, toks in enumerate(tokens[1:]):
+                check_condition(len(toks) == source_len,
+                                'Factor {:d} has the wrong number of tokens (found {:d}, needed {:d})'.format(
+                                    i, len(toks), source_len))
+
+            # Single-line nested comprehensions are unreadable
+            merged = []
+            for i in range(source_len):
+                merged.append(C.FACTOR_DELIM.join([tokens[j][i] for j in range(num_streams)]))
+
+            yield ' '.join(merged)
 
 
 def read_and_translate(translator: sockeye.inference.Translator, output_handler: sockeye.output_handler.OutputHandler,
-                       chunk_size: Optional[int], source: Optional[str] = None) -> None:
+                       chunk_size: Optional[int], source: Optional[str] = None, source_factors: Optional[List[str]] = []) -> None:
     """
     Reads from either a file or stdin and translates each line, calling the output_handler with the result.
 
@@ -100,7 +136,7 @@ def read_and_translate(translator: sockeye.inference.Translator, output_handler:
     :param chunk_size: The size of the portion to read at a time from the input.
     :param source: Path to file which will be translated line-by-line if included, if none use stdin.
     """
-    source_data = sys.stdin if source is None else sockeye.data_io.smart_open(source)
+    source_data = sys.stdin if source is None else merge_factors(source, source_factors)
 
     batch_size = translator.batch_size
     if chunk_size is None:
@@ -132,13 +168,13 @@ def read_and_translate(translator: sockeye.inference.Translator, output_handler:
         logger.info("Processed 0 lines.")
 
 
-def translate(output_handler: sockeye.output_handler.OutputHandler, source_data: Iterable[str],
+def translate(output_handler: sockeye.output_handler.OutputHandler, source_data: Iterable[Dict],
                     translator: sockeye.inference.Translator, chunk_id: int = 0) -> float:
     """
     Translates each line from source_data, calling output handler after translating a batch.
 
     :param output_handler: A handler that will be called once with the output of each translation.
-    :param source_data: A enumerable list of source sentences that will be translated.
+    :param source_data: A enumerable list of source sentence JSON objects that will be translated.
     :param translator: The translator that will be used for each line of input.
     :param chunk_id: Global id of the chunk.
     :return: Total time taken.

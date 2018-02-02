@@ -755,6 +755,7 @@ class Translator:
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
         self.batch_size = self.models[0].batch_size
+        self.num_factors = self.models[0].config.num_factors
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         self.max_input_length = self.models[0].max_input_length
         max_output_length = self.models[0].get_max_output_length(self.max_input_length)
@@ -795,24 +796,29 @@ class Translator:
         # pylint: disable=invalid-unary-operand-type
         return -mx.nd.log(mx.nd.softmax(log_probs))
 
-    def make_input(self, sentence_id: int, sentence: str) -> TranslatorInput:
+    def make_input(self, sentence_id: int, raw_sentence: str) -> TranslatorInput:
         """
         Constructs a TranslatorInput from the input string.
-        The input string may contain input factors, delimited by a tab.
+        The string might have source factors in Moses format (word1|f1|f2 word2|f1|f2 ...).
 
         :param sentence_id: Input sentence id.
         :param sentence: Input sentence.
         :return: Input for translate method.
         """
-        pieces = sentence.split('\t')
-        if len(pieces) != self.num_factors + 1:
-            raise Exception('sentence %d: expected %d factor(s), but found %d' % (sentence_id, self.num_factors, len(pieces)-1))
+        tokens = []
+        factors = [[] for i in range(self.num_factors)]
+        for token in data_io.get_tokens(raw_sentence):
+            pieces = token.rsplit(C.FACTOR_DELIM, maxsplit=self.num_factors)
+            tokens.append(pieces[0])
+            for i in range(self.num_factors):
+                try:
+                    factors[i].append(pieces[i + 1])
+                except:
+                    raise ValueError('Wrong number of factors for sentence %d word %d' % (sentence_id, i))
 
-        sentence = pieces[0]
-        factors = pieces[1:]
-        tokens = list(data_io.get_tokens(sentence))
-        factors = [list(data_io.get_tokens(factor)) for factor in factors]
-        return TranslatorInput(id=sentence_id, sentence=sentence.rstrip(), tokens=tokens, factors=factors)
+        text = ' '.join(tokens)
+
+        return TranslatorInput(id=sentence_id, sentence=text, tokens=tokens, factors=factors)
 
     def translate(self, trans_inputs: List[TranslatorInput]) -> List[TranslatorOutput]:
         """
