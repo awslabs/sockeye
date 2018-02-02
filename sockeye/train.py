@@ -371,8 +371,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 word_min_count_source=word_min_count_source,
                 word_min_count_target=word_min_count_target)
 
-        utils.check_condition(len(args.source_factor_dims) == len(source_factor_vocabs),
-                              "The number of source factor data sources (%d) is different from the number of provided source factor embedding dimensions (%d)" % (len(args.source_factor_dims), len(source_factor_vocabs)))
+        utils.check_condition(len(args.source_factor_num_embed) == len(source_factor_vocabs),
+                              "The number of source factor data sources (%d) is different from the number of provided source factor embedding dimensions (%d)" % (len(args.source_factor_num_embed), len(source_factor_vocabs)))
 
         train_iter, validation_iter, config_data = data_io.get_training_data_iters(
             source=os.path.abspath(args.source),
@@ -639,7 +639,7 @@ def create_model_config(args: argparse.Namespace,
     config_embed_source = encoder.EmbeddingConfig(vocab_size=vocab_source_size,
                                                   num_embed=num_embed_source,
                                                   dropout=embed_dropout_source,
-                                                  factor_configs = [encoder.FactorConfig(size, dim) for size, dim in zip(source_factor_vocab_sizes, args.source_factor_dims)])
+                                                  factor_configs = [encoder.FactorConfig(size, dim) for size, dim in zip(source_factor_vocab_sizes, args.source_factor_num_embed)])
 
     config_embed_target = encoder.EmbeddingConfig(vocab_size=vocab_target_size,
                                                   num_embed=num_embed_target,

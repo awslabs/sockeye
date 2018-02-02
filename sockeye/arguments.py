@@ -588,7 +588,7 @@ def add_model_parameters(params):
                               default=(512, 512),
                               help='Embedding size for source and target tokens. '
                                    'Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
-    model_params.add_argument('--source-factor-dims',
+    model_params.add_argument('--source-factor-num-embed',
                               type=int,
                               nargs='+',
                               default=[],
@@ -940,6 +940,13 @@ def add_inference_args(params):
                                default=None,
                                help='Input file to translate. One sentence per line. '
                                     'If not given, will read from stdin.')
+
+    decode_params.add_argument(C.INFERENCE_ARG_INPUT_FACTORS_LONG, C.INFERENCE_ARG_INPUT_FACTORS_SHORT,
+                               required=False,
+                               nargs='+',
+                               type=regular_file(),
+                               default=[],
+                               help='List of input files containing source factors, each token-parallel to the source. ')
 
     decode_params.add_argument(C.INFERENCE_ARG_OUTPUT_LONG, C.INFERENCE_ARG_OUTPUT_SHORT,
                                default=None,
