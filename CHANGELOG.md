@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.16.5]
+### Changed
+ - Device locking: Only one process will be acquiring GPUs at a time.
+ This will lead to consecutive device ids whenever possible.
+
 ## [1.16.4]
 ### Changed
  - Internal change: Standardized all data to be batch-major both at training and at inference time.

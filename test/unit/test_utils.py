@@ -64,6 +64,9 @@ def test_aquire_gpus(tmpdir, requested_device_ids, num_gpus_available, expected)
     with utils.acquire_gpus(requested_device_ids, lock_dir=str(tmpdir),
                             num_gpus_available=num_gpus_available) as acquired_gpus:
         assert set(acquired_gpus) == set(expected)
+        # make sure the master lock does not exist anymore after acquiring
+        # (but rather just one lock per acquired GPU)
+        assert len(tmpdir.listdir()) == len(acquired_gpus)
 
 
 # We expect the following settings to raise a ValueError
