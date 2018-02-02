@@ -25,7 +25,7 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager, ExitStack
-from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar
+from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
 
 import fcntl
 import mxnet as mx
@@ -568,15 +568,14 @@ def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
         with ExitStack() as exit_stack:
             any_failed = False
             acquired_gpus = []  # type: List[int]
-            with GpuFileLock(candidates=["master_lock"], lock_dir=lock_dir) as master_lock:
+            with GpuFileLock(candidates=["master_lock"], lock_dir=lock_dir) as master_lock:  # type: str
                 # Only one process, determined by the master lock, can try acquiring gpu locks at a time.
                 # This will make sure that we use consecutive device ids whenever possible.
                 if master_lock is not None:
                     for candidates in candidates_to_request:
-                        gpu_id = exit_stack.enter_context(GpuFileLock(candidates=candidates,
-                                                                      lock_dir=lock_dir))  # type: ignore
+                        gpu_id = exit_stack.enter_context(GpuFileLock(candidates=candidates, lock_dir=lock_dir))
                         if gpu_id is not None:
-                            acquired_gpus.append(gpu_id)
+                            acquired_gpus.append(cast(int, gpu_id))
                         else:
                             if len(candidates) == 1:
                                 logger.info("Could not acquire GPU %d. It's currently locked.", candidates[0])
