@@ -4,6 +4,7 @@
 - [ ] Changes are complete (if posting work-in-progress code, prefix your pull request title with '[WIP]'
 until you can check this box.
 - [ ] Unit tests pass (`pytest`)
+- [ ] Were system tests modified? If so did you run these at least 5 times to account for the variation across runs?
 - [ ] System tests pass (`pytest test/system`)
 - [ ] Passed code style checking (`./pre-commit.sh` or manual run of pylint & mypy)
 - [ ] You have considered writing a test

@@ -10,20 +10,14 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.16.5]
+### Changed
+ - Device locking: Only one process will be acquiring GPUs at a time.
+ This will lead to consecutive device ids whenever possible.
+
 ## [1.16.4]
-### Added
- - Source factors, as described in
-
-   Linguistic Input Features Improve Neural Machine Translation.
-   Rico Sennrich & Barry Haddow
-   In Proceedings of the First Conference on Machine Translation. Berlin, Germany, pp. 83-91.
-
-   Source factors are enabled by passing `--source-factors file1 [file2 ...]` (`-sf`), where file1, etc. are token-parallel to the source (`-s`).
-   An analogous parameter, `--validation-source-factors`, is used to pass factors for validation data.
-   The flag `--source-factor-dims D1 [D2 ...]` denotes the embedding dimensions.
-   These are concatenated with the source word dimension (`--num-embed`), which can continue to be tied to the target (`--weight-tying --weight-tying-type=src_trg`).
-
-   At test time, the input sentence and its factors should be passed on STDIN, separated by a tab (e.g., the output of UNIX `paste SOURCE FACTOR1 [FACTOR2 ...]`.
+### Changed
+ - Internal change: Standardized all data to be batch-major both at training and at inference time.
 
 ## [1.16.3]
 ### Changed

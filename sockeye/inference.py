@@ -171,9 +171,6 @@ class InferenceModel(model.SockeyeModel):
              source_encoded_seq_len) = self.encoder.encode(source_embed,
                                                            source_embed_length,
                                                            source_embed_seq_len)
-            # source_encoded: (batch_size, source_encoded_length, encoder_depth)
-            # TODO(fhieber): Consider standardizing encoders to return batch-major data to avoid this line.
-            source_encoded = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1)
 
             # initial decoder states
             decoder_init_states = self.decoder.init_states(source_encoded,
