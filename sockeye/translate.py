@@ -90,11 +90,11 @@ def main():
         read_and_translate(translator, output_handler, args.chunk_size, args.input, args.input_factors)
 
 
-def merge_factors(*streams: Iterable[str]) -> Iterable[str]:
+def merge_factors(*streams: Iterable[str], delimiter=C.FACTOR_DELIMITER) -> Iterable[str]:
     """
-    This function merges multiple factor streams into a single stream with Moses-style factors present on each token.
-    No error checking is done (since only the model knows what factors are required).
-    This function makes it easy to stream in factors from multiple files and merge them into the inference-time format used by Moses.
+    This function merges multiple factor streams into a single stream with word factors present on each token.
+    No error checking is done (since only the model knows how many factors are required).
+    This function makes it easy to stream in factors from multiple files and merge them into our inference-time format.
 
     :param streams: A list of input streams.
     :return: A single stream with the factors merged into the source stream.
@@ -111,7 +111,7 @@ def merge_factors(*streams: Iterable[str]) -> Iterable[str]:
         # Single-line nested comprehensions are unreadable
         merged = []
         for i in range(source_len):
-            merged.append(C.FACTOR_DELIM.join([tokens[j][i] for j in range(len(streams))]))
+            merged.append(delimiter.join([tokens[j][i] for j in range(len(streams))]))
 
         yield ' '.join(merged)
 
@@ -158,13 +158,13 @@ def read_and_translate(translator: sockeye.inference.Translator, output_handler:
         logger.info("Processed 0 lines.")
 
 
-def translate(output_handler: sockeye.output_handler.OutputHandler, source_data: Iterable[Dict],
+def translate(output_handler: sockeye.output_handler.OutputHandler, source_data: Iterable[str],
                     translator: sockeye.inference.Translator, chunk_id: int = 0) -> float:
     """
     Translates each line from source_data, calling output handler after translating a batch.
 
     :param output_handler: A handler that will be called once with the output of each translation.
-    :param source_data: A enumerable list of source sentence JSON objects that will be translated.
+    :param source_data: A enumerable list of (possibly factored) source sentences that will be translated.
     :param translator: The translator that will be used for each line of input.
     :param chunk_id: Global id of the chunk.
     :return: Total time taken.

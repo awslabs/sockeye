@@ -228,17 +228,11 @@ TRAINING_ARG_PREPARED_DATA = "--prepared-data"
 
 VOCAB_ARG_SHARED_VOCAB = "--shared-vocab"
 
-INFERENCE_ARG_INPUT_LONG = "--input"
-INFERENCE_ARG_INPUT_SHORT = "-i"
-INFERENCE_ARG_INPUT_FACTORS_LONG = "--input-factors"
-INFERENCE_ARG_INPUT_FACTORS_SHORT = "-if"
-INFERENCE_ARG_OUTPUT_LONG = "--output"
-INFERENCE_ARG_OUTPUT_SHORT = "-o"
 TRAIN_ARGS_MONITOR_BLEU = "--decode-and-evaluate"
 TRAIN_ARGS_CHECKPOINT_FREQUENCY = "--checkpoint-frequency"
 
 # Used to delimit factors on STDIN for inference
-FACTOR_DELIM = '|'
+FACTOR_DELIMITER = '|'
 
 # data layout strings
 BATCH_MAJOR = "NTC"

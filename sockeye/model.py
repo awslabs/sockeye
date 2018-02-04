@@ -42,7 +42,6 @@ class ModelConfig(Config):
     :param max_seq_len_target: Maximum target sequence length to unroll during training.
     :param vocab_source_size: Source vocabulary size.
     :param vocab_target_size: Target vocabulary size.
-    :param num_factors: The number of source factors.
     :param source_factor_vocab_sizes: The list vocabulary sizes for source factors.
     :param config_embed_source: Embedding config for source.
     :param config_embed_target: Embedding config for target.
@@ -65,7 +64,6 @@ class ModelConfig(Config):
                  config_encoder: encoder.EncoderConfig,
                  config_decoder: decoder.DecoderConfig,
                  config_loss: loss.LossConfig,
-                 num_factors: int = 0,
                  weight_tying: bool = False,
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
                  weight_normalization: bool = False) -> None:
@@ -75,7 +73,6 @@ class ModelConfig(Config):
         self.max_seq_len_target = max_seq_len_target
         self.vocab_source_size = vocab_source_size
         self.vocab_target_size = vocab_target_size
-        self.num_factors = num_factors
         self.config_embed_source = config_embed_source
         self.config_embed_target = config_embed_target
         self.config_encoder = config_encoder

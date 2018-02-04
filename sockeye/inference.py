@@ -77,7 +77,7 @@ class InferenceModel(model.SockeyeModel):
         self.softmax_temperature = softmax_temperature
         self.batch_size = batch_size
         self.context = context
-        self.num_factors = self.config.num_factors
+        self.num_factors = self.config.config_embed_source.num_factors
 
         self._build_model_components()
 
@@ -157,7 +157,7 @@ class InferenceModel(model.SockeyeModel):
 
         def sym_gen(source_seq_len: int):
             source = mx.sym.Variable(C.SOURCE_NAME)
-            source_factors = [mx.sym.Variable('%s_factor_%d' % (C.SOURCE_NAME,i)) for i in range(self.config.num_factors)]
+            source_factors = [mx.sym.Variable('%s_factor_%d' % (C.SOURCE_NAME,i)) for i in range(self.num_factors)]
             source_length = utils.compute_lengths(source)
 
             (source_embed,
@@ -177,7 +177,7 @@ class InferenceModel(model.SockeyeModel):
                                                            source_encoded_length,
                                                            source_encoded_seq_len)
 
-            data_names = [C.SOURCE_NAME] + [C.SOURCE_NAME + '_factor_' + str(i) for i in range(self.config.num_factors)]
+            data_names = [C.SOURCE_NAME] + [C.SOURCE_NAME + '_factor_' + str(i) for i in range(self.num_factors)]
             label_names = []  # type: List[str]
             return mx.sym.Group(decoder_init_states), data_names, label_names
 
@@ -736,7 +736,7 @@ class Translator:
                  models: List[InferenceModel],
                  vocab_source: Dict[str, int],
                  vocab_target: Dict[str, int],
-                 source_factor_vocabs: Optional[List[Dict[str, int]]],
+                 source_factor_vocabs: Optional[List[Dict[str, int]]] = [],
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None) -> None:
         self.context = context
         self.length_penalty = length_penalty
@@ -752,7 +752,7 @@ class Translator:
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
         self.batch_size = self.models[0].batch_size
-        self.num_factors = self.models[0].config.num_factors
+        self.num_factors = self.models[0].config.config_embed_source.num_factors
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         self.max_input_length = self.models[0].max_input_length
         max_output_length = self.models[0].get_max_output_length(self.max_input_length)
@@ -793,10 +793,12 @@ class Translator:
         # pylint: disable=invalid-unary-operand-type
         return -mx.nd.log(mx.nd.softmax(log_probs))
 
-    def make_input(self, sentence_id: int, raw_sentence: str) -> TranslatorInput:
+    def make_input(self, sentence_id: int,
+                   raw_sentence: str,
+                   delimiter: str = C.FACTOR_DELIMITER) -> TranslatorInput:
         """
         Constructs a TranslatorInput from the input string.
-        The string might have source factors in Moses format (word1|f1|f2 word2|f1|f2 ...).
+        The string might have source factors in the format (word1|f1|f2 word2|f1|f2 ...).
 
         :param sentence_id: Input sentence id.
         :param sentence: Input sentence.
@@ -804,14 +806,13 @@ class Translator:
         """
         tokens = []
         factors = [[] for i in range(self.num_factors)]
-        for token in data_io.get_tokens(raw_sentence):
-            pieces = token.rsplit(C.FACTOR_DELIM, maxsplit=self.num_factors)
+        for token_id, token in enumerate(data_io.get_tokens(raw_sentence)):
+            pieces = token.rsplit(delimiter, maxsplit=self.num_factors)
+            utils.check_condition(len(pieces) == 1 + self.num_factors,
+                                  'Wrong number of factors for sentence {:d} word {:d} ({})'.format(sentence_id, token_id, token))
             tokens.append(pieces[0])
             for i in range(self.num_factors):
-                try:
-                    factors[i].append(pieces[i + 1])
-                except:
-                    raise ValueError('Wrong number of factors for sentence %d word %d' % (sentence_id, i))
+                factors[i].append(pieces[i + 1])
 
         text = ' '.join(tokens)
 

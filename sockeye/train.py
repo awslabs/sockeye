@@ -612,7 +612,7 @@ def create_model_config(args: argparse.Namespace,
     Create a ModelConfig from the argument given in the command line.
 
     :param args: Arguments as returned by argparse.
-    :param vocab_source_size: The sizes of the source vocabularies.
+    :param vocab_source_size: The size of the source vocabulary.
     :param vocab_target_size: The size of the target vocabulary.
     :param config_data: Data config.
     :param source_factor_vocab_sizes: Size of source factor vocabularies.
@@ -661,7 +661,6 @@ def create_model_config(args: argparse.Namespace,
                                      config_encoder=config_encoder,
                                      config_decoder=config_decoder,
                                      config_loss=config_loss,
-                                     num_factors=len(source_factor_vocab_sizes),
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
                                      weight_normalization=args.weight_normalization)
@@ -800,8 +799,10 @@ def main():
         vocab_source_size = len(vocab_source)
         vocab_target_size = len(vocab_target)
         source_factor_vocab_sizes = [len(v) for v in source_factor_vocabs]
-        logger.info("Vocabulary sizes: source (%s) target (%s)",
-                    ', '.join([str(size) for size in [vocab_source_size] + source_factor_vocab_sizes]), vocab_target_size)
+        logger.info('Vocabulary sizes: source=%d source_factors=%s target=%d',
+                    vocab_source_size,
+                    ','.join([str(size) for size in source_factor_vocab_sizes]),
+                    vocab_target_size)
         lr_scheduler_instance = create_lr_scheduler(args, resume_training, training_state_dir)
 
         model_config = create_model_config(args, vocab_source_size, vocab_target_size, config_data, source_factor_vocab_sizes)

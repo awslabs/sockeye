@@ -102,13 +102,14 @@ class TrainingModel(model.SockeyeModel):
         Initializes model components, creates training symbol and module, and binds it.
         """
         #utils.check_condition(train_iter.pad_id == C.PAD_ID == 0, "pad id should be 0")
+        num_factors = self.config.config_embed_source.num_factors
+
         source = mx.sym.Variable(C.SOURCE_NAME)
+        source_factors = [mx.sym.Variable('{}_factor_{:d}'.format(C.SOURCE_NAME, i)) for i in range(num_factors)]
         source_length = utils.compute_lengths(source)
         target = mx.sym.Variable(C.TARGET_NAME)
         target_length = utils.compute_lengths(target)
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
-
-        source_factors = [mx.sym.Variable(C.SOURCE_NAME + "_factor_" + str(i)) for i in range(self.config.num_factors)]
 
         model_loss = loss.get_loss(self.config.config_loss)
 
@@ -123,7 +124,7 @@ class TrainingModel(model.SockeyeModel):
             source_seq_len, target_seq_len = seq_lens
 
             # source embedding
-            if self.config.num_factors == 0:
+            if num_factors == 0:
                 (source_embed,
                  source_embed_length,
                  source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
