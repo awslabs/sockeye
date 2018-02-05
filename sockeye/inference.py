@@ -17,7 +17,7 @@ Code for inference/translation
 import itertools
 import logging
 import os
-from typing import Callable, Dict, List, NamedTuple, Iterable, Optional, Tuple, Union, Set
+from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set
 
 import mxnet as mx
 import numpy as np
@@ -95,8 +95,12 @@ class InferenceModel(model.SockeyeModel):
         self.output_layer_b = None  # type: mx.nd.NDArray
 
     @property
-    def num_factors(self):
-        return self.config.config_embed_source.num_factors
+    def num_source_factors(self) -> int:
+        """
+        Returns the number of source factors of this InferenceModel.
+        :return:
+        """
+        return self.config.config_embed_source.num_source_factors
 
     def initialize(self, max_input_length: int, get_max_output_length_function: Callable):
         """
@@ -160,7 +164,7 @@ class InferenceModel(model.SockeyeModel):
 
         def sym_gen(source_seq_len: int):
             source = mx.sym.Variable(C.SOURCE_NAME)
-            source_words = source.split(num_outputs=self.num_factors + 1, axis=2, squeeze_axis=True)[0]
+            source_words = source.split(num_outputs=self.num_source_factors + 1, axis=2, squeeze_axis=True)[0]
             source_length = utils.compute_lengths(source_words)
 
             # source embedding
@@ -258,7 +262,7 @@ class InferenceModel(model.SockeyeModel):
         :param bucket_key: Maximum input length.
         :return: List of data descriptions.
         """
-        num_factors = self.config.config_embed_source.num_factors
+        num_factors = self.config.config_embed_source.num_source_factors
         data = [mx.io.DataDesc(name=C.SOURCE_NAME,
                                shape=(self.batch_size, bucket_key, num_factors + 1),
                                layout=C.BATCH_MAJOR)]
@@ -290,7 +294,7 @@ class InferenceModel(model.SockeyeModel):
         Returns encoder representation of the source, source_length, initial hidden state of decoder RNN,
         and initial decoder states tiled to beam size.
 
-        :param source: Integer-coded input tokens. Shape (batch_size, source length).
+        :param source: Integer-coded input tokens. Shape (batch_size, source length, 1 + num_source_factors).
         :param source_max_length: Bucket key.
         :return: Initial model state.
         """
@@ -357,16 +361,6 @@ class InferenceModel(model.SockeyeModel):
     def length_ratio_std(self) -> float:
         return self.config.config_data.data_statistics.length_ratio_std
 
-def load_source_factor_vocabs(model_folder: str, num_factors: Optional[int] = 0) -> List[Dict[str,int]]:
-    """
-    Loads source factor vocabs of the form "vocab.src.N" until one can no longer be found.
-    This could alternately be done by first reading the number of factors from the config file.
-
-    :param model_folder: The location of the model folder
-    :return: The list of source factor vocabs found in the model folder.
-    """
-    return [vocab.vocab_from_json_or_pickle('%s.%d' % (os.path.join(model_folder, C.VOCAB_SRC_NAME), fi)) for fi in range(num_factors)]
-
 
 def load_models(context: mx.context.Context,
                 max_input_len: Optional[int],
@@ -377,13 +371,17 @@ def load_models(context: mx.context.Context,
                 softmax_temperature: Optional[float] = None,
                 max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                 decoder_return_logit_inputs: bool = False,
-                cache_output_layer_w_b: bool = False) -> Tuple[List[InferenceModel], Dict[str, int], Dict[str, int], List[Dict[str, int]]]:
+                cache_output_layer_w_b: bool = False) -> Tuple[List[InferenceModel],
+                                                               vocab.Vocab,
+                                                               List[vocab.Vocab],
+                                                               vocab.Vocab]:
     """
     Loads a list of models for inference.
 
     :param context: MXNet context to bind modules to.
     :param max_input_len: Maximum input length.
     :param beam_size: Beam size.
+    :param batch_size: Batch size.
     :param model_folders: List of model folders to load models from.
     :param checkpoints: List of checkpoints to use for each model in model_folders. Use None to load best checkpoint.
     :param softmax_temperature: Optional parameter to control steepness of softmax distribution.
@@ -395,11 +393,13 @@ def load_models(context: mx.context.Context,
                                    restrict lexicon).
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
-    models, source_vocabs, source_factor_vocabs, target_vocabs = [], [], [], []
+    models = []  # type: List[InferenceModel]
+    source_vocabs = []  # type: List[vocab.Vocab]
+    target_vocabs = []  # type: List[vocab.Vocab]
+    source_factor_vocabs = []  # type: List[List[vocab.Vocab]]
     if checkpoints is None:
         checkpoints = [None] * len(model_folders)
 
-    source_factor_vocabs = []
     for model_folder, checkpoint in zip(model_folders, checkpoints):
         source_vocabs.append(vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_SRC_NAME)))
         target_vocabs.append(vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_TRG_NAME)))
@@ -414,16 +414,14 @@ def load_models(context: mx.context.Context,
                                          cache_output_layer_w_b=cache_output_layer_w_b)
         models.append(inference_model)
 
-        source_factor_vocabs.append(load_source_factor_vocabs(model_folder, inference_model.num_factors))
+        source_factor_vocabs.append(vocab.load_source_factor_vocabs(model_folder, inference_model.num_source_factors))
 
     utils.check_condition(vocab.are_identical(*source_vocabs), "Source vocabulary ids do not match")
     utils.check_condition(vocab.are_identical(*target_vocabs), "Target vocabulary ids do not match")
-
-    # sanity check on source factor vocabs
-    if len(source_factor_vocabs) > 0:
-        for fi in range(len(source_factor_vocabs[0])):
-            utils.check_condition(vocab.are_identical(*[source_factor_vocabs[i][fi] for i in range(len(source_factor_vocabs))]),
-                                  "Source factor vocabs do not match")
+    for fi in range(len(source_factor_vocabs[0])):
+        utils.check_condition(
+            vocab.are_identical(*[source_factor_vocabs[i][fi] for i in range(len(source_factor_vocabs))]),
+            "Source factor vocabs do not match")
 
     # set a common max_output length for all models.
     max_input_len, get_max_output_length = models_max_input_output_length(models,
@@ -432,7 +430,7 @@ def load_models(context: mx.context.Context,
     for inference_model in models:
         inference_model.initialize(max_input_len, get_max_output_length)
 
-    return models, source_vocabs[0], target_vocabs[0], source_factor_vocabs[0]
+    return models, source_vocabs[0], source_factor_vocabs[0], target_vocabs[0],
 
 
 def models_max_input_output_length(models: List[InferenceModel],
@@ -545,43 +543,44 @@ class TranslatorInput:
     """
     Required input for Translator.
 
-    :param sent_id: Sentence id.
-    :param sentence: Input sentence.
+    :param sentence_id: Sentence id.
     :param tokens: List of input tokens.
-    :param factors: List of zero or more input factors.
+    :param factors: List of list of input factor strings. Can be empty.
+    :param chunk_id: Chunk id. Defaults to 0.
     """
+
     def __init__(self,
-                 id: int,
-                 tokens: List[str],
-                 chunk_id: Optional[int] = 0,
-                 factors: Optional[List[List[str]]] = []) -> None:
-        self.id = id
+                 sentence_id: int,
+                 tokens: Tokens,
+                 factors: List[Tokens],
+                 chunk_id: int = 0) -> None:
+        self.sentence_id = sentence_id
         self.chunk_id = chunk_id
         self.tokens = tokens
         self.factors = factors
-        self.num_factors = len(factors)
 
     def __str__(self):
-        return '[%d.%d] %s' % (self.id, self.chunk_id, ' '.join(self.tokens))
+        return '[%d.%d] %s' % (self.sentence_id, self.chunk_id, ' '.join(self.tokens))
 
-    def chunks(self, chunk_size: int) -> 'TranslatorInput':
+    def chunks(self, chunk_size: int) -> Generator['TranslatorInput', None, None]:
         """
-        Takes a TranslatorInput (itself) and splits it into chunks, in the case where the
-        input sentence is greater than the requested chunk_size.
+        Takes a TranslatorInput (itself) and yields TranslatorInputs for chunks of size chunk_size.
 
         :param chunk_size: The maximum size of a chunk.
         :return: A generator of TranslatorInputs, one for each chunk created.
         """
         for chunk_id, i in enumerate(range(0, len(self.tokens), chunk_size)):
-            new_tokens = self.tokens[i:i + chunk_size]
-            new_sent = ' '.join(new_tokens)
-            new_factors = [self.factors[f][i: i + chunk_size] for f in range(self.num_factors)]
-            yield TranslatorInput(id=self.id, chunk_id=chunk_id, sentence=new_sent, tokens=new_tokens, factors=new_factors)
+            yield TranslatorInput(sentence_id=self.sentence_id,
+                                  chunk_id=chunk_id,
+                                  tokens=self.tokens[i:i + chunk_size],
+                                  factors=[factor[i: i + chunk_size] for i, factor in
+                                           enumerate(self.factors)] if self.factors else [])
+
 
 TranslatorOutput = NamedTuple('TranslatorOutput', [
     ('id', int),
     ('translation', str),
-    ('tokens', List[str]),
+    ('tokens', Tokens),
     ('attention_matrix', np.ndarray),
     ('score', float),
 ])
@@ -771,7 +770,7 @@ class Translator:
 
     @property
     def num_source_factors(self) -> int:
-        return self.models[0].config.config_embed_source.num_factors
+        return self.models[0].num_source_factors
 
     @staticmethod
     def _get_interpolation_func(ensemble_mode):
@@ -797,54 +796,66 @@ class Translator:
         return -mx.nd.log(mx.nd.softmax(log_probs))
 
     @staticmethod
-    def make_input_raw(sentence_id: int,
-                       raw_sentence: str,
-                       num_factors: int,
-                       delimiter: Optional[str] = C.FACTOR_DELIMITER) -> TranslatorInput:
+    def make_input(sentence_id: int,
+                   raw_sentence: str,
+                   num_factors: int = 0,
+                   delimiter: str = C.DEFAULT_FACTOR_DELIMITER) -> TranslatorInput:
         """
-        Constructs a TranslatorInput from a factored input string in the format:
+        Constructs a TranslatorInput from a sentence string, optionally enriched with factors, delimited by delimiter.
+        The default delimiter is '|'. The expected format is then:
 
             word1|f1|f2 word2|f1|f2 word3|f1|f2 ...
 
         :param sentence_id: Input sentence id.
-        :param raw_sentence: Input sentence.
-        :param num_factors: The number of factors to expect.
-        :param delimiter: The delimiter to split factors on.
-        :return: Input for translate method.
+        :param raw_sentence: Input sentence string.
+        :param num_factors: Optional number of factors to expect in this sentence string.
+        :param delimiter: Optional delimiter to separate factors.
+        :return: A TranslatorInput object.
         """
-        tokens = []
-        factors = [[] for i in range(num_factors)]
+        tokens = []  # type: Tokens
+        factors = [[] for _ in range(num_factors)]  # type: List[Tokens]
         for token_id, token in enumerate(data_io.get_tokens(raw_sentence)):
-            pieces = token.rsplit(delimiter, maxsplit=num_factors)
-            utils.check_condition(len(pieces) == 1 + num_factors,
-                                  'Wrong number of factors for sentence {:d} word {:d} ({})'.format(sentence_id, token_id, token))
-            tokens.append(pieces[0])
-            for i in range(num_factors):
-                factors[i].append(pieces[i + 1])
+            token, *token_factors = token.rsplit(delimiter, maxsplit=num_factors)
+            print(token, token_factors)
+            utils.check_condition(len(factors) == num_factors,
+                                  'Expecting {} factors, but got {} at sentence {}, word {}'.format(
+                                      num_factors, len(token_factors), sentence_id, token))
+            tokens.append(token)
+            for i, factor in enumerate(token_factors):
+                factors[i].append(factor)
 
-        return TranslatorInput(id=sentence_id, tokens=tokens, factors=factors)
+        print(factors)
+
+        return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
 
     @staticmethod
     def make_input_multiple(sentence_id: int,
                             raw_sentence: str,
-                            *sentence_factors: str) -> TranslatorInput:
+                            num_factors: int,
+                            raw_factors: List[str]) -> TranslatorInput:
         """
+        TODO(fhieber): rename this method.
         Constructs a TranslatorInput from factors listed in token-parallel strings.
 
         :param sentence_id: Input sentence id.
         :param raw_sentence: The input sentence.
-        :param sentence_factors: The sentence factors, in token-parallel strings.
-        :return: Input for translate method.
+        :param num_factors: Optional number of factors to expect in this sentence string.
+        :param raw_factors: List of token-parallel source factor strings.
+        :return: A TranslatorInput object.
         """
-        tokens = raw_sentence.split()
-        factors = [f.split() for f in sentence_factors]
-        source_len = len(tokens)
-        for i, factor_tokens in enumerate(factors, 1):
-            utils.check_condition(len(factor_tokens) == source_len,
-                                  'Factor {:d} has the wrong number of tokens (found {:d}, needed {:d})'.format(
-                                      i, len(factor_tokens), source_len))
+        utils.check_condition(num_factors == len(raw_factors),
+                              "Expecting {:d} factor sequences, got {:d}".format(num_factors, len(raw_factors)))
+        tokens = list(data_io.get_tokens(raw_sentence))
+        num_tokens = len(tokens)
+        factors = []  # type: List[Tokens]
+        for i, factor_sequence in enumerate(raw_factors, 1):
+            factor_sequence = list(data_io.get_tokens(factor_sequence))
+            utils.check_condition(len(factor_sequence) == num_tokens,
+                                  "Expecting {:d} factors for factor {:d}, got {:d}".format(num_tokens, i,
+                                                                                            len(factor_sequence)))
+            factors.append(factor_sequence)
 
-        return TranslatorInput(id=sentence_id, tokens=tokens, factors=factors)
+        return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
 
     def translate(self, trans_inputs: List[TranslatorInput]) -> List[TranslatorOutput]:
         """
@@ -869,7 +880,7 @@ class Translator:
             elif len(trans_input.tokens) > self.max_input_length:
                 logger.debug(
                     "Input %d has length (%d) that exceeds max input length (%d). Splitting into chunks of size %d.",
-                    trans_input.id, len(trans_input.tokens), self.buckets_source[-1], self.max_input_length)
+                    trans_input.sentence_id, len(trans_input.tokens), self.buckets_source[-1], self.max_input_length)
                 input_chunks.extend(list(trans_input.chunks(self.max_input_length)))
             else:
                 input_chunks.append(trans_input)
@@ -908,21 +919,21 @@ class Translator:
 
         return results
 
-    def _get_inference_input(self, sequences: List[TranslatorInput]) -> Tuple[mx.nd.NDArray, int]:
+    def _get_inference_input(self, trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray, int]:
         """
         Returns NDArray of source ids (shape=(batch_size, bucket_key, num_factors)) and corresponding bucket_key.
 
-        :param sequences: List of lists of input tokens.
+        :param trans_inputs: List of TranslatorInputs.
         :return NDArray of source ids and bucket key.
         """
-        bucket_key = data_io.get_bucket(max(len(seq.tokens) for seq in sequences), self.buckets_source)
+        bucket_key = data_io.get_bucket(max(len(seq.tokens) for seq in trans_inputs), self.buckets_source)
 
         utils.check_condition(C.PAD_ID == 0, "pad id should be 0")
-        source = mx.nd.zeros((len(sequences), bucket_key, self.num_source_factors + 1))
-        for j, seq in enumerate(sequences):
-            source[j, :len(seq.tokens), 0] = data_io.tokens2ids(seq.tokens, self.vocab_source)
-            for fi in range(self.num_source_factors):
-                source[j, :len(seq.tokens), fi + 1] = data_io.tokens2ids(seq.factors[fi], self.source_factor_vocabs[fi])
+        source = mx.nd.zeros((len(trans_inputs), bucket_key, self.num_source_factors + 1), ctx=self.context)
+        for j, trans_input in enumerate(trans_inputs):
+            source[j, :len(trans_input.tokens), 0] = data_io.tokens2ids(trans_input.tokens, self.vocab_source)
+            for i, factor in enumerate(trans_input.factors):
+                source[j, :len(trans_input.tokens), i + 1] = data_io.tokens2ids(factor, self.source_factor_vocabs[i])
         return source, bucket_key
 
     def _make_result(self,
@@ -946,7 +957,7 @@ class Translator:
             target_id not in self.stop_ids)
         attention_matrix = attention_matrix[:, :len(trans_input.tokens)]
 
-        return TranslatorOutput(id=trans_input.id,
+        return TranslatorOutput(id=trans_input.sentence_id,
                                 translation=target_string,
                                 tokens=target_tokens,
                                 attention_matrix=attention_matrix,
@@ -967,7 +978,7 @@ class Translator:
         """
         Translates source of source_length, given a bucket_key.
 
-        :param source: Source ids. Shape: (batch_size, bucket_key).
+        :param source: Source ids. Shape: (batch_size, bucket_key, 1 + num_factors).
         :param source_length: Bucket key.
 
         :return: Sequence of translations.
@@ -978,7 +989,7 @@ class Translator:
         """
         Returns a ModelState for each model representing the state of the model after encoding the source.
 
-        :param sources: Source ids. Shape: (batch_size, bucket_key).
+        :param sources: Source ids. Shape: (batch_size, bucket_key, 1 + num_factors).
         :param source_length: Bucket key.
         :return: List of ModelStates.
         """
@@ -1097,7 +1108,8 @@ class Translator:
         if self.restrict_lexicon:
             # TODO: See note in method about migrating to pure MXNet when set operations are supported.
             #       We currently convert source to NumPy and target ids back to NDArray.
-            vocab_slice_ids = mx.nd.array(self.restrict_lexicon.get_trg_ids(source.astype("int32").asnumpy()),
+            source_words = source.split(num_outputs=self.num_source_factors + 1, axis=2, squeeze_axis=True)[0]
+            vocab_slice_ids = mx.nd.array(self.restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy()),
                                           ctx=self.context)
 
             if vocab_slice_ids.shape[0] < self.beam_size + 1:

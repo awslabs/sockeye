@@ -189,6 +189,7 @@ CONFIG_NAME = "config"
 LOG_NAME = "log"
 JSON_SUFFIX = ".json"
 VOCAB_SRC_NAME = "vocab.src"
+VOCAB_SRC_FACTOR_NAME = "vocab.src.%d"
 VOCAB_TRG_NAME = "vocab.trg"
 VOCAB_ENCODING = "utf-8"
 PARAMS_PREFIX = "params."
@@ -232,7 +233,7 @@ TRAIN_ARGS_MONITOR_BLEU = "--decode-and-evaluate"
 TRAIN_ARGS_CHECKPOINT_FREQUENCY = "--checkpoint-frequency"
 
 # Used to delimit factors on STDIN for inference
-FACTOR_DELIMITER = '|'
+DEFAULT_FACTOR_DELIMITER = '|'
 
 # data layout strings
 BATCH_MAJOR = "NTC"

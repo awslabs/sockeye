@@ -92,7 +92,6 @@ def test_get_max_input_output_length(
         length_ratio_std,
         expected_max_input_len,
         expected_max_output_len):
-
     max_input_len, get_max_output_len = sockeye.inference.get_max_input_output_length(
         supported_max_seq_len_source=supported_max_seq_len_source,
         supported_max_seq_len_target=supported_max_seq_len_target,
@@ -113,3 +112,21 @@ def test_get_max_input_output_length(
         assert max_output_len == expected_max_output_len
 
 
+@pytest.mark.parametrize("sentence_id, raw_sentence, num_factors, delimiter, expected_tokens, expected_factors",
+                         [(1, "this is a test", 0, "|", ["this", "is", "a", "test"], []),
+                          (2, "", 0, "|", [], []),
+                          (14, "a|l b|l C|u", 1, "|", ["a", "b", "C"], [["l", "l", "u"]]),
+                          (1, "a-X-Y ", 2, "-", ["a"], [["X"], ["Y"]]),
+                          (1, "a-X-Y ", 1, "-", ["a-X"], [["Y"]])])
+def test_make_input(sentence_id, raw_sentence, num_factors, delimiter, expected_tokens, expected_factors):
+    translator_input = sockeye.inference.Translator.make_input(sentence_id=sentence_id,
+                                                               raw_sentence=raw_sentence,
+                                                               num_factors=num_factors,
+                                                               delimiter=delimiter)
+    assert translator_input.sentence_id == sentence_id
+    assert translator_input.chunk_id == 0
+    assert translator_input.tokens == expected_tokens
+    assert len(translator_input.factors) == num_factors
+    assert translator_input.factors == expected_factors
+
+# TODO(fhieber): failure tests and other tests for factor parsing

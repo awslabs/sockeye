@@ -132,7 +132,7 @@ class CheckpointDecoder:
         :param output_name: Filename to write translations to. Defaults to /dev/null.
         :return: Mapping of metric names to scores.
         """
-        models, vocab_source, vocab_target, source_factor_vocabs = inference.load_models(
+        models, vocab_source, source_factor_vocabs, vocab_target = inference.load_models(
             self.context,
             self.max_input_len,
             self.beam_size,

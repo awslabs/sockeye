@@ -15,8 +15,8 @@
 Defines commandline arguments for the main CLIs with reasonable defaults.
 """
 import argparse
-import sys
 import os
+import sys
 from typing import Callable, Optional
 
 from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
@@ -278,7 +278,7 @@ def add_validation_data_params(params):
                         nargs='+',
                         type=regular_file(),
                         default=[],
-                        help='Source side factors for validation data.')
+                        help='File(s) containing token-parallel validation source side factors. Default: %(default)s.')
     params.add_argument('--validation-target', '-vt',
                         required=True,
                         type=regular_file(),
@@ -592,7 +592,8 @@ def add_model_parameters(params):
                               type=int,
                               nargs='+',
                               default=[],
-                              help='Source factor dimensions')
+                              help='Embedding size for source factors. You must provide as many dimensions as '
+                                   '(validation) source factor files. Default: %(default)s.')
 
     # attention arguments
     model_params.add_argument('--rnn-attention-type',

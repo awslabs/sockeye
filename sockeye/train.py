@@ -271,7 +271,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                  output_folder: str) -> Tuple['data_io.BaseParallelSampleIter',
                                                               'data_io.BaseParallelSampleIter',
                                                               'data_io.DataConfig',
-                                                              Dict, Dict, List[Dict]]:
+                                                              vocab.Vocab, vocab.Vocab, List[vocab.Vocab]]:
     """
     Create the data iterators and the vocabularies.
 

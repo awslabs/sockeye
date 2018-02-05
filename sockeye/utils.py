@@ -781,6 +781,7 @@ def grouper(iterable: Iterable, size: int) -> Iterable:
     Collect data into fixed-length chunks or blocks without discarding underfilled chunks or padding them.
 
     :param iterable: A sequence of inputs.
+    :param size: Chunk size.
     :return: Sequence of chunks.
     """
     it = iter(iterable)

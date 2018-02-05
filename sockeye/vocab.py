@@ -144,6 +144,18 @@ def vocab_from_json(path: str, encoding: str = C.VOCAB_ENCODING) -> Vocab:
         return vocab
 
 
+def load_source_factor_vocabs(model_folder: str, num_factors: int) -> List[Vocab]:
+    """
+    Loads num_factor source factor vocabularies from "model_folder/vocab.src.N".
+
+    :param model_folder: The model folder.
+    :param num_factors: Number of source factor vocabularies to load.
+    :return: List of loaded source factor vocabularies.
+    """
+    return [vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_SRC_FACTOR_NAME % fi)) for fi in
+            range(num_factors)]
+
+
 def load_or_create_vocab(data: str, vocab_path: Optional[str],
                          num_words: int, word_min_count: int) -> Vocab:
     """
@@ -172,12 +184,11 @@ def load_or_create_vocabs(source: str,
     No writing to disk is done.
 
     :param source: The source text.
-    :param source_vocab_path: The source vocabulary path.
     :param target: The target text.
+    :param source_vocab_path: The source vocabulary path.
     :param target_vocab_path: The target vocabulary path.
     :param source_factor_sources: The source texts for any factors.
     :param source_factor_vocab_paths: The vocabularies for any factors.
-    :param vocab_paths: List (parallel to vocab_support) of vocabulary paths.
     :param shared_vocab: Whether the vocabulary is shared.
     :param num_words_source:
     :param word_min_count_source:
