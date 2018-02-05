@@ -131,8 +131,8 @@ class InferenceModel(model.SockeyeModel):
         self.decoder_module.bind(data_shapes=max_decoder_data_shapes, for_training=False, grad_req="null")
 
         self.load_params_from_file(self.fname_params)
-        self.encoder_module.init_params(arg_params=self.params, allow_missing=False)
-        self.decoder_module.init_params(arg_params=self.params, allow_missing=False)
+        self.encoder_module.init_params(arg_params=self.params, aux_params=self.aux_params, allow_missing=False)
+        self.decoder_module.init_params(arg_params=self.params, aux_params=self.aux_params, allow_missing=False)
 
         if self.cache_output_layer_w_b:
             if self.output_layer.weight_normalization:

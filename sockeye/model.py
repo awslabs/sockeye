@@ -110,6 +110,8 @@ class SockeyeModel:
         self.output_layer = None  # type: Optional[layers.OutputLayer]
         self._is_built = False
         self.params = None  # type: Optional[Dict]
+        self.aux_params = None  # type: Optional[Dict]
+
 
     def save_config(self, folder: str):
         """
@@ -140,7 +142,10 @@ class SockeyeModel:
         :param fname: Path to save parameters to.
         """
         assert self._is_built
-        utils.save_params(self.params.copy(), fname)
+        if self.aux_params is not None:
+            utils.save_params(self.params.copy(), fname, self.aux_params.copy())
+        else:
+            utils.save_params(self.params.copy(), fname)
         logging.info('Saved params to "%s"', fname)
 
     def load_params_from_file(self, fname: str):
@@ -153,7 +158,7 @@ class SockeyeModel:
         utils.check_condition(os.path.exists(fname), "No model parameter file found under %s. "
                                                      "This is either not a model directory or the first training "
                                                      "checkpoint has not happened yet." % fname)
-        self.params, _ = utils.load_params(fname)
+        self.params, self.aux_params = utils.load_params(fname)
         logger.info('Loaded params from "%s"', fname)
 
     @staticmethod

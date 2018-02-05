@@ -270,7 +270,7 @@ class TrainingModel(model.SockeyeModel):
                          for_training=True, force_rebind=True, grad_req='write')
         self.module.symbol.save(os.path.join(output_folder, C.SYMBOL_NAME))
 
-        self.module.init_params(initializer=initializer, arg_params=self.params, aux_params=None,
+        self.module.init_params(initializer=initializer, arg_params=self.params, aux_params=self.aux_params,
                                 allow_missing=allow_missing_params, force_init=False)
         self._log_params()
         initial_params_fname = self._save_params(output_folder, checkpoint=0)
@@ -603,6 +603,7 @@ class TrainingModel(model.SockeyeModel):
         arg_params, aux_params = self.module.get_params()
         self.module.set_params(arg_params, aux_params)
         self.params = arg_params
+        self.aux_params = aux_params
         params_base_fname = C.PARAMS_NAME % checkpoint
         self.save_params_to_file(os.path.join(output_folder, params_base_fname))
         return params_base_fname
@@ -613,7 +614,7 @@ class TrainingModel(model.SockeyeModel):
         """
         params_fname = os.path.join(output_folder, C.PARAMS_NAME % checkpoint)
         self.load_params_from_file(params_fname)  # sets self.params
-        self.module.set_params(arg_params=self.params, aux_params={})
+        self.module.set_params(arg_params=self.params, aux_params=self.aux_params)
 
     def _evaluate(self, training_state, val_iter, val_metric):
         """
