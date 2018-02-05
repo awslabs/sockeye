@@ -816,15 +816,12 @@ class Translator:
         factors = [[] for _ in range(num_factors)]  # type: List[Tokens]
         for token_id, token in enumerate(data_io.get_tokens(raw_sentence)):
             token, *token_factors = token.rsplit(delimiter, maxsplit=num_factors)
-            print(token, token_factors)
             utils.check_condition(len(factors) == num_factors,
                                   'Expecting {} factors, but got {} at sentence {}, word {}'.format(
                                       num_factors, len(token_factors), sentence_id, token))
             tokens.append(token)
             for i, factor in enumerate(token_factors):
                 factors[i].append(factor)
-
-        print(factors)
 
         return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
 
