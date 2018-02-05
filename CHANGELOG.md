@@ -1,4 +1,4 @@
--# Changelog
+# Changelog
 All notable changes to the project are documented in this file.
 
 Version numbers are of the form `1.0.0`.
