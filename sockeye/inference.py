@@ -77,7 +77,6 @@ class InferenceModel(model.SockeyeModel):
         self.softmax_temperature = softmax_temperature
         self.batch_size = batch_size
         self.context = context
-        self.num_factors = self.config.config_embed_source.num_factors
 
         self._build_model_components()
 
@@ -94,6 +93,10 @@ class InferenceModel(model.SockeyeModel):
         self.cache_output_layer_w_b = cache_output_layer_w_b
         self.output_layer_w = None  # type: mx.nd.NDArray
         self.output_layer_b = None  # type: mx.nd.NDArray
+
+    @property
+    def num_factors(self):
+        return self.config.config_embed_source.num_factors
 
     def initialize(self, max_input_length: int, get_max_output_length_function: Callable):
         """
@@ -547,16 +550,19 @@ class TranslatorInput:
     :param tokens: List of input tokens.
     :param factors: List of zero or more input factors.
     """
-    def __init__(self, id: int, sentence: str, tokens: List[str], chunk_id: Optional[int] = 0, factors: Optional[List[List[str]]] = []) -> None:
+    def __init__(self,
+                 id: int,
+                 tokens: List[str],
+                 chunk_id: Optional[int] = 0,
+                 factors: Optional[List[List[str]]] = []) -> None:
         self.id = id
         self.chunk_id = chunk_id
-        self.sentence = sentence
         self.tokens = tokens
         self.factors = factors
         self.num_factors = len(factors)
 
     def __str__(self):
-        return '[%d.%d] %s' % (self.id, self.chunk_id, self.sentence)
+        return '[%d.%d] %s' % (self.id, self.chunk_id, ' '.join(self.tokens))
 
     def chunks(self, chunk_size: int) -> 'TranslatorInput':
         """
@@ -739,7 +745,6 @@ class Translator:
         self.vocab_target = vocab_target
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
         self.source_factor_vocabs = source_factor_vocabs
-        self.num_factors = len(self.source_factor_vocabs)
         self.restrict_lexicon = restrict_lexicon
         self.start_id = self.vocab_target[C.BOS_SYMBOL]
         self.stop_ids = {self.vocab_target[C.EOS_SYMBOL], C.PAD_ID}  # type: Set[int]
@@ -747,7 +752,6 @@ class Translator:
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
         self.batch_size = self.models[0].batch_size
-        self.num_factors = self.models[0].config.config_embed_source.num_factors
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         self.max_input_length = self.models[0].max_input_length
         max_output_length = self.models[0].get_max_output_length(self.max_input_length)
@@ -764,6 +768,10 @@ class Translator:
                     "None" if len(self.models) == 1 else ensemble_mode,
                     self.batch_size,
                     self.buckets_source)
+
+    @property
+    def num_source_factors(self) -> int:
+        return self.models[0].config.config_embed_source.num_factors
 
     @staticmethod
     def _get_interpolation_func(ensemble_mode):
@@ -788,30 +796,55 @@ class Translator:
         # pylint: disable=invalid-unary-operand-type
         return -mx.nd.log(mx.nd.softmax(log_probs))
 
-    def make_input(self, sentence_id: int,
-                   raw_sentence: str,
-                   delimiter: str = C.FACTOR_DELIMITER) -> TranslatorInput:
+    @staticmethod
+    def make_input_raw(sentence_id: int,
+                       raw_sentence: str,
+                       num_factors: int,
+                       delimiter: Optional[str] = C.FACTOR_DELIMITER) -> TranslatorInput:
         """
-        Constructs a TranslatorInput from the input string.
-        The string might have source factors in the format (word1|f1|f2 word2|f1|f2 ...).
+        Constructs a TranslatorInput from a factored input string in the format:
+
+            word1|f1|f2 word2|f1|f2 word3|f1|f2 ...
 
         :param sentence_id: Input sentence id.
-        :param sentence: Input sentence.
+        :param raw_sentence: Input sentence.
+        :param num_factors: The number of factors to expect.
+        :param delimiter: The delimiter to split factors on.
         :return: Input for translate method.
         """
         tokens = []
-        factors = [[] for i in range(self.num_factors)]
+        factors = [[] for i in range(num_factors)]
         for token_id, token in enumerate(data_io.get_tokens(raw_sentence)):
-            pieces = token.rsplit(delimiter, maxsplit=self.num_factors)
-            utils.check_condition(len(pieces) == 1 + self.num_factors,
+            pieces = token.rsplit(delimiter, maxsplit=num_factors)
+            utils.check_condition(len(pieces) == 1 + num_factors,
                                   'Wrong number of factors for sentence {:d} word {:d} ({})'.format(sentence_id, token_id, token))
             tokens.append(pieces[0])
-            for i in range(self.num_factors):
+            for i in range(num_factors):
                 factors[i].append(pieces[i + 1])
 
-        text = ' '.join(tokens)
+        return TranslatorInput(id=sentence_id, tokens=tokens, factors=factors)
 
-        return TranslatorInput(id=sentence_id, sentence=text, tokens=tokens, factors=factors)
+    @staticmethod
+    def make_input_multiple(sentence_id: int,
+                            raw_sentence: str,
+                            *sentence_factors: str) -> TranslatorInput:
+        """
+        Constructs a TranslatorInput from factors listed in token-parallel strings.
+
+        :param sentence_id: Input sentence id.
+        :param raw_sentence: The input sentence.
+        :param sentence_factors: The sentence factors, in token-parallel strings.
+        :return: Input for translate method.
+        """
+        tokens = raw_sentence.split()
+        factors = [f.split() for f in sentence_factors]
+        source_len = len(tokens)
+        for i, factor_tokens in enumerate(factors, 1):
+            utils.check_condition(len(factor_tokens) == source_len,
+                                  'Factor {:d} has the wrong number of tokens (found {:d}, needed {:d})'.format(
+                                      i, len(factor_tokens), source_len))
+
+        return TranslatorInput(id=sentence_id, tokens=tokens, factors=factors)
 
     def translate(self, trans_inputs: List[TranslatorInput]) -> List[TranslatorOutput]:
         """
@@ -885,10 +918,10 @@ class Translator:
         bucket_key = data_io.get_bucket(max(len(seq.tokens) for seq in sequences), self.buckets_source)
 
         utils.check_condition(C.PAD_ID == 0, "pad id should be 0")
-        source = mx.nd.zeros((len(sequences), bucket_key, self.num_factors + 1))
+        source = mx.nd.zeros((len(sequences), bucket_key, self.num_source_factors + 1))
         for j, seq in enumerate(sequences):
             source[j, :len(seq.tokens), 0] = data_io.tokens2ids(seq.tokens, self.vocab_source)
-            for fi in range(self.num_factors):
+            for fi in range(self.num_source_factors):
                 source[j, :len(seq.tokens), fi + 1] = data_io.tokens2ids(seq.factors[fi], self.source_factor_vocabs[fi])
         return source, bucket_key
 

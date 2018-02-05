@@ -98,11 +98,11 @@ class CheckpointDecoder:
                 # custom random number generator to guarantee the same samples across runs in order to be able to
                 # compare metrics across independent runs
                 random_gen = random.Random(random_seed)
-                self.input_sentences, self.target_sentences = zip(
-                    *random_gen.sample(list(zip(sockeye.translate.merge_factors(input_sentences, *input_sentence_factors), target_sentences)),
+                self.input_sentences, self.target_sentences, *self.input_sentence_factors = zip(
+                    *random_gen.sample(list(zip(input_sentences, target_sentences, *input_sentence_factors)),
                                        sample_size))
             else:
-                self.input_sentences, self.target_sentences = list(sockeye.translate.merge_factors(input_sentences, *input_sentence_factors)), target_sentences
+                self.input_sentences, self.target_sentences, self.input_sentence_factors = input_sentences, target_sentences, input_sentence_factors
 
         logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d, source_factors=%d)",
                     max_input_len if max_input_len is not None else -1,
@@ -114,6 +114,13 @@ class CheckpointDecoder:
                 print(s.rstrip(), file=trg_out)
             for s in self.input_sentences:
                 print(s.rstrip(), file=src_out)
+
+        # Write factor files
+        for fi in range(len(self.input_sentence_factors)):
+            outfile = '{}.{:d}'.format(os.path.join(self.model, C.DECODE_IN_NAME), fi)
+            with data_io.smart_open(outfile, 'w') as factor_out:
+                for s in self.input_sentence_factors[fi]:
+                    print(s.rstrip(), file=factor_out)
 
     def decode_and_evaluate(self,
                             checkpoint: Optional[int] = None,
@@ -147,7 +154,7 @@ class CheckpointDecoder:
         with data_io.smart_open(output_name, 'w') as output:
             handler = sockeye.output_handler.StringOutputHandler(output)
             tic = time.time()
-            trans_inputs = [translator.make_input(i, line) for i, line in enumerate(self.input_sentences)]
+            trans_inputs = [translator.make_input_multiple(i, source, *factors) for i, (source, *factors) in enumerate(zip(self.input_sentences, *self.input_sentence_factors))]
             trans_outputs = translator.translate(trans_inputs)
             trans_wall_time = time.time() - tic
             for trans_input, trans_output in zip(trans_inputs, trans_outputs):
