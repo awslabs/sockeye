@@ -14,19 +14,19 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Added
  - Source factors, as described in
 
-   Linguistic Input Features Improve Neural Machine Translation.
-   Rico Sennrich & Barry Haddow
-   In Proceedings of the First Conference on Machine Translation. Berlin, Germany, pp. 83-91.
+   Linguistic Input Features Improve Neural Machine Translation (Sennrich & Haddow, WMT 2016)
+   [PDF](http://www.aclweb.org/anthology/W16-2209.pdf) [bibtex](http://www.aclweb.org/anthology/W16-2209.bib)
 
    Source factors are enabled by passing `--source-factors file1 [file2 ...]` (`-sf`), where file1, etc. are token-parallel to the source (`-s`).
    An analogous parameter, `--validation-source-factors`, is used to pass factors for validation data.
-   The flag `--source-factor-num-embed D1 [D2 ...]` denotes the embedding dimensions.
-   These are concatenated with the source word dimension (`--num-embed`), which can continue to be tied to the target (`--weight-tying --weight-tying-type=src_trg`).
+   The required flag `--source-factor-num-embed D1 [D2 ...]` denotes the embedding dimensions.
+   These dimensions are added to (not subtracted from) the source word dimension (`--num-embed`), in order that weight tying can still be used (`--weight-tying --weight-tying-type=src_trg`).
 
    At test time, the input sentence and its factors can be passed in via STDIN or command-line arguments.
-   For STDIN, the input and factors should be in Moses format, e.g., `word1|factor1|factor2|... w2|f1|f2|... ...1`.
-   You can also use file arguments, which mirrors training: `--input` takes an argument to the file containing the source, and `--input-factors` a list of files containing token-parallel factors.
-   The number of expected factors and their dimensions is read from the model config and checked.
+   - For STDIN, the input and factors should be in a token-based factored format, e.g., `word1|factor1|factor2|... w2|f1|f2|... ...1`.
+   - You can also use file arguments, which mirrors training: `--input` takes an argument to the file containing the source, and `--input-factors` a list of files containing token-parallel factors.
+   At test time, the number of expected factors and their dimensions is read from the model config and checked.
+   An error will be thrown if any mismatch is discovered.
 
 ## [1.16.5]
 ### Changed

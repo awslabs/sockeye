@@ -157,12 +157,13 @@ class InferenceModel(model.SockeyeModel):
 
         def sym_gen(source_seq_len: int):
             source = mx.sym.Variable(C.SOURCE_NAME)
-            source_factors = [mx.sym.Variable('%s_factor_%d' % (C.SOURCE_NAME,i)) for i in range(self.num_factors)]
-            source_length = utils.compute_lengths(source)
+            source_words = source.split(num_outputs=self.num_factors + 1, axis=2, squeeze_axis=True)[0]
+            source_length = utils.compute_lengths(source_words)
 
+            # source embedding
             (source_embed,
              source_embed_length,
-             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len, source_factors)
+             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
 
             # encoder
             # source_encoded: (source_encoded_length, batch_size, encoder_depth)
@@ -177,7 +178,7 @@ class InferenceModel(model.SockeyeModel):
                                                            source_encoded_length,
                                                            source_encoded_seq_len)
 
-            data_names = [C.SOURCE_NAME] + [C.SOURCE_NAME + '_factor_' + str(i) for i in range(self.num_factors)]
+            data_names = [C.SOURCE_NAME]
             label_names = []  # type: List[str]
             return mx.sym.Group(decoder_init_states), data_names, label_names
 
@@ -254,13 +255,10 @@ class InferenceModel(model.SockeyeModel):
         :param bucket_key: Maximum input length.
         :return: List of data descriptions.
         """
+        num_factors = self.config.config_embed_source.num_factors
         data = [mx.io.DataDesc(name=C.SOURCE_NAME,
-                               shape=(self.batch_size, bucket_key),
+                               shape=(self.batch_size, bucket_key, num_factors + 1),
                                layout=C.BATCH_MAJOR)]
-        data += [mx.io.DataDesc(name=C.SOURCE_NAME + "_factor_" + str(f),
-                                shape=(self.batch_size, bucket_key),
-                                layout=C.BATCH_MAJOR) for f in range(self.num_factors)]
-
         return data
 
     def _get_decoder_data_shapes(self, bucket_key: Tuple[int, int]) -> List[mx.io.DataDesc]:
@@ -282,8 +280,7 @@ class InferenceModel(model.SockeyeModel):
 
     def run_encoder(self,
                     source: mx.nd.NDArray,
-                    source_max_length: int,
-                    source_factors: List[mx.nd.NDArray] = []) -> 'ModelState':
+                    source_max_length: int) -> 'ModelState':
         """
         Runs forward pass of the encoder.
         Encodes source given source length and bucket key.
@@ -294,10 +291,7 @@ class InferenceModel(model.SockeyeModel):
         :param source_max_length: Bucket key.
         :return: Initial model state.
         """
-        data = [source]
-        for fi, factor in enumerate(source_factors):
-            data.append(factor)
-        batch = mx.io.DataBatch(data=data,
+        batch = mx.io.DataBatch(data=[source],
                                 label=None,
                                 bucket_key=source_max_length,
                                 provide_data=self._get_encoder_data_shapes(source_max_length))
@@ -407,17 +401,17 @@ def load_models(context: mx.context.Context,
         source_vocabs.append(vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_SRC_NAME)))
         target_vocabs.append(vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_TRG_NAME)))
 
-        inf_model = InferenceModel(model_folder=model_folder,
-                                   context=context,
-                                   beam_size=beam_size,
-                                   batch_size=batch_size,
-                                   softmax_temperature=softmax_temperature,
-                                   checkpoint=checkpoint,
-                                   decoder_return_logit_inputs=decoder_return_logit_inputs,
-                                   cache_output_layer_w_b=cache_output_layer_w_b)
-        models.append(inf_model)
+        inference_model = InferenceModel(model_folder=model_folder,
+                                         context=context,
+                                         beam_size=beam_size,
+                                         batch_size=batch_size,
+                                         softmax_temperature=softmax_temperature,
+                                         checkpoint=checkpoint,
+                                         decoder_return_logit_inputs=decoder_return_logit_inputs,
+                                         cache_output_layer_w_b=cache_output_layer_w_b)
+        models.append(inference_model)
 
-        source_factor_vocabs.append(load_source_factor_vocabs(model_folder, inf_model.num_factors))
+        source_factor_vocabs.append(load_source_factor_vocabs(model_folder, inference_model.num_factors))
 
     utils.check_condition(vocab.are_identical(*source_vocabs), "Source vocabulary ids do not match")
     utils.check_condition(vocab.are_identical(*target_vocabs), "Target vocabulary ids do not match")
@@ -542,6 +536,7 @@ def get_max_input_output_length(supported_max_seq_len_source: Optional[int],
 
 
 Tokens = List[str]
+
 
 class TranslatorInput:
     """
@@ -880,9 +875,9 @@ class Translator:
 
         return results
 
-    def _get_inference_input(self, sequences: List[TranslatorInput]) -> Tuple[mx.nd.NDArray, int, mx.nd.NDArray]:
+    def _get_inference_input(self, sequences: List[TranslatorInput]) -> Tuple[mx.nd.NDArray, int]:
         """
-        Returns NDArray of source ids (shape=(batch_size, bucket_key)) and corresponding bucket_key.
+        Returns NDArray of source ids (shape=(batch_size, bucket_key, num_factors)) and corresponding bucket_key.
 
         :param sequences: List of lists of input tokens.
         :return NDArray of source ids and bucket key.
@@ -890,13 +885,12 @@ class Translator:
         bucket_key = data_io.get_bucket(max(len(seq.tokens) for seq in sequences), self.buckets_source)
 
         utils.check_condition(C.PAD_ID == 0, "pad id should be 0")
-        source = mx.nd.zeros((len(sequences), bucket_key))
-        source_factors = [mx.nd.zeros((len(sequences), bucket_key)) for fi in range(self.num_factors)]
+        source = mx.nd.zeros((len(sequences), bucket_key, self.num_factors + 1))
         for j, seq in enumerate(sequences):
-            source[j, :len(seq.tokens)] = data_io.tokens2ids(seq.tokens, self.vocab_source)
+            source[j, :len(seq.tokens), 0] = data_io.tokens2ids(seq.tokens, self.vocab_source)
             for fi in range(self.num_factors):
-                source_factors[fi][j, :len(seq.tokens)] = data_io.tokens2ids(seq.factors[fi], self.source_factor_vocabs[fi])
-        return source, bucket_key, source_factors
+                source[j, :len(seq.tokens), fi + 1] = data_io.tokens2ids(seq.factors[fi], self.source_factor_vocabs[fi])
+        return source, bucket_key
 
     def _make_result(self,
                      trans_input: TranslatorInput,
@@ -936,8 +930,7 @@ class Translator:
 
     def translate_nd(self,
                      source: mx.nd.NDArray,
-                     source_length: int,
-                     source_factors: List[mx.nd.NDArray]) -> List[Translation]:
+                     source_length: int) -> List[Translation]:
         """
         Translates source of source_length, given a bucket_key.
 
@@ -946,9 +939,9 @@ class Translator:
 
         :return: Sequence of translations.
         """
-        return self._get_best_from_beam(*self._beam_search(source, source_length, source_factors))
+        return self._get_best_from_beam(*self._beam_search(source, source_length))
 
-    def _encode(self, sources: mx.nd.NDArray, source_length: int, source_factors: List[mx.nd.NDArray]) -> List[ModelState]:
+    def _encode(self, sources: mx.nd.NDArray, source_length: int) -> List[ModelState]:
         """
         Returns a ModelState for each model representing the state of the model after encoding the source.
 
@@ -956,7 +949,7 @@ class Translator:
         :param source_length: Bucket key.
         :return: List of ModelStates.
         """
-        return [model.run_encoder(sources, source_length, source_factors) for model in self.models]
+        return [model.run_encoder(sources, source_length) for model in self.models]
 
     def _decode_step(self,
                      sequences: mx.nd.NDArray,
@@ -1020,8 +1013,7 @@ class Translator:
 
     def _beam_search(self,
                      source: mx.nd.NDArray,
-                     source_length: int,
-                     source_factors: List[mx.nd.NDArray]) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
+                     source_length: int) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
         """
         Translates multiple sentences using beam search.
 
@@ -1092,7 +1084,7 @@ class Translator:
                 models_output_layer_b.append(m.output_layer_b.take(vocab_slice_ids))
 
         # (0) encode source sentence, returns a list
-        model_states = self._encode(source, source_length, source_factors)
+        model_states = self._encode(source, source_length)
 
         for t in range(1, max_output_length):
 

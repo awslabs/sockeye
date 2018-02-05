@@ -322,7 +322,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                   "Prepared data and resumed model target vocabs do not match.")
 
             for i, sfv in enumerate(source_factor_vocabs):
-                model_vocab_source_factor = vocab.vocab_from_json('%s.%d.%s' % (os.path.join(output_folder, C.VOCAB_SRC_NAME), i, C.JSON_SUFFIX))
+                model_vocab_source_factor = vocab.vocab_from_json('%s.%d%s' % (os.path.join(output_folder, C.VOCAB_SRC_NAME), i, C.JSON_SUFFIX))
                 utils.check_condition(vocab.are_identical(sfv, model_vocab_source_factor),
                                       "Prepared data and resumed model vocabs do not match on source factor %d." % (i))
 
