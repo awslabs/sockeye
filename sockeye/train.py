@@ -23,6 +23,7 @@ import sys
 from contextlib import ExitStack
 from typing import Any, cast, Optional, Dict, List, Tuple
 
+import numpy as np
 import mxnet as mx
 
 from sockeye.config import Config
@@ -305,7 +306,8 @@ def create_data_iters_and_vocab(args: argparse.Namespace,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
             batch_num_devices=batch_num_devices,
-            fill_up=args.fill_up)
+            fill_up=args.fill_up,
+            dtype=np.dtype(args.dtype).type)
         if resume_training:
             # resuming training. Making sure the vocabs in the model and in the prepared data match up
             model_vocab_source = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_SRC_NAME + C.JSON_SUFFIX))
@@ -359,7 +361,8 @@ def create_data_iters_and_vocab(args: argparse.Namespace,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
-            bucket_width=args.bucket_width)
+            bucket_width=args.bucket_width,
+            dtype=np.dtype(args.dtype).type)
         return train_iter, validation_iter, config_data, vocab_source, vocab_target
 
 
@@ -709,6 +712,10 @@ def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict, str, str, 
     # Manually specified params
     if args.optimizer_params:
         optimizer_params.update(args.optimizer_params)
+
+    if args.dtype == 'float16':
+        optimizer_params['multi_precision'] = True
+
     logger.info("Optimizer: %s", optimizer)
     logger.info("Optimizer Parameters: %s", optimizer_params)
     logger.info("kvstore: %s", args.kvstore)
@@ -757,6 +764,8 @@ def main():
         lr_scheduler_instance = create_lr_scheduler(args, resume_training, training_state_dir)
 
         model_config = create_model_config(args, vocab_source_size, vocab_target_size, config_data)
+        model_config.config_encoder.dtype = np.dtype(args.dtype).type
+        model_config.config_decoder.dtype = np.dtype(args.dtype).type
         model_config.freeze()
 
         training_model = create_training_model(model_config, args,
