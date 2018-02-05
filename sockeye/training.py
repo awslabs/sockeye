@@ -594,7 +594,8 @@ class TrainingModel(model.SockeyeModel):
 
     def _save_params(self, output_folder: str, checkpoint: int) -> str:
         """
-        Synchronizes parameters across devices, saves the parameters to disk, and updates self.params.
+        Synchronizes parameters across devices, saves the parameters to disk, and updates self.params
+        and self.aux_params.
 
         :param output_folder: The folder in which the parameters will be serialized in.
         :param checkpoint: The current checkpoint used for creating a unique parameter file name.
@@ -610,7 +611,7 @@ class TrainingModel(model.SockeyeModel):
 
     def _load_params(self, output_folder: str, checkpoint: int):
         """
-        Loads parameters from disk, sets self.params and module's parameters.
+        Loads parameters from disk, sets self.params, self.aux_params and module's parameters.
         """
         params_fname = os.path.join(output_folder, C.PARAMS_NAME % checkpoint)
         self.load_params_from_file(params_fname)  # sets self.params
