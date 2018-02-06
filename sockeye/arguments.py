@@ -946,8 +946,8 @@ def add_inference_args(params):
                                required=False,
                                nargs='+',
                                type=regular_file(),
-                               default=[],
-                               help='List of input files containing source factors, each token-parallel to the source. ')
+                               default=None,
+                               help='List of input files containing source factors, each token-parallel to the source.')
 
     decode_params.add_argument('--output', '-o',
                                default=None,

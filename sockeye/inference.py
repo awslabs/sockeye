@@ -262,7 +262,7 @@ class InferenceModel(model.SockeyeModel):
         :param bucket_key: Maximum input length.
         :return: List of data descriptions.
         """
-        num_factors = self.config.config_embed_source.num_source_factors
+        num_factors = self.config.config_embed_source.num_factors
         data = [mx.io.DataDesc(name=C.SOURCE_NAME,
                                shape=(self.batch_size, bucket_key, num_factors + 1),
                                layout=C.BATCH_MAJOR)]
@@ -816,8 +816,8 @@ class Translator:
         factors = [[] for _ in range(num_factors)]  # type: List[Tokens]
         for token_id, token in enumerate(data_io.get_tokens(raw_sentence)):
             token, *token_factors = token.rsplit(delimiter, maxsplit=num_factors)
-            utils.check_condition(len(factors) == num_factors,
-                                  'Expecting {} factors, but got {} at sentence {}, word {}'.format(
+            utils.check_condition(len(token_factors) == num_factors,
+                                  'Expecting {} factors, but got {} at sentence {}, word "{}"'.format(
                                       num_factors, len(token_factors), sentence_id, token))
             tokens.append(token)
             for i, factor in enumerate(token_factors):
@@ -897,7 +897,7 @@ class Translator:
             if rest > 0:
                 batch_translations = batch_translations[:-rest]
             for chunk, translation in zip(batch, batch_translations):
-                translated_chunks.append(TranslatedChunk(chunk.id, chunk.chunk_id, translation))
+                translated_chunks.append(TranslatedChunk(chunk.sentence_id, chunk.chunk_id, translation))
         # Sort by input idx and then chunk id
         translated_chunks = sorted(translated_chunks)
 

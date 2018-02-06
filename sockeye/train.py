@@ -273,6 +273,10 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             fill_up=args.fill_up)
         source_vocab, *source_factor_vocabs = source_vocabs
 
+        check_condition(data_config.num_source_factors == len(args.source_factor_num_embed),
+                        "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
+                            data_config.num_source_factors, len(args.source_factor_num_embed)))
+
         if resume_training:
             # resuming training. Making sure the vocabs in the model and in the prepared data match up
             model_source_vocab = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_SRC_NAME + C.JSON_SUFFIX))
@@ -324,10 +328,11 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 num_words_target=num_words_target,
                 word_min_count_source=word_min_count_source,
                 word_min_count_target=word_min_count_target)
+            source_vocab, *source_factor_vocabs = source_vocabs
 
-        utils.check_condition(len(args.source_factor_num_embed) == len(source_factor_vocabs),
-                              "The number of source factor data sources (%d) is different from the number of provided source factor embedding dimensions (%d)" % (
-                              len(args.source_factor_num_embed), len(source_factor_vocabs)))
+        check_condition(len(source_factor_vocabs) == len(args.source_factor_num_embed),
+                        "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (
+                            len(source_factor_vocabs), len(args.source_factor_num_embed)))
 
         train_iter, validation_iter, config_data = data_io.get_training_data_iters(
             sources=list(map(os.path.abspath, [args.source] + args.source_factors)),
@@ -588,7 +593,7 @@ def create_model_config(args: argparse.Namespace,
     config_decoder = create_decoder_config(args, encoder_num_hidden)
 
     source_factor_configs = None
-    if args.source_factor_num_embed:
+    if config_data.num_source_factors > 0:
         source_factor_configs = [encoder.FactorConfig(size, dim) for size, dim in zip(source_factor_vocab_sizes,
                                                                                       args.source_factor_num_embed)]
 

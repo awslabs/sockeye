@@ -269,7 +269,7 @@ class ReverseSequence(Encoder):
 
 class FactorConfig(config.Config):
 
-    def __init__(self, num_embed: int, vocab_size: int) -> None:
+    def __init__(self, vocab_size: int, num_embed: int) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
@@ -327,17 +327,17 @@ class Embedding(Encoder):
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
-        :param data: Input data.
+        :param data: Input data. TODO: in case of source 3d, in case of target 2d (or even 1d at inference time).
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
         factor_embeddings = []  # type: List[mx.sym.Symbol
         if self.config.factor_configs is not None:
-            data, data_factors = mx.sym.split(data=data,
-                                              num_outputs=self.config.num_factors + 1,
-                                              axis=2,
-                                              squeeze_axis=True)
+            data, *data_factors = mx.sym.split(data=data,
+                                               num_outputs=self.config.num_factors + 1,
+                                               axis=2,
+                                               squeeze_axis=True, name=self.prefix + "factor_split")
 
             for i, (factor_data, factor_config, factor_weight) in enumerate(zip(data_factors,
                                                                                 self.config.factor_configs,
@@ -347,6 +347,8 @@ class Embedding(Encoder):
                                                           weight=factor_weight,
                                                           output_dim=factor_config.num_embed,
                                                           name=self.prefix + "factor%d_embed" % i))
+        else:
+            data = mx.sym.reshape(data=data, shape=(-1, seq_len))
 
         embedding = mx.sym.Embedding(data=data,
                                      input_dim=self.config.vocab_size,

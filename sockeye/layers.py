@@ -435,7 +435,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         # split into query, keys and values
         # (batch, max_length, depth)
         # pylint: disable=unbalanced-tuple-unpacking
-        queries, keys, values = mx.sym.split(data=combined, num_outputs=3, axis=2)
+        queries, keys, values = mx.sym.split(data=combined, num_outputs=3, axis=2, name=self.prefix + "BLUB")
 
         if cache is not None:
             # append new keys & values to cache, update the cache

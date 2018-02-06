@@ -939,6 +939,7 @@ class DataConfig(config.Config):
         self.data_statistics = data_statistics
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
+        self.num_source_factors = len(sources) - 1
 
 
 def read_content(path: str, limit: Optional[int] = None) -> Iterator[List[str]]:

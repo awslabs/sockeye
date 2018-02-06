@@ -18,7 +18,7 @@ import argparse
 import sys
 import time
 from contextlib import ExitStack
-from typing import Optional, Iterable, List
+from typing import Generator, Optional, Iterable, List
 
 import mxnet as mx
 from math import ceil
@@ -117,6 +117,35 @@ def merge_factors(*streams: Iterable[str], delimiter=C.DEFAULT_FACTOR_DELIMITER)
         yield ' '.join(merged)
 
 
+def _make_input(source: Optional[str],
+                source_factors: Optional[List[str]] = None,
+                num_source_factors: int = 0) -> Generator[inference.TranslatorInput, None, None]:
+    """
+    Transform both accepted inputs (STDIN and `--input`, factored or not) into a stream of TranslatorInput objects.
+    :param source: The source file (possibly None).
+    :param source_factors: Source factor files
+    :param num_source_factors: Number of source factors required by the model.
+    :return: TranslatorInput objects
+    """
+    if source is None:
+        check_condition(source_factors is None, "Translating from STDIN, not expecting any factor files.")
+        for sentence_id, line in enumerate(sys.stdin, 1):
+            yield inference.Translator.make_input(sentence_id=sentence_id, raw_sentence=line,
+                                                  num_factors=num_source_factors)
+    else:
+        source_factors = [] if source_factors is None else source_factors
+        check_condition(len(source_factors) == num_source_factors,
+                        "Model(s) require(s) %d factor files, got %d" % (num_source_factors,
+                                                                         len(source_factors)))
+        with ExitStack() as exit_stack:
+            streams = [exit_stack.enter_context(data_io.smart_open(x)) for x in [source] + source_factors]
+            for sentence_id, (source, *factors) in enumerate(zip(*streams), 1):
+                yield inference.Translator.make_input_multiple(sentence_id=sentence_id,
+                                                               raw_sentence=source,
+                                                               num_factors=num_source_factors,
+                                                               raw_factors=factors)
+
+
 def read_and_translate(translator: inference.Translator,
                        output_handler: OutputHandler,
                        chunk_size: Optional[int],
@@ -131,17 +160,6 @@ def read_and_translate(translator: inference.Translator,
     :param source: Optional path to file which will be translated line-by-line if included, if none use stdin.
     :param source_factors: Optional list of paths to files that contain source factors.
     """
-    if source is None:
-        source_data = [sys.stdin]
-        check_condition(not source_factors, "Translating from STDIN, not expecting any factor files.")
-    else:
-        source_data = data_io.smart_open(source)
-        check_condition(len(source_factors) == translator.num_source_factors,
-                        "Model(s) require(s) %d factor files, got %d" % (translator.num_source_factors,
-                                                                         len(source_factors)))
-        source_data += [data_io.smart_open(sf) for sf in source_factors]
-        source_data = zip(*source_data)
-
     batch_size = translator.batch_size
     if chunk_size is None:
         if translator.batch_size == 1:
@@ -159,8 +177,8 @@ def read_and_translate(translator: inference.Translator,
     logger.info("Translating...")
 
     total_time, total_lines = 0.0, 0
-    for chunk in grouper(source_data, chunk_size):
-        chunk_time = translate(output_handler, chunk, translator, total_lines)
+    for chunk in grouper(_make_input(source, source_factors, translator.num_source_factors), size=chunk_size):
+        chunk_time = translate(output_handler, chunk, translator)
         total_lines += len(chunk)
         total_time += chunk_time
 
@@ -172,31 +190,17 @@ def read_and_translate(translator: inference.Translator,
         logger.info("Processed 0 lines.")
 
 
-def translate(output_handler: OutputHandler, source_data: Iterable[List[str]],
-              translator: inference.Translator, chunk_id: int = 0) -> float:
+def translate(output_handler: OutputHandler, trans_inputs: List[inference.TranslatorInput],
+              translator: inference.Translator) -> float:
     """
     Translates each line from source_data, calling output handler after translating a batch.
 
     :param output_handler: A handler that will be called once with the output of each translation.
-    :param source_data: A enumerable list of (possibly factored) source sentences that will be translated.
+    :param trans_inputs: A enumerable list of translator inputs.
     :param translator: The translator that will be used for each line of input.
-    :param chunk_id: Global id of the chunk.
     :return: Total time taken.
     """
     tic = time.time()
-    trans_inputs = []  # type: List[inference.TranslatorInput]
-    for sentence_id, data in enumerate(source_data, start=chunk_id + 1):
-        raw_sentence, *raw_factors = data
-        if not raw_factors:
-            trans_inputs.append(translator.make_input(sentence_id=sentence_id,
-                                                      raw_sentence=raw_sentence,
-                                                      num_factors=translator.num_source_factors,
-                                                      delimiter=C.DEFAULT_FACTOR_DELIMITER))
-        else:
-            trans_inputs.append(translator.make_input_multiple(sentence_id=sentence_id,
-                                                               raw_sentence=raw_sentence,
-                                                               num_factors=translator.num_source_factors,
-                                                               raw_factors=raw_factors))
     trans_outputs = translator.translate(trans_inputs)
     total_time = time.time() - tic
     batch_time = total_time / len(trans_inputs)

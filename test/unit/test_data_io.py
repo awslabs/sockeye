@@ -382,17 +382,14 @@ def test_get_training_data_iters():
         # tmp common vocab
         vcb = vocab.build_from_paths([data['source'], data['target']])
 
-        train_iter, val_iter, config_data = data_io.get_training_data_iters(data['source'], data['target'],
-                                                                            source_factors=[],
-                                                                            validation_source=data['validation_source'],
+        train_iter, val_iter, config_data = data_io.get_training_data_iters(sources=[data['source']],
+                                                                            target=data['target'],
+                                                                            validation_sources=[data['validation_source']],
                                                                             validation_target=data['validation_target'],
-                                                                            validation_source_factors=[],
-                                                                            vocab_source=vcb,
-                                                                            vocab_target=vcb,
-                                                                            vocab_source_path=None,
-                                                                            vocab_target_path=None,
-                                                                            source_factor_vocabs=[],
-                                                                            source_factor_vocab_paths=[],
+                                                                            source_vocabs=[vcb],
+                                                                            target_vocab=vcb,
+                                                                            source_vocab_paths=[None],
+                                                                            target_vocab_path=None,
                                                                             shared_vocab=True,
                                                                             batch_size=batch_size,
                                                                             batch_by_words=False,
@@ -405,10 +402,10 @@ def test_get_training_data_iters():
         assert isinstance(train_iter, data_io.ParallelSampleIter)
         assert isinstance(val_iter, data_io.ParallelSampleIter)
         assert isinstance(config_data, data_io.DataConfig)
-        assert config_data.source == data['source']
+        assert config_data.sources == [data['source']]
         assert config_data.target == data['target']
-        assert config_data.vocab_source is None
-        assert config_data.vocab_target is None
+        assert config_data.source_vocabs == [None]
+        assert config_data.target_vocab is None
         assert config_data.data_statistics.max_observed_len_source == train_max_length - 1
         assert config_data.data_statistics.max_observed_len_target == train_max_length
         assert np.isclose(config_data.data_statistics.length_ratio_mean, expected_mean)
