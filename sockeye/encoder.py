@@ -281,12 +281,14 @@ class EmbeddingConfig(config.Config):
                  vocab_size: int,
                  num_embed: int,
                  dropout: float,
+                 is_source: bool,
                  factor_configs: Optional[List[FactorConfig]] = None) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
         self.dropout = dropout
         self.factor_configs = factor_configs
+        self.is_source = is_source
         self.num_factors = 0
         if self.factor_configs is not None:
             self.num_factors = len(self.factor_configs)
@@ -323,8 +325,7 @@ class Embedding(Encoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: Optional[mx.sym.Symbol],
-               seq_len: int,
-               split: True) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -334,41 +335,30 @@ class Embedding(Encoder):
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
         factor_embeddings = []  # type: List[mx.sym.Symbol
-        if self.config.factor_configs is not None:
+        if self.config.is_source:
             data, *data_factors = mx.sym.split(data=data,
                                                num_outputs=self.config.num_factors + 1,
                                                axis=2,
                                                squeeze_axis=True, name=self.prefix + "factor_split")
 
-            embedding = mx.sym.Embedding(data=data,
-                                         input_dim=self.config.vocab_size,
-                                         weight=self.embed_weight,
-                                         output_dim=self.config.num_embed,
-                                         name=self.prefix + "embed")
+            if self.config.factor_configs is not None:
+                for i, (factor_data, factor_config, factor_weight) in enumerate(zip(data_factors,
+                                                                                    self.config.factor_configs,
+                                                                                    self.embed_factor_weights)):
+                    factor_embeddings.append(mx.sym.Embedding(data=factor_data,
+                                                              input_dim=factor_config.vocab_size,
+                                                              weight=factor_weight,
+                                                              output_dim=factor_config.num_embed,
+                                                              name=self.prefix + "factor%d_embed" % i))
 
-            for i, (factor_data, factor_config, factor_weight) in enumerate(zip(data_factors,
-                                                                                self.config.factor_configs,
-                                                                                self.embed_factor_weights)):
-                factor_embeddings.append(mx.sym.Embedding(data=factor_data,
-                                                          input_dim=factor_config.vocab_size,
-                                                          weight=factor_weight,
-                                                          output_dim=factor_config.num_embed,
-                                                          name=self.prefix + "factor%d_embed" % i))
+        embedding = mx.sym.Embedding(data=data,
+                                     input_dim=self.config.vocab_size,
+                                     weight=self.embed_weight,
+                                     output_dim=self.config.num_embed,
+                                     name=self.prefix + "embed")
 
+        if self.config.factor_configs is not None:
             embedding = mx.sym.concat(embedding, *factor_embeddings, dim=2, name=self.prefix + "embed_plus_factors")
-
-        else:
-            if split:
-                data = mx.sym.split(data=data,
-                                    num_outputs=1,
-                                    axis=2,
-                                    squeeze_axis=True, name=self.prefix + "factor_slice")
-
-            embedding = mx.sym.Embedding(data=data,
-                                         input_dim=self.config.vocab_size,
-                                         weight=self.embed_weight,
-                                         output_dim=self.config.num_embed,
-                                         name=self.prefix + "embed")
 
         if self.config.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.config.dropout, name="source_embed_dropout")

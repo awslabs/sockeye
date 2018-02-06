@@ -600,10 +600,12 @@ def create_model_config(args: argparse.Namespace,
     config_embed_source = encoder.EmbeddingConfig(vocab_size=source_vocab_size,
                                                   num_embed=num_embed_source,
                                                   dropout=embed_dropout_source,
+                                                  is_source=True,
                                                   factor_configs=source_factor_configs)
 
     config_embed_target = encoder.EmbeddingConfig(vocab_size=target_vocab_size,
                                                   num_embed=num_embed_target,
+                                                  is_source=False,
                                                   dropout=embed_dropout_target)
 
     config_loss = loss.LossConfig(name=args.loss,

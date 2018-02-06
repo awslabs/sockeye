@@ -170,7 +170,7 @@ class InferenceModel(model.SockeyeModel):
             # source embedding
             (source_embed,
              source_embed_length,
-             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len, split=True)
+             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
 
             # encoder
             # source_encoded: (source_encoded_length, batch_size, encoder_depth)
@@ -223,7 +223,7 @@ class InferenceModel(model.SockeyeModel):
 
             # embedding for previous word
             # (batch_size, num_embed)
-            target_embed_prev, _, _ = self.embedding_target.encode(data=target_prev, data_length=None, seq_len=1, split=False)
+            target_embed_prev, _, _ = self.embedding_target.encode(data=target_prev, data_length=None, seq_len=1)
 
             # decoder
             # target_decoded: (batch_size, decoder_depth)
