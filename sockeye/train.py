@@ -210,50 +210,12 @@ def determine_decode_and_evaluate_context(args: argparse.Namespace,
     return num_to_decode, context
 
 
-def load_or_create_vocabs(args: argparse.Namespace, resume_training: bool, output_folder: str) -> Tuple[Dict, Dict]:
-    """
-    Load the vocabularies from disks if given, create them if not.
-
-    :param args: Arguments as returned by argparse.
-    :param resume_training: When True, the vocabulary will be loaded from an existing output folder.
-    :param output_folder: Main output folder for the training.
-    :return: The source and target vocabularies.
-    """
-    if resume_training:
-        vocab_source = vocab.vocab_from_json_or_pickle(os.path.join(output_folder, C.VOCAB_SRC_NAME))
-        vocab_target = vocab.vocab_from_json_or_pickle(os.path.join(output_folder, C.VOCAB_TRG_NAME))
-    else:
-        num_words_source, num_words_target = args.num_words
-        word_min_count_source, word_min_count_target = args.word_min_count
-
-        # if the source and target embeddings are tied we build a joint vocabulary:
-        if args.weight_tying and C.WEIGHT_TYING_SRC in args.weight_tying_type \
-                and C.WEIGHT_TYING_TRG in args.weight_tying_type:
-            vocab_source = vocab_target = _build_or_load_vocab(args.source_vocab,
-                                                               [args.source, args.target],
-                                                               num_words_source,
-                                                               word_min_count_source)
-        else:
-            vocab_source = _build_or_load_vocab(args.source_vocab, [args.source],
-                                                num_words_source, word_min_count_source)
-            vocab_target = _build_or_load_vocab(args.target_vocab, [args.target],
-                                                num_words_target, word_min_count_target)
-    return vocab_source, vocab_target
-
-
-def _build_or_load_vocab(existing_vocab_path: Optional[str], data_paths: List[str],
-                         num_words: int, word_min_count: int) -> vocab.Vocab:
-    if existing_vocab_path is None:
-        vocabulary = vocab.build_from_paths(paths=data_paths,
-                                            num_words=num_words,
-                                            min_count=word_min_count)
-    else:
-        vocabulary = vocab.vocab_from_json(existing_vocab_path)
-    return vocabulary
-
-
 def use_shared_vocab(args: argparse.Namespace) -> bool:
-    """ Determine whether the source and target vocabulary should be shared. """
+    """
+    True if arguments entail a shared source and target vocabulary.
+
+    :param: args: Arguments as returned by argparse.
+    """
     weight_tying = args.weight_tying
     weight_tying_type = args.weight_tying_type
     shared_vocab = args.shared_vocab
@@ -271,7 +233,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                  output_folder: str) -> Tuple['data_io.BaseParallelSampleIter',
                                                               'data_io.BaseParallelSampleIter',
                                                               'data_io.DataConfig',
-                                                              vocab.Vocab, vocab.Vocab, List[vocab.Vocab]]:
+                                                              List[vocab.Vocab], vocab.Vocab]:
     """
     Create the data iterators and the vocabularies.
 
@@ -288,7 +250,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
     batch_by_words = args.batch_type == C.BATCH_TYPE_WORD
 
-    validation_source_factors = list(map(os.path.abspath, args.validation_source_factors))
+    validation_sources = list(map(os.path.abspath, [args.validation_source] + args.validation_source_factors))
 
     either_raw_or_prepared_error_msg = "Either specify a raw training corpus with %s and %s or a preprocessed corpus " \
                                        "with %s." % (C.TRAINING_ARG_SOURCE,
@@ -300,71 +262,63 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             utils.check_condition(args.source_vocab is None and args.target_vocab is None,
                                   "You are using a prepared data folder, which is tied to a vocabulary. "
                                   "To change it you need to rerun data preparation with a different vocabulary.")
-        train_iter, validation_iter, data_config, vocab_source, vocab_target, source_factor_vocabs = data_io.get_prepared_data_iters(
+        train_iter, validation_iter, data_config, source_vocabs, target_vocab = data_io.get_prepared_data_iters(
             prepared_data_dir=args.prepared_data,
-            validation_source=os.path.abspath(args.validation_source),
+            validation_sources=validation_sources,
             validation_target=os.path.abspath(args.validation_target),
-            validation_source_factors=validation_source_factors,
             shared_vocab=shared_vocab,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
             batch_num_devices=batch_num_devices,
             fill_up=args.fill_up)
+        source_vocab, *source_factor_vocabs = source_vocabs
 
         if resume_training:
             # resuming training. Making sure the vocabs in the model and in the prepared data match up
-            # TODO: sanity check excludes factored vocabularies
-            model_vocab_source = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_SRC_NAME + C.JSON_SUFFIX))
-            model_vocab_target = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_TRG_NAME + C.JSON_SUFFIX))
-            utils.check_condition(vocab.are_identical(vocab_source, model_vocab_source),
+            model_source_vocab = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_SRC_NAME + C.JSON_SUFFIX))
+            model_target_vocab = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_TRG_NAME + C.JSON_SUFFIX))
+            utils.check_condition(vocab.are_identical(source_vocab, model_source_vocab),
                                   "Prepared data and resumed model source vocabs do not match.")
-            utils.check_condition(vocab.are_identical(vocab_target, model_vocab_target),
+            utils.check_condition(vocab.are_identical(target_vocab, model_target_vocab),
                                   "Prepared data and resumed model target vocabs do not match.")
 
-            for i, sfv in enumerate(source_factor_vocabs):
-                model_vocab_source_factor = vocab.vocab_from_json('%s.%d%s' % (os.path.join(output_folder, C.VOCAB_SRC_NAME), i, C.JSON_SUFFIX))
-                utils.check_condition(vocab.are_identical(sfv, model_vocab_source_factor),
-                                      "Prepared data and resumed model vocabs do not match on source factor %d." % (i))
+            check_condition(len(args.source_factors) == len(args.validation_source_factors),
+                            'Training and validation data must have the same number of factors: %d vs. %d.' % (
+                                len(args.source_factors), len(args.validation_source_factors)))
 
-        return train_iter, validation_iter, data_config, vocab_source, vocab_target, source_factor_vocabs
+            for i, model_source_factor_vocab, source_factor_vocab in enumerate(
+                    zip(vocab.load_source_factor_vocabs(output_folder, len(args.validation_source_factors)),
+                        source_factor_vocabs)):
+                utils.check_condition(vocab.are_identical(source_factor_vocab, model_source_factor_vocab),
+                                      "Prepared data and resumed source factor vocab does not match for factor %d" % i)
+
+        return train_iter, validation_iter, data_config, source_vocabs, target_vocab
+
     else:
         utils.check_condition(args.prepared_data is None and args.source is not None and args.target is not None,
                               either_raw_or_prepared_error_msg)
 
-        utils.check_condition(len(args.source_factors) == len(args.validation_source_factors),
-                              'Training and validation data must have the same number of factors'
-                              ' (found %d and %d, respectively)' % (len(args.source_factors), len(args.validation_source_factors)))
-
-
-        if args.source_factors is not None:
-            source_factor_sources = args.source_factors
-
         if resume_training:
             # Load the existing vocab created when starting the training run.
-            vocab_source = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_SRC_NAME + C.JSON_SUFFIX))
-            vocab_target = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_TRG_NAME + C.JSON_SUFFIX))
-
-            if args.source_factors is not None:
-                source_factor_vocabs = [vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_SRC_NAME + "." + str(ext) + C.JSON_SUFFIX)) for ext in range(len(args.source_factors))]
+            source_vocab = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_SRC_NAME + C.JSON_SUFFIX))
+            target_vocab = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_TRG_NAME + C.JSON_SUFFIX))
+            source_factor_vocabs = vocab.load_source_factor_vocabs(output_folder, len(args.validation_source_factors))
+            source_vocabs = [source_vocab] + source_factor_vocabs
 
             # Recover the vocabulary path from the existing config file:
             orig_config = cast(model.ModelConfig, Config.load(os.path.join(output_folder, C.CONFIG_NAME)))
-            vocab_source_path = orig_config.config_data.vocab_source
-            vocab_target_path = orig_config.config_data.vocab_target
-            source_factor_vocab_paths = list(orig_config.config_data.source_factor_vocabs)
+            source_vocab_paths = orig_config.config_data.source_vocabs
+            target_vocab_path = orig_config.config_data.target_vocab
 
         else:
             # Load vocabs
-            vocab_source_path = args.source_vocab
-            vocab_target_path = args.target_vocab
-            source_factor_vocab_paths = [None] * len(args.source_factors)
-
-            vocab_source, vocab_target, *source_factor_vocabs = vocab.load_or_create_vocabs(
-                source=args.source, target=args.target,
-                source_vocab_path=vocab_source_path,
-                target_vocab_path=vocab_target_path,
-                source_factor_sources=source_factor_sources,
-                source_factor_vocab_paths=source_factor_vocab_paths,
+            source_vocab_paths = [args.source_vocab] + [None] * len(args.source_factors)
+            target_vocab_path = args.target_vocab
+            source_vocabs, target_vocab = vocab.load_or_create_vocabs(
+                source_paths=[args.source] + args.source_factors,
+                target_path=args.target,
+                source_vocab_paths=source_vocab_paths,
+                target_vocab_path=target_vocab_path,
                 shared_vocab=shared_vocab,
                 num_words_source=num_words_source,
                 num_words_target=num_words_target,
@@ -372,22 +326,19 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 word_min_count_target=word_min_count_target)
 
         utils.check_condition(len(args.source_factor_num_embed) == len(source_factor_vocabs),
-                              "The number of source factor data sources (%d) is different from the number of provided source factor embedding dimensions (%d)" % (len(args.source_factor_num_embed), len(source_factor_vocabs)))
+                              "The number of source factor data sources (%d) is different from the number of provided source factor embedding dimensions (%d)" % (
+                              len(args.source_factor_num_embed), len(source_factor_vocabs)))
 
         train_iter, validation_iter, config_data = data_io.get_training_data_iters(
-            source=os.path.abspath(args.source),
+            sources=list(map(os.path.abspath, [args.source] + args.source_factors)),
             target=os.path.abspath(args.target),
-            source_factors=list(map(os.path.abspath, args.source_factors)),
-            validation_source=os.path.abspath(args.validation_source),
+            validation_sources=list(map(os.path.abspath, validation_sources)),
             validation_target=os.path.abspath(args.validation_target),
-            validation_source_factors=list(map(os.path.abspath, args.validation_source_factors)),
-            vocab_source=vocab_source,
-            vocab_target=vocab_target,
-            vocab_source_path=vocab_source_path,
-            vocab_target_path=vocab_target_path,
+            source_vocabs=source_vocabs,
+            target_vocab=target_vocab,
+            source_vocab_paths=source_vocab_paths,
+            target_vocab_path=target_vocab_path,
             shared_vocab=shared_vocab,
-            source_factor_vocabs=source_factor_vocabs,
-            source_factor_vocab_paths=source_factor_vocab_paths,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
             batch_num_devices=batch_num_devices,
@@ -396,7 +347,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
             bucket_width=args.bucket_width)
-        return train_iter, validation_iter, config_data, vocab_source, vocab_target, source_factor_vocabs
+
+        return train_iter, validation_iter, config_data, source_vocabs, target_vocab
 
 
 def create_lr_scheduler(args: argparse.Namespace, resume_training: bool,
@@ -604,23 +556,22 @@ def check_encoder_decoder_args(args) -> None:
 
 
 def create_model_config(args: argparse.Namespace,
-                        vocab_source_size: int,
-                        vocab_target_size: int,
-                        config_data: data_io.DataConfig,
-                        source_factor_vocab_sizes: Optional[List[int]] = []) -> model.ModelConfig:
+                        source_vocab_sizes: List[int],
+                        target_vocab_size: int,
+                        config_data: data_io.DataConfig) -> model.ModelConfig:
     """
     Create a ModelConfig from the argument given in the command line.
 
     :param args: Arguments as returned by argparse.
-    :param vocab_source_size: The size of the source vocabulary.
-    :param vocab_target_size: The size of the target vocabulary.
+    :param source_vocab_sizes: The size of the source vocabulary (and source factors).
+    :param target_vocab_size: The size of the target vocabulary.
     :param config_data: Data config.
-    :param source_factor_vocab_sizes: Size of source factor vocabularies.
     :return: The model configuration.
     """
     max_seq_len_source, max_seq_len_target = args.max_seq_len
     num_embed_source, num_embed_target = args.num_embed
     embed_dropout_source, embed_dropout_target = args.embed_dropout
+    source_vocab_size, *source_factor_vocab_sizes = source_vocab_sizes
 
     check_encoder_decoder_args(args)
 
@@ -636,25 +587,30 @@ def create_model_config(args: argparse.Namespace,
     config_encoder, encoder_num_hidden = create_encoder_config(args, config_conv)
     config_decoder = create_decoder_config(args, encoder_num_hidden)
 
-    config_embed_source = encoder.EmbeddingConfig(vocab_size=vocab_source_size,
+    source_factor_configs = None
+    if args.source_factor_num_embed:
+        source_factor_configs = [encoder.FactorConfig(size, dim) for size, dim in zip(source_factor_vocab_sizes,
+                                                                                      args.source_factor_num_embed)]
+
+    config_embed_source = encoder.EmbeddingConfig(vocab_size=source_vocab_size,
                                                   num_embed=num_embed_source,
                                                   dropout=embed_dropout_source,
-                                                  factor_configs = [encoder.FactorConfig(size, dim) for size, dim in zip(source_factor_vocab_sizes, args.source_factor_num_embed)])
+                                                  factor_configs=source_factor_configs)
 
-    config_embed_target = encoder.EmbeddingConfig(vocab_size=vocab_target_size,
+    config_embed_target = encoder.EmbeddingConfig(vocab_size=target_vocab_size,
                                                   num_embed=num_embed_target,
                                                   dropout=embed_dropout_target)
 
     config_loss = loss.LossConfig(name=args.loss,
-                                  vocab_size=vocab_target_size,
+                                  vocab_size=source_vocab_size,
                                   normalization_type=args.loss_normalization_type,
                                   label_smoothing=args.label_smoothing)
 
     model_config = model.ModelConfig(config_data=config_data,
                                      max_seq_len_source=max_seq_len_source,
                                      max_seq_len_target=max_seq_len_target,
-                                     vocab_source_size=vocab_source_size,
-                                     vocab_target_size=vocab_target_size,
+                                     vocab_source_size=source_vocab_size,
+                                     vocab_target_size=target_vocab_size,
                                      source_factor_vocab_sizes=source_factor_vocab_sizes,
                                      config_embed_source=config_embed_source,
                                      config_embed_target=config_embed_target,
@@ -783,29 +739,28 @@ def main():
 
         shared_vocab = use_shared_vocab(args)
 
-        train_iter, eval_iter, config_data, vocab_source, vocab_target, source_factor_vocabs = create_data_iters_and_vocabs(
+        train_iter, eval_iter, config_data, source_vocabs, target_vocab = create_data_iters_and_vocabs(
             args=args,
             shared_vocab=shared_vocab,
             resume_training=resume_training,
             output_folder=output_folder)
+        source_vocab, *source_factor_vocabs = source_vocabs
 
         # Dump the vocabularies if we're just starting up
         if not resume_training:
-            vocab.vocab_to_json(vocab_source, os.path.join(output_folder, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
-            vocab.vocab_to_json(vocab_target, os.path.join(output_folder, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX)
-            for i, v in enumerate(source_factor_vocabs):
-                vocab.vocab_to_json(v, os.path.join(output_folder, C.VOCAB_SRC_NAME) + "." + str(i) + C.JSON_SUFFIX)
+            vocab.vocab_to_json(source_vocab, os.path.join(output_folder, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
+            vocab.vocab_to_json(target_vocab, os.path.join(output_folder, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX)
+            vocab.save_source_factor_vocabs(output_folder, source_factor_vocabs)
 
-        vocab_source_size = len(vocab_source)
-        vocab_target_size = len(vocab_target)
-        source_factor_vocab_sizes = [len(v) for v in source_factor_vocabs]
-        logger.info('Vocabulary sizes: source=%d source_factors=%s target=%d',
-                    vocab_source_size,
-                    ','.join([str(size) for size in source_factor_vocab_sizes]),
-                    vocab_target_size)
+        source_vocab_sizes = [len(v) for v in source_vocabs]
+        vocab_source_size = source_vocab_sizes[0]
+        target_vocab_size = len(target_vocab)
+        logger.info('Vocabulary sizes: source=[%s] target=%d',
+                    '|'.join([str(size) for size in source_vocab_sizes]),
+                    target_vocab_size)
         lr_scheduler_instance = create_lr_scheduler(args, resume_training, training_state_dir)
 
-        model_config = create_model_config(args, vocab_source_size, vocab_target_size, config_data, source_factor_vocab_sizes)
+        model_config = create_model_config(args, source_vocab_sizes, target_vocab_size, config_data)
         model_config.freeze()
 
         training_model = create_training_model(model_config, args,

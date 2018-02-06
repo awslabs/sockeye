@@ -136,6 +136,7 @@ def vocab_from_json(path: str, encoding: str = C.VOCAB_ENCODING) -> Vocab:
     Saves vocabulary in json format.
 
     :param path: Path to json file containing the vocabulary.
+    :param encoding: Vocabulary encoding.
     :return: The loaded vocabulary.
     """
     with open(path, encoding=encoding) as inp:
@@ -144,16 +145,26 @@ def vocab_from_json(path: str, encoding: str = C.VOCAB_ENCODING) -> Vocab:
         return vocab
 
 
-def load_source_factor_vocabs(model_folder: str, num_factors: int) -> List[Vocab]:
+def load_source_factor_vocabs(folder: str, num_factors: int) -> List[Vocab]:
     """
-    Loads num_factor source factor vocabularies from "model_folder/vocab.src.N".
+    Loads num_factor source factor vocabularies from folder.
 
-    :param model_folder: The model folder.
+    :param folder: Model or prepared data folder.
     :param num_factors: Number of source factor vocabularies to load.
     :return: List of loaded source factor vocabularies.
     """
-    return [vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_SRC_FACTOR_NAME % fi)) for fi in
+    return [vocab_from_json_or_pickle(os.path.join(folder, C.VOCAB_SRC_FACTOR_NAME % fi)) for fi in
             range(num_factors)]
+
+
+def save_source_factor_vocabs(folder: str, source_factor_vocabs: List[Vocab]):
+    """
+    Saves source factor vocabularies to folder
+    :param folder: Model or prepared data folder.
+    :param source_factor_vocabs: List of source factor vocabularies.
+    """
+    for i, v in enumerate(source_factor_vocabs):
+        vocab_to_json(v, os.path.join(folder, C.VOCAB_SRC_FACTOR_NAME % i) + C.JSON_SUFFIX)
 
 
 def load_or_create_vocab(data: str, vocab_path: Optional[str],
@@ -163,75 +174,75 @@ def load_or_create_vocab(data: str, vocab_path: Optional[str],
     Otherwise, it is built from the data file.
     No writing to disk occurs.
     """
-    return build_from_paths(paths=[data],
-                            num_words=num_words,
-                            min_count=word_min_count) if vocab_path is None else vocab_from_json(vocab_path)
+    if vocab_path is None:
+        return build_from_paths(paths=[data], num_words=num_words, min_count=word_min_count)
+    else:
+        return vocab_from_json(vocab_path)
 
 
-def load_or_create_vocabs(source: str,
-                          target: str,
-                          source_vocab_path: Optional[str],
+def load_or_create_vocabs(source_paths: List[str],
+                          target_path: str,
+                          source_vocab_paths: List[Optional[str]],
                           target_vocab_path: Optional[str],
-                          source_factor_sources: Optional[List[str]],
-                          source_factor_vocab_paths: Optional[List[str]],
                           shared_vocab: bool,
                           num_words_source: int, word_min_count_source: int,
-                          num_words_target: int, word_min_count_target: int) -> List[Vocab]:
+                          num_words_target: int, word_min_count_target: int) -> Tuple[List[Vocab], Vocab]:
     """
-    Returns vocabularies for each of source, target, and source_factors_sources.
-    If the respective vocabulary paths are not None, the vocab is read from the path and returned.
+    Returns vocabularies for source files (including factors) and target.
+    If the respective vocabulary paths are not None, the vocabulary is read from the path and returned.
     Otherwise, it is built from the support and saved to the path.
-    No writing to disk is done.
 
-    :param source: The source text.
-    :param target: The target text.
-    :param source_vocab_path: The source vocabulary path.
+    :param source_paths: The path to the source text (and optional token-parallel factor files).
+    :param target_path: The target text.
+    :param source_vocab_paths: The source vocabulary path (and optional factor vocabulary paths).
     :param target_vocab_path: The target vocabulary path.
-    :param source_factor_sources: The source texts for any factors.
-    :param source_factor_vocab_paths: The vocabularies for any factors.
-    :param shared_vocab: Whether the vocabulary is shared.
-    :param num_words_source:
-    :param word_min_count_source:
-    :param num_words_target:
-    :param word_min_count_target:
-    :param first_target_vocab_index: Indicates where the target vocabularies start.
-    :return: Vocabularies for each entry in vocab_paths.
+    :param shared_vocab: Whether the source and target vocabularies are shared.
+    :param num_words_source: Number of words in the source vocabulary.
+    :param word_min_count_source: Minimum frequency of words in the source vocabulary.
+    :param num_words_target: Number of words in the target vocabulary.
+    :param word_min_count_target: Minimum frequency of words in the target vocabulary.
+    :return: List of source vocabularies (for source and factors), and target vocabulary.
     """
-
-    vocabs = [] # type: List[Vocab]
-    vocab_paths = [source_vocab_path, target_vocab_path] + source_factor_vocab_paths
+    source_path, *source_factor_paths = source_paths
+    source_vocab_path, *source_factor_vocab_paths = source_vocab_paths
 
     if shared_vocab:
-        # Build a shared vocabulary between the source and target.
-        # Source factors are still separate.
         if source_vocab_path and target_vocab_path:
-            vocabs = [vocab_from_json(x) for x in vocab_paths]
-            utils.check_condition(are_identical(vocabs[0], vocabs[1]),
+            vocab_source = vocab_from_json(source_vocab_path)
+            vocab_target = vocab_from_json(target_vocab_path)
+            utils.check_condition(are_identical(vocab_source, vocab_target),
                                   "Shared vocabulary requires identical source and target vocabularies. "
                                   "The vocabularies in %s and %s are not identical." % (source_vocab_path,
                                                                                         target_vocab_path))
+            # source factor vocabs are not shared
+            vocab_source_factors = [vocab_from_json(path) for path in source_factor_vocab_paths]
+
         elif source_vocab_path is None and target_vocab_path is None:
             utils.check_condition(num_words_source == num_words_target,
                                   "A shared vocabulary requires the number of source and target words to be the same.")
             utils.check_condition(word_min_count_source == word_min_count_target,
                                   "A shared vocabulary requires the minimum word count for source and target "
                                   "to be the same.")
-            vocab_source = vocab_target = build_from_paths(paths=[source, target],
+            vocab_source = vocab_target = build_from_paths(paths=[source_path, target_path],
                                                            num_words=num_words_source,
                                                            min_count=word_min_count_source)
-            vocabs = [vocab_source, vocab_target] + [build_from_paths(paths=[path]) for path in source_factor_sources]
+            vocab_source_factors = [build_from_paths(paths=[path]) for path in source_factor_vocab_paths]
+
         else:
             vocab_path = source_vocab_path if source_vocab_path is not None else target_vocab_path
             logger.info("Using %s as a shared source/target vocabulary." % vocab_path)
             vocab_source = vocab_target = vocab_from_json(vocab_path)
-            vocabs = [vocab_source, vocab_target] + [vocab_from_json(path) for path in source_factor_sources]
+            vocab_source_factors = [vocab_from_json(path) for path in source_factor_vocab_paths]
 
     else:
-        vocab_source = load_or_create_vocab(source, source_vocab_path, num_words_source, word_min_count_source)
-        vocab_target = load_or_create_vocab(target, target_vocab_path, num_words_target, word_min_count_target)
-        vocabs = [vocab_source, vocab_target] + [load_or_create_vocab(d, v, num_words_source, word_min_count_source) for d, v in zip(source_factor_sources, source_factor_vocab_paths)]
+        vocab_source = load_or_create_vocab(source_path, source_vocab_path, num_words_source, word_min_count_source)
+        vocab_target = load_or_create_vocab(target_path, target_vocab_path, num_words_target, word_min_count_target)
+        vocab_source_factors = []  # type: List[Vocab]
+        for factor_path, factor_vocab_path in zip(source_factor_paths, source_factor_vocab_paths):
+            vocab_source_factors.append(load_or_create_vocab(factor_path, factor_vocab_path,
+                                                             num_words_source, word_min_count_target))
 
-    return vocabs
+    return [vocab_source] + vocab_source_factors, vocab_target
 
 
 def reverse_vocab(vocab: Mapping) -> InverseVocab:

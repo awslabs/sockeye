@@ -189,7 +189,7 @@ CONFIG_NAME = "config"
 LOG_NAME = "log"
 JSON_SUFFIX = ".json"
 VOCAB_SRC_NAME = "vocab.src"
-VOCAB_SRC_FACTOR_NAME = "vocab.src.%d"
+VOCAB_SRC_FACTOR_NAME = "vocab.src.factor.%d"
 VOCAB_TRG_NAME = "vocab.trg"
 VOCAB_ENCODING = "utf-8"
 PARAMS_PREFIX = "params."
@@ -335,5 +335,5 @@ SHARD_SOURCE = SHARD_NAME + ".source"
 SHARD_TARGET = SHARD_NAME + ".target"
 DATA_CONFIG = "data.config"
 PREPARED_DATA_VERSION_FILE = "data.version"
-PREPARED_DATA_VERSION = 1
+PREPARED_DATA_VERSION = 2
 

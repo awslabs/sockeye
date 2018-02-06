@@ -267,11 +267,12 @@ class ReverseSequence(Encoder):
         return self.num_hidden
 
 
-class FactorConfig:
+class FactorConfig(config.Config):
 
-    def __init__(self, dim: int, vocab_size: int) -> None:
+    def __init__(self, num_embed: int, vocab_size: int) -> None:
+        super().__init__()
         self.vocab_size = vocab_size
-        self.dim = dim
+        self.num_embed = num_embed
 
 
 class EmbeddingConfig(config.Config):
@@ -280,13 +281,15 @@ class EmbeddingConfig(config.Config):
                  vocab_size: int,
                  num_embed: int,
                  dropout: float,
-                 factor_configs: Optional[List[FactorConfig]] = []) -> None:
+                 factor_configs: Optional[List[FactorConfig]] = None) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
         self.dropout = dropout
         self.factor_configs = factor_configs
-        self.num_factors = len(self.factor_configs)
+        self.num_factors = 0
+        if self.factor_configs is not None:
+            self.num_factors = len(self.factor_configs)
 
 
 class Embedding(Encoder):
@@ -310,12 +313,12 @@ class Embedding(Encoder):
             self.embed_weight = mx.sym.Variable(prefix + "weight",
                                                 shape=(self.config.vocab_size, self.config.num_embed))
 
-        # Factors weights aren't shared so they're not passed in and we create them here.
-        self.embed_factor_weights = [
-            mx.sym.Variable(prefix + "factor" + str(i) +  "_weight",
-                            shape=(config.vocab_size,
-                                   config.dim))
-            for i, config in enumerate(self.config.factor_configs)]
+        self.embed_factor_weights = []  # type: List[mx.sym.Symbol]
+        if self.config.factor_configs is not None:
+            # Factors weights aren't shared so they're not passed in and we create them here.
+            for i, fc in enumerate(self.config.factor_configs):
+                self.embed_factor_weights.append(mx.sym.Variable(prefix + "factor%d_weight" % i,
+                                                                 shape=(fc.vocab_size, fc.num_embed)))
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -329,23 +332,21 @@ class Embedding(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
-        if self.config.num_factors > 0:
+        factor_embeddings = []  # type: List[mx.sym.Symbol
+        if self.config.factor_configs is not None:
             data, data_factors = mx.sym.split(data=data,
                                               num_outputs=self.config.num_factors + 1,
                                               axis=2,
                                               squeeze_axis=True)
 
-            factor_embeddings = []
             for i, (factor_data, factor_config, factor_weight) in enumerate(zip(data_factors,
                                                                                 self.config.factor_configs,
                                                                                 self.embed_factor_weights)):
                 factor_embeddings.append(mx.sym.Embedding(data=factor_data,
                                                           input_dim=factor_config.vocab_size,
                                                           weight=factor_weight,
-                                                          output_dim=factor_config.dim,
+                                                          output_dim=factor_config.num_embed,
                                                           name=self.prefix + "factor%d_embed" % i))
-        else:
-            factor_embeddings = []
 
         embedding = mx.sym.Embedding(data=data,
                                      input_dim=self.config.vocab_size,
@@ -353,7 +354,7 @@ class Embedding(Encoder):
                                      output_dim=self.config.num_embed,
                                      name=self.prefix + "embed")
 
-        if self.config.num_factors > 0:
+        if self.config.factor_configs is not None:
             embedding = mx.sym.concat(embedding, *factor_embeddings, dim=2, name=self.prefix + "embed_plus_factors")
 
         if self.config.dropout > 0:

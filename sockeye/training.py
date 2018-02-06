@@ -102,10 +102,10 @@ class TrainingModel(model.SockeyeModel):
         Initializes model components, creates training symbol and module, and binds it.
         """
         #utils.check_condition(train_iter.pad_id == C.PAD_ID == 0, "pad id should be 0")
-        num_factors = self.config.config_embed_source.num_source_factors
 
         source = mx.sym.Variable(C.SOURCE_NAME)
-        source_words = source.split(num_outputs=num_factors + 1, axis=2, squeeze_axis=True)[0]
+        source_words = source.split(num_outputs=self.config.config_embed_source.num_factors + 1,
+                                    axis=2, squeeze_axis=True)[0]
         source_length = utils.compute_lengths(source_words)
         target = mx.sym.Variable(C.TARGET_NAME)
         target_length = utils.compute_lengths(target)
