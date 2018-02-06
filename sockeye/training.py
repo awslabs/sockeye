@@ -126,12 +126,12 @@ class TrainingModel(model.SockeyeModel):
             # source embedding
             (source_embed,
              source_embed_length,
-             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
+             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len, split=True)
 
             # target embedding
             (target_embed,
              target_embed_length,
-             target_embed_seq_len) = self.embedding_target.encode(target, target_length, target_seq_len)
+             target_embed_seq_len) = self.embedding_target.encode(target, target_length, target_seq_len, split=False)
 
             # encoder
             # source_encoded: (batch_size, source_encoded_length, encoder_depth)
