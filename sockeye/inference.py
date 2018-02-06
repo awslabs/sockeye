@@ -809,9 +809,11 @@ class Translator:
         :param sentence_id: Input sentence id.
         :param raw_sentence: Input sentence string.
         :param num_factors: Optional number of factors to expect in this sentence string.
-        :param delimiter: Optional delimiter to separate factors.
+        :param delimiter: Optional delimiter to separate factors. Can not be a whitespace string.
         :return: A TranslatorInput object.
         """
+        utils.check_condition(delimiter and not delimiter.isspace(),
+                              "Factor delimiter can not be whitespace or empty.")
         tokens = []  # type: Tokens
         factors = [[] for _ in range(num_factors)]  # type: List[Tokens]
         for token_id, token in enumerate(data_io.get_tokens(raw_sentence)):

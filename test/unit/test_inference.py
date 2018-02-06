@@ -142,7 +142,7 @@ def test_make_input(sentence_id, raw_sentence, num_factors, delimiter, expected_
                           ("this|| another", 1, "|", 0, "another"),
                           ("this|||", 1, "|", 0, "this"),
                           ("|this", 1, "|", 0, "this"),
-                          (r"this\tX is\tX", 1, r"\t", 0, "this"),
+                          ("this\tX is\tX", 1, "\t", 0, "this"),
                           ])
 def test_failed_make_input(sentence, num_factors, delimiter, expected_wrong_num_factors, expected_fail_word):
     sentence_id = 1
@@ -155,5 +155,20 @@ def test_failed_make_input(sentence, num_factors, delimiter, expected_wrong_num_
                                                                                             expected_wrong_num_factors,
                                                                                             sentence_id,
                                                                                             expected_fail_word)
+
+
+@pytest.mark.parametrize("delimiter", ["\t", "\t \t", "\t\t", "\n", "\r", "\r\n", "\u0020",
+                                       "\n\n", "  ", " \t", "\f", "\v", "\u00a0", "\u1680",
+                                       "\u2000", None, "", "\u200a", "\u205f", "\u3000"])
+def test_make_input_whitespace_delimiter(delimiter):
+    sentence_id = 1
+    sentence = "foo"
+    num_factors = 2
+    with pytest.raises(SockeyeError) as e:
+        sockeye.inference.Translator.make_input(sentence_id=sentence_id,
+                                                raw_sentence=sentence,
+                                                num_factors=num_factors,
+                                                delimiter=delimiter)
+    assert str(e.value) == 'Factor delimiter can not be whitespace or empty.'
 
 # TODO(fhieber): failure tests and other tests for factor parsing
