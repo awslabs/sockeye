@@ -59,7 +59,7 @@ def main():
     with ExitStack() as exit_stack:
         context = _setup_context(args, exit_stack)
 
-        models, vocab_source, source_factor_vocabs, vocab_target = inference.load_models(
+        models, source_vocabs, target_vocab = inference.load_models(
             context,
             args.max_input_len,
             args.beam_size,
@@ -72,7 +72,7 @@ def main():
             cache_output_layer_w_b=args.restrict_lexicon is not None)
         restrict_lexicon = None  # type: TopKLexicon
         if args.restrict_lexicon:
-            restrict_lexicon = TopKLexicon(vocab_source, vocab_target)
+            restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
             restrict_lexicon.load(args.restrict_lexicon)
         translator = inference.Translator(context,
                                           args.ensemble_mode,
@@ -80,9 +80,8 @@ def main():
                                           inference.LengthPenalty(args.length_penalty_alpha,
                                                                   args.length_penalty_beta),
                                           models,
-                                          vocab_source,
-                                          vocab_target,
-                                          source_factor_vocabs,
+                                          source_vocabs,
+                                          target_vocab,
                                           restrict_lexicon)
         read_and_translate(translator,
                            output_handler,

@@ -218,7 +218,7 @@ class TrainingModel(model.SockeyeModel):
             decode_and_evaluate: int = 0,
             decode_and_evaluate_fname_source: Optional[str] = None,
             decode_and_evaluate_fname_target: Optional[str] = None,
-            decode_and_evaluate_fname_source_factors: Optional[List[str]] = [],
+            decode_and_evaluate_fname_source_factors: Optional[List[str]] = None,
             decode_and_evaluate_context: Optional[mx.Context] = None,
             use_tensorboard: bool = False,
             mxmonitor_pattern: Optional[str] = None,
@@ -250,6 +250,7 @@ class TrainingModel(model.SockeyeModel):
                evaluation, -1: decode the full validation set.).
         :param decode_and_evaluate_fname_source: Filename of source data to decode and evaluate.
         :param decode_and_evaluate_fname_target: Filename of target data (references) to decode and evaluate.
+        :param decode_and_evaluate_fname_source_factors: Filenames of source factor files.
         :param decode_and_evaluate_context: Optional MXNet context for decode and evaluate.
         :param use_tensorboard: If True write tensorboard compatible logs for monitoring training and
                validation metrics.
@@ -282,13 +283,14 @@ class TrainingModel(model.SockeyeModel):
 
         self.module.init_optimizer(kvstore=kvstore, optimizer=optimizer, optimizer_params=optimizer_params)
 
-        cp_decoder = checkpoint_decoder.CheckpointDecoder(decode_and_evaluate_context,
-                                                          decode_and_evaluate_fname_source,
-                                                          decode_and_evaluate_fname_target,
-                                                          output_folder,
-                                                          input_factors=decode_and_evaluate_fname_source_factors,
-                                                          sample_size=decode_and_evaluate) \
-            if decode_and_evaluate else None
+        cp_decoder = None
+        if decode_and_evaluate:
+            cp_decoder = checkpoint_decoder.CheckpointDecoder(context=decode_and_evaluate_context,
+                                                              inputs=decode_and_evaluate_fname_source,
+                                                              references=decode_and_evaluate_fname_target,
+                                                              model=output_folder,
+                                                              input_factors=decode_and_evaluate_fname_source_factors,
+                                                              sample_size=decode_and_evaluate)
 
         logger.info("Training started.")
         self.training_monitor = callback.TrainingMonitor(output_folder,

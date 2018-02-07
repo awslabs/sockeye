@@ -372,7 +372,6 @@ def load_models(context: mx.context.Context,
                 max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                 decoder_return_logit_inputs: bool = False,
                 cache_output_layer_w_b: bool = False) -> Tuple[List[InferenceModel],
-                                                               vocab.Vocab,
                                                                List[vocab.Vocab],
                                                                vocab.Vocab]:
     """
@@ -430,7 +429,7 @@ def load_models(context: mx.context.Context,
     for inference_model in models:
         inference_model.initialize(max_input_len, get_max_output_length)
 
-    return models, source_vocabs[0], source_factor_vocabs[0], target_vocabs[0],
+    return models, [source_vocabs[0]] + source_factor_vocabs[0], target_vocabs[0],
 
 
 def models_max_input_output_length(models: List[InferenceModel],
@@ -722,8 +721,8 @@ class Translator:
     :param ensemble_mode: Ensemble mode: linear or log_linear combination.
     :param length_penalty: Length penalty instance.
     :param models: List of models.
-    :param vocab_source: Source vocabulary.
-    :param vocab_target: Target vocabulary.
+    :param source_vocabs: Source vocabularies.
+    :param target_vocab: Target vocabulary.
     :param restrict_lexicon: Top-k lexicon to use for target vocabulary restriction.
     """
 
@@ -733,16 +732,14 @@ class Translator:
                  bucket_source_width: int,
                  length_penalty: LengthPenalty,
                  models: List[InferenceModel],
-                 vocab_source: Dict[str, int],
-                 vocab_target: Dict[str, int],
-                 source_factor_vocabs: Optional[List[Dict[str, int]]] = [],
+                 source_vocabs: List[vocab.Vocab],
+                 target_vocab: vocab.Vocab,
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None) -> None:
         self.context = context
         self.length_penalty = length_penalty
-        self.vocab_source = vocab_source
-        self.vocab_target = vocab_target
+        self.vocab_source, *self.source_factor_vocabs = source_vocabs
+        self.vocab_target = target_vocab
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
-        self.source_factor_vocabs = source_factor_vocabs
         self.restrict_lexicon = restrict_lexicon
         self.start_id = self.vocab_target[C.BOS_SYMBOL]
         self.stop_ids = {self.vocab_target[C.EOS_SYMBOL], C.PAD_ID}  # type: Set[int]

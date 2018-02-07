@@ -19,7 +19,7 @@ import os
 import random
 import time
 from contextlib import ExitStack
-from typing import Dict, Optional, List
+from typing import Any, Dict, Iterable, Optional, List
 
 import mxnet as mx
 
@@ -61,7 +61,7 @@ class CheckpointDecoder:
                  inputs: str,
                  references: str,
                  model: str,
-                 input_factors: Optional[List[str]] = [],
+                 input_factors: List[str],
                  max_input_len: Optional[int] = None,
                  beam_size: int = C.DEFAULT_BEAM_SIZE,
                  bucket_width_source: int = 10,
@@ -83,44 +83,36 @@ class CheckpointDecoder:
         self.length_penalty_beta = length_penalty_beta
         self.softmax_temperature = softmax_temperature
         self.model = model
+
         with ExitStack() as exit_stack:
-            inputs_fin = data_io.smart_open(inputs)
-            references_fin = data_io.smart_open(references)
-            factor_fins = [data_io.smart_open(f) for f in input_factors]
+            inputs_fin = exit_stack.enter_context(data_io.smart_open(inputs))
+            references_fin = exit_stack.enter_context(data_io.smart_open(references))
+            factor_fins = [exit_stack.enter_context(data_io.smart_open(f)) for f in input_factors]
 
             input_sentences = inputs_fin.readlines()
             target_sentences = references_fin.readlines()
             input_sentence_factors = [f.readlines() for f in factor_fins]
-            utils.check_condition(len(input_sentences) == len(target_sentences), "Number of sentence pairs do not match")
+
             if sample_size <= 0:
                 sample_size = len(input_sentences)
             if sample_size < len(input_sentences):
-                # custom random number generator to guarantee the same samples across runs in order to be able to
-                # compare metrics across independent runs
-                random_gen = random.Random(random_seed)
-                self.input_sentences, self.target_sentences, *self.input_sentence_factors = zip(
-                    *random_gen.sample(list(zip(input_sentences, target_sentences, *input_sentence_factors)),
-                                       sample_size))
+                self.input_sentences, self.target_sentences, *self.input_sentence_factors = parallel_subsample(
+                    [input_sentences, target_sentences] + input_sentence_factors, sample_size, random_seed)
             else:
-                self.input_sentences, self.target_sentences, self.input_sentence_factors = input_sentences, target_sentences, input_sentence_factors
+                self.input_sentences, self.target_sentences = input_sentences, target_sentences
+                self.input_sentence_factors = input_sentence_factors
 
-        logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d, source_factors=%d)",
-                    max_input_len if max_input_len is not None else -1,
-                    beam_size, model, len(self.input_sentences), len(input_factors))
+        write_to_file(self.input_sentences, os.path.join(self.model, C.DECODE_REF_NAME))
+        write_to_file(self.target_sentences, os.path.join(self.model, C.DECODE_REF_NAME))
+        for i, input_sentence_factor in enumerate(self.input_sentence_factors):
+            write_to_file(input_sentence_factor, os.path.join(self.model, C.DECODE_IN_FACTOR_NAME % i))
 
-        with data_io.smart_open(os.path.join(self.model, C.DECODE_REF_NAME), 'w') as trg_out, \
-                data_io.smart_open(os.path.join(self.model, C.DECODE_IN_NAME), 'w') as src_out:
-            for s in self.target_sentences:
-                print(s.rstrip(), file=trg_out)
-            for s in self.input_sentences:
-                print(s.rstrip(), file=src_out)
+        self.input_sentence_factors = list(zip(*self.input_sentence_factors))
 
-        # Write factor files
-        for fi in range(len(self.input_sentence_factors)):
-            outfile = '{}.{:d}'.format(os.path.join(self.model, C.DECODE_IN_NAME), fi)
-            with data_io.smart_open(outfile, 'w') as factor_out:
-                for s in self.input_sentence_factors[fi]:
-                    print(s.rstrip(), file=factor_out)
+        logger.info(
+            "Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d, source_factors=%d)",
+            max_input_len if max_input_len is not None else -1,
+            beam_size, model, len(self.input_sentences), len(input_factors))
 
     def decode_and_evaluate(self,
                             checkpoint: Optional[int] = None,
@@ -132,7 +124,7 @@ class CheckpointDecoder:
         :param output_name: Filename to write translations to. Defaults to /dev/null.
         :return: Mapping of metric names to scores.
         """
-        models, vocab_source, source_factor_vocabs, vocab_target = inference.load_models(
+        models, source_vocabs, target_vocab = inference.load_models(
             self.context,
             self.max_input_len,
             self.beam_size,
@@ -146,15 +138,19 @@ class CheckpointDecoder:
                                           self.bucket_width_source,
                                           inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
                                           models,
-                                          vocab_source,
-                                          vocab_target,
-                                          source_factor_vocabs)
+                                          source_vocabs,
+                                          target_vocab)
         trans_wall_time = 0.0
         translations = []
         with data_io.smart_open(output_name, 'w') as output:
             handler = sockeye.output_handler.StringOutputHandler(output)
             tic = time.time()
-            trans_inputs = [translator.make_input_multiple(i, source, *factors) for i, (source, *factors) in enumerate(zip(self.input_sentences, *self.input_sentence_factors))]
+            trans_inputs = []  # type: List[inference.TranslatorInput]
+            for i, source in enumerate(self.input_sentences):
+                factors = []
+                if self.input_sentence_factors and translator.num_source_factors:
+                    factors = self.input_sentence_factors[i]
+                trans_inputs.append(translator.make_input_multiple(i, source, translator.num_source_factors, factors))
             trans_outputs = translator.translate(trans_inputs)
             trans_wall_time = time.time() - tic
             for trans_input, trans_output in zip(trans_inputs, trans_outputs):
@@ -169,3 +165,21 @@ class CheckpointDecoder:
                 C.CHRF_VAL: evaluate.raw_corpus_chrf(hypotheses=translations,
                                                      references=self.target_sentences),
                 C.AVG_TIME: avg_time}
+
+
+def parallel_subsample(parallel_sequences: List[List[Any]], sample_size: int, seed: int) -> Iterable[Any]:
+    it = iter(parallel_sequences)
+    the_len = len(next(it))
+    utils.check_condition(all(len(l) == the_len for l in it), "Lists differ in length")
+
+    # custom random number generator to guarantee the same samples across runs in order to be able to
+    # compare metrics across independent runs
+    random_gen = random.Random(seed)
+    parallel_sample = zip(*random_gen.sample(list(zip(*parallel_sequences)), sample_size))
+    return parallel_sample
+
+
+def write_to_file(data: List[str], fname: str):
+    with data_io.smart_open(fname, 'w') as f:
+        for x in data:
+            print(x.rstrip(), file=f)

@@ -197,6 +197,7 @@ PARAMS_NAME = PARAMS_PREFIX + "%05d"
 PARAMS_BEST_NAME = "params.best"
 DECODE_OUT_NAME = "decode.output.%05d"
 DECODE_IN_NAME = "decode.source"
+DECODE_IN_FACTOR_NAME = "decode.source.factor.%d"
 DECODE_REF_NAME = "decode.target"
 SYMBOL_NAME = "symbol" + JSON_SUFFIX
 METRICS_NAME = "metrics"
