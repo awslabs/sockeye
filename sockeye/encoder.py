@@ -281,7 +281,7 @@ class EmbeddingConfig(config.Config):
                  vocab_size: int,
                  num_embed: int,
                  dropout: float,
-                 is_source: bool,
+                 is_source: bool = False,
                  factor_configs: Optional[List[FactorConfig]] = None) -> None:
         super().__init__()
         self.vocab_size = vocab_size

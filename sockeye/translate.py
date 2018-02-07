@@ -91,32 +91,6 @@ def main():
                            source_factors=args.input_factors)
 
 
-def merge_factors(*streams: Iterable[str], delimiter=C.DEFAULT_FACTOR_DELIMITER) -> Iterable[str]:
-    """
-    This function merges multiple factor streams into a single stream with word factors present on each token.
-    No error checking is done (since only the model knows how many factors are required).
-    This function makes it easy to stream in factors from multiple files and merge them into our inference-time format.
-
-    :param streams: A list of input streams.
-    :return: A single stream with the factors merged into the source stream.
-    """
-
-    for factors in zip(*streams):
-        tokens = [f.rstrip().split() for f in factors]
-        source_len = len(tokens[0])
-        for i, toks in enumerate(tokens[1:]):
-            check_condition(len(toks) == source_len,
-                            'Factor {:d} has the wrong number of tokens (found {:d}, needed {:d})'.format(
-                                i, len(toks), source_len))
-
-        # Single-line nested comprehensions are unreadable
-        merged = []
-        for i in range(source_len):
-            merged.append(delimiter.join([tokens[j][i] for j in range(len(streams))]))
-
-        yield ' '.join(merged)
-
-
 def _make_input(source: Optional[str],
                 source_factors: Optional[List[str]] = None,
                 num_source_factors: int = 0) -> Generator[inference.TranslatorInput, None, None]:
