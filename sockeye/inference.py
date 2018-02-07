@@ -546,14 +546,14 @@ class TranslatorInput:
     :param sentence_id: Sentence id.
     :param tokens: List of input tokens.
     :param factors: List of list of input factor strings. Can be empty.
-    :param chunk_id: Chunk id. Defaults to 0.
+    :param chunk_id: Chunk id. Defaults to -1.
     """
 
     def __init__(self,
                  sentence_id: int,
                  tokens: Tokens,
                  factors: List[Tokens],
-                 chunk_id: int = 0) -> None:
+                 chunk_id: int = -1) -> None:
         self.sentence_id = sentence_id
         self.chunk_id = chunk_id
         self.tokens = tokens
@@ -847,13 +847,13 @@ class Translator:
                               "Expecting {:d} factor sequences, got {:d}".format(num_factors, len(raw_factors)))
         tokens = list(data_io.get_tokens(raw_sentence))
         num_tokens = len(tokens)
-        factors = []  # type: List[Tokens]
-        for i, factor_sequence in enumerate(raw_factors, 1):
+        factors = [[] for _ in range(num_factors)]  # type: List[Tokens]
+        for i, factor_sequence in enumerate(raw_factors):
             factor_sequence = list(data_io.get_tokens(factor_sequence))
             utils.check_condition(len(factor_sequence) == num_tokens,
                                   "Expecting {:d} factors for factor {:d}, got {:d}".format(num_tokens, i,
                                                                                             len(factor_sequence)))
-            factors.append(factor_sequence)
+            factors[i] = factor_sequence
 
         return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
 
@@ -933,6 +933,8 @@ class Translator:
         for j, trans_input in enumerate(trans_inputs):
             source[j, :len(trans_input.tokens), 0] = data_io.tokens2ids(trans_input.tokens, self.vocab_source)
             for i, factor in enumerate(trans_input.factors):
+                utils.check_condition(len(factor) == len(trans_input.tokens),
+                                      "Factor sequence has different length than tokens: %s" % trans_input)
                 source[j, :len(trans_input.tokens), i + 1] = data_io.tokens2ids(factor, self.source_factor_vocabs[i])
         return source, bucket_key
 

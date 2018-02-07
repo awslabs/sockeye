@@ -14,6 +14,7 @@
 import mxnet as mx
 import numpy as np
 import pytest
+from math import ceil
 
 import sockeye.inference
 from sockeye.utils import SockeyeError
@@ -24,22 +25,22 @@ _EOS = -1
 
 def test_concat_translations():
     expected_target_ids = [0, 1, 2, 8, 9, 3, 4, 5, -1]
-    NUM_SRC = 7
+    num_src = 7
 
     def length_penalty(length):
         return 1. / length
 
     expected_score = (1 + 2 + 3) / length_penalty(len(expected_target_ids))
 
-    translations = [sockeye.inference.Translation([0, 1, 2, -1], np.zeros((4, NUM_SRC)), 1.0 / length_penalty(4)),
+    translations = [sockeye.inference.Translation([0, 1, 2, -1], np.zeros((4, num_src)), 1.0 / length_penalty(4)),
                     # Translation without EOS
-                    sockeye.inference.Translation([0, 8, 9], np.zeros((3, NUM_SRC)), 2.0 / length_penalty(3)),
-                    sockeye.inference.Translation([0, 3, 4, 5, -1], np.zeros((5, NUM_SRC)), 3.0 / length_penalty(5))]
+                    sockeye.inference.Translation([0, 8, 9], np.zeros((3, num_src)), 2.0 / length_penalty(3)),
+                    sockeye.inference.Translation([0, 3, 4, 5, -1], np.zeros((5, num_src)), 3.0 / length_penalty(5))]
     combined = sockeye.inference._concat_translations(translations, start_id=_BOS, stop_ids={_EOS},
                                                       length_penalty=length_penalty)
 
     assert combined.target_ids == expected_target_ids
-    assert combined.attention_matrix.shape == (len(expected_target_ids), len(translations) * NUM_SRC)
+    assert combined.attention_matrix.shape == (len(expected_target_ids), len(translations) * num_src)
     assert np.isclose(combined.score, expected_score)
 
 
@@ -66,6 +67,36 @@ def test_length_penalty_int_input():
 
     assert np.isclose(np.asarray([length_penalty(length)]),
                       np.asarray(expected_lp)).all()
+
+
+@pytest.mark.parametrize("sentence_id, sentence, factors, chunk_size",
+                         [(1, "a test", [], 4),
+                          (1, "a test", [], 2),
+                          (1, "a test", [], 1),
+                          (0, "", [], 1),
+                          (1, "a test", [['h', 'l']], 4),
+                          (1, "a test", [['h', 'h'], ['x', 'y']], 1)])
+def test_translator_input(sentence_id, sentence, factors, chunk_size):
+    tokens = sentence.split()
+    trans_input = sockeye.inference.TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
+
+    assert trans_input.sentence_id == sentence_id
+    assert trans_input.tokens == tokens
+    assert trans_input.factors == factors
+    for factor in trans_input.factors:
+        assert len(factor) == len(tokens)
+    assert trans_input.chunk_id == -1
+
+    chunked_inputs = list(trans_input.chunks(chunk_size))
+    assert len(chunked_inputs) == ceil(len(tokens) / chunk_size)
+    for chunk_id, chunk_input in enumerate(chunked_inputs):
+        assert chunk_input.sentence_id == sentence_id
+        assert chunk_input.chunk_id == chunk_id
+        assert chunk_input.tokens == trans_input.tokens[chunk_id * chunk_size: (chunk_id + 1) * chunk_size]
+        assert len(chunk_input.factors) == len(factors)
+        for factor, expected_factor in zip(chunk_input.factors, factors):
+            assert len(factor) == len(chunk_input.tokens)
+            assert factor == expected_factor[chunk_id * chunk_size: (chunk_id + 1) * chunk_size]
 
 
 @pytest.mark.parametrize("supported_max_seq_len_source, supported_max_seq_len_target, training_max_seq_len_source, "
@@ -136,7 +167,7 @@ def test_make_input(sentence_id, raw_sentence, num_factors, delimiter, expected_
                                                                delimiter=delimiter)
     assert isinstance(translator_input, sockeye.inference.TranslatorInput)
     assert translator_input.sentence_id == sentence_id
-    assert translator_input.chunk_id == 0
+    assert translator_input.chunk_id == -1
     assert translator_input.tokens == expected_tokens
     assert len(translator_input.factors) == num_factors
     assert translator_input.factors == expected_factors
