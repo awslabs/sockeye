@@ -84,6 +84,15 @@ def check_arg_compatibility(args: argparse.Namespace):
         check_condition(args.transformer_model_size == args.num_embed[0],
                         "Source embedding size must match transformer model size: %s vs. %s"
                         % (args.transformer_model_size, args.num_embed[0]))
+
+        total_source_factor_size = sum(args.source_factors_num_embed)
+        if total_source_factor_size > 0:
+            adjusted_transformer_encoder_model_size = args.num_embed[0] + total_source_factor_size
+            check_condition(adjusted_transformer_encoder_model_size % 2 == 0 and
+                            adjusted_transformer_encoder_model_size % args.transformer_attention_heads == 0,
+                            "Sum of source factor sizes (%d) has to be a multiple of attention heads (%d)" % (
+                                total_source_factor_size, args.transformer_attention_heads))
+
     if args.decoder == C.TRANSFORMER_TYPE:
         check_condition(args.transformer_model_size == args.num_embed[1],
                         "Target embedding size must match transformer model size: %s vs. %s"
@@ -273,9 +282,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             fill_up=args.fill_up)
         source_vocab, *source_factor_vocabs = source_vocabs
 
-        check_condition(data_config.num_source_factors == len(args.source_factor_num_embed),
+        check_condition(data_config.num_source_factors == len(args.source_factors_num_embed),
                         "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
-                            data_config.num_source_factors, len(args.source_factor_num_embed)))
+                            data_config.num_source_factors, len(args.source_factors_num_embed)))
 
         if resume_training:
             # resuming training. Making sure the vocabs in the model and in the prepared data match up
@@ -330,9 +339,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 word_min_count_target=word_min_count_target)
             source_vocab, *source_factor_vocabs = source_vocabs
 
-        check_condition(len(source_factor_vocabs) == len(args.source_factor_num_embed),
+        check_condition(len(source_factor_vocabs) == len(args.source_factors_num_embed),
                         "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (
-                            len(source_factor_vocabs), len(args.source_factor_num_embed)))
+                            len(source_factor_vocabs), len(args.source_factors_num_embed)))
 
         train_iter, validation_iter, config_data = data_io.get_training_data_iters(
             sources=list(map(os.path.abspath, [args.source] + args.source_factors)),
@@ -400,8 +409,15 @@ def create_encoder_config(args: argparse.Namespace,
     if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
         encoder_transformer_preprocess, _ = args.transformer_preprocess
         encoder_transformer_postprocess, _ = args.transformer_postprocess
+        encoder_transformer_model_size = args.transformer_model_size
+
+        total_source_factor_size = sum(args.source_factors_num_embed)
+        if total_source_factor_size > 0:
+            logger.info("Transformer encoder model size adjusted for source factors num embed: %d -> %d" % (
+                encoder_transformer_model_size, num_embed_source + total_source_factor_size))
+            encoder_transformer_model_size = num_embed_source + total_source_factor_size
         config_encoder = transformer.TransformerConfig(
-            model_size=args.transformer_model_size,
+            model_size=encoder_transformer_model_size,
             attention_heads=args.transformer_attention_heads,
             feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
             act_type=args.transformer_activation_type,
@@ -415,14 +431,14 @@ def create_encoder_config(args: argparse.Namespace,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
             conv_config=config_conv)
-        encoder_num_hidden = args.transformer_model_size
+        encoder_num_hidden = encoder_transformer_model_size
     elif args.encoder == C.CONVOLUTION_TYPE:
         cnn_kernel_width_encoder, _ = args.cnn_kernel_width
         cnn_config = convolution.ConvolutionConfig(kernel_width=cnn_kernel_width_encoder,
                                                    num_hidden=args.cnn_num_hidden,
                                                    act_type=args.cnn_activation_type,
                                                    weight_normalization=args.weight_normalization)
-        config_encoder = encoder.ConvolutionalEncoderConfig(num_embed=num_embed_source,
+        config_encoder = encoder.ConvolutionalEncoderConfig(num_embed=num_embed_source + sum(args.source_factors_num_embed),
                                                             max_seq_len_source=max_seq_len_source,
                                                             cnn_config=cnn_config,
                                                             num_layers=encoder_num_layers,
@@ -595,7 +611,7 @@ def create_model_config(args: argparse.Namespace,
     source_factor_configs = None
     if config_data.num_source_factors > 0:
         source_factor_configs = [encoder.FactorConfig(size, dim) for size, dim in zip(source_factor_vocab_sizes,
-                                                                                      args.source_factor_num_embed)]
+                                                                                      args.source_factors_num_embed)]
 
     config_embed_source = encoder.EmbeddingConfig(vocab_size=source_vocab_size,
                                                   num_embed=num_embed_source,

@@ -76,7 +76,7 @@ def test_device_args(test_params, expected_params):
               allow_missing_params=False,
               num_layers=(1, 1),
               num_embed=(512, 512),
-              source_factor_num_embed=[],
+              source_factors_num_embed=[],
               rnn_attention_type='mlp',
               rnn_attention_num_hidden=None,
               rnn_attention_coverage_type='count',

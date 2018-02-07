@@ -214,8 +214,6 @@ def load_or_create_vocabs(source_paths: List[str],
                                   "Shared vocabulary requires identical source and target vocabularies. "
                                   "The vocabularies in %s and %s are not identical." % (source_vocab_path,
                                                                                         target_vocab_path))
-            # source factor vocabs are not shared
-            vocab_source_factors = [vocab_from_json(path) for path in source_factor_vocab_paths]
 
         elif source_vocab_path is None and target_vocab_path is None:
             utils.check_condition(num_words_source == num_words_target,
@@ -226,21 +224,21 @@ def load_or_create_vocabs(source_paths: List[str],
             vocab_source = vocab_target = build_from_paths(paths=[source_path, target_path],
                                                            num_words=num_words_source,
                                                            min_count=word_min_count_source)
-            vocab_source_factors = [build_from_paths(paths=[path]) for path in source_factor_vocab_paths]
 
         else:
             vocab_path = source_vocab_path if source_vocab_path is not None else target_vocab_path
             logger.info("Using %s as a shared source/target vocabulary." % vocab_path)
             vocab_source = vocab_target = vocab_from_json(vocab_path)
-            vocab_source_factors = [vocab_from_json(path) for path in source_factor_vocab_paths]
 
     else:
         vocab_source = load_or_create_vocab(source_path, source_vocab_path, num_words_source, word_min_count_source)
         vocab_target = load_or_create_vocab(target_path, target_vocab_path, num_words_target, word_min_count_target)
-        vocab_source_factors = []  # type: List[Vocab]
-        for factor_path, factor_vocab_path in zip(source_factor_paths, source_factor_vocab_paths):
-            vocab_source_factors.append(load_or_create_vocab(factor_path, factor_vocab_path,
-                                                             num_words_source, word_min_count_target))
+
+    # source factor vocabs are always created
+    vocab_source_factors = []  # type: List[Vocab]
+    for factor_path, factor_vocab_path in zip(source_factor_paths, source_factor_vocab_paths):
+        vocab_source_factors.append(load_or_create_vocab(factor_path, factor_vocab_path,
+                                                         num_words_source, word_min_count_target))
 
     return [vocab_source] + vocab_source_factors, vocab_target
 

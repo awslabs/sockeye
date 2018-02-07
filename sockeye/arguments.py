@@ -588,7 +588,7 @@ def add_model_parameters(params):
                               default=(512, 512),
                               help='Embedding size for source and target tokens. '
                                    'Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
-    model_params.add_argument('--source-factor-num-embed',
+    model_params.add_argument('--source-factors-num-embed',
                               type=int,
                               nargs='+',
                               default=[],
