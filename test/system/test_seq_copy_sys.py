@@ -113,15 +113,15 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
                             _LINE_MAX_LENGTH, _TEST_LINE_COUNT, _TEST_LINE_COUNT_EMPTY, _TEST_MAX_LENGTH,
                             seed_train=_SEED_TRAIN_DATA, seed_dev=_SEED_DEV_DATA) as data:
         # Test model configuration
-        perplexity, bleu, bleu_restrict, chrf = run_train_translate(train_params,
-                                                                    translate_params,
-                                                                    None,  # no second set of parameters
-                                                                    data['source'],
-                                                                    data['target'],
-                                                                    data['validation_source'],
-                                                                    data['validation_target'],
-                                                                    data['test_source'],
-                                                                    data['test_target'],
+        perplexity, bleu, bleu_restrict, chrf = run_train_translate(train_params=train_params,
+                                                                    translate_params=translate_params,
+                                                                    translate_params_equiv=None,
+                                                                    train_source_path=data['source'],
+                                                                    train_target_path=data['target'],
+                                                                    dev_source_path=data['validation_source'],
+                                                                    dev_target_path=data['validation_target'],
+                                                                    test_source_path=data['test_source'],
+                                                                    test_target_path=data['test_target'],
                                                                     use_prepared_data=use_prepared_data,
                                                                     max_seq_len=_LINE_MAX_LENGTH + 1,
                                                                     restrict_lexicon=True,
@@ -134,13 +134,14 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
         assert bleu_restrict >= bleu_thresh
 
 
-@pytest.mark.parametrize("name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh", [
-    ("Sort:lstm",
+@pytest.mark.parametrize(
+    "name, train_params, translate_params, use_prepared_data, use_source_factor, perplexity_thresh, bleu_thresh", [
+    ("Sort:lstm:lstm",
      "--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity"
      " --max-updates 7000 --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
-     True,
+     True, False,
      1.03,
      0.97),
     ("Sort:word-based-batching",
@@ -149,7 +150,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --optimized-metric perplexity --max-updates 6000 --checkpoint-frequency 1000 --optimizer adam "
      " --initial-learning-rate 0.001 --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0",
      "--beam-size 5",
-     False,
+     False, False,
      1.03,
      0.97),
     ("Sort:transformer:lstm",
@@ -160,7 +161,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --transformer-feed-forward-num-hidden 64 --transformer-activation-type gelu"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
-     True,
+     True, False,
      1.03,
      0.97),
     ("Sort:lstm:transformer",
@@ -171,44 +172,62 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --transformer-feed-forward-num-hidden 64 --transformer-activation-type swish1"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
-     False,
+     False, False,
      1.03,
      0.97),
-    ("Sort:transformer",
+    ("Sort:transformer:transformer",
      "--encoder transformer --decoder transformer"
      " --batch-size 16 --max-updates 6000"
      " --num-layers 2 --transformer-attention-heads 4 --transformer-model-size 32 --num-embed 32"
      " --transformer-feed-forward-num-hidden 64"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 1",
-     True,
+     True, False,
      1.03,
      0.97),
-    ("Sort:cnn",
+    ("Sort:transformer_with_source_factor",
+     "--encoder transformer --decoder transformer"
+     " --batch-size 16 --max-updates 6000"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
+     " --transformer-feed-forward-num-hidden 64"
+     " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001 --source-factors-num-embed 2",
+     "--beam-size 1",
+     True, True,
+     1.03,
+     0.97),
+    ("Sort:cnn:cnn",
      "--encoder cnn --decoder cnn "
      " --batch-size 16 --num-layers 3 --max-updates 6000"
      " --cnn-num-hidden 32 --cnn-positional-embedding-type fixed"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 1",
-     False,
+     False, False,
      1.05,
      0.94)
 ])
-def test_seq_sort(name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh):
+def test_seq_sort(name, train_params, translate_params, use_prepared_data,
+                  use_source_factor, perplexity_thresh, bleu_thresh):
     """Task: sort short sequences of digits"""
     with tmp_digits_dataset("test_seq_sort.", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT, _LINE_MAX_LENGTH,
                             _TEST_LINE_COUNT, _TEST_LINE_COUNT_EMPTY, _TEST_MAX_LENGTH,
-                            sort_target=True, seed_train=_SEED_TRAIN_DATA, seed_dev=_SEED_DEV_DATA) as data:
+                            sort_target=True, seed_train=_SEED_TRAIN_DATA, seed_dev=_SEED_DEV_DATA,
+                            with_source_factors=use_source_factor) as data:
         # Test model configuration
-        perplexity, bleu, bleu_restrict, chrf = run_train_translate(train_params,
-                                                                    translate_params,
-                                                                    None,  # no second set of parameters
-                                                                    data['source'],
-                                                                    data['target'],
-                                                                    data['validation_source'],
-                                                                    data['validation_target'],
-                                                                    data['test_source'],
-                                                                    data['test_target'],
+        perplexity, bleu, bleu_restrict, chrf = run_train_translate(train_params=train_params,
+                                                                    translate_params=translate_params,
+                                                                    translate_params_equiv=None,
+                                                                    train_source_path=data['source'],
+                                                                    train_target_path=data['target'],
+                                                                    dev_source_path=data['validation_source'],
+                                                                    dev_target_path=data['validation_target'],
+                                                                    test_source_path=data['test_source'],
+                                                                    test_target_path=data['test_target'],
+                                                                    train_source_factor_paths=data.get(
+                                                                        'train_source_factors'),
+                                                                    dev_source_factor_paths=data.get(
+                                                                        'dev_source_factors'),
+                                                                    test_source_factor_paths=data.get(
+                                                                        'test_source_factors'),
                                                                     use_prepared_data=use_prepared_data,
                                                                     max_seq_len=_LINE_MAX_LENGTH + 1,
                                                                     restrict_lexicon=True,

@@ -89,6 +89,7 @@ def generate_random_sentence(vocab_size, max_len):
 
 
 _DIGITS = "0123456789"
+_MID = 5
 
 
 def generate_digits_file(source_path: str,
@@ -115,6 +116,18 @@ def generate_digits_file(source_path: str,
             print(" ".join(digits), file=target_out)
 
 
+def generate_low_high_factors(source_path: str,
+                              output_path: str):
+    """
+    Writes low/high factor file given a source file of digit sequences.
+    """
+    with open(source_path, 'r') as fin, open(output_path, 'w') as fout:
+        for line in fin:
+            digits = map(int, line.rstrip().split())
+            factors = ["l" if digit < _MID else "h" for digit in digits]
+            print(" ".join(factors), file=fout)
+
+
 def generate_fast_align_lex(lex_path: str):
     """
     Generate a fast_align format lex table for digits.
@@ -135,7 +148,8 @@ def tmp_digits_dataset(prefix: str,
                        dev_line_count: int, dev_max_length: int,
                        test_line_count: int, test_line_count_empty: int, test_max_length: int,
                        sort_target: bool = False,
-                       seed_train: int = 13, seed_dev: int = 13):
+                       seed_train: int = 13, seed_dev: int = 13,
+                       with_source_factors: bool = False):
     with TemporaryDirectory(prefix=prefix) as work_dir:
         # Simple digits files for train/dev data
         train_source_path = os.path.join(work_dir, "train.src")
@@ -157,6 +171,18 @@ def tmp_digits_dataset(prefix: str,
                 'validation_target': dev_target_path,
                 'test_source': test_source_path,
                 'test_target': test_target_path}
+
+        if with_source_factors:
+            train_factor_path = train_source_path + ".factors"
+            dev_factor_path = dev_source_path + ".factors"
+            test_factor_path = test_source_path + ".factors"
+            generate_low_high_factors(train_source_path, train_factor_path)
+            generate_low_high_factors(dev_source_path, dev_factor_path)
+            generate_low_high_factors(test_source_path, test_factor_path)
+            data['train_source_factors'] = [train_factor_path]
+            data['dev_source_factors'] = [dev_factor_path]
+            data['test_source_factors'] = [test_factor_path]
+
         yield data
 
 

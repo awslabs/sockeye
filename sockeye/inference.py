@@ -560,7 +560,7 @@ class TranslatorInput:
         self.factors = factors
 
     def __str__(self):
-        return '[%d.%d] %s' % (self.sentence_id, self.chunk_id, ' '.join(self.tokens))
+        return 'TranslatorInput(%d, %s, %s, %d)' % (self.sentence_id, self.tokens, self.factors, self.chunk_id)
 
     def chunks(self, chunk_size: int) -> Generator['TranslatorInput', None, None]:
         """
@@ -571,10 +571,9 @@ class TranslatorInput:
         """
         for chunk_id, i in enumerate(range(0, len(self.tokens), chunk_size)):
             yield TranslatorInput(sentence_id=self.sentence_id,
-                                  chunk_id=chunk_id,
                                   tokens=self.tokens[i:i + chunk_size],
-                                  factors=[factor[i: i + chunk_size] for i, factor in
-                                           enumerate(self.factors)] if self.factors else [])
+                                  factors=[factor[i:i + chunk_size] for factor in self.factors],
+                                  chunk_id=chunk_id)
 
 
 TranslatorOutput = NamedTuple('TranslatorOutput', [
@@ -927,7 +926,7 @@ class Translator:
         :param trans_inputs: List of TranslatorInputs.
         :return NDArray of source ids and bucket key.
         """
-        bucket_key = data_io.get_bucket(max(len(seq.tokens) for seq in trans_inputs), self.buckets_source)
+        bucket_key = data_io.get_bucket(max(len(inp.tokens) for inp in trans_inputs), self.buckets_source)
 
         utils.check_condition(C.PAD_ID == 0, "pad id should be 0")
         source = mx.nd.zeros((len(trans_inputs), bucket_key, self.num_source_factors + 1), ctx=self.context)

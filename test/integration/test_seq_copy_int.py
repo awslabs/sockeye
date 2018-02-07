@@ -104,9 +104,15 @@ def test_seq_copy(train_params: str,
                   use_source_factors: bool):
     """Task: copy short sequences of digits"""
 
-    with tmp_digits_dataset("test_seq_copy", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH,
-                            _DEV_LINE_COUNT, _LINE_MAX_LENGTH,
-                            _TEST_LINE_COUNT, _TEST_LINE_COUNT_EMPTY, _TEST_MAX_LENGTH) as data:
+    with tmp_digits_dataset(prefix="test_seq_copy",
+                            train_line_count=_TRAIN_LINE_COUNT,
+                            train_max_length=_LINE_MAX_LENGTH,
+                            dev_line_count=_DEV_LINE_COUNT,
+                            dev_max_length=_LINE_MAX_LENGTH,
+                            test_line_count=_TEST_LINE_COUNT,
+                            test_line_count_empty=_TEST_LINE_COUNT_EMPTY,
+                            test_max_length=_TEST_MAX_LENGTH,
+                            sort_target=False) as data:
 
         # Test model configuration, including the output equivalence of batch and no-batch decoding
         translate_params_batch = translate_params + " --batch-size 2"
