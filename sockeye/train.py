@@ -288,8 +288,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 
         if resume_training:
             # resuming training. Making sure the vocabs in the model and in the prepared data match up
-            model_source_vocab = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_SRC_NAME + C.JSON_SUFFIX))
-            model_target_vocab = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_TRG_NAME + C.JSON_SUFFIX))
+            model_source_vocab = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_SRC_NAME))
+            model_target_vocab = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_TRG_NAME))
             utils.check_condition(vocab.are_identical(source_vocab, model_source_vocab),
                                   "Prepared data and resumed model source vocabs do not match.")
             utils.check_condition(vocab.are_identical(target_vocab, model_target_vocab),
@@ -300,7 +300,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                 len(args.source_factors), len(args.validation_source_factors)))
 
             for i, model_source_factor_vocab, source_factor_vocab in enumerate(
-                    zip(vocab.load_source_factor_vocabs(output_folder, len(args.validation_source_factors)),
+                    zip(vocab.load_source_factor_vocabs(output_folder),
                         source_factor_vocabs)):
                 utils.check_condition(vocab.are_identical(source_factor_vocab, model_source_factor_vocab),
                                       "Prepared data and resumed source factor vocab does not match for factor %d" % i)
@@ -313,10 +313,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 
         if resume_training:
             # Load the existing vocab created when starting the training run.
-            source_vocab = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_SRC_NAME + C.JSON_SUFFIX))
-            target_vocab = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_TRG_NAME + C.JSON_SUFFIX))
-            source_factor_vocabs = vocab.load_source_factor_vocabs(output_folder, len(args.validation_source_factors))
-            source_vocabs = [source_vocab] + source_factor_vocabs
+            source_vocabs = [vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_SRC_NAME))] + \
+                            vocab.load_source_factor_vocabs(output_folder)
+            target_vocab = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_TRG_NAME))
 
             # Recover the vocabulary path from the existing config file:
             orig_config = cast(model.ModelConfig, Config.load(os.path.join(output_folder, C.CONFIG_NAME)))
@@ -438,7 +437,8 @@ def create_encoder_config(args: argparse.Namespace,
                                                    num_hidden=args.cnn_num_hidden,
                                                    act_type=args.cnn_activation_type,
                                                    weight_normalization=args.weight_normalization)
-        config_encoder = encoder.ConvolutionalEncoderConfig(num_embed=num_embed_source + sum(args.source_factors_num_embed),
+        cnn_num_embed = num_embed_source + sum(args.source_factors_num_embed)
+        config_encoder = encoder.ConvolutionalEncoderConfig(num_embed=cnn_num_embed,
                                                             max_seq_len_source=max_seq_len_source,
                                                             cnn_config=cnn_config,
                                                             num_layers=encoder_num_layers,
@@ -771,8 +771,8 @@ def main():
 
         # Dump the vocabularies if we're just starting up
         if not resume_training:
-            vocab.vocab_to_json(source_vocab, os.path.join(output_folder, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
-            vocab.vocab_to_json(target_vocab, os.path.join(output_folder, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX)
+            vocab.vocab_to_json(source_vocab, os.path.join(output_folder, C.VOCAB_SRC_NAME))
+            vocab.vocab_to_json(target_vocab, os.path.join(output_folder, C.VOCAB_TRG_NAME))
             vocab.save_source_factor_vocabs(output_folder, source_factor_vocabs)
 
         source_vocab_sizes = [len(v) for v in source_vocabs]
@@ -799,7 +799,8 @@ def main():
             embed_init_sigma=vocab_source_size ** -0.5,  # TODO
             rnn_init_type=args.rnn_h2h_init)
 
-        optimizer, optimizer_params, kvstore, gradient_clipping_type, gradient_clipping_threshold = define_optimizer(args, lr_scheduler_instance)
+        optimizer, optimizer_params, kvstore, gradient_clipping_type, gradient_clipping_threshold = define_optimizer(
+            args, lr_scheduler_instance)
 
         # Handle options that override training settings
         max_updates = args.max_updates

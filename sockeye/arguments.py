@@ -261,7 +261,7 @@ def add_training_data_args(params, required=False):
                         nargs='+',
                         type=regular_file(),
                         default=[],
-                        help='File(s) containing token-parallel source side factors. Default: %(default)s.')
+                        help='File(s) containing additional token-parallel source side factors. Default: %(default)s.')
     params.add_argument(C.TRAINING_ARG_TARGET, '-t',
                         required=required,
                         type=regular_file(),
@@ -278,7 +278,8 @@ def add_validation_data_params(params):
                         nargs='+',
                         type=regular_file(),
                         default=[],
-                        help='File(s) containing token-parallel validation source side factors. Default: %(default)s.')
+                        help='File(s) containing additional token-parallel validation source side factors. '
+                             'Default: %(default)s.')
     params.add_argument('--validation-target', '-vt',
                         required=True,
                         type=regular_file(),
@@ -592,7 +593,8 @@ def add_model_parameters(params):
                               type=int,
                               nargs='+',
                               default=[],
-                              help='Embedding size for source factors. You must provide as many dimensions as '
+                              help='Embedding size for additional source factors. '
+                                   'You must provide as many dimensions as '
                                    '(validation) source factor files. Default: %(default)s.')
 
     # attention arguments

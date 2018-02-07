@@ -505,8 +505,8 @@ def prepare_data(source_fnames: List[str],
     source_vocab, *source_factor_vocabs = source_vocabs
 
     # write vocabularies to data folder
-    vocab.vocab_to_json(source_vocab, os.path.join(output_prefix, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
-    vocab.vocab_to_json(target_vocab, os.path.join(output_prefix, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX)
+    vocab.vocab_to_json(source_vocab, os.path.join(output_prefix, C.VOCAB_SRC_NAME))
+    vocab.vocab_to_json(target_vocab, os.path.join(output_prefix, C.VOCAB_TRG_NAME))
     vocab.save_source_factor_vocabs(output_prefix, source_factor_vocabs)
 
     # Pass 1: get target/source length ratios.
@@ -669,8 +669,8 @@ def get_prepared_data_iters(prepared_data_dir: str,
     for shard_fname in shard_fnames:
         check_condition(os.path.exists(shard_fname), "Shard %s does not exist." % shard_fname)
 
-    source_vocab_fname = os.path.join(prepared_data_dir, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX
-    target_vocab_fname = os.path.join(prepared_data_dir, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX
+    source_vocab_fname = os.path.join(prepared_data_dir, C.VOCAB_SRC_NAME)
+    target_vocab_fname = os.path.join(prepared_data_dir, C.VOCAB_TRG_NAME)
 
     check_condition(bool(source_vocab_fname), "Source vocabulary %s does not exist." % source_vocab_fname)
     check_condition(bool(target_vocab_fname), "Target vocabulary %s does not exist." % target_vocab_fname)
@@ -679,16 +679,15 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                                               "data was prepared without a shared vocab. Use %s when "
                                                               "preparing the data." % C.VOCAB_ARG_SHARED_VOCAB)
 
-    source_vocab = vocab.vocab_from_json(source_vocab_fname)
+    source_vocabs = [vocab.vocab_from_json(source_vocab_fname)] + vocab.load_source_factor_vocabs(prepared_data_dir)
     target_vocab = vocab.vocab_from_json(target_vocab_fname)
-    num_factors = len(data_config.sources) - 1
-    source_factor_vocabs = vocab.load_source_factor_vocabs(prepared_data_dir, num_factors=num_factors)
-    source_vocabs = [source_vocab] + source_factor_vocabs
 
-    validation_source, *validation_source_factors = validation_sources
-    check_condition(num_factors == len(validation_source_factors),
-                    "Wrong number of validation source factors (found %d, needed %d)" % (len(validation_source_factors),
-                                                                                         num_factors))
+    # TODO(fhieber): remove num_factors
+    num_factors = len(data_config.sources) - 1
+
+    check_condition(len(source_vocabs) == len(data_config.sources),
+                    "Wrong number of source vocabularies. Found %d, need %d." % (len(source_vocabs),
+                                                                                 len(data_config.sources)))
 
     buckets = data_config.data_statistics.buckets
     max_seq_len_source = data_config.max_seq_len_source

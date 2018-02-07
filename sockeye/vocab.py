@@ -15,7 +15,6 @@ import argparse
 import json
 import logging
 import os
-import pickle
 from collections import Counter
 from contextlib import ExitStack
 from itertools import chain, islice
@@ -80,19 +79,7 @@ def build_vocab(data: Iterable[str], num_words: int = 50000, min_count: int = 1)
     return word_to_id
 
 
-def vocab_to_pickle(vocab: Mapping, path: str):
-    """
-    Saves vocabulary in pickle format.
-
-    :param vocab: Vocabulary mapping.
-    :param path: Output file path.
-    """
-    with open(path, 'wb') as out:
-        pickle.dump(vocab, out)
-        logger.info('Vocabulary saved to "%s"', path)
-
-
-def vocab_to_json(vocab: Mapping, path: str):
+def vocab_to_json(vocab: Vocab, path: str):
     """
     Saves vocabulary in human-readable json.
 
@@ -102,33 +89,6 @@ def vocab_to_json(vocab: Mapping, path: str):
     with open(path, "w", encoding=C.VOCAB_ENCODING) as out:
         json.dump(vocab, out, indent=4, ensure_ascii=False)
         logger.info('Vocabulary saved to "%s"', path)
-
-
-def vocab_from_json_or_pickle(path) -> Vocab:
-    """
-    Try loading the json version of the vocab and fall back to pickle for backwards compatibility.
-
-    :param path: Path to vocab without the json suffix. If it exists the `path` + '.json' will be loaded as a JSON
-        object and otherwise `path` is loaded as a pickle object.
-    :return: The loaded vocabulary.
-    """
-    if os.path.exists(path + C.JSON_SUFFIX):
-        return vocab_from_json(path + C.JSON_SUFFIX)
-    else:
-        return vocab_from_pickle(path)
-
-
-def vocab_from_pickle(path: str) -> Vocab:
-    """
-    Saves vocabulary in pickle format.
-
-    :param path: Path to pickle file containing the vocabulary.
-    :return: The loaded vocabulary.
-    """
-    with open(path, 'rb') as inp:
-        vocab = pickle.load(inp)
-        logger.info('Vocabulary (%d words) loaded from "%s"', len(vocab), path)
-        return vocab
 
 
 def vocab_from_json(path: str, encoding: str = C.VOCAB_ENCODING) -> Vocab:
@@ -145,34 +105,32 @@ def vocab_from_json(path: str, encoding: str = C.VOCAB_ENCODING) -> Vocab:
         return vocab
 
 
-def load_source_factor_vocabs(folder: str, num_factors: int) -> List[Vocab]:
+def load_source_factor_vocabs(folder: str) -> List[Vocab]:
     """
     Loads num_factor source factor vocabularies from folder.
 
     :param folder: Model or prepared data folder.
-    :param num_factors: Number of source factor vocabularies to load.
     :return: List of loaded source factor vocabularies.
     """
-    return [vocab_from_json_or_pickle(os.path.join(folder, C.VOCAB_SRC_FACTOR_NAME % fi)) for fi in
-            range(num_factors)]
+    filenames = sorted([f for f in os.listdir(folder) if f.startswith(C.VOCAB_SRC_FACTOR_PREFIX)])
+    return [vocab_from_json(os.path.join(folder, fname)) for fname in filenames]
 
 
 def save_source_factor_vocabs(folder: str, source_factor_vocabs: List[Vocab]):
     """
-    Saves source factor vocabularies to folder
+    Saves source factor vocabularies to folder.
+
     :param folder: Model or prepared data folder.
     :param source_factor_vocabs: List of source factor vocabularies.
     """
     for i, v in enumerate(source_factor_vocabs):
-        vocab_to_json(v, os.path.join(folder, C.VOCAB_SRC_FACTOR_NAME % i) + C.JSON_SUFFIX)
+        vocab_to_json(v, os.path.join(folder, C.VOCAB_SRC_FACTOR_NAME % i))
 
 
-def load_or_create_vocab(data: str, vocab_path: Optional[str],
-                         num_words: int, word_min_count: int) -> Vocab:
+def load_or_create_vocab(data: str, vocab_path: Optional[str], num_words: int, word_min_count: int) -> Vocab:
     """
     If the vocabulary path is defined, the vocabulary is loaded from the path.
-    Otherwise, it is built from the data file.
-    No writing to disk occurs.
+    Otherwise, it is built from the data file. No writing to disk occurs.
     """
     if vocab_path is None:
         return build_from_paths(paths=[data], num_words=num_words, min_count=word_min_count)
@@ -277,7 +235,7 @@ def main():
 
     vocab = build_from_paths(args.inputs, num_words=num_words, min_count=word_min_count)
     logger.info("Vocabulary size: %d ", len(vocab))
-    vocab_to_json(vocab, args.output + C.JSON_SUFFIX)
+    vocab_to_json(vocab, args.output)
 
 
 if __name__ == "__main__":

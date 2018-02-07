@@ -84,7 +84,7 @@ def main():
 
     logger.info("Arguments: %s", args)
 
-    vocab = sockeye.vocab.vocab_from_json_or_pickle(args.vocab)
+    vocab = sockeye.vocab.vocab_from_json(args.vocab)
     vocab_inv = sockeye.vocab.reverse_vocab(vocab)
 
     params, _ = sockeye.utils.load_params(args.params)

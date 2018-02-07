@@ -393,15 +393,17 @@ def load_models(context: mx.context.Context,
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
     models = []  # type: List[InferenceModel]
-    source_vocabs = []  # type: List[vocab.Vocab]
+    source_vocabs = []  # type: List[List[vocab.Vocab]]
     target_vocabs = []  # type: List[vocab.Vocab]
-    source_factor_vocabs = []  # type: List[List[vocab.Vocab]]
+
     if checkpoints is None:
         checkpoints = [None] * len(model_folders)
 
     for model_folder, checkpoint in zip(model_folders, checkpoints):
-        source_vocabs.append(vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_SRC_NAME)))
-        target_vocabs.append(vocab.vocab_from_json_or_pickle(os.path.join(model_folder, C.VOCAB_TRG_NAME)))
+        model_source_vocabs = [vocab.vocab_from_json(
+            os.path.join(model_folder, C.VOCAB_SRC_NAME))] + vocab.load_source_factor_vocabs(model_folder)
+        source_vocabs.append(model_source_vocabs)
+        target_vocabs.append(vocab.vocab_from_json(os.path.join(model_folder, C.VOCAB_TRG_NAME)))
 
         inference_model = InferenceModel(model_folder=model_folder,
                                          context=context,
@@ -411,16 +413,13 @@ def load_models(context: mx.context.Context,
                                          checkpoint=checkpoint,
                                          decoder_return_logit_inputs=decoder_return_logit_inputs,
                                          cache_output_layer_w_b=cache_output_layer_w_b)
+        # TODO(fhieber): check if model.num_source_factors == len(source_vocabs)
         models.append(inference_model)
 
-        source_factor_vocabs.append(vocab.load_source_factor_vocabs(model_folder, inference_model.num_source_factors))
-
-    utils.check_condition(vocab.are_identical(*source_vocabs), "Source vocabulary ids do not match")
     utils.check_condition(vocab.are_identical(*target_vocabs), "Target vocabulary ids do not match")
-    for fi in range(len(source_factor_vocabs[0])):
-        utils.check_condition(
-            vocab.are_identical(*[source_factor_vocabs[i][fi] for i in range(len(source_factor_vocabs))]),
-            "Source factor vocabs do not match")
+    for fi in range(len(source_vocabs[0])):
+        utils.check_condition(vocab.are_identical(*[source_vocabs[i][fi] for i in range(len(source_vocabs))]),
+                              "Source vocabulary ids do not match. Factor %d" % fi)
 
     # set a common max_output length for all models.
     max_input_len, get_max_output_length = models_max_input_output_length(models,
@@ -429,7 +428,7 @@ def load_models(context: mx.context.Context,
     for inference_model in models:
         inference_model.initialize(max_input_len, get_max_output_length)
 
-    return models, [source_vocabs[0]] + source_factor_vocabs[0], target_vocabs[0],
+    return models, source_vocabs[0], target_vocabs[0]
 
 
 def models_max_input_output_length(models: List[InferenceModel],
@@ -927,12 +926,18 @@ class Translator:
 
         utils.check_condition(C.PAD_ID == 0, "pad id should be 0")
         source = mx.nd.zeros((len(trans_inputs), bucket_key, self.num_source_factors + 1), ctx=self.context)
+
         for j, trans_input in enumerate(trans_inputs):
             source[j, :len(trans_input.tokens), 0] = data_io.tokens2ids(trans_input.tokens, self.vocab_source)
+
+            utils.check_condition(self.num_source_factors == len(trans_input.factors),
+                                  "Unexpected number of factors for input %s. Expected %d" % (trans_input,
+                                                                                              self.num_source_factors))
             for i, factor in enumerate(trans_input.factors):
                 utils.check_condition(len(factor) == len(trans_input.tokens),
                                       "Factor sequence has different length than tokens: %s" % trans_input)
                 source[j, :len(trans_input.tokens), i + 1] = data_io.tokens2ids(factor, self.source_factor_vocabs[i])
+
         return source, bucket_key
 
     def _make_result(self,
