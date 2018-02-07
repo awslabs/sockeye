@@ -501,16 +501,12 @@ def prepare_data(source_fnames: List[str],
                  output_prefix: str,
                  keep_tmp_shard_files: bool = False):
     logger.info("Preparing data.")
-    source_fname, *source_factor_fnames = source_fnames
-    source_vocab, *source_factor_vocabs = source_vocabs
-
     # write vocabularies to data folder
-    vocab.vocab_to_json(source_vocab, os.path.join(output_prefix, C.VOCAB_SRC_NAME))
+    vocab.save_source_vocabs(source_vocabs, output_prefix)
     vocab.vocab_to_json(target_vocab, os.path.join(output_prefix, C.VOCAB_TRG_NAME))
-    vocab.save_source_factor_vocabs(output_prefix, source_factor_vocabs)
 
     # Pass 1: get target/source length ratios.
-    length_statistics = analyze_sequence_lengths(source_fname, target_fname, source_vocab, target_vocab,
+    length_statistics = analyze_sequence_lengths(source_fnames[0], target_fname, source_vocabs[0], target_vocab,
                                                  max_seq_len_source, max_seq_len_target)
 
     # define buckets
@@ -669,18 +665,12 @@ def get_prepared_data_iters(prepared_data_dir: str,
     for shard_fname in shard_fnames:
         check_condition(os.path.exists(shard_fname), "Shard %s does not exist." % shard_fname)
 
-    source_vocab_fname = os.path.join(prepared_data_dir, C.VOCAB_SRC_NAME)
-    target_vocab_fname = os.path.join(prepared_data_dir, C.VOCAB_TRG_NAME)
-
-    check_condition(bool(source_vocab_fname), "Source vocabulary %s does not exist." % source_vocab_fname)
-    check_condition(bool(target_vocab_fname), "Target vocabulary %s does not exist." % target_vocab_fname)
-
     check_condition(shared_vocab == data_config.shared_vocab, "Shared config needed (e.g. for weight tying), but "
                                                               "data was prepared without a shared vocab. Use %s when "
                                                               "preparing the data." % C.VOCAB_ARG_SHARED_VOCAB)
 
-    source_vocabs = [vocab.vocab_from_json(source_vocab_fname)] + vocab.load_source_factor_vocabs(prepared_data_dir)
-    target_vocab = vocab.vocab_from_json(target_vocab_fname)
+    source_vocabs = vocab.load_source_vocabs(prepared_data_dir)
+    target_vocab = vocab.vocab_from_json(os.path.join(prepared_data_dir, C.VOCAB_TRG_NAME))
 
     # TODO(fhieber): remove num_factors
     num_factors = len(data_config.sources) - 1

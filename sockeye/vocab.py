@@ -105,26 +105,29 @@ def vocab_from_json(path: str, encoding: str = C.VOCAB_ENCODING) -> Vocab:
         return vocab
 
 
-def load_source_factor_vocabs(folder: str) -> List[Vocab]:
+def save_source_vocabs(source_vocabs: List[Vocab], folder: str):
     """
-    Loads num_factor source factor vocabularies from folder.
+    Saves source vocabularies (primary surface form vocabulary) and optional factor vocabularies to folder.
 
-    :param folder: Model or prepared data folder.
-    :return: List of loaded source factor vocabularies.
+    :param source_vocabs: List of source vocabularies.
+    :param folder: Destination folder.
     """
-    filenames = sorted([f for f in os.listdir(folder) if f.startswith(C.VOCAB_SRC_FACTOR_PREFIX)])
-    return [vocab_from_json(os.path.join(folder, fname)) for fname in filenames]
+    vocab_to_json(source_vocabs[0], os.path.join(folder, C.VOCAB_SRC_NAME))
+    for i, vocab in enumerate(source_vocabs[1:], 1):
+        vocab_to_json(vocab, os.path.join(folder, C.VOCAB_SRC_FACTOR_NAME % i))
 
 
-def save_source_factor_vocabs(folder: str, source_factor_vocabs: List[Vocab]):
+def load_source_vocabs(folder: str) -> List[Vocab]:
     """
-    Saves source factor vocabularies to folder.
-
-    :param folder: Model or prepared data folder.
-    :param source_factor_vocabs: List of source factor vocabularies.
+    Loads source vocabularies from folder. The first element in the list is the primary source vocabulary.
+    Other elements correspond to optional additional source factor vocabularies found in folder.
+    :param folder: Source folder.
+    :return: List of vocabularies.
     """
-    for i, v in enumerate(source_factor_vocabs):
-        vocab_to_json(v, os.path.join(folder, C.VOCAB_SRC_FACTOR_NAME % i))
+    vocabs = [vocab_from_json(os.path.join(folder, C.VOCAB_SRC_NAME))]  # type: List[Vocab
+    for fname in sorted([f for f in os.listdir(folder) if f.startswith(C.VOCAB_SRC_FACTOR_PREFIX)]):
+        vocabs.append(vocab_from_json(os.path.join(folder, fname)))
+    return vocabs
 
 
 def load_or_create_vocab(data: str, vocab_path: Optional[str], num_words: int, word_min_count: int) -> Vocab:

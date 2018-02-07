@@ -400,9 +400,7 @@ def load_models(context: mx.context.Context,
         checkpoints = [None] * len(model_folders)
 
     for model_folder, checkpoint in zip(model_folders, checkpoints):
-        model_source_vocabs = [vocab.vocab_from_json(
-            os.path.join(model_folder, C.VOCAB_SRC_NAME))] + vocab.load_source_factor_vocabs(model_folder)
-        source_vocabs.append(model_source_vocabs)
+        source_vocabs.append(vocab.load_source_vocabs(model_folder))
         target_vocabs.append(vocab.vocab_from_json(os.path.join(model_folder, C.VOCAB_TRG_NAME)))
 
         inference_model = InferenceModel(model_folder=model_folder,
