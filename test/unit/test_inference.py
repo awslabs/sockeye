@@ -114,12 +114,21 @@ def test_get_max_input_output_length(
 
 
 @pytest.mark.parametrize("sentence_id, raw_sentence, num_factors, delimiter, expected_tokens, expected_factors",
-                         [(1, "this is a test", 0, "|", ["this", "is", "a", "test"], []),
-                          (1, "space   space", 0, "|", ["space", "space"], []),
-                          (2, "", 0, "|", [], []),
-                          (14, "a|l b|l C|u", 1, "|", ["a", "b", "C"], [["l", "l", "u"]]),
-                          (1, "a-X-Y ", 2, "-", ["a"], [["X"], ["Y"]]),
-                          (1, "a-X-Y ", 1, "-", ["a-X"], [["Y"]])])
+                         [
+                             # sentence without factors
+                             (1, "this is a test", 0, "|", ["this", "is", "a", "test"], []),
+                             # sentence with factor-like tokens, but no factors expected
+                             (1, "this|X is| a|X test|", 0, "|", ["this|X", "is|", "a|X", "test|"], []),
+                             # multiple spaces between token sequence
+                             (1, "space   space", 0, "|", ["space", "space"], []),
+                             # empty token sequence
+                             (2, "", 0, "|", [], []),
+                             (2, "", 1, "|", [], [[]]),
+                             # proper factored sequences
+                             (14, "a|l b|l C|u", 1, "|", ["a", "b", "C"], [["l", "l", "u"]]),
+                             (1, "a-X-Y b-Y-X", 2, "-", ["a", "b"], [["X", "Y"], ["Y", "X"]]),
+                             (1, "a-X-Y ", 1, "-", ["a-X"], [["Y"]])
+                         ])
 def test_make_input(sentence_id, raw_sentence, num_factors, delimiter, expected_tokens, expected_factors):
     translator_input = sockeye.inference.Translator.make_input(sentence_id=sentence_id,
                                                                raw_sentence=raw_sentence,
@@ -134,33 +143,58 @@ def test_make_input(sentence_id, raw_sentence, num_factors, delimiter, expected_
 
 
 @pytest.mark.parametrize("sentence, num_factors, delimiter, expected_wrong_num_factors, expected_fail_word",
-                         [("this is a test", 1, "|", 0, "this"),
-                          ("this is", 1, " ", 0, "this"),
-                          ("this", 1, "|", 0, "this"),
-                          ("this|X is| a|", 1, "|", 1, "is"),
-                          ("this||", 1, "|", 1, "is"),
-                          ("this|| another", 1, "|", 0, "another"),
-                          ("this|||", 1, "|", 0, "this"),
-                          ("|this", 1, "|", 0, "this"),
-                          ("this\tX is\tX", 1, "\t", 0, "this"),
-                          ])
-def test_failed_make_input(sentence, num_factors, delimiter, expected_wrong_num_factors, expected_fail_word):
+                         [("this is a test", 1, "|", 0, "this"),  # first token without factor
+                          ("this|X is a test", 1, "|", 0, "is"),  # second token without factor
+                          ("this|X is|X a|X test", 1, "|", 0, "test"),  # fail on last token without factor
+                          ("this| is|X a|X test|", 1, "|", 0, "this"),  # first token with delimiter but no factor
+                          ("this|X is|X a|X test|", 1, "|", 0, "test"),  # last token with delimiter but no factor
+                          ("this", 1, "|", 0, "this"),  # single token without factor
+                          ("this|", 1, "|", 0, "this"),  # single token with delimiter but no factor
+                          ("this||", 2, "|", 0, "this"),  # double delimiter
+                          ("this|| another", 1, "|", 0, "this|"),  # double delimiter followed by token
+                          ("this|||", 1, "|", 0, "this||")])  # triple delimiter
+def test_make_input_factor_parsing(sentence, num_factors, delimiter, expected_wrong_num_factors, expected_fail_word):
+    """
+    Test to ensure we fail on parses with invalid factors.
+    """
+    sentence_id = 1
+    with pytest.raises(SockeyeError) as e:
+        sockeye.inference.Translator.make_input(sentence_id=1,
+                                                raw_sentence=sentence,
+                                                num_factors=num_factors,
+                                                delimiter=delimiter)
+    assert str(e.value) == 'Expecting %d factors, but got %d at sentence %d, word "%s"' % (num_factors,
+                                                                                           expected_wrong_num_factors,
+                                                                                           sentence_id,
+                                                                                           expected_fail_word)
+
+
+@pytest.mark.parametrize("sentence, num_factors, delimiter, expected_position",
+                         [
+                             ("|this", 1, "|", 0),  # empty token with 1 factor
+                             ("|this|that", 2, "|", 0),  # empty token with 2 factors
+                             ("|this|that|", 3, "|", 0)  # empty token with 3 factors
+                         ])
+def test_make_input_emtpy_token(sentence, num_factors, delimiter, expected_position):
+    """
+    Test to ensure we fail on parses that create empty tokens.
+    """
     sentence_id = 1
     with pytest.raises(SockeyeError) as e:
         sockeye.inference.Translator.make_input(sentence_id=sentence_id,
                                                 raw_sentence=sentence,
                                                 num_factors=num_factors,
                                                 delimiter=delimiter)
-    assert str(e.value) == 'Expecting %d factors, but got %d at sentence %d, word "%s"' % (num_factors,
-                                                                                            expected_wrong_num_factors,
-                                                                                            sentence_id,
-                                                                                            expected_fail_word)
+    assert str(e.value) == 'Empty token at sentence %d, position %d' % (sentence_id, expected_position)
 
 
 @pytest.mark.parametrize("delimiter", ["\t", "\t \t", "\t\t", "\n", "\r", "\r\n", "\u0020",
                                        "\n\n", "  ", " \t", "\f", "\v", "\u00a0", "\u1680",
                                        "\u2000", None, "", "\u200a", "\u205f", "\u3000"])
 def test_make_input_whitespace_delimiter(delimiter):
+    """
+    Test to ensure we disallow a variety of whitespace strings as factor delimiters.
+    """
     sentence_id = 1
     sentence = "foo"
     num_factors = 2
@@ -170,5 +204,3 @@ def test_make_input_whitespace_delimiter(delimiter):
                                                 num_factors=num_factors,
                                                 delimiter=delimiter)
     assert str(e.value) == 'Factor delimiter can not be whitespace or empty.'
-
-# TODO(fhieber): failure tests and other tests for factor parsing
