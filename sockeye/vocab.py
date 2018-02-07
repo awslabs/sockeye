@@ -67,7 +67,8 @@ def build_vocab(data: Iterable[str], num_words: int = 50000, min_count: int = 1)
     pruned_vocab = sorted(((c, w) for w, c in raw_vocab.items() if c >= min_count), reverse=True)
 
     vocab = islice((w for c, w in pruned_vocab), num_words)
-
+    div_16_len = int(len(pruned_vocab) / 16) * 16 - len(C.VOCAB_SYMBOLS)
+    vocab = islice(vocab, div_16_len)
     word_to_id = {word: idx for idx, word in enumerate(chain(C.VOCAB_SYMBOLS, vocab))}
     logger.info("Vocabulary: types: %d/%d/%d/%d (initial/min_pruned/max_pruned/+special) " +
                 "[min_frequency=%d, max_num_types=%d]",
