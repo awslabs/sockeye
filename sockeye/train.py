@@ -252,14 +252,14 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     :param output_folder: Output folder.
     :return: The data iterators (train, validation, config_data) as well as the source and target vocabularies.
     """
-
     max_seq_len_source, max_seq_len_target = args.max_seq_len
     num_words_source, num_words_target = args.num_words
     word_min_count_source, word_min_count_target = args.word_min_count
     batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
     batch_by_words = args.batch_type == C.BATCH_TYPE_WORD
 
-    validation_sources = list(map(str, map(os.path.abspath, [args.validation_source] + args.validation_source_factors)))
+    validation_sources = [args.validation_source] + args.validation_source_factors
+    validation_sources = [str(os.path.abspath(source)) for source in validation_sources]
 
     either_raw_or_prepared_error_msg = "Either specify a raw training corpus with %s and %s or a preprocessed corpus " \
                                        "with %s." % (C.TRAINING_ARG_SOURCE,
@@ -334,10 +334,13 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                         "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (
                             len(args.source_factors), len(args.source_factors_num_embed)))
 
+        sources = [args.source] + args.source_factors
+        sources = [str(os.path.abspath(source)) for source in sources]
+
         train_iter, validation_iter, config_data = data_io.get_training_data_iters(
-            sources=list(map(os.path.abspath, [args.source] + args.source_factors)),
+            sources=sources,
             target=os.path.abspath(args.target),
-            validation_sources=[str(os.path.abspath(s)) for s in validation_sources],
+            validation_sources=validation_sources,
             validation_target=os.path.abspath(args.validation_target),
             source_vocabs=source_vocabs,
             target_vocab=target_vocab,
