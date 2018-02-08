@@ -617,7 +617,7 @@ def create_model_config(args: argparse.Namespace,
                                                   dropout=embed_dropout_target)
 
     config_loss = loss.LossConfig(name=args.loss,
-                                  vocab_size=source_vocab_size,
+                                  vocab_size=target_vocab_size,
                                   normalization_type=args.loss_normalization_type,
                                   label_smoothing=args.label_smoothing)
 
