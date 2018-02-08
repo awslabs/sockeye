@@ -587,19 +587,19 @@ def prepare_data(source_fnames: List[str],
         version_out.write(str(C.PREPARED_DATA_VERSION))
 
 
-def get_data_statistics(source_sentences: Iterable[List[int]],
+def get_data_statistics(sources_sentences: List[Iterable[List[int]]],
                         target_sentences: Iterable[List[int]],
                         buckets: List[Tuple[int, int]],
                         length_ratio_mean: float,
                         length_ratio_std: float,
-                        vocab_source: vocab.Vocab,
-                        vocab_target: vocab.Vocab) -> 'DataStatistics':
-    data_stats_accumulator = DataStatisticsAccumulator(buckets, vocab_source, vocab_target,
+                        source_vocabs: List[vocab.Vocab],
+                        target_vocab: vocab.Vocab) -> 'DataStatistics':
+    data_stats_accumulator = DataStatisticsAccumulator(buckets, source_vocabs[0], target_vocab,
                                                        length_ratio_mean, length_ratio_std)
 
-    for source, target in zip(source_sentences, target_sentences):
-        buck_idx, buck = get_parallel_bucket(buckets, len(source), len(target))
-        data_stats_accumulator.sequence_pair(source, target, buck_idx)
+    for (sources), target in zip(zip(*sources_sentences), target_sentences):
+        buck_idx, buck = get_parallel_bucket(buckets, len(sources[0]), len(target))
+        data_stats_accumulator.sequence_pair(sources[0], target, buck_idx)
 
     return data_stats_accumulator.statistics
 
@@ -621,28 +621,24 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
     logger.info("=================================")
     logger.info("Creating validation data iterator")
     logger.info("=================================")
-    validation_source, *validation_source_factors = validation_sources
-    source_vocab, *source_factor_vocabs = source_vocabs
     validation_length_statistics = analyze_sequence_lengths(validation_sources, validation_target,
                                                             source_vocabs, target_vocab,
                                                             max_seq_len_source, max_seq_len_target)
 
-    validation_source_sentences = SequenceReader(validation_source, source_vocab, add_bos=False, limit=None)
+    validation_sources_sentences = [SequenceReader(source, vocab, add_bos=False) for source, vocab in
+                                    zip(validation_sources, source_vocabs)]
     validation_target_sentences = SequenceReader(validation_target, target_vocab, add_bos=True, limit=None)
-    validation_source_factor_sentences = [SequenceReader(f, v, add_bos=False, limit=None) for f, v in
-                                          zip(validation_source_factors, source_factor_vocabs)]
 
-    validation_data_statistics = get_data_statistics(validation_source_sentences,
+    validation_data_statistics = get_data_statistics(validation_sources_sentences,
                                                      validation_target_sentences,
                                                      buckets,
                                                      validation_length_statistics.length_ratio_mean,
                                                      validation_length_statistics.length_ratio_std,
-                                                     source_vocab, target_vocab)
+                                                     source_vocabs, target_vocab)
 
     validation_data_statistics.log(bucket_batch_sizes)
 
-    validation_data = data_loader.load([validation_source_sentences] + validation_source_factor_sentences,
-                                       validation_target_sentences,
+    validation_data = data_loader.load(validation_sources_sentences, validation_target_sentences,
                                        validation_data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes,
                                                                                                 fill_up)
 
@@ -776,8 +772,6 @@ def get_training_data_iters(sources: List[str],
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
-    source, *source_factors = sources
-    source_vocab, *source_factor_vocabs = source_vocabs
     # Pass 1: get target/source length ratios.
     length_statistics = analyze_sequence_lengths(sources, target, source_vocabs, target_vocab,
                                                  max_seq_len_source, max_seq_len_target)
@@ -786,15 +780,13 @@ def get_training_data_iters(sources: List[str],
                                       length_statistics.length_ratio_mean) if bucketing else [
         (max_seq_len_source, max_seq_len_target)]
 
-    source_sentences = SequenceReader(source, source_vocab, add_bos=False)
+    sources_sentences = [SequenceReader(source, vocab, add_bos=False) for source, vocab in zip(sources, source_vocabs)]
     target_sentences = SequenceReader(target, target_vocab, add_bos=True)
-    source_factor_sentences = [SequenceReader(f, v, add_bos=False) for f, v in
-                               zip(source_factors, source_factor_vocabs)]
 
     # 2. pass: Get data statistics
-    data_statistics = get_data_statistics(source_sentences, target_sentences, buckets,
+    data_statistics = get_data_statistics(sources_sentences, target_sentences, buckets,
                                           length_statistics.length_ratio_mean, length_statistics.length_ratio_std,
-                                          source_vocab, target_vocab)
+                                          source_vocabs, target_vocab)
 
     bucket_batch_sizes = define_bucket_batch_sizes(buckets,
                                                    batch_size,
@@ -808,7 +800,7 @@ def get_training_data_iters(sources: List[str],
                                            eos_id=target_vocab[C.EOS_SYMBOL],
                                            pad_id=C.PAD_ID)
 
-    training_data = data_loader.load([source_sentences] + source_factor_sentences, target_sentences,
+    training_data = data_loader.load(sources_sentences, target_sentences,
                                      data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes, fill_up)
 
     config_data = DataConfig(sources=sources,
