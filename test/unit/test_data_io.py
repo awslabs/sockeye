@@ -350,19 +350,30 @@ def test_get_parallel_bucket(buckets, source_length, target_length, expected_buc
     assert bucket == expected_bucket
 
 
-@pytest.mark.parametrize("source, target, expected_num_sents, expected_mean, expected_std",
-                         [([[1, 1, 1], [2, 2, 2], [3, 3, 3]],
+@pytest.mark.parametrize("sources, target, expected_num_sents, expected_mean, expected_std",
+                         [([[[1, 1, 1], [2, 2, 2], [3, 3, 3]]],
                            [[1, 1, 1], [2, 2, 2], [3, 3, 3]], 3, 1.0, 0.0),
-                          ([[1, 1], [2, 2], [3, 3]],
+                          ([[[1, 1], [2, 2], [3, 3]]],
                            [[1, 1, 1], [2, 2, 2], [3, 3, 3]], 3, 1.5, 0.0),
-                          ([[1, 1, 1], [2, 2], [3, 3, 3, 3, 3, 3, 3]],
+                          ([[[1, 1, 1], [2, 2], [3, 3, 3, 3, 3, 3, 3]]],
                            [[1, 1, 1], [2], [3, 3, 3]], 2, 0.75, 0.25)])
-def test_calculate_length_statistics(source, target, expected_num_sents, expected_mean, expected_std):
-    length_statistics = data_io.calculate_length_statistics(source, target, 5, 5)
-    assert len(source) == len(target)
+def test_calculate_length_statistics(sources, target, expected_num_sents, expected_mean, expected_std):
+    length_statistics = data_io.calculate_length_statistics(sources, target, 5, 5)
+    assert len(sources[0]) == len(target)
     assert length_statistics.num_sents == expected_num_sents
     assert np.isclose(length_statistics.length_ratio_mean, expected_mean)
     assert np.isclose(length_statistics.length_ratio_std, expected_std)
+
+
+@pytest.mark.parametrize("sources, target",
+                         [
+                             ([[[1, 1, 1], [2, 2, 2], [3, 3, 3]],
+                               [[1, 1, 1], [2, 2], [3, 3, 3]]],
+                              [[1, 1, 1], [2, 2, 2], [3, 3, 3]])
+                         ])
+def test_non_parallel_calculate_length_statistics(sources, target):
+    with pytest.raises(SockeyeError):
+        data_io.calculate_length_statistics(sources, target, 5, 5)
 
 
 def test_get_training_data_iters():

@@ -181,14 +181,14 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
     return bucket_batch_sizes
 
 
-def calculate_length_statistics(source_sentences: Iterable[List[Any]],
+def calculate_length_statistics(sources_sentences: List[Iterable[List[Any]]],
                                 target_sentences: Iterable[List[Any]],
                                 max_seq_len_source: int,
                                 max_seq_len_target: int) -> 'LengthStatistics':
     """
     Returns mean and standard deviation of target-to-source length ratios of parallel corpus.
 
-    :param source_sentences: Source sentences.
+    :param sources_sentences: Source(s) sentences.
     :param target_sentences: Target sentences.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
@@ -196,8 +196,13 @@ def calculate_length_statistics(source_sentences: Iterable[List[Any]],
     """
     mean_and_variance = OnlineMeanAndVariance()
 
-    for target, source in zip(target_sentences, source_sentences):
-        source_len = len(source)
+    for target, sources in zip(target_sentences, zip(*sources_sentences)):
+        print(target)
+        print(sources)
+        check_condition(are_token_parallel(sources),
+                        "Source sequences are not token-parallel: %s" % (str(sources)))
+
+        source_len = len(sources[0])
         target_len = len(target)
         if source_len > max_seq_len_source or target_len > max_seq_len_target:
             continue
@@ -211,26 +216,27 @@ def calculate_length_statistics(source_sentences: Iterable[List[Any]],
     return LengthStatistics(num_sents, mean, std)
 
 
-def analyze_sequence_lengths(source: str,
+def analyze_sequence_lengths(sources: List[str],
                              target: str,
-                             vocab_source: Dict[str, int],
-                             vocab_target: Dict[str, int],
+                             vocab_sources: List[vocab.Vocab],
+                             vocab_target: vocab.Vocab,
                              max_seq_len_source: int,
                              max_seq_len_target: int) -> 'LengthStatistics':
-    train_source_sentences = SequenceReader(source, vocab_source, add_bos=False)
+    train_sources_sentences = [SequenceReader(source, vocab, add_bos=False) for source, vocab in
+                               zip(sources, vocab_sources)]
     # Length statistics are calculated on the raw sentences without special tokens, such as the BOS, as these can
     # have a a large impact on the length ratios, especially with lots of short sequences.
     train_target_sentences = SequenceReader(target, vocab_target, add_bos=False)
 
-    length_statistics = calculate_length_statistics(train_source_sentences, train_target_sentences,
+    length_statistics = calculate_length_statistics(train_sources_sentences, train_target_sentences,
                                                     max_seq_len_source,
                                                     # Take into account the BOS symbol that is added later
                                                     max_seq_len_target - 1)
-    check_condition(train_source_sentences.is_done() and train_target_sentences.is_done(),
-                    "Different number of lines in source and target data.")
+    check_condition(all(r.is_done() for r in train_sources_sentences) and train_target_sentences.is_done(),
+                    "Different number of lines in source(s) and target data.")
 
     logger.info("%d sequences of maximum length (%d, %d) in '%s' and '%s'.",
-                length_statistics.num_sents, max_seq_len_source, max_seq_len_target, source, target)
+                length_statistics.num_sents, max_seq_len_source, max_seq_len_target, sources[0], target)
     logger.info("Mean training target/source length ratio: %.2f (+-%.2f)",
                 length_statistics.length_ratio_mean,
                 length_statistics.length_ratio_std)
@@ -380,9 +386,6 @@ def shard_data(source_fnames: List[str],
             source_len = len(source)
             target_len = len(target)
 
-            check_condition(are_token_parallel(sources),
-                            "Source sequences are not token-parallel: %s" % (str(sources)))
-
             buck_idx, buck = get_parallel_bucket(buckets, source_len, target_len)
             data_stats_accumulator.sequence_pair(source, target, buck_idx)
             per_shard_stat_accumulators[random_shard_index].sequence_pair(source, target, buck_idx)
@@ -521,7 +524,7 @@ def prepare_data(source_fnames: List[str],
     vocab.vocab_to_json(target_vocab, os.path.join(output_prefix, C.VOCAB_TRG_NAME))
 
     # Pass 1: get target/source length ratios.
-    length_statistics = analyze_sequence_lengths(source_fnames[0], target_fname, source_vocabs[0], target_vocab,
+    length_statistics = analyze_sequence_lengths(source_fnames, target_fname, source_vocabs, target_vocab,
                                                  max_seq_len_source, max_seq_len_target)
 
     # define buckets
@@ -620,8 +623,8 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
     logger.info("=================================")
     validation_source, *validation_source_factors = validation_sources
     source_vocab, *source_factor_vocabs = source_vocabs
-    validation_length_statistics = analyze_sequence_lengths(validation_source, validation_target,
-                                                            source_vocab, target_vocab,
+    validation_length_statistics = analyze_sequence_lengths(validation_sources, validation_target,
+                                                            source_vocabs, target_vocab,
                                                             max_seq_len_source, max_seq_len_target)
 
     validation_source_sentences = SequenceReader(validation_source, source_vocab, add_bos=False, limit=None)
@@ -776,7 +779,7 @@ def get_training_data_iters(sources: List[str],
     source, *source_factors = sources
     source_vocab, *source_factor_vocabs = source_vocabs
     # Pass 1: get target/source length ratios.
-    length_statistics = analyze_sequence_lengths(source, target, source_vocab, target_vocab,
+    length_statistics = analyze_sequence_lengths(sources, target, source_vocabs, target_vocab,
                                                  max_seq_len_source, max_seq_len_target)
     # define buckets
     buckets = define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width,
