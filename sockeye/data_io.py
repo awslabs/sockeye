@@ -237,6 +237,15 @@ def analyze_sequence_lengths(source: str,
     return length_statistics
 
 
+def are_token_parallel(sequences: List[Sized]) -> bool:
+    """
+    Returns True if all sequences in the list have the same length.
+    """
+    if not sequences:
+        return True
+    return all(len(s) == len(sequences[0]) for s in sequences)
+
+
 class DataStatisticsAccumulator:
 
     def __init__(self,
@@ -360,8 +369,8 @@ def shard_data(source_fnames: List[str],
 
         source_iter = SequenceReader(source_fname, source_vocab, add_bos=False)
         target_iter = SequenceReader(target_fname, target_vocab, add_bos=True)
-        source_factor_iters = [SequenceReader(f, v, add_bos=False) for f, v in zip(source_factor_fnames,
-                                                                                   source_factor_vocabs)]
+        source_factor_iters = [SequenceReader(fname, vocab, add_bos=False) for fname, vocab in zip(source_factor_fnames,
+                                                                                                   source_factor_vocabs)]
         random_shard_iter = iter(lambda: random.randrange(num_shards), None)
 
         for sources, target, random_shard_index in zip(zip(source_iter, *source_factor_iters), target_iter,
@@ -370,6 +379,9 @@ def shard_data(source_fnames: List[str],
             random_shard_index = cast(int, random_shard_index)
             source_len = len(source)
             target_len = len(target)
+
+            check_condition(are_token_parallel(sources),
+                            "Source sequences are not token-parallel: %s" % (str(sources)))
 
             buck_idx, buck = get_parallel_bucket(buckets, source_len, target_len)
             data_stats_accumulator.sequence_pair(source, target, buck_idx)
@@ -442,6 +454,9 @@ class RawParallelDatasetLoader:
             buck_index, buck = get_parallel_bucket(self.buckets, source_len, target_len)
             if buck is None:
                 continue  # skip this sentence pair
+
+            check_condition(are_token_parallel(sources),
+                            "Source sequences are not token-parallel: %s" % (str(sources)))
 
             num_tokens_source += buck[0]
             num_tokens_target += buck[1]
