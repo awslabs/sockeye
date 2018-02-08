@@ -564,11 +564,11 @@ def prepare_data(source_fnames: List[str],
         dataset.save(shard_fname)
 
         if not keep_tmp_shard_files:
-            for file in shard_sources:
-                os.remove(file)
+            for f in shard_sources:
+                os.remove(f)
             os.remove(shard_target)
 
-    config_data = DataConfig(sources=list(map(os.path.abspath, source_fnames)),
+    config_data = DataConfig(sources=[os.path.abspath(fname) for fname in source_fnames],
                              target=os.path.abspath(target_fname),
                              source_vocabs=source_vocab_paths,
                              target_vocab=target_vocab_path,
