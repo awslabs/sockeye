@@ -787,7 +787,7 @@ class Translator:
 
     @staticmethod
     def make_input(sentence_id: int,
-                   raw_sentence: str,
+                   sentence: str,
                    num_factors: int = 1,
                    delimiter: str = C.DEFAULT_FACTOR_DELIMITER) -> TranslatorInput:
         """
@@ -797,8 +797,8 @@ class Translator:
             word1|f1|f2 word2|f1|f2 word3|f1|f2 ...
 
         :param sentence_id: Input sentence id.
-        :param raw_sentence: Input sentence string.
-        :param num_factors: Number of factors to expect in the raw_sentence. Default 1 (first factor is surface form.)
+        :param sentence: Input sentence.
+        :param num_factors: Number of factors to expect in the sentence. Default 1 (first factor is surface form.)
         :param delimiter: Optional delimiter to separate factors. Can not be a whitespace string.
         :return: A TranslatorInput object.
         """
@@ -808,7 +808,7 @@ class Translator:
         tokens = []  # type: Tokens
         num_additional_factors = num_factors - 1
         additional_factors = [[] for _ in range(num_additional_factors)]  # type: List[Tokens]
-        for token_id, token in enumerate(data_io.get_tokens(raw_sentence)):
+        for token_id, token in enumerate(data_io.get_tokens(sentence)):
             token, *token_factors = token.rsplit(delimiter, maxsplit=num_additional_factors)
             token_factors = list(filter(None, token_factors))
             utils.check_condition(token, "Empty token at sentence {}, position {}".format(sentence_id, token_id))
@@ -823,7 +823,7 @@ class Translator:
 
     @staticmethod
     def make_input_multiple(sentence_id: int,
-                            raw_sentence: str,
+                            sentence: str,
                             num_factors: int,
                             raw_factors: List[str]) -> TranslatorInput:
         """
@@ -831,15 +831,15 @@ class Translator:
         Constructs a TranslatorInput from factors listed in token-parallel strings.
 
         :param sentence_id: Input sentence id.
-        :param raw_sentence: The input sentence.
-        :param num_factors: Number of factors to expect in the raw_sentence. Default 1 (first factor is surface form.)
+        :param sentence: Input sentence.
+        :param num_factors: Number of factors to expect in the sentence. Default 1 (first factor is surface form.)
         :param raw_factors: List of token-parallel source factor strings.
         :return: A TranslatorInput object.
         """
         utils.check_condition(num_factors > 0, "Number of factors must be at least 1")
         utils.check_condition(num_factors == 1 + len(raw_factors),
                               "Expecting {:d} factor sequences, got {:d}".format(num_factors, 1 + len(raw_factors)))
-        tokens = list(data_io.get_tokens(raw_sentence))
+        tokens = list(data_io.get_tokens(sentence))
         num_tokens = len(tokens)
         num_additional_factors = num_factors - 1
         factors = [[] for _ in range(num_additional_factors)]  # type: List[Tokens]

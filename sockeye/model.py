@@ -42,7 +42,6 @@ class ModelConfig(Config):
     :param max_seq_len_target: Maximum target sequence length to unroll during training.
     :param vocab_source_size: Source vocabulary size.
     :param vocab_target_size: Target vocabulary size.
-    :param source_factor_vocab_sizes: The list vocabulary sizes for source factors.
     :param config_embed_source: Embedding config for source.
     :param config_embed_target: Embedding config for target.
     :param config_encoder: Encoder configuration.

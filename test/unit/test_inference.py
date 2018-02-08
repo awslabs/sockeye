@@ -162,7 +162,7 @@ def test_get_max_input_output_length(
                          ])
 def test_make_input(sentence_id, raw_sentence, num_factors, delimiter, expected_tokens, expected_factors):
     translator_input = sockeye.inference.Translator.make_input(sentence_id=sentence_id,
-                                                               raw_sentence=raw_sentence,
+                                                               sentence=raw_sentence,
                                                                num_factors=num_factors,
                                                                delimiter=delimiter)
     assert isinstance(translator_input, sockeye.inference.TranslatorInput)
@@ -191,7 +191,7 @@ def test_make_input_factor_parsing(sentence, num_factors, delimiter, expected_wr
     sentence_id = 1
     with pytest.raises(SockeyeError) as e:
         sockeye.inference.Translator.make_input(sentence_id=1,
-                                                raw_sentence=sentence,
+                                                sentence=sentence,
                                                 num_factors=num_factors,
                                                 delimiter=delimiter)
     assert str(e.value) == 'Expecting %d factors, but got %d at sentence %d, word "%s"' % (num_factors,
@@ -213,7 +213,7 @@ def test_make_input_emtpy_token(sentence, num_factors, delimiter, expected_posit
     sentence_id = 1
     with pytest.raises(SockeyeError) as e:
         sockeye.inference.Translator.make_input(sentence_id=sentence_id,
-                                                raw_sentence=sentence,
+                                                sentence=sentence,
                                                 num_factors=num_factors,
                                                 delimiter=delimiter)
     assert str(e.value) == 'Empty token at sentence %d, position %d' % (sentence_id, expected_position)
@@ -231,7 +231,7 @@ def test_make_input_whitespace_delimiter(delimiter):
     num_factors = 2
     with pytest.raises(SockeyeError) as e:
         sockeye.inference.Translator.make_input(sentence_id=sentence_id,
-                                                raw_sentence=sentence,
+                                                sentence=sentence,
                                                 num_factors=num_factors,
                                                 delimiter=delimiter)
     assert str(e.value) == 'Factor delimiter can not be whitespace or empty.'

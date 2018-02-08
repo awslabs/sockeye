@@ -60,50 +60,54 @@ def main():
         context = _setup_context(args, exit_stack)
 
         models, source_vocabs, target_vocab = inference.load_models(
-            context,
-            args.max_input_len,
-            args.beam_size,
-            args.batch_size,
-            args.models,
-            args.checkpoints,
-            args.softmax_temperature,
-            args.max_output_length_num_stds,
+            context=context,
+            max_input_len=args.max_input_len,
+            beam_size=args.beam_size,
+            batch_size=args.batch_size,
+            model_folders=args.models,
+            checkpoints=args.checkpoints,
+            softmax_temperature=args.softmax_temperature,
+            max_output_length_num_stds=args.max_output_length_num_stds,
             decoder_return_logit_inputs=args.restrict_lexicon is not None,
             cache_output_layer_w_b=args.restrict_lexicon is not None)
         restrict_lexicon = None  # type: TopKLexicon
         if args.restrict_lexicon:
             restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
             restrict_lexicon.load(args.restrict_lexicon)
-        translator = inference.Translator(context,
-                                          args.ensemble_mode,
-                                          args.bucket_width,
-                                          inference.LengthPenalty(args.length_penalty_alpha,
-                                                                  args.length_penalty_beta),
-                                          models,
-                                          source_vocabs,
-                                          target_vocab,
-                                          restrict_lexicon)
-        read_and_translate(translator,
-                           output_handler,
+        translator = inference.Translator(context=context,
+                                          ensemble_mode=args.ensemble_mode,
+                                          bucket_source_width=args.bucket_width,
+                                          length_penalty=inference.LengthPenalty(args.length_penalty_alpha,
+                                                                                 args.length_penalty_beta),
+                                          models=models,
+                                          source_vocabs=source_vocabs,
+                                          target_vocab=target_vocab,
+                                          restrict_lexicon=restrict_lexicon)
+        read_and_translate(translator=translator,
+                           output_handler=output_handler,
                            chunk_size=args.chunk_size,
                            source=args.input,
                            source_factors=args.input_factors)
 
 
-def _make_input(source: Optional[str],
+def make_inputs(source: Optional[str],
                 source_factors: Optional[List[str]] = None,
                 num_source_factors: int = 1) -> Generator[inference.TranslatorInput, None, None]:
     """
-    Transform both accepted inputs (STDIN and `--input`, factored or not) into a stream of TranslatorInput objects.
+    Generates TranslatorInput instances from source. If source is None, reads from stdin. If num_source_factors > 1,
+    the function will look for factors attached to each token, separated by '|'.
+    If source is not None, reads from the source file. If num_source_factors > 1, num_source_factors source factor
+    filenames are required.
+
     :param source: The source file (possibly None).
-    :param source_factors: Source factor files
+    :param source_factors: Source factor files.
     :param num_source_factors: Number of source factors required by the model.
-    :return: TranslatorInput objects
+    :return: TranslatorInput objects.
     """
     if source is None:
         check_condition(source_factors is None, "Translating from STDIN, not expecting any factor files.")
         for sentence_id, line in enumerate(sys.stdin, 1):
-            yield inference.Translator.make_input(sentence_id=sentence_id, raw_sentence=line,
+            yield inference.Translator.make_input(sentence_id=sentence_id, sentence=line,
                                                   num_factors=num_source_factors)
     else:
         source_factors = [] if source_factors is None else source_factors
@@ -114,7 +118,7 @@ def _make_input(source: Optional[str],
             streams = [exit_stack.enter_context(data_io.smart_open(x)) for x in [source] + source_factors]
             for sentence_id, (source, *factors) in enumerate(zip(*streams), 1):
                 yield inference.Translator.make_input_multiple(sentence_id=sentence_id,
-                                                               raw_sentence=source,
+                                                               sentence=source,
                                                                num_factors=num_source_factors,
                                                                raw_factors=factors)
 
@@ -150,7 +154,7 @@ def read_and_translate(translator: inference.Translator,
     logger.info("Translating...")
 
     total_time, total_lines = 0.0, 0
-    for chunk in grouper(_make_input(source, source_factors, translator.num_source_factors), size=chunk_size):
+    for chunk in grouper(make_inputs(source, source_factors, translator.num_source_factors), size=chunk_size):
         chunk_time = translate(output_handler, chunk, translator)
         total_lines += len(chunk)
         total_time += chunk_time
