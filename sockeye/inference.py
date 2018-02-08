@@ -408,7 +408,10 @@ def load_models(context: mx.context.Context,
                                          checkpoint=checkpoint,
                                          decoder_return_logit_inputs=decoder_return_logit_inputs,
                                          cache_output_layer_w_b=cache_output_layer_w_b)
-        # TODO(fhieber): check if model.num_source_factors == len(source_vocabs)
+        utils.check_condition(inference_model.num_source_factors == len(source_vocabs),
+                              "Number of loaded source vocabularies (%d) does not match "
+                              "number of source factors for model '%s' (%d)" % (len(source_vocabs), model_folder,
+                                                                                inference_model.num_source_factors))
         models.append(inference_model)
 
     utils.check_condition(vocab.are_identical(*target_vocabs), "Target vocabulary ids do not match")
