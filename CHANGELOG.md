@@ -10,7 +10,7 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [1.16.6]
+## [1.16.7]
 ### Added
  - Source factors, as described in
 
@@ -30,6 +30,12 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
      and `--input-factors` a list of files containing token-parallel factors.
    At test time, an exception is raised if the number of expected factors does not
    match the factors passed along with the input.
+
+## [1.16.6]
+### Changed
+ - Loading/Saving auxiliary parameters of the models. Before aux parameters were not saved or used for initialization.
+ Therefore the parameters of certain layers were ignored (e.g., BatchNorm) and randomly initialized. This change
+ enables to properly load, save and initialize the layers which use auxiliary parameters.
 
 ## [1.16.5]
 ### Changed
