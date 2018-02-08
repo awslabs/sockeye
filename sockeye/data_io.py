@@ -331,7 +331,7 @@ def shard_data(source_fnames: List[str],
                buckets: List[Tuple[int, int]],
                length_ratio_mean: float,
                length_ratio_std: float,
-               output_prefix: str) -> Tuple[List[Tuple[str, str, 'DataStatistics']], 'DataStatistics']:
+               output_prefix: str) -> Tuple[List[Tuple[List[str], str, 'DataStatistics']], 'DataStatistics']:
     """
     Assign int-coded source/target sentence pairs to shards at random.
 
@@ -347,61 +347,50 @@ def shard_data(source_fnames: List[str],
     :return: Tuple of source (and source factor) file names, target file names and statistics for each shard,
              as well as global statistics.
     """
-    source_fname, *source_factor_fnames = source_fnames
-    source_vocab, *source_factor_vocabs = source_vocabs
-
     os.makedirs(output_prefix, exist_ok=True)
-    source_shard_fnames = [os.path.join(output_prefix, C.SHARD_SOURCE % i)
-                           for i in range(num_shards)]  # type: List[str]
+    sources_shard_fnames = [[os.path.join(output_prefix, C.SHARD_SOURCE % i) + ".%d" % f for i in range(num_shards)]
+                            for f in range(len(source_fnames))]
     target_shard_fnames = [os.path.join(output_prefix, C.SHARD_TARGET % i)
                            for i in range(num_shards)]  # type: List[str]
-    source_factor_shard_fnames = [[os.path.join(output_prefix, C.SHARD_SOURCE % j) + ".factor.%d" % i
-                                   for j in range(num_shards)]
-                                  for i in range(len(source_factor_fnames))]  # type: List[List[str]]
 
-    data_stats_accumulator = DataStatisticsAccumulator(buckets, source_vocab, target_vocab,
+    data_stats_accumulator = DataStatisticsAccumulator(buckets, source_vocabs[0], target_vocab,
                                                        length_ratio_mean, length_ratio_std)
-    per_shard_stat_accumulators = [DataStatisticsAccumulator(buckets, source_vocab, target_vocab, length_ratio_mean,
+    per_shard_stat_accumulators = [DataStatisticsAccumulator(buckets, source_vocabs[0], target_vocab, length_ratio_mean,
                                                              length_ratio_std) for shard_idx in range(num_shards)]
 
     with ExitStack() as exit_stack:
-        source_shards = [exit_stack.enter_context(smart_open(f, mode="wt")) for f in source_shard_fnames]
+        sources_shards = [[exit_stack.enter_context(smart_open(f, mode="wt")) for f in sources_shard_fnames[i]] for i in
+                          range(len(source_fnames))]
         target_shards = [exit_stack.enter_context(smart_open(f, mode="wt")) for f in target_shard_fnames]
-        source_factor_shards = [
-            [exit_stack.enter_context(smart_open(f, mode="wt")) for f in source_factor_shard_fnames[i]] for i in
-            range(len(source_factor_fnames))]
 
-        source_iter = SequenceReader(source_fname, source_vocab, add_bos=False)
+        source_iters = [SequenceReader(fname, vocab, add_bos=False) for fname, vocab in zip(source_fnames,
+                                                                                            source_vocabs)]
         target_iter = SequenceReader(target_fname, target_vocab, add_bos=True)
-        source_factor_iters = [SequenceReader(fname, vocab, add_bos=False) for fname, vocab in zip(source_factor_fnames,
-                                                                                                   source_factor_vocabs)]
+
         random_shard_iter = iter(lambda: random.randrange(num_shards), None)
 
-        for sources, target, random_shard_index in zip(zip(source_iter, *source_factor_iters), target_iter,
+        for sources, target, random_shard_index in zip(zip(*source_iters), target_iter,
                                                        random_shard_iter):
-            source, *source_factors = sources
             random_shard_index = cast(int, random_shard_index)
-            source_len = len(source)
+            source_len = len(sources[0])
             target_len = len(target)
 
             buck_idx, buck = get_parallel_bucket(buckets, source_len, target_len)
-            data_stats_accumulator.sequence_pair(source, target, buck_idx)
-            per_shard_stat_accumulators[random_shard_index].sequence_pair(source, target, buck_idx)
+            data_stats_accumulator.sequence_pair(sources[0], target, buck_idx)
+            per_shard_stat_accumulators[random_shard_index].sequence_pair(sources[0], target, buck_idx)
 
             if buck is None:
                 continue
 
-            source_shards[random_shard_index].write(ids2strids(source) + "\n")
+            for i, line in enumerate(sources):
+                sources_shards[i][random_shard_index].write(ids2strids(line) + "\n")
             target_shards[random_shard_index].write(ids2strids(target) + "\n")
-            for i, line in enumerate(source_factors):
-                source_factor_shards[i][random_shard_index].write(ids2strids(line) + "\n")
 
     per_shard_stats = [shard_stat_accumulator.statistics for shard_stat_accumulator in per_shard_stat_accumulators]
 
-    # pack source and source factor fnames together
-    source_shard_fnames = list(zip(source_shard_fnames, *source_factor_shard_fnames))
+    sources_shard_fnames = zip(*sources_shard_fnames)  # type: List[List[str]]
 
-    return list(zip(source_shard_fnames, target_shard_fnames, per_shard_stats)), data_stats_accumulator.statistics
+    return list(zip(sources_shard_fnames, target_shard_fnames, per_shard_stats)), data_stats_accumulator.statistics
 
 
 class RawParallelDatasetLoader:
