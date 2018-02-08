@@ -329,7 +329,7 @@ class Embedding(Encoder):
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
-        :param data: Input data. TODO: in case of source 3d, in case of target 2d (or even 1d at inference time).
+        :param data: Input data.
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
