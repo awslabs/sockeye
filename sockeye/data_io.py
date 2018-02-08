@@ -738,9 +738,9 @@ def get_training_data_iters(sources: List[str],
 
     :param sources: Path to source training data (with optional factor data paths).
     :param target: Path to target training data.
-    :param validation_sources: Path to source validation data. (with optional factor data paths).
+    :param validation_sources: Path to source validation data (with optional factor data paths).
     :param validation_target: Path to target validation data.
-    :param source_vocabs: Source vocabulary.
+    :param source_vocabs: Source vocabulary and optional factor vocabularies.
     :param target_vocab: Target vocabulary.
     :param source_vocab_paths: Path to source vocabulary.
     :param target_vocab_path: Path to target vocabulary.

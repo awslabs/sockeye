@@ -955,7 +955,8 @@ def add_inference_args(params):
     decode_params.add_argument('--json-input',
                                action='store_true',
                                default=False,
-                               help="If given, the CLI expects json objects as input.")
+                               help="If given, the CLI expects string-serialized json objects as input."
+                                    "Requires at least the key-value pair: %s: '<text>'" % C.JSON_TEXT_KEY)
 
     decode_params.add_argument('--output', '-o',
                                default=None,
