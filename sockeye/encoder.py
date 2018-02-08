@@ -281,14 +281,12 @@ class EmbeddingConfig(config.Config):
                  vocab_size: int,
                  num_embed: int,
                  dropout: float,
-                 is_source: bool = False,
                  factor_configs: Optional[List[FactorConfig]] = None) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
         self.dropout = dropout
         self.factor_configs = factor_configs
-        self.is_source = is_source
         self.num_factors = 1
         if self.factor_configs is not None:
             self.num_factors += len(self.factor_configs)
@@ -301,15 +299,18 @@ class Embedding(Encoder):
     :param config: Embedding config.
     :param prefix: Name prefix for symbols of this encoder.
     :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
+    :param is_source: Whether this is the source embedding instance. Default: False.
     """
 
     def __init__(self,
                  config: EmbeddingConfig,
                  prefix: str,
-                 embed_weight: Optional[mx.sym.Symbol] = None) -> None:
+                 embed_weight: Optional[mx.sym.Symbol] = None,
+                 is_source: bool = False) -> None:
         self.config = config
         self.prefix = prefix
         self.embed_weight = embed_weight
+        self.is_source = is_source
 
         if self.embed_weight is None:
             self.embed_weight = mx.sym.Variable(prefix + "weight",
@@ -335,7 +336,7 @@ class Embedding(Encoder):
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
         factor_embeddings = []  # type: List[mx.sym.Symbol]
-        if self.config.is_source:
+        if self.is_source:
             data, *data_factors = mx.sym.split(data=data,
                                                num_outputs=self.config.num_factors,
                                                axis=2,

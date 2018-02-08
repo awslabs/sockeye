@@ -196,9 +196,7 @@ def calculate_length_statistics(sources_sentences: List[Iterable[List[Any]]],
     """
     mean_and_variance = OnlineMeanAndVariance()
 
-    for target, sources in zip(target_sentences, zip(*sources_sentences)):
-        print(target)
-        print(sources)
+    for target, (sources) in zip(target_sentences, zip(*sources_sentences)):
         check_condition(are_token_parallel(sources),
                         "Source sequences are not token-parallel: %s" % (str(sources)))
 
