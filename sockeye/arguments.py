@@ -944,7 +944,7 @@ def add_inference_args(params):
                                help='Input file to translate. One sentence per line. '
                                     'If not given, will read from stdin.')
 
-    decode_params.add_argument('--input-factors', '-if',
+    decode_params.add_argument(C.INFERENCE_ARG_INPUT_FACTORS_LONG, C.INFERENCE_ARG_INPUT_FACTORS_SHORT,
                                required=False,
                                nargs='+',
                                type=regular_file(),
