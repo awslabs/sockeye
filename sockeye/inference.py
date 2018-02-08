@@ -292,7 +292,7 @@ class InferenceModel(model.SockeyeModel):
         Returns encoder representation of the source, source_length, initial hidden state of decoder RNN,
         and initial decoder states tiled to beam size.
 
-        :param source: Integer-coded input tokens. Shape (batch_size, source length, 1 + num_source_factors).
+        :param source: Integer-coded input tokens. Shape (batch_size, source length, num_source_factors).
         :param source_max_length: Bucket key.
         :return: Initial model state.
         """
@@ -562,6 +562,13 @@ class TranslatorInput:
 
     def __len__(self):
         return len(self.tokens)
+
+    @property
+    def num_factors(self) -> int:
+        """
+        Returns the number of factors of this instance.
+        """
+        return 1 + (0 if not self.factors else len(self.factors))
 
     def chunks(self, chunk_size: int) -> Generator['TranslatorInput', None, None]:
         """
@@ -964,7 +971,7 @@ class Translator:
             num_tokens = len(trans_input)
             source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.vocab_source)
 
-            utils.check_condition(self.num_source_factors == 1 + len(trans_input.factors),
+            utils.check_condition(self.num_source_factors == trans_input.num_factors,
                                   "Unexpected number of factors for input %s. Expected %d" % (trans_input,
                                                                                               self.num_source_factors))
             for i, factor in enumerate(trans_input.factors):
