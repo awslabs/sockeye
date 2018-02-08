@@ -439,7 +439,7 @@ def add_model_parameters(params):
     model_params.add_argument('--allow-missing-params',
                               action="store_true",
                               default=False,
-                              help="Allow misssing parameters when initializing model parameters from file. "
+                              help="Allow missing parameters when initializing model parameters from file. "
                                    "Default: %(default)s.")
 
     model_params.add_argument('--encoder',
