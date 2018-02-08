@@ -939,7 +939,7 @@ def add_translate_cli_args(params):
 def add_inference_args(params):
     decode_params = params.add_argument_group("Inference parameters")
 
-    decode_params.add_argument('--input', '-i',
+    decode_params.add_argument(C.INFERENCE_ARG_INPUT_LONG, C.INFERENCE_ARG_INPUT_SHORT,
                                default=None,
                                help='Input file to translate. One sentence per line. '
                                     'If not given, will read from stdin.')
@@ -958,7 +958,7 @@ def add_inference_args(params):
                                help="If given, the CLI expects string-serialized json objects as input."
                                     "Requires at least the key-value pair: %s: '<text>'" % C.JSON_TEXT_KEY)
 
-    decode_params.add_argument('--output', '-o',
+    decode_params.add_argument(C.INFERENCE_ARG_OUTPUT_LONG, C.INFERENCE_ARG_OUTPUT_SHORT,
                                default=None,
                                help='Output file to write translations to. '
                                     'If not given, will write to stdout.')
