@@ -109,10 +109,8 @@ class CheckpointDecoder:
 
         self.input_sentence_factors = list(zip(*self.input_sentence_factors))
 
-        logger.info(
-            "Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d, source_factors=%d)",
-            max_input_len if max_input_len is not None else -1,
-            beam_size, model, len(self.input_sentences), len(input_factors))
+        logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d)",
+                    max_input_len if max_input_len is not None else -1, beam_size, model, len(self.input_sentences))
 
     def decode_and_evaluate(self,
                             checkpoint: Optional[int] = None,
@@ -147,10 +145,10 @@ class CheckpointDecoder:
             tic = time.time()
             trans_inputs = []  # type: List[inference.TranslatorInput]
             for i, source in enumerate(self.input_sentences):
-                factors = []
-                if self.input_sentence_factors and translator.num_source_factors:
-                    factors = self.input_sentence_factors[i]
-                trans_inputs.append(translator.make_input_multiple(i, source, translator.num_source_factors, factors))
+                inputs = [source]
+                if self.input_sentence_factors:
+                    inputs += self.input_sentence_factors[i]
+                trans_inputs.append(sockeye.inference.make_input_from_multiple_strings(i, inputs))
             trans_outputs = translator.translate(trans_inputs)
             trans_wall_time = time.time() - tic
             for trans_input, trans_output in zip(trans_inputs, trans_outputs):

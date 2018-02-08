@@ -184,6 +184,11 @@ DEFAULT_BEAM_SIZE = 5
 CHUNK_SIZE_NO_BATCHING = 1
 CHUNK_SIZE_PER_BATCH_SEGMENT = 500
 
+# Inference Input JSON constants
+JSON_TEXT_KEY = "text"
+JSON_FACTORS_KEY = "factors"
+JSON_ENCODING = "utf-8"
+
 VERSION_NAME = "version"
 CONFIG_NAME = "config"
 LOG_NAME = "log"

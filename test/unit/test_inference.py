@@ -11,16 +11,27 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import json
+from unittest.mock import Mock
+
 import mxnet as mx
 import numpy as np
 import pytest
 from math import ceil
 
+import sockeye.constants as C
+import sockeye.data_io
 import sockeye.inference
 from sockeye.utils import SockeyeError
 
 _BOS = 0
 _EOS = -1
+
+
+def mock_translator(num_source_factors: int):
+    t_mock = Mock(sockeye.inference.Translator)
+    t_mock.num_source_factors = num_source_factors
+    return t_mock
 
 
 def test_concat_translations():
@@ -70,10 +81,10 @@ def test_length_penalty_int_input():
 
 
 @pytest.mark.parametrize("sentence_id, sentence, factors, chunk_size",
-                         [(1, "a test", [], 4),
-                          (1, "a test", [], 2),
-                          (1, "a test", [], 1),
-                          (0, "", [], 1),
+                         [(1, "a test", None, 4),
+                          (1, "a test", None, 2),
+                          (1, "a test", None, 1),
+                          (0, "", None, 1),
                           (1, "a test", [['h', 'l']], 4),
                           (1, "a test", [['h', 'h'], ['x', 'y']], 1)])
 def test_translator_input(sentence_id, sentence, factors, chunk_size):
@@ -82,9 +93,11 @@ def test_translator_input(sentence_id, sentence, factors, chunk_size):
 
     assert trans_input.sentence_id == sentence_id
     assert trans_input.tokens == tokens
+    assert len(trans_input) == len(tokens)
     assert trans_input.factors == factors
-    for factor in trans_input.factors:
-        assert len(factor) == len(tokens)
+    if factors is not None:
+        for factor in trans_input.factors:
+            assert len(factor) == len(tokens)
     assert trans_input.chunk_id == -1
 
     chunked_inputs = list(trans_input.chunks(chunk_size))
@@ -93,10 +106,11 @@ def test_translator_input(sentence_id, sentence, factors, chunk_size):
         assert chunk_input.sentence_id == sentence_id
         assert chunk_input.chunk_id == chunk_id
         assert chunk_input.tokens == trans_input.tokens[chunk_id * chunk_size: (chunk_id + 1) * chunk_size]
-        assert len(chunk_input.factors) == len(factors)
-        for factor, expected_factor in zip(chunk_input.factors, factors):
-            assert len(factor) == len(chunk_input.tokens)
-            assert factor == expected_factor[chunk_id * chunk_size: (chunk_id + 1) * chunk_size]
+        if factors:
+            assert len(chunk_input.factors) == len(factors)
+            for factor, expected_factor in zip(chunk_input.factors, factors):
+                assert len(factor) == len(chunk_input.tokens)
+                assert factor == expected_factor[chunk_id * chunk_size: (chunk_id + 1) * chunk_size]
 
 
 @pytest.mark.parametrize("supported_max_seq_len_source, supported_max_seq_len_target, training_max_seq_len_source, "
@@ -144,36 +158,39 @@ def test_get_max_input_output_length(
         assert max_output_len == expected_max_output_len
 
 
-@pytest.mark.parametrize("sentence_id, raw_sentence, num_factors, delimiter, expected_tokens, expected_factors",
+@pytest.mark.parametrize("sentence, num_expected_factors, delimiter, expected_tokens, expected_factors",
                          [
                              # sentence with single factor
-                             (1, "this is a test", 1, "|", ["this", "is", "a", "test"], []),
+                             ("this is a test", 1, "|", ["this", "is", "a", "test"], None),
                              # sentence with additional factor-like tokens, but no additional factors expected
-                             (1, "this|X is| a|X test|", 1, "|", ["this|X", "is|", "a|X", "test|"], []),
+                             ("this|X is| a|X test|", 1, "|", ["this|X", "is|", "a|X", "test|"], None),
                              # multiple spaces between token sequence
-                             (1, "space   space", 1, "|", ["space", "space"], []),
+                             ("space   space", 1, "|", ["space", "space"], None),
                              # empty token sequence
-                             (2, "", 1, "|", [], []),
-                             (2, "", 2, "|", [], [[]]),
+                             ("", 1, "|", [], None),
+                             ("", 2, "|", [], [[]]),
                              # proper factored sequences
-                             (14, "a|l b|l C|u", 2, "|", ["a", "b", "C"], [["l", "l", "u"]]),
-                             (1, "a-X-Y b-Y-X", 3, "-", ["a", "b"], [["X", "Y"], ["Y", "X"]]),
-                             (1, "a-X-Y ", 2, "-", ["a-X"], [["Y"]])
+                             ("a|l b|l C|u", 2, "|", ["a", "b", "C"], [["l", "l", "u"]]),
+                             ("a-X-Y b-Y-X", 3, "-", ["a", "b"], [["X", "Y"], ["Y", "X"]]),
+                             ("a-X-Y ", 2, "-", ["a-X"], [["Y"]])
                          ])
-def test_make_input(sentence_id, raw_sentence, num_factors, delimiter, expected_tokens, expected_factors):
-    translator_input = sockeye.inference.Translator.make_input(sentence_id=sentence_id,
-                                                               sentence=raw_sentence,
-                                                               num_factors=num_factors,
-                                                               delimiter=delimiter)
-    assert isinstance(translator_input, sockeye.inference.TranslatorInput)
-    assert translator_input.sentence_id == sentence_id
-    assert translator_input.chunk_id == -1
-    assert translator_input.tokens == expected_tokens
-    assert len(translator_input.factors) == num_factors - 1
-    assert translator_input.factors == expected_factors
+def test_make_input_from_factored_string(sentence, num_expected_factors, delimiter,
+                                         expected_tokens, expected_factors):
+    sentence_id = 1
+    translator = mock_translator(num_expected_factors)
+
+    inp = sockeye.inference.make_input_from_factored_string(sentence_id=sentence_id, factored_string=sentence,
+                                                            translator=translator, delimiter=delimiter)
+    assert isinstance(inp, sockeye.inference.TranslatorInput)
+    assert inp.sentence_id == sentence_id
+    assert inp.chunk_id == -1
+    assert inp.tokens == expected_tokens
+    assert inp.factors == expected_factors
+    if num_expected_factors > 1:
+        assert len(inp.factors) == num_expected_factors - 1
 
 
-@pytest.mark.parametrize("sentence, num_factors, delimiter, expected_wrong_num_factors, expected_fail_word",
+@pytest.mark.parametrize("sentence, num_expected_factors, delimiter, expected_wrong_num_factors, expected_fail_word",
                          [("this is a test", 2, "|", 1, "this"),  # expecting additional factor
                           ("this|X is a test", 2, "|", 1, "is"),  # expecting additional factor
                           ("this|X is|X a|X test", 2, "|", 1, "test"),  # fail on last token without factor
@@ -184,38 +201,36 @@ def test_make_input(sentence_id, raw_sentence, num_factors, delimiter, expected_
                           ("this||", 3, "|", 1, "this"),  # double delimiter
                           ("this|| another", 2, "|", 1, "this|"),  # double delimiter followed by token
                           ("this|||", 2, "|", 1, "this||")])  # triple delimiter
-def test_make_input_factor_parsing(sentence, num_factors, delimiter, expected_wrong_num_factors, expected_fail_word):
+def test_factor_parsing(sentence, num_expected_factors, delimiter, expected_wrong_num_factors, expected_fail_word):
     """
     Test to ensure we fail on parses with invalid factors.
     """
     sentence_id = 1
+    translator = mock_translator(num_expected_factors)
     with pytest.raises(SockeyeError) as e:
-        sockeye.inference.Translator.make_input(sentence_id=1,
-                                                sentence=sentence,
-                                                num_factors=num_factors,
-                                                delimiter=delimiter)
-    assert str(e.value) == 'Expecting %d factors, but got %d at sentence %d, word "%s"' % (num_factors,
-                                                                                           expected_wrong_num_factors,
-                                                                                           sentence_id,
-                                                                                           expected_fail_word)
+        sockeye.inference.make_input_from_factored_string(sentence_id=sentence_id,
+                                                          factored_string=sentence,
+                                                          translator=translator, delimiter=delimiter)
+    assert str(e.value) == 'Expecting %d factors, but got %d at sentence %d, word "%s"' % (
+        num_expected_factors, expected_wrong_num_factors, sentence_id, expected_fail_word)
 
 
-@pytest.mark.parametrize("sentence, num_factors, delimiter, expected_position",
+@pytest.mark.parametrize("sentence, num_expected_factors, delimiter, expected_position",
                          [
                              ("|this", 2, "|", 0),  # empty token with 1 additional factor
                              ("|this|that", 3, "|", 0),  # empty token with 2 additional factors
                              ("|this|that|", 4, "|", 0)  # empty token with 3 additional factors
                          ])
-def test_make_input_emtpy_token(sentence, num_factors, delimiter, expected_position):
+def test_make_input_emtpy_token(sentence, num_expected_factors, delimiter, expected_position):
     """
     Test to ensure we fail on parses that create empty tokens.
     """
     sentence_id = 1
+    translator = mock_translator(num_expected_factors)
     with pytest.raises(SockeyeError) as e:
-        sockeye.inference.Translator.make_input(sentence_id=sentence_id,
-                                                sentence=sentence,
-                                                num_factors=num_factors,
-                                                delimiter=delimiter)
+        sockeye.inference.make_input_from_factored_string(sentence_id=sentence_id,
+                                                          factored_string=sentence,
+                                                          translator=translator, delimiter=delimiter)
     assert str(e.value) == 'Empty token at sentence %d, position %d' % (sentence_id, expected_position)
 
 
@@ -227,11 +242,59 @@ def test_make_input_whitespace_delimiter(delimiter):
     Test to ensure we disallow a variety of whitespace strings as factor delimiters.
     """
     sentence_id = 1
+    translator = mock_translator(2)
     sentence = "foo"
-    num_factors = 2
     with pytest.raises(SockeyeError) as e:
-        sockeye.inference.Translator.make_input(sentence_id=sentence_id,
-                                                sentence=sentence,
-                                                num_factors=num_factors,
-                                                delimiter=delimiter)
+        sockeye.inference.make_input_from_factored_string(sentence_id=sentence_id,
+                                                          factored_string=sentence,
+                                                          translator=translator, delimiter=delimiter)
     assert str(e.value) == 'Factor delimiter can not be whitespace or empty.'
+
+
+@pytest.mark.parametrize("text, factors",
+                         [("this is a test without factors", None),
+                          ("", None),
+                          ("test", ["X", "X"]),
+                          ("a b c", ["x y z"]),
+                          ("a", [])])
+def test_make_input_from_valid_json_string(text, factors):
+    sentence_id = 1
+    expected_tokens = list(sockeye.data_io.get_tokens(text))
+    inp = sockeye.inference.make_input_from_json_string(sentence_id, json.dumps({C.JSON_TEXT_KEY: text,
+                                                                                 C.JSON_FACTORS_KEY: factors}))
+    assert len(inp) == len(expected_tokens)
+    assert inp.tokens == expected_tokens
+    if factors is not None:
+        assert len(inp.factors) == len(factors)
+    else:
+        assert inp.factors is None
+
+
+@pytest.mark.parametrize("text, text_key, factors, factors_key", [("a", "blub", None, "")])
+def test_failed_make_input_from_valid_json_string(text, text_key, factors, factors_key):
+    sentence_id = 1
+    with pytest.raises(ValueError):
+        sockeye.inference.make_input_from_json_string(sentence_id, json.dumps({text_key: text,
+                                                                               factors_key: factors}))
+
+
+@pytest.mark.parametrize("strings",
+                         [
+                             ["a b c"],
+                             ["a b c", "f1 f2 f3", "f3 f3 f3"]
+                         ])
+def test_make_input_from_multiple_strings(strings):
+    inp = sockeye.inference.make_input_from_multiple_strings(1, strings)
+
+    expected_tokens = list(sockeye.data_io.get_tokens(strings[0]))
+    expected_factors = [list(sockeye.data_io.get_tokens(f)) for f in strings[1:]]
+    assert len(inp) == len(expected_tokens)
+    assert inp.tokens == expected_tokens
+    assert inp.factors == expected_factors
+
+
+@pytest.mark.parametrize("strings",
+                         [[], ["a b c", "f1 f2"], ["a b c", "f1 f2 f3", "f1"]])
+def test_failed_make_input_from_multiple_strings(strings):
+    with pytest.raises(SockeyeError):
+        sockeye.inference.make_input_from_multiple_strings(1, strings)

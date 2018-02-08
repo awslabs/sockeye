@@ -949,7 +949,13 @@ def add_inference_args(params):
                                nargs='+',
                                type=regular_file(),
                                default=None,
-                               help='List of input files containing source factors, each token-parallel to the source.')
+                               help='List of input files containing additional source factors,'
+                                    'each token-parallel to the source. Default: %(default)s.')
+
+    decode_params.add_argument('--json-input',
+                               action='store_true',
+                               default=False,
+                               help="If given, the CLI expects json objects as input.")
 
     decode_params.add_argument('--output', '-o',
                                default=None,
