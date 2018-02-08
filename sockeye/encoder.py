@@ -334,7 +334,7 @@ class Embedding(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
-        factor_embeddings = []  # type: List[mx.sym.Symbol
+        factor_embeddings = []  # type: List[mx.sym.Symbol]
         if self.config.is_source:
             data, *data_factors = mx.sym.split(data=data,
                                                num_outputs=self.config.num_factors,

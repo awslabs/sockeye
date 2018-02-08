@@ -165,7 +165,7 @@ class CheckpointDecoder:
                 C.AVG_TIME: avg_time}
 
 
-def parallel_subsample(parallel_sequences: List[List[Any]], sample_size: int, seed: int) -> Iterable[Any]:
+def parallel_subsample(parallel_sequences: List[List[Any]], sample_size: int, seed: int) -> List[Any]:
     it = iter(parallel_sequences)
     the_len = len(next(it))
     utils.check_condition(all(len(l) == the_len for l in it), "Lists differ in length")
@@ -173,7 +173,7 @@ def parallel_subsample(parallel_sequences: List[List[Any]], sample_size: int, se
     # custom random number generator to guarantee the same samples across runs in order to be able to
     # compare metrics across independent runs
     random_gen = random.Random(seed)
-    parallel_sample = zip(*random_gen.sample(list(zip(*parallel_sequences)), sample_size))
+    parallel_sample = list(zip(*random_gen.sample(list(zip(*parallel_sequences)), sample_size)))
     return parallel_sample
 
 

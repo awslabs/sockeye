@@ -22,7 +22,7 @@ import random
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from contextlib import ExitStack
-from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sized, Tuple
+from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sequence, Sized, Tuple
 
 import math
 import mxnet as mx
@@ -413,7 +413,7 @@ class RawParallelDatasetLoader:
         self.dtype = dtype
 
     def load(self,
-             sources_sentences: List[Iterable[List[Any]]],
+             sources_sentences: Sequence[Iterable[List[Any]]],
              target_sentences: Iterable[List[Any]],
              num_samples_per_bucket: List[int]) -> 'ParallelDataSet':
 

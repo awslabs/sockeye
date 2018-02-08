@@ -124,7 +124,7 @@ def load_source_vocabs(folder: str) -> List[Vocab]:
     :param folder: Source folder.
     :return: List of vocabularies.
     """
-    vocabs = [vocab_from_json(os.path.join(folder, C.VOCAB_SRC_NAME))]  # type: List[Vocab
+    vocabs = [vocab_from_json(os.path.join(folder, C.VOCAB_SRC_NAME))]  # type: List[Vocab]
     for fname in sorted([f for f in os.listdir(folder) if f.startswith(C.VOCAB_SRC_FACTOR_PREFIX)]):
         vocabs.append(vocab_from_json(os.path.join(folder, fname)))
     return vocabs

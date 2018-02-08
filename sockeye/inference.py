@@ -626,7 +626,7 @@ def make_input_from_factored_string(sentence_id: int,
     :param delimiter: A factor delimiter. Default: '|'.
     :return: A TranslatorInput.
     """
-    utils.check_condition(delimiter and not delimiter.isspace(),
+    utils.check_condition(bool(delimiter) and not delimiter.isspace(),
                           "Factor delimiter can not be whitespace or empty.")
     model_num_factors = translator.num_source_factors
     num_additional_factors = model_num_factors - 1
@@ -638,7 +638,7 @@ def make_input_from_factored_string(sentence_id: int,
     factors = [[] for _ in range(num_additional_factors)]  # type: List[Tokens]
     for token_id, token in enumerate(data_io.get_tokens(factored_string)):
         token, *token_factors = token.rsplit(delimiter, maxsplit=num_additional_factors)
-        utils.check_condition(token, "Empty token at sentence {}, position {}".format(sentence_id, token_id))
+        utils.check_condition(bool(token), "Empty token at sentence {}, position {}".format(sentence_id, token_id))
 
         token_factors = list(filter(None, token_factors))
         utils.check_condition(len(token_factors) == num_additional_factors and all(token_factors),
@@ -936,9 +936,9 @@ class Translator:
         results = []  # type: List[TranslatorOutput]
         chunks_by_input_idx = itertools.groupby(translated_chunks, key=lambda translation: translation.id)
         for trans_input, (input_idx, chunks) in zip(trans_inputs, chunks_by_input_idx):
-            chunks = list(chunks)
-            if len(chunks) == 1:
-                translation = chunks[0].translation
+            chunks = list(chunks)  # type: ignore
+            if len(chunks) == 1:  # type: ignore
+                translation = chunks[0].translation  # type: ignore
             else:
                 translations_to_concat = [translated_chunk.translation for translated_chunk in chunks]
                 translation = self._concat_translations(translations_to_concat)
