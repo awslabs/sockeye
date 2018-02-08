@@ -58,7 +58,6 @@ class ModelConfig(Config):
                  max_seq_len_target: int,
                  vocab_source_size: int,
                  vocab_target_size: int,
-                 source_factor_vocab_sizes: List[int],
                  config_embed_source: encoder.EmbeddingConfig,
                  config_embed_target: encoder.EmbeddingConfig,
                  config_encoder: encoder.EncoderConfig,

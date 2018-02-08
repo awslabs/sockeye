@@ -289,9 +289,9 @@ class EmbeddingConfig(config.Config):
         self.dropout = dropout
         self.factor_configs = factor_configs
         self.is_source = is_source
-        self.num_factors = 0
+        self.num_factors = 1
         if self.factor_configs is not None:
-            self.num_factors = len(self.factor_configs)
+            self.num_factors += len(self.factor_configs)
 
 
 class Embedding(Encoder):
@@ -337,7 +337,7 @@ class Embedding(Encoder):
         factor_embeddings = []  # type: List[mx.sym.Symbol
         if self.config.is_source:
             data, *data_factors = mx.sym.split(data=data,
-                                               num_outputs=self.config.num_factors + 1,
+                                               num_outputs=self.config.num_factors,
                                                axis=2,
                                                squeeze_axis=True, name=self.prefix + "factor_split")
 

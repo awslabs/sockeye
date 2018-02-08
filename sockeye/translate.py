@@ -92,7 +92,7 @@ def main():
 
 def _make_input(source: Optional[str],
                 source_factors: Optional[List[str]] = None,
-                num_source_factors: int = 0) -> Generator[inference.TranslatorInput, None, None]:
+                num_source_factors: int = 1) -> Generator[inference.TranslatorInput, None, None]:
     """
     Transform both accepted inputs (STDIN and `--input`, factored or not) into a stream of TranslatorInput objects.
     :param source: The source file (possibly None).
@@ -107,9 +107,9 @@ def _make_input(source: Optional[str],
                                                   num_factors=num_source_factors)
     else:
         source_factors = [] if source_factors is None else source_factors
-        check_condition(len(source_factors) == num_source_factors,
+        check_condition(1 + len(source_factors) == num_source_factors,
                         "Model(s) require(s) %d factor files, got %d" % (num_source_factors,
-                                                                         len(source_factors)))
+                                                                         1 + len(source_factors)))
         with ExitStack() as exit_stack:
             streams = [exit_stack.enter_context(data_io.smart_open(x)) for x in [source] + source_factors]
             for sentence_id, (source, *factors) in enumerate(zip(*streams), 1):

@@ -97,8 +97,7 @@ class InferenceModel(model.SockeyeModel):
     @property
     def num_source_factors(self) -> int:
         """
-        Returns the number of source factors of this InferenceModel.
-        :return:
+        Returns the number of source factors of this InferenceModel (at least 1).
         """
         return self.config.config_embed_source.num_factors
 
@@ -164,7 +163,7 @@ class InferenceModel(model.SockeyeModel):
 
         def sym_gen(source_seq_len: int):
             source = mx.sym.Variable(C.SOURCE_NAME)
-            source_words = source.split(num_outputs=self.num_source_factors + 1, axis=2, squeeze_axis=True)[0]
+            source_words = source.split(num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
             source_length = utils.compute_lengths(source_words)
 
             # source embedding
@@ -262,11 +261,9 @@ class InferenceModel(model.SockeyeModel):
         :param bucket_key: Maximum input length.
         :return: List of data descriptions.
         """
-        num_factors = self.config.config_embed_source.num_factors
-        data = [mx.io.DataDesc(name=C.SOURCE_NAME,
-                               shape=(self.batch_size, bucket_key, num_factors + 1),
+        return [mx.io.DataDesc(name=C.SOURCE_NAME,
+                               shape=(self.batch_size, bucket_key, self.num_source_factors),
                                layout=C.BATCH_MAJOR)]
-        return data
 
     def _get_decoder_data_shapes(self, bucket_key: Tuple[int, int]) -> List[mx.io.DataDesc]:
         """
@@ -791,7 +788,7 @@ class Translator:
     @staticmethod
     def make_input(sentence_id: int,
                    raw_sentence: str,
-                   num_factors: int = 0,
+                   num_factors: int = 1,
                    delimiter: str = C.DEFAULT_FACTOR_DELIMITER) -> TranslatorInput:
         """
         Constructs a TranslatorInput from a sentence string, optionally enriched with factors, delimited by delimiter.
@@ -801,26 +798,28 @@ class Translator:
 
         :param sentence_id: Input sentence id.
         :param raw_sentence: Input sentence string.
-        :param num_factors: Optional number of factors to expect in this sentence string.
+        :param num_factors: Number of factors to expect in the raw_sentence. Default 1 (first factor is surface form.)
         :param delimiter: Optional delimiter to separate factors. Can not be a whitespace string.
         :return: A TranslatorInput object.
         """
         utils.check_condition(delimiter and not delimiter.isspace(),
                               "Factor delimiter can not be whitespace or empty.")
+        utils.check_condition(num_factors > 0, "Number of factors must be at least 1")
         tokens = []  # type: Tokens
-        factors = [[] for _ in range(num_factors)]  # type: List[Tokens]
+        num_additional_factors = num_factors - 1
+        additional_factors = [[] for _ in range(num_additional_factors)]  # type: List[Tokens]
         for token_id, token in enumerate(data_io.get_tokens(raw_sentence)):
-            token, *token_factors = token.rsplit(delimiter, maxsplit=num_factors)
+            token, *token_factors = token.rsplit(delimiter, maxsplit=num_additional_factors)
             token_factors = list(filter(None, token_factors))
             utils.check_condition(token, "Empty token at sentence {}, position {}".format(sentence_id, token_id))
-            utils.check_condition(token and len(token_factors) == num_factors and all(token_factors),
+            utils.check_condition(token and len(token_factors) == num_additional_factors and all(token_factors),
                                   'Expecting {} factors, but got {} at sentence {}, word "{}"'.format(
-                                      num_factors, len(token_factors), sentence_id, token))
+                                      num_factors, 1 + len(token_factors), sentence_id, token))
             tokens.append(token)
             for i, factor in enumerate(token_factors):
-                factors[i].append(factor)
+                additional_factors[i].append(factor)
 
-        return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
+        return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=additional_factors)
 
     @staticmethod
     def make_input_multiple(sentence_id: int,
@@ -833,20 +832,21 @@ class Translator:
 
         :param sentence_id: Input sentence id.
         :param raw_sentence: The input sentence.
-        :param num_factors: Optional number of factors to expect in this sentence string.
+        :param num_factors: Number of factors to expect in the raw_sentence. Default 1 (first factor is surface form.)
         :param raw_factors: List of token-parallel source factor strings.
         :return: A TranslatorInput object.
         """
-        utils.check_condition(num_factors == len(raw_factors),
-                              "Expecting {:d} factor sequences, got {:d}".format(num_factors, len(raw_factors)))
+        utils.check_condition(num_factors > 0, "Number of factors must be at least 1")
+        utils.check_condition(num_factors == 1 + len(raw_factors),
+                              "Expecting {:d} factor sequences, got {:d}".format(num_factors, 1 + len(raw_factors)))
         tokens = list(data_io.get_tokens(raw_sentence))
         num_tokens = len(tokens)
-        factors = [[] for _ in range(num_factors)]  # type: List[Tokens]
+        num_additional_factors = num_factors - 1
+        factors = [[] for _ in range(num_additional_factors)]  # type: List[Tokens]
         for i, factor_sequence in enumerate(raw_factors):
             factor_sequence = list(data_io.get_tokens(factor_sequence))
             utils.check_condition(len(factor_sequence) == num_tokens,
-                                  "Expecting {:d} factors for factor {:d}, got {:d}".format(num_tokens, i,
-                                                                                            len(factor_sequence)))
+                                  "Expecting {:d} factors got {:d}".format(num_tokens, len(factor_sequence)))
             factors[i] = factor_sequence
 
         return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
@@ -923,12 +923,12 @@ class Translator:
         bucket_key = data_io.get_bucket(max(len(inp.tokens) for inp in trans_inputs), self.buckets_source)
 
         utils.check_condition(C.PAD_ID == 0, "pad id should be 0")
-        source = mx.nd.zeros((len(trans_inputs), bucket_key, self.num_source_factors + 1), ctx=self.context)
+        source = mx.nd.zeros((len(trans_inputs), bucket_key, self.num_source_factors), ctx=self.context)
 
         for j, trans_input in enumerate(trans_inputs):
             source[j, :len(trans_input.tokens), 0] = data_io.tokens2ids(trans_input.tokens, self.vocab_source)
 
-            utils.check_condition(self.num_source_factors == len(trans_input.factors),
+            utils.check_condition(self.num_source_factors == 1 + len(trans_input.factors),
                                   "Unexpected number of factors for input %s. Expected %d" % (trans_input,
                                                                                               self.num_source_factors))
             for i, factor in enumerate(trans_input.factors):
@@ -980,7 +980,7 @@ class Translator:
         """
         Translates source of source_length, given a bucket_key.
 
-        :param source: Source ids. Shape: (batch_size, bucket_key, 1 + num_factors).
+        :param source: Source ids. Shape: (batch_size, bucket_key, num_factors).
         :param source_length: Bucket key.
 
         :return: Sequence of translations.
@@ -991,7 +991,7 @@ class Translator:
         """
         Returns a ModelState for each model representing the state of the model after encoding the source.
 
-        :param sources: Source ids. Shape: (batch_size, bucket_key, 1 + num_factors).
+        :param sources: Source ids. Shape: (batch_size, bucket_key, num_factors).
         :param source_length: Bucket key.
         :return: List of ModelStates.
         """
@@ -1110,7 +1110,7 @@ class Translator:
         if self.restrict_lexicon:
             # TODO: See note in method about migrating to pure MXNet when set operations are supported.
             #       We currently convert source to NumPy and target ids back to NDArray.
-            source_words = source.split(num_outputs=self.num_source_factors + 1, axis=2, squeeze_axis=True)[0]
+            source_words = source.split(num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
             vocab_slice_ids = mx.nd.array(self.restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy()),
                                           ctx=self.context)
 

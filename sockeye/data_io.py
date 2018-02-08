@@ -632,7 +632,7 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
                               buckets=buckets,
                               batch_size=batch_size,
                               bucket_batch_sizes=bucket_batch_sizes,
-                              num_factors=len(validation_source_factors))
+                              num_factors=len(validation_sources))
 
 
 def get_prepared_data_iters(prepared_data_dir: str,
@@ -672,9 +672,6 @@ def get_prepared_data_iters(prepared_data_dir: str,
     source_vocabs = vocab.load_source_vocabs(prepared_data_dir)
     target_vocab = vocab.vocab_from_json(os.path.join(prepared_data_dir, C.VOCAB_TRG_NAME))
 
-    # TODO(fhieber): remove num_factors
-    num_factors = len(data_config.sources) - 1
-
     check_condition(len(source_vocabs) == len(data_config.sources),
                     "Wrong number of source vocabularies. Found %d, need %d." % (len(source_vocabs),
                                                                                  len(data_config.sources)))
@@ -696,7 +693,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                            batch_size,
                                            bucket_batch_sizes,
                                            fill_up,
-                                           num_factors=num_factors)
+                                           num_factors=len(data_config.sources))
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=target_vocab[C.EOS_SYMBOL],
@@ -810,7 +807,7 @@ def get_training_data_iters(sources: List[str],
                                     buckets,
                                     batch_size,
                                     bucket_batch_sizes,
-                                    num_factors=len(source_factors))
+                                    num_factors=len(config_data.sources))
 
     validation_iter = get_validation_data_iter(data_loader=data_loader,
                                                validation_sources=validation_sources,
@@ -928,7 +925,7 @@ class DataConfig(config.Config):
         self.data_statistics = data_statistics
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
-        self.num_source_factors = len(sources) - 1
+        self.num_source_factors = len(sources)
 
 
 def read_content(path: str, limit: Optional[int] = None) -> Iterator[List[str]]:
@@ -1243,7 +1240,7 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
                  source_data_name,
                  target_data_name,
                  label_name,
-                 num_factors: int = 0,
+                 num_factors: int = 1,
                  dtype='float32') -> None:
         super().__init__(batch_size=batch_size)
 
@@ -1266,7 +1263,7 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
         self.provide_data = [
             mx.io.DataDesc(name=self.source_data_name,
                            shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[0],
-                                  self.num_factors + 1),
+                                  self.num_factors),
                            layout=C.BATCH_MAJOR),
             mx.io.DataDesc(name=self.target_data_name,
                            shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[1]),
@@ -1315,10 +1312,11 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                  source_data_name=C.SOURCE_NAME,
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
-                 num_factors: int = 0,
+                 num_factors: int = 1,
                  dtype='float32') -> None:
-        super().__init__(buckets, batch_size, bucket_batch_sizes,
-                         source_data_name, target_data_name, label_name, num_factors, dtype)
+        super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
+                         source_data_name=source_data_name, target_data_name=target_data_name,
+                         label_name=label_name, num_factors=num_factors, dtype=dtype)
         assert len(shards_fnames) > 0
         self.shards_fnames = list(shards_fnames)
         self.shard_index = -1
@@ -1332,10 +1330,12 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
         dataset = ParallelDataSet.load(self.shards_fnames[self.shard_index]).fill_up(self.bucket_batch_sizes,
                                                                                      self.fill_up,
                                                                                      seed=self.shard_index)
-        self.shard_iter = ParallelSampleIter(dataset,
-                                             self.buckets,
-                                             self.batch_size,
-                                             self.bucket_batch_sizes,
+        self.shard_iter = ParallelSampleIter(data=dataset,
+                                             buckets=self.buckets,
+                                             batch_size=self.batch_size,
+                                             bucket_batch_sizes=self.bucket_batch_sizes,
+                                             source_data_name=self.source_data_name,
+                                             target_data_name=self.target_data_name,
                                              num_factors=self.num_factors)
 
     def reset(self):
@@ -1403,10 +1403,11 @@ class ParallelSampleIter(BaseParallelSampleIter):
                  source_data_name=C.SOURCE_NAME,
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
-                 num_factors: int = 0,
+                 num_factors: int = 1,
                  dtype='float32') -> None:
-        super().__init__(buckets, batch_size, bucket_batch_sizes,
-                         source_data_name, target_data_name, label_name, num_factors, dtype)
+        super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
+                         source_data_name=source_data_name, target_data_name=target_data_name,
+                         label_name=label_name, num_factors=num_factors, dtype=dtype)
 
         # create independent lists to be shuffled
         self.data = ParallelDataSet(list(data.source), list(data.target), list(data.label))

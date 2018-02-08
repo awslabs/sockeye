@@ -104,7 +104,7 @@ class TrainingModel(model.SockeyeModel):
         #utils.check_condition(train_iter.pad_id == C.PAD_ID == 0, "pad id should be 0")
 
         source = mx.sym.Variable(C.SOURCE_NAME)
-        source_words = source.split(num_outputs=self.config.config_embed_source.num_factors + 1,
+        source_words = source.split(num_outputs=self.config.config_embed_source.num_factors,
                                     axis=2, squeeze_axis=True)[0]
         source_length = utils.compute_lengths(source_words)
         target = mx.sym.Variable(C.TARGET_NAME)

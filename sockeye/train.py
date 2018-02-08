@@ -281,9 +281,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_num_devices=batch_num_devices,
             fill_up=args.fill_up)
 
-        check_condition(data_config.num_source_factors == len(args.source_factors_num_embed),
+        check_condition(data_config.num_source_factors == len(args.source_factors_num_embed) + 1,
                         "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
-                            data_config.num_source_factors, len(args.source_factors_num_embed)))
+                            data_config.num_source_factors, len(args.source_factors_num_embed) + 1))
 
         if resume_training:
             # resuming training. Making sure the vocabs in the model and in the prepared data match up
@@ -404,7 +404,7 @@ def create_encoder_config(args: argparse.Namespace,
 
         total_source_factor_size = sum(args.source_factors_num_embed)
         if total_source_factor_size > 0:
-            logger.info("Transformer encoder model size adjusted for source factors num embed: %d -> %d" % (
+            logger.info("Encoder transformer-model-size adjusted to account source factor embeddings: %d -> %d" % (
                 encoder_transformer_model_size, num_embed_source + total_source_factor_size))
             encoder_transformer_model_size = num_embed_source + total_source_factor_size
         config_encoder = transformer.TransformerConfig(
@@ -601,7 +601,7 @@ def create_model_config(args: argparse.Namespace,
     config_decoder = create_decoder_config(args, encoder_num_hidden)
 
     source_factor_configs = None
-    if config_data.num_source_factors > 0:
+    if config_data.num_source_factors > 1:
         source_factor_configs = [encoder.FactorConfig(size, dim) for size, dim in zip(source_factor_vocab_sizes,
                                                                                       args.source_factors_num_embed)]
 
@@ -626,7 +626,6 @@ def create_model_config(args: argparse.Namespace,
                                      max_seq_len_target=max_seq_len_target,
                                      vocab_source_size=source_vocab_size,
                                      vocab_target_size=target_vocab_size,
-                                     source_factor_vocab_sizes=source_factor_vocab_sizes,
                                      config_embed_source=config_embed_source,
                                      config_embed_target=config_embed_target,
                                      config_encoder=config_encoder,
