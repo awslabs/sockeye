@@ -586,7 +586,7 @@ class BadTranslatorInput(TranslatorInput):
         super().__init__(sentence_id=sentence_id, tokens=tokens, chunk_id=-1, factors=None)
 
 
-def _bad_input(sentence_id: int):
+def _bad_input(sentence_id: int) -> BadTranslatorInput:
     logger.warning("Bad input (%d) will return empty output.", sentence_id)
     return BadTranslatorInput(sentence_id=sentence_id, tokens=[])
 
@@ -622,7 +622,7 @@ def make_input_from_json_string(sentence_id: int, json_string: str) -> Translato
         return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
 
     except Exception as e:
-        logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)
+        logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
         return _bad_input(sentence_id)
 
 
