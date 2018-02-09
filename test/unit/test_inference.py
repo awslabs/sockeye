@@ -197,7 +197,7 @@ def test_make_input_from_factored_string(sentence, num_expected_factors, delimit
                              ("this|X is|X a|X test", 2, "|", "test"),  # fail on last token without factor
                              ("this| is|X a|X test|", 2, "|", "this|"),  # first token with delimiter but no factor
                              ("this|X is|X a|X test|", 2, "|", "test|"),  # last token with delimiter but no factor
-                             ("w1||w2||f22", 2, "|", "w1||w2||f22"),  # davids test
+                             ("w1||w2||f22", 2, "|", "w1||w2||f22"),
                              ("this", 2, "|", "this"),  # single token without factor
                              ("this|", 2, "|", "this|"),  # single token with delimiter but no factor
                              ("this||", 3, "|", "this||"),  # double delimiter
