@@ -710,7 +710,10 @@ Translation = NamedTuple('Translation', [
     ('score', float)
 ])
 
-EMPTY_TRANSLATION = Translation(target_ids=[], attention_matrix=np.asarray([[0]]), score=-np.inf)
+
+def empty_translation() -> Translation:
+    return Translation(target_ids=[], attention_matrix=np.asarray([[0]]), score=-np.inf)
+
 
 TranslatedChunk = NamedTuple('TranslatedChunk', [
     ('id', int),
@@ -920,11 +923,11 @@ class Translator:
 
             # bad input
             if isinstance(trans_input, BadTranslatorInput):
-                translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=EMPTY_TRANSLATION))
+                translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
 
             # empty input
             elif len(trans_input.tokens) == 0:
-                translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=EMPTY_TRANSLATION))
+                translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
 
             # oversized input
             elif len(trans_input.tokens) > self.max_input_length:
