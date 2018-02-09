@@ -279,7 +279,7 @@ def main():
     log_sockeye_version(logger)
 
     logger.info("Reading source and target vocab from \"%s\"", args.model)
-    vocab_source = vocab.vocab_from_json(os.path.join(args.model, C.VOCAB_SRC_NAME))
+    vocab_source = vocab.load_source_vocabs(args.model)[0]
     vocab_target = vocab.vocab_from_json(os.path.join(args.model, C.VOCAB_TRG_NAME))
 
     logger.info("Creating top-k lexicon from \"%s\"", args.input)

@@ -39,10 +39,9 @@ class CheckpointDecoder:
     Decodes a (random sample of a) dataset using parameters at given checkpoint and computes BLEU against references.
 
     :param context: MXNet context to bind the model to.
-    :param inputs: Path to file containing input sentences.
+    :param inputs: Path(s) to file containing input sentences (and their factors).
     :param references: Path to file containing references.
     :param model: Model to load.
-    :param input_factors: Paths to files containing input factors.
     :param max_input_len: Maximum input length.
     :param beam_size: Size of the beam.
     :param bucket_width_source: Source bucket width.
@@ -58,10 +57,9 @@ class CheckpointDecoder:
 
     def __init__(self,
                  context: mx.context.Context,
-                 inputs: str,
+                 inputs: List[str],
                  references: str,
                  model: str,
-                 input_factors: List[str],
                  max_input_len: Optional[int] = None,
                  beam_size: int = C.DEFAULT_BEAM_SIZE,
                  bucket_width_source: int = 10,
@@ -85,32 +83,28 @@ class CheckpointDecoder:
         self.model = model
 
         with ExitStack() as exit_stack:
-            inputs_fin = exit_stack.enter_context(data_io.smart_open(inputs))
+            inputs_fins = [exit_stack.enter_context(data_io.smart_open(f)) for f in inputs]
             references_fin = exit_stack.enter_context(data_io.smart_open(references))
-            factor_fins = [exit_stack.enter_context(data_io.smart_open(f)) for f in input_factors]
 
-            input_sentences = inputs_fin.readlines()
+            inputs_sentences = [f.readlines() for f in inputs_fins]
             target_sentences = references_fin.readlines()
-            input_sentence_factors = [f.readlines() for f in factor_fins]
 
             if sample_size <= 0:
-                sample_size = len(input_sentences)
-            if sample_size < len(input_sentences):
-                self.input_sentences, self.target_sentences, *self.input_sentence_factors = parallel_subsample(
-                    [input_sentences, target_sentences] + input_sentence_factors, sample_size, random_seed)
+                sample_size = len(inputs_sentences[0])
+            if sample_size < len(inputs_sentences[0]):
+                self.target_sentences, *self.inputs_sentences = parallel_subsample(
+                    [target_sentences] + inputs_sentences, sample_size, random_seed)
             else:
-                self.input_sentences, self.target_sentences = input_sentences, target_sentences
-                self.input_sentence_factors = input_sentence_factors
+                self.inputs_sentences, self.target_sentences = inputs_sentences, target_sentences
 
-        write_to_file(self.input_sentences, os.path.join(self.model, C.DECODE_REF_NAME))
+        for i, factor in enumerate(self.inputs_sentences):
+            write_to_file(factor, os.path.join(self.model, C.DECODE_IN_NAME % i))
         write_to_file(self.target_sentences, os.path.join(self.model, C.DECODE_REF_NAME))
-        for i, input_sentence_factor in enumerate(self.input_sentence_factors):
-            write_to_file(input_sentence_factor, os.path.join(self.model, C.DECODE_IN_FACTOR_NAME % i))
 
-        self.input_sentence_factors = list(zip(*self.input_sentence_factors))
+        self.inputs_sentences = list(zip(*self.inputs_sentences))  # type: List[List[str]]
 
         logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d)",
-                    max_input_len if max_input_len is not None else -1, beam_size, model, len(self.input_sentences))
+                    max_input_len if max_input_len is not None else -1, beam_size, model, len(self.target_sentences))
 
     def decode_and_evaluate(self,
                             checkpoint: Optional[int] = None,
@@ -144,17 +138,14 @@ class CheckpointDecoder:
             handler = sockeye.output_handler.StringOutputHandler(output)
             tic = time.time()
             trans_inputs = []  # type: List[inference.TranslatorInput]
-            for i, source in enumerate(self.input_sentences):
-                inputs = [source]
-                if self.input_sentence_factors:
-                    inputs += self.input_sentence_factors[i]
+            for i, inputs in enumerate(self.inputs_sentences):
                 trans_inputs.append(sockeye.inference.make_input_from_multiple_strings(i, inputs))
             trans_outputs = translator.translate(trans_inputs)
             trans_wall_time = time.time() - tic
             for trans_input, trans_output in zip(trans_inputs, trans_outputs):
                 handler.handle(trans_input, trans_output)
                 translations.append(trans_output.translation)
-        avg_time = trans_wall_time / len(self.input_sentences)
+        avg_time = trans_wall_time / len(self.target_sentences)
 
         # TODO(fhieber): eventually add more metrics (METEOR etc.)
         return {C.BLEU_VAL: evaluate.raw_corpus_bleu(hypotheses=translations,

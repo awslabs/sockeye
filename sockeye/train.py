@@ -316,7 +316,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             target_vocab_path = orig_config.config_data.target_vocab
 
         else:
-            # Load vocabs
+            # Load or create vocabs
             source_vocab_paths = [args.source_vocab] + [None] * len(args.source_factors)
             target_vocab_path = args.target_vocab
             source_vocabs, target_vocab = vocab.load_or_create_vocabs(
@@ -827,9 +827,8 @@ def main():
                            min_num_epochs=min_num_epochs,
                            max_num_epochs=max_num_epochs,
                            decode_and_evaluate=decode_and_evaluate,
-                           decode_and_evaluate_fname_source=args.validation_source,
+                           decode_and_evaluate_fname_sources=[args.validation_source] + args.validation_source_factors,
                            decode_and_evaluate_fname_target=args.validation_target,
-                           decode_and_evaluate_fname_source_factors=args.validation_source_factors,
                            decode_and_evaluate_context=decode_and_evaluate_context,
                            use_tensorboard=args.use_tensorboard,
                            mxmonitor_pattern=args.monitor_pattern,

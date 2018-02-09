@@ -112,22 +112,20 @@ def save_source_vocabs(source_vocabs: List[Vocab], folder: str):
     :param source_vocabs: List of source vocabularies.
     :param folder: Destination folder.
     """
-    vocab_to_json(source_vocabs[0], os.path.join(folder, C.VOCAB_SRC_NAME))
-    for i, vocab in enumerate(source_vocabs[1:], 1):
-        vocab_to_json(vocab, os.path.join(folder, C.VOCAB_SRC_FACTOR_NAME % i))
+    for i, vocab in enumerate(source_vocabs):
+        vocab_to_json(vocab, os.path.join(folder, C.VOCAB_SRC_NAME % i))
 
 
 def load_source_vocabs(folder: str) -> List[Vocab]:
     """
     Loads source vocabularies from folder. The first element in the list is the primary source vocabulary.
     Other elements correspond to optional additional source factor vocabularies found in folder.
+
     :param folder: Source folder.
     :return: List of vocabularies.
     """
-    vocabs = [vocab_from_json(os.path.join(folder, C.VOCAB_SRC_NAME))]  # type: List[Vocab]
-    for fname in sorted([f for f in os.listdir(folder) if f.startswith(C.VOCAB_SRC_FACTOR_PREFIX)]):
-        vocabs.append(vocab_from_json(os.path.join(folder, fname)))
-    return vocabs
+    return [vocab_from_json(os.path.join(folder, fname)) for fname in
+            sorted([f for f in os.listdir(folder) if f.startswith(C.VOCAB_SRC_PREFIX)])]
 
 
 def load_or_create_vocab(data: str, vocab_path: Optional[str], num_words: int, word_min_count: int) -> Vocab:
@@ -167,6 +165,11 @@ def load_or_create_vocabs(source_paths: List[str],
     source_path, *source_factor_paths = source_paths
     source_vocab_path, *source_factor_vocab_paths = source_vocab_paths
 
+    logger.info("=============================")
+    logger.info("Loading/creating vocabularies")
+    logger.info("=============================")
+    logger.info("(1) Surface form vocabularies (source & target)")
+
     if shared_vocab:
         if source_vocab_path and target_vocab_path:
             vocab_source = vocab_from_json(source_vocab_path)
@@ -195,11 +198,13 @@ def load_or_create_vocabs(source_paths: List[str],
         vocab_source = load_or_create_vocab(source_path, source_vocab_path, num_words_source, word_min_count_source)
         vocab_target = load_or_create_vocab(target_path, target_vocab_path, num_words_target, word_min_count_target)
 
-    # source factor vocabs are always created
     vocab_source_factors = []  # type: List[Vocab]
-    for factor_path, factor_vocab_path in zip(source_factor_paths, source_factor_vocab_paths):
-        vocab_source_factors.append(load_or_create_vocab(factor_path, factor_vocab_path,
-                                                         num_words_source, word_min_count_target))
+    if source_factor_paths:
+        logger.info("(2) Additional source factor vocabularies")
+        # source factor vocabs are always created
+        for factor_path, factor_vocab_path in zip(source_factor_paths, source_factor_vocab_paths):
+            vocab_source_factors.append(load_or_create_vocab(factor_path, factor_vocab_path,
+                                                             num_words_source, word_min_count_target))
 
     return [vocab_source] + vocab_source_factors, vocab_target
 

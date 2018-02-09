@@ -216,9 +216,8 @@ class TrainingModel(model.SockeyeModel):
             min_num_epochs: Optional[int] = None,
             max_num_epochs: Optional[int] = None,
             decode_and_evaluate: int = 0,
-            decode_and_evaluate_fname_source: Optional[str] = None,
+            decode_and_evaluate_fname_sources: Optional[List[str]] = None,
             decode_and_evaluate_fname_target: Optional[str] = None,
-            decode_and_evaluate_fname_source_factors: Optional[List[str]] = None,
             decode_and_evaluate_context: Optional[mx.Context] = None,
             use_tensorboard: bool = False,
             mxmonitor_pattern: Optional[str] = None,
@@ -248,9 +247,8 @@ class TrainingModel(model.SockeyeModel):
         :param max_num_epochs: Optional maximum number of epochs to train.
         :param decode_and_evaluate: Monitor BLEU during training (0: off, >=0: the number of sentences to decode for BLEU
                evaluation, -1: decode the full validation set.).
-        :param decode_and_evaluate_fname_source: Filename of source data to decode and evaluate.
+        :param decode_and_evaluate_fname_sources: Filename(s) of source data to decode and evaluate.
         :param decode_and_evaluate_fname_target: Filename of target data (references) to decode and evaluate.
-        :param decode_and_evaluate_fname_source_factors: Filenames of source factor files.
         :param decode_and_evaluate_context: Optional MXNet context for decode and evaluate.
         :param use_tensorboard: If True write tensorboard compatible logs for monitoring training and
                validation metrics.
@@ -286,10 +284,9 @@ class TrainingModel(model.SockeyeModel):
         cp_decoder = None
         if decode_and_evaluate:
             cp_decoder = checkpoint_decoder.CheckpointDecoder(context=decode_and_evaluate_context,
-                                                              inputs=decode_and_evaluate_fname_source,
+                                                              inputs=decode_and_evaluate_fname_sources,
                                                               references=decode_and_evaluate_fname_target,
                                                               model=output_folder,
-                                                              input_factors=decode_and_evaluate_fname_source_factors,
                                                               sample_size=decode_and_evaluate)
 
         logger.info("Training started.")
