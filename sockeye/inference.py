@@ -412,7 +412,8 @@ def load_models(context: mx.context.Context,
         models.append(inference_model)
 
     utils.check_condition(vocab.are_identical(*target_vocabs), "Target vocabulary ids do not match")
-    for fi in range(len(source_vocabs[0])):
+    first_model_vocabs = source_vocabs[0]
+    for fi in range(len(first_model_vocabs)):
         utils.check_condition(vocab.are_identical(*[source_vocabs[i][fi] for i in range(len(source_vocabs))]),
                               "Source vocabulary ids do not match. Factor %d" % fi)
 
@@ -607,7 +608,9 @@ def make_input_from_json_string(sentence_id: int, json_string: str) -> Translato
     Returns a TranslatorInput object from a JSON object, serialized as a string.
 
     :param sentence_id: An integer id.
-    :param json_string: A JSON object serialized as a string.
+    :param json_string: A JSON object serialized as a string that must contain a key "text", mapping to the input text,
+           and optionally a key "factors" that maps to a list of strings, each of which representing a factor sequence
+           for the input text.
     :return: A TranslatorInput.
     """
     try:
