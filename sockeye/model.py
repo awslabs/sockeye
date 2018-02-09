@@ -38,8 +38,6 @@ class ModelConfig(Config):
     contain these parameters, provide a reasonable default under default_values.
 
     :param config_data: Used training data.
-    :param max_seq_len_source: Maximum source sequence length to unroll during training.
-    :param max_seq_len_target: Maximum target sequence length to unroll during training.
     :param vocab_source_size: Source vocabulary size.
     :param vocab_target_size: Target vocabulary size.
     :param config_embed_source: Embedding config for source.
@@ -53,8 +51,6 @@ class ModelConfig(Config):
 
     def __init__(self,
                  config_data: data_io.DataConfig,
-                 max_seq_len_source: int,
-                 max_seq_len_target: int,
                  vocab_source_size: int,
                  vocab_target_size: int,
                  config_embed_source: encoder.EmbeddingConfig,
@@ -67,8 +63,6 @@ class ModelConfig(Config):
                  weight_normalization: bool = False) -> None:
         super().__init__()
         self.config_data = config_data
-        self.max_seq_len_source = max_seq_len_source
-        self.max_seq_len_target = max_seq_len_target
         self.vocab_source_size = vocab_source_size
         self.vocab_target_size = vocab_target_size
         self.config_embed_source = config_embed_source

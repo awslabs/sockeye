@@ -281,9 +281,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_num_devices=batch_num_devices,
             fill_up=args.fill_up)
 
-        check_condition(data_config.num_source_factors == len(args.source_factors_num_embed) + 1,
+        check_condition(len(source_vocabs) == len(args.source_factors_num_embed) + 1,
                         "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
-                            data_config.num_source_factors, len(args.source_factors_num_embed) + 1))
+                            len(source_vocabs), len(args.source_factors_num_embed) + 1))
 
         if resume_training:
             # resuming training. Making sure the vocabs in the model and in the prepared data match up
@@ -310,10 +310,10 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             source_vocabs = vocab.load_source_vocabs(output_folder)
             target_vocab = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_TRG_NAME))
 
-            # Recover the vocabulary path from the existing config file:
-            orig_config = cast(model.ModelConfig, Config.load(os.path.join(output_folder, C.CONFIG_NAME)))
-            source_vocab_paths = orig_config.config_data.source_vocabs
-            target_vocab_path = orig_config.config_data.target_vocab
+            # Recover the vocabulary path from the data info file:
+            data_info = cast(data_io.DataInfo, Config.load(os.path.join(output_folder, C.DATA_INFO)))
+            source_vocab_paths = data_info.source_vocabs
+            target_vocab_path = data_info.target_vocab
 
         else:
             # Load or create vocabs
@@ -337,7 +337,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         sources = [args.source] + args.source_factors
         sources = [str(os.path.abspath(source)) for source in sources]
 
-        train_iter, validation_iter, config_data = data_io.get_training_data_iters(
+        train_iter, validation_iter, config_data, data_info = data_io.get_training_data_iters(
             sources=sources,
             target=os.path.abspath(args.target),
             validation_sources=validation_sources,
@@ -355,6 +355,10 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
             bucket_width=args.bucket_width)
+
+        data_info_fname = os.path.join(output_folder, C.DATA_INFO)
+        logger.info("Writing data config to '%s'", data_info_fname)
+        data_info.save(data_info_fname)
 
         return train_iter, validation_iter, config_data, source_vocabs, target_vocab
 
@@ -584,7 +588,6 @@ def create_model_config(args: argparse.Namespace,
     :param config_data: Data config.
     :return: The model configuration.
     """
-    max_seq_len_source, max_seq_len_target = args.max_seq_len
     num_embed_source, num_embed_target = args.num_embed
     embed_dropout_source, embed_dropout_target = args.embed_dropout
     source_vocab_size, *source_factor_vocab_sizes = source_vocab_sizes
@@ -604,7 +607,7 @@ def create_model_config(args: argparse.Namespace,
     config_decoder = create_decoder_config(args, encoder_num_hidden)
 
     source_factor_configs = None
-    if config_data.num_source_factors > 1:
+    if len(source_vocab_sizes) > 1:
         source_factor_configs = [encoder.FactorConfig(size, dim) for size, dim in zip(source_factor_vocab_sizes,
                                                                                       args.source_factors_num_embed)]
 
@@ -623,8 +626,6 @@ def create_model_config(args: argparse.Namespace,
                                   label_smoothing=args.label_smoothing)
 
     model_config = model.ModelConfig(config_data=config_data,
-                                     max_seq_len_source=max_seq_len_source,
-                                     max_seq_len_target=max_seq_len_target,
                                      vocab_source_size=source_vocab_size,
                                      vocab_target_size=target_vocab_size,
                                      config_embed_source=config_embed_source,
