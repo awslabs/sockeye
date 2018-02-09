@@ -635,27 +635,21 @@ def make_input_from_factored_string(sentence_id: int,
     """
     utils.check_condition(bool(delimiter) and not delimiter.isspace(),
                           "Factor delimiter can not be whitespace or empty.")
-    model_num_factors = translator.num_source_factors
-    num_additional_factors = model_num_factors - 1
 
-    if num_additional_factors == 0:
+    model_num_source_factors = translator.num_source_factors
+
+    if model_num_source_factors == 1:
         return make_input_from_plain_string(sentence_id=sentence_id, string=factored_string)
 
     tokens = []  # type: Tokens
-    factors = [[] for _ in range(num_additional_factors)]  # type: List[Tokens]
+    factors = [[] for _ in range(model_num_source_factors - 1)]  # type: List[Tokens]
     for token_id, token in enumerate(data_io.get_tokens(factored_string)):
-        token, *token_factors = token.rsplit(delimiter, maxsplit=num_additional_factors)
-        utils.check_condition(bool(token), "Empty token at sentence {}, position {}".format(sentence_id, token_id))
-
-        token_factors = list(filter(None, token_factors))
-        utils.check_condition(len(token_factors) == num_additional_factors and all(token_factors),
-                              'Expecting {} factors, but got {} at sentence {}, word "{}"'.format(model_num_factors,
-                                                                                                  1+len(token_factors),
-                                                                                                  sentence_id,
-                                                                                                  token))
-        tokens.append(token)
-        for i, factor in enumerate(token_factors):
-            factors[i].append(factor)
+        pieces = token.split(delimiter)
+        utils.check_condition(all(pieces) and len(pieces) == model_num_source_factors,
+                              "Failed to parse %s factors from token '%s'" % (model_num_source_factors, token))
+        tokens.append(pieces[0])
+        for i, factor in enumerate(factors):
+            factors[i].append(pieces[i + 1])
 
     return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
 
