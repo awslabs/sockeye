@@ -100,7 +100,7 @@ class InferenceModel(model.SockeyeModel):
         """
         Returns the number of source factors of this InferenceModel (at least 1).
         """
-        return self.config.config_embed_source.num_factors
+        return self.config.config_data.num_source_factors
 
     def initialize(self, max_input_length: int, get_max_output_length_function: Callable):
         """

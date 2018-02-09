@@ -568,10 +568,11 @@ def prepare_data(source_fnames: List[str],
 
     config_data = DataConfig(data_statistics=data_statistics,
                              max_seq_len_source=max_seq_len_source,
-                             max_seq_len_target=max_seq_len_target)
-    data_config_fname = os.path.join(output_prefix, C.DATA_CONFIG)
-    logger.info("Writing data config to '%s'", data_config_fname)
-    config_data.save(data_config_fname)
+                             max_seq_len_target=max_seq_len_target,
+                             num_source_factors=len(source_fnames))
+    config_data_fname = os.path.join(output_prefix, C.DATA_CONFIG)
+    logger.info("Writing data config to '%s'", config_data_fname)
+    config_data.save(config_data_fname)
 
     version_file = os.path.join(output_prefix, C.PREPARED_DATA_VERSION_FILE)
 
@@ -670,7 +671,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
     check_condition(os.path.exists(config_file),
                     "Could not find data config %s. Are you sure %s is a directory created with "
                     "python -m sockeye.prepare_data?" % (config_file, prepared_data_dir))
-    data_config = cast(DataConfig, DataConfig.load(config_file))
+    config_data = cast(DataConfig, DataConfig.load(config_file))
     shard_fnames = [os.path.join(prepared_data_dir,
                                  C.SHARD_NAME % shard_idx) for shard_idx in range(data_info.num_shards)]
     for shard_fname in shard_fnames:
@@ -687,17 +688,17 @@ def get_prepared_data_iters(prepared_data_dir: str,
                     "Wrong number of source vocabularies. Found %d, need %d." % (len(source_vocabs),
                                                                                  len(data_info.sources)))
 
-    buckets = data_config.data_statistics.buckets
-    max_seq_len_source = data_config.max_seq_len_source
-    max_seq_len_target = data_config.max_seq_len_target
+    buckets = config_data.data_statistics.buckets
+    max_seq_len_source = config_data.max_seq_len_source
+    max_seq_len_target = config_data.max_seq_len_target
 
     bucket_batch_sizes = define_bucket_batch_sizes(buckets,
                                                    batch_size,
                                                    batch_by_words,
                                                    batch_num_devices,
-                                                   data_config.data_statistics.average_len_target_per_bucket)
+                                                   config_data.data_statistics.average_len_target_per_bucket)
 
-    data_config.data_statistics.log(bucket_batch_sizes)
+    config_data.data_statistics.log(bucket_batch_sizes)
 
     train_iter = ShardedParallelSampleIter(shard_fnames,
                                            buckets,
@@ -722,7 +723,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                                batch_size=batch_size,
                                                fill_up=fill_up)
 
-    return train_iter, validation_iter, data_config, source_vocabs, target_vocab
+    return train_iter, validation_iter, config_data, source_vocabs, target_vocab
 
 
 def get_training_data_iters(sources: List[str],
@@ -809,7 +810,8 @@ def get_training_data_iters(sources: List[str],
 
     config_data = DataConfig(data_statistics=data_statistics,
                              max_seq_len_source=max_seq_len_source,
-                             max_seq_len_target=max_seq_len_target)
+                             max_seq_len_target=max_seq_len_target,
+                             num_source_factors=len(sources))
 
     train_iter = ParallelSampleIter(data=training_data,
                                     buckets=buckets,
@@ -910,7 +912,7 @@ def describe_data_and_buckets(data_statistics: DataStatistics, bucket_batch_size
 
 class DataInfo(config.Config):
     """
-    Stores training data information that is not relevant for inference
+    Stores training data information that is not relevant for inference.
     """
 
     def __init__(self,
@@ -922,7 +924,6 @@ class DataInfo(config.Config):
                  num_shards: int) -> None:
         super().__init__()
         self.sources = sources
-        self.num_source_factors = len(sources)
         self.target = target
         self.source_vocabs = source_vocabs
         self.target_vocab = target_vocab
@@ -938,11 +939,13 @@ class DataConfig(config.Config):
     def __init__(self,
                  data_statistics: DataStatistics,
                  max_seq_len_source: int,
-                 max_seq_len_target: int) -> None:
+                 max_seq_len_target: int,
+                 num_source_factors: int) -> None:
         super().__init__()
         self.data_statistics = data_statistics
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
+        self.num_source_factors = num_source_factors
 
 
 def read_content(path: str, limit: Optional[int] = None) -> Iterator[List[str]]:
