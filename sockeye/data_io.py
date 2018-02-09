@@ -563,7 +563,7 @@ def prepare_data(source_fnames: List[str],
                          shared_vocab=shared_vocab,
                          num_shards=num_shards)
     data_info_fname = os.path.join(output_prefix, C.DATA_INFO)
-    logger.info("Writing data config to '%s'", data_info_fname)
+    logger.info("Writing data info to '%s'", data_info_fname)
     data_info.save(data_info_fname)
 
     config_data = DataConfig(data_statistics=data_statistics,
