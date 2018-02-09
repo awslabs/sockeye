@@ -556,13 +556,17 @@ def prepare_data(source_fnames: List[str],
                 os.remove(f)
             os.remove(shard_target)
 
-    config_data = DataConfig(sources=[os.path.abspath(fname) for fname in source_fnames],
-                             target=os.path.abspath(target_fname),
-                             source_vocabs=source_vocab_paths,
-                             target_vocab=target_vocab_path,
-                             shared_vocab=shared_vocab,
-                             num_shards=num_shards,
-                             data_statistics=data_statistics,
+    data_info = DataInfo(sources=[os.path.abspath(fname) for fname in source_fnames],
+                         target=os.path.abspath(target_fname),
+                         source_vocabs=source_vocab_paths,
+                         target_vocab=target_vocab_path,
+                         shared_vocab=shared_vocab,
+                         num_shards=num_shards)
+    data_info_fname = os.path.join(output_prefix, C.DATA_INFO)
+    logger.info("Writing data config to '%s'", data_info_fname)
+    data_info.save(data_info_fname)
+
+    config_data = DataConfig(data_statistics=data_statistics,
                              max_seq_len_source=max_seq_len_source,
                              max_seq_len_target=max_seq_len_target)
     data_config_fname = os.path.join(output_prefix, C.DATA_CONFIG)
@@ -657,26 +661,31 @@ def get_prepared_data_iters(prepared_data_dir: str,
         check_condition(version == C.PREPARED_DATA_VERSION,
                         "The dataset %s was written in an old and incompatible format. Please rerun data "
                         "preparation with a current version of Sockeye." % prepared_data_dir)
+    info_file = os.path.join(prepared_data_dir, C.DATA_INFO)
+    check_condition(os.path.exists(info_file),
+                    "Could not find data info %s. Are you sure %s is a directory created with "
+                    "python -m sockeye.prepare_data?" % (info_file, prepared_data_dir))
+    data_info = cast(DataInfo, DataInfo.load(info_file))
     config_file = os.path.join(prepared_data_dir, C.DATA_CONFIG)
     check_condition(os.path.exists(config_file),
                     "Could not find data config %s. Are you sure %s is a directory created with "
                     "python -m sockeye.prepare_data?" % (config_file, prepared_data_dir))
     data_config = cast(DataConfig, DataConfig.load(config_file))
     shard_fnames = [os.path.join(prepared_data_dir,
-                                 C.SHARD_NAME % shard_idx) for shard_idx in range(data_config.num_shards)]
+                                 C.SHARD_NAME % shard_idx) for shard_idx in range(data_info.num_shards)]
     for shard_fname in shard_fnames:
         check_condition(os.path.exists(shard_fname), "Shard %s does not exist." % shard_fname)
 
-    check_condition(shared_vocab == data_config.shared_vocab, "Shared config needed (e.g. for weight tying), but "
-                                                              "data was prepared without a shared vocab. Use %s when "
-                                                              "preparing the data." % C.VOCAB_ARG_SHARED_VOCAB)
+    check_condition(shared_vocab == data_info.shared_vocab, "Shared config needed (e.g. for weight tying), but "
+                                                            "data was prepared without a shared vocab. Use %s when "
+                                                            "preparing the data." % C.VOCAB_ARG_SHARED_VOCAB)
 
     source_vocabs = vocab.load_source_vocabs(prepared_data_dir)
     target_vocab = vocab.vocab_from_json(os.path.join(prepared_data_dir, C.VOCAB_TRG_NAME))
 
-    check_condition(len(source_vocabs) == len(data_config.sources),
+    check_condition(len(source_vocabs) == len(data_info.sources),
                     "Wrong number of source vocabularies. Found %d, need %d." % (len(source_vocabs),
-                                                                                 len(data_config.sources)))
+                                                                                 len(data_info.sources)))
 
     buckets = data_config.data_statistics.buckets
     max_seq_len_source = data_config.max_seq_len_source
@@ -695,7 +704,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                            batch_size,
                                            bucket_batch_sizes,
                                            fill_up,
-                                           num_factors=len(data_config.sources))
+                                           num_factors=len(data_info.sources))
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=target_vocab[C.EOS_SYMBOL],
@@ -734,7 +743,7 @@ def get_training_data_iters(sources: List[str],
                             bucketing: bool,
                             bucket_width: int) -> Tuple['BaseParallelSampleIter',
                                                         'BaseParallelSampleIter',
-                                                        'DataConfig']:
+                                                        'DataConfig', 'DataInfo']:
     """
     Returns data iterators for training and validation data.
 
@@ -791,21 +800,22 @@ def get_training_data_iters(sources: List[str],
     training_data = data_loader.load(sources_sentences, target_sentences,
                                      data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes, fill_up)
 
-    config_data = DataConfig(sources=sources,
-                             target=target,
-                             source_vocabs=source_vocab_paths,
-                             target_vocab=target_vocab_path,
-                             shared_vocab=shared_vocab,
-                             num_shards=1,
-                             data_statistics=data_statistics,
+    data_info = DataInfo(sources=sources,
+                         target=target,
+                         source_vocabs=source_vocab_paths,
+                         target_vocab=target_vocab_path,
+                         shared_vocab=shared_vocab,
+                         num_shards=1)
+
+    config_data = DataConfig(data_statistics=data_statistics,
                              max_seq_len_source=max_seq_len_source,
                              max_seq_len_target=max_seq_len_target)
 
-    train_iter = ParallelSampleIter(training_data,
-                                    buckets,
-                                    batch_size,
-                                    bucket_batch_sizes,
-                                    num_factors=len(config_data.sources))
+    train_iter = ParallelSampleIter(data=training_data,
+                                    buckets=buckets,
+                                    batch_size=batch_size,
+                                    bucket_batch_sizes=bucket_batch_sizes,
+                                    num_factors=len(sources))
 
     validation_iter = get_validation_data_iter(data_loader=data_loader,
                                                validation_sources=validation_sources,
@@ -819,7 +829,7 @@ def get_training_data_iters(sources: List[str],
                                                batch_size=batch_size,
                                                fill_up=fill_up)
 
-    return train_iter, validation_iter, config_data
+    return train_iter, validation_iter, config_data, data_info
 
 
 class LengthStatistics(config.Config):
@@ -898,9 +908,9 @@ def describe_data_and_buckets(data_statistics: DataStatistics, bucket_batch_size
                         bucket_batch_size.average_words_per_batch)
 
 
-class DataConfig(config.Config):
+class DataInfo(config.Config):
     """
-    Stores data paths from training.
+    Stores training data information that is not relevant for inference
     """
 
     def __init__(self,
@@ -909,21 +919,30 @@ class DataConfig(config.Config):
                  source_vocabs: List[Optional[str]],
                  target_vocab: Optional[str],
                  shared_vocab: bool,
-                 num_shards: int,
-                 data_statistics: DataStatistics,
-                 max_seq_len_source: int,
-                 max_seq_len_target: int) -> None:
+                 num_shards: int) -> None:
         super().__init__()
         self.sources = sources
+        self.num_source_factors = len(sources)
         self.target = target
         self.source_vocabs = source_vocabs
         self.target_vocab = target_vocab
         self.shared_vocab = shared_vocab
         self.num_shards = num_shards
+
+
+class DataConfig(config.Config):
+    """
+    Stores data statistics relevant for inference.
+    """
+
+    def __init__(self,
+                 data_statistics: DataStatistics,
+                 max_seq_len_source: int,
+                 max_seq_len_target: int) -> None:
+        super().__init__()
         self.data_statistics = data_statistics
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
-        self.num_source_factors = len(sources)
 
 
 def read_content(path: str, limit: Optional[int] = None) -> Iterator[List[str]]:
