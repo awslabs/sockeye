@@ -29,6 +29,7 @@ from . import lexicon
 from . import model
 from . import utils
 from . import vocab
+from .log import is_python34
 
 logger = logging.getLogger(__name__)
 
@@ -579,6 +580,17 @@ class TranslatorInput:
                                   chunk_id=chunk_id)
 
 
+class BadTranslatorInput(TranslatorInput):
+
+    def __init__(self, sentence_id, tokens):
+        super().__init__(sentence_id=sentence_id, tokens=tokens, chunk_id=-1, factors=None)
+
+
+def _bad_input(sentence_id: int):
+    logger.warning("Bad input (%d) will return empty output.", sentence_id)
+    return BadTranslatorInput(sentence_id=sentence_id, tokens=[])
+
+
 def make_input_from_plain_string(sentence_id: int, string: str) -> TranslatorInput:
     """
     Returns a TranslatorInput object from a plain string.
@@ -598,19 +610,20 @@ def make_input_from_json_string(sentence_id: int, json_string: str) -> Translato
     :param json_string: A JSON object serialized as a string.
     :return: A TranslatorInput.
     """
-    jobj = json.loads(json_string, encoding=C.JSON_ENCODING)
-    tokens = jobj.get(C.JSON_TEXT_KEY)
-    if tokens is None:
-        raise ValueError("Missing 'text' field in JSON string: %s", json_string)
+    try:
+        jobj = json.loads(json_string, encoding=C.JSON_ENCODING)
+        tokens = jobj[C.JSON_TEXT_KEY]
+        tokens = list(data_io.get_tokens(tokens))
+        factors = jobj.get(C.JSON_FACTORS_KEY)
+        if isinstance(factors, list):
+            factors = [list(data_io.get_tokens(factor)) for factor in factors]
+        else:
+            factors = None
+        return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
 
-    tokens = list(data_io.get_tokens(tokens))
-    factors = jobj.get(C.JSON_FACTORS_KEY)
-    if isinstance(factors, list):
-        factors = [list(data_io.get_tokens(factor)) for factor in factors]
-    else:
-        factors = None
-
-    return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
+    except Exception as e:
+        logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)
+        return _bad_input(sentence_id)
 
 
 def make_input_from_factored_string(sentence_id: int,
@@ -639,8 +652,13 @@ def make_input_from_factored_string(sentence_id: int,
     factors = [[] for _ in range(model_num_source_factors - 1)]  # type: List[Tokens]
     for token_id, token in enumerate(data_io.get_tokens(factored_string)):
         pieces = token.split(delimiter)
-        utils.check_condition(all(pieces) and len(pieces) == model_num_source_factors,
-                              "Failed to parse %s factors from token '%s'" % (model_num_source_factors, token))
+
+        if not all(pieces) or len(pieces) != model_num_source_factors:
+            logger.error("Failed to parse %s factors at position %d ('%s') in '%s'" % (model_num_source_factors,
+                                                                                       token_id, token,
+                                                                                       factored_string.strip()))
+            return _bad_input(sentence_id)
+
         tokens.append(pieces[0])
         for i, factor in enumerate(factors):
             factors[i].append(pieces[i + 1])
@@ -652,15 +670,19 @@ def make_input_from_multiple_strings(sentence_id: int, strings: List[str]) -> Tr
     """
     Returns a TranslatorInput object from multiple strings, where the first element corresponds to the surface tokens
     and the remaining elements to additional factors. All strings must parse into token sequences of the same length.
+
     :param sentence_id: An integer id.
     :param strings: A list of strings representing a factored input sequence.
     :return: A TranslatorInput.
     """
-    utils.check_condition(bool(strings), "List of strings cannot be empty.")
+    if not bool(strings):
+        return TranslatorInput(sentence_id=sentence_id, tokens=[], factors=None)
+
     tokens = list(data_io.get_tokens(strings[0]))
     factors = [list(data_io.get_tokens(factor)) for factor in strings[1:]]
-    utils.check_condition(all(len(factor) == len(tokens) for factor in factors),
-                          "Length of string sequences do not match")
+    if not all(len(factor) == len(tokens) for factor in factors):
+        logger.error("Length of string sequences do not match: '%s'", strings)
+        return _bad_input(sentence_id)
     return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
 
 
@@ -687,6 +709,8 @@ Translation = NamedTuple('Translation', [
     ('attention_matrix', np.ndarray),
     ('score', float)
 ])
+
+EMPTY_TRANSLATION = Translation(target_ids=[], attention_matrix=np.asarray([[0]]), score=-np.inf)
 
 TranslatedChunk = NamedTuple('TranslatedChunk', [
     ('id', int),
@@ -768,7 +792,6 @@ def _concat_translations(translations: List[Translation], start_id: int, stop_id
     target_ids = [start_id]
     attention_matrices = []
     for idx, translation in enumerate(translations):
-        assert translation.target_ids[0] == start_id
         if idx == len(translations) - 1:
             target_ids.extend(translation.target_ids[1:])
             attention_matrices.append(translation.attention_matrix[1:, :])
@@ -826,11 +849,12 @@ class Translator:
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None) -> None:
         self.context = context
         self.length_penalty = length_penalty
-        self.vocab_source, *self.source_factor_vocabs = source_vocabs
+        self.source_vocabs = source_vocabs
         self.vocab_target = target_vocab
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
         self.restrict_lexicon = restrict_lexicon
         self.start_id = self.vocab_target[C.BOS_SYMBOL]
+        utils.check_condition(C.PAD_ID == 0, "pad id should be 0")
         self.stop_ids = {self.vocab_target[C.EOS_SYMBOL], C.PAD_ID}  # type: Set[int]
         self.models = models
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
@@ -893,20 +917,26 @@ class Translator:
         # split into chunks
         input_chunks = []  # type: List[TranslatorInput]
         for input_idx, trans_input in enumerate(trans_inputs, 1):
-            if len(trans_input.tokens) == 0:
-                empty_translation = Translation(target_ids=[],
-                                                attention_matrix=np.asarray([[0]]),
-                                                score=-np.inf)
-                translated_chunks.append(TranslatedChunk(id=input_idx,
-                                                         chunk_id=0,
-                                                         translation=empty_translation))
+
+            # bad input
+            if isinstance(trans_input, BadTranslatorInput):
+                translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=EMPTY_TRANSLATION))
+
+            # empty input
+            elif len(trans_input.tokens) == 0:
+                translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=EMPTY_TRANSLATION))
+
+            # oversized input
             elif len(trans_input.tokens) > self.max_input_length:
                 logger.debug(
                     "Input %d has length (%d) that exceeds max input length (%d). Splitting into chunks of size %d.",
                     trans_input.sentence_id, len(trans_input.tokens), self.buckets_source[-1], self.max_input_length)
                 input_chunks.extend(list(trans_input.chunks(self.max_input_length)))
+
+            # regular input
             else:
                 input_chunks.append(trans_input)
+
         # Sort longest to shortest (to rather fill batches of shorter than longer sequences)
         input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.tokens), reverse=True)
 
@@ -952,20 +982,19 @@ class Translator:
         """
         bucket_key = data_io.get_bucket(max(len(inp.tokens) for inp in trans_inputs), self.buckets_source)
 
-        utils.check_condition(C.PAD_ID == 0, "pad id should be 0")
         source = mx.nd.zeros((len(trans_inputs), bucket_key, self.num_source_factors), ctx=self.context)
 
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)
-            source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.vocab_source)
+            source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
 
-            utils.check_condition(self.num_source_factors == trans_input.num_factors,
-                                  "Unexpected number of factors for input %s. Expected %d" % (trans_input,
-                                                                                              self.num_source_factors))
-            for i, factor in enumerate(trans_input.factors):
-                utils.check_condition(len(factor) == num_tokens,
-                                      "Factor sequence has different length than tokens: %s" % trans_input)
-                source[j, :num_tokens, i + 1] = data_io.tokens2ids(factor, self.source_factor_vocabs[i])
+            factors = trans_input.factors if trans_input.factors is not None else []
+            num_factors = 1 + len(factors)
+            if num_factors != self.num_source_factors:
+                logger.warning("Input has not enough factors, %d, but expected %d",num_factors, self.num_source_factors)
+            for i, factor in enumerate(factors[:self.num_source_factors - 1], start=1):
+                # fill in as many factors as there are tokens
+                source[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
 
         return source, bucket_key
 
