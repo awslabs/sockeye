@@ -654,7 +654,7 @@ def make_input_from_factored_string(sentence_id: int,
         pieces = token.split(delimiter)
 
         if not all(pieces) or len(pieces) != model_num_source_factors:
-            logger.error("Failed to parse %s factors at position %d ('%s') in '%s'" % (model_num_source_factors,
+            logger.error("Failed to parse %d factors at position %d ('%s') in '%s'" % (model_num_source_factors,
                                                                                        token_id, token,
                                                                                        factored_string.strip()))
             return _bad_input(sentence_id)
@@ -994,7 +994,8 @@ class Translator:
             factors = trans_input.factors if trans_input.factors is not None else []
             num_factors = 1 + len(factors)
             if num_factors != self.num_source_factors:
-                logger.warning("Input has not enough factors, %d, but expected %d",num_factors, self.num_source_factors)
+                logger.warning("Input has not enough factors, %d, but expected %d", num_factors,
+                               self.num_source_factors)
             for i, factor in enumerate(factors[:self.num_source_factors - 1], start=1):
                 # fill in as many factors as there are tokens
                 source[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
