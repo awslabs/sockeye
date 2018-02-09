@@ -190,34 +190,33 @@ def test_make_input_from_factored_string(sentence, num_expected_factors, delimit
         assert len(inp.factors) == num_expected_factors - 1
 
 
-@pytest.mark.parametrize("sentence, num_expected_factors, delimiter, expected_fail_word",
+@pytest.mark.parametrize("sentence, num_expected_factors, delimiter",
                          [
-                             ("this is a test", 2, "|", "this"),  # expecting additional factor
-                             ("this|X is a test", 2, "|", "is"),  # expecting additional factor
-                             ("this|X is|X a|X test", 2, "|", "test"),  # fail on last token without factor
-                             ("this| is|X a|X test|", 2, "|", "this|"),  # first token with delimiter but no factor
-                             ("this|X is|X a|X test|", 2, "|", "test|"),  # last token with delimiter but no factor
-                             ("w1||w2||f22", 2, "|", "w1||w2||f22"),
-                             ("this", 2, "|", "this"),  # single token without factor
-                             ("this|", 2, "|", "this|"),  # single token with delimiter but no factor
-                             ("this||", 3, "|", "this||"),  # double delimiter
-                             ("this|| another", 2, "|", "this||"),  # double delimiter followed by token
-                             ("this|||", 2, "|", "this|||"),  # triple delimiter
-                             ("|this", 2, "|", "|this"),  # empty token with 1 additional factor
-                             ("|this|that", 3, "|", "|this|that"),  # empty token with 2 additional factors
-                             ("|this|that|", 4, "|", "|this|that|")  # empty token with 3 additional factors
+                             ("this is a test", 2, "|"),  # expecting additional factor
+                             ("this|X is a test", 2, "|"),  # expecting additional factor
+                             ("this|X is|X a|X test", 2, "|"),  # fail on last token without factor
+                             ("this| is|X a|X test|", 2, "|"),  # first token with delimiter but no factor
+                             ("this|X is|X a|X test|", 2, "|"),  # last token with delimiter but no factor
+                             ("w1||w2||f22", 2, "|"),
+                             ("this", 2, "|"),  # single token without factor
+                             ("this|", 2, "|"),  # single token with delimiter but no factor
+                             ("this||", 3, "|"),  # double delimiter
+                             ("this|| another", 2, "|"),  # double delimiter followed by token
+                             ("this|||", 2, "|"),  # triple delimiter
+                             ("|this", 2, "|"),  # empty token with 1 additional factor
+                             ("|this|that", 3, "|"),  # empty token with 2 additional factors
+                             ("|this|that|", 4, "|")  # empty token with 3 additional factors
                          ])
-def test_factor_parsing(sentence, num_expected_factors, delimiter, expected_fail_word):
+def test_factor_parsing(sentence, num_expected_factors, delimiter):
     """
     Test to ensure we fail on parses with invalid factors.
     """
     sentence_id = 1
     translator = mock_translator(num_expected_factors)
-    with pytest.raises(SockeyeError) as e:
-        sockeye.inference.make_input_from_factored_string(sentence_id=sentence_id,
-                                                          factored_string=sentence,
-                                                          translator=translator, delimiter=delimiter)
-    assert str(e.value) == "Failed to parse %d factors from token '%s'" % (num_expected_factors, expected_fail_word)
+    inp = sockeye.inference.make_input_from_factored_string(sentence_id=sentence_id,
+                                                            factored_string=sentence,
+                                                            translator=translator, delimiter=delimiter)
+    assert isinstance(inp, sockeye.inference.BadTranslatorInput)
 
 
 @pytest.mark.parametrize("delimiter", ["\t", "\t \t", "\t\t", "\n", "\r", "\r\n", "\u0020",
@@ -259,9 +258,8 @@ def test_make_input_from_valid_json_string(text, factors):
 @pytest.mark.parametrize("text, text_key, factors, factors_key", [("a", "blub", None, "")])
 def test_failed_make_input_from_valid_json_string(text, text_key, factors, factors_key):
     sentence_id = 1
-    with pytest.raises(ValueError):
-        sockeye.inference.make_input_from_json_string(sentence_id, json.dumps({text_key: text,
-                                                                               factors_key: factors}))
+    inp = sockeye.inference.make_input_from_json_string(sentence_id, json.dumps({text_key: text, factors_key: factors}))
+    assert isinstance(inp, sockeye.inference.BadTranslatorInput)
 
 
 @pytest.mark.parametrize("strings",
@@ -277,10 +275,3 @@ def test_make_input_from_multiple_strings(strings):
     assert len(inp) == len(expected_tokens)
     assert inp.tokens == expected_tokens
     assert inp.factors == expected_factors
-
-
-@pytest.mark.parametrize("strings",
-                         [[], ["a b c", "f1 f2"], ["a b c", "f1 f2 f3", "f1"]])
-def test_failed_make_input_from_multiple_strings(strings):
-    with pytest.raises(SockeyeError):
-        sockeye.inference.make_input_from_multiple_strings(1, strings)
