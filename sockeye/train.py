@@ -310,10 +310,11 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             source_vocabs = vocab.load_source_vocabs(output_folder)
             target_vocab = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_TRG_NAME))
 
-            # Recover the vocabulary path from the existing config file:
+            # Recover the vocabulary path from the data info file:
+            data_info = cast(data_io.DataInfo, Config.load(os.path.join(output_folder, C.DATA_INFO)))
             orig_config = cast(model.ModelConfig, Config.load(os.path.join(output_folder, C.CONFIG_NAME)))
-            source_vocab_paths = orig_config.config_data.source_vocabs
-            target_vocab_path = orig_config.config_data.target_vocab
+            source_vocab_paths = data_info.source_vocabs
+            target_vocab_path = data_info.target_vocab
 
         else:
             # Load or create vocabs
