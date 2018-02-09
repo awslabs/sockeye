@@ -586,8 +586,8 @@ class BadTranslatorInput(TranslatorInput):
         super().__init__(sentence_id=sentence_id, tokens=tokens, chunk_id=-1, factors=None)
 
 
-def _bad_input(sentence_id: int) -> BadTranslatorInput:
-    logger.warning("Bad input (%d) will return empty output.", sentence_id)
+def _bad_input(sentence_id: int, reason: str = '') -> BadTranslatorInput:
+    logger.warning("Bad input (%d): '%s'. Will return empty output.", sentence_id, reason.strip())
     return BadTranslatorInput(sentence_id=sentence_id, tokens=[])
 
 
@@ -623,7 +623,7 @@ def make_input_from_json_string(sentence_id: int, json_string: str) -> Translato
 
     except Exception as e:
         logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
-        return _bad_input(sentence_id)
+        return _bad_input(sentence_id, reason=json_string)
 
 
 def make_input_from_factored_string(sentence_id: int,
@@ -657,7 +657,7 @@ def make_input_from_factored_string(sentence_id: int,
             logger.error("Failed to parse %d factors at position %d ('%s') in '%s'" % (model_num_source_factors,
                                                                                        token_id, token,
                                                                                        factored_string.strip()))
-            return _bad_input(sentence_id)
+            return _bad_input(sentence_id, reason=factored_string)
 
         tokens.append(pieces[0])
         for i, factor in enumerate(factors):
@@ -682,7 +682,7 @@ def make_input_from_multiple_strings(sentence_id: int, strings: List[str]) -> Tr
     factors = [list(data_io.get_tokens(factor)) for factor in strings[1:]]
     if not all(len(factor) == len(tokens) for factor in factors):
         logger.error("Length of string sequences do not match: '%s'", strings)
-        return _bad_input(sentence_id)
+        return _bad_input(sentence_id, reason=str(strings))
     return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
 
 
@@ -994,7 +994,7 @@ class Translator:
             factors = trans_input.factors if trans_input.factors is not None else []
             num_factors = 1 + len(factors)
             if num_factors != self.num_source_factors:
-                logger.warning("Input has not enough factors, %d, but expected %d", num_factors,
+                logger.warning("Input %d factors, but model(s) expect %d", num_factors,
                                self.num_source_factors)
             for i, factor in enumerate(factors[:self.num_source_factors - 1], start=1):
                 # fill in as many factors as there are tokens
