@@ -166,7 +166,7 @@ class TrainingModel(model.SockeyeModel):
                                           compression_params=self.gradient_compression_params)
         else:
             logger.info("No bucketing. Unrolled to (%d,%d)",
-                        self.config.max_seq_len_source, self.config.max_seq_len_target)
+                        self.config.config_data.max_seq_len_source, self.config.config_data.max_seq_len_target)
             symbol, _, __ = sym_gen(train_iter.buckets[0])
             return mx.mod.Module(symbol=symbol,
                                  data_names=data_names,

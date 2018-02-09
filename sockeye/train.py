@@ -584,7 +584,6 @@ def create_model_config(args: argparse.Namespace,
     :param config_data: Data config.
     :return: The model configuration.
     """
-    max_seq_len_source, max_seq_len_target = args.max_seq_len
     num_embed_source, num_embed_target = args.num_embed
     embed_dropout_source, embed_dropout_target = args.embed_dropout
     source_vocab_size, *source_factor_vocab_sizes = source_vocab_sizes
@@ -623,8 +622,6 @@ def create_model_config(args: argparse.Namespace,
                                   label_smoothing=args.label_smoothing)
 
     model_config = model.ModelConfig(config_data=config_data,
-                                     max_seq_len_source=max_seq_len_source,
-                                     max_seq_len_target=max_seq_len_target,
                                      vocab_source_size=source_vocab_size,
                                      vocab_target_size=target_vocab_size,
                                      config_embed_source=config_embed_source,

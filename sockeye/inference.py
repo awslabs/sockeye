@@ -328,18 +328,12 @@ class InferenceModel(model.SockeyeModel):
     @property
     def training_max_seq_len_source(self) -> int:
         """ The maximum sequence length on the source side during training. """
-        if self.config.config_data.data_statistics.max_observed_len_source is not None:
-            return self.config.config_data.data_statistics.max_observed_len_source
-        else:
-            return self.config.max_seq_len_source
+        return self.config.config_data.data_statistics.max_observed_len_source
 
     @property
     def training_max_seq_len_target(self) -> int:
         """ The maximum sequence length on the target side during training. """
-        if self.config.config_data.data_statistics.max_observed_len_target is not None:
-            return self.config.config_data.data_statistics.max_observed_len_target
-        else:
-            return self.config.max_seq_len_target
+        return self.config.config_data.data_statistics.max_observed_len_target
 
     @property
     def max_supported_seq_len_source(self) -> Optional[int]:
