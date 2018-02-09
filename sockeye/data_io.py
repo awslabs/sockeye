@@ -181,7 +181,7 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
     return bucket_batch_sizes
 
 
-def calculate_length_statistics(sources_sentences: List[Iterable[List[Any]]],
+def calculate_length_statistics(sources_sentences: Sequence[Iterable[List[Any]]],
                                 target_sentences: Iterable[List[Any]],
                                 max_seq_len_source: int,
                                 max_seq_len_target: int) -> 'LengthStatistics':
@@ -388,9 +388,10 @@ def shard_data(source_fnames: List[str],
 
     per_shard_stats = [shard_stat_accumulator.statistics for shard_stat_accumulator in per_shard_stat_accumulators]
 
-    sources_shard_fnames = zip(*sources_shard_fnames)  # type: List[List[str]]
+    sources_shard_fnames_by_shards = zip(*sources_shard_fnames)  # type: List[List[str]]
 
-    return list(zip(sources_shard_fnames, target_shard_fnames, per_shard_stats)), data_stats_accumulator.statistics
+    return list(
+        zip(sources_shard_fnames_by_shards, target_shard_fnames, per_shard_stats)), data_stats_accumulator.statistics
 
 
 class RawParallelDatasetLoader:
@@ -574,7 +575,7 @@ def prepare_data(source_fnames: List[str],
         version_out.write(str(C.PREPARED_DATA_VERSION))
 
 
-def get_data_statistics(sources_sentences: List[Iterable[List[int]]],
+def get_data_statistics(sources_sentences: Sequence[Iterable[List[int]]],
                         target_sentences: Iterable[List[int]],
                         buckets: List[Tuple[int, int]],
                         length_ratio_mean: float,
