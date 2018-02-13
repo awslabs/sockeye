@@ -106,7 +106,6 @@ class SockeyeModel:
         self.params = None  # type: Optional[Dict]
         self.aux_params = None  # type: Optional[Dict]
 
-
     def save_config(self, folder: str):
         """
         Saves model configuration to <folder>/config

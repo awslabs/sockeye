@@ -77,8 +77,6 @@ class TrainingModel(model.SockeyeModel):
     :param train_iter: The iterator over the training data.
     :param bucketing: If True bucketing will be used, if False the computation graph will always be
             unrolled to the full length.
-    :param lr_scheduler: The scheduler that lowers the learning rate during training.
-    :param gradient_compression_params: Gradient compression parameters.
     """
 
     def __init__(self,
@@ -86,16 +84,14 @@ class TrainingModel(model.SockeyeModel):
                  context: List[mx.context.Context],
                  train_iter: data_io.BaseParallelSampleIter,
                  bucketing: bool,
-                 lr_scheduler,
                  gradient_compression_params: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
         self.context = context
-        self.lr_scheduler = lr_scheduler
         self.bucketing = bucketing
         self.gradient_compression_params = gradient_compression_params
+
         self._build_model_components()
         self.module = self._build_module(train_iter)
-        self.training_monitor = None  # type: Optional[callback.TrainingMonitor]
 
     def _build_module(self, train_iter: data_io.BaseParallelSampleIter):
         """
@@ -174,6 +170,25 @@ class TrainingModel(model.SockeyeModel):
                                  logger=logger,
                                  context=self.context,
                                  compression_params=self.gradient_compression_params)
+
+    def _get_curr_module(self):
+        # As the BucketingModule does not expose all methods of the underlying Module we need to directly access
+        # the currently active module, when we use bucketing.
+        return self.module._curr_module if self.bucketing else self.module
+
+
+class Trainer:
+    """
+
+    :param model: Training Model.
+    :param lr_scheduler: The scheduler that lowers the learning rate during training.
+        """
+
+    def __init__(self,
+                 model: TrainingModel,
+                 lr_scheduler) -> None:
+        self.model = model
+        self.lr_scheduler = lr_scheduler
 
     @staticmethod
     def create_eval_metric(metric_name: AnyStr) -> mx.metric.EvalMetric:
