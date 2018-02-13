@@ -50,7 +50,7 @@ def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> flo
     :return: chrF score as float between 0 and 1.
     """
     return sacrebleu.corpus_chrf(hypotheses, references, order=sacrebleu.CHRF_ORDER, beta=sacrebleu.CHRF_BETA,
-                                 remove_whitespace=sacrebleu.CHRF_REMOVE_WS)
+                                 remove_whitespace=True)
 
 
 def main():
