@@ -30,6 +30,8 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
      and `--input-factors` a list of files containing token-parallel factors.
    At test time, an exception is raised if the number of expected factors does not
    match the factors passed along with the input.
+   
+ - Removed bias parameters from multi-head attention layers of the transformer.
 
 ## [1.16.6]
 ### Changed
