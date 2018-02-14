@@ -956,7 +956,10 @@ def add_inference_args(params):
                                action='store_true',
                                default=False,
                                help="If given, the CLI expects string-serialized json objects as input."
-                                    "Requires at least the key-value pair: %s: '<text>'" % C.JSON_TEXT_KEY)
+                                    "Requires at least the input text field, for example: "
+                                    "{'text': 'some input string'} "
+                                    "Optionally, a list of factors can be provided: "
+                                    "{'text': 'some input string', 'factors': ['C C C', 'X X X']}.")
 
     decode_params.add_argument(C.INFERENCE_ARG_OUTPUT_LONG, C.INFERENCE_ARG_OUTPUT_SHORT,
                                default=None,

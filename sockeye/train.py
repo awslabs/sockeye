@@ -90,8 +90,8 @@ def check_arg_compatibility(args: argparse.Namespace):
             adjusted_transformer_encoder_model_size = args.num_embed[0] + total_source_factor_size
             check_condition(adjusted_transformer_encoder_model_size % 2 == 0 and
                             adjusted_transformer_encoder_model_size % args.transformer_attention_heads == 0,
-                            "Sum of source factor sizes (%d) has to be a multiple of attention heads (%d)" % (
-                                total_source_factor_size, args.transformer_attention_heads))
+                            "Sum of source factor sizes (%d) has to be even and a multiple of attention heads (%d)" % (
+                                adjusted_transformer_encoder_model_size, args.transformer_attention_heads))
 
     if args.decoder == C.TRANSFORMER_TYPE:
         check_condition(args.transformer_model_size == args.num_embed[1],

@@ -620,6 +620,10 @@ def make_input_from_json_string(sentence_id: int, json_string: str) -> Translato
         factors = jobj.get(C.JSON_FACTORS_KEY)
         if isinstance(factors, list):
             factors = [list(data_io.get_tokens(factor)) for factor in factors]
+            lengths = [len(f) for f in factors]
+            if not all(l == len(tokens) for l in lengths):
+                logger.error("Factors have different length than input text: %d vs. %s", len(tokens), str(lengths))
+                return _bad_input(sentence_id, reason=json_string)
         else:
             factors = None
         return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
@@ -798,6 +802,7 @@ def _concat_translations(translations: List[Translation], start_id: int, stop_id
     target_ids = [start_id]
     attention_matrices = []
     for idx, translation in enumerate(translations):
+        assert translation.target_ids[0] == start_id
         if idx == len(translations) - 1:
             target_ids.extend(translation.target_ids[1:])
             attention_matrices.append(translation.attention_matrix[1:, :])

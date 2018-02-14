@@ -196,7 +196,7 @@ def calculate_length_statistics(sources_sentences: Sequence[Iterable[List[Any]]]
     """
     mean_and_variance = OnlineMeanAndVariance()
 
-    for target, (sources) in zip(target_sentences, zip(*sources_sentences)):
+    for target, sources in zip(target_sentences, zip(*sources_sentences)):
         check_condition(are_token_parallel(sources),
                         "Source sequences are not token-parallel: %s" % (str(sources)))
 
@@ -245,7 +245,7 @@ def are_token_parallel(sequences: List[Sized]) -> bool:
     """
     Returns True if all sequences in the list have the same length.
     """
-    if not sequences:
+    if not sequences or len(sequences) == 1:
         return True
     return all(len(s) == len(sequences[0]) for s in sequences)
 

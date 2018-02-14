@@ -89,6 +89,9 @@ class CheckpointDecoder:
             inputs_sentences = [f.readlines() for f in inputs_fins]
             target_sentences = references_fin.readlines()
 
+            utils.check_condition(all(len(l) == len(target_sentences) for l in inputs_sentences),
+                                  "Sentences differ in length")
+
             if sample_size <= 0:
                 sample_size = len(inputs_sentences[0])
             if sample_size < len(inputs_sentences[0]):
@@ -157,9 +160,6 @@ class CheckpointDecoder:
 
 
 def parallel_subsample(parallel_sequences: List[List[Any]], sample_size: int, seed: int) -> List[Any]:
-    utils.check_condition(all(len(l) == len(parallel_sequences[0]) for l in parallel_sequences),
-                          "Lists differ in length")
-
     # custom random number generator to guarantee the same samples across runs in order to be able to
     # compare metrics across independent runs
     random_gen = random.Random(seed)

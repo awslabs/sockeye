@@ -86,29 +86,29 @@ def main():
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
-                           input=args.input,
-                           input_factors=args.input_factors,
+                           inp=args.input,
+                           inp_factors=args.input_factors,
                            json_input=args.json_input)
 
 
-def make_inputs(input: Optional[str],
+def make_inputs(inp: Optional[str],
                 translator: inference.Translator,
                 json_input: bool,
-                input_factors: Optional[List[str]] = None) -> Generator[inference.TranslatorInput, None, None]:
+                inp_factors: Optional[List[str]] = None) -> Generator[inference.TranslatorInput, None, None]:
     """
     Generates TranslatorInput instances from input. If input is None, reads from stdin. If num_input_factors > 1,
     the function will look for factors attached to each token, separated by '|'.
     If source is not None, reads from the source file. If num_source_factors > 1, num_source_factors source factor
     filenames are required.
 
-    :param input: The source file (possibly None).
+    :param inp: The source file (possibly None).
     :param translator: Translator that will translate each line of input.
     :param json_input: Whether the input is in json format.
-    :param input_factors: Source factor files.
+    :param inp_factors: Source factor files.
     :return: TranslatorInput objects.
     """
-    if input is None:
-        check_condition(input_factors is None, "Translating from STDIN, not expecting any factor files.")
+    if inp is None:
+        check_condition(inp_factors is None, "Translating from STDIN, not expecting any factor files.")
         for sentence_id, line in enumerate(sys.stdin, 1):
             if json_input:
                 yield inference.make_input_from_json_string(sentence_id=sentence_id, json_string=line)
@@ -117,8 +117,11 @@ def make_inputs(input: Optional[str],
                                                                 factored_string=line,
                                                                 translator=translator)
     else:
-        input_factors = [] if input_factors is None else input_factors
-        inputs = [input] + input_factors
+        inp_factors = [] if inp_factors is None else inp_factors
+        inputs = [inp] + inp_factors
+        check_condition(translator.num_source_factors == len(inputs),
+                        "Model(s) require %d factors, but %d given (through --input and --input-factors)." % (
+                            translator.num_source_factors, len(inputs)))
         with ExitStack() as exit_stack:
             streams = [exit_stack.enter_context(data_io.smart_open(i)) for i in inputs]
             for sentence_id, inputs in enumerate(zip(*streams), 1):
@@ -128,8 +131,8 @@ def make_inputs(input: Optional[str],
 def read_and_translate(translator: inference.Translator,
                        output_handler: OutputHandler,
                        chunk_size: Optional[int],
-                       input: Optional[str] = None,
-                       input_factors: Optional[List[str]] = None,
+                       inp: Optional[str] = None,
+                       inp_factors: Optional[List[str]] = None,
                        json_input: bool = False) -> None:
     """
     Reads from either a file or stdin and translates each line, calling the output_handler with the result.
@@ -137,8 +140,8 @@ def read_and_translate(translator: inference.Translator,
     :param output_handler: Handler that will write output to a stream.
     :param translator: Translator that will translate each line of input.
     :param chunk_size: The size of the portion to read at a time from the input.
-    :param input: Optional path to file which will be translated line-by-line if included, if none use stdin.
-    :param input_factors: Optional list of paths to files that contain source factors.
+    :param inp: Optional path to file which will be translated line-by-line if included, if none use stdin.
+    :param inp_factors: Optional list of paths to files that contain source factors.
     :param json_input: Whether the input is in json format.
     """
     batch_size = translator.batch_size
@@ -158,7 +161,7 @@ def read_and_translate(translator: inference.Translator,
     logger.info("Translating...")
 
     total_time, total_lines = 0.0, 0
-    for chunk in grouper(make_inputs(input, translator, json_input, input_factors), size=chunk_size):
+    for chunk in grouper(make_inputs(inp, translator, json_input, inp_factors), size=chunk_size):
         chunk_time = translate(output_handler, chunk, translator)
         total_lines += len(chunk)
         total_time += chunk_time
