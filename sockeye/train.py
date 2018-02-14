@@ -640,40 +640,27 @@ def create_model_config(args: argparse.Namespace,
     return model_config
 
 
-def create_training_model(model_config: model.ModelConfig,
-                          args: argparse.Namespace,
+def create_training_model(config: model.ModelConfig,
                           context: List[mx.Context],
+                          output_dir: str,
                           train_iter: data_io.BaseParallelSampleIter,
-                          lr_scheduler_instance: lr_scheduler.LearningRateScheduler,
-                          resume_training: bool,
-                          training_state_dir: str) -> training.TrainingModel:
+                          args: argparse.Namespace) -> training.TrainingModel:
     """
     Create a training model and load the parameters from disk if needed.
 
-    :param model_config: The configuration for the model.
-    :param args: Arguments as returned by argparse.
+    :param config: The configuration for the model.
     :param context: The context(s) to run on.
+    :param output_dir: Output folder.
     :param train_iter: The training data iterator.
-    :param lr_scheduler_instance: The learning rate scheduler.
-    :param resume_training: When True, the model will be loaded from disk.
-    :param training_state_dir: Directory where the training state is stored.
+    :param args: Arguments as returned by argparse.
     :return: The training model.
     """
-    training_model = training.TrainingModel(config=model_config,
+    training_model = training.TrainingModel(config=config,
                                             context=context,
+                                            output_dir=output_dir,
                                             train_iter=train_iter,
                                             bucketing=not args.no_bucketing,
-                                            lr_scheduler=lr_scheduler_instance,
                                             gradient_compression_params=gradient_compression_params(args))
-
-    # We may consider loading the params in TrainingModule, for consistency
-    # with the training state saving
-    if resume_training:
-        logger.info("Found partial training in directory %s. Resuming from saved state.", training_state_dir)
-        training_model.load_params_from_file(os.path.join(training_state_dir, C.TRAINING_STATE_PARAMS_NAME))
-    elif args.params:
-        logger.info("Training will initialize from parameters loaded from '%s'", args.params)
-        training_model.load_params_from_file(args.params)
 
     return training_model
 
@@ -777,9 +764,11 @@ def main():
         model_config = create_model_config(args, source_vocab_sizes, target_vocab_size, config_data)
         model_config.freeze()
 
-        training_model = create_training_model(model_config, args,
-                                               context, train_iter, lr_scheduler_instance,
-                                               resume_training, training_state_dir)
+        training_model = create_training_model(config=model_config,
+                                               context=context,
+                                               output_dir=output_folder,
+                                               train_iter=train_iter,
+                                               args=args)
 
         weight_initializer = initializer.get_initializer(
             default_init_type=args.weight_init,
@@ -812,31 +801,35 @@ def main():
                                                                                                  exit_stack,
                                                                                                  context)
 
-        training_model.fit(train_iter, eval_iter,
-                           output_folder=output_folder,
-                           max_params_files_to_keep=args.keep_last_params,
-                           metrics=args.metrics,
-                           initializer=weight_initializer,
-                           allow_missing_params=args.allow_missing_params,
-                           max_updates=max_updates,
-                           checkpoint_frequency=args.checkpoint_frequency,
-                           optimizer=optimizer, optimizer_params=optimizer_params,
-                           optimized_metric=args.optimized_metric,
-                           gradient_clipping_type=gradient_clipping_type,
-                           clip_gradient_threshold=gradient_clipping_threshold,
-                           kvstore=kvstore,
-                           max_num_not_improved=max_num_checkpoint_not_improved,
-                           min_num_epochs=min_num_epochs,
-                           max_num_epochs=max_num_epochs,
-                           decode_and_evaluate=decode_and_evaluate,
-                           decode_and_evaluate_fname_sources=[args.validation_source] + args.validation_source_factors,
-                           decode_and_evaluate_fname_target=args.validation_target,
-                           decode_and_evaluate_context=decode_and_evaluate_context,
-                           use_tensorboard=args.use_tensorboard,
-                           mxmonitor_pattern=args.monitor_pattern,
-                           mxmonitor_stat_func=args.monitor_stat_func,
-                           lr_decay_param_reset=args.learning_rate_decay_param_reset,
-                           lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset)
+        trainer = training.Trainer(initializer=weight_initializer,
+                                   lr_scheduler=lr_scheduler_instance,
+                                   max_params_files_to_keep=args.keep_last_params,
+                                   kvstore=kvstore,
+                                   log_to_tensorboard=args.use_tensorboard)
+
+        trainer.fit(model=training_model,
+                    train_iter=train_iter,
+                    val_iter=eval_iter,
+                    output_folder=output_folder,
+                    metrics=args.metrics,
+                    allow_missing_params=args.allow_missing_params,
+                    max_updates=max_updates,
+                    checkpoint_frequency=args.checkpoint_frequency,
+                    optimizer=optimizer, optimizer_params=optimizer_params,
+                    optimized_metric=args.optimized_metric,
+                    gradient_clipping_type=gradient_clipping_type,
+                    clip_gradient_threshold=gradient_clipping_threshold,
+                    max_num_not_improved=max_num_checkpoint_not_improved,
+                    min_num_epochs=min_num_epochs,
+                    max_num_epochs=max_num_epochs,
+                    decode_and_evaluate=decode_and_evaluate,
+                    decode_and_evaluate_fname_sources=[args.validation_source] + args.validation_source_factors,
+                    decode_and_evaluate_fname_target=args.validation_target,
+                    decode_and_evaluate_context=decode_and_evaluate_context,
+                    mxmonitor_pattern=args.monitor_pattern,
+                    mxmonitor_stat_func=args.monitor_stat_func,
+                    lr_decay_param_reset=args.learning_rate_decay_param_reset,
+                    lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset)
 
 
 if __name__ == "__main__":
