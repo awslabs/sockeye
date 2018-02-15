@@ -102,7 +102,7 @@ args = dict(
     tests_require=['pytest', 'pytest-cov'],
 
     extras_require={
-        'optional': ['tensorboard', 'matplotlib'],
+        'optional': ['tensorboard==1.0.0a6', 'matplotlib'],
         'dev': get_requirements('requirements.dev.txt')
     },
 
