@@ -25,7 +25,7 @@ pip install matplotlib
 
 We will visualize training progress using `tensorboard`. Install it using:
 ```bash
-pip install tensorboard
+pip install tensorboard==1.0.0a6
 ```
 
 All of the commands below assume you're running on a CPU.

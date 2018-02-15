@@ -105,15 +105,15 @@ running the following:
 where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), or `90` (9.0).
 
 ### Optional dependencies
-In order to track learning curves during training you can optionally install dmlc's tensorboard fork
- (````pip install tensorboard````).
+In order to track learning curves during training you can optionally install dmlc's fork of tensorboard
+ (````pip install tensorboard==1.0.0a6````).
+ 
 If you want to create alignment plots you will need to install matplotlib (````pip install matplotlib````).
 
 In general you can install all optional dependencies from the Sockeye source folder using:
 ```bash
 > pip install '.[optional]'
 ```
-
 
 ### Running sockeye
 
