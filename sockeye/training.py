@@ -36,7 +36,7 @@ from . import loss
 from . import lr_scheduler
 from . import model
 from . import utils
-from .optimizers import BatchState, CheckpointState, SockeyeOptimizer
+from .optimizers import BatchState, CheckpointState, SockeyeOptimizer, OptimizerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -225,8 +225,8 @@ class TrainingModel(model.SockeyeModel):
         # TODO: Push update to MXNet to expose the optimizer (Module should have a get_optimizer method)
         return self.current_module._optimizer
 
-    def initialize_optimizer(self, kvstore: str, optimizer: str, optimizer_params: dict):
-        self.module.init_optimizer(kvstore=kvstore, optimizer=optimizer, optimizer_params=optimizer_params)
+    def initialize_optimizer(self, config: OptimizerConfig):
+        self.module.init_optimizer(kvstore=config.kvstore, optimizer=config.name, optimizer_params=config.params)
 
     def save_optimizer_states(self, fname: str):
         """
@@ -338,9 +338,7 @@ class _TrainingState:
 class Trainer:
     """
 
-    :param model: Training Model.
-    :param initializer: The parameter initializer.
-    :param lr_scheduler: The scheduler that lowers the learning rate during training.
+    :param optimizer_config: The optimizer configuration.
     :param output_folder: The folder in which all model artifacts will be stored in (parameters, checkpoints, etc.).
     :param max_params_files_to_keep: Maximum number of params files to keep in the output folder (last n are kept).
     :param kvstore: The MXNet kvstore used.
@@ -348,15 +346,11 @@ class Trainer:
     """
 
     def __init__(self,
-                 initializer: mx.init.Initializer,
-                 lr_scheduler: lr_scheduler.LearningRateScheduler,
+                 optimizer_config: OptimizerConfig,
                  max_params_files_to_keep: int,
-                 kvstore: str = C.KVSTORE_DEVICE,
                  log_to_tensorboard: bool = True) -> None:
-        self.initializer = initializer
-        self.lr_scheduler = lr_scheduler
+        self.optimizer_config = optimizer_config
         self.max_params_files_to_keep = max_params_files_to_keep
-        self.kvstore = kvstore
         self.log_to_tensorboard = log_to_tensorboard
         self.state = _TrainingState(num_not_improved=0, epoch=0, checkpoint=0, updates=0, samples=0)
 
@@ -369,18 +363,11 @@ class Trainer:
             allow_missing_params: bool,
             max_updates: Optional[int],
             checkpoint_frequency: int,
-            optimizer: str,
-            optimizer_params: dict,
-            optimized_metric: str = "perplexity",
-            gradient_clipping_type: str = "abs",
-            clip_gradient_threshold: float = 1.0,
+            early_stopping_metric: str = "perplexity",
             max_num_not_improved: int = 3,
             min_num_epochs: Optional[int] = None,
             max_num_epochs: Optional[int] = None,
-            decode_and_evaluate: int = 0,
-            decode_and_evaluate_fname_sources: Optional[List[str]] = None,
-            decode_and_evaluate_fname_target: Optional[str] = None,
-            decode_and_evaluate_context: Optional[mx.Context] = None,
+            cp_decoder: Optional[checkpoint_decoder.CheckpointDecoder] = None,
             mxmonitor_pattern: Optional[str] = None,
             mxmonitor_stat_func: Optional[str] = None,
             lr_decay_param_reset: bool = False,
@@ -398,9 +385,7 @@ class Trainer:
         :param allow_missing_params: Allow missing parameters when initializing model parameters from file.
         :param max_updates: Optional maximum number of batches to process.
         :param checkpoint_frequency: Frequency of checkpointing in number of updates.
-        :param optimizer: The MXNet optimizer that will update the parameters.
-        :param optimizer_params: The parameters for the optimizer.
-        :param optimized_metric: The metric that is tracked for early stopping.
+        :param early_stopping_metric: The metric that is tracked for early stopping.
 
         :param max_num_not_improved: Stop training if the optimized_metric does not improve for this many checkpoints,
                -1: do not use early stopping.
@@ -408,9 +393,7 @@ class Trainer:
         :param max_num_epochs: Optional maximum number of epochs to train.
         :param decode_and_evaluate: Monitor BLEU during training (0: off, >=0: the number of sentences to decode for BLEU
                evaluation, -1: decode the full validation set.).
-        :param decode_and_evaluate_fname_sources: Filename(s) of source data to decode and evaluate.
-        :param decode_and_evaluate_fname_target: Filename of target data (references) to decode and evaluate.
-        :param decode_and_evaluate_context: Optional MXNet context for decode and evaluate.
+        :param cp_decoder: Optional CheckpointDecoder instance to decode and compoute BLEU at avery checkpoint.
 
         :param mxmonitor_pattern: Optional pattern to match to monitor weights/gradients/outputs
                with MXNet's monitor. Default is None which means no monitoring.
@@ -420,35 +403,27 @@ class Trainer:
         :param lr_decay_opt_states_reset: How to reset optimizer states after learning rate decay.
         :return: Best score on validation data observed during training.
         """
-        if 'dist' in self.kvstore:
-            self._check_dist_kvstore_requirements(lr_decay_opt_states_reset, lr_decay_param_reset, optimizer)
+        if 'dist' in self.optimizer_config.kvstore:
+            self._check_dist_kvstore_requirements(lr_decay_opt_states_reset, lr_decay_param_reset, self.optimizer_config.name)
 
-        utils.check_condition(gradient_clipping_type in C.GRADIENT_CLIPPING_TYPES,
-                              "Unknown gradient clipping type %s" % gradient_clipping_type)
-
-        cp_decoder = None
-        if decode_and_evaluate:
-            cp_decoder = checkpoint_decoder.CheckpointDecoder(context=decode_and_evaluate_context,
-                                                              inputs=decode_and_evaluate_fname_sources,
-                                                              references=decode_and_evaluate_fname_target,
-                                                              model=output_folder,
-                                                              sample_size=decode_and_evaluate)
+        utils.check_condition(self.optimizer_config.gradient_clipping_type in C.GRADIENT_CLIPPING_TYPES,
+                              "Unknown gradient clipping type %s" % self.optimizer_config.gradient_clipping_type)
 
         logger.info("Training started.")
         self.training_monitor = callback.TrainingMonitor(output_folder,
-                                                         optimized_metric=optimized_metric,
+                                                         optimized_metric=early_stopping_metric,
                                                          use_tensorboard=self.log_to_tensorboard,
                                                          cp_decoder=cp_decoder)
 
         # parameters
-        model.initialize_parameters(self.initializer, allow_missing_params)
+        model.initialize_parameters(self.optimizer_config.initializer, allow_missing_params)
         if params is not None:
             logger.info("Training will start with parameters loaded from '%s'", params)
             model.load_params_from_file(params)
         model.log_parameters()
 
         # optimizer
-        model.initialize_optimizer(self.kvstore, optimizer, optimizer_params)
+        model.initialize_optimizer(self.optimizer_config)
         if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_INITIAL:
             model.save_optimizer_states(os.path.join(output_folder, C.OPT_STATES_INITIAL))
         optimizer = model.optimizer
@@ -458,8 +433,8 @@ class Trainer:
         resume_training = os.path.exists(training_state_dir)
         if resume_training:
             logger.info("Found partial training in directory %s. Resuming from saved state.", training_state_dir)
-            utils.check_condition('dist' not in self.kvstore, "Training continuation not supported with "
-                                                              "distributed training.")
+            utils.check_condition('dist' not in self.optimizer_config.kvstore,
+                                  "Training continuation not supported with distributed training.")
             self.state = self._load_checkpoint(model, training_state_dir, train_iter)
         else:
             self._save_checkpoint(model, output_folder, train_iter)
@@ -499,11 +474,11 @@ class Trainer:
                 gradient_norm = model.get_global_gradient_norm()
 
             # note: C.GRADIENT_CLIPPING_TYPE_ABS is handled by the mxnet optimizer directly
-            if gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
+            if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
                 if gradient_norm is None:
                     gradient_norm = model.get_global_gradient_norm()
-                if gradient_norm > clip_gradient_threshold:
-                    ratio = clip_gradient_threshold / gradient_norm
+                if gradient_norm > self.optimizer_config.gradient_clipping_threshold:
+                    ratio = self.optimizer_config.gradient_clipping_threshold / gradient_norm
                     model.rescale_gradients(ratio)
 
             # If using an extended optimizer, provide extra state information about the current batch
@@ -580,9 +555,9 @@ class Trainer:
                     optimizer.pre_update_checkpoint(checkpoint_state)
 
                 # learning rate adjustment
-                if self.lr_scheduler is not None:
-                    if issubclass(type(self.lr_scheduler), lr_scheduler.AdaptiveLearningRateScheduler):
-                        lr_adjusted = self.lr_scheduler.new_evaluation_result(has_improved)
+                if self.optimizer_config.lr_scheduler is not None:
+                    if issubclass(type(self.optimizer_config.lr_scheduler), lr_scheduler.AdaptiveLearningRateScheduler):
+                        lr_adjusted = self.optimizer_config.lr_scheduler.new_evaluation_result(has_improved)
                     else:
                         lr_adjusted = False
                     if lr_adjusted and not has_improved:
@@ -695,7 +670,7 @@ class Trainer:
         # In distributed training the optimizer will run remotely. For eve we however need to pass information about
         # the loss, which is not possible anymore by means of accessing self.module._curr_module._optimizer.
         utils.check_condition(optimizer != C.OPTIMIZER_EVE, "Eve optimizer not supported with distributed training.")
-        utils.check_condition(not issubclass(type(self.lr_scheduler), lr_scheduler.AdaptiveLearningRateScheduler),
+        utils.check_condition(not issubclass(type(self.optimizer_config.lr_scheduler), lr_scheduler.AdaptiveLearningRateScheduler),
                               "Adaptive learning rate schedulers not supported with a dist kvstore. "
                               "Try a fixed schedule such as %s." % C.LR_SCHEDULER_FIXED_RATE_INV_SQRT_T)
         utils.check_condition(not lr_decay_param_reset, "Parameter reset when the learning rate decays not "
@@ -773,7 +748,7 @@ class Trainer:
 
         # The lr scheduler
         with open(os.path.join(training_state_dirname, C.SCHEDULER_STATE_NAME), "wb") as fp:
-            pickle.dump(self.lr_scheduler, fp)
+            pickle.dump(self.optimizer_config.lr_scheduler, fp)
 
         # We are now finished with writing. Rename the temporary directory to
         # the actual directory
@@ -805,6 +780,10 @@ class Trainer:
         # Optimzer state (from mxnet)
         opt_state_fname = os.path.join(directory, C.OPT_STATES_LAST)
         model.load_optimizer_states(opt_state_fname)
+
+        # The lr scheduler
+        with open(os.path.join(directory, C.SCHEDULER_STATE_NAME), "rb") as fp:
+            self.optimizer_config.lr_scheduler = pickle.load(fp)
 
         # State of the bucket iterator
         train_iter.load_state(os.path.join(directory, C.BUCKET_ITER_STATE_NAME))

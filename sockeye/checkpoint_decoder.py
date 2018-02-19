@@ -106,8 +106,9 @@ class CheckpointDecoder:
 
         self.inputs_sentences = list(zip(*self.inputs_sentences))  # type: List[List[str]]
 
-        logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d)",
-                    max_input_len if max_input_len is not None else -1, beam_size, model, len(self.target_sentences))
+        logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d, context=%s)",
+                    max_input_len if max_input_len is not None else -1, beam_size, model, len(self.target_sentences),
+                    context)
 
     def decode_and_evaluate(self,
                             checkpoint: Optional[int] = None,
