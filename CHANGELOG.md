@@ -10,6 +10,28 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.17.0]
+### Added
+ - Source factors, as described in
+
+   Linguistic Input Features Improve Neural Machine Translation (Sennrich \& Haddow, WMT 2016)
+   [PDF](http://www.aclweb.org/anthology/W16-2209.pdf) [bibtex](http://www.aclweb.org/anthology/W16-2209.bib)
+
+   Additional source factors are enabled by passing `--source-factors file1 [file2 ...]` (`-sf`), where file1, etc. are
+   token-parallel to the source (`-s`).
+   An analogous parameter, `--validation-source-factors`, is used to pass factors for validation data.
+   The flag `--source-factors-num-embed D1 [D2 ...]` denotes the embedding dimensions and is required if source factor
+   files are given. Factor embeddings are concatenated to the source embeddings dimension (`--num-embed`).
+
+   At test time, the input sentence and its factors can be passed in via STDIN or command-line arguments.
+   - For STDIN, the input and factors should be in a token-based factored format, e.g.,
+     `word1|factor1|factor2|... w2|f1|f2|... ...1`.
+   - You can also use file arguments, which mirrors training: `--input` takes the path to a file containing the source,
+     and `--input-factors` a list of files containing token-parallel factors.
+   At test time, an exception is raised if the number of expected factors does not
+   match the factors passed along with the input.
+   
+ - Removed bias parameters from multi-head attention layers of the transformer.
 
 ## [1.16.6]
 ### Changed

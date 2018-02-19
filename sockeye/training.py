@@ -102,8 +102,11 @@ class TrainingModel(model.SockeyeModel):
         Initializes model components, creates training symbol and module, and binds it.
         """
         #utils.check_condition(train_iter.pad_id == C.PAD_ID == 0, "pad id should be 0")
+
         source = mx.sym.Variable(C.SOURCE_NAME)
-        source_length = utils.compute_lengths(source)
+        source_words = source.split(num_outputs=self.config.config_embed_source.num_factors,
+                                    axis=2, squeeze_axis=True)[0]
+        source_length = utils.compute_lengths(source_words)
         target = mx.sym.Variable(C.TARGET_NAME)
         target_length = utils.compute_lengths(target)
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
@@ -163,7 +166,7 @@ class TrainingModel(model.SockeyeModel):
                                           compression_params=self.gradient_compression_params)
         else:
             logger.info("No bucketing. Unrolled to (%d,%d)",
-                        self.config.max_seq_len_source, self.config.max_seq_len_target)
+                        self.config.config_data.max_seq_len_source, self.config.config_data.max_seq_len_target)
             symbol, _, __ = sym_gen(train_iter.buckets[0])
             return mx.mod.Module(symbol=symbol,
                                  data_names=data_names,
@@ -213,7 +216,7 @@ class TrainingModel(model.SockeyeModel):
             min_num_epochs: Optional[int] = None,
             max_num_epochs: Optional[int] = None,
             decode_and_evaluate: int = 0,
-            decode_and_evaluate_fname_source: Optional[str] = None,
+            decode_and_evaluate_fname_sources: Optional[List[str]] = None,
             decode_and_evaluate_fname_target: Optional[str] = None,
             decode_and_evaluate_context: Optional[mx.Context] = None,
             use_tensorboard: bool = False,
@@ -244,7 +247,7 @@ class TrainingModel(model.SockeyeModel):
         :param max_num_epochs: Optional maximum number of epochs to train.
         :param decode_and_evaluate: Monitor BLEU during training (0: off, >=0: the number of sentences to decode for BLEU
                evaluation, -1: decode the full validation set.).
-        :param decode_and_evaluate_fname_source: Filename of source data to decode and evaluate.
+        :param decode_and_evaluate_fname_sources: Filename(s) of source data to decode and evaluate.
         :param decode_and_evaluate_fname_target: Filename of target data (references) to decode and evaluate.
         :param decode_and_evaluate_context: Optional MXNet context for decode and evaluate.
         :param use_tensorboard: If True write tensorboard compatible logs for monitoring training and
@@ -278,12 +281,13 @@ class TrainingModel(model.SockeyeModel):
 
         self.module.init_optimizer(kvstore=kvstore, optimizer=optimizer, optimizer_params=optimizer_params)
 
-        cp_decoder = checkpoint_decoder.CheckpointDecoder(decode_and_evaluate_context,
-                                                          decode_and_evaluate_fname_source,
-                                                          decode_and_evaluate_fname_target,
-                                                          output_folder,
-                                                          sample_size=decode_and_evaluate) \
-            if decode_and_evaluate else None
+        cp_decoder = None
+        if decode_and_evaluate:
+            cp_decoder = checkpoint_decoder.CheckpointDecoder(context=decode_and_evaluate_context,
+                                                              inputs=decode_and_evaluate_fname_sources,
+                                                              references=decode_and_evaluate_fname_target,
+                                                              model=output_folder,
+                                                              sample_size=decode_and_evaluate)
 
         logger.info("Training started.")
         self.training_monitor = callback.TrainingMonitor(output_folder,

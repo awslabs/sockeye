@@ -22,7 +22,7 @@ import random
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from contextlib import ExitStack
-from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sized, Tuple
+from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sequence, Sized, Tuple
 
 import math
 import mxnet as mx
@@ -181,14 +181,14 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
     return bucket_batch_sizes
 
 
-def calculate_length_statistics(source_sentences: Iterable[List[Any]],
+def calculate_length_statistics(sources_sentences: Sequence[Iterable[List[Any]]],
                                 target_sentences: Iterable[List[Any]],
                                 max_seq_len_source: int,
                                 max_seq_len_target: int) -> 'LengthStatistics':
     """
     Returns mean and standard deviation of target-to-source length ratios of parallel corpus.
 
-    :param source_sentences: Source sentences.
+    :param sources_sentences: Source(s) sentences.
     :param target_sentences: Target sentences.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
@@ -196,8 +196,11 @@ def calculate_length_statistics(source_sentences: Iterable[List[Any]],
     """
     mean_and_variance = OnlineMeanAndVariance()
 
-    for target, source in zip(target_sentences, source_sentences):
-        source_len = len(source)
+    for target, sources in zip(target_sentences, zip(*sources_sentences)):
+        check_condition(are_token_parallel(sources),
+                        "Source sequences are not token-parallel: %s" % (str(sources)))
+
+        source_len = len(sources[0])
         target_len = len(target)
         if source_len > max_seq_len_source or target_len > max_seq_len_target:
             continue
@@ -211,30 +214,40 @@ def calculate_length_statistics(source_sentences: Iterable[List[Any]],
     return LengthStatistics(num_sents, mean, std)
 
 
-def analyze_sequence_lengths(source: str,
+def analyze_sequence_lengths(sources: List[str],
                              target: str,
-                             vocab_source: Dict[str, int],
-                             vocab_target: Dict[str, int],
+                             vocab_sources: List[vocab.Vocab],
+                             vocab_target: vocab.Vocab,
                              max_seq_len_source: int,
                              max_seq_len_target: int) -> 'LengthStatistics':
-    train_source_sentences = SequenceReader(source, vocab_source, add_bos=False)
+    train_sources_sentences = [SequenceReader(source, vocab, add_bos=False) for source, vocab in
+                               zip(sources, vocab_sources)]
     # Length statistics are calculated on the raw sentences without special tokens, such as the BOS, as these can
     # have a a large impact on the length ratios, especially with lots of short sequences.
     train_target_sentences = SequenceReader(target, vocab_target, add_bos=False)
 
-    length_statistics = calculate_length_statistics(train_source_sentences, train_target_sentences,
+    length_statistics = calculate_length_statistics(train_sources_sentences, train_target_sentences,
                                                     max_seq_len_source,
                                                     # Take into account the BOS symbol that is added later
                                                     max_seq_len_target - 1)
-    check_condition(train_source_sentences.is_done() and train_target_sentences.is_done(),
-                    "Different number of lines in source and target data.")
+    check_condition(all(r.is_done() for r in train_sources_sentences) and train_target_sentences.is_done(),
+                    "Different number of lines in source(s) and target data.")
 
     logger.info("%d sequences of maximum length (%d, %d) in '%s' and '%s'.",
-                length_statistics.num_sents, max_seq_len_source, max_seq_len_target, source, target)
+                length_statistics.num_sents, max_seq_len_source, max_seq_len_target, sources[0], target)
     logger.info("Mean training target/source length ratio: %.2f (+-%.2f)",
                 length_statistics.length_ratio_mean,
                 length_statistics.length_ratio_std)
     return length_statistics
+
+
+def are_token_parallel(sequences: List[Sized]) -> bool:
+    """
+    Returns True if all sequences in the list have the same length.
+    """
+    if not sequences or len(sequences) == 1:
+        return True
+    return all(len(s) == len(sequences[0]) for s in sequences)
 
 
 class DataStatisticsAccumulator:
@@ -310,73 +323,75 @@ class DataStatisticsAccumulator:
                               mean_len_target_per_bucket=self.mean_len_target_per_bucket)
 
 
-def shard_data(source_fname: str,
+def shard_data(source_fnames: List[str],
                target_fname: str,
-               vocab_source: Dict[str, int],
-               vocab_target: Dict[str, int],
+               source_vocabs: List[vocab.Vocab],
+               target_vocab: vocab.Vocab,
                num_shards: int,
                buckets: List[Tuple[int, int]],
                length_ratio_mean: float,
                length_ratio_std: float,
-               output_prefix: str) -> Tuple[List[Tuple[str, str, 'DataStatistics']], 'DataStatistics']:
+               output_prefix: str) -> Tuple[List[Tuple[List[str], str, 'DataStatistics']], 'DataStatistics']:
     """
     Assign int-coded source/target sentence pairs to shards at random.
 
-    :param source_fname: The file name of the source file.
+    :param source_fnames: The path to the source text (and optional token-parallel factor files).
     :param target_fname: The file name of the target file.
-    :param vocab_source: Source vocabulary.
-    :param vocab_target: Target vocabulary.
+    :param source_vocabs: Source vocabulary (and optional source factor vocabularies).
+    :param target_vocab: Target vocabulary.
     :param num_shards: The total number of shards.
     :param buckets: Bucket list.
     :param length_ratio_mean: Mean length ratio.
     :param length_ratio_std: Standard deviation of length ratios.
     :param output_prefix: The prefix under which the shard files will be created.
-    :return: Tuple of source, target file names and statistics for each shard as well as global statistics.
+    :return: Tuple of source (and source factor) file names, target file names and statistics for each shard,
+             as well as global statistics.
     """
     os.makedirs(output_prefix, exist_ok=True)
-    source_shard_fnames = [os.path.join(output_prefix, C.SHARD_SOURCE % i)
-                           for i in range(num_shards)]  # type: List[str]
+    sources_shard_fnames = [[os.path.join(output_prefix, C.SHARD_SOURCE % i) + ".%d" % f for i in range(num_shards)]
+                            for f in range(len(source_fnames))]
     target_shard_fnames = [os.path.join(output_prefix, C.SHARD_TARGET % i)
                            for i in range(num_shards)]  # type: List[str]
 
-    data_stats_accumulator = DataStatisticsAccumulator(buckets, vocab_source, vocab_target,
+    data_stats_accumulator = DataStatisticsAccumulator(buckets, source_vocabs[0], target_vocab,
                                                        length_ratio_mean, length_ratio_std)
-    per_shard_stat_accumulators = [DataStatisticsAccumulator(buckets, vocab_source, vocab_target, length_ratio_mean,
+    per_shard_stat_accumulators = [DataStatisticsAccumulator(buckets, source_vocabs[0], target_vocab, length_ratio_mean,
                                                              length_ratio_std) for shard_idx in range(num_shards)]
 
     with ExitStack() as exit_stack:
-        source_shards = []
-        target_shards = []
-        # create shard files:
-        for fname in source_shard_fnames:
-            source_shards.append(exit_stack.enter_context(smart_open(fname, mode="wt")))
-        for fname in target_shard_fnames:
-            target_shards.append(exit_stack.enter_context(smart_open(fname, mode="wt")))
-        shards = list(zip(source_shards, target_shards, per_shard_stat_accumulators))
+        sources_shards = [[exit_stack.enter_context(smart_open(f, mode="wt")) for f in sources_shard_fnames[i]] for i in
+                          range(len(source_fnames))]
+        target_shards = [exit_stack.enter_context(smart_open(f, mode="wt")) for f in target_shard_fnames]
 
-        source_iter = SequenceReader(source_fname, vocab_source, add_bos=False)
-        target_iter = SequenceReader(target_fname, vocab_target, add_bos=True)
+        source_iters = [SequenceReader(fname, vocab, add_bos=False) for fname, vocab in zip(source_fnames,
+                                                                                            source_vocabs)]
+        target_iter = SequenceReader(target_fname, target_vocab, add_bos=True)
 
-        random_shard_iter = iter(lambda: random.choice(shards), None)
+        random_shard_iter = iter(lambda: random.randrange(num_shards), None)
 
-        for source, target, (source_shard, target_shard, shard_stats) in zip(source_iter, target_iter,
-                                                                             random_shard_iter):
-            source_len = len(source)
+        for sources, target, random_shard_index in zip(zip(*source_iters), target_iter,
+                                                       random_shard_iter):
+            random_shard_index = cast(int, random_shard_index)
+            source_len = len(sources[0])
             target_len = len(target)
 
             buck_idx, buck = get_parallel_bucket(buckets, source_len, target_len)
-            data_stats_accumulator.sequence_pair(source, target, buck_idx)
-            shard_stats.sequence_pair(source, target, buck_idx)
+            data_stats_accumulator.sequence_pair(sources[0], target, buck_idx)
+            per_shard_stat_accumulators[random_shard_index].sequence_pair(sources[0], target, buck_idx)
 
             if buck is None:
                 continue
 
-            source_shard.write(ids2strids(source) + "\n")
-            target_shard.write(ids2strids(target) + "\n")
+            for i, line in enumerate(sources):
+                sources_shards[i][random_shard_index].write(ids2strids(line) + "\n")
+            target_shards[random_shard_index].write(ids2strids(target) + "\n")
 
     per_shard_stats = [shard_stat_accumulator.statistics for shard_stat_accumulator in per_shard_stat_accumulators]
 
-    return list(zip(source_shard_fnames, target_shard_fnames, per_shard_stats)), data_stats_accumulator.statistics
+    sources_shard_fnames_by_shards = zip(*sources_shard_fnames)  # type: List[List[str]]
+
+    return list(
+        zip(sources_shard_fnames_by_shards, target_shard_fnames, per_shard_stats)), data_stats_accumulator.statistics
 
 
 class RawParallelDatasetLoader:
@@ -401,13 +416,14 @@ class RawParallelDatasetLoader:
         self.dtype = dtype
 
     def load(self,
-             source_sentences: Iterable[List[Any]],
+             sources_sentences: Sequence[Iterable[List[Any]]],
              target_sentences: Iterable[List[Any]],
              num_samples_per_bucket: List[int]) -> 'ParallelDataSet':
 
         assert len(num_samples_per_bucket) == len(self.buckets)
+        num_factors = len(sources_sentences)
 
-        data_source = [np.full((num_samples, source_len), self.pad_id, dtype=self.dtype)
+        data_source = [np.full((num_samples, source_len, num_factors), self.pad_id, dtype=self.dtype)
                        for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
         data_target = [np.full((num_samples, target_len), self.pad_id, dtype=self.dtype)
                        for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
@@ -423,12 +439,15 @@ class RawParallelDatasetLoader:
         num_pad_target = 0
 
         # Bucket sentences as padded np arrays
-        for source, target in zip(source_sentences, target_sentences):
-            source_len = len(source)
+        for sources, target in zip(zip(*sources_sentences), target_sentences):
+            source_len = len(sources[0])
             target_len = len(target)
             buck_index, buck = get_parallel_bucket(self.buckets, source_len, target_len)
             if buck is None:
                 continue  # skip this sentence pair
+
+            check_condition(are_token_parallel(sources),
+                            "Source sequences are not token-parallel: %s" % (str(sources)))
 
             num_tokens_source += buck[0]
             num_tokens_target += buck[1]
@@ -436,7 +455,8 @@ class RawParallelDatasetLoader:
             num_pad_target += buck[1] - target_len
 
             sample_index = bucket_sample_index[buck_index]
-            data_source[buck_index][sample_index, :source_len] = source
+            for i, s in enumerate(sources):
+                data_source[buck_index][sample_index, 0:source_len, i] = s
             data_target[buck_index][sample_index, :target_len] = target
             # NOTE(fhieber): while this is wasteful w.r.t memory, we need to explicitly create the label sequence
             # with the EOS symbol here sentence-wise and not per-batch due to variable sequence length within a batch.
@@ -471,9 +491,12 @@ def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int
     return max(int(math.ceil(num_samples / samples_per_shard)), min_num_shards)
 
 
-def prepare_data(source: str, target: str,
-                 vocab_source: Dict[str, int], vocab_target: Dict[str, int],
-                 vocab_source_path: Optional[str], vocab_target_path: Optional[str],
+def prepare_data(source_fnames: List[str],
+                 target_fname: str,
+                 source_vocabs: List[vocab.Vocab],
+                 target_vocab: vocab.Vocab,
+                 source_vocab_paths: List[Optional[str]],
+                 target_vocab_path: Optional[str],
                  shared_vocab: bool,
                  max_seq_len_source: int,
                  max_seq_len_target: int,
@@ -484,13 +507,12 @@ def prepare_data(source: str, target: str,
                  output_prefix: str,
                  keep_tmp_shard_files: bool = False):
     logger.info("Preparing data.")
-
-    # write vocabularies
-    vocab.vocab_to_json(vocab_source, os.path.join(output_prefix, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX)
-    vocab.vocab_to_json(vocab_target, os.path.join(output_prefix, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX)
+    # write vocabularies to data folder
+    vocab.save_source_vocabs(source_vocabs, output_prefix)
+    vocab.vocab_to_json(target_vocab, os.path.join(output_prefix, C.VOCAB_TRG_NAME))
 
     # Pass 1: get target/source length ratios.
-    length_statistics = analyze_sequence_lengths(source, target, vocab_source, vocab_target,
+    length_statistics = analyze_sequence_lengths(source_fnames, target_fname, source_vocabs, target_vocab,
                                                  max_seq_len_source, max_seq_len_target)
 
     # define buckets
@@ -504,10 +526,10 @@ def prepare_data(source: str, target: str,
     num_shards = get_num_shards(length_statistics.num_sents, samples_per_shard, min_num_shards)
     logger.info("%d samples will be split into %d shard(s) (requested samples/shard=%d, min_num_shards=%d)."
                 % (length_statistics.num_sents, num_shards, samples_per_shard, min_num_shards))
-    shards, data_statistics = shard_data(source_fname=source,
-                                         target_fname=target,
-                                         vocab_source=vocab_source,
-                                         vocab_target=vocab_target,
+    shards, data_statistics = shard_data(source_fnames=source_fnames,
+                                         target_fname=target_fname,
+                                         source_vocabs=source_vocabs,
+                                         target_vocab=target_vocab,
                                          num_shards=num_shards,
                                          buckets=buckets,
                                          length_ratio_mean=length_statistics.length_ratio_mean,
@@ -516,35 +538,41 @@ def prepare_data(source: str, target: str,
     data_statistics.log()
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
-                                           eos_id=vocab_target[C.EOS_SYMBOL],
+                                           eos_id=target_vocab[C.EOS_SYMBOL],
                                            pad_id=C.PAD_ID)
 
     # 3. convert each shard to serialized ndarrays
-    for shard_idx, (shard_source, shard_target, shard_stats) in enumerate(shards):
-        source_sentences = SequenceReader(shard_source, vocab=None)
+    for shard_idx, (shard_sources, shard_target, shard_stats) in enumerate(shards):
+        sources_sentences = [SequenceReader(s, vocab=None) for s in shard_sources]
         target_sentences = SequenceReader(shard_target, vocab=None)
-        dataset = data_loader.load(source_sentences, target_sentences, shard_stats.num_sents_per_bucket)
+        dataset = data_loader.load(sources_sentences, target_sentences, shard_stats.num_sents_per_bucket)
         shard_fname = os.path.join(output_prefix, C.SHARD_NAME % shard_idx)
         shard_stats.log()
         logger.info("Writing '%s'", shard_fname)
         dataset.save(shard_fname)
 
         if not keep_tmp_shard_files:
-            os.remove(shard_source)
+            for f in shard_sources:
+                os.remove(f)
             os.remove(shard_target)
 
-    config_data = DataConfig(source=os.path.abspath(source),
-                             target=os.path.abspath(target),
-                             vocab_source=vocab_source_path,
-                             vocab_target=vocab_target_path,
-                             shared_vocab=shared_vocab,
-                             num_shards=num_shards,
-                             data_statistics=data_statistics,
+    data_info = DataInfo(sources=[os.path.abspath(fname) for fname in source_fnames],
+                         target=os.path.abspath(target_fname),
+                         source_vocabs=source_vocab_paths,
+                         target_vocab=target_vocab_path,
+                         shared_vocab=shared_vocab,
+                         num_shards=num_shards)
+    data_info_fname = os.path.join(output_prefix, C.DATA_INFO)
+    logger.info("Writing data info to '%s'", data_info_fname)
+    data_info.save(data_info_fname)
+
+    config_data = DataConfig(data_statistics=data_statistics,
                              max_seq_len_source=max_seq_len_source,
-                             max_seq_len_target=max_seq_len_target)
-    data_config_fname = os.path.join(output_prefix, C.DATA_CONFIG)
-    logger.info("Writing data config to '%s'", data_config_fname)
-    config_data.save(data_config_fname)
+                             max_seq_len_target=max_seq_len_target,
+                             num_source_factors=len(source_fnames))
+    config_data_fname = os.path.join(output_prefix, C.DATA_CONFIG)
+    logger.info("Writing data config to '%s'", config_data_fname)
+    config_data.save(config_data_fname)
 
     version_file = os.path.join(output_prefix, C.PREPARED_DATA_VERSION_FILE)
 
@@ -552,30 +580,30 @@ def prepare_data(source: str, target: str,
         version_out.write(str(C.PREPARED_DATA_VERSION))
 
 
-def get_data_statistics(source_sentences: Iterable[List[int]],
+def get_data_statistics(sources_sentences: Sequence[Iterable[List[int]]],
                         target_sentences: Iterable[List[int]],
                         buckets: List[Tuple[int, int]],
                         length_ratio_mean: float,
                         length_ratio_std: float,
-                        vocab_source: vocab.Vocab,
-                        vocab_target: vocab.Vocab) -> 'DataStatistics':
-    data_stats_accumulator = DataStatisticsAccumulator(buckets, vocab_source, vocab_target,
+                        source_vocabs: List[vocab.Vocab],
+                        target_vocab: vocab.Vocab) -> 'DataStatistics':
+    data_stats_accumulator = DataStatisticsAccumulator(buckets, source_vocabs[0], target_vocab,
                                                        length_ratio_mean, length_ratio_std)
 
-    for source, target in zip(source_sentences, target_sentences):
-        buck_idx, buck = get_parallel_bucket(buckets, len(source), len(target))
-        data_stats_accumulator.sequence_pair(source, target, buck_idx)
+    for (sources), target in zip(zip(*sources_sentences), target_sentences):
+        buck_idx, buck = get_parallel_bucket(buckets, len(sources[0]), len(target))
+        data_stats_accumulator.sequence_pair(sources[0], target, buck_idx)
 
     return data_stats_accumulator.statistics
 
 
 def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
-                             validation_source: str,
+                             validation_sources: List[str],
                              validation_target: str,
                              buckets: List[Tuple[int, int]],
                              bucket_batch_sizes: List[BucketBatchSize],
-                             vocab_source: vocab.Vocab,
-                             vocab_target: vocab.Vocab,
+                             source_vocabs: List[vocab.Vocab],
+                             target_vocab: vocab.Vocab,
                              max_seq_len_source: int,
                              max_seq_len_target: int,
                              batch_size: int,
@@ -586,42 +614,44 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
     logger.info("=================================")
     logger.info("Creating validation data iterator")
     logger.info("=================================")
-    validation_length_statistics = analyze_sequence_lengths(validation_source, validation_target,
-                                                            vocab_source, vocab_target,
+    validation_length_statistics = analyze_sequence_lengths(validation_sources, validation_target,
+                                                            source_vocabs, target_vocab,
                                                             max_seq_len_source, max_seq_len_target)
 
-    validation_source_sentences = SequenceReader(validation_source, vocab_source, add_bos=False, limit=None)
-    validation_target_sentences = SequenceReader(validation_target, vocab_target, add_bos=True, limit=None)
+    validation_sources_sentences = [SequenceReader(source, vocab, add_bos=False) for source, vocab in
+                                    zip(validation_sources, source_vocabs)]
+    validation_target_sentences = SequenceReader(validation_target, target_vocab, add_bos=True, limit=None)
 
-    validation_data_statistics = get_data_statistics(validation_source_sentences,
+    validation_data_statistics = get_data_statistics(validation_sources_sentences,
                                                      validation_target_sentences,
                                                      buckets,
                                                      validation_length_statistics.length_ratio_mean,
                                                      validation_length_statistics.length_ratio_std,
-                                                     vocab_source, vocab_target)
+                                                     source_vocabs, target_vocab)
 
     validation_data_statistics.log(bucket_batch_sizes)
 
-    validation_data = data_loader.load(validation_source_sentences,
-                                       validation_target_sentences,
+    validation_data = data_loader.load(validation_sources_sentences, validation_target_sentences,
                                        validation_data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes,
                                                                                                 fill_up)
 
     return ParallelSampleIter(data=validation_data,
                               buckets=buckets,
                               batch_size=batch_size,
-                              bucket_batch_sizes=bucket_batch_sizes)
+                              bucket_batch_sizes=bucket_batch_sizes,
+                              num_factors=len(validation_sources))
 
 
 def get_prepared_data_iters(prepared_data_dir: str,
-                            validation_source: str, validation_target: str,
+                            validation_sources: List[str],
+                            validation_target: str,
                             shared_vocab: bool,
                             batch_size: int,
                             batch_by_words: bool,
                             batch_num_devices: int,
                             fill_up: str) -> Tuple['BaseParallelSampleIter',
                                                    'BaseParallelSampleIter',
-                                                   'DataConfig', vocab.Vocab, vocab.Vocab]:
+                                                   'DataConfig', List[vocab.Vocab], vocab.Vocab]:
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
@@ -632,69 +662,78 @@ def get_prepared_data_iters(prepared_data_dir: str,
         check_condition(version == C.PREPARED_DATA_VERSION,
                         "The dataset %s was written in an old and incompatible format. Please rerun data "
                         "preparation with a current version of Sockeye." % prepared_data_dir)
+    info_file = os.path.join(prepared_data_dir, C.DATA_INFO)
+    check_condition(os.path.exists(info_file),
+                    "Could not find data info %s. Are you sure %s is a directory created with "
+                    "python -m sockeye.prepare_data?" % (info_file, prepared_data_dir))
+    data_info = cast(DataInfo, DataInfo.load(info_file))
     config_file = os.path.join(prepared_data_dir, C.DATA_CONFIG)
     check_condition(os.path.exists(config_file),
                     "Could not find data config %s. Are you sure %s is a directory created with "
                     "python -m sockeye.prepare_data?" % (config_file, prepared_data_dir))
-    data_config = cast(DataConfig, DataConfig.load(config_file))
+    config_data = cast(DataConfig, DataConfig.load(config_file))
     shard_fnames = [os.path.join(prepared_data_dir,
-                                 C.SHARD_NAME % shard_idx) for shard_idx in range(data_config.num_shards)]
+                                 C.SHARD_NAME % shard_idx) for shard_idx in range(data_info.num_shards)]
     for shard_fname in shard_fnames:
         check_condition(os.path.exists(shard_fname), "Shard %s does not exist." % shard_fname)
 
-    source_vocab_fname = os.path.join(prepared_data_dir, C.VOCAB_SRC_NAME) + C.JSON_SUFFIX
-    target_vocab_fname = os.path.join(prepared_data_dir, C.VOCAB_TRG_NAME) + C.JSON_SUFFIX
-    check_condition(bool(source_vocab_fname), "Source vocabulary %s does not exist." % source_vocab_fname)
-    check_condition(bool(target_vocab_fname), "Target vocabulary %s does not exist." % target_vocab_fname)
+    check_condition(shared_vocab == data_info.shared_vocab, "Shared config needed (e.g. for weight tying), but "
+                                                            "data was prepared without a shared vocab. Use %s when "
+                                                            "preparing the data." % C.VOCAB_ARG_SHARED_VOCAB)
 
-    check_condition(shared_vocab == data_config.shared_vocab, "Shared config needed (e.g. for weight tying), but "
-                                                              "data was prepared without a shared vocab. Use %s when "
-                                                              "preparing the data." % C.VOCAB_ARG_SHARED_VOCAB)
+    source_vocabs = vocab.load_source_vocabs(prepared_data_dir)
+    target_vocab = vocab.vocab_from_json(os.path.join(prepared_data_dir, C.VOCAB_TRG_NAME))
 
-    vocab_source = vocab.vocab_from_json(source_vocab_fname)
-    vocab_target = vocab.vocab_from_json(target_vocab_fname)
+    check_condition(len(source_vocabs) == len(data_info.sources),
+                    "Wrong number of source vocabularies. Found %d, need %d." % (len(source_vocabs),
+                                                                                 len(data_info.sources)))
 
-    buckets = data_config.data_statistics.buckets
-    max_seq_len_source = data_config.max_seq_len_source
-    max_seq_len_target = data_config.max_seq_len_target
+    buckets = config_data.data_statistics.buckets
+    max_seq_len_source = config_data.max_seq_len_source
+    max_seq_len_target = config_data.max_seq_len_target
 
     bucket_batch_sizes = define_bucket_batch_sizes(buckets,
                                                    batch_size,
                                                    batch_by_words,
                                                    batch_num_devices,
-                                                   data_config.data_statistics.average_len_target_per_bucket)
+                                                   config_data.data_statistics.average_len_target_per_bucket)
 
-    data_config.data_statistics.log(bucket_batch_sizes)
+    config_data.data_statistics.log(bucket_batch_sizes)
 
     train_iter = ShardedParallelSampleIter(shard_fnames,
                                            buckets,
                                            batch_size,
                                            bucket_batch_sizes,
-                                           fill_up)
+                                           fill_up,
+                                           num_factors=len(data_info.sources))
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
-                                           eos_id=vocab_target[C.EOS_SYMBOL],
+                                           eos_id=target_vocab[C.EOS_SYMBOL],
                                            pad_id=C.PAD_ID)
 
     validation_iter = get_validation_data_iter(data_loader=data_loader,
-                                               validation_source=validation_source,
+                                               validation_sources=validation_sources,
                                                validation_target=validation_target,
                                                buckets=buckets,
                                                bucket_batch_sizes=bucket_batch_sizes,
-                                               vocab_source=vocab_source,
-                                               vocab_target=vocab_target,
+                                               source_vocabs=source_vocabs,
+                                               target_vocab=target_vocab,
                                                max_seq_len_source=max_seq_len_source,
                                                max_seq_len_target=max_seq_len_target,
                                                batch_size=batch_size,
                                                fill_up=fill_up)
 
-    return train_iter, validation_iter, data_config, vocab_source, vocab_target
+    return train_iter, validation_iter, config_data, source_vocabs, target_vocab
 
 
-def get_training_data_iters(source: str, target: str,
-                            validation_source: str, validation_target: str,
-                            vocab_source: vocab.Vocab, vocab_target: vocab.Vocab,
-                            vocab_source_path: Optional[str], vocab_target_path: Optional[str],
+def get_training_data_iters(sources: List[str],
+                            target: str,
+                            validation_sources: List[str],
+                            validation_target: str,
+                            source_vocabs: List[vocab.Vocab],
+                            target_vocab: vocab.Vocab,
+                            source_vocab_paths: List[Optional[str]],
+                            target_vocab_path: Optional[str],
                             shared_vocab: bool,
                             batch_size: int,
                             batch_by_words: bool,
@@ -705,18 +744,18 @@ def get_training_data_iters(source: str, target: str,
                             bucketing: bool,
                             bucket_width: int) -> Tuple['BaseParallelSampleIter',
                                                         'BaseParallelSampleIter',
-                                                        'DataConfig']:
+                                                        'DataConfig', 'DataInfo']:
     """
     Returns data iterators for training and validation data.
 
-    :param source: Path to source training data.
+    :param sources: Path to source training data (with optional factor data paths).
     :param target: Path to target training data.
-    :param validation_source: Path to source validation data.
+    :param validation_sources: Path to source validation data (with optional factor data paths).
     :param validation_target: Path to target validation data.
-    :param vocab_source: Source vocabulary.
-    :param vocab_target: Target vocabulary.
-    :param vocab_source_path: Path to source vocabulary.
-    :param vocab_target_path: Path to target vocabulary.
+    :param source_vocabs: Source vocabulary and optional factor vocabularies.
+    :param target_vocab: Target vocabulary.
+    :param source_vocab_paths: Path to source vocabulary.
+    :param target_vocab_path: Path to target vocabulary.
     :param shared_vocab: Whether the vocabularies are shared.
     :param batch_size: Batch size.
     :param batch_by_words: Size batches by words rather than sentences.
@@ -732,20 +771,20 @@ def get_training_data_iters(source: str, target: str,
     logger.info("Creating training data iterator")
     logger.info("===============================")
     # Pass 1: get target/source length ratios.
-    length_statistics = analyze_sequence_lengths(source, target, vocab_source, vocab_target,
+    length_statistics = analyze_sequence_lengths(sources, target, source_vocabs, target_vocab,
                                                  max_seq_len_source, max_seq_len_target)
     # define buckets
     buckets = define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width,
                                       length_statistics.length_ratio_mean) if bucketing else [
         (max_seq_len_source, max_seq_len_target)]
 
-    source_sentences = SequenceReader(source, vocab_source, add_bos=False)
-    target_sentences = SequenceReader(target, vocab_target, add_bos=True)
+    sources_sentences = [SequenceReader(source, vocab, add_bos=False) for source, vocab in zip(sources, source_vocabs)]
+    target_sentences = SequenceReader(target, target_vocab, add_bos=True)
 
     # 2. pass: Get data statistics
-    data_statistics = get_data_statistics(source_sentences, target_sentences, buckets,
+    data_statistics = get_data_statistics(sources_sentences, target_sentences, buckets,
                                           length_statistics.length_ratio_mean, length_statistics.length_ratio_std,
-                                          vocab_source, vocab_target)
+                                          source_vocabs, target_vocab)
 
     bucket_batch_sizes = define_bucket_batch_sizes(buckets,
                                                    batch_size,
@@ -756,40 +795,43 @@ def get_training_data_iters(source: str, target: str,
     data_statistics.log(bucket_batch_sizes)
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
-                                           eos_id=vocab_target[C.EOS_SYMBOL],
+                                           eos_id=target_vocab[C.EOS_SYMBOL],
                                            pad_id=C.PAD_ID)
 
-    training_data = data_loader.load(source_sentences, target_sentences,
+    training_data = data_loader.load(sources_sentences, target_sentences,
                                      data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes, fill_up)
 
-    config_data = DataConfig(source=source,
-                             target=target,
-                             vocab_source=vocab_source_path,
-                             vocab_target=vocab_target_path,
-                             shared_vocab=shared_vocab,
-                             num_shards=1,
-                             data_statistics=data_statistics,
-                             max_seq_len_source=max_seq_len_source,
-                             max_seq_len_target=max_seq_len_target)
+    data_info = DataInfo(sources=sources,
+                         target=target,
+                         source_vocabs=source_vocab_paths,
+                         target_vocab=target_vocab_path,
+                         shared_vocab=shared_vocab,
+                         num_shards=1)
 
-    train_iter = ParallelSampleIter(training_data,
-                                    buckets,
-                                    batch_size,
-                                    bucket_batch_sizes)
+    config_data = DataConfig(data_statistics=data_statistics,
+                             max_seq_len_source=max_seq_len_source,
+                             max_seq_len_target=max_seq_len_target,
+                             num_source_factors=len(sources))
+
+    train_iter = ParallelSampleIter(data=training_data,
+                                    buckets=buckets,
+                                    batch_size=batch_size,
+                                    bucket_batch_sizes=bucket_batch_sizes,
+                                    num_factors=len(sources))
 
     validation_iter = get_validation_data_iter(data_loader=data_loader,
-                                               validation_source=validation_source,
+                                               validation_sources=validation_sources,
                                                validation_target=validation_target,
                                                buckets=buckets,
                                                bucket_batch_sizes=bucket_batch_sizes,
-                                               vocab_source=vocab_source,
-                                               vocab_target=vocab_target,
+                                               source_vocabs=source_vocabs,
+                                               target_vocab=target_vocab,
                                                max_seq_len_source=max_seq_len_source,
                                                max_seq_len_target=max_seq_len_target,
                                                batch_size=batch_size,
                                                fill_up=fill_up)
 
-    return train_iter, validation_iter, config_data
+    return train_iter, validation_iter, config_data, data_info
 
 
 class LengthStatistics(config.Config):
@@ -868,31 +910,42 @@ def describe_data_and_buckets(data_statistics: DataStatistics, bucket_batch_size
                         bucket_batch_size.average_words_per_batch)
 
 
-class DataConfig(config.Config):
+class DataInfo(config.Config):
     """
-    Stores data paths from training.
+    Stores training data information that is not relevant for inference.
     """
 
     def __init__(self,
-                 source: str,
+                 sources: List[str],
                  target: str,
-                 vocab_source: Optional[str],
-                 vocab_target: Optional[str],
+                 source_vocabs: List[Optional[str]],
+                 target_vocab: Optional[str],
                  shared_vocab: bool,
-                 num_shards: int,
-                 data_statistics: DataStatistics,
-                 max_seq_len_source: int,
-                 max_seq_len_target: int) -> None:
+                 num_shards: int) -> None:
         super().__init__()
-        self.source = source
+        self.sources = sources
         self.target = target
-        self.vocab_source = vocab_source
-        self.vocab_target = vocab_target
+        self.source_vocabs = source_vocabs
+        self.target_vocab = target_vocab
         self.shared_vocab = shared_vocab
         self.num_shards = num_shards
+
+
+class DataConfig(config.Config):
+    """
+    Stores data statistics relevant for inference.
+    """
+
+    def __init__(self,
+                 data_statistics: DataStatistics,
+                 max_seq_len_source: int,
+                 max_seq_len_target: int,
+                 num_source_factors: int) -> None:
+        super().__init__()
         self.data_statistics = data_statistics
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
+        self.num_source_factors = num_source_factors
 
 
 def read_content(path: str, limit: Optional[int] = None) -> Iterator[List[str]]:
@@ -956,7 +1009,7 @@ class SequenceReader(Iterator):
 
     def __init__(self,
                  path: str,
-                 vocab: Optional[Dict[str, int]],
+                 vocab: Optional[vocab.Vocab],
                  add_bos: bool = False,
                  limit: Optional[int] = None) -> None:
         self.path = path
@@ -972,7 +1025,6 @@ class SequenceReader(Iterator):
             check_condition(not add_bos, "Adding a BOS symbol requires a vocabulary")
         self.add_bos = add_bos
         self.limit = limit
-
         self._iter = None  # type: Optional[Iterator]
         self._iterated_once = False
         self.count = 0
@@ -1054,7 +1106,9 @@ class ParallelDataSet(Sized):
                  target: List[mx.nd.array],
                  label: List[mx.nd.array]) -> None:
         check_condition(len(source) == len(target) == len(label),
-                        "Number of buckets for source/target/label must match.")
+                        "Number of buckets for source/target/label do not match: %d/%d/%d." % (len(source),
+                                                                                               len(target),
+                                                                                               len(label)))
         self.source = source
         self.target = target
         self.label = label
@@ -1141,6 +1195,7 @@ class ParallelDataSet(Sized):
                 source.append(self.source[buck_idx])
                 target.append(self.target[buck_idx])
                 label.append(self.label[buck_idx])
+
         return ParallelDataSet(source, target, label)
 
 
@@ -1205,17 +1260,17 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
                  source_data_name,
                  target_data_name,
                  label_name,
+                 num_factors: int = 1,
                  dtype='float32') -> None:
         super().__init__(batch_size=batch_size)
 
         self.buckets = list(buckets)
         self.default_bucket_key = get_default_bucket_key(self.buckets)
         self.bucket_batch_sizes = bucket_batch_sizes
-
         self.source_data_name = source_data_name
         self.target_data_name = target_data_name
         self.label_name = label_name
-
+        self.num_factors = num_factors
         self.dtype = dtype
 
         # "Staging area" that needs to fit any size batch we're using by total number of elements.
@@ -1227,7 +1282,8 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
         # will silently allocate additional memory.
         self.provide_data = [
             mx.io.DataDesc(name=self.source_data_name,
-                           shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[0]),
+                           shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[0],
+                                  self.num_factors),
                            layout=C.BATCH_MAJOR),
             mx.io.DataDesc(name=self.target_data_name,
                            shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[1]),
@@ -1276,9 +1332,11 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                  source_data_name=C.SOURCE_NAME,
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
+                 num_factors: int = 1,
                  dtype='float32') -> None:
-        super().__init__(buckets, batch_size, bucket_batch_sizes,
-                         source_data_name, target_data_name, label_name, dtype)
+        super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
+                         source_data_name=source_data_name, target_data_name=target_data_name,
+                         label_name=label_name, num_factors=num_factors, dtype=dtype)
         assert len(shards_fnames) > 0
         self.shards_fnames = list(shards_fnames)
         self.shard_index = -1
@@ -1292,10 +1350,13 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
         dataset = ParallelDataSet.load(self.shards_fnames[self.shard_index]).fill_up(self.bucket_batch_sizes,
                                                                                      self.fill_up,
                                                                                      seed=self.shard_index)
-        self.shard_iter = ParallelSampleIter(dataset,
-                                             self.buckets,
-                                             self.batch_size,
-                                             self.bucket_batch_sizes)
+        self.shard_iter = ParallelSampleIter(data=dataset,
+                                             buckets=self.buckets,
+                                             batch_size=self.batch_size,
+                                             bucket_batch_sizes=self.bucket_batch_sizes,
+                                             source_data_name=self.source_data_name,
+                                             target_data_name=self.target_data_name,
+                                             num_factors=self.num_factors)
 
     def reset(self):
         if len(self.shards_fnames) > 1:
@@ -1362,9 +1423,11 @@ class ParallelSampleIter(BaseParallelSampleIter):
                  source_data_name=C.SOURCE_NAME,
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
+                 num_factors: int = 1,
                  dtype='float32') -> None:
-        super().__init__(buckets, batch_size, bucket_batch_sizes,
-                         source_data_name, target_data_name, label_name, dtype)
+        super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
+                         source_data_name=source_data_name, target_data_name=target_data_name,
+                         label_name=label_name, num_factors=num_factors, dtype=dtype)
 
         # create independent lists to be shuffled
         self.data = ParallelDataSet(list(data.source), list(data.target), list(data.label))
@@ -1415,7 +1478,6 @@ class ParallelSampleIter(BaseParallelSampleIter):
         source = self.data.source[i][j:j + batch_size]
         target = self.data.target[i][j:j + batch_size]
         data = [source, target]
-
         label = [self.data.label[i][j:j + batch_size]]
 
         provide_data = [mx.io.DataDesc(name=n, shape=x.shape, layout=C.BATCH_MAJOR) for n, x in

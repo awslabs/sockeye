@@ -180,7 +180,7 @@ class StringWithAlignmentMatrixOutputHandler(StringOutputHandler):
         :param t_walltime: Total wall-clock time for translation.
         """
         line = "{sent_id:d} ||| {target} ||| {score:f} ||| {source} ||| {source_len:d} ||| {target_len:d}\n"
-        self.stream.write(line.format(sent_id=t_input.id,
+        self.stream.write(line.format(sent_id=t_input.sentence_id,
                                       target=" ".join(t_output.tokens),
                                       score=t_output.score,
                                       source=" ".join(t_input.tokens),
@@ -211,7 +211,7 @@ class BenchmarkOutputHandler(StringOutputHandler):
         :param t_walltime: Total walltime for translation.
         """
         self.stream.write("input=%s\toutput=%s\tinput_tokens=%d\toutput_tokens=%d\ttranslation_time=%0.4f\n" %
-                          (t_input.sentence,
+                          (" ".join(t_input.tokens),
                            t_output.translation,
                            len(t_input.tokens),
                            len(t_output.tokens),
@@ -241,7 +241,7 @@ class AlignPlotHandler(OutputHandler):
         plot_attention(t_output.attention_matrix,
                        t_input.tokens,
                        t_output.tokens,
-                       "%s_%d.png" % (self.plot_prefix, t_input.id))
+                       "%s_%d.png" % (self.plot_prefix, t_input.sentence_id))
 
 
 class AlignTextHandler(OutputHandler):

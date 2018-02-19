@@ -14,7 +14,7 @@
 import copy
 import logging
 import os
-from typing import cast, Dict, Optional, Tuple
+from typing import cast, Dict, Optional, Tuple, List
 
 import mxnet as mx
 
@@ -38,8 +38,6 @@ class ModelConfig(Config):
     contain these parameters, provide a reasonable default under default_values.
 
     :param config_data: Used training data.
-    :param max_seq_len_source: Maximum source sequence length to unroll during training.
-    :param max_seq_len_target: Maximum target sequence length to unroll during training.
     :param vocab_source_size: Source vocabulary size.
     :param vocab_target_size: Target vocabulary size.
     :param config_embed_source: Embedding config for source.
@@ -53,8 +51,6 @@ class ModelConfig(Config):
 
     def __init__(self,
                  config_data: data_io.DataConfig,
-                 max_seq_len_source: int,
-                 max_seq_len_target: int,
                  vocab_source_size: int,
                  vocab_target_size: int,
                  config_embed_source: encoder.EmbeddingConfig,
@@ -67,8 +63,6 @@ class ModelConfig(Config):
                  weight_normalization: bool = False) -> None:
         super().__init__()
         self.config_data = config_data
-        self.max_seq_len_source = max_seq_len_source
-        self.max_seq_len_target = max_seq_len_target
         self.vocab_source_size = vocab_source_size
         self.vocab_target_size = vocab_target_size
         self.config_embed_source = config_embed_source
@@ -175,6 +169,8 @@ class SockeyeModel:
     def _get_embed_weights(self) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol]:
         """
         Returns embedding parameters for source and target.
+        When source and target embeddings are shared, they are created here and passed in to each side,
+        instead of being created in the Embedding constructors.
 
         :return: Tuple of source and target parameter symbols.
         """
@@ -217,7 +213,9 @@ class SockeyeModel:
         embed_weight_source, embed_weight_target, out_weight_target = self._get_embed_weights()
         self.embedding_source = encoder.Embedding(self.config.config_embed_source,
                                                   prefix=C.SOURCE_EMBEDDING_PREFIX,
-                                                  embed_weight=embed_weight_source)
+                                                  embed_weight=embed_weight_source,
+                                                  is_source=True)
+
         self.embedding_target = encoder.Embedding(self.config.config_embed_target,
                                                   prefix=C.TARGET_EMBEDDING_PREFIX,
                                                   embed_weight=embed_weight_target)

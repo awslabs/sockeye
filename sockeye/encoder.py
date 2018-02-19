@@ -22,7 +22,7 @@ from typing import Callable, List, Optional, Tuple, Union
 
 import mxnet as mx
 
-from sockeye.config import Config
+from . import config
 from . import constants as C
 from . import rnn
 from . import convolution
@@ -44,7 +44,7 @@ def get_encoder(config: EncoderConfig) -> 'Encoder':
         raise ValueError("Unsupported encoder configuration")
 
 
-class RecurrentEncoderConfig(Config):
+class RecurrentEncoderConfig(config.Config):
     """
     Recurrent encoder configuration.
 
@@ -63,7 +63,7 @@ class RecurrentEncoderConfig(Config):
         self.reverse_input = reverse_input
 
 
-class ConvolutionalEncoderConfig(Config):
+class ConvolutionalEncoderConfig(config.Config):
     """
     Convolutional encoder configuration.
 
@@ -267,16 +267,29 @@ class ReverseSequence(Encoder):
         return self.num_hidden
 
 
-class EmbeddingConfig(Config):
+class FactorConfig(config.Config):
+
+    def __init__(self, vocab_size: int, num_embed: int) -> None:
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.num_embed = num_embed
+
+
+class EmbeddingConfig(config.Config):
 
     def __init__(self,
                  vocab_size: int,
                  num_embed: int,
-                 dropout: float) -> None:
+                 dropout: float,
+                 factor_configs: Optional[List[FactorConfig]] = None) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
         self.dropout = dropout
+        self.factor_configs = factor_configs
+        self.num_factors = 1
+        if self.factor_configs is not None:
+            self.num_factors += len(self.factor_configs)
 
 
 class Embedding(Encoder):
@@ -286,18 +299,29 @@ class Embedding(Encoder):
     :param config: Embedding config.
     :param prefix: Name prefix for symbols of this encoder.
     :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
+    :param is_source: Whether this is the source embedding instance. Default: False.
     """
 
     def __init__(self,
                  config: EmbeddingConfig,
                  prefix: str,
-                 embed_weight: Optional[mx.sym.Symbol] = None) -> None:
+                 embed_weight: Optional[mx.sym.Symbol] = None,
+                 is_source: bool = False) -> None:
         self.config = config
         self.prefix = prefix
         self.embed_weight = embed_weight
+        self.is_source = is_source
+
         if self.embed_weight is None:
             self.embed_weight = mx.sym.Variable(prefix + "weight",
                                                 shape=(self.config.vocab_size, self.config.num_embed))
+
+        self.embed_factor_weights = []  # type: List[mx.sym.Symbol]
+        if self.config.factor_configs is not None:
+            # Factors weights aren't shared so they're not passed in and we create them here.
+            for i, fc in enumerate(self.config.factor_configs):
+                self.embed_factor_weights.append(mx.sym.Variable(prefix + "factor%d_weight" % i,
+                                                                 shape=(fc.vocab_size, fc.num_embed)))
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -311,11 +335,32 @@ class Embedding(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
+        factor_embeddings = []  # type: List[mx.sym.Symbol]
+        if self.is_source:
+            data, *data_factors = mx.sym.split(data=data,
+                                               num_outputs=self.config.num_factors,
+                                               axis=2,
+                                               squeeze_axis=True, name=self.prefix + "factor_split")
+
+            if self.config.factor_configs is not None:
+                for i, (factor_data, factor_config, factor_weight) in enumerate(zip(data_factors,
+                                                                                    self.config.factor_configs,
+                                                                                    self.embed_factor_weights)):
+                    factor_embeddings.append(mx.sym.Embedding(data=factor_data,
+                                                              input_dim=factor_config.vocab_size,
+                                                              weight=factor_weight,
+                                                              output_dim=factor_config.num_embed,
+                                                              name=self.prefix + "factor%d_embed" % i))
+
         embedding = mx.sym.Embedding(data=data,
                                      input_dim=self.config.vocab_size,
                                      weight=self.embed_weight,
                                      output_dim=self.config.num_embed,
                                      name=self.prefix + "embed")
+
+        if self.config.factor_configs is not None:
+            embedding = mx.sym.concat(embedding, *factor_embeddings, dim=2, name=self.prefix + "embed_plus_factors")
+
         if self.config.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.config.dropout, name="source_embed_dropout")
 
@@ -829,7 +874,7 @@ class TransformerEncoder(Encoder):
         return self.config.model_size
 
 
-class ConvolutionalEmbeddingConfig(Config):
+class ConvolutionalEmbeddingConfig(config.Config):
     """
     Convolutional embedding encoder configuration.
 

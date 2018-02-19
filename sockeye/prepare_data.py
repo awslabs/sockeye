@@ -41,29 +41,35 @@ def main():
     bucketing = not args.no_bucketing
     bucket_width = args.bucket_width
 
-    shared_vocab = args.shared_vocab
-    vocab_source_path = args.source_vocab
-    vocab_target_path = args.target_vocab
+    source_paths = [args.source] + args.source_factors
+    # NOTE: Pre-existing source factor vocabularies not yet supported for prepare data
+    source_factor_vocab_paths = [None] * len(args.source_factors)
+    source_vocab_paths = [args.source_vocab] + source_factor_vocab_paths
+
     num_words_source, num_words_target = args.num_words
     word_min_count_source, word_min_count_target = args.word_min_count
     max_len_source, max_len_target = args.max_seq_len
 
-    vocab_source, vocab_target = vocab.load_or_create_vocabs(source=args.source,
-                                                             target=args.target,
-                                                             source_vocab_path=args.source_vocab,
-                                                             target_vocab_path=args.target_vocab,
-                                                             shared_vocab=args.shared_vocab,
-                                                             num_words_source=num_words_source,
-                                                             word_min_count_source=word_min_count_source,
-                                                             num_words_target=num_words_target,
-                                                             word_min_count_target=word_min_count_target)
+    source_vocabs, target_vocab = vocab.load_or_create_vocabs(
+        source_paths=source_paths,
+        target_path=args.target,
+        source_vocab_paths=source_vocab_paths,
+        target_vocab_path=args.target_vocab,
+        shared_vocab=args.shared_vocab,
+        num_words_source=num_words_source,
+        word_min_count_source=word_min_count_source,
+        num_words_target=num_words_target,
+        word_min_count_target=word_min_count_target)
 
-    data_io.prepare_data(args.source, args.target,
-                         vocab_source, vocab_target,
-                         vocab_source_path, vocab_target_path,
-                         shared_vocab,
-                         max_len_source,
-                         max_len_target,
+    data_io.prepare_data(source_fnames=source_paths,
+                         target_fname=args.target,
+                         source_vocabs=source_vocabs,
+                         target_vocab=target_vocab,
+                         source_vocab_paths=source_vocab_paths,
+                         target_vocab_path=args.target_vocab,
+                         shared_vocab=args.shared_vocab,
+                         max_seq_len_source=max_len_source,
+                         max_seq_len_target=max_len_target,
                          bucketing=bucketing,
                          bucket_width=bucket_width,
                          samples_per_shard=samples_per_shard,

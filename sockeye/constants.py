@@ -184,18 +184,24 @@ DEFAULT_BEAM_SIZE = 5
 CHUNK_SIZE_NO_BATCHING = 1
 CHUNK_SIZE_PER_BATCH_SEGMENT = 500
 
+# Inference Input JSON constants
+JSON_TEXT_KEY = "text"
+JSON_FACTORS_KEY = "factors"
+JSON_ENCODING = "utf-8"
+
 VERSION_NAME = "version"
 CONFIG_NAME = "config"
 LOG_NAME = "log"
 JSON_SUFFIX = ".json"
-VOCAB_SRC_NAME = "vocab.src"
-VOCAB_TRG_NAME = "vocab.trg"
+VOCAB_SRC_PREFIX = "vocab.src"
+VOCAB_SRC_NAME = VOCAB_SRC_PREFIX + ".%d" + JSON_SUFFIX
+VOCAB_TRG_NAME = "vocab.trg" + JSON_SUFFIX
 VOCAB_ENCODING = "utf-8"
 PARAMS_PREFIX = "params."
 PARAMS_NAME = PARAMS_PREFIX + "%05d"
 PARAMS_BEST_NAME = "params.best"
 DECODE_OUT_NAME = "decode.output.%05d"
-DECODE_IN_NAME = "decode.source"
+DECODE_IN_NAME = "decode.source.%d"
 DECODE_REF_NAME = "decode.target"
 SYMBOL_NAME = "symbol" + JSON_SUFFIX
 METRICS_NAME = "metrics"
@@ -232,9 +238,13 @@ INFERENCE_ARG_INPUT_LONG = "--input"
 INFERENCE_ARG_INPUT_SHORT = "-i"
 INFERENCE_ARG_OUTPUT_LONG = "--output"
 INFERENCE_ARG_OUTPUT_SHORT = "-o"
+INFERENCE_ARG_INPUT_FACTORS_LONG = "--input-factors"
+INFERENCE_ARG_INPUT_FACTORS_SHORT = "-if"
 TRAIN_ARGS_MONITOR_BLEU = "--decode-and-evaluate"
 TRAIN_ARGS_CHECKPOINT_FREQUENCY = "--checkpoint-frequency"
 
+# Used to delimit factors on STDIN for inference
+DEFAULT_FACTOR_DELIMITER = '|'
 
 # data layout strings
 BATCH_MAJOR = "NTC"
@@ -334,7 +344,8 @@ LARGE_NEGATIVE_VALUE = -LARGE_POSITIVE_VALUE
 SHARD_NAME = "shard.%05d"
 SHARD_SOURCE = SHARD_NAME + ".source"
 SHARD_TARGET = SHARD_NAME + ".target"
+DATA_INFO = "data.info"
 DATA_CONFIG = "data.config"
 PREPARED_DATA_VERSION_FILE = "data.version"
-PREPARED_DATA_VERSION = 1
+PREPARED_DATA_VERSION = 2
 
