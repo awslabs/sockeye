@@ -272,9 +272,7 @@ def _decode_and_evaluate(checkpoint_decoder: checkpoint_decoder.CheckpointDecode
     queue.put((checkpoint, metrics))
 
 
-def write_tensorboard(summary_writer,
-                      metrics: Dict[str, Union[float, int]],
-                      checkpoint: int):
+def write_tensorboard(summary_writer, metrics: Dict[str, Union[float, int]], checkpoint: int):
     """
     Writes a Tensorboard scalar event to the given SummaryWriter.
 
@@ -287,8 +285,4 @@ def write_tensorboard(summary_writer,
     except ImportError:
         raise RuntimeError("Please install tensorboard.")
     for name, value in metrics.items():
-        summary_writer.add_summary(
-            scalar(
-                name=name, scalar=value), global_step=checkpoint)
-
-
+        summary_writer.add_summary(scalar(name=name, scalar=value), global_step=checkpoint)

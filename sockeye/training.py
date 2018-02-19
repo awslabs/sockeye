@@ -22,7 +22,7 @@ import random
 import shutil
 import time
 from functools import reduce
-from typing import Any, AnyStr, Dict, List, Optional, Tuple
+from typing import Any, AnyStr, Dict, List, Optional, Tuple, Union
 
 import mxnet as mx
 import numpy as np
@@ -69,6 +69,8 @@ class TrainingModel(model.SockeyeModel):
 
         self._build_model_components()
         self._initialize(train_iter)
+
+        self._monitor = None  # type: Optional[mx.monitor.Monitor]
 
     def _initialize(self, train_iter: data_io.BaseParallelSampleIter):
         """
@@ -221,7 +223,7 @@ class TrainingModel(model.SockeyeModel):
         return self.model_loss
 
     @property
-    def optimizer(self) -> mx.optimizer.Optimizer:
+    def optimizer(self) -> Union[mx.optimizer.Optimizer, SockeyeOptimizer]:
         # TODO: Push update to MXNet to expose the optimizer (Module should have a get_optimizer method)
         return self.current_module._optimizer
 
@@ -269,9 +271,7 @@ class TrainingModel(model.SockeyeModel):
         Synchronizes parameters across devices, saves the parameters to disk, and updates self.params
         and self.aux_params.
 
-        :param output_folder: The folder in which the parameters will be serialized in.
-        :param checkpoint: The current checkpoint used for creating a unique parameter file name.
-        :returns: The full path of the parameter file.
+        :param fname: Filename to write parameters to.
         """
         arg_params, aux_params = self.module.get_params()
         self.module.set_params(arg_params, aux_params)
@@ -284,13 +284,17 @@ class TrainingModel(model.SockeyeModel):
         self.module.set_params(arg_params=self.params, aux_params=self.aux_params)
 
     def install_monitor(self, monitor_pattern: str, monitor_stat_func_name: str):
-        monitor = mx.monitor.Monitor(interval=C.MEASURE_SPEED_EVERY,
-                                     stat_func=C.MONITOR_STAT_FUNCS.get(monitor_stat_func_name),
-                                     pattern=monitor_pattern,
-                                     sort=True)
-        self.module.install_monitor(monitor)
+        self._monitor = mx.monitor.Monitor(interval=C.MEASURE_SPEED_EVERY,
+                                           stat_func=C.MONITOR_STAT_FUNCS.get(monitor_stat_func_name),
+                                           pattern=monitor_pattern,
+                                           sort=True)
+        self.module.install_monitor(self._monitor)
         logger.info("Installed MXNet monitor; pattern='%s'; statistics_func='%s'",
                     monitor_pattern, monitor_stat_func_name)
+
+    @property
+    def monitor(self) -> Optional[mx.monitor.Monitor]:
+        return self._monitor
 
 
 def global_norm(ndarrays: List[mx.nd.NDArray]) -> float:
@@ -305,7 +309,7 @@ class _TrainingState:
     be stored to disk when resuming training.
     """
 
-    __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'updates', 'samples']
+    __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'updates', 'samples', 'gradient_norm']
 
     def __init__(self,
                  num_not_improved: int,
@@ -318,6 +322,7 @@ class _TrainingState:
         self.checkpoint = checkpoint
         self.updates = updates
         self.samples = samples
+        self.gradient_norm = None  # type: Optional[float]
 
     def save(self, fname: str):
         """
@@ -334,10 +339,15 @@ class _TrainingState:
         with open(fname, "rb") as fp:
             return pickle.load(fp)
 
+    @staticmethod
+    def initial() -> '_TrainingState':
+        return _TrainingState(num_not_improved=0, epoch=0, checkpoint=0, updates=0, samples=0)
+
 
 class Trainer:
     """
 
+    :param model: Training model.
     :param optimizer_config: The optimizer configuration.
     :param output_folder: The folder in which all model artifacts will be stored in (parameters, checkpoints, etc.).
     :param max_params_files_to_keep: Maximum number of params files to keep in the output folder (last n are kept).
@@ -346,19 +356,19 @@ class Trainer:
     """
 
     def __init__(self,
+                 model: TrainingModel,
                  optimizer_config: OptimizerConfig,
                  max_params_files_to_keep: int,
                  log_to_tensorboard: bool = True) -> None:
+        self.model = model
         self.optimizer_config = optimizer_config
         self.max_params_files_to_keep = max_params_files_to_keep
         self.log_to_tensorboard = log_to_tensorboard
-        self.state = _TrainingState(num_not_improved=0, epoch=0, checkpoint=0, updates=0, samples=0)
+        self.state = _TrainingState.initial()
 
     def fit(self,
-            model: TrainingModel,
             train_iter: data_io.BaseParallelSampleIter,
             val_iter: data_io.BaseParallelSampleIter,
-            output_folder: str,
             metrics: List[AnyStr],
             allow_missing_params: bool,
             max_updates: Optional[int],
@@ -410,103 +420,64 @@ class Trainer:
                               "Unknown gradient clipping type %s" % self.optimizer_config.gradient_clipping_type)
 
         logger.info("Training started.")
-        self.training_monitor = callback.TrainingMonitor(output_folder,
+        self.training_monitor = callback.TrainingMonitor(self.model.output_dir,
                                                          optimized_metric=early_stopping_metric,
                                                          use_tensorboard=self.log_to_tensorboard,
                                                          cp_decoder=cp_decoder)
 
         # parameters
-        model.initialize_parameters(self.optimizer_config.initializer, allow_missing_params)
+        self.model.initialize_parameters(self.optimizer_config.initializer, allow_missing_params)
         if params is not None:
             logger.info("Training will start with parameters loaded from '%s'", params)
-            model.load_params_from_file(params)
-        model.log_parameters()
+            self.model.load_params_from_file(params)
+        self.model.log_parameters()
 
         # optimizer
-        model.initialize_optimizer(self.optimizer_config)
+        self.model.initialize_optimizer(self.optimizer_config)
         if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_INITIAL:
-            model.save_optimizer_states(os.path.join(output_folder, C.OPT_STATES_INITIAL))
-        optimizer = model.optimizer
+            self.model.save_optimizer_states(os.path.join(self.model.output_dir, C.OPT_STATES_INITIAL))
 
-        # resume training?
-        training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
-        resume_training = os.path.exists(training_state_dir)
+        resume_training = os.path.exists(self.training_state_dirname)
         if resume_training:
-            logger.info("Found partial training in directory %s. Resuming from saved state.", training_state_dir)
+            logger.info("Found partial training in '%s'. Resuming from saved state.", self.training_state_dirname)
             utils.check_condition('dist' not in self.optimizer_config.kvstore,
                                   "Training continuation not supported with distributed training.")
-            self.state = self._load_checkpoint(model, training_state_dir, train_iter)
+            self._load_checkpoint(train_iter)
         else:
-            self._save_checkpoint(model, output_folder, train_iter)
+            self._save_checkpoint(train_iter, False)  # TODO
 
-        metric_train, metric_val, metric_loss = self._create_metrics(metrics, model.optimizer, model.loss)
+        metric_train, metric_val, metric_loss = self._create_metrics(metrics, self.model.optimizer, self.model.loss)
 
-        mxmonitor = model.install_monitor(mxmonitor_pattern, mxmonitor_stat_func) if mxmonitor_pattern is not None else None
+        if mxmonitor_pattern is not None:
+            self.model.install_monitor(mxmonitor_pattern, mxmonitor_stat_func)
 
         speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
-
         tic = time.time()
 
         next_data_batch = train_iter.next()
-
         while True:
+
             if not train_iter.iter_next():
                 self.state.epoch += 1
                 train_iter.reset()
+                if max_num_epochs is not None and self.state.epoch == max_num_epochs:
+                    logger.info("Maximum # of epochs (%s) reached.", max_num_epochs)
+                    break
 
-            if (max_updates is not None and self.state.updates == max_updates) or \
-                    (max_num_epochs is not None and self.state.epoch == max_num_epochs):
-                logger.info("Maximum # of updates (%s) or epochs (%s) reached.", max_updates, max_num_epochs)
+            if max_updates is not None and self.state.updates == max_updates:
+                logger.info("Maximum # of updates (%s) reached.", max_updates)
                 break
 
-            # process batch
+            ######
+            # STEP
+            ######
             batch = next_data_batch
-
-            if mxmonitor is not None:
-                mxmonitor.tic()
-
-            # forward & backward pass, update train metric
-            model.run_forward_backward(batch, metric_train)
-
-            gradient_norm = None
-            if self.state.updates > 0 and self.state.updates % checkpoint_frequency == 0:
-                # compute values for logging to metrics (before rescaling...)
-                gradient_norm = model.get_global_gradient_norm()
-
-            # note: C.GRADIENT_CLIPPING_TYPE_ABS is handled by the mxnet optimizer directly
-            if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
-                if gradient_norm is None:
-                    gradient_norm = model.get_global_gradient_norm()
-                if gradient_norm > self.optimizer_config.gradient_clipping_threshold:
-                    ratio = self.optimizer_config.gradient_clipping_threshold / gradient_norm
-                    model.rescale_gradients(ratio)
-
-            # If using an extended optimizer, provide extra state information about the current batch
-            # Loss: training loss
-            if metric_loss is not None and isinstance(optimizer, SockeyeOptimizer):
-                # Loss for this batch
-                metric_loss.reset()
-                metric_loss.update(batch.label, model.module.get_outputs())
-                [(_, m_val)] = metric_loss.get_name_value()
-                batch_state = BatchState(metric_val=m_val)
-                optimizer.pre_update_batch(batch_state)
-
-            # Call optimizer to update weights given gradients, current state
-            model.update()
-
-            if mxmonitor is not None:
-                results = mxmonitor.toc()
-                if results:
-                    for _, k, v in results:
-                        logger.info('Monitor: Batch [{:d}] {:s} {:s}'.format(self.state.updates, k, v))
-
+            self.step(self.model, batch, checkpoint_frequency, metric_train, metric_loss)
             if train_iter.iter_next():
                 next_data_batch = train_iter.next()
-                model.prepare_batch(next_data_batch)
-
+                self.model.prepare_batch(next_data_batch)
             batch_num_samples = batch.data[0].shape[0]
             batch_num_tokens = batch.data[0].shape[1] * batch_num_samples
-
             self.state.updates += 1
             self.state.samples += batch_num_samples
             speedometer(self.state.epoch, self.state.updates, batch_num_samples, batch_num_tokens, metric_train)
@@ -515,20 +486,17 @@ class Trainer:
             # CHECKPOINT
             ############
             if self.state.updates > 0 and self.state.updates % checkpoint_frequency == 0:
-                toc = time.time()
-
+                time_cost = time.time() - tic
                 self.state.checkpoint += 1
 
                 metric_train_dict = {k: v for k, v in metric_train.get_name_value()}
-                if gradient_norm is not None:
-                    metric_train_dict['gradient-norm'] = gradient_norm
+                metric_train_dict['gradient-norm'] = self.state.gradient_norm
                 self.training_monitor.checkpoint_callback(self.state.checkpoint,
                                                           self.state.epoch,
-                                                          optimizer.learning_rate,
+                                                          self.model.optimizer.learning_rate,
                                                           metric_train_dict,
-                                                          memory_data=utils.get_gpu_memory_usage(model.context))
+                                                          memory_data=utils.get_gpu_memory_usage(self.model.context))
 
-                time_cost = toc - tic
                 logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f Updates/sec=%.3f",
                             self.state.checkpoint, self.state.updates, self.state.epoch,
                             self.state.samples, time_cost, checkpoint_frequency / time_cost)
@@ -538,7 +506,7 @@ class Trainer:
                 metric_train.reset()
 
                 # evaluation on validation set
-                model.evaluate(val_iter, metric_val)
+                self.model.evaluate(val_iter, metric_val)
                 for name, val in metric_val.get_name_value():
                     logger.info('Checkpoint [%d]\tValidation-%s=%f', self.state.checkpoint, name, val)
                 has_improved, best_checkpoint = self.training_monitor.eval_end_callback(self.state.checkpoint,
@@ -546,13 +514,13 @@ class Trainer:
 
                 # If using an extended optimizer, provide extra state information about the current checkpoint
                 # Loss: optimized metric
-                if metric_loss is not None and isinstance(optimizer, SockeyeOptimizer):
+                if metric_loss is not None and isinstance(self.model.optimizer, SockeyeOptimizer):
                     m_val = 0
                     for name, val in metric_val.get_name_value():
                         if name == self.training_monitor.optimized_metric:
                             m_val = val
                     checkpoint_state = CheckpointState(checkpoint=self.state.checkpoint, metric_val=m_val)
-                    optimizer.pre_update_checkpoint(checkpoint_state)
+                    self.model.optimizer.pre_update_checkpoint(checkpoint_state)
 
                 # learning rate adjustment
                 if self.optimizer_config.lr_scheduler is not None:
@@ -563,25 +531,21 @@ class Trainer:
                     if lr_adjusted and not has_improved:
                         if lr_decay_param_reset:
                             logger.info("Loading parameters from last best checkpoint: %d", best_checkpoint)
-                            model.load_params_from_file(os.path.join(output_folder, C.PARAMS_NAME % best_checkpoint))
+                            self.model.load_params_from_file(self.best_params_fname)
                         if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_INITIAL:
                             logger.info("Resetting optimizer states to initial")
-                            model.load_optimizer_states(os.path.join(output_folder, C.OPT_STATES_INITIAL))
+                            self.model.load_optimizer_states(os.path.join(self.model.output_dir, C.OPT_STATES_INITIAL))
                         elif lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
                             logger.info("Resetting optimizer states to last best checkpoint: %d", best_checkpoint)
-                            model.load_optimizer_states(os.path.join(output_folder, C.OPT_STATES_BEST))
+                            self.model.load_optimizer_states(os.path.join(self.model.output_dir, C.OPT_STATES_BEST))
 
                 if has_improved:
 
-                    best_params_path = os.path.join(output_folder, C.PARAMS_BEST_NAME)
-                    if os.path.lexists(best_params_path):
-                        os.remove(best_params_path)
-                    actual_best_params_fname = C.PARAMS_NAME % best_checkpoint
-                    os.symlink(actual_best_params_fname, best_params_path)
+                    self._update_best_params_link()
 
                     if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
-                        best_opt_states_fname = os.path.join(output_folder, C.OPT_STATES_BEST)
-                        model.save_optimizer_states(best_opt_states_fname)
+                        best_opt_states_fname = os.path.join(self.model.output_dir, C.OPT_STATES_BEST)
+                        self.model.save_optimizer_states(best_opt_states_fname)
 
                     self.state.num_not_improved = 0
 
@@ -596,28 +560,27 @@ class Trainer:
 
                     if min_num_epochs is not None and self.state.epoch < min_num_epochs:
                         logger.info("Minimum number of epochs (%d) not reached yet: %d",
-                                    min_num_epochs,
-                                    self.state.epoch)
+                                    min_num_epochs, self.state.epoch)
                         stop_fit = False
 
                     if stop_fit:
                         break
 
-                self._save_checkpoint(model, output_folder, train_iter)
+                self._save_checkpoint(train_iter, has_improved)
 
                 tic = time.time()
 
-        cleanup_params_files(output_folder, self.max_params_files_to_keep,
+        cleanup_params_files(self.model.output_dir, self.max_params_files_to_keep,
                              self.state.checkpoint, self.training_monitor.get_best_checkpoint())
 
         logger.info('Training stopped')
         self.training_monitor.stop_fit_callback()
-        final_training_state_dirname = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
+        final_training_state_dirname = os.path.join(self.model.output_dir, C.TRAINING_STATE_DIRNAME)
         if os.path.exists(final_training_state_dirname):
             shutil.rmtree(final_training_state_dirname)
 
         if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
-            best_opt_states_fname = os.path.join(output_folder, C.OPT_STATES_BEST)
+            best_opt_states_fname = os.path.join(self.model.output_dir, C.OPT_STATES_BEST)
             if os.path.exists(best_opt_states_fname):
                 os.remove(best_opt_states_fname)
 
@@ -626,6 +589,71 @@ class Trainer:
                     self.training_monitor.optimized_metric,
                     self.training_monitor.get_best_validation_score())
         return self.training_monitor.get_best_validation_score()
+
+    def step(self,
+             model: TrainingModel,
+             batch: mx.io.DataBatch,
+             checkpoint_frequency: int,
+             metric_train: mx.metric.EvalMetric,
+             metric_loss: Optional[mx.metric.EvalMetric] = None):
+
+        if model.monitor is not None:
+            model.monitor.tic()
+
+        ####################
+        # Forward & Backward
+        ####################
+        model.run_forward_backward(batch, metric_train)
+
+        ####################
+        # Gradient rescaling
+        ####################
+        gradient_norm = None
+        if self.state.updates > 0 and (self.state.updates + 1) % checkpoint_frequency == 0:
+            # compute values for logging to metrics (before rescaling...)
+            gradient_norm = self.state.gradient_norm = model.get_global_gradient_norm()
+
+        # note: C.GRADIENT_CLIPPING_TYPE_ABS is handled by the mxnet optimizer directly
+        if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
+            if gradient_norm is None:
+                gradient_norm = model.get_global_gradient_norm()
+            # clip gradients
+            if gradient_norm > self.optimizer_config.gradient_clipping_threshold:
+                ratio = self.optimizer_config.gradient_clipping_threshold / gradient_norm
+                model.rescale_gradients(ratio)
+
+        # If using an extended optimizer, provide extra state information about the current batch
+        optimizer = model.optimizer
+        if metric_loss is not None and isinstance(optimizer, SockeyeOptimizer):
+            # Loss for this batch
+            metric_loss.reset()
+            metric_loss.update(batch.label, model.module.get_outputs())
+            [(_, m_val)] = metric_loss.get_name_value()
+            batch_state = BatchState(metric_val=m_val)
+            optimizer.pre_update_batch(batch_state)
+
+        ########
+        # UPDATE
+        ########
+        model.update()
+
+        if model.monitor is not None:
+            results = model.monitor.toc()
+            if results:
+                for _, k, v in results:
+                    logger.info('Monitor: Batch [{:d}] {:s} {:s}'.format(self.state.updates, k, v))
+
+    @property
+    def best_params_fname(self) -> str:
+        return os.path.join(self.model.output_dir, C.PARAMS_BEST_NAME)
+
+    @property
+    def current_params_fname(self) -> str:
+        return os.path.join(self.model.output_dir, C.PARAMS_NAME % self.state.checkpoint)
+
+    @property
+    def training_state_dirname(self) -> str:
+        return os.path.join(self.model.output_dir, C.TRAINING_STATE_DIRNAME)
 
     @staticmethod
     def _create_eval_metric(metric_name: AnyStr) -> mx.metric.EvalMetric:
@@ -666,6 +694,16 @@ class Trainer:
             metric_loss = None
         return metric_train, metric_val, metric_loss
 
+    def _update_best_params_link(self):
+        """
+        Updates the params.best link to the latest best parameter file.
+        """
+        best_params_path = self.best_params_fname
+        actual_best_params_fname = C.PARAMS_NAME % self.training_monitor.get_best_checkpoint()
+        if os.path.lexists(best_params_path):
+            os.remove(best_params_path)
+        os.symlink(actual_best_params_fname, best_params_path)
+
     def _check_dist_kvstore_requirements(self, lr_decay_opt_states_reset, lr_decay_param_reset, optimizer):
         # In distributed training the optimizer will run remotely. For eve we however need to pass information about
         # the loss, which is not possible anymore by means of accessing self.module._curr_module._optimizer.
@@ -678,128 +716,115 @@ class Trainer:
         utils.check_condition(not lr_decay_opt_states_reset, "Optimizer state reset when the learning rate decays "
                                                              "not supported with distributed training.")
 
-    @staticmethod
-    def _save_params(model: TrainingModel, output_folder: str, checkpoint: int) -> str:
+    def _save_params(self):
         """
-        Synchronizes parameters across devices, saves the parameters to disk, and updates self.params
-        and self.aux_params.
+        Saves model parameters at current checkpoint and optionally cleans up older parameter files to save disk space.
 
-        :param output_folder: The folder in which the parameters will be serialized in.
-        :param checkpoint: The current checkpoint used for creating a unique parameter file name.
+        :param model: Training model.
         :returns: The full path of the parameter file.
         """
-        params_base_fname = C.PARAMS_NAME % checkpoint
-        model.save_params_to_file(os.path.join(output_folder, params_base_fname))
-        return params_base_fname
+        self.model.save_params_to_file(self.current_params_fname)
+        cleanup_params_files(self.model.output_dir, self.max_params_files_to_keep, self.state.checkpoint,
+                             self.training_monitor.get_best_checkpoint())
 
-    def _save_checkpoint(self, model: TrainingModel, output_folder: str,
-                         train_iter: data_io.BaseParallelSampleIter,
-                         has_improved: bool):
+    def _save_checkpoint(self, train_iter: data_io.BaseParallelSampleIter, has_improved: bool):
         """
         Saves checkpoint.
         """
-        self._save_params(model, output_folder, self.state.checkpoint)
-        cleanup_params_files(output_folder, self.max_params_files_to_keep,
-                             self.state.checkpoint, self.training_monitor.get_best_checkpoint())
+        self._save_params()
 
         if has_improved:
 
-            best_params_path = os.path.join(output_folder, C.PARAMS_BEST_NAME)
-            if os.path.lexists(best_params_path):
-                os.remove(best_params_path)
-            actual_best_params_fname = C.PARAMS_NAME % self.training_monitor.get_best_checkpoint()
-            os.symlink(actual_best_params_fname, best_params_path)
+            self._update_best_params_link()
 
             if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
-                best_opt_states_fname = os.path.join(output_folder, C.OPT_STATES_BEST)
-                model.save_optimizer_states(best_opt_states_fname)
+                best_opt_states_fname = os.path.join(self.model.output_dir, C.OPT_STATES_BEST)
+                self.model.save_optimizer_states(best_opt_states_fname)
 
             self.state.num_not_improved = 0
 
-
         # Create temporary directory for storing the state of the optimization process
-        training_state_dirname = os.path.join(output_folder, C.TRAINING_STATE_TEMP_DIRNAME)
+        training_state_dirname = os.path.join(self.model.output_dir, C.TRAINING_STATE_TEMP_DIRNAME)
         if not os.path.exists(training_state_dirname):
             os.mkdir(training_state_dirname)
-        # Link current parameter file
+
+        # (1) Parameters: link current file
         params_base_fname = C.PARAMS_NAME % self.state.checkpoint
         os.symlink(os.path.join("..", params_base_fname),
                    os.path.join(training_state_dirname, C.TRAINING_STATE_PARAMS_NAME))
 
-        # Save current optimizer states
+        # (2) Optimizer states
         opt_state_fname = os.path.join(training_state_dirname, C.OPT_STATES_LAST)
-        model.save_optimizer_states(opt_state_fname)
+        self.model.save_optimizer_states(opt_state_fname)
 
-        # State of the bucket iterator
+        # (3) Data iterator
         train_iter.save_state(os.path.join(training_state_dirname, C.BUCKET_ITER_STATE_NAME))
 
+        # (4) Random generators
         # RNG states: python's random and np.random provide functions for
         # storing the state, mxnet does not, but inside our code mxnet's RNG is
         # not used AFAIK
         with open(os.path.join(training_state_dirname, C.RNG_STATE_NAME), "wb") as fp:
             pickle.dump(random.getstate(), fp)
-            pickle.dump(np.random.get_state(), fp)  # Yes, one uses _, the other does not
+            pickle.dump(np.random.get_state(), fp)
 
-        # Monitor state, in order to get the full information about the metrics
+        # (5) Training monitor
         self.training_monitor.save_state(os.path.join(training_state_dirname, C.MONITOR_STATE_NAME))
 
-        # Our own state
+        # (6) Training state
         self.state.save(os.path.join(training_state_dirname, C.TRAINING_STATE_NAME))
 
-        # The lr scheduler
+        # (7) Learning rate scheduler
         with open(os.path.join(training_state_dirname, C.SCHEDULER_STATE_NAME), "wb") as fp:
             pickle.dump(self.optimizer_config.lr_scheduler, fp)
-
-        # We are now finished with writing. Rename the temporary directory to
-        # the actual directory
-        final_training_state_dirname = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
 
         # First we rename the existing directory to minimize the risk of state
         # loss if the process is aborted during deletion (which will be slower
         # than directory renaming)
-        delete_training_state_dirname = os.path.join(output_folder, C.TRAINING_STATE_TEMP_DELETENAME)
-        if os.path.exists(final_training_state_dirname):
-            os.rename(final_training_state_dirname, delete_training_state_dirname)
-        os.rename(training_state_dirname, final_training_state_dirname)
+        delete_training_state_dirname = os.path.join(self.model.output_dir, C.TRAINING_STATE_TEMP_DELETENAME)
+        if os.path.exists(self.training_state_dirname):
+            os.rename(self.training_state_dirname, delete_training_state_dirname)
+        os.rename(training_state_dirname, self.training_state_dirname)
         if os.path.exists(delete_training_state_dirname):
             shutil.rmtree(delete_training_state_dirname)
 
-    def _load_checkpoint(self, model: TrainingModel, directory: str,
-                         train_iter: data_io.BaseParallelSampleIter) -> _TrainingState:
+    def _load_checkpoint(self, train_iter: data_io.BaseParallelSampleIter):
         """
         Loads the full training state from disk. This includes optimizer,
         random number generators and everything needed.  Note that params
         should have been loaded already by the initializer.
 
-        :param directory: directory where the state has been saved.
         :param train_iter: training data iterator.
         """
-        params_fname = os.path.join(directory, C.TRAINING_STATE_PARAMS_NAME)
-        model.load_params_from_file(params_fname)
 
-        # Optimzer state (from mxnet)
-        opt_state_fname = os.path.join(directory, C.OPT_STATES_LAST)
-        model.load_optimizer_states(opt_state_fname)
+        # (1) Parameters
+        params_fname = os.path.join(self.training_state_dirname, C.TRAINING_STATE_PARAMS_NAME)
+        self.model.load_params_from_file(params_fname)
 
-        # The lr scheduler
-        with open(os.path.join(directory, C.SCHEDULER_STATE_NAME), "rb") as fp:
-            self.optimizer_config.lr_scheduler = pickle.load(fp)
+        # (2) Optimizer states
+        opt_state_fname = os.path.join(self.training_state_dirname, C.OPT_STATES_LAST)
+        self.model.load_optimizer_states(opt_state_fname)
 
-        # State of the bucket iterator
-        train_iter.load_state(os.path.join(directory, C.BUCKET_ITER_STATE_NAME))
+        # (3) Data Iterator
+        train_iter.load_state(os.path.join(self.training_state_dirname, C.BUCKET_ITER_STATE_NAME))
 
+        # (4) Random generators
         # RNG states: python's random and np.random provide functions for
         # storing the state, mxnet does not, but inside our code mxnet's RNG is
         # not used AFAIK
-        with open(os.path.join(directory, C.RNG_STATE_NAME), "rb") as fp:
+        with open(os.path.join(self.training_state_dirname, C.RNG_STATE_NAME), "rb") as fp:
             random.setstate(pickle.load(fp))
             np.random.set_state(pickle.load(fp))
 
-        # Monitor state, in order to get the full information about the metrics
-        self.training_monitor.load_state(os.path.join(directory, C.MONITOR_STATE_NAME))
+        # (5) Training monitor
+        self.training_monitor.load_state(os.path.join(self.training_state_dirname, C.MONITOR_STATE_NAME))
 
-        # And our own state
-        return _TrainingState.load(os.path.join(directory, C.TRAINING_STATE_NAME))
+        # (6) Training state
+        self.state = _TrainingState.load(os.path.join(self.training_state_dirname, C.TRAINING_STATE_NAME))
+
+        # (7) Learning rate scheduler
+        with open(os.path.join(self.training_state_dirname, C.SCHEDULER_STATE_NAME), "rb") as fp:
+            self.optimizer_config.lr_scheduler = pickle.load(fp)
 
 
 def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int):

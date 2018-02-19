@@ -735,7 +735,7 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
                                                                         args.learning_rate_reduce_num_not_improved,
                                                                         args.learning_rate_schedule,
                                                                         args.learning_rate_warmup))
-    logger.info("Optimizer config: %s", config)
+    logger.info("Optimizer: %s", config)
     logger.info("Gradient Compression: %s", gradient_compression_params(args))
     return config
 
@@ -805,14 +805,13 @@ def main():
             min_num_epochs = None
             max_num_epochs = None
 
-        trainer = training.Trainer(optimizer_config=create_optimizer_config(args, source_vocab_sizes),
+        trainer = training.Trainer(model=training_model,
+                                   optimizer_config=create_optimizer_config(args, source_vocab_sizes),
                                    max_params_files_to_keep=args.keep_last_params,
                                    log_to_tensorboard=args.use_tensorboard)
 
-        trainer.fit(model=training_model,
-                    train_iter=train_iter,
+        trainer.fit(train_iter=train_iter,
                     val_iter=eval_iter,
-                    output_folder=output_folder,
                     metrics=args.metrics,
                     allow_missing_params=args.allow_missing_params,
                     max_updates=max_updates,
