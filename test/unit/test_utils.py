@@ -12,6 +12,7 @@
 # permissions and limitations under the License.
 
 import os
+import re
 import tempfile
 
 import math
@@ -199,6 +200,16 @@ def test_check_version_checks_major():
     with pytest.raises(utils.SockeyeError) as e:
         utils.check_version(version)
     assert "Given major version (%s) does not match major code version (%s)" % (version, __version__) == str(e.value)
+
+
+def test_version_matches_changelog():
+    """
+    Tests whether the last version mentioned in CHANGELOG.md matches the sockeye version (sockeye/__init__.py).
+    """
+    pattern = re.compile(r'''## \[([0-9.]+)\]''')
+    changelog = open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "CHANGELOG.md")).read()
+    last_changelog_version = pattern.findall(changelog)[0]
+    assert __version__ == last_changelog_version
 
 
 @pytest.mark.parametrize("samples,expected_mean, expected_variance",

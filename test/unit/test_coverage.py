@@ -133,8 +133,8 @@ def _test_gru_coverage():
     assert (np.sum(np.sum(new_coverage != 1, axis=2) != 0, axis=1) == source_length_data).all()
 
 
-def _mask_with_one(data, use_sequence_length, sequence_length):
-    return _mask_with_one.original_sequence_mask(data=data, use_sequence_length=use_sequence_length,
+def _mask_with_one(data, axis, use_sequence_length, sequence_length):
+    return _mask_with_one.original_sequence_mask(data=data, axis=axis, use_sequence_length=use_sequence_length,
                                                  sequence_length=sequence_length, value=1)
 
 

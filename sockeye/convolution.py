@@ -112,13 +112,10 @@ class ConvolutionBlock:
         num_hidden = self._pre_activation_num_hidden()
 
         # Apply masking (so that we properly have zero padding for variable sequence length batches)
-        # Note: SequenceMask expects time-major data
-        # (seq_len, batch_size, num_hidden)
-        data = mx.sym.swapaxes(data, dim1=0, dim2=1)
-        data = mx.sym.SequenceMask(data=data, sequence_length=data_length, use_sequence_length=True, value=0)
+        data = mx.sym.SequenceMask(data=data, axis=1, sequence_length=data_length, use_sequence_length=True, value=0)
 
-        # (batch_size,  num_hidden, seq_len)
-        data = mx.sym.transpose(data, axes=(1, 2, 0))
+        # (batch_size, num_hidden, seq_len)
+        data = mx.sym.transpose(data, axes=(0, 2, 1))
         data_conv = mx.sym.Convolution(data=data,
                                        weight=self.conv_weight,
                                        bias=self.conv_bias,
