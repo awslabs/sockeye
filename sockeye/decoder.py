@@ -724,25 +724,19 @@ class RecurrentDecoder(Decoder):
         :param source_encoded_length: Lengths of source sequences. Shape: (batch_size,).
         :return: Decoder state.
         """
-        # TODO (tdomhan): Due to a bug in swapaxes we need to avoid in-place gradient additions, see:
-        # https://github.com/apache/incubator-mxnet/pull/9495
-        source_encoded = mx.sym.identity(source_encoded)
-        # The mx.sym.Sequence* operators expect time-major data.
-        # TODO (tdomhan): Use the `axis` argument instead of transposing once the new MXNet version becomes available.
-        # (see https://github.com/apache/incubator-mxnet/pull/9306)
-        # (source_encoded_max_length, batch_size, encoder_depth)
-        source_encoded_time_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_time_major')
-
         # we derive the shape of hidden and layer_states from some input to enable
         # shape inference for the batch dimension during inference.
         # (batch_size, 1)
         zeros = mx.sym.expand_dims(mx.sym.zeros_like(source_encoded_length), axis=1)
         # last encoder state: (batch, num_hidden)
-        source_encoded_last = mx.sym.SequenceLast(data=source_encoded_time_major,
+        source_encoded_last = mx.sym.SequenceLast(data=source_encoded,
+                                                  axis=1,
                                                   sequence_length=source_encoded_length,
                                                   use_sequence_length=True) \
             if self.config.state_init == C.RNN_DEC_INIT_LAST else None
-        source_masked = mx.sym.SequenceMask(data=source_encoded_time_major,
+        # source_masked: (batch_size, source_seq_len, encoder_num_hidden)
+        source_masked = mx.sym.SequenceMask(data=source_encoded,
+                                            axis=1,
                                             sequence_length=source_encoded_length,
                                             use_sequence_length=True,
                                             value=0.) if self.config.state_init == C.RNN_DEC_INIT_AVG else None
@@ -760,7 +754,7 @@ class RecurrentDecoder(Decoder):
                     init = source_encoded_last
                 elif self.config.state_init == C.RNN_DEC_INIT_AVG:
                     # (batch_size, encoder_num_hidden)
-                    init = mx.sym.broadcast_div(mx.sym.sum(source_masked, axis=0, keepdims=False),
+                    init = mx.sym.broadcast_div(mx.sym.sum(source_masked, axis=1, keepdims=False),
                                                 mx.sym.expand_dims(source_encoded_length, axis=1))
                 else:
                     raise ValueError("Unknown decoder state init type '%s'" % self.config.state_init)
