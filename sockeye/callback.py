@@ -167,6 +167,7 @@ class TrainingMonitor(object):
         this function, together with the best checkpoint
         """
         has_improved = False
+        previous_best = self.validation_best
         for checkpoint, metric_dict in enumerate(self.metrics, 1):
             value = metric_dict.get(self.optimized_metric + "-val",
                                     self.validation_best)
@@ -176,8 +177,8 @@ class TrainingMonitor(object):
                 has_improved = True
 
         if has_improved:
-            logger.info("Validation-%s improved to %f.", self.optimized_metric,
-                        self.validation_best)
+            logger.info("Validation-%s improved to %f (delta=%f).", self.optimized_metric,
+                        self.validation_best, abs(self.validation_best - previous_best))
         else:
             logger.info("Validation-%s has not improved, best so far: %f",
                         self.optimized_metric, self.validation_best)

@@ -462,6 +462,7 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Optional[Dict[int, Tu
     for line in result:
         gpu_id, mem_used, mem_total = line.split(",")
         memory_data[int(gpu_id)] = (int(mem_used), int(mem_total))
+    log_gpu_memory_usage(memory_data)
     return memory_data
 
 

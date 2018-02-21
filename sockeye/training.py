@@ -119,7 +119,7 @@ class TrainingModel(model.SockeyeModel):
             target_decoded = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
                                                           target_embed, target_embed_length, target_embed_seq_len)
 
-            # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
+            # target_decoded: (batch_size * target_seq_len, decoder_depth)
             target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
 
             # output layer
@@ -202,8 +202,6 @@ class TrainingModel(model.SockeyeModel):
         """
         Resets and recomputes evaluation metric on given data iterator.
         """
-        eval_iter.reset()
-        eval_metric.reset()
         for eval_batch in eval_iter:
             self.module.forward(eval_batch, is_train=False)
             self.module.update_metric(eval_metric, eval_batch.label)
@@ -228,7 +226,10 @@ class TrainingModel(model.SockeyeModel):
         return self.current_module._optimizer
 
     def initialize_optimizer(self, config: OptimizerConfig):
-        self.module.init_optimizer(kvstore=config.kvstore, optimizer=config.name, optimizer_params=config.params)
+        self.module.init_optimizer(kvstore=config.kvstore,
+                                   optimizer=config.name,
+                                   optimizer_params=config.params,
+                                   force_init=True)  # force init for training resumption use case
 
     def save_optimizer_states(self, fname: str):
         """
@@ -303,13 +304,14 @@ def global_norm(ndarrays: List[mx.nd.NDArray]) -> float:
     return sqrt(sum(norm.asscalar() for norm in norms))
 
 
-class _TrainingState:
+class TrainState:
     """
     Stores the state of the training process. These are the variables that will
     be stored to disk when resuming training.
     """
 
-    __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'updates', 'samples', 'gradient_norm']
+    __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint',
+                 'updates', 'samples', 'gradient_norm', 'metrics', 'start_tic']
 
     def __init__(self,
                  num_not_improved: int,
@@ -320,9 +322,13 @@ class _TrainingState:
         self.num_not_improved = num_not_improved
         self.epoch = epoch
         self.checkpoint = checkpoint
+        self.best_checkpoint = 0
         self.updates = updates
         self.samples = samples
         self.gradient_norm = None  # type: Optional[float]
+        # stores dicts of metric names & values for each checkpoint
+        self.metrics = []  # type: List[Dict]
+        self.start_tic = time.time()
 
     def save(self, fname: str):
         """
@@ -332,7 +338,7 @@ class _TrainingState:
             pickle.dump(self, fp)
 
     @staticmethod
-    def load(fname: str) -> '_TrainingState':
+    def load(fname: str) -> 'TrainState':
         """
         Loads a training state from fname.
         """
@@ -340,8 +346,8 @@ class _TrainingState:
             return pickle.load(fp)
 
     @staticmethod
-    def initial() -> '_TrainingState':
-        return _TrainingState(num_not_improved=0, epoch=0, checkpoint=0, updates=0, samples=0)
+    def initial() -> 'TrainState':
+        return TrainState(num_not_improved=0, epoch=0, checkpoint=0, updates=0, samples=0)
 
 
 class Trainer:
@@ -364,13 +370,13 @@ class Trainer:
         self.optimizer_config = optimizer_config
         self.max_params_files_to_keep = max_params_files_to_keep
         self.log_to_tensorboard = log_to_tensorboard
-        self.state = _TrainingState.initial()
+        self.state = TrainState.initial()
 
     def fit(self,
             train_iter: data_io.BaseParallelSampleIter,
             val_iter: data_io.BaseParallelSampleIter,
             metrics: List[AnyStr],
-            allow_missing_params: bool,
+            allow_missing_parameters: bool,
             max_updates: Optional[int],
             checkpoint_frequency: int,
             early_stopping_metric: str = "perplexity",
@@ -382,7 +388,7 @@ class Trainer:
             mxmonitor_stat_func: Optional[str] = None,
             lr_decay_param_reset: bool = False,
             lr_decay_opt_states_reset: str = C.LR_DECAY_OPT_STATES_RESET_OFF,
-            params: Optional[str] = None):
+            existing_parameters: Optional[str] = None):
         """
         Fits model to data given by train_iter using early-stopping w.r.t data given by val_iter.
         Saves all intermediate and final output to output_folder
@@ -392,7 +398,7 @@ class Trainer:
 
         :param metrics: The metrics that will be evaluated during training.
 
-        :param allow_missing_params: Allow missing parameters when initializing model parameters from file.
+        :param allow_missing_parameters: Allow missing parameters when initializing model parameters from file.
         :param max_updates: Optional maximum number of batches to process.
         :param checkpoint_frequency: Frequency of checkpointing in number of updates.
         :param early_stopping_metric: The metric that is tracked for early stopping.
@@ -419,32 +425,27 @@ class Trainer:
         utils.check_condition(self.optimizer_config.gradient_clipping_type in C.GRADIENT_CLIPPING_TYPES,
                               "Unknown gradient clipping type %s" % self.optimizer_config.gradient_clipping_type)
 
-        logger.info("Training started.")
         self.training_monitor = callback.TrainingMonitor(self.model.output_dir,
                                                          optimized_metric=early_stopping_metric,
                                                          use_tensorboard=self.log_to_tensorboard,
                                                          cp_decoder=cp_decoder)
 
-        # parameters
-        self.model.initialize_parameters(self.optimizer_config.initializer, allow_missing_params)
-        if params is not None:
-            logger.info("Training will start with parameters loaded from '%s'", params)
-            self.model.load_params_from_file(params)
-        self.model.log_parameters()
-
-        # optimizer
-        self.model.initialize_optimizer(self.optimizer_config)
-        if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_INITIAL:
-            self.model.save_optimizer_states(os.path.join(self.model.output_dir, C.OPT_STATES_INITIAL))
+        self._initialize_parameters(existing_parameters, allow_missing_parameters)
+        self._initialize_optimizer()
 
         resume_training = os.path.exists(self.training_state_dirname)
         if resume_training:
             logger.info("Found partial training in '%s'. Resuming from saved state.", self.training_state_dirname)
             utils.check_condition('dist' not in self.optimizer_config.kvstore,
                                   "Training continuation not supported with distributed training.")
-            self._load_checkpoint(train_iter)
+            self._load_training_state(train_iter)
         else:
-            self._save_checkpoint(train_iter, False)  # TODO
+            logger.info("Training started.")
+            self.state = TrainState.initial()
+            self._save_params()
+            self._update_best_params_link()
+            self._save_training_state(train_iter)
+            self._update_best_optimizer_states(lr_decay_opt_states_reset)
 
         metric_train, metric_val, metric_loss = self._create_metrics(metrics, self.model.optimizer, self.model.loss)
 
@@ -488,27 +489,20 @@ class Trainer:
             if self.state.updates > 0 and self.state.updates % checkpoint_frequency == 0:
                 time_cost = time.time() - tic
                 self.state.checkpoint += 1
-
-                metric_train_dict = {k: v for k, v in metric_train.get_name_value()}
-                metric_train_dict['gradient-norm'] = self.state.gradient_norm
-                self.training_monitor.checkpoint_callback(self.state.checkpoint,
-                                                          self.state.epoch,
-                                                          self.model.optimizer.learning_rate,
-                                                          metric_train_dict,
-                                                          memory_data=utils.get_gpu_memory_usage(self.model.context))
-
+                self._save_params()
                 logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f Updates/sec=%.3f",
                             self.state.checkpoint, self.state.updates, self.state.epoch,
                             self.state.samples, time_cost, checkpoint_frequency / time_cost)
-
                 for name, val in metric_train.get_name_value():
                     logger.info('Checkpoint [%d]\tTrain-%s=%f', self.state.checkpoint, name, val)
+
+                self.evaluate(val_iter, metric_val)
+
+                self._add_metrics_to_state(metric_train, metric_val)
                 metric_train.reset()
 
-                # evaluation on validation set
-                self.model.evaluate(val_iter, metric_val)
-                for name, val in metric_val.get_name_value():
-                    logger.info('Checkpoint [%d]\tValidation-%s=%f', self.state.checkpoint, name, val)
+                # TODO IMPROVEMENT LOGIC
+
                 has_improved, best_checkpoint = self.training_monitor.eval_end_callback(self.state.checkpoint,
                                                                                         metric_val)
 
@@ -522,38 +516,19 @@ class Trainer:
                     checkpoint_state = CheckpointState(checkpoint=self.state.checkpoint, metric_val=m_val)
                     self.model.optimizer.pre_update_checkpoint(checkpoint_state)
 
-                # learning rate adjustment
-                if self.optimizer_config.lr_scheduler is not None:
-                    if issubclass(type(self.optimizer_config.lr_scheduler), lr_scheduler.AdaptiveLearningRateScheduler):
-                        lr_adjusted = self.optimizer_config.lr_scheduler.new_evaluation_result(has_improved)
-                    else:
-                        lr_adjusted = False
-                    if lr_adjusted and not has_improved:
-                        if lr_decay_param_reset:
-                            logger.info("Loading parameters from last best checkpoint: %d", best_checkpoint)
-                            self.model.load_params_from_file(self.best_params_fname)
-                        if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_INITIAL:
-                            logger.info("Resetting optimizer states to initial")
-                            self.model.load_optimizer_states(os.path.join(self.model.output_dir, C.OPT_STATES_INITIAL))
-                        elif lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
-                            logger.info("Resetting optimizer states to last best checkpoint: %d", best_checkpoint)
-                            self.model.load_optimizer_states(os.path.join(self.model.output_dir, C.OPT_STATES_BEST))
+                self._adjust_learning_rate(has_improved, lr_decay_param_reset, lr_decay_opt_states_reset)
 
                 if has_improved:
-
                     self._update_best_params_link()
-
-                    if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
-                        best_opt_states_fname = os.path.join(self.model.output_dir, C.OPT_STATES_BEST)
-                        self.model.save_optimizer_states(best_opt_states_fname)
-
+                    self._update_best_optimizer_states(lr_decay_opt_states_reset)
                     self.state.num_not_improved = 0
-
                 else:
-                    self.state.num_not_improved += 1
                     logger.info("Model has not improved for %d checkpoints", self.state.num_not_improved)
+                    self.state.num_not_improved += 1
 
-                if max_num_not_improved >= 0 and self.state.num_not_improved >= max_num_not_improved:
+                self._save_training_state(train_iter)
+
+                if 0 <= max_num_not_improved <= self.state.num_not_improved:
                     logger.info("Maximum number of not improved checkpoints (%d) reached: %d",
                                 max_num_not_improved, self.state.num_not_improved)
                     stop_fit = True
@@ -566,24 +541,9 @@ class Trainer:
                     if stop_fit:
                         break
 
-                self._save_checkpoint(train_iter, has_improved)
-
                 tic = time.time()
 
-        cleanup_params_files(self.model.output_dir, self.max_params_files_to_keep,
-                             self.state.checkpoint, self.training_monitor.get_best_checkpoint())
-
-        logger.info('Training stopped')
-        self.training_monitor.stop_fit_callback()
-        final_training_state_dirname = os.path.join(self.model.output_dir, C.TRAINING_STATE_DIRNAME)
-        if os.path.exists(final_training_state_dirname):
-            shutil.rmtree(final_training_state_dirname)
-
-        if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
-            best_opt_states_fname = os.path.join(self.model.output_dir, C.OPT_STATES_BEST)
-            if os.path.exists(best_opt_states_fname):
-                os.remove(best_opt_states_fname)
-
+        self._cleanup(lr_decay_opt_states_reset)
         logger.info("Training finished. Best checkpoint: %d. Best validation %s: %.6f",
                     self.training_monitor.get_best_checkpoint(),
                     self.training_monitor.optimized_metric,
@@ -643,6 +603,80 @@ class Trainer:
                 for _, k, v in results:
                     logger.info('Monitor: Batch [{:d}] {:s} {:s}'.format(self.state.updates, k, v))
 
+    def evaluate(self,
+                 val_iter: data_io.BaseParallelSampleIter,
+                 val_metric: mx.metric.EvalMetric,
+                 cp_decoder: Optional[checkpoint_decoder.CheckpointDecoder] = None):
+        val_iter.reset()
+        val_metric.reset()
+        self.model.evaluate(val_iter, val_metric)
+        for name, val in val_metric.get_name_value():
+            logger.info('Checkpoint [%d]\tValidation-%s=%f', self.state.checkpoint, name, val)
+
+        if cp_decoder:
+            self._wait_for_decoder_to_finish()
+            self._empty_decoder_metric_queue()
+            self._start_decode_process(checkpoint)
+            # TODO
+
+    def _add_metrics_to_state(self, metric_train: mx.metric.EvalMetric, metric_val: mx.metric.EvalMetric):
+        checkpoint_metrics = {"epoch": self.state.epoch,
+                              "learning-rate": self.model.optimizer.learning_rate,
+                              "gradient-norm": self.state.gradient_norm,
+                              "used-gpu-memory": utils.get_gpu_memory_usage(self.model.context),
+                              "time-elapsed": time.time() - self.state.start_tic}
+        for name, value in metric_train.get_name_value():
+            checkpoint_metrics["%s-train" % name] = value
+        for name, value in metric_val.get_name_value():
+            checkpoint_metrics["%s-val" % name] = value
+        self.state.metrics.append(checkpoint_metrics)
+
+        utils.write_metrics_file(self.state.metrics, self.metrics_fname)
+        # TODO
+        # if self.summary_writer:
+        #     write_tensorboard(self.summary_writer, checkpoint_metrics, self.state.checkpoint)
+
+    def _cleanup(self, lr_decay_opt_states_reset):
+        cleanup_params_files(self.model.output_dir, self.max_params_files_to_keep,
+                             self.state.checkpoint, self.training_monitor.get_best_checkpoint())
+        self.training_monitor.stop_fit_callback()
+        final_training_state_dirname = os.path.join(self.model.output_dir, C.TRAINING_STATE_DIRNAME)
+        if os.path.exists(final_training_state_dirname):
+            shutil.rmtree(final_training_state_dirname)
+        if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
+            best_opt_states_fname = os.path.join(self.model.output_dir, C.OPT_STATES_BEST)
+            if os.path.exists(best_opt_states_fname):
+                os.remove(best_opt_states_fname)
+
+    def _initialize_parameters(self, params: Optional[str], allow_missing_params: bool):
+        self.model.initialize_parameters(self.optimizer_config.initializer, allow_missing_params)
+        if params is not None:
+            logger.info("Training will start with parameters loaded from '%s'", params)
+            self.model.load_params_from_file(params)
+        self.model.log_parameters()
+
+    def _initialize_optimizer(self):
+        self.model.initialize_optimizer(self.optimizer_config)
+
+    def _adjust_learning_rate(self, has_improved: bool, lr_decay_param_reset: bool, lr_decay_opt_states_reset: str):
+        if self.optimizer_config.lr_scheduler is not None:
+            if issubclass(type(self.optimizer_config.lr_scheduler), lr_scheduler.AdaptiveLearningRateScheduler):
+                lr_adjusted = self.optimizer_config.lr_scheduler.new_evaluation_result(has_improved)
+            else:
+                lr_adjusted = False
+            if lr_adjusted and not has_improved:
+                if lr_decay_param_reset:
+                    logger.info("Loading parameters from last best checkpoint: %d",
+                                self.training_monitor.get_best_checkpoint())
+                    self.model.load_params_from_file(self.best_params_fname)
+                if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_INITIAL:
+                    logger.info("Resetting optimizer states to initial")
+                    self.model.load_optimizer_states(os.path.join(self.model.output_dir, C.OPT_STATES_INITIAL))
+                elif lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
+                    logger.info("Resetting optimizer states to last best checkpoint: %d",
+                                self.training_monitor.get_best_checkpoint())
+                    self.model.load_optimizer_states(os.path.join(self.model.output_dir, C.OPT_STATES_BEST))
+
     @property
     def best_params_fname(self) -> str:
         return os.path.join(self.model.output_dir, C.PARAMS_BEST_NAME)
@@ -650,6 +684,10 @@ class Trainer:
     @property
     def current_params_fname(self) -> str:
         return os.path.join(self.model.output_dir, C.PARAMS_NAME % self.state.checkpoint)
+
+    @property
+    def metrics_fname(self) -> str:
+        return os.path.join(self.model.output_dir, C.METRICS_NAME)
 
     @property
     def training_state_dirname(self) -> str:
@@ -704,13 +742,22 @@ class Trainer:
             os.remove(best_params_path)
         os.symlink(actual_best_params_fname, best_params_path)
 
+    def _update_best_optimizer_states(self, lr_decay_opt_states_reset: str):
+        if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
+            self.model.save_optimizer_states(os.path.join(self.model.output_dir, C.OPT_STATES_BEST))
+
+    def _save_initial_optimizer_states(self, lr_decay_opt_states_reset: str):
+        if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_INITIAL:
+            self.model.save_optimizer_states(os.path.join(self.model.output_dir, C.OPT_STATES_INITIAL))
+
     def _check_dist_kvstore_requirements(self, lr_decay_opt_states_reset, lr_decay_param_reset, optimizer):
         # In distributed training the optimizer will run remotely. For eve we however need to pass information about
         # the loss, which is not possible anymore by means of accessing self.module._curr_module._optimizer.
         utils.check_condition(optimizer != C.OPTIMIZER_EVE, "Eve optimizer not supported with distributed training.")
-        utils.check_condition(not issubclass(type(self.optimizer_config.lr_scheduler), lr_scheduler.AdaptiveLearningRateScheduler),
-                              "Adaptive learning rate schedulers not supported with a dist kvstore. "
-                              "Try a fixed schedule such as %s." % C.LR_SCHEDULER_FIXED_RATE_INV_SQRT_T)
+        utils.check_condition(
+            not issubclass(type(self.optimizer_config.lr_scheduler), lr_scheduler.AdaptiveLearningRateScheduler),
+            "Adaptive learning rate schedulers not supported with a dist kvstore. "
+            "Try a fixed schedule such as %s." % C.LR_SCHEDULER_FIXED_RATE_INV_SQRT_T)
         utils.check_condition(not lr_decay_param_reset, "Parameter reset when the learning rate decays not "
                                                         "supported with distributed training.")
         utils.check_condition(not lr_decay_opt_states_reset, "Optimizer state reset when the learning rate decays "
@@ -719,30 +766,15 @@ class Trainer:
     def _save_params(self):
         """
         Saves model parameters at current checkpoint and optionally cleans up older parameter files to save disk space.
-
-        :param model: Training model.
-        :returns: The full path of the parameter file.
         """
         self.model.save_params_to_file(self.current_params_fname)
         cleanup_params_files(self.model.output_dir, self.max_params_files_to_keep, self.state.checkpoint,
                              self.training_monitor.get_best_checkpoint())
 
-    def _save_checkpoint(self, train_iter: data_io.BaseParallelSampleIter, has_improved: bool):
+    def _save_training_state(self, train_iter: data_io.BaseParallelSampleIter):
         """
-        Saves checkpoint.
+        Saves current training state.
         """
-        self._save_params()
-
-        if has_improved:
-
-            self._update_best_params_link()
-
-            if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
-                best_opt_states_fname = os.path.join(self.model.output_dir, C.OPT_STATES_BEST)
-                self.model.save_optimizer_states(best_opt_states_fname)
-
-            self.state.num_not_improved = 0
-
         # Create temporary directory for storing the state of the optimization process
         training_state_dirname = os.path.join(self.model.output_dir, C.TRAINING_STATE_TEMP_DIRNAME)
         if not os.path.exists(training_state_dirname):
@@ -788,15 +820,12 @@ class Trainer:
         if os.path.exists(delete_training_state_dirname):
             shutil.rmtree(delete_training_state_dirname)
 
-    def _load_checkpoint(self, train_iter: data_io.BaseParallelSampleIter):
+    def _load_training_state(self, train_iter: data_io.BaseParallelSampleIter):
         """
-        Loads the full training state from disk. This includes optimizer,
-        random number generators and everything needed.  Note that params
-        should have been loaded already by the initializer.
+        Loads the full training state from disk.
 
         :param train_iter: training data iterator.
         """
-
         # (1) Parameters
         params_fname = os.path.join(self.training_state_dirname, C.TRAINING_STATE_PARAMS_NAME)
         self.model.load_params_from_file(params_fname)
@@ -820,11 +849,13 @@ class Trainer:
         self.training_monitor.load_state(os.path.join(self.training_state_dirname, C.MONITOR_STATE_NAME))
 
         # (6) Training state
-        self.state = _TrainingState.load(os.path.join(self.training_state_dirname, C.TRAINING_STATE_NAME))
+        self.state = TrainState.load(os.path.join(self.training_state_dirname, C.TRAINING_STATE_NAME))
 
         # (7) Learning rate scheduler
         with open(os.path.join(self.training_state_dirname, C.SCHEDULER_STATE_NAME), "rb") as fp:
             self.optimizer_config.lr_scheduler = pickle.load(fp)
+        # initialize optimizer again
+        self.model.initialize_optimizer(self.optimizer_config)
 
 
 def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int):

@@ -17,7 +17,6 @@ Simple Training CLI.
 import argparse
 import json
 import os
-import pickle
 import shutil
 import sys
 from contextlib import ExitStack
@@ -27,8 +26,8 @@ import mxnet as mx
 
 from sockeye.config import Config
 from sockeye.log import setup_main_logger
-from sockeye.utils import check_condition
 from sockeye.optimizers import OptimizerConfig
+from sockeye.utils import check_condition
 from . import arguments
 from . import checkpoint_decoder
 from . import constants as C
@@ -367,32 +366,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         data_info.save(data_info_fname)
 
         return train_iter, validation_iter, config_data, source_vocabs, target_vocab
-
-
-def create_lr_scheduler(args: argparse.Namespace, resume_training: bool,
-                        training_state_dir: str) -> Optional[lr_scheduler.LearningRateScheduler]:
-    """
-    Create the learning rate scheduler.
-
-    :param args: Arguments as returned by argparse.
-    :param resume_training: When True, the scheduler will be loaded from disk.
-    :param training_state_dir: Directory where the training state is stored.
-    :return: The learning rate scheduler.
-    """
-    learning_rate_half_life = none_if_negative(args.learning_rate_half_life)
-    # TODO: The loading for continuation of the scheduler is done separately from the other parts
-    if not resume_training:
-        lr_scheduler_instance = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
-                                                              args.checkpoint_frequency,
-                                                              learning_rate_half_life,
-                                                              args.learning_rate_reduce_factor,
-                                                              args.learning_rate_reduce_num_not_improved,
-                                                              args.learning_rate_schedule,
-                                                              args.learning_rate_warmup)
-    else:
-        with open(os.path.join(training_state_dir, C.SCHEDULER_STATE_NAME), "rb") as fp:
-            lr_scheduler_instance = pickle.load(fp)
-    return lr_scheduler_instance
 
 
 def create_encoder_config(args: argparse.Namespace,
@@ -813,7 +786,7 @@ def main():
         trainer.fit(train_iter=train_iter,
                     val_iter=eval_iter,
                     metrics=args.metrics,
-                    allow_missing_params=args.allow_missing_params,
+                    allow_missing_parameters=args.allow_missing_params,
                     max_updates=max_updates,
                     checkpoint_frequency=args.checkpoint_frequency,
                     early_stopping_metric=args.optimized_metric,
