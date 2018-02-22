@@ -70,7 +70,8 @@ def main():
             max_output_length_num_stds=args.max_output_length_num_stds,
             decoder_return_logit_inputs=args.restrict_lexicon is not None,
             cache_output_layer_w_b=args.restrict_lexicon is not None)
-        restrict_lexicon = None  # type: TopKLexicon
+        restrict_lexicon = None # type: TopKLexicon
+        store_beam = args.output_type == C.OUTPUT_HANDLER_BEAM_STORE
         if args.restrict_lexicon:
             restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
             restrict_lexicon.load(args.restrict_lexicon)
@@ -82,7 +83,8 @@ def main():
                                           models=models,
                                           source_vocabs=source_vocabs,
                                           target_vocab=target_vocab,
-                                          restrict_lexicon=restrict_lexicon)
+                                          restrict_lexicon=restrict_lexicon,
+                                          store_beam=store_beam)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
