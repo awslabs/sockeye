@@ -15,6 +15,7 @@
 A set of utility methods.
 """
 import errno
+import glob
 import gzip
 import itertools
 import logging
@@ -32,7 +33,7 @@ import mxnet as mx
 import numpy as np
 
 import sockeye.constants as C
-from sockeye import __version__
+from sockeye import __version__, constants as C
 from sockeye.log import log_sockeye_version, log_mxnet_version
 
 logger = logging.getLogger(__name__)
@@ -791,3 +792,33 @@ def grouper(iterable: Iterable, size: int) -> Iterable:
         if not chunk:
             return
         yield chunk
+
+
+def metric_value_is_better(new: float, old: float, metric: str) -> bool:
+    """
+    Returns true if new value is strictly better than old for given metric.
+    """
+    if C.METRIC_MAXIMIZE[metric]:
+        return new > old
+    else:
+        return new < old
+
+
+def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int):
+    """
+    Deletes oldest parameter files from a model folder.
+
+    :param output_folder: Folder where param files are located.
+    :param max_to_keep: Maximum number of files to keep, negative to keep all.
+    :param checkpoint: Current checkpoint (i.e. index of last params file created).
+    :param best_checkpoint: Best checkpoint. The parameter file corresponding to this checkpoint will not be deleted.
+    """
+    if max_to_keep <= 0:
+        return
+    existing_files = glob.glob(os.path.join(output_folder, C.PARAMS_PREFIX + "*"))
+    params_name_with_dir = os.path.join(output_folder, C.PARAMS_NAME)
+    for n in range(0, max(1, checkpoint - max_to_keep + 1)):
+        if n != best_checkpoint:
+            param_fname_n = params_name_with_dir % n
+            if param_fname_n in existing_files:
+                os.remove(param_fname_n)

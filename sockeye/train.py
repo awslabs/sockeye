@@ -778,26 +778,27 @@ def main():
             min_num_epochs = None
             max_num_epochs = None
 
-        trainer = training.Trainer(model=training_model,
-                                   optimizer_config=create_optimizer_config(args, source_vocab_sizes),
-                                   max_params_files_to_keep=args.keep_last_params,
-                                   log_to_tensorboard=args.use_tensorboard)
+        trainer = training.EarlyStoppingTrainer(model=training_model,
+                                                optimizer_config=create_optimizer_config(args, source_vocab_sizes),
+                                                max_params_files_to_keep=args.keep_last_params,
+                                                log_to_tensorboard=args.use_tensorboard)
 
         trainer.fit(train_iter=train_iter,
-                    val_iter=eval_iter,
-                    metrics=args.metrics,
-                    allow_missing_parameters=args.allow_missing_params,
-                    max_updates=max_updates,
-                    checkpoint_frequency=args.checkpoint_frequency,
+                    validation_iter=eval_iter,
                     early_stopping_metric=args.optimized_metric,
+                    metrics=args.metrics,
+                    checkpoint_frequency=args.checkpoint_frequency,
                     max_num_not_improved=max_num_checkpoint_not_improved,
+                    max_updates=max_updates,
                     min_num_epochs=min_num_epochs,
                     max_num_epochs=max_num_epochs,
-                    cp_decoder=create_checkpoint_decoder(args, exit_stack, context),
+                    lr_decay_param_reset=args.learning_rate_decay_param_reset,
+                    lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset,
+                    decoder=create_checkpoint_decoder(args, exit_stack, context),
                     mxmonitor_pattern=args.monitor_pattern,
                     mxmonitor_stat_func=args.monitor_stat_func,
-                    lr_decay_param_reset=args.learning_rate_decay_param_reset,
-                    lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset)
+                    allow_missing_parameters=args.allow_missing_params,
+                    existing_parameters=args.params)
 
 
 if __name__ == "__main__":

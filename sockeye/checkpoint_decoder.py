@@ -19,15 +19,15 @@ import os
 import random
 import time
 from contextlib import ExitStack
-from typing import Any, Dict, Iterable, Optional, List
+from typing import Any, Dict, Optional, List
 
 import mxnet as mx
 
 import sockeye.output_handler
 import sockeye.translate
-from . import evaluate
 from . import constants as C
 from . import data_io
+from . import evaluate
 from . import inference
 from . import utils
 
