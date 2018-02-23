@@ -223,7 +223,8 @@ class TrainingModel(model.SockeyeModel):
             mxmonitor_pattern: Optional[str] = None,
             mxmonitor_stat_func: Optional[str] = None,
             lr_decay_param_reset: bool = False,
-            lr_decay_opt_states_reset: str = C.LR_DECAY_OPT_STATES_RESET_OFF):
+            lr_decay_opt_states_reset: str = C.LR_DECAY_OPT_STATES_RESET_OFF,
+            resume_training: bool = False):
         """
         Fits model to data given by train_iter using early-stopping w.r.t data given by val_iter.
         Saves all intermediate and final output to output_folder
@@ -258,6 +259,7 @@ class TrainingModel(model.SockeyeModel):
                when using MXNEt's monitor.
         :param lr_decay_param_reset: Reset parameters to previous best after learning rate decay.
         :param lr_decay_opt_states_reset: How to reset optimizer states after learning rate decay.
+        :param resume_training: Resume an interrupted training.
         :return: Best score on validation data observed during training.
         """
         self.save_version(output_folder)
@@ -276,8 +278,9 @@ class TrainingModel(model.SockeyeModel):
         self.module.init_params(initializer=initializer, arg_params=self.params, aux_params=self.aux_params,
                                 allow_missing=allow_missing_params, force_init=False)
         self._log_params()
-        initial_params_fname = self._save_params(output_folder, checkpoint=0)
-        os.symlink(initial_params_fname, os.path.join(output_folder, C.PARAMS_BEST_NAME))
+        if not resume_training:
+            initial_params_fname = self._save_params(output_folder, checkpoint=0)
+            os.symlink(initial_params_fname, os.path.join(output_folder, C.PARAMS_BEST_NAME))
 
         self.module.init_optimizer(kvstore=kvstore, optimizer=optimizer, optimizer_params=optimizer_params)
 
