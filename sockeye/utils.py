@@ -448,7 +448,7 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Optional[Dict[int, Tu
         ctx = [ctx]
     ctx = [c for c in ctx if c.device_type == 'gpu']
     if not ctx:
-        return None
+        return {}
     if shutil.which("nvidia-smi") is None:
         logger.warning("Couldn't find nvidia-smi, therefore we assume no GPUs are available.")
         return {}

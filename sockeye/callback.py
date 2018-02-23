@@ -32,7 +32,7 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
-class TrainingMonitor(object):
+class DecoderProcessManager(object):
     """
     TrainingMonitor logs metrics on training and validation data, submits decoding processes to compute BLEU scores,
     and writes metrics to the model output folder.
@@ -42,149 +42,19 @@ class TrainingMonitor(object):
     TrainingModel.
 
     :param output_folder: Folder where model files are written to.
-    :param optimized_metric: Name of the metric that controls early stopping.
-    :param use_tensorboard: Whether to use Tensorboard logging of metrics.
     :param cp_decoder: Optional CheckpointDecoder instance for BLEU monitoring.
     """
 
     def __init__(self,
                  output_folder: str,
-                 optimized_metric: str = C.PERPLEXITY,
-                 use_tensorboard: bool = False,
                  cp_decoder: Optional[checkpoint_decoder.CheckpointDecoder] = None) -> None:
         self.output_folder = output_folder
-        # stores dicts of metric names & values for each checkpoint
-        self.metrics = []  # type: List[Dict]
-        self.metrics_filename = os.path.join(output_folder, C.METRICS_NAME)
-        self.best_checkpoint = 0
-        self.start_tic = time.time()
-        self.summary_writer = None
-        if use_tensorboard:
-            try:
-                import tensorboard  # pylint: disable=import-error
-            except ImportError:
-                raise RuntimeError("Please install tensorboard.")
-            log_dir = os.path.join(output_folder, C.TENSORBOARD_NAME)
-            if os.path.exists(log_dir):
-                logger.info("Deleting existing tensorboard log dir %s", log_dir)
-                shutil.rmtree(log_dir)
-            logger.info("Logging training events for Tensorboard at '%s'", log_dir)
-            self.summary_writer = tensorboard.FileWriter(log_dir)
         self.cp_decoder = cp_decoder
         self.ctx = mp.get_context('spawn')  # type: ignore
         self.decoder_metric_queue = self.ctx.Queue()
         self.decoder_process = None  # type: Optional[mp.Process]
-        utils.check_condition(optimized_metric in C.METRICS, "Unsupported metric: %s" % optimized_metric)
-        if optimized_metric == C.BLEU:
-            utils.check_condition(self.cp_decoder is not None, "%s requires CheckpointDecoder" % C.BLEU)
-        self.optimized_metric = optimized_metric
-        self.validation_best = C.METRIC_WORST[self.optimized_metric]
-        logger.info("Early stopping by optimizing '%s'", self.optimized_metric)
-        self.tic = 0
 
-    def get_best_checkpoint(self) -> int:
-        """
-        Returns current best checkpoint.
-        """
-        return self.best_checkpoint
-
-    def get_best_validation_score(self) -> float:
-        """
-        Returns current best validation result for optimized metric.
-        """
-        return self.validation_best
-
-    def _is_better(self, value: float) -> bool:
-        if C.METRIC_MAXIMIZE[self.optimized_metric]:
-            return value > self.validation_best
-        else:
-            return value < self.validation_best
-
-    def checkpoint_callback(self,
-                            checkpoint: int,
-                            epoch: int,
-                            learning_rate: float,
-                            train_metric: Dict[str, float],
-                            memory_data: Optional[Dict[int, Tuple[int, int]]] = None):
-        """
-        Callback function when a model checkpoint is performed.
-        If TrainingMonitor uses Tensorboard, training metrics are written to the Tensorboard event file.
-
-        :param checkpoint: Current checkpoint.
-        :param epoch: Current epoch.
-        :param learning_rate: Current learning rate.
-        :param train_metric: A dictionary of training metrics.
-        :param memory_data: Optional data about memory usage.
-        """
-        metrics = {"epoch": epoch,
-                   "learning-rate": learning_rate}  # type: Dict[str, Union[float, int]]
-        for name, value in train_metric.items():
-            metrics[name + "-train"] = value
-        if memory_data is not None:
-            utils.log_gpu_memory_usage(memory_data)
-            used_gpu_mem = sum(v[0] for v in memory_data.values())
-            metrics['used-gpu-memory'] = used_gpu_mem  # total gpu memory used in MB
-        self.metrics.append(metrics)
-
-        if self.summary_writer:
-            write_tensorboard(self.summary_writer, metrics, checkpoint)
-
-    def eval_end_callback(self, checkpoint: int, val_metric: mx.metric.EvalMetric) -> Tuple[bool, int]:
-        """
-        Callback function when processing of held-out validation data is complete.
-        Counts time elapsed since the start of training.
-        If TrainingMonitor uses Tensorboard, validation metrics are written to the Tensorboard event file.
-        If BLEU is monitored with subprocesses, this function collects result from finished decoder processes
-        and starts a new one for the current checkpoint.
-
-        :param checkpoint: Current checkpoint.
-        :param val_metric: Evaluation metric for validation data.
-        :return: Tuple of boolean indicating if model improved on validation data according to the.
-                 optimized metric, and the (updated) best checkpoint.
-        """
-        metrics = {}  # type: Dict[str, Union[float, int]]
-        for name, value in val_metric.get_name_value():
-            metrics[name + "-val"] = value
-        metrics['time-elapsed'] = time.time() - self.start_tic
-
-        if self.summary_writer:
-            write_tensorboard(self.summary_writer, metrics, checkpoint)
-
-        if self.cp_decoder:
-            self._wait_for_decoder_to_finish()
-            self._empty_decoder_metric_queue()
-            self._start_decode_process(checkpoint)
-
-        self.metrics[-1].update(metrics)
-        utils.write_metrics_file(self.metrics, self.metrics_filename)
-
-        has_improved, best_checkpoint = self._find_best_checkpoint()
-        return has_improved, best_checkpoint
-
-    def _find_best_checkpoint(self):
-        """
-        Returns True if optimized_metric has improved since the last call of
-        this function, together with the best checkpoint
-        """
-        has_improved = False
-        previous_best = self.validation_best
-        for checkpoint, metric_dict in enumerate(self.metrics, 1):
-            value = metric_dict.get(self.optimized_metric + "-val",
-                                    self.validation_best)
-            if self._is_better(value):
-                self.validation_best = value
-                self.best_checkpoint = checkpoint
-                has_improved = True
-
-        if has_improved:
-            logger.info("Validation-%s improved to %f (delta=%f).", self.optimized_metric,
-                        self.validation_best, abs(self.validation_best - previous_best))
-        else:
-            logger.info("Validation-%s has not improved, best so far: %f",
-                        self.optimized_metric, self.validation_best)
-        return has_improved, self.best_checkpoint
-
-    def _start_decode_process(self, checkpoint):
+    def spawn(self, checkpoint: int):
         assert self.decoder_process is None
         output_name = os.path.join(self.output_folder, C.DECODE_OUT_NAME % checkpoint)
         process = self.ctx.Process(
@@ -198,67 +68,35 @@ class TrainingMonitor(object):
         process.start()
         self.decoder_process = process
 
-    def _empty_decoder_metric_queue(self):
+    def collect_results(self) -> Optional[Tuple[int, Dict[str, float]]]:
         """
         Get metric results from decoder_process queue and optionally write to tensorboard logs
         """
-        while not self.decoder_metric_queue.empty():
+        assert self.decoder_process is None
+        if self.decoder_metric_queue.empty():
+            return None
+        else:
             decoded_checkpoint, decoder_metrics = self.decoder_metric_queue.get()
-            logger.info("Checkpoint [%d]: Decoder finished (%s)",
-                        decoded_checkpoint, decoder_metrics)
-            self.metrics[decoded_checkpoint - 1].update(decoder_metrics)
-            if self.summary_writer:
-                write_tensorboard(self.summary_writer, decoder_metrics,
-                                  decoded_checkpoint)
+            assert self.decoder_metric_queue.empty()
+            return decoded_checkpoint, decoder_metrics
 
-    def _wait_for_decoder_to_finish(self, check_interval: int = 5):
+    def wait_to_finish(self):
         if self.decoder_process is None:
             return
         if not self.decoder_process.is_alive():
             self.decoder_process = None
             return
         # Wait for the decoder to finish
+        logger.warning("Waiting for process %s to finish.", self.decoder_process.name)
         wait_start = time.time()
-        while self.decoder_process.is_alive():
-            time.sleep(check_interval)
+        self.decoder_process.join()
         self.decoder_process = None
-
         wait_time = int(time.time() - wait_start)
         logger.warning("Had to wait %d seconds for the checkpoint decoder to finish. Consider increasing the "
                        "checkpoint frequency (updates between checkpoints, see %s) or reducing the size of the "
                        "validation samples that are decoded (see %s)." % (wait_time,
                                                                           C.TRAIN_ARGS_CHECKPOINT_FREQUENCY,
                                                                           C.TRAIN_ARGS_MONITOR_BLEU))
-
-    def stop_fit_callback(self):
-        """
-        Callback function when fitting is stopped. Collects results from decoder processes and writes their results.
-        """
-        if self.decoder_process is not None and self.decoder_process.is_alive():
-            logger.info("Waiting for %s process to finish." % self.decoder_process.name)
-            self.decoder_process.join()
-        self._empty_decoder_metric_queue()
-        utils.write_metrics_file(self.metrics, self.metrics_filename)
-
-    def save_state(self, fname: str):
-        """
-        Saves the state: current metrics and best checkpoint.
-
-        :param fname: Name of the file to save the state to.
-        """
-        with open(fname, "wb") as fp:
-            pickle.dump(self.metrics, fp)
-            pickle.dump(self.best_checkpoint, fp)
-
-    def load_state(self, fname: str):
-        """
-        Loads the state: current metrics and best checkpoint.
-
-        :param fname: Name of the file to load the state from.
-        """
-        with open(fname, "rb") as fp:
-            self.metrics = pickle.load(fp)
-            self.best_checkpoint = pickle.load(fp)
 
 
 def _decode_and_evaluate(checkpoint_decoder: checkpoint_decoder.CheckpointDecoder,
@@ -271,19 +109,3 @@ def _decode_and_evaluate(checkpoint_decoder: checkpoint_decoder.CheckpointDecode
     """
     metrics = checkpoint_decoder.decode_and_evaluate(checkpoint, output_name)
     queue.put((checkpoint, metrics))
-
-
-def write_tensorboard(summary_writer, metrics: Dict[str, Union[float, int]], checkpoint: int):
-    """
-    Writes a Tensorboard scalar event to the given SummaryWriter.
-
-    :param summary_writer: A Tensorboard SummaryWriter instance.
-    :param metrics: Mapping of metric names to their values.
-    :param checkpoint: Current checkpoint.
-    """
-    try:
-        from tensorboard.summary import scalar  # pylint: disable=import-error
-    except ImportError:
-        raise RuntimeError("Please install tensorboard.")
-    for name, value in metrics.items():
-        summary_writer.add_summary(scalar(name=name, scalar=value), global_step=checkpoint)

@@ -100,6 +100,9 @@ class CheckpointDecoder:
             else:
                 self.inputs_sentences, self.target_sentences = inputs_sentences, target_sentences
 
+            if sample_size < self.batch_size:
+                self.batch_size = sample_size
+
         for i, factor in enumerate(self.inputs_sentences):
             write_to_file(factor, os.path.join(self.model, C.DECODE_IN_NAME % i))
         write_to_file(self.target_sentences, os.path.join(self.model, C.DECODE_REF_NAME))
@@ -157,7 +160,8 @@ class CheckpointDecoder:
                                                      offset=0.01),
                 C.CHRF_VAL: evaluate.raw_corpus_chrf(hypotheses=translations,
                                                      references=self.target_sentences),
-                C.AVG_TIME: avg_time}
+                C.AVG_TIME: avg_time,
+                C.DECODING_TIME: trans_wall_time}
 
 
 def parallel_subsample(parallel_sequences: List[List[Any]], sample_size: int, seed: int) -> List[Any]:
