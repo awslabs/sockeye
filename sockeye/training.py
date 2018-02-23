@@ -22,7 +22,7 @@ import random
 import shutil
 import time
 from functools import reduce
-from typing import Any, AnyStr, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import mxnet as mx
 import numpy as np
@@ -218,7 +218,7 @@ class TrainingModel(model.SockeyeModel):
         return self.current_module._exec_group.execs
 
     @property
-    def loss(self) -> loss.Loss:
+    def loss(self):
         return self.model_loss
 
     @property
@@ -372,7 +372,7 @@ class EarlyStoppingTrainer:
             train_iter: data_io.BaseParallelSampleIter,
             validation_iter: data_io.BaseParallelSampleIter,
             early_stopping_metric,
-            metrics: List[AnyStr],
+            metrics: List[str],
             checkpoint_frequency: int,
             max_num_not_improved: int,
             max_updates: Optional[int] = None,
@@ -680,7 +680,7 @@ class EarlyStoppingTrainer:
     def _adjust_learning_rate(self, has_improved: bool, lr_decay_param_reset: bool, lr_decay_opt_states_reset: str):
         if self.optimizer_config.lr_scheduler is not None:
             if issubclass(type(self.optimizer_config.lr_scheduler), lr_scheduler.AdaptiveLearningRateScheduler):
-                lr_adjusted = self.optimizer_config.lr_scheduler.new_evaluation_result(has_improved)
+                lr_adjusted = self.optimizer_config.lr_scheduler.new_evaluation_result(has_improved)  # type: ignore
             else:
                 lr_adjusted = False
             if lr_adjusted and not has_improved:
@@ -689,10 +689,10 @@ class EarlyStoppingTrainer:
                                 self.state.best_checkpoint)
                     self.model.load_params_from_file(self.best_params_fname)
                 if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_INITIAL:
-                    logger.info("Resetting optimizer states to initial")
+                    logger.info("Loading initial optimizer states")
                     self.model.load_optimizer_states(os.path.join(self.model.output_dir, C.OPT_STATES_INITIAL))
                 elif lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
-                    logger.info("Resetting optimizer states to last best checkpoint: %d",
+                    logger.info("Loading optimizer states from best checkpoint: %d",
                                 self.state.best_checkpoint)
                     self.model.load_optimizer_states(os.path.join(self.model.output_dir, C.OPT_STATES_BEST))
 
@@ -713,7 +713,7 @@ class EarlyStoppingTrainer:
         return os.path.join(self.model.output_dir, C.TRAINING_STATE_DIRNAME)
 
     @staticmethod
-    def _create_eval_metric(metric_name: AnyStr) -> mx.metric.EvalMetric:
+    def _create_eval_metric(metric_name: str) -> mx.metric.EvalMetric:
         """
         Creates an EvalMetric given a metric names.
         """
@@ -726,7 +726,7 @@ class EarlyStoppingTrainer:
             raise ValueError("unknown metric name")
 
     @staticmethod
-    def _create_eval_metric_composite(metric_names: List[AnyStr]) -> mx.metric.CompositeEvalMetric:
+    def _create_eval_metric_composite(metric_names: List[str]) -> mx.metric.CompositeEvalMetric:
         """
         Creates a composite EvalMetric given a list of metric names.
         """
@@ -734,7 +734,7 @@ class EarlyStoppingTrainer:
         return mx.metric.create(metrics)
 
     def _create_metrics(self,
-                        metrics: List[AnyStr],
+                        metrics: List[str],
                         optimizer: mx.optimizer.Optimizer,
                         loss: loss.Loss) -> Tuple[mx.metric.EvalMetric,
                                                   mx.metric.EvalMetric,
@@ -744,7 +744,7 @@ class EarlyStoppingTrainer:
         # If optimizer requires it, track loss as metric
         if isinstance(optimizer, SockeyeOptimizer):
             if optimizer.request_optimized_metric:
-                metric_loss = self._create_eval_metric(self.training_monitor.optimized_metric)
+                metric_loss = self._create_eval_metric(self.state.early_stopping_metric)
             else:
                 metric_loss = loss.create_metric()
         else:
