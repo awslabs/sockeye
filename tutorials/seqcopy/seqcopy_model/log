@@ -1,3 +1,0 @@
-[2018-02-23:17:28:11:INFO:sockeye.utils:log_sockeye_version] Sockeye version 1.17.2 commit 1ac070660eb4a34c655d9ba9f19a7f96a398bc36
-[2018-02-23:17:28:11:INFO:sockeye.utils:log_mxnet_version] MXNet version 1.0.0
-[2018-02-23:17:28:11:INFO:sockeye.utils:log_basic_info] Command: C:\Users\john\AppData\Local\Continuum\anaconda3\lib\site-packages\sockeye\train.py -s train.source -t train.target -vs dev.source -vt dev.target --num-embed 32 --rnn-num-hidden 64 --rnn-attention-type dot --use-cpu --metrics perplexity accuracy --max-num-checkpoint-not-improved 3 -o seqcopy_model
