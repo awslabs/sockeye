@@ -27,7 +27,7 @@ import time
 from contextlib import contextmanager, ExitStack
 from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
 
-#import fcntl
+import fcntl
 import mxnet as mx
 import numpy as np
 
@@ -631,21 +631,21 @@ class GpuFileLock:
                     logger.warning("GPU {} is currently locked by a different process "
                                    "(Permission denied).".format(gpu_id))
                     continue
-           # try:
-           #     # exclusive non-blocking lock
-            #    fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try:
+                # exclusive non-blocking lock
+                fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 # got the lock, let's write our PID into it:
-             #   lock_file.write("%d\n" % os.getpid())
-              #  lock_file.flush()
+                lock_file.write("%d\n" % os.getpid())
+                lock_file.flush()
 
-               # self._acquired_lock = True
-                #self.gpu_id = gpu_id
-                #self.lock_file = lock_file
-               # self.lockfile_path = lockfile_path
+                self._acquired_lock = True
+                self.gpu_id = gpu_id
+                self.lock_file = lock_file
+                self.lockfile_path = lockfile_path
 
-               # logger.info("Acquired GPU {}.".format(gpu_id))
+                logger.info("Acquired GPU {}.".format(gpu_id))
 
-               # return gpu_id
+                return gpu_id
             except IOError as e:
                 # raise on unrelated IOErrors
                 if e.errno != errno.EAGAIN:
