@@ -836,7 +836,8 @@ def main():
                            mxmonitor_pattern=args.monitor_pattern,
                            mxmonitor_stat_func=args.monitor_stat_func,
                            lr_decay_param_reset=args.learning_rate_decay_param_reset,
-                           lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset)
+                           lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset,
+                           resume_training=resume_training)
 
 
 if __name__ == "__main__":
