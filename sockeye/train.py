@@ -101,7 +101,7 @@ def check_arg_compatibility(args: argparse.Namespace):
                         % (args.transformer_model_size, args.num_embed[1]))
 
 
-def check_resume(args: argparse.Namespace, output_folder: str) -> Tuple[bool, str]:
+def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     """
     Check if we should resume a broken training run.
 
@@ -142,7 +142,7 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> Tuple[bool, st
     else:
         os.makedirs(output_folder)
 
-    return resume_training, training_state_dir
+    return resume_training
 
 
 def determine_context(args: argparse.Namespace, exit_stack: ExitStack) -> List[mx.Context]:
@@ -714,7 +714,7 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
 
 
 def main():
-    params = argparse.ArgumentParser(description='CLI to train sockeye sequence-to-sequence models.')
+    params = argparse.ArgumentParser(description='Train Sockeye sequence-to-sequence models.')
     arguments.add_train_cli_args(params)
     args = params.parse_args()
 
@@ -722,7 +722,7 @@ def main():
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
-    resume_training, training_state_dir = check_resume(args, output_folder)
+    resume_training = check_resume(args, output_folder)
 
     global logger
     logger = setup_main_logger(__name__,
@@ -735,11 +735,9 @@ def main():
     with ExitStack() as exit_stack:
         context = determine_context(args, exit_stack)
 
-        shared_vocab = use_shared_vocab(args)
-
         train_iter, eval_iter, config_data, source_vocabs, target_vocab = create_data_iters_and_vocabs(
             args=args,
-            shared_vocab=shared_vocab,
+            shared_vocab=use_shared_vocab(args),
             resume_training=resume_training,
             output_folder=output_folder)
 

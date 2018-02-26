@@ -42,15 +42,15 @@ logger = logging.getLogger(__name__)
 
 class TrainingModel(model.SockeyeModel):
     """
-    Defines an Encoder/Decoder model (with attention).
-    RNN configuration (number of hidden units, number of layers, cell type)
-    is shared between encoder & decoder.
+    TrainingModel is a SockeyeModel that fully unrolls over source and target sequences.
 
     :param config: Configuration object holding details about the model.
     :param context: The context(s) that MXNet will be run in (GPU(s)/CPU)
-    :param train_iter: The iterator over the training data.
+    :param output_dir: Directory where this model is stored.
+    :param train_iter: An iterator over the training data.
     :param bucketing: If True bucketing will be used, if False the computation graph will always be
             unrolled to the full length.
+    :param gradient_compression_params: Optional dictionary of gradient compression parameters.
     """
 
     def __init__(self,
@@ -183,7 +183,7 @@ class TrainingModel(model.SockeyeModel):
 
     def rescale_gradients(self, scale: float):
         """
-        Rescales gradient arrays by scale.
+        Rescales gradient arrays of executors by scale.
         """
         for exe in self.executors:
             for arr in exe.grad_arrays:
@@ -223,10 +223,16 @@ class TrainingModel(model.SockeyeModel):
 
     @property
     def optimizer(self) -> Union[mx.optimizer.Optimizer, SockeyeOptimizer]:
+        """
+        Returns the optimizer of the underlying module.
+        """
         # TODO: Push update to MXNet to expose the optimizer (Module should have a get_optimizer method)
         return self.current_module._optimizer
 
     def initialize_optimizer(self, config: OptimizerConfig):
+        """
+        Initializes the optimizer of the underlying module with an optimizer config.
+        """
         self.module.init_optimizer(kvstore=config.kvstore,
                                    optimizer=config.name,
                                    optimizer_params=config.params,
@@ -249,6 +255,11 @@ class TrainingModel(model.SockeyeModel):
         self.current_module.load_optimizer_states(fname)
 
     def initialize_parameters(self, initializer: mx.init.Initializer, allow_missing_params: bool):
+        """
+        Initializes the parameters of the underlying module.
+        :param initializer: Parameter initializer.
+        :param allow_missing_params: Whether to allow missing parameters.
+        """
         self.module.init_params(initializer=initializer,
                                 arg_params=self.params,
                                 aux_params=self.aux_params,
@@ -282,10 +293,16 @@ class TrainingModel(model.SockeyeModel):
         super().save_params_to_file(fname)
 
     def load_params_from_file(self, fname: str):
+        """
+        Loads parameters from a file and sets the parameters of the underlying module and this model instance.
+        """
         super().load_params_from_file(fname)  # sets self.params & self.aux_params
         self.module.set_params(arg_params=self.params, aux_params=self.aux_params)
 
     def install_monitor(self, monitor_pattern: str, monitor_stat_func_name: str):
+        """
+        Installs an MXNet monitor onto the underlying module.
+        """
         self._monitor = mx.monitor.Monitor(interval=C.MEASURE_SPEED_EVERY,
                                            stat_func=C.MONITOR_STAT_FUNCS.get(monitor_stat_func_name),
                                            pattern=monitor_pattern,
@@ -387,7 +404,7 @@ class EarlyStoppingTrainer:
             existing_parameters: Optional[str] = None):
         """
         Fits model to data given by train_iter using early-stopping w.r.t data given by val_iter.
-        Saves all intermediate and final output to output_folder
+        Saves all intermediate and final output to output_folder.
 
         :param train_iter: The training data iterator.
         :param validation_iter: The data iterator for held-out data.
@@ -561,6 +578,9 @@ class EarlyStoppingTrainer:
               checkpoint_frequency: int,
               metric_train: mx.metric.EvalMetric,
               metric_loss: Optional[mx.metric.EvalMetric] = None):
+        """
+        Performs an update to model given a batch and updates metrics.
+        """
 
         if model.monitor is not None:
             model.monitor.tic()
@@ -608,9 +628,10 @@ class EarlyStoppingTrainer:
                 for _, k, v in results:
                     logger.info('Monitor: Batch [{:d}] {:s} {:s}'.format(self.state.updates, k, v))
 
-    def _evaluate(self,
-                  val_iter: data_io.BaseParallelSampleIter,
-                  val_metric: mx.metric.EvalMetric):
+    def _evaluate(self, val_iter: data_io.BaseParallelSampleIter, val_metric: mx.metric.EvalMetric):
+        """
+        Evaluates the model on the validation data and updates the validation metric(s).
+        """
         val_iter.reset()
         val_metric.reset()
         self.model.evaluate(val_iter, val_metric)
@@ -619,6 +640,11 @@ class EarlyStoppingTrainer:
                         metric_train: mx.metric.EvalMetric,
                         metric_val: mx.metric.EvalMetric,
                         process_manager: Optional['DecoderProcessManager'] = None):
+        """
+        Updates metrics for current checkpoint. If a process manager is given, also collects previous decoding results
+        and spawns a new decoding process.
+        Writes all metrics to the metrics file and optionally logs to tensorboard.
+        """
         checkpoint_metrics = {"epoch": self.state.epoch,
                               "learning-rate": self.model.optimizer.learning_rate,
                               "gradient-norm": self.state.gradient_norm,
@@ -648,6 +674,9 @@ class EarlyStoppingTrainer:
             self.tensorboard_logger.log_metrics(checkpoint_metrics, self.state.checkpoint)
 
     def _cleanup(self, lr_decay_opt_states_reset: str, process_manager: Optional['DecoderProcessManager'] = None):
+        """
+        Cleans parameter files, training state directory and waits for remaining decoding processes.
+        """
         utils.cleanup_params_files(self.model.output_dir, self.max_params_files_to_keep,
                                    self.state.checkpoint, self.state.best_checkpoint)
         if process_manager is not None:
@@ -678,6 +707,9 @@ class EarlyStoppingTrainer:
         self.model.initialize_optimizer(self.optimizer_config)
 
     def _adjust_learning_rate(self, has_improved: bool, lr_decay_param_reset: bool, lr_decay_opt_states_reset: str):
+        """
+        Adjusts the optimizer learning rate if required.
+        """
         if self.optimizer_config.lr_scheduler is not None:
             if issubclass(type(self.optimizer_config.lr_scheduler), lr_scheduler.AdaptiveLearningRateScheduler):
                 lr_adjusted = self.optimizer_config.lr_scheduler.new_evaluation_result(has_improved)  # type: ignore
@@ -733,9 +765,7 @@ class EarlyStoppingTrainer:
         metrics = [EarlyStoppingTrainer._create_eval_metric(metric_name) for metric_name in metric_names]
         return mx.metric.create(metrics)
 
-    def _create_metrics(self,
-                        metrics: List[str],
-                        optimizer: mx.optimizer.Optimizer,
+    def _create_metrics(self, metrics: List[str], optimizer: mx.optimizer.Optimizer,
                         loss: loss.Loss) -> Tuple[mx.metric.EvalMetric,
                                                   mx.metric.EvalMetric,
                                                   Optional[mx.metric.EvalMetric]]:
@@ -993,6 +1023,7 @@ class DecoderProcessManager(object):
         self.output_folder = output_folder
         self.decoder = decoder
         self.ctx = mp.get_context('spawn')  # type: ignore
+        print(type(self.ctx))
         self.decoder_metric_queue = self.ctx.Queue()
         self.decoder_process = None  # type: Optional[mp.Process]
 
@@ -1005,8 +1036,7 @@ class DecoderProcessManager(object):
         assert self.decoder_process is None
         output_name = os.path.join(self.output_folder, C.DECODE_OUT_NAME % checkpoint)
         self.decoder_process = self.ctx.Process(target=_decode_and_evaluate,
-                                                args=(
-                                                    self.decoder, checkpoint, output_name, self.decoder_metric_queue))
+                                                args=(self.decoder, checkpoint, output_name, self.decoder_metric_queue))
         self.decoder_process.name = 'Decoder-%d' % checkpoint
         logger.info("Starting process: %s", self.decoder_process.name)
         self.decoder_process.start()
@@ -1017,6 +1047,7 @@ class DecoderProcessManager(object):
         """
         self.wait_to_finish()
         if self.decoder_metric_queue.empty():
+            print("TRUE")
             return None
         decoded_checkpoint, decoder_metrics = self.decoder_metric_queue.get()
         assert self.decoder_metric_queue.empty()
