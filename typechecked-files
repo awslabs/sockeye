@@ -3,7 +3,6 @@ sockeye/arguments.py
 sockeye/average.py
 sockeye/callback.py
 sockeye/checkpoint_decoder.py
-sockeye/chrf.py
 sockeye/config.py
 sockeye/constants.py
 sockeye/convolution.py

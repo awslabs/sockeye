@@ -19,6 +19,7 @@ import pytest
 import sockeye.inference
 import sockeye.output_handler
 import sockeye.translate
+import sockeye.constants
 
 TEST_DATA = "Test file line 1\n" \
             "Test file line 2\n"
@@ -35,6 +36,8 @@ def mock_output_handler():
 
 
 def mock_open(*args, **kargs):
+    # work-around for [MagicMock objects not being iterable](http://bugs.python.org/issue21258)
+    # cf. http://stackoverflow.com/questions/24779893/customizing-unittest-mock-mock-open-for-iteration
     f_open = unittest.mock.mock_open(*args, **kargs)
     f_open.return_value.__iter__ = lambda self: iter(self.readline, '')
     return f_open
@@ -43,14 +46,10 @@ def mock_open(*args, **kargs):
 @unittest.mock.patch("builtins.open", new_callable=mock_open, read_data=TEST_DATA)
 def test_translate_by_file(mock_file, mock_translator, mock_output_handler):
     mock_translator.translate.return_value = ['', '']
+    mock_translator.num_source_factors = 1
     mock_translator.batch_size = 1
-    mock_file.return_value = TEST_DATA.splitlines()
     sockeye.translate.read_and_translate(translator=mock_translator, output_handler=mock_output_handler,
-                                         chunk_size=2, source='/dev/null')
-
-    # Ensure that our translator has the correct input passed to it.
-    mock_translator.make_input.assert_any_call(1, "Test file line 1")
-    mock_translator.make_input.assert_any_call(2, "Test file line 2")
+                                         chunk_size=2, inp='/dev/null', inp_factors=None)
 
     # Ensure translate gets called once.  Input here will be a dummy mocked result, so we'll ignore it.
     assert mock_translator.translate.call_count == 1
@@ -59,14 +58,11 @@ def test_translate_by_file(mock_file, mock_translator, mock_output_handler):
 @unittest.mock.patch("sys.stdin", io.StringIO(TEST_DATA))
 def test_translate_by_stdin_chunk2(mock_translator, mock_output_handler):
     mock_translator.translate.return_value = ['', '']
+    mock_translator.num_source_factors = 1
     mock_translator.batch_size = 1
     sockeye.translate.read_and_translate(translator=mock_translator,
                                          output_handler=mock_output_handler,
                                          chunk_size=2)
-
-    # Ensure that our translator has the correct input passed to it.
-    mock_translator.make_input.assert_any_call(1, "Test file line 1\n")
-    mock_translator.make_input.assert_any_call(2, "Test file line 2\n")
 
     # Ensure translate gets called once.  Input here will be a dummy mocked result, so we'll ignore it.
     assert mock_translator.translate.call_count == 1

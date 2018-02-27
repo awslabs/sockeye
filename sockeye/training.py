@@ -102,8 +102,11 @@ class TrainingModel(model.SockeyeModel):
         Initializes model components, creates training symbol and module, and binds it.
         """
         #utils.check_condition(train_iter.pad_id == C.PAD_ID == 0, "pad id should be 0")
+
         source = mx.sym.Variable(C.SOURCE_NAME)
-        source_length = utils.compute_lengths(source)
+        source_words = source.split(num_outputs=self.config.config_embed_source.num_factors,
+                                    axis=2, squeeze_axis=True)[0]
+        source_length = utils.compute_lengths(source_words)
         target = mx.sym.Variable(C.TARGET_NAME)
         target_length = utils.compute_lengths(target)
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
@@ -131,7 +134,7 @@ class TrainingModel(model.SockeyeModel):
              target_embed_seq_len) = self.embedding_target.encode(target, target_length, target_seq_len)
 
             # encoder
-            # source_encoded: (source_encoded_length, batch_size, encoder_depth)
+            # source_encoded: (batch_size, source_encoded_length, encoder_depth)
             (source_encoded,
              source_encoded_length,
              source_encoded_seq_len) = self.encoder.encode(source_embed,
@@ -163,7 +166,7 @@ class TrainingModel(model.SockeyeModel):
                                           compression_params=self.gradient_compression_params)
         else:
             logger.info("No bucketing. Unrolled to (%d,%d)",
-                        self.config.max_seq_len_source, self.config.max_seq_len_target)
+                        self.config.config_data.max_seq_len_source, self.config.config_data.max_seq_len_target)
             symbol, _, __ = sym_gen(train_iter.buckets[0])
             return mx.mod.Module(symbol=symbol,
                                  data_names=data_names,
@@ -213,14 +216,15 @@ class TrainingModel(model.SockeyeModel):
             min_num_epochs: Optional[int] = None,
             max_num_epochs: Optional[int] = None,
             decode_and_evaluate: int = 0,
-            decode_and_evaluate_fname_source: Optional[str] = None,
+            decode_and_evaluate_fname_sources: Optional[List[str]] = None,
             decode_and_evaluate_fname_target: Optional[str] = None,
             decode_and_evaluate_context: Optional[mx.Context] = None,
             use_tensorboard: bool = False,
             mxmonitor_pattern: Optional[str] = None,
             mxmonitor_stat_func: Optional[str] = None,
             lr_decay_param_reset: bool = False,
-            lr_decay_opt_states_reset: str = C.LR_DECAY_OPT_STATES_RESET_OFF):
+            lr_decay_opt_states_reset: str = C.LR_DECAY_OPT_STATES_RESET_OFF,
+            resume_training: bool = False):
         """
         Fits model to data given by train_iter using early-stopping w.r.t data given by val_iter.
         Saves all intermediate and final output to output_folder
@@ -244,7 +248,7 @@ class TrainingModel(model.SockeyeModel):
         :param max_num_epochs: Optional maximum number of epochs to train.
         :param decode_and_evaluate: Monitor BLEU during training (0: off, >=0: the number of sentences to decode for BLEU
                evaluation, -1: decode the full validation set.).
-        :param decode_and_evaluate_fname_source: Filename of source data to decode and evaluate.
+        :param decode_and_evaluate_fname_sources: Filename(s) of source data to decode and evaluate.
         :param decode_and_evaluate_fname_target: Filename of target data (references) to decode and evaluate.
         :param decode_and_evaluate_context: Optional MXNet context for decode and evaluate.
         :param use_tensorboard: If True write tensorboard compatible logs for monitoring training and
@@ -255,6 +259,7 @@ class TrainingModel(model.SockeyeModel):
                when using MXNEt's monitor.
         :param lr_decay_param_reset: Reset parameters to previous best after learning rate decay.
         :param lr_decay_opt_states_reset: How to reset optimizer states after learning rate decay.
+        :param resume_training: Resume an interrupted training.
         :return: Best score on validation data observed during training.
         """
         self.save_version(output_folder)
@@ -270,21 +275,25 @@ class TrainingModel(model.SockeyeModel):
                          for_training=True, force_rebind=True, grad_req='write')
         self.module.symbol.save(os.path.join(output_folder, C.SYMBOL_NAME))
 
-        self.module.init_params(initializer=initializer, arg_params=self.params, aux_params=None,
+        self.module.init_params(initializer=initializer, arg_params=self.params, aux_params=self.aux_params,
                                 allow_missing=allow_missing_params, force_init=False)
         self._log_params()
+        if not resume_training:
+            initial_params_fname = self._save_params(output_folder, checkpoint=0)
+            os.symlink(initial_params_fname, os.path.join(output_folder, C.PARAMS_BEST_NAME))
 
         self.module.init_optimizer(kvstore=kvstore, optimizer=optimizer, optimizer_params=optimizer_params)
 
-        cp_decoder = checkpoint_decoder.CheckpointDecoder(decode_and_evaluate_context,
-                                                          decode_and_evaluate_fname_source,
-                                                          decode_and_evaluate_fname_target,
-                                                          output_folder,
-                                                          sample_size=decode_and_evaluate) \
-            if decode_and_evaluate else None
+        cp_decoder = None
+        if decode_and_evaluate:
+            cp_decoder = checkpoint_decoder.CheckpointDecoder(context=decode_and_evaluate_context,
+                                                              inputs=decode_and_evaluate_fname_sources,
+                                                              references=decode_and_evaluate_fname_target,
+                                                              model=output_folder,
+                                                              sample_size=decode_and_evaluate)
 
         logger.info("Training started.")
-        self.training_monitor = callback.TrainingMonitor(train_iter.batch_size, output_folder,
+        self.training_monitor = callback.TrainingMonitor(output_folder,
                                                          optimized_metric=optimized_metric,
                                                          use_tensorboard=use_tensorboard,
                                                          cp_decoder=cp_decoder)
@@ -340,7 +349,7 @@ class TrainingModel(model.SockeyeModel):
     def _get_executors(self):
         return self._get_curr_module()._exec_group.execs
 
-    def _get_optimizer(self):
+    def _get_optimizer(self) -> mx.optimizer.Optimizer:
         # TODO: Push update to MXNet to expose the optimizer (Module should have a get_optimizer method)
         return self._get_curr_module()._optimizer
 
@@ -483,14 +492,17 @@ class TrainingModel(model.SockeyeModel):
                 metric_train_dict = {k: v for k, v in metric_train.get_name_value()}
                 if gradient_norm is not None:
                     metric_train_dict['gradient-norm'] = gradient_norm
-                self.training_monitor.checkpoint_callback(train_state.checkpoint, metric_train_dict,
+                self.training_monitor.checkpoint_callback(train_state.checkpoint,
+                                                          train_state.epoch,
+                                                          optimizer.learning_rate,
+                                                          metric_train_dict,
                                                           memory_data=utils.get_gpu_memory_usage(self.context))
 
                 toc = time.time()
-                logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f",
+                time_cost = toc - tic
+                logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f Updates/sec=%.3f",
                             train_state.checkpoint, train_state.updates, train_state.epoch,
-                            train_state.samples, (toc - tic))
-                tic = time.time()
+                            train_state.samples, time_cost, checkpoint_frequency/time_cost)
 
                 for name, val in metric_train.get_name_value():
                     logger.info('Checkpoint [%d]\tTrain-%s=%f', train_state.checkpoint, name, val)
@@ -558,6 +570,8 @@ class TrainingModel(model.SockeyeModel):
 
                 self._checkpoint(train_state, output_folder, train_iter)
 
+                tic = time.time()
+
         cleanup_params_files(output_folder, max_params_files_to_keep,
                              train_state.checkpoint, self.training_monitor.get_best_checkpoint())
 
@@ -585,23 +599,30 @@ class TrainingModel(model.SockeyeModel):
         logger.info("Model parameters: %s", ", ".join(info))
         logger.info("Total # of parameters: %d", total_parameters)
 
-    def _save_params(self, output_folder: str, checkpoint: int):
+    def _save_params(self, output_folder: str, checkpoint: int) -> str:
         """
-        Synchronizes parameters across devices, saves the parameters to disk, and updates self.params.
+        Synchronizes parameters across devices, saves the parameters to disk, and updates self.params
+        and self.aux_params.
+
+        :param output_folder: The folder in which the parameters will be serialized in.
+        :param checkpoint: The current checkpoint used for creating a unique parameter file name.
+        :returns: The full path of the parameter file.
         """
         arg_params, aux_params = self.module.get_params()
         self.module.set_params(arg_params, aux_params)
         self.params = arg_params
+        self.aux_params = aux_params
         params_base_fname = C.PARAMS_NAME % checkpoint
         self.save_params_to_file(os.path.join(output_folder, params_base_fname))
+        return params_base_fname
 
     def _load_params(self, output_folder: str, checkpoint: int):
         """
-        Loads parameters from disk, sets self.params and module's parameters.
+        Loads parameters from disk, sets self.params, self.aux_params and module's parameters.
         """
         params_fname = os.path.join(output_folder, C.PARAMS_NAME % checkpoint)
         self.load_params_from_file(params_fname)  # sets self.params
-        self.module.set_params(arg_params=self.params, aux_params={})
+        self.module.set_params(arg_params=self.params, aux_params=self.aux_params)
 
     def _evaluate(self, training_state, val_iter, val_metric):
         """
@@ -771,7 +792,7 @@ def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, 
         return
     existing_files = glob.glob(os.path.join(output_folder, C.PARAMS_PREFIX + "*"))
     params_name_with_dir = os.path.join(output_folder, C.PARAMS_NAME)
-    for n in range(1, max(1, checkpoint - max_to_keep + 1)):
+    for n in range(0, max(1, checkpoint - max_to_keep + 1)):
         if n != best_checkpoint:
             param_fname_n = params_name_with_dir % n
             if param_fname_n in existing_files:
@@ -791,7 +812,7 @@ class Speedometer:
         self.auto_reset = auto_reset
         self.samples = 0
         self.tokens = 0
-        self.msg = 'Epoch[%d] Batch [%d]\tSpeed: %.2f samples/sec %.2f tokens/sec'
+        self.msg = 'Epoch[%d] Batch [%d]\tSpeed: %.2f samples/sec %.2f tokens/sec %.2f updates/sec'
 
     def __call__(self, epoch: int, updates: int, samples: int, tokens: int, metric: Optional[mx.metric.EvalMetric]):
         count = updates
@@ -803,8 +824,10 @@ class Speedometer:
 
         if self.init:
             if count % self.frequency == 0:
-                samples_per_sec = self.samples / (time.time() - self.tic)
-                tokens_per_sec = self.tokens / (time.time() - self.tic)
+                toc = (time.time() - self.tic)
+                updates_per_sec = self.frequency / toc
+                samples_per_sec = self.samples / toc
+                tokens_per_sec = self.tokens / toc
                 self.samples = 0
                 self.tokens = 0
 
@@ -813,7 +836,7 @@ class Speedometer:
                     if self.auto_reset:
                         metric.reset()
                     logger.info(self.msg + '\t%s=%f' * len(name_value),
-                                epoch, count, samples_per_sec, tokens_per_sec, *sum(name_value, ()))
+                                epoch, count, samples_per_sec, tokens_per_sec, updates_per_sec, *sum(name_value, ()))
                 else:
                     logger.info(self.msg, epoch, count, samples_per_sec)
 

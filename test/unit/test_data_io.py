@@ -350,19 +350,30 @@ def test_get_parallel_bucket(buckets, source_length, target_length, expected_buc
     assert bucket == expected_bucket
 
 
-@pytest.mark.parametrize("source, target, expected_num_sents, expected_mean, expected_std",
-                         [([[1, 1, 1], [2, 2, 2], [3, 3, 3]],
+@pytest.mark.parametrize("sources, target, expected_num_sents, expected_mean, expected_std",
+                         [([[[1, 1, 1], [2, 2, 2], [3, 3, 3]]],
                            [[1, 1, 1], [2, 2, 2], [3, 3, 3]], 3, 1.0, 0.0),
-                          ([[1, 1], [2, 2], [3, 3]],
+                          ([[[1, 1], [2, 2], [3, 3]]],
                            [[1, 1, 1], [2, 2, 2], [3, 3, 3]], 3, 1.5, 0.0),
-                          ([[1, 1, 1], [2, 2], [3, 3, 3, 3, 3, 3, 3]],
+                          ([[[1, 1, 1], [2, 2], [3, 3, 3, 3, 3, 3, 3]]],
                            [[1, 1, 1], [2], [3, 3, 3]], 2, 0.75, 0.25)])
-def test_calculate_length_statistics(source, target, expected_num_sents, expected_mean, expected_std):
-    length_statistics = data_io.calculate_length_statistics(source, target, 5, 5)
-    assert len(source) == len(target)
+def test_calculate_length_statistics(sources, target, expected_num_sents, expected_mean, expected_std):
+    length_statistics = data_io.calculate_length_statistics(sources, target, 5, 5)
+    assert len(sources[0]) == len(target)
     assert length_statistics.num_sents == expected_num_sents
     assert np.isclose(length_statistics.length_ratio_mean, expected_mean)
     assert np.isclose(length_statistics.length_ratio_std, expected_std)
+
+
+@pytest.mark.parametrize("sources, target",
+                         [
+                             ([[[1, 1, 1], [2, 2, 2], [3, 3, 3]],
+                               [[1, 1, 1], [2, 2], [3, 3, 3]]],
+                              [[1, 1, 1], [2, 2, 2], [3, 3, 3]])
+                         ])
+def test_non_parallel_calculate_length_statistics(sources, target):
+    with pytest.raises(SockeyeError):
+        data_io.calculate_length_statistics(sources, target, 5, 5)
 
 
 def test_get_training_data_iters():
@@ -382,29 +393,32 @@ def test_get_training_data_iters():
         # tmp common vocab
         vcb = vocab.build_from_paths([data['source'], data['target']])
 
-        train_iter, val_iter, config_data = data_io.get_training_data_iters(data['source'], data['target'],
-                                                                            data['validation_source'],
-                                                                            data['validation_target'],
-                                                                            vocab_source=vcb,
-                                                                            vocab_target=vcb,
-                                                                            vocab_source_path=None,
-                                                                            vocab_target_path=None,
-                                                                            shared_vocab=True,
-                                                                            batch_size=batch_size,
-                                                                            batch_by_words=False,
-                                                                            batch_num_devices=1,
-                                                                            fill_up="replicate",
-                                                                            max_seq_len_source=train_max_length,
-                                                                            max_seq_len_target=train_max_length,
-                                                                            bucketing=True,
-                                                                            bucket_width=10)
+        train_iter, val_iter, config_data, data_info = data_io.get_training_data_iters(sources=[data['source']],
+                                                                                       target=data['target'],
+                                                                                       validation_sources=[
+                                                                                           data['validation_source']],
+                                                                                       validation_target=data[
+                                                                                           'validation_target'],
+                                                                                       source_vocabs=[vcb],
+                                                                                       target_vocab=vcb,
+                                                                                       source_vocab_paths=[None],
+                                                                                       target_vocab_path=None,
+                                                                                       shared_vocab=True,
+                                                                                       batch_size=batch_size,
+                                                                                       batch_by_words=False,
+                                                                                       batch_num_devices=1,
+                                                                                       fill_up="replicate",
+                                                                                       max_seq_len_source=train_max_length,
+                                                                                       max_seq_len_target=train_max_length,
+                                                                                       bucketing=True,
+                                                                                       bucket_width=10)
         assert isinstance(train_iter, data_io.ParallelSampleIter)
         assert isinstance(val_iter, data_io.ParallelSampleIter)
         assert isinstance(config_data, data_io.DataConfig)
-        assert config_data.source == data['source']
-        assert config_data.target == data['target']
-        assert config_data.vocab_source is None
-        assert config_data.vocab_target is None
+        assert data_info.sources == [data['source']]
+        assert data_info.target == data['target']
+        assert data_info.source_vocabs == [None]
+        assert data_info.target_vocab is None
         assert config_data.data_statistics.max_observed_len_source == train_max_length - 1
         assert config_data.data_statistics.max_observed_len_target == train_max_length
         assert np.isclose(config_data.data_statistics.length_ratio_mean, expected_mean)

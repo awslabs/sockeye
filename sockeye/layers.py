@@ -342,7 +342,6 @@ class MultiHeadAttentionBase:
         self.depth_per_head = self.depth // self.heads
 
         self.w_h2o = mx.sym.Variable("%sh2o_weight" % prefix)
-        self.b_h2o = mx.sym.Variable("%sh2o_bias" % prefix)
 
     def _attend(self,
                 queries: mx.sym.Symbol,
@@ -379,7 +378,7 @@ class MultiHeadAttentionBase:
         # contexts: (batch, query_max_length, output_depth)
         contexts = mx.sym.FullyConnected(data=contexts,
                                          weight=self.w_h2o,
-                                         bias=self.b_h2o,
+                                         no_bias=True,
                                          num_hidden=self.depth_out,
                                          flatten=False)
 
@@ -405,7 +404,6 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
                  dropout: float = 0.0) -> None:
         super().__init__(prefix, depth_att, heads, depth_out, dropout)
         self.w_i2h = mx.sym.Variable("%si2h_weight" % prefix)
-        self.b_i2h = mx.sym.Variable("%si2h_bias" % prefix)
 
     def __call__(self,
                  inputs: mx.sym.Symbol,
@@ -428,7 +426,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         # combined: (batch, max_length, depth * 3)
         combined = mx.sym.FullyConnected(data=inputs,
                                          weight=self.w_i2h,
-                                         bias=self.b_i2h,
+                                         no_bias=True,
                                          num_hidden=self.depth * 3,
                                          flatten=False,
                                          name="%sqkv_transform" % self.prefix)
@@ -468,9 +466,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                  dropout: float = 0.0) -> None:
         super().__init__(prefix, depth_att, heads, depth_out, dropout)
         self.w_q2h = mx.sym.Variable("%sq2h_weight" % prefix)
-        self.b_q2h = mx.sym.Variable("%sq2h_bias" % prefix)
         self.w_kv2h = mx.sym.Variable("%skv2h_weight" % prefix)
-        self.b_kv2h = mx.sym.Variable("%skv2h_bias" % prefix)
 
     def __call__(self,
                  queries: mx.sym.Symbol,
@@ -492,7 +488,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         # (batch, memory_max_length, depth * 2)
         combined = mx.sym.FullyConnected(data=memory,
                                          weight=self.w_kv2h,
-                                         bias=self.b_kv2h,
+                                         no_bias=True,
                                          num_hidden=self.depth * 2,
                                          flatten=False,
                                          name="%skv_transform" % self.prefix)
@@ -506,14 +502,15 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         # (batch, query_max_length, depth * 2)
         queries = mx.sym.FullyConnected(data=queries,
                                         weight=self.w_q2h,
-                                        bias=self.b_q2h,
+                                        no_bias=True,
                                         num_hidden=self.depth,
                                         flatten=False,
                                         name="%sq_transform" % self.prefix)
         return self._attend(queries,
                             keys,
                             values,
-                            bias=bias)
+                            bias=bias,
+                            lengths=memory_lengths)
 
 
 class ProjectedDotAttention:
@@ -596,7 +593,6 @@ class PlainDotAttention:
         contexts = dot_attention(queries, memory, memory, memory_lengths)
 
         return contexts
-
 
 
 class PositionalEncodings(mx.operator.CustomOp):

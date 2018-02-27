@@ -28,8 +28,10 @@ from itertools import zip_longest
      '--validation-source test_validation_src --validation-target test_validation_tgt '
      '--output test_output',
      dict(source='test_src', target='test_tgt',
+          source_factors=[],
           prepared_data='prep_data',
           validation_source='test_validation_src', validation_target='test_validation_tgt',
+          validation_source_factors=[],
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1,1),
           no_bucketing=False, bucket_width=10, max_seq_len=(100, 100),
@@ -40,8 +42,10 @@ from itertools import zip_longest
      '-vs test_validation_src -vt test_validation_tgt '
      '-o test_output',
      dict(source='test_src', target='test_tgt',
+          source_factors=[],
           prepared_data='prep_data',
           validation_source='test_validation_src', validation_target='test_validation_tgt',
+          validation_source_factors=[],
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1,1),
           no_bucketing=False, bucket_width=10, max_seq_len=(100, 100),
@@ -72,6 +76,7 @@ def test_device_args(test_params, expected_params):
               allow_missing_params=False,
               num_layers=(1, 1),
               num_embed=(512, 512),
+              source_factors_num_embed=[],
               rnn_attention_type='mlp',
               rnn_attention_num_hidden=None,
               rnn_attention_coverage_type='count',
@@ -175,6 +180,8 @@ def test_training_arg(test_params, expected_params):
 
 @pytest.mark.parametrize("test_params, expected_params", [
     ('-m model', dict(input=None,
+                      input_factors=None,
+                      json_input=False,
                       output=None,
                       checkpoints=None,
                       models=['model'],
@@ -190,6 +197,8 @@ def test_training_arg(test_params, expected_params):
                       output_type='translation',
                       sure_align_threshold=0.9,
                       max_output_length_num_stds=2,
+                      beam_search_stop='all',
+                      coverage_penalty_beta=0.0,
                       length_penalty_alpha=1.0,
                       length_penalty_beta=0.0)),
 ])
@@ -308,6 +317,7 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
      dict(source='test_src', target='test_tgt',
           source_vocab=None,
           target_vocab=None,
+          source_factors=[],
           shared_vocab=False,
           num_words=(50000, 50000),
           word_min_count=(1,1),

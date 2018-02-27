@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 # Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
@@ -14,7 +15,7 @@
 # permissions and limitations under the License.
 
 """
-SacréBLEU provides hassle-free computation of shareable, comparable, and reproducible BLEU scores.
+SacreBLEU provides hassle-free computation of shareable, comparable, and reproducible BLEU scores.
 Inspired by Rico Sennrich's `multi-bleu-detok.perl`, it produces the official WMT scores but works with plain text.
 It also knows all the standard test sets and handles downloading, processing, and tokenization for you.
 
@@ -50,14 +51,14 @@ After tokenizing, translating, and detokenizing it, you can score your decoder o
 
     cat output.detok.txt | sacrebleu -t wmt14 -l de-en
 
-SacréBLEU knows about common WMT test sets, but you can also use it to score system outputs with arbitrary references.
+SacreBLEU knows about common WMT test sets, but you can also use it to score system outputs with arbitrary references.
 It also works in backwards compatible model where you manually specify the reference(s), similar to the format of `multi-bleu.txt`:
 
     cat output.detok.txt | sacrebleu REF1 [REF2 ...]
 
 Note that the system output and references will all be tokenized internally.
 
-SacréBLEU generates version strings like the following.
+SacreBLEU generates version strings like the following.
 Put them in a footnote in your paper!
 Use `--short` for a shorter hash if you like.
 
@@ -71,17 +72,32 @@ Moses itself has a number of implementations as standalone scripts, with little 
 Different flags passed to each of these scripts can produce wide swings in the final score.
 All of these may handle tokenization in different ways.
 On top of this, downloading and managing test sets is a moderate annoyance.
-Sacré bleu!
+Sacre bleu!
 What a mess.
 
-SacréBLEU aims to solve these problems by wrapping the original Papineni reference implementation together with other useful features.
+SacreBLEU aims to solve these problems by wrapping the original Papineni reference implementation together with other useful features.
 The defaults are set the way that BLEU should be computed, and furthermore, the script outputs a short version string that allows others to know exactly what you did.
 As an added bonus, it automatically downloads and manages test sets for you, so that you can simply tell it to score against 'wmt14', without having to hunt down a path on your local file system.
 It is all designed to take BLEU a little more seriously.
 After all, even with all its problems, BLEU is the default and---admit it---well-loved metric of our entire research community.
-Sacré BLEU.
+Sacre BLEU.
 
 # VERSION HISTORY
+
+- 1.2.3 (28 January 2018)
+   - metrics (`-m`) are now printed in the order requested
+   - chrF now prints a version string (including the beta parameter, importantly)
+   - attempt to remove dependence on locale setting
+
+- 1.2 (17 January 2018)
+   - added the chrF metric (`-m chrf` or `-m bleu chrf` for both)
+     See 'CHRF: character n-gram F-score for automatic MT evaluation' by Maja Popovic (WMT 2015)
+     [http://www.statmt.org/wmt15/pdf/WMT49.pdf]
+   - added IWSLT 2017 test and tuning sets for DE, FR, and ZH
+     (Thanks to Mauro Cettolo and Marcello Federico).
+   - added `--cite` to produce the citation for easy inclusion in papers
+   - added `--input` (`-i`) to set input to a file instead of STDIN
+   - removed accent mark after objection from UN official
 
 - 1.1.7 (27 November 2017)
    - corpus_bleu() now raises an exception if input streams are different lengths
@@ -129,7 +145,7 @@ Sacré BLEU.
 
 # LICENSE
 
-SacréBLEU is licensed under the Apache 2.0 License.
+SacreBLEU is licensed under the Apache 2.0 License.
 
 # CREDITS
 
@@ -138,23 +154,23 @@ Originally written by Matt Post.
 The official version can be found at github.com/awslabs/sockeye, under `contrib/sacrebleu`.
 """
 
-import re
-import os
-import sys
-import math
-import gzip
-import tarfile
-import logging
-import urllib.request
-import urllib.parse
 import argparse
-import unicodedata
-
+import gzip
+import logging
+import io
+import os
+import re
+import sys
+import tarfile
+import urllib.request
 from collections import Counter, namedtuple
 from itertools import zip_longest
-from typing import List
+from typing import List, Iterable, Tuple
 
-VERSION = '1.1.7'
+import math
+import unicodedata
+
+VERSION = '1.2.3'
 
 try:
     # SIGPIPE is not available on Windows machines, throwing an exception.
@@ -179,6 +195,11 @@ SACREBLEU = os.environ.get('SACREBLEU', os.path.join(USERHOME, '.sacrebleu'))
 # n-gram order. Don't change this.
 NGRAM_ORDER = 4
 
+# Default values for CHRF
+CHRF_ORDER = 6
+# default to 2 (per http://www.aclweb.org/anthology/W16-2341)
+CHRF_BETA = 2
+
 # This defines data locations.
 # At the top level are test sets.
 # Beneath each test set, we define the location to download the test data.
@@ -187,8 +208,9 @@ NGRAM_ORDER = 4
 # The canonical location of unpacked, processed data is $SACREBLEU/$TEST/$SOURCE-$TARGET.{$SOURCE,$TARGET}
 DATASETS = {
     'wmt17': {
-        'data': 'http://data.statmt.org/wmt17/translation-task/test.tgz',
+        'data': ['http://data.statmt.org/wmt17/translation-task/test.tgz'],
         'description': 'Official evaluation data.',
+        'citation': '@InProceedings{bojar-EtAl:2017:WMT1,\n  author    = {Bojar, Ond\\v{r}ej  and  Chatterjee, Rajen  and  Federmann, Christian  and  Graham, Yvette  and  Haddow, Barry  and  Huang, Shujian  and  Huck, Matthias  and  Koehn, Philipp  and  Liu, Qun  and  Logacheva, Varvara  and  Monz, Christof  and  Negri, Matteo  and  Post, Matt  and  Rubino, Raphael  and  Specia, Lucia  and  Turchi, Marco},\n  title     = {Findings of the 2017 Conference on Machine Translation (WMT17)},\n  booktitle = {Proceedings of the Second Conference on Machine Translation, Volume 2: Shared Task Papers},\n  month     = {September},\n  year      = {2017},\n  address   = {Copenhagen, Denmark},\n  publisher = {Association for Computational Linguistics},\n  pages     = {169--214},\n  url       = {http://www.aclweb.org/anthology/W17-4717}\n}',
         'cs-en': ['test/newstest2017-csen-src.cs.sgm', 'test/newstest2017-csen-ref.en.sgm'],
         'de-en': ['test/newstest2017-deen-src.de.sgm', 'test/newstest2017-deen-ref.en.sgm'],
         'en-cs': ['test/newstest2017-encs-src.en.sgm', 'test/newstest2017-encs-ref.cs.sgm'],
@@ -205,23 +227,23 @@ DATASETS = {
         'zh-en': ['test/newstest2017-zhen-src.zh.sgm', 'test/newstest2017-zhen-ref.en.sgm'],
     },
     'wmt17/B': {
-        'data': 'http://data.statmt.org/wmt17/translation-task/test.tgz',
+        'data': ['http://data.statmt.org/wmt17/translation-task/test.tgz'],
         'description': 'Additional reference for EN-FI and FI-EN.',
         'en-fi': ['test/newstestB2017-enfi-src.en.sgm', 'test/newstestB2017-enfi-ref.fi.sgm'],
     },
     'wmt17/tworefs': {
-        'data': 'http://data.statmt.org/wmt17/translation-task/test.tgz',
+        'data': ['http://data.statmt.org/wmt17/translation-task/test.tgz'],
         'description': 'Systems with two references.',
         'en-fi': ['test/newstest2017-enfi-src.en.sgm', 'test/newstest2017-enfi-ref.fi.sgm', 'test/newstestB2017-enfi-ref.fi.sgm'],
     },
     'wmt17/improved': {
-        'data': 'http://data.statmt.org/wmt17/translation-task/test-update-1.tgz',
+        'data': ['http://data.statmt.org/wmt17/translation-task/test-update-1.tgz'],
         'description': 'Improved zh-en and en-zh translations.',
         'en-zh': ['newstest2017-enzh-src.en.sgm', 'newstest2017-enzh-ref.zh.sgm'],
         'zh-en': ['newstest2017-zhen-src.zh.sgm', 'newstest2017-zhen-ref.en.sgm'],
     },
     'wmt17/dev': {
-        'data': 'http://data.statmt.org/wmt17/translation-task/dev.tgz',
+        'data': ['http://data.statmt.org/wmt17/translation-task/dev.tgz'],
         'description': 'Development sets released for new languages in 2017.',
         'en-lv': ['dev/newsdev2017-enlv-src.en.sgm', 'dev/newsdev2017-enlv-ref.lv.sgm'],
         'en-zh': ['dev/newsdev2017-enzh-src.en.sgm', 'dev/newsdev2017-enzh-ref.zh.sgm'],
@@ -229,8 +251,9 @@ DATASETS = {
         'zh-en': ['dev/newsdev2017-zhen-src.zh.sgm', 'dev/newsdev2017-zhen-ref.en.sgm'],
     },
     'wmt16': {
-        'data': 'http://data.statmt.org/wmt16/translation-task/test.tgz',
+        'data': ['http://data.statmt.org/wmt16/translation-task/test.tgz'],
         'description': 'Official evaluation data.',
+        'citation': '@InProceedings{bojar-EtAl:2016:WMT1,\n  author    = {Bojar, Ond\\v{r}ej  and  Chatterjee, Rajen  and  Federmann, Christian  and  Graham, Yvette  and  Haddow, Barry  and  Huck, Matthias  and  Jimeno Yepes, Antonio  and  Koehn, Philipp  and  Logacheva, Varvara  and  Monz, Christof  and  Negri, Matteo  and  Neveol, Aurelie  and  Neves, Mariana  and  Popel, Martin  and  Post, Matt  and  Rubino, Raphael  and  Scarton, Carolina  and  Specia, Lucia  and  Turchi, Marco  and  Verspoor, Karin  and  Zampieri, Marcos},\n  title     = {Findings of the 2016 Conference on Machine Translation},\n  booktitle = {Proceedings of the First Conference on Machine Translation},\n  month     = {August},\n  year      = {2016},\n  address   = {Berlin, Germany},\n  publisher = {Association for Computational Linguistics},\n  pages     = {131--198},\n  url       = {http://www.aclweb.org/anthology/W/W16/W16-2301}\n}',
         'cs-en': ['test/newstest2016-csen-src.cs.sgm', 'test/newstest2016-csen-ref.en.sgm'],
         'de-en': ['test/newstest2016-deen-src.de.sgm', 'test/newstest2016-deen-ref.en.sgm'],
         'en-cs': ['test/newstest2016-encs-src.en.sgm', 'test/newstest2016-encs-ref.cs.sgm'],
@@ -245,17 +268,17 @@ DATASETS = {
         'tr-en': ['test/newstest2016-tren-src.tr.sgm', 'test/newstest2016-tren-ref.en.sgm'],
     },
     'wmt16/B': {
-        'data': 'http://data.statmt.org/wmt16/translation-task/test.tgz',
+        'data': ['http://data.statmt.org/wmt16/translation-task/test.tgz'],
         'description': 'Additional reference for EN-FI.',
         'en-fi': ['test/newstest2016-enfi-src.en.sgm', 'test/newstestB2016-enfi-ref.fi.sgm'],
     },
     'wmt16/tworefs': {
-        'data': 'http://data.statmt.org/wmt16/translation-task/test.tgz',
+        'data': ['http://data.statmt.org/wmt16/translation-task/test.tgz'],
         'description': 'EN-FI with two references.',
         'en-fi': ['test/newstest2016-enfi-src.en.sgm', 'test/newstest2016-enfi-ref.fi.sgm', 'test/newstestB2016-enfi-ref.fi.sgm'],
     },
     'wmt16/dev': {
-        'data': 'http://data.statmt.org/wmt16/translation-task/dev.tgz',
+        'data': ['http://data.statmt.org/wmt16/translation-task/dev.tgz'],
         'description': 'Development sets released for new languages in 2016.',
         'en-ro': ['dev/newsdev2016-enro-src.en.sgm', 'dev/newsdev2016-enro-ref.ro.sgm'],
         'en-tr': ['dev/newsdev2016-entr-src.en.sgm', 'dev/newsdev2016-entr-ref.tr.sgm'],
@@ -263,8 +286,9 @@ DATASETS = {
         'tr-en': ['dev/newsdev2016-tren-src.tr.sgm', 'dev/newsdev2016-tren-ref.en.sgm']
     },
     'wmt15': {
-        'data': 'http://statmt.org/wmt15/test.tgz',
+        'data': ['http://statmt.org/wmt15/test.tgz'],
         'description': 'Official evaluation data.',
+        'citation': '@InProceedings{bojar-EtAl:2015:WMT,\n  author    = {Bojar, Ond\\v{r}ej  and  Chatterjee, Rajen  and  Federmann, Christian  and  Haddow, Barry  and  Huck, Matthias  and  Hokamp, Chris  and  Koehn, Philipp  and  Logacheva, Varvara  and  Monz, Christof  and  Negri, Matteo  and  Post, Matt  and  Scarton, Carolina  and  Specia, Lucia  and  Turchi, Marco},\n  title     = {Findings of the 2015 Workshop on Statistical Machine Translation},\n  booktitle = {Proceedings of the Tenth Workshop on Statistical Machine Translation},\n  month     = {September},\n  year      = {2015},\n  address   = {Lisbon, Portugal},\n  publisher = {Association for Computational Linguistics},\n  pages     = {1--46},\n  url       = {http://aclweb.org/anthology/W15-3001}\n}',
         'en-fr': ['test/newsdiscusstest2015-enfr-src.en.sgm', 'test/newsdiscusstest2015-enfr-ref.fr.sgm'],
         'fr-en': ['test/newsdiscusstest2015-fren-src.fr.sgm', 'test/newsdiscusstest2015-fren-ref.en.sgm'],
         'cs-en': ['test/newstest2015-csen-src.cs.sgm', 'test/newstest2015-csen-ref.en.sgm'],
@@ -277,8 +301,9 @@ DATASETS = {
         'ru-en': ['test/newstest2015-ruen-src.ru.sgm', 'test/newstest2015-ruen-ref.en.sgm']
     },
     'wmt14': {
-        'data': 'http://statmt.org/wmt14/test-filtered.tgz',
+        'data': ['http://statmt.org/wmt14/test-filtered.tgz'],
         'description': 'Official evaluation data.',
+        'citation': '@InProceedings{bojar-EtAl:2014:W14-33,\n  author    = {Bojar, Ondrej  and  Buck, Christian  and  Federmann, Christian  and  Haddow, Barry  and  Koehn, Philipp  and  Leveling, Johannes  and  Monz, Christof  and  Pecina, Pavel  and  Post, Matt  and  Saint-Amand, Herve  and  Soricut, Radu  and  Specia, Lucia  and  Tamchyna, Ale\\v{s}},\n  title     = {Findings of the 2014 Workshop on Statistical Machine Translation},\n  booktitle = {Proceedings of the Ninth Workshop on Statistical Machine Translation},\n  month     = {June},\n  year      = {2014},\n  address   = {Baltimore, Maryland, USA},\n  publisher = {Association for Computational Linguistics},\n  pages     = {12--58},\n  url       = {http://www.aclweb.org/anthology/W/W14/W14-3302}\n}',
         'cs-en': ['test/newstest2014-csen-src.cs.sgm', 'test/newstest2014-csen-ref.en.sgm'],
         'en-cs': ['test/newstest2014-csen-src.en.sgm', 'test/newstest2014-csen-ref.cs.sgm'],
         'de-en': ['test/newstest2014-deen-src.de.sgm', 'test/newstest2014-deen-ref.en.sgm'],
@@ -291,7 +316,7 @@ DATASETS = {
         'ru-en': ['test/newstest2014-ruen-src.ru.sgm', 'test/newstest2014-ruen-ref.en.sgm']
     },
     'wmt14/full': {
-        'data': 'http://statmt.org/wmt14/test-full.tgz',
+        'data': ['http://statmt.org/wmt14/test-full.tgz'],
         'description': 'Evaluation data released after official evaluation for further research.',
         'cs-en': ['test-full/newstest2014-csen-src.cs.sgm', 'test-full/newstest2014-csen-ref.en.sgm'],
         'en-cs': ['test-full/newstest2014-csen-src.en.sgm', 'test-full/newstest2014-csen-ref.cs.sgm'],
@@ -305,8 +330,9 @@ DATASETS = {
         'ru-en': ['test-full/newstest2014-ruen-src.ru.sgm', 'test-full/newstest2014-ruen-ref.en.sgm']
     },
     'wmt13': {
-        'data': 'http://statmt.org/wmt13/test.tgz',
+        'data': ['http://statmt.org/wmt13/test.tgz'],
         'description': 'Official evaluation data.',
+        'citation': '@InProceedings{bojar-EtAl:2013:WMT,\n  author    = {Bojar, Ond\\v{r}ej  and  Buck, Christian  and  Callison-Burch, Chris  and  Federmann, Christian  and  Haddow, Barry  and  Koehn, Philipp  and  Monz, Christof  and  Post, Matt  and  Soricut, Radu  and  Specia, Lucia},\n  title     = {Findings of the 2013 {Workshop on Statistical Machine Translation}},\n  booktitle = {Proceedings of the Eighth Workshop on Statistical Machine Translation},\n  month     = {August},\n  year      = {2013},\n  address   = {Sofia, Bulgaria},\n  publisher = {Association for Computational Linguistics},\n  pages     = {1--44},\n  url       = {http://www.aclweb.org/anthology/W13-2201}\n}',
         'cs-en': ['test/newstest2013-src.cs.sgm', 'test/newstest2013-src.en.sgm'],
         'en-cs': ['test/newstest2013-src.en.sgm', 'test/newstest2013-src.cs.sgm'],
         'de-en': ['test/newstest2013-src.de.sgm', 'test/newstest2013-src.en.sgm'],
@@ -319,8 +345,9 @@ DATASETS = {
         'en-ru': ['test/newstest2013-src.en.sgm', 'test/newstest2013-src.ru.sgm']
     },
     'wmt12': {
-        'data': 'http://statmt.org/wmt12/test.tgz',
+        'data': ['http://statmt.org/wmt12/test.tgz'],
         'description': 'Official evaluation data.',
+        'citation': '@InProceedings{callisonburch-EtAl:2012:WMT,\n  author    = {Callison-Burch, Chris  and  Koehn, Philipp  and  Monz, Christof  and  Post, Matt  and  Soricut, Radu  and  Specia, Lucia},\n  title     = {Findings of the 2012 Workshop on Statistical Machine Translation},\n  booktitle = {Proceedings of the Seventh Workshop on Statistical Machine Translation},\n  month     = {June},\n  year      = {2012},\n  address   = {Montr{\'e}al, Canada},\n  publisher = {Association for Computational Linguistics},\n  pages     = {10--51},\n  url       = {http://www.aclweb.org/anthology/W12-3102}\n}',
         'cs-en': ['test/newstest2012-src.cs.sgm', 'test/newstest2012-src.en.sgm'],
         'en-cs': ['test/newstest2012-src.en.sgm', 'test/newstest2012-src.cs.sgm'],
         'de-en': ['test/newstest2012-src.de.sgm', 'test/newstest2012-src.en.sgm'],
@@ -331,8 +358,9 @@ DATASETS = {
         'en-fr': ['test/newstest2012-src.en.sgm', 'test/newstest2012-src.fr.sgm']
     },
     'wmt11': {
-        'data': 'http://statmt.org/wmt11/test.tgz',
+        'data': ['http://statmt.org/wmt11/test.tgz'],
         'description': 'Official evaluation data.',
+        'citation': '@InProceedings{callisonburch-EtAl:2011:WMT,\n  author    = {Callison-Burch, Chris  and  Koehn, Philipp  and  Monz, Christof  and  Zaidan, Omar},\n  title     = {Findings of the 2011 Workshop on Statistical Machine Translation},\n  booktitle = {Proceedings of the Sixth Workshop on Statistical Machine Translation},\n  month     = {July},\n  year      = {2011},\n  address   = {Edinburgh, Scotland},\n  publisher = {Association for Computational Linguistics},\n  pages     = {22--64},\n  url       = {http://www.aclweb.org/anthology/W11-2103}\n}',
         'cs-en': ['newstest2011-src.cs.sgm', 'newstest2011-src.en.sgm'],
         'en-cs': ['newstest2011-src.en.sgm', 'newstest2011-src.cs.sgm'],
         'de-en': ['newstest2011-src.de.sgm', 'newstest2011-src.en.sgm'],
@@ -343,8 +371,9 @@ DATASETS = {
         'en-es': ['newstest2011-src.en.sgm', 'newstest2011-src.es.sgm']
     },
     'wmt10': {
-        'data': 'http://statmt.org/wmt10/test.tgz',
+        'data': ['http://statmt.org/wmt10/test.tgz'],
         'description': 'Official evaluation data.',
+        'citation': '@InProceedings{callisonburch-EtAl:2010:WMT,\n  author    = {Callison-Burch, Chris  and  Koehn, Philipp  and  Monz, Christof  and  Peterson, Kay  and  Przybocki, Mark  and  Zaidan, Omar},\n  title     = {Findings of the 2010 Joint Workshop on Statistical Machine Translation and Metrics for Machine Translation},\n  booktitle = {Proceedings of the Joint Fifth Workshop on Statistical Machine Translation and MetricsMATR},\n  month     = {July},\n  year      = {2010},\n  address   = {Uppsala, Sweden},\n  publisher = {Association for Computational Linguistics},\n  pages     = {17--53},\n  note      = {Revised August 2010},\n  url       = {http://www.aclweb.org/anthology/W10-1703}\n}',
         'cs-en': ['test/newstest2010-src.cz.sgm', 'test/newstest2010-src.en.sgm'],
         'en-cs': ['test/newstest2010-src.en.sgm', 'test/newstest2010-src.cz.sgm'],
         'de-en': ['test/newstest2010-src.de.sgm', 'test/newstest2010-src.en.sgm'],
@@ -355,8 +384,9 @@ DATASETS = {
         'en-fr': ['test/newstest2010-src.en.sgm', 'test/newstest2010-src.fr.sgm']
     },
     'wmt09': {
-        'data': 'http://statmt.org/wmt09/test.tgz',
+        'data': ['http://statmt.org/wmt09/test.tgz'],
         'description': 'Official evaluation data.',
+        'citation': '@InProceedings{callisonburch-EtAl:2009:WMT-09,\n  author    = {Callison-Burch, Chris  and  Koehn, Philipp  and  Monz, Christof  and  Schroeder, Josh},\n  title     = {Findings of the 2009 {W}orkshop on {S}tatistical {M}achine {T}ranslation},\n  booktitle = {Proceedings of the Fourth Workshop on Statistical Machine Translation},\n  month     = {March},\n  year      = {2009},\n  address   = {Athens, Greece},\n  publisher = {Association for Computational Linguistics},\n  pages     = {1--28},\n  url       = {http://www.aclweb.org/anthology/W/W09/W09-0401}\n}',
         'cs-en': ['test/newstest2009-src.cz.sgm', 'test/newstest2009-src.en.sgm'],
         'en-cs': ['test/newstest2009-src.en.sgm', 'test/newstest2009-src.cz.sgm'],
         'de-en': ['test/newstest2009-src.de.sgm', 'test/newstest2009-src.en.sgm'],
@@ -371,8 +401,9 @@ DATASETS = {
         'en-it': ['test/newstest2009-src.en.sgm', 'test/newstest2009-src.it.sgm']
     },
     'wmt08': {
-        'data': 'http://statmt.org/wmt08/test.tgz',
+        'data': ['http://statmt.org/wmt08/test.tgz'],
         'description': 'Official evaluation data.',
+        'citation': '@InProceedings{callisonburch-EtAl:2008:WMT,\n  author    = {Callison-Burch, Chris  and  Fordyce, Cameron  and  Koehn, Philipp  and  Monz, Christof  and  Schroeder, Josh},\n  title     = {Further Meta-Evaluation of Machine Translation},\n  booktitle = {Proceedings of the Third Workshop on Statistical Machine Translation},\n  month     = {June},\n  year      = {2008},\n  address   = {Columbus, Ohio},\n  publisher = {Association for Computational Linguistics},\n  pages     = {70--106},\n  url       = {http://www.aclweb.org/anthology/W/W08/W08-0309}\n}',
         'cs-en': ['test/newstest2008-src.cz.sgm', 'test/newstest2008-src.en.sgm'],
         'en-cs': ['test/newstest2008-src.en.sgm', 'test/newstest2008-src.cz.sgm'],
         'de-en': ['test/newstest2008-src.de.sgm', 'test/newstest2008-src.en.sgm'],
@@ -385,13 +416,13 @@ DATASETS = {
         'en-hu': ['test/newstest2008-src.en.sgm', 'test/newstest2008-src.hu.sgm']
     },
     'wmt08/nc': {
-        'data': 'http://statmt.org/wmt08/test.tgz',
+        'data': ['http://statmt.org/wmt08/test.tgz'],
         'description': 'Official evaluation data (news commentary).',
         'cs-en': ['test/nc-test2008-src.cz.sgm', 'test/nc-test2008-src.en.sgm'],
         'en-cs': ['test/nc-test2008-src.en.sgm', 'test/nc-test2008-src.cz.sgm']
     },
     'wmt08/europarl': {
-        'data': 'http://statmt.org/wmt08/test.tgz',
+        'data': ['http://statmt.org/wmt08/test.tgz'],
         'description': 'Official evaluation data (Europarl).',
         'de-en': ['test/test2008-src.de.sgm', 'test/test2008-src.en.sgm'],
         'en-de': ['test/test2008-src.en.sgm', 'test/test2008-src.de.sgm'],
@@ -399,6 +430,148 @@ DATASETS = {
         'en-es': ['test/test2008-src.en.sgm', 'test/test2008-src.es.sgm'],
         'fr-en': ['test/test2008-src.fr.sgm', 'test/test2008-src.en.sgm'],
         'en-fr': ['test/test2008-src.en.sgm', 'test/test2008-src.fr.sgm']
+    },
+    'iwslt17': {
+        'data': ['https://wit3.fbk.eu/archive/2017-01-ted-test/texts/en/fr/en-fr.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/fr/en/fr-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/en/de/en-de.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/de/en/de-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/en/ar/en-ar.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/ar/en/ar-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/en/ja/en-ja.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/ja/en/ja-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/en/ko/en-ko.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/ko/en/ko-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/en/zh/en-zh.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/zh/en/zh-en.tgz'],
+        'description': 'Official evaluation data for IWSLT.',
+        'citation': '@InProceedings{iwslt2017,\n  author    = {Cettolo, Mauro and Federico, Marcello and Bentivogli, Luisa and Niehues, Jan and Stüker, Sebastian and Sudoh, Katsuitho and Yoshino, Koichiro and Federmann, Christian},\n  title     = {Overview of the IWSLT 2017 Evaluation Campaign},\n  booktitle = {14th International Workshop on Spoken Language Translation},\n  month     = {December},\n  year      = {2017},\n  address   = {Tokyo, Japan},\n  pages     = {2--14},\n  url       = {http://workshop2017.iwslt.org/downloads/iwslt2017_proceeding_v2.pdf\n}',
+        'en-fr': ['en-fr/IWSLT17.TED.tst2017.en-fr.en.xml', 'fr-en/IWSLT17.TED.tst2017.fr-en.fr.xml'],
+        'fr-en': ['fr-en/IWSLT17.TED.tst2017.fr-en.fr.xml', 'en-fr/IWSLT17.TED.tst2017.en-fr.en.xml'],
+        'en-de': ['en-de/IWSLT17.TED.tst2017.en-de.en.xml', 'de-en/IWSLT17.TED.tst2017.de-en.de.xml'],
+        'de-en': ['de-en/IWSLT17.TED.tst2017.de-en.de.xml', 'en-de/IWSLT17.TED.tst2017.en-de.en.xml'],
+        'en-zh': ['en-zh/IWSLT17.TED.tst2017.en-zh.en.xml', 'zh-en/IWSLT17.TED.tst2017.zh-en.zh.xml'],
+        'zh-en': ['zh-en/IWSLT17.TED.tst2017.zh-en.zh.xml', 'en-zh/IWSLT17.TED.tst2017.en-zh.en.xml'],
+        },
+    'iwslt17/tst2016': {
+        'data': ['https://wit3.fbk.eu/archive/2017-01-ted-test/texts/en/fr/en-fr.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/fr/en/fr-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/en/de/en-de.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/de/en/de-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/en/zh/en-zh.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/zh/en/zh-en.tgz'],
+        'description': 'Development data for IWSLT 2017.',
+        'en-fr': ['en-fr/IWSLT17.TED.tst2016.en-fr.en.xml', 'fr-en/IWSLT17.TED.tst2016.fr-en.fr.xml'],
+        'fr-en': ['fr-en/IWSLT17.TED.tst2016.fr-en.fr.xml', 'en-fr/IWSLT17.TED.tst2016.en-fr.en.xml'],
+        'en-de': ['en-de/IWSLT17.TED.tst2016.en-de.en.xml', 'de-en/IWSLT17.TED.tst2016.de-en.de.xml'],
+        'de-en': ['de-en/IWSLT17.TED.tst2016.de-en.de.xml', 'en-de/IWSLT17.TED.tst2016.en-de.en.xml'],
+        'en-zh': ['en-zh/IWSLT17.TED.tst2016.en-zh.en.xml', 'zh-en/IWSLT17.TED.tst2016.zh-en.zh.xml'],
+        'zh-en': ['zh-en/IWSLT17.TED.tst2016.zh-en.zh.xml', 'en-zh/IWSLT17.TED.tst2016.en-zh.en.xml'],
+    },
+    'iwslt17/tst2015': {
+        'data': ['https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/de/en-de.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/de/en/de-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/fr/en-fr.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/fr/en/fr-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/zh/en-zh.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/zh/en/zh-en.tgz'],
+        'description': 'Development data for IWSLT 2017.',
+        'en-fr': ['en-fr/IWSLT17.TED.tst2015.en-fr.en.xml', 'fr-en/IWSLT17.TED.tst2015.fr-en.fr.xml'],
+        'fr-en': ['fr-en/IWSLT17.TED.tst2015.fr-en.fr.xml', 'en-fr/IWSLT17.TED.tst2015.en-fr.en.xml'],
+        'en-de': ['en-de/IWSLT17.TED.tst2015.en-de.en.xml', 'de-en/IWSLT17.TED.tst2015.de-en.de.xml'],
+        'de-en': ['de-en/IWSLT17.TED.tst2015.de-en.de.xml', 'en-de/IWSLT17.TED.tst2015.en-de.en.xml'],
+        'en-zh': ['en-zh/IWSLT17.TED.tst2015.en-zh.en.xml', 'zh-en/IWSLT17.TED.tst2015.zh-en.zh.xml'],
+        'zh-en': ['zh-en/IWSLT17.TED.tst2015.zh-en.zh.xml', 'en-zh/IWSLT17.TED.tst2015.en-zh.en.xml'],
+    },
+    'iwslt17/tst2014': {
+        'data': ['https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/de/en-de.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/de/en/de-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/fr/en-fr.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/fr/en/fr-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/zh/en-zh.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/zh/en/zh-en.tgz'],
+        'description': 'Development data for IWSLT 2017.',
+        'en-fr': ['en-fr/IWSLT17.TED.tst2014.en-fr.en.xml', 'fr-en/IWSLT17.TED.tst2014.fr-en.fr.xml'],
+        'fr-en': ['fr-en/IWSLT17.TED.tst2014.fr-en.fr.xml', 'en-fr/IWSLT17.TED.tst2014.en-fr.en.xml'],
+        'en-de': ['en-de/IWSLT17.TED.tst2014.en-de.en.xml', 'de-en/IWSLT17.TED.tst2014.de-en.de.xml'],
+        'de-en': ['de-en/IWSLT17.TED.tst2014.de-en.de.xml', 'en-de/IWSLT17.TED.tst2014.en-de.en.xml'],
+        'en-zh': ['en-zh/IWSLT17.TED.tst2014.en-zh.en.xml', 'zh-en/IWSLT17.TED.tst2014.zh-en.zh.xml'],
+        'zh-en': ['zh-en/IWSLT17.TED.tst2014.zh-en.zh.xml', 'en-zh/IWSLT17.TED.tst2014.en-zh.en.xml'],
+    },
+    'iwslt17/tst2013': {
+        'data': ['https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/de/en-de.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/de/en/de-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/fr/en-fr.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/fr/en/fr-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/zh/en-zh.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/zh/en/zh-en.tgz'],
+        'description': 'Development data for IWSLT 2017.',
+        'en-fr': ['en-fr/IWSLT17.TED.tst2013.en-fr.en.xml', 'fr-en/IWSLT17.TED.tst2013.fr-en.fr.xml'],
+        'fr-en': ['fr-en/IWSLT17.TED.tst2013.fr-en.fr.xml', 'en-fr/IWSLT17.TED.tst2013.en-fr.en.xml'],
+        'en-de': ['en-de/IWSLT17.TED.tst2013.en-de.en.xml', 'de-en/IWSLT17.TED.tst2013.de-en.de.xml'],
+        'de-en': ['de-en/IWSLT17.TED.tst2013.de-en.de.xml', 'en-de/IWSLT17.TED.tst2013.en-de.en.xml'],
+        'en-zh': ['en-zh/IWSLT17.TED.tst2013.en-zh.en.xml', 'zh-en/IWSLT17.TED.tst2013.zh-en.zh.xml'],
+        'zh-en': ['zh-en/IWSLT17.TED.tst2013.zh-en.zh.xml', 'en-zh/IWSLT17.TED.tst2013.en-zh.en.xml'],
+    },
+    'iwslt17/tst2012': {
+        'data': ['https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/de/en-de.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/de/en/de-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/fr/en-fr.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/fr/en/fr-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/zh/en-zh.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/zh/en/zh-en.tgz'],
+        'description': 'Development data for IWSLT 2017.',
+        'en-fr': ['en-fr/IWSLT17.TED.tst2012.en-fr.en.xml', 'fr-en/IWSLT17.TED.tst2012.fr-en.fr.xml'],
+        'fr-en': ['fr-en/IWSLT17.TED.tst2012.fr-en.fr.xml', 'en-fr/IWSLT17.TED.tst2012.en-fr.en.xml'],
+        'en-de': ['en-de/IWSLT17.TED.tst2012.en-de.en.xml', 'de-en/IWSLT17.TED.tst2012.de-en.de.xml'],
+        'de-en': ['de-en/IWSLT17.TED.tst2012.de-en.de.xml', 'en-de/IWSLT17.TED.tst2012.en-de.en.xml'],
+        'en-zh': ['en-zh/IWSLT17.TED.tst2012.en-zh.en.xml', 'zh-en/IWSLT17.TED.tst2012.zh-en.zh.xml'],
+        'zh-en': ['zh-en/IWSLT17.TED.tst2012.zh-en.zh.xml', 'en-zh/IWSLT17.TED.tst2012.en-zh.en.xml'],
+    },
+    'iwslt17/tst2011': {
+        'data': ['https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/de/en-de.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/de/en/de-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/fr/en-fr.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/fr/en/fr-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/zh/en-zh.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/zh/en/zh-en.tgz'],
+        'description': 'Development data for IWSLT 2017.',
+        'en-fr': ['en-fr/IWSLT17.TED.tst2011.en-fr.en.xml', 'fr-en/IWSLT17.TED.tst2011.fr-en.fr.xml'],
+        'fr-en': ['fr-en/IWSLT17.TED.tst2011.fr-en.fr.xml', 'en-fr/IWSLT17.TED.tst2011.en-fr.en.xml'],
+        'en-de': ['en-de/IWSLT17.TED.tst2011.en-de.en.xml', 'de-en/IWSLT17.TED.tst2011.de-en.de.xml'],
+        'de-en': ['de-en/IWSLT17.TED.tst2011.de-en.de.xml', 'en-de/IWSLT17.TED.tst2011.en-de.en.xml'],
+        'en-zh': ['en-zh/IWSLT17.TED.tst2011.en-zh.en.xml', 'zh-en/IWSLT17.TED.tst2011.zh-en.zh.xml'],
+        'zh-en': ['zh-en/IWSLT17.TED.tst2011.zh-en.zh.xml', 'en-zh/IWSLT17.TED.tst2011.en-zh.en.xml'],
+    },
+    'iwslt17/tst2010': {
+        'data': ['https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/de/en-de.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/de/en/de-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/fr/en-fr.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/fr/en/fr-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/zh/en-zh.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/zh/en/zh-en.tgz'],
+        'description': 'Development data for IWSLT 2017.',
+        'en-fr': ['en-fr/IWSLT17.TED.tst2010.en-fr.en.xml', 'fr-en/IWSLT17.TED.tst2010.fr-en.fr.xml'],
+        'fr-en': ['fr-en/IWSLT17.TED.tst2010.fr-en.fr.xml', 'en-fr/IWSLT17.TED.tst2010.en-fr.en.xml'],
+        'en-de': ['en-de/IWSLT17.TED.tst2010.en-de.en.xml', 'de-en/IWSLT17.TED.tst2010.de-en.de.xml'],
+        'de-en': ['de-en/IWSLT17.TED.tst2010.de-en.de.xml', 'en-de/IWSLT17.TED.tst2010.en-de.en.xml'],
+        'en-zh': ['en-zh/IWSLT17.TED.tst2010.en-zh.en.xml', 'zh-en/IWSLT17.TED.tst2010.zh-en.zh.xml'],
+        'zh-en': ['zh-en/IWSLT17.TED.tst2010.zh-en.zh.xml', 'en-zh/IWSLT17.TED.tst2010.en-zh.en.xml'],
+    },
+    'iwslt17/dev2010': {
+        'data': ['https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/de/en-de.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/de/en/de-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/fr/en-fr.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/fr/en/fr-en.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/en/zh/en-zh.tgz',
+                 'https://wit3.fbk.eu/archive/2017-01-trnted/texts/zh/en/zh-en.tgz'],
+        'description': 'Development data for IWSLT 2017.',
+        'en-fr': ['en-fr/IWSLT17.TED.dev2010.en-fr.en.xml', 'fr-en/IWSLT17.TED.dev2010.fr-en.fr.xml'],
+        'fr-en': ['fr-en/IWSLT17.TED.dev2010.fr-en.fr.xml', 'en-fr/IWSLT17.TED.dev2010.en-fr.en.xml'],
+        'en-de': ['en-de/IWSLT17.TED.dev2010.en-de.en.xml', 'de-en/IWSLT17.TED.dev2010.de-en.de.xml'],
+        'de-en': ['de-en/IWSLT17.TED.dev2010.de-en.de.xml', 'en-de/IWSLT17.TED.dev2010.en-de.en.xml'],
+        'en-zh': ['en-zh/IWSLT17.TED.dev2010.en-zh.en.xml', 'zh-en/IWSLT17.TED.dev2010.zh-en.zh.xml'],
+        'zh-en': ['zh-en/IWSLT17.TED.dev2010.zh-en.zh.xml', 'en-zh/IWSLT17.TED.dev2010.en-zh.en.xml'],
     },
 }
 
@@ -600,7 +773,8 @@ TOKENIZERS = {
 }
 DEFAULT_TOKENIZER = '13a'
 
-def _read(file, encoding='utf-8'):
+
+def _open(file, encoding='utf-8'):
     """Convenience function for reading compressed or plain text files.
     :param file: The file to read.
     :param encoding: The file encoding.
@@ -623,7 +797,7 @@ def my_log(num):
     return math.log(num)
 
 
-def build_signature(args, numrefs):
+def bleu_signature(args, numrefs):
     """
     Builds a signature that uniquely identifies the scoring parameters used.
     :param args: the arguments passed into the script
@@ -658,7 +832,43 @@ def build_signature(args, numrefs):
     return sigstr
 
 
-def extract_ngrams(line, max_order=NGRAM_ORDER):
+def chrf_signature(args, numrefs):
+    """
+    Builds a signature that uniquely identifies the scoring parameters used.
+    :param args: the arguments passed into the script
+    :return: the chrF signature
+    """
+
+    # Abbreviations for the signature
+    abbr = {
+        'test': 't',
+        'lang': 'l',
+        'numchars': 'n',
+        'space': 's',
+        'case': 'c',
+        'numrefs': '#',
+        'version': 'v'
+    }
+
+    signature = {'tok': args.tokenize,
+                 'version': VERSION,
+                 'space': args.chrf_whitespace,
+                 'numchars': args.chrf_order,
+                 'numrefs': numrefs,
+                 'case': 'lc' if args.lc else 'mixed'}
+
+    if args.test_set is not None:
+        signature['test'] = args.test_set
+
+    if args.langpair is not None:
+        signature['lang'] = args.langpair
+
+    sigstr = '+'.join(['{}.{}'.format(abbr[x] if args.short else x, signature[x]) for x in sorted(signature.keys())])
+
+    return sigstr
+
+
+def extract_ngrams(line, min_order=1, max_order=NGRAM_ORDER) -> Counter:
     """Extracts all the ngrams (1 <= n <= NGRAM_ORDER) from a sequence of tokens.
 
     :param line: a segment containing a sequence of words
@@ -668,12 +878,19 @@ def extract_ngrams(line, max_order=NGRAM_ORDER):
 
     ngrams = Counter()
     tokens = line.split()
-    for n in range(1, max_order + 1):
+    for n in range(min_order, max_order + 1):
         for i in range(0, len(tokens) - n + 1):
             ngram = ' '.join(tokens[i: i + n])
             ngrams[ngram] += 1
 
     return ngrams
+
+
+def extract_char_ngrams(s: str, n: int) -> Counter:
+    """
+    Yields counts of character n-grams from string s of order n.
+    """
+    return Counter([s[i:i + n] for i in range(len(s) - n + 1)])
 
 
 def ref_stats(output, refs):
@@ -698,20 +915,34 @@ def ref_stats(output, refs):
     return ngrams, closest_diff, closest_len
 
 
+def _clean(s):
+    """
+    Removes trailing and leading spaces and collapses multiple consecutive internal spaces to a single one.
+
+    :param s: The string.
+    :return: A cleaned-up string.
+    """
+    return re.sub(r'\s+', ' ', s.strip())
+
+
 def process_to_text(rawfile, txtfile):
     """Processes raw files to plain text files.
     :param rawfile: the input file (possibly SGML)
     :param txtfile: the plaintext file
     """
 
-    if not os.path.exists(txtfile):
+    if not os.path.exists(txtfile) or os.path.getsize(txtfile) == 0:
+        logging.info("Processing %s to %s", rawfile, txtfile)
         if rawfile.endswith('.sgm') or rawfile.endswith('.sgml'):
-            logging.info("Processing %s to %s", rawfile, txtfile)
-            with _read(rawfile) as fin, open(txtfile, 'wt') as fout:
+            with _open(rawfile) as fin, open(txtfile, 'wt') as fout:
                 for line in fin:
                     if line.startswith('<seg '):
-                        fout.write(re.sub(r'<seg.*?>(.*)</seg>.*?', '\\1', line))
-
+                        print(_clean(re.sub(r'<seg.*?>(.*)</seg>.*?', '\\1', line)), file=fout)
+        elif rawfile.endswith('.xml'): # IWSLT
+            with _open(rawfile) as fin, open(txtfile, 'wt') as fout:
+                for line in fin:
+                    if line.startswith('<seg '):
+                        print(_clean(re.sub(r'<seg.*?>(.*)</seg>.*?', '\\1', line)), file=fout)
 
 def print_test_set(test_set, langpair, side):
     """Prints to STDOUT the specified side of the specified test set
@@ -737,24 +968,30 @@ def download_test_set(test_set, langpair=None):
     # if not data.has_key(test_set):
     #     return None
 
-    dataset = DATASETS[test_set]['data']
     outdir = os.path.join(SACREBLEU, test_set)
     if not os.path.exists(outdir):
         logging.info('Creating %s', outdir)
         os.makedirs(outdir)
 
-    tarball = os.path.join(outdir, os.path.basename(dataset))
-    rawdir = os.path.join(outdir, 'raw')
-    if not os.path.exists(tarball):
-        # TODO: check MD5sum
-        logging.info("Downloading %s to %s", dataset, tarball)
-        with urllib.request.urlopen(dataset) as f, open(tarball, 'wb') as out:
-            out.write(f.read())
+    for dataset in DATASETS[test_set]['data']:
+        tarball = os.path.join(outdir, os.path.basename(dataset))
+        rawdir = os.path.join(outdir, 'raw')
+        if not os.path.exists(tarball) or os.path.getsize(tarball) == 0:
+            # TODO: check MD5sum
+            logging.info("Downloading %s to %s", dataset, tarball)
+            try:
+                with urllib.request.urlopen(dataset) as f, open(tarball, 'wb') as out:
+                    out.write(f.read())
+            except ssl.SSLError:
+                log.warning('An SSL error was encountered in downloading the files. If you\'re on a Mac, '
+                            'you may need to run the "Install Certificates.command" file located in the '
+                            '"Python 3" folder, often found under /Applications')
+                sys.exit(1)
 
-        # Extract the tarball
-        logging.info('Extracting %s', tarball)
-        tar = tarfile.open(tarball)
-        tar.extractall(path=rawdir)
+            # Extract the tarball
+            logging.info('Extracting %s', tarball)
+            tar = tarfile.open(tarball)
+            tar.extractall(path=rawdir)
 
     found = []
 
@@ -832,7 +1069,8 @@ def compute_bleu(correct: List[int], total: List[int], sys_len: int, ref_len: in
     return BLEU._make([bleu, correct, total, precisions, brevity_penalty, sys_len, ref_len])
 
 
-def corpus_bleu(sys_stream, ref_streams, smooth='exp', smooth_floor=0.0, force=False, lowercase=False, tokenize=DEFAULT_TOKENIZER, use_effective_order=False) -> BLEU:
+def corpus_bleu(sys_stream, ref_streams, smooth='exp', smooth_floor=0.0, force=False, lowercase=False,
+                tokenize=DEFAULT_TOKENIZER, use_effective_order=False) -> BLEU:
     """Produces BLEU scores along with its sufficient statistics from a source against one or more references.
 
     :param sys_stream: The system stream (a sequence of segments)
@@ -904,8 +1142,112 @@ def raw_corpus_bleu(sys_stream, ref_streams, smooth_floor=0.01) -> BLEU:
     return corpus_bleu(sys_stream, ref_streams, smooth='floor', smooth_floor=smooth_floor, force=True, tokenize='none', use_effective_order=True)
 
 
+def delete_whitespace(text: str) -> str:
+    """
+    Removes whitespaces from text.
+    """
+    return re.sub(r'\s+', '', text).strip()
+
+
+def get_sentence_statistics(hypothesis: str,
+                            reference: str,
+                            order: int = CHRF_ORDER,
+                            remove_whitespace: bool = True) -> List[float]:
+    hypothesis = delete_whitespace(hypothesis) if remove_whitespace else hypothesis
+    reference = delete_whitespace(reference) if remove_whitespace else reference
+    statistics = [0] * (order * 3)
+    for i in range(order):
+        n = i + 1
+        hypothesis_ngrams = extract_char_ngrams(hypothesis, n)
+        reference_ngrams = extract_char_ngrams(reference, n)
+        common_ngrams = hypothesis_ngrams & reference_ngrams
+        statistics[3 * i + 0] = sum(hypothesis_ngrams.values())
+        statistics[3 * i + 1] = sum(reference_ngrams.values())
+        statistics[3 * i + 2] = sum(common_ngrams.values())
+    return statistics
+
+
+def get_corpus_statistics(hypotheses: Iterable[str],
+                          references: Iterable[str],
+                          order: int = CHRF_ORDER,
+                          remove_whitespace: bool = True) -> List[float]:
+    corpus_statistics = [0] * (order * 3)
+    for hypothesis, reference in zip(hypotheses, references):
+        statistics = get_sentence_statistics(hypothesis, reference, order=order, remove_whitespace=remove_whitespace)
+        for i in range(len(statistics)):
+            corpus_statistics[i] += statistics[i]
+    return corpus_statistics
+
+
+def _avg_precision_and_recall(statistics: List[float], order: int) -> Tuple[float, float]:
+    avg_precision = 0.0
+    avg_recall = 0.0
+    effective_order = 0
+    for i in range(order):
+        hypotheses_ngrams = statistics[3 * i + 0]
+        references_ngrams = statistics[3 * i + 1]
+        common_ngrams = statistics[3 * i + 2]
+        if hypotheses_ngrams > 0 and references_ngrams > 0:
+            avg_precision += common_ngrams / hypotheses_ngrams
+            avg_recall += common_ngrams / references_ngrams
+            effective_order += 1
+    if effective_order == 0:
+        return 0.0, 0.0
+    avg_precision /= effective_order
+    avg_recall /= effective_order
+    return avg_precision, avg_recall
+
+
+def _chrf(avg_precision, avg_recall, beta: int = CHRF_BETA) -> float:
+    if avg_precision + avg_recall == 0:
+        return 0.0
+    beta_square = beta ** 2
+    score = (1 + beta_square) * (avg_precision * avg_recall) / ((beta_square * avg_precision) + avg_recall)
+    return score
+
+
+def corpus_chrf(hypotheses: Iterable[str],
+                references: Iterable[str],
+                order: int = CHRF_ORDER,
+                beta: float = CHRF_BETA,
+                remove_whitespace: bool = True) -> float:
+    """
+    Computes Chrf on a corpus.
+
+    :param hypotheses: Stream of hypotheses.
+    :param references: Stream of references
+    :param order: Maximum n-gram order.
+    :param remove_whitespace: Whether to delete all whitespace from hypothesis and reference strings.
+    :param beta: Defines importance of recall w.r.t precision. If beta=1, same importance.
+    :return: Chrf score.
+    """
+    corpus_statistics = get_corpus_statistics(hypotheses, references, order=order, remove_whitespace=remove_whitespace)
+    avg_precision, avg_recall = _avg_precision_and_recall(corpus_statistics, order)
+    return _chrf(avg_precision, avg_recall, beta=beta)
+
+
+def sentence_chrf(hypothesis: str,
+                  reference: str,
+                  order: int = CHRF_ORDER,
+                  beta: float = CHRF_BETA,
+                  remove_whitespace: bool = True) -> float:
+    """
+    Computes ChrF on a single sentence pair.
+
+    :param hypothesis: Hypothesis string.
+    :param reference: Reference string.
+    :param order: Maximum n-gram order.
+    :param remove_whitespace: Whether to delete whitespaces from hypothesis and reference strings.
+    :param beta: Defines importance of recall w.r.t precision. If beta=1, same importance.
+    :return: Chrf score.
+    """
+    statistics = get_sentence_statistics(hypothesis, reference, order=order, remove_whitespace=remove_whitespace)
+    avg_precision, avg_recall = _avg_precision_and_recall(statistics, order)
+    return _chrf(avg_precision, avg_recall, beta=beta)
+
+
 def main():
-    arg_parser = argparse.ArgumentParser(description='sacréBLEU: Hassle-free computation of shareable BLEU scores.'
+    arg_parser = argparse.ArgumentParser(description='sacreBLEU: Hassle-free computation of shareable BLEU scores.'
                                          'Quick usage: score your detokenized output against WMT\'14 EN-DE:'
                                          '    cat output.detok.de | ./sacreBLEU -t wmt14 -l en-de')
     arg_parser.add_argument('--test-set', '-t', type=str, default=None,
@@ -923,8 +1265,18 @@ def main():
                             help='download a test set and quit')
     arg_parser.add_argument('--echo', choices=['src', 'ref'], type=str, default=None,
                             help='output the source or reference to STDOUT and quit')
+    arg_parser.add_argument('--input', '-i', type=str, default='-',
+                            help='Read input from a file instead of STDIN')
     arg_parser.add_argument('refs', nargs='*', default=[],
                             help='optional list of references (for backwards-compatibility with older scripts)')
+    arg_parser.add_argument('--metrics', '-m', choices=['bleu', 'chrf'], nargs='+', default=['bleu'],
+                            help='metrics to compute (default: bleu)')
+    arg_parser.add_argument('--chrf-order', type=int, default=CHRF_ORDER,
+                            help='chrf character order (default: %(default)s)')
+    arg_parser.add_argument('--chrf-beta', type=int, default=CHRF_BETA,
+                            help='chrf BETA parameter (default: %(default)s)')
+    arg_parser.add_argument('--chrf-whitespace', action='store_true', default=False,
+                            help='include whitespace in chrF calculation (default: %(default)s)')
     arg_parser.add_argument('--short', default=False, action='store_true',
                             help='produce a shorter (less human readable) signature')
     arg_parser.add_argument('--score-only', '-b', default=False, action='store_true',
@@ -935,15 +1287,28 @@ def main():
                             help='suppress informative output')
     arg_parser.add_argument('--encoding', '-e', type=str, default='utf-8',
                             help='open text files with specified encoding (default: %(default)s)')
+    arg_parser.add_argument('--citation', '--cite', default=False, action='store_true',
+                            help='dump the bibtex citation and quit.')
     arg_parser.add_argument('-V', '--version', action='version',
                             version='%(prog)s {}'.format(VERSION))
     args = arg_parser.parse_args()
 
     if not args.quiet:
-        logging.basicConfig(level=logging.INFO, format='sacréBLEU: %(message)s')
+        logging.basicConfig(level=logging.INFO, format='sacreBLEU: %(message)s')
 
     if args.download:
         download_test_set(args.download, args.langpair)
+        sys.exit(0)
+
+    if args.citation:
+        if not args.test_set:
+            logging.error('I need a test set (-t).')
+            sys.exit(1)
+        elif 'citation' not in DATASETS[args.test_set]:
+            logging.error('No citation found for %s', args.test_set)
+            sys.exit(1)
+
+        print(DATASETS[args.test_set]['citation'])
         sys.exit(0)
 
     if args.test_set is not None and args.test_set not in DATASETS:
@@ -957,7 +1322,8 @@ def main():
             logging.error('I need a language pair (-l).')
         elif args.langpair not in DATASETS[args.test_set]:
             logging.error('No such language pair "%s"', args.langpair)
-        logging.error('Available language pairs for test set "%s": %s', args.test_set, ', '.join(filter(lambda x: '-' in x, DATASETS[args.test_set].keys())))
+        logging.error('Available language pairs for test set "%s": %s', args.test_set,
+                      ', '.join(filter(lambda x: '-' in x, DATASETS[args.test_set].keys())))
         sys.exit(1)
 
     if args.echo:
@@ -982,32 +1348,51 @@ def main():
     else:
         refs = args.refs
 
+    inputfh = io.TextIOWrapper(sys.stdin.buffer, encoding=args.encoding) if args.input == '-' else _open(args.input, args.encoding)
+    system = inputfh.readlines()
+
     # Read references
-    refs = [_read(x, args.encoding) for x in refs]
+    refs = [_open(x, args.encoding).readlines() for x in refs]
 
     if args.langpair is not None:
         _, target = args.langpair.split('-')
-        if target == 'zh' and args.tokenize != 'zh':
+        if target == 'zh' and 'bleu' in args.metrics and args.tokenize != 'zh':
             logging.warning('You should also pass "--tok zh" when scoring Chinese...')
 
     try:
-        bleu = corpus_bleu(sys.stdin, refs, smooth=args.smooth, force=args.force, lowercase=args.lc, tokenize=args.tokenize)
+        if 'bleu' in args.metrics:
+            bleu = corpus_bleu(system, refs, smooth=args.smooth, force=args.force, lowercase=args.lc, tokenize=args.tokenize)
+        if 'chrf' in args.metrics:
+            chrf = corpus_chrf(system, refs[0], beta=args.chrf_beta, order=args.chrf_order, remove_whitespace=not args.chrf_whitespace)
     except EOFError:
-        logging.error('The input and reference stream(s) were of different lengths.\n'
-                      'This could be a problem with your system output, or with sacreBLEU\'s reference database.\n'
-                      'If the latter, you can clean out the references cache by typing:\n'
-                      '\n'
-                      '    rm -r %s/%s\n'
-                      '\n'
-                      'They will be downloaded automatically again the next time you run sacreBLEU.', SACREBLEU, args.test_set)
+        logging.error('The input and reference stream(s) were of different lengths.\n')
+        if args.test_set is not None:
+            logging.error('This could be a problem with your system output or with sacreBLEU\'s reference database.\n'
+                          'If the latter, you can clean out the references cache by typing:\n'
+                          '\n'
+                          '    rm -r %s/%s\n'
+                          '\n'
+                          'They will be downloaded automatically again the next time you run sacreBLEU.', SACREBLEU,
+                          args.test_set)
         sys.exit(1)
 
-    version_str = build_signature(args, len(refs))
+    for metric in args.metrics:
+        if metric == 'bleu':
+            if args.score_only:
+                print('{:.2f}'.format(bleu.score))
+            else:
+                version_str = bleu_signature(args, len(refs))
+                print(
+                    'BLEU+{} = {:.2f} {:.1f}/{:.1f}/{:.1f}/{:.1f} (BP = {:.3f} ratio = {:.3f} hyp_len = {:d} ref_len = {:d})'.format(
+                        version_str, bleu.score, bleu.precisions[0], bleu.precisions[1], bleu.precisions[2],
+                        bleu.precisions[3], bleu.bp, bleu.sys_len / bleu.ref_len, bleu.sys_len, bleu.ref_len))
 
-    if args.score_only:
-        print('{:.2f}'.format(bleu.score))
-    else:
-        print('BLEU+{} = {:.2f} {:.1f}/{:.1f}/{:.1f}/{:.1f} (BP = {:.3f} ratio = {:.3f} hyp_len = {:d} ref_len = {:d})'.format(version_str, bleu.score, bleu.precisions[0], bleu.precisions[1], bleu.precisions[2], bleu.precisions[3], bleu.bp, bleu.sys_len / bleu.ref_len, bleu.sys_len, bleu.ref_len))
+        elif metric == 'chrf':
+            if args.score_only:
+                print('{:.2f}'.format(chrf))
+            else:
+                version_str = chrf_signature(args, len(refs))
+                print('chrF{:d}+{} = {:.2f}'.format(args.chrf_beta, version_str, chrf))
 
 
 if __name__ == '__main__':

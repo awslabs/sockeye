@@ -11,26 +11,38 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+# -*- coding: utf-8 -*-
+
 import pytest
-import numpy as np
 
-import sockeye.chrf as chrf
+from contrib import sacrebleu
 
+EPSILON = 1e-8
 
-@pytest.mark.parametrize("hypothesis, reference, expected_chrf",
-                         [("a b c", "a b c", 1.0),
-                          ("a b c", "abc", 1.0),
-                          ("", "c", 0.0)])
-def test_sentence_chrf(hypothesis, reference, expected_chrf):
-    value = chrf.sentence_chrf(hypothesis, reference)
-    assert np.isclose(value, expected_chrf)
+test_cases = [(["Niemand hat die Absicht, eine Mauer zu errichten"], ["Niemand hat die Absicht, eine Mauer zu errichten"], 1.0),
+              (["abcdefg"], ["hijklmnop"], 0.0),
+              (["a"], ["a"], 1.0),
+              ([""], [""], 0.0),
+              ([""], ["reference"], 0.0),
+              (["a b c"], ["a b c"], 1.0),
+              (["a b c"], ["abc"], 1.0),
+              ([""], ["c"], 0.0),
+              (["a", "b"], ["a", "c"], 0.5),
+              (["source"], [""], 0.0),
+              (["aa"], ["ab"], 0.25),
+              ([" Die    Beziehung zwischen  Obama und Netanjahu ist nicht gerade  freundlich. "], ["Das Verhältnis zwischen Obama und Netanyahu ist nicht gerade freundschaftlich."], 0.64130269831561459),
+              ([" risk assessment must be made of those who are qualified and expertise in the sector - these are the scientists ."], ["risk assessment has to be undertaken by those who are qualified and expert in that area - that is the scientists ."], 0.63361730303214769)]
 
+test_cases_keep_whitespace = [
+              (["Die Beziehung zwischen Obama und Netanjahu ist nicht gerade freundlich."], ["Das Verhältnis zwischen Obama und Netanyahu ist nicht gerade freundschaftlich."], 0.67348160629772402),
+              (["risk assessment must be made of those who are qualified and expertise in the sector - these are the scientists ."], ["risk assessment has to be undertaken by those who are qualified and expert in that area - that is the scientists ."], 0.652414427449)]
 
-@pytest.mark.parametrize("hypotheses, references, expected_chrf",
-                         [(["a b c"], ["a b c"], 1.0),
-                          (["a b c"], ["abc"], 1.0),
-                          ([""], ["c"], 0.0),
-                          (["a", "b"], ["a", "c"], 0.5)])
-def test_corpus_chrf(hypotheses, references, expected_chrf):
-    value = chrf.corpus_chrf(hypotheses, references)
-    assert np.isclose(value, expected_chrf)
+@pytest.mark.parametrize("hypotheses, references, expected_score", test_cases)
+def test_chrf(hypotheses, references, expected_score):
+    score = sacrebleu.corpus_chrf(hypotheses, references, 6, 3)
+    assert abs(score - expected_score) < EPSILON
+
+@pytest.mark.parametrize("hypotheses, references, expected_score", test_cases_keep_whitespace)
+def test_chrf_keep_whitespace(hypotheses, references, expected_score):
+    score = sacrebleu.corpus_chrf(hypotheses, references, 6, 3, remove_whitespace=False)
+    assert abs(score - expected_score) < EPSILON

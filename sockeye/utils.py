@@ -25,7 +25,7 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager, ExitStack
-from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO
+from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
 
 import fcntl
 import mxnet as mx
@@ -131,7 +131,7 @@ def save_graph(symbol: mx.sym.Symbol, filename: str, hide_weights: bool = True):
 
 def compute_lengths(sequence_data: mx.sym.Symbol) -> mx.sym.Symbol:
     """
-    Computes sequence lenghts of PAD_ID-padded data in sequence_data.
+    Computes sequence lengths of PAD_ID-padded data in sequence_data.
 
     :param sequence_data: Input data. Shape: (batch_size, seq_len).
     :return: Length data. Shape: (batch_size,).
@@ -322,7 +322,10 @@ def plot_attention(attention_matrix: np.ndarray, source_tokens: List[str], targe
     :param target_tokens: A list of target tokens.
     :param filename: The file to which the attention visualization will be written to.
     """
-    import matplotlib
+    try:
+        import matplotlib
+    except ImportError:
+        raise RuntimeError("Please install matplotlib.")
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     assert attention_matrix.shape[0] == len(target_tokens)
@@ -551,33 +554,44 @@ def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
     candidates_to_request += [remaining_device_ids for _ in range(num_arbitrary_device_ids)]
 
     while True:
+
         with ExitStack() as exit_stack:
-            acquired_gpus = []  # type: List[int]
             any_failed = False
-            for candidates in candidates_to_request:
-                gpu_id = exit_stack.enter_context(GpuFileLock(candidates=candidates, lock_dir=lock_dir))  # type: ignore
-                if gpu_id is not None:
-                    acquired_gpus.append(gpu_id)
-                else:
-                    if len(candidates) == 1:
-                        logger.info("Could not acquire GPU %d. It's currently locked.", candidates[0])
-                    any_failed = True
-                    break
-            if not any_failed:
+            acquired_gpus = []  # type: List[int]
+            with GpuFileLock(candidates=["master_lock"], lock_dir=lock_dir) as master_lock:  # type: str
+                # Only one process, determined by the master lock, can try acquiring gpu locks at a time.
+                # This will make sure that we use consecutive device ids whenever possible.
+                if master_lock is not None:
+                    for candidates in candidates_to_request:
+                        gpu_id = exit_stack.enter_context(GpuFileLock(candidates=candidates, lock_dir=lock_dir))
+                        if gpu_id is not None:
+                            acquired_gpus.append(cast(int, gpu_id))
+                        else:
+                            if len(candidates) == 1:
+                                logger.info("Could not acquire GPU %d. It's currently locked.", candidates[0])
+                            any_failed = True
+                            break
+            if master_lock is not None and not any_failed:
                 try:
                     yield acquired_gpus
                 except:
                     raise
                 return
-        # couldn't acquire all GPUs, let's wait and try again later
 
         # randomize so that multiple processes starting at the same time don't retry at a similar point in time
         if retry_wait_rand > 0:
             retry_wait_actual = retry_wait_min + random.randint(0, retry_wait_rand)
         else:
             retry_wait_actual = retry_wait_min
-        logger.info("Not enough GPUs available will try again in %ss." % retry_wait_actual)
+
+        if master_lock is None:
+            logger.info("Another process is acquiring GPUs at the moment will try again in %ss." % retry_wait_actual)
+        else:
+            logger.info("Not enough GPUs available will try again in %ss." % retry_wait_actual)
         time.sleep(retry_wait_actual)
+
+
+GpuDeviceType = TypeVar('GpuDeviceType')
 
 
 class GpuFileLock:
@@ -589,18 +603,24 @@ class GpuFileLock:
     :param lock_dir: The directory for storing the lock file.
     """
 
-    def __init__(self, candidates: List[int], lock_dir: str) -> None:
+    def __init__(self, candidates: List[GpuDeviceType], lock_dir: str) -> None:
         self.candidates = candidates
         self.lock_dir = lock_dir
         self.lock_file = None  # type: Optional[IO[Any]]
         self.lock_file_path = None  # type: Optional[str]
-        self.gpu_id = None  # type: Optional[int]
+        self.gpu_id = None  # type: Optional[GpuDeviceType]
         self._acquired_lock = False
 
-    def __enter__(self) -> Optional[int]:
+    def __enter__(self) -> Optional[GpuDeviceType]:
         for gpu_id in self.candidates:
-            lockfile_path = os.path.join(self.lock_dir, "sockeye.gpu%d.lock" % gpu_id)
-            lock_file = open(lockfile_path, 'w')
+            lockfile_path = os.path.join(self.lock_dir, "sockeye.gpu{}.lock".format(gpu_id))
+            try:
+                lock_file = open(lockfile_path, 'w')
+            except IOError as e:
+                if errno.EACCES:
+                    logger.warning("GPU {} is currently locked by a different process "
+                                   "(Permission denied).".format(gpu_id))
+                    continue
             try:
                 # exclusive non-blocking lock
                 fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -613,7 +633,7 @@ class GpuFileLock:
                 self.lock_file = lock_file
                 self.lockfile_path = lockfile_path
 
-                logger.info("Acquired GPU %d." % gpu_id)
+                logger.info("Acquired GPU {}.".format(gpu_id))
 
                 return gpu_id
             except IOError as e:
@@ -622,12 +642,12 @@ class GpuFileLock:
                     logger.error("Failed acquiring GPU lock.", exc_info=True)
                     raise
                 else:
-                    logger.debug("GPU %d is currently locked.", gpu_id)
+                    logger.debug("GPU {} is currently locked.".format(gpu_id))
         return None
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.gpu_id is not None:
-            logger.info("Releasing GPU %d.", self.gpu_id)
+            logger.info("Releasing GPU {}.".format(self.gpu_id))
         if self.lock_file is not None:
             if self._acquired_lock:
                 fcntl.flock(self.lock_file, fcntl.LOCK_UN)
@@ -666,8 +686,8 @@ def write_metrics_file(metrics: List[Dict[str, Any]], path: str):
     """
     with open(path, 'w') as metrics_out:
         for checkpoint, metric_dict in enumerate(metrics, 1):
-            metrics_str = "\t".join(["%s=%.6f" % (name, value) for name, value in sorted(metric_dict.items())])
-            metrics_out.write("%d\t%s\n" % (checkpoint, metrics_str))
+            metrics_str = "\t".join(["{}={}".format(name, value) for name, value in sorted(metric_dict.items())])
+            metrics_out.write("{}\t{}\n".format(checkpoint, metrics_str))
 
 
 def get_validation_metric_points(model_path: str, metric: str):
@@ -751,6 +771,7 @@ def grouper(iterable: Iterable, size: int) -> Iterable:
     Collect data into fixed-length chunks or blocks without discarding underfilled chunks or padding them.
 
     :param iterable: A sequence of inputs.
+    :param size: Chunk size.
     :return: Sequence of chunks.
     """
     it = iter(iterable)

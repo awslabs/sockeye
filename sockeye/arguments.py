@@ -15,8 +15,8 @@
 Defines commandline arguments for the main CLIs with reasonable defaults.
 """
 import argparse
-import sys
 import os
+import sys
 from typing import Callable, Optional
 
 from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
@@ -256,6 +256,12 @@ def add_training_data_args(params, required=False):
                         required=required,
                         type=regular_file(),
                         help='Source side of parallel training data.')
+    params.add_argument('--source-factors', '-sf',
+                        required=False,
+                        nargs='+',
+                        type=regular_file(),
+                        default=[],
+                        help='File(s) containing additional token-parallel source side factors. Default: %(default)s.')
     params.add_argument(C.TRAINING_ARG_TARGET, '-t',
                         required=required,
                         type=regular_file(),
@@ -267,6 +273,13 @@ def add_validation_data_params(params):
                         required=True,
                         type=regular_file(),
                         help='Source side of validation data.')
+    params.add_argument('--validation-source-factors', '-vsf',
+                        required=False,
+                        nargs='+',
+                        type=regular_file(),
+                        default=[],
+                        help='File(s) containing additional token-parallel validation source side factors. '
+                             'Default: %(default)s.')
     params.add_argument('--validation-target', '-vt',
                         required=True,
                         type=regular_file(),
@@ -426,7 +439,7 @@ def add_model_parameters(params):
     model_params.add_argument('--allow-missing-params',
                               action="store_true",
                               default=False,
-                              help="Allow misssing parameters when initializing model parameters from file. "
+                              help="Allow missing parameters when initializing model parameters from file. "
                                    "Default: %(default)s.")
 
     model_params.add_argument('--encoder',
@@ -576,6 +589,13 @@ def add_model_parameters(params):
                               default=(512, 512),
                               help='Embedding size for source and target tokens. '
                                    'Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
+    model_params.add_argument('--source-factors-num-embed',
+                              type=int,
+                              nargs='+',
+                              default=[],
+                              help='Embedding size for additional source factors. '
+                                   'You must provide as many dimensions as '
+                                   '(validation) source factor files. Default: %(default)s.')
 
     # attention arguments
     model_params.add_argument('--rnn-attention-type',
@@ -924,6 +944,23 @@ def add_inference_args(params):
                                help='Input file to translate. One sentence per line. '
                                     'If not given, will read from stdin.')
 
+    decode_params.add_argument(C.INFERENCE_ARG_INPUT_FACTORS_LONG, C.INFERENCE_ARG_INPUT_FACTORS_SHORT,
+                               required=False,
+                               nargs='+',
+                               type=regular_file(),
+                               default=None,
+                               help='List of input files containing additional source factors,'
+                                    'each token-parallel to the source. Default: %(default)s.')
+
+    decode_params.add_argument('--json-input',
+                               action='store_true',
+                               default=False,
+                               help="If given, the CLI expects string-serialized json objects as input."
+                                    "Requires at least the input text field, for example: "
+                                    "{'text': 'some input string'} "
+                                    "Optionally, a list of factors can be provided: "
+                                    "{'text': 'some input string', 'factors': ['C C C', 'X X X']}.")
+
     decode_params.add_argument(C.INFERENCE_ARG_OUTPUT_LONG, C.INFERENCE_ARG_OUTPUT_SHORT,
                                default=None,
                                help='Output file to write translations to. '
@@ -1017,7 +1054,7 @@ def add_inference_args(params):
                                default=0.0,
                                type=float,
                                help='Beta factor for the coverage penalty used in beam search: %(default)s ')
-    decode_params.add_argument('--stop',
+    decode_params.add_argument('--beam-search-stop',
                                choices='all first'.split(),
                                default='all',
                                help='Stopping criteria. Quit when (all) hypotheses are finished (default) or when a finished hypothesis is in (first) position')
@@ -1056,14 +1093,14 @@ def add_build_vocab_args(params):
 
 
 def add_init_embedding_args(params):
-    params.add_argument('--embeddings', '-e', required=True, nargs='+',
-                        help='List of input embedding weights in .npy format.')
+    params.add_argument('--weight-files', '-w', required=True, nargs='+',
+                        help='List of input weight files in .npy, .npz or Sockeye parameter format.')
     params.add_argument('--vocabularies-in', '-i', required=True, nargs='+',
                         help='List of input vocabularies as token-index dictionaries in .json format.')
     params.add_argument('--vocabularies-out', '-o', required=True, nargs='+',
                         help='List of output vocabularies as token-index dictionaries in .json format.')
     params.add_argument('--names', '-n', required=True, nargs='+',
-                        help='List of Sockeye parameter names for embedding weights.')
+                        help='List of Sockeye parameter names for (embedding) weights.')
     params.add_argument('--file', '-f', required=True,
                         help='File to write initialized parameters to.')
     params.add_argument('--encoding', '-c', type=str, default=C.VOCAB_ENCODING,

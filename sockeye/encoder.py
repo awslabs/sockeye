@@ -22,7 +22,7 @@ from typing import Callable, List, Optional, Tuple, Union
 
 import mxnet as mx
 
-from sockeye.config import Config
+from . import config
 from . import constants as C
 from . import rnn
 from . import convolution
@@ -30,10 +30,10 @@ from . import transformer
 from . import utils
 
 logger = logging.getLogger(__name__)
-EncoderConfigs = Union['RecurrentEncoderConfig', transformer.TransformerConfig, 'ConvolutionalEncoderConfig']
+EncoderConfig = Union['RecurrentEncoderConfig', transformer.TransformerConfig, 'ConvolutionalEncoderConfig']
 
 
-def get_encoder(config: EncoderConfigs) -> 'Encoder':
+def get_encoder(config: EncoderConfig) -> 'Encoder':
     if isinstance(config, RecurrentEncoderConfig):
         return get_recurrent_encoder(config)
     elif isinstance(config, transformer.TransformerConfig):
@@ -44,7 +44,7 @@ def get_encoder(config: EncoderConfigs) -> 'Encoder':
         raise ValueError("Unsupported encoder configuration")
 
 
-class RecurrentEncoderConfig(Config):
+class RecurrentEncoderConfig(config.Config):
     """
     Recurrent encoder configuration.
 
@@ -63,7 +63,7 @@ class RecurrentEncoderConfig(Config):
         self.reverse_input = reverse_input
 
 
-class ConvolutionalEncoderConfig(Config):
+class ConvolutionalEncoderConfig(config.Config):
     """
     Convolutional encoder configuration.
 
@@ -104,11 +104,12 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
                                                           scale_up_input=False,
                                                           scale_down_positions=False,
                                                           prefix="%sadd_positional_encodings" % C.CHAR_SEQ_ENCODER_PREFIX))
-
-    encoders.append(BatchMajor2TimeMajor())
+        encoders.append(ConvertLayout(C.TIME_MAJOR, num_hidden=encoders[-1].get_num_hidden()))
+    else:
+        encoders.append(ConvertLayout(C.TIME_MAJOR, num_hidden=0))
 
     if config.reverse_input:
-        encoders.append(ReverseSequence())
+        encoders.append(ReverseSequence(num_hidden=encoders[-1].get_num_hidden()))
 
     if config.rnn_config.residual:
         utils.check_condition(config.rnn_config.first_residual_layer >= 2,
@@ -125,8 +126,10 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
         remaining_rnn_config = config.rnn_config.copy(num_layers=config.rnn_config.num_layers - 1,
                                                       first_residual_layer=config.rnn_config.first_residual_layer - 1)
         encoders.append(RecurrentEncoder(rnn_config=remaining_rnn_config,
-                                      prefix=C.STACKEDRNN_PREFIX,
-                                      layout=C.TIME_MAJOR))
+                                         prefix=C.STACKEDRNN_PREFIX,
+                                         layout=C.TIME_MAJOR))
+
+    encoders.append(ConvertLayout(C.BATCH_MAJOR, encoders[-1].get_num_hidden()))
 
     return EncoderSequence(encoders)
 
@@ -147,7 +150,6 @@ def get_convolutional_encoder(config: ConvolutionalEncoderConfig) -> 'Encoder':
                                              fixed_pos_embed_scale_down_positions=True,
                                              prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
     encoders.append(ConvolutionalEncoder(config=config))
-    encoders.append(BatchMajor2TimeMajor())
     return EncoderSequence(encoders)
 
 
@@ -170,7 +172,6 @@ def get_transformer_encoder(config: transformer.TransformerConfig) -> 'Encoder':
         encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
 
     encoders.append(TransformerEncoder(config))
-    encoders.append(BatchMajor2TimeMajor())
 
     return EncoderSequence(encoders)
 
@@ -195,6 +196,7 @@ class Encoder(ABC):
         """
         pass
 
+    @abstractmethod
     def get_num_hidden(self) -> int:
         """
         :return: The representation size of this encoder.
@@ -214,10 +216,18 @@ class Encoder(ABC):
         return None
 
 
-class BatchMajor2TimeMajor(Encoder):
+class ConvertLayout(Encoder):
     """
-    Converts batch major data to time major.
+    Converts batch major data to time major by swapping the first dimension and setting the __layout__ attribute.
+
+    :param target_layout: The target layout to convert to (C.BATCH_MAJOR or C.TIMEMAJOR).
+    :param num_hidden: The number of hidden units of the previous encoder.
     """
+
+    def __init__(self, target_layout: str, num_hidden: int) -> None:
+        assert target_layout == C.BATCH_MAJOR or target_layout == C.TIME_MAJOR
+        self.num_hidden = num_hidden
+        self.target_layout = target_layout
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -231,14 +241,20 @@ class BatchMajor2TimeMajor(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
-        with mx.AttrScope(__layout__=C.TIME_MAJOR):
+        with mx.AttrScope(__layout__=self.target_layout):
             return mx.sym.swapaxes(data=data, dim1=0, dim2=1), data_length, seq_len
+
+    def get_num_hidden(self) -> int:
+        return self.num_hidden
 
 
 class ReverseSequence(Encoder):
     """
     Reverses the input sequence. Requires time-major layout.
     """
+
+    def __init__(self, num_hidden: int) -> None:
+        self.num_hidden = num_hidden
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -247,17 +263,33 @@ class ReverseSequence(Encoder):
         data = mx.sym.SequenceReverse(data=data, sequence_length=data_length, use_sequence_length=True)
         return data, data_length, seq_len
 
+    def get_num_hidden(self):
+        return self.num_hidden
 
-class EmbeddingConfig(Config):
+
+class FactorConfig(config.Config):
+
+    def __init__(self, vocab_size: int, num_embed: int) -> None:
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.num_embed = num_embed
+
+
+class EmbeddingConfig(config.Config):
 
     def __init__(self,
                  vocab_size: int,
                  num_embed: int,
-                 dropout: float) -> None:
+                 dropout: float,
+                 factor_configs: Optional[List[FactorConfig]] = None) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
         self.dropout = dropout
+        self.factor_configs = factor_configs
+        self.num_factors = 1
+        if self.factor_configs is not None:
+            self.num_factors += len(self.factor_configs)
 
 
 class Embedding(Encoder):
@@ -267,18 +299,29 @@ class Embedding(Encoder):
     :param config: Embedding config.
     :param prefix: Name prefix for symbols of this encoder.
     :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
+    :param is_source: Whether this is the source embedding instance. Default: False.
     """
 
     def __init__(self,
                  config: EmbeddingConfig,
                  prefix: str,
-                 embed_weight: Optional[mx.sym.Symbol] = None) -> None:
+                 embed_weight: Optional[mx.sym.Symbol] = None,
+                 is_source: bool = False) -> None:
         self.config = config
         self.prefix = prefix
         self.embed_weight = embed_weight
+        self.is_source = is_source
+
         if self.embed_weight is None:
             self.embed_weight = mx.sym.Variable(prefix + "weight",
                                                 shape=(self.config.vocab_size, self.config.num_embed))
+
+        self.embed_factor_weights = []  # type: List[mx.sym.Symbol]
+        if self.config.factor_configs is not None:
+            # Factors weights aren't shared so they're not passed in and we create them here.
+            for i, fc in enumerate(self.config.factor_configs):
+                self.embed_factor_weights.append(mx.sym.Variable(prefix + "factor%d_weight" % i,
+                                                                 shape=(fc.vocab_size, fc.num_embed)))
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -292,11 +335,32 @@ class Embedding(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
+        factor_embeddings = []  # type: List[mx.sym.Symbol]
+        if self.is_source:
+            data, *data_factors = mx.sym.split(data=data,
+                                               num_outputs=self.config.num_factors,
+                                               axis=2,
+                                               squeeze_axis=True, name=self.prefix + "factor_split")
+
+            if self.config.factor_configs is not None:
+                for i, (factor_data, factor_config, factor_weight) in enumerate(zip(data_factors,
+                                                                                    self.config.factor_configs,
+                                                                                    self.embed_factor_weights)):
+                    factor_embeddings.append(mx.sym.Embedding(data=factor_data,
+                                                              input_dim=factor_config.vocab_size,
+                                                              weight=factor_weight,
+                                                              output_dim=factor_config.num_embed,
+                                                              name=self.prefix + "factor%d_embed" % i))
+
         embedding = mx.sym.Embedding(data=data,
                                      input_dim=self.config.vocab_size,
                                      weight=self.embed_weight,
                                      output_dim=self.config.num_embed,
                                      name=self.prefix + "embed")
+
+        if self.config.factor_configs is not None:
+            embedding = mx.sym.concat(embedding, *factor_embeddings, dim=2, name=self.prefix + "embed_plus_factors")
+
         if self.config.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.config.dropout, name="source_embed_dropout")
 
@@ -551,12 +615,7 @@ class EncoderSequence(Encoder):
         """
         Return the representation size of this encoder.
         """
-        if isinstance(self.encoders[-1], BatchMajor2TimeMajor):
-            utils.check_condition(len(self.encoders) > 1,
-                                  "Cannot return num_hidden from a BatchMajor2TimeMajor encoder only")
-            return self.encoders[-2].get_num_hidden()
-        else:
-            return self.encoders[-1].get_num_hidden()
+        return self.encoders[-1].get_num_hidden()
 
     def get_encoded_seq_len(self, seq_len: int) -> int:
         """
@@ -800,7 +859,7 @@ class TransformerEncoder(Encoder):
                                                                        max_length=seq_len,
                                                                        num_heads=self.config.attention_heads,
                                                                        fold_heads=True,
-                                                                       name="%sbias"% self.prefix), axis=1)
+                                                                       name="%sbias" % self.prefix), axis=1)
 
         for i, layer in enumerate(self.layers):
             # (batch_size, seq_len, config.model_size)
@@ -815,7 +874,7 @@ class TransformerEncoder(Encoder):
         return self.config.model_size
 
 
-class ConvolutionalEmbeddingConfig(Config):
+class ConvolutionalEmbeddingConfig(config.Config):
     """
     Convolutional embedding encoder configuration.
 

@@ -21,7 +21,7 @@ import os
 import pickle
 import shutil
 import time
-from typing import List, Optional, Tuple, Dict
+from typing import Dict, List, Optional, Tuple, Union
 
 import mxnet as mx
 
@@ -41,7 +41,6 @@ class TrainingMonitor(object):
     Technically, TrainingMonitor exposes a couple of callback function that are called in the fit() method of
     TrainingModel.
 
-    :param batch_size: Batch size during training.
     :param output_folder: Folder where model files are written to.
     :param optimized_metric: Name of the metric that controls early stopping.
     :param use_tensorboard: Whether to use Tensorboard logging of metrics.
@@ -49,7 +48,6 @@ class TrainingMonitor(object):
     """
 
     def __init__(self,
-                 batch_size: int,
                  output_folder: str,
                  optimized_metric: str = C.PERPLEXITY,
                  use_tensorboard: bool = False,
@@ -62,7 +60,10 @@ class TrainingMonitor(object):
         self.start_tic = time.time()
         self.summary_writer = None
         if use_tensorboard:
-            import tensorboard  # pylint: disable=import-error
+            try:
+                import tensorboard  # pylint: disable=import-error
+            except ImportError:
+                raise RuntimeError("Please install tensorboard.")
             log_dir = os.path.join(output_folder, C.TENSORBOARD_NAME)
             if os.path.exists(log_dir):
                 logger.info("Deleting existing tensorboard log dir %s", log_dir)
@@ -101,6 +102,8 @@ class TrainingMonitor(object):
 
     def checkpoint_callback(self,
                             checkpoint: int,
+                            epoch: int,
+                            learning_rate: float,
                             train_metric: Dict[str, float],
                             memory_data: Optional[Dict[int, Tuple[int, int]]] = None):
         """
@@ -108,10 +111,13 @@ class TrainingMonitor(object):
         If TrainingMonitor uses Tensorboard, training metrics are written to the Tensorboard event file.
 
         :param checkpoint: Current checkpoint.
+        :param epoch: Current epoch.
+        :param learning_rate: Current learning rate.
         :param train_metric: A dictionary of training metrics.
         :param memory_data: Optional data about memory usage.
         """
-        metrics = {}
+        metrics = {"epoch": epoch,
+                   "learning-rate": learning_rate}  # type: Dict[str, Union[float, int]]
         for name, value in train_metric.items():
             metrics[name + "-train"] = value
         if memory_data is not None:
@@ -136,7 +142,7 @@ class TrainingMonitor(object):
         :return: Tuple of boolean indicating if model improved on validation data according to the.
                  optimized metric, and the (updated) best checkpoint.
         """
-        metrics = {}
+        metrics = {}  # type: Dict[str, Union[float, int]]
         for name, value in val_metric.get_name_value():
             metrics[name + "-val"] = value
         metrics['time-elapsed'] = time.time() - self.start_tic
@@ -267,7 +273,7 @@ def _decode_and_evaluate(checkpoint_decoder: checkpoint_decoder.CheckpointDecode
 
 
 def write_tensorboard(summary_writer,
-                      metrics: Dict[str, float],
+                      metrics: Dict[str, Union[float, int]],
                       checkpoint: int):
     """
     Writes a Tensorboard scalar event to the given SummaryWriter.
@@ -276,7 +282,10 @@ def write_tensorboard(summary_writer,
     :param metrics: Mapping of metric names to their values.
     :param checkpoint: Current checkpoint.
     """
-    from tensorboard.summary import scalar  # pylint: disable=import-error
+    try:
+        from tensorboard.summary import scalar  # pylint: disable=import-error
+    except ImportError:
+        raise RuntimeError("Please install tensorboard.")
     for name, value in metrics.items():
         summary_writer.add_summary(
             scalar(

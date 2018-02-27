@@ -10,6 +10,60 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.17.2]
+### Added
+- Optionally store the beam search history to a `json` output using the `beam_store` output handler.
+
+## [1.17.1]
+### Changed
+ - Updated to [MXNet 1.1.0](https://github.com/apache/incubator-mxnet/tree/1.1.0)
+
+## [1.17.0]
+### Added
+ - Source factors, as described in
+
+   Linguistic Input Features Improve Neural Machine Translation (Sennrich \& Haddow, WMT 2016)
+   [PDF](http://www.aclweb.org/anthology/W16-2209.pdf) [bibtex](http://www.aclweb.org/anthology/W16-2209.bib)
+
+   Additional source factors are enabled by passing `--source-factors file1 [file2 ...]` (`-sf`), where file1, etc. are
+   token-parallel to the source (`-s`).
+   An analogous parameter, `--validation-source-factors`, is used to pass factors for validation data.
+   The flag `--source-factors-num-embed D1 [D2 ...]` denotes the embedding dimensions and is required if source factor
+   files are given. Factor embeddings are concatenated to the source embeddings dimension (`--num-embed`).
+
+   At test time, the input sentence and its factors can be passed in via STDIN or command-line arguments.
+   - For STDIN, the input and factors should be in a token-based factored format, e.g.,
+     `word1|factor1|factor2|... w2|f1|f2|... ...1`.
+   - You can also use file arguments, which mirrors training: `--input` takes the path to a file containing the source,
+     and `--input-factors` a list of files containing token-parallel factors.
+   At test time, an exception is raised if the number of expected factors does not
+   match the factors passed along with the input.
+   
+ - Removed bias parameters from multi-head attention layers of the transformer.
+
+## [1.16.6]
+### Changed
+ - Loading/Saving auxiliary parameters of the models. Before aux parameters were not saved or used for initialization.
+ Therefore the parameters of certain layers were ignored (e.g., BatchNorm) and randomly initialized. This change
+ enables to properly load, save and initialize the layers which use auxiliary parameters.
+
+## [1.16.5]
+### Changed
+ - Device locking: Only one process will be acquiring GPUs at a time.
+ This will lead to consecutive device ids whenever possible.
+
+## [1.16.4]
+### Changed
+ - Internal change: Standardized all data to be batch-major both at training and at inference time.
+
+## [1.16.3]
+### Changed
+ - When a device lock file exists and the process has no write permissions for the lock file we assume that the device
+ is locked. Previously this lead to an permission denied exception. Please note that in this scenario we an not detect
+ if the original Sockeye process did not shut down gracefully. This is not an issue when the sockeye process has write
+ permissions on existing lock files as in that case locking is based on file system locks, which cease to exist when a
+ process exits.
+
 ## [1.16.2]
 ### Changed
  - Changed to a custom speedometer that tracks samples/sec AND words/sec. The original MXNet speedometer did not take

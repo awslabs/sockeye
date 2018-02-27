@@ -12,6 +12,7 @@
 # permissions and limitations under the License.
 
 import os
+import re
 import tempfile
 
 import math
@@ -64,6 +65,9 @@ def test_aquire_gpus(tmpdir, requested_device_ids, num_gpus_available, expected)
     with utils.acquire_gpus(requested_device_ids, lock_dir=str(tmpdir),
                             num_gpus_available=num_gpus_available) as acquired_gpus:
         assert set(acquired_gpus) == set(expected)
+        # make sure the master lock does not exist anymore after acquiring
+        # (but rather just one lock per acquired GPU)
+        assert len(tmpdir.listdir()) == len(acquired_gpus)
 
 
 # We expect the following settings to raise a ValueError
@@ -153,13 +157,15 @@ def test_gpu_file_lock_locking(tmpdir):
 
 
 def test_gpu_file_lock_permission_exception(tmpdir):
-    with pytest.raises(PermissionError):
-        tmpdir = tmpdir.mkdir("sub")
-        # remove permissions
-        tmpdir.chmod(0)
+    tmpdir = tmpdir.mkdir("sub")
+    existing_lock = tmpdir.join("sockeye.gpu0.lock")
+    # remove permissions
+    existing_lock.write("")
+    existing_lock.chmod(0)
 
-        with utils.GpuFileLock([0], str(tmpdir)) as lock:
-            assert False, "We expect to raise an exception when aquiring the lock and never reach this code."
+    with utils.GpuFileLock([0, 1], str(tmpdir)) as acquired_lock:
+        # We expect to ignore the file for which we do not have permission and acquire the other device instead
+        assert acquired_lock == 1
 
 
 def test_check_condition_true():
@@ -194,6 +200,16 @@ def test_check_version_checks_major():
     with pytest.raises(utils.SockeyeError) as e:
         utils.check_version(version)
     assert "Given major version (%s) does not match major code version (%s)" % (version, __version__) == str(e.value)
+
+
+def test_version_matches_changelog():
+    """
+    Tests whether the last version mentioned in CHANGELOG.md matches the sockeye version (sockeye/__init__.py).
+    """
+    pattern = re.compile(r'''## \[([0-9.]+)\]''')
+    changelog = open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "CHANGELOG.md")).read()
+    last_changelog_version = pattern.findall(changelog)[0]
+    assert __version__ == last_changelog_version
 
 
 @pytest.mark.parametrize("samples,expected_mean, expected_variance",

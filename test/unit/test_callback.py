@@ -33,6 +33,7 @@ test_constants = [('perplexity', np.inf,
                    [{'accuracy': 200.0}, {'accuracy': 100.0}, {'accuracy': 100.001}, {'accuracy': 99.99}],
                    [True, False, False, False])]
 
+
 class DummyMetric:
     def __init__(self, metric_dict):
         self.metric_dict = metric_dict
@@ -46,19 +47,22 @@ class DummyMetric:
                          test_constants)
 def test_callback(optimized_metric, initial_best, train_metrics, eval_metrics, improved_seq):
     with tempfile.TemporaryDirectory() as tmpdir:
-        batch_size = 32
-        monitor = callback.TrainingMonitor(batch_size=batch_size,
-                                           output_folder=tmpdir,
+        monitor = callback.TrainingMonitor(output_folder=tmpdir,
                                            optimized_metric=optimized_metric)
         assert monitor.optimized_metric == optimized_metric
         assert monitor.get_best_validation_score() == initial_best
         metrics_fname = os.path.join(tmpdir, C.METRICS_NAME)
+        epoch = 1
+        learning_rate = 0.1
 
         for checkpoint, (train_metric, eval_metric, expected_improved) in enumerate(
                 zip(train_metrics, eval_metrics, improved_seq), 1):
-            monitor.checkpoint_callback(checkpoint, train_metric)
+            monitor.checkpoint_callback(checkpoint, epoch, learning_rate, train_metric)
             assert len(monitor.metrics) == checkpoint
-            assert monitor.metrics[-1] == {k + "-train": v for k, v in train_metric.items()}
+            expected_train_metrics = {k + "-train": v for k, v in train_metric.items()}
+            expected_train_metrics['epoch'] = epoch
+            expected_train_metrics['learning-rate'] = learning_rate
+            assert monitor.metrics[-1] == expected_train_metrics
             improved, best_checkpoint = monitor.eval_end_callback(checkpoint, DummyMetric(eval_metric))
             assert {k + "-val" for k in eval_metric.keys()} <= monitor.metrics[-1].keys()
             assert improved == expected_improved
@@ -78,8 +82,7 @@ def _compare_metrics(a, b):
 
 def test_bleu_requires_checkpoint_decoder():
     with pytest.raises(utils.SockeyeError) as e, tempfile.TemporaryDirectory() as tmpdir:
-        callback.TrainingMonitor(batch_size=1,
-                                 output_folder=tmpdir,
+        callback.TrainingMonitor(output_folder=tmpdir,
                                  optimized_metric='bleu',
                                  cp_decoder=None)
     assert "bleu requires CheckpointDecoder" == str(e.value)

@@ -54,6 +54,7 @@ test_case_degenerate_stats = [((Statistics([0, 0, 0, 0], [4, 4, 2, 1]), 0, 1), 0
 test_cases_uneven = [(["I am one sentence"], ["But I", "am two"]),
                      (["And I", "am a number of sentences", "three actually"], ["Compared to just one reference"])]
 
+
 @pytest.mark.parametrize("hypotheses, references, expected_bleu", test_cases)
 def test_bleu(hypotheses, references, expected_bleu):
     bleu = sacrebleu.raw_corpus_bleu(hypotheses, [references], .01).score / 100
