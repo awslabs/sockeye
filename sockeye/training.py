@@ -65,10 +65,7 @@ class TrainingModel(model.SockeyeModel):
         self.output_dir = output_dir
         self._bucketing = bucketing
         self._gradient_compression_params = gradient_compression_params
-
-        self._build_model_components()
         self._initialize(train_iter)
-
         self._monitor = None  # type: Optional[mx.monitor.Monitor]
 
     def _initialize(self, train_iter: data_io.BaseParallelSampleIter):
