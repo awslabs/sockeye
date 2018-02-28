@@ -45,7 +45,7 @@ class TrainingModel(model.SockeyeModel):
     TrainingModel is a SockeyeModel that fully unrolls over source and target sequences.
 
     :param config: Configuration object holding details about the model.
-    :param context: The context(s) that MXNet will be run in (GPU(s)/CPU)
+    :param context: The context(s) that MXNet will be run in (GPU(s)/CPU).
     :param output_dir: Directory where this model is stored.
     :param provide_data: List of input data descriptions.
     :param provide_label: List of label descriptions.
