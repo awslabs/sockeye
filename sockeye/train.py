@@ -636,7 +636,9 @@ def create_training_model(config: model.ModelConfig,
     training_model = training.TrainingModel(config=config,
                                             context=context,
                                             output_dir=output_dir,
-                                            train_iter=train_iter,
+                                            provide_data=train_iter.provide_data,
+                                            provide_label=train_iter.provide_label,
+                                            default_bucket_key=train_iter.default_bucket_key,
                                             bucketing=not args.no_bucketing,
                                             gradient_compression_params=gradient_compression_params(args))
 

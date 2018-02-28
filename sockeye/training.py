@@ -47,7 +47,9 @@ class TrainingModel(model.SockeyeModel):
     :param config: Configuration object holding details about the model.
     :param context: The context(s) that MXNet will be run in (GPU(s)/CPU)
     :param output_dir: Directory where this model is stored.
-    :param train_iter: An iterator over the training data.
+    :param provide_data: List of input data descriptions.
+    :param provide_label: List of label descriptions.
+    :param default_bucket_key: Default bucket key.
     :param bucketing: If True bucketing will be used, if False the computation graph will always be
             unrolled to the full length.
     :param gradient_compression_params: Optional dictionary of gradient compression parameters.
@@ -57,7 +59,9 @@ class TrainingModel(model.SockeyeModel):
                  config: model.ModelConfig,
                  context: List[mx.context.Context],
                  output_dir: str,
-                 train_iter: data_io.BaseParallelSampleIter,
+                 provide_data: List[mx.io.DataDesc],
+                 provide_label: List[mx.io.DataDesc],
+                 default_bucket_key: Tuple[int, int],
                  bucketing: bool,
                  gradient_compression_params: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
@@ -65,10 +69,13 @@ class TrainingModel(model.SockeyeModel):
         self.output_dir = output_dir
         self._bucketing = bucketing
         self._gradient_compression_params = gradient_compression_params
-        self._initialize(train_iter)
+        self._initialize(provide_data, provide_label, default_bucket_key)
         self._monitor = None  # type: Optional[mx.monitor.Monitor]
 
-    def _initialize(self, train_iter: data_io.BaseParallelSampleIter):
+    def _initialize(self,
+                    provide_data: List[mx.io.DataDesc],
+                    provide_label: List[mx.io.DataDesc],
+                    default_bucket_key: Tuple[int, int]):
         """
         Initializes model components, creates training symbol and module, and binds it.
         """
@@ -82,8 +89,16 @@ class TrainingModel(model.SockeyeModel):
 
         self.model_loss = loss.get_loss(self.config.config_loss)
 
-        data_names = [x[0] for x in train_iter.provide_data]
-        label_names = [x[0] for x in train_iter.provide_label]
+        data_names = [C.SOURCE_NAME, C.TARGET_NAME]
+        label_names = [C.TARGET_LABEL_NAME]
+
+        # check provide_{data,label} names
+        provide_data_names = [d[0] for d in provide_data]
+        utils.check_condition(provide_data_names == data_names,
+                              "incompatible provide_data: %s, names should be %s" % (provide_data_names, data_names))
+        provide_label_names = [d[0] for d in provide_label]
+        utils.check_condition(provide_label_names == label_names,
+                              "incompatible provide_label: %s, names should be %s" % (provide_label_names, label_names))
 
         def sym_gen(seq_lens):
             """
@@ -127,16 +142,16 @@ class TrainingModel(model.SockeyeModel):
             return mx.sym.Group(probs), data_names, label_names
 
         if self._bucketing:
-            logger.info("Using bucketing. Default max_seq_len=%s", train_iter.default_bucket_key)
+            logger.info("Using bucketing. Default max_seq_len=%s", default_bucket_key)
             self.module = mx.mod.BucketingModule(sym_gen=sym_gen,
                                                  logger=logger,
-                                                 default_bucket_key=train_iter.default_bucket_key,
+                                                 default_bucket_key=default_bucket_key,
                                                  context=self.context,
                                                  compression_params=self._gradient_compression_params)
         else:
             logger.info("No bucketing. Unrolled to (%d,%d)",
                         self.config.config_data.max_seq_len_source, self.config.config_data.max_seq_len_target)
-            symbol, _, __ = sym_gen(train_iter.buckets[0])
+            symbol, _, __ = sym_gen(default_bucket_key)
             self.module = mx.mod.Module(symbol=symbol,
                                         data_names=data_names,
                                         label_names=label_names,
@@ -144,8 +159,8 @@ class TrainingModel(model.SockeyeModel):
                                         context=self.context,
                                         compression_params=self._gradient_compression_params)
 
-        self.module.bind(data_shapes=train_iter.provide_data,
-                         label_shapes=train_iter.provide_label,
+        self.module.bind(data_shapes=provide_data,
+                         label_shapes=provide_label,
                          for_training=True,
                          force_rebind=True,
                          grad_req='write')
