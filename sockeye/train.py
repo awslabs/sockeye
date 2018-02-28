@@ -184,7 +184,7 @@ def create_checkpoint_decoder(args: argparse.Namespace,
     :param args: Arguments as returned by argparse.
     :param exit_stack: An ExitStack from contextlib.
     :param train_context: Context for training.
-    :return: CheckpointDecoder instance or None.
+    :return: A CheckpointDecoder if --decode-and-evaluate != 0, None else.
     """
     sample_size = args.decode_and_evaluate
     if args.optimized_metric == C.BLEU and sample_size == 0:
@@ -697,7 +697,7 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
                                  default_init_xavier_rand_type=args.weight_init_xavier_rand_type,
                                  default_init_xavier_factor_type=args.weight_init_xavier_factor_type,
                                  embed_init_type=args.embed_weight_init,
-                                 embed_init_sigma=source_vocab_sizes[0] ** -0.5,  # TODO
+                                 embed_init_sigma=source_vocab_sizes[0] ** -0.5,
                                  rnn_init_type=args.rnn_h2h_init),
                              gradient_clipping_type=gradient_clipping_type,
                              gradient_clipping_threshold=gradient_clipping_threshold,

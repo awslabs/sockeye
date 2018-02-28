@@ -1020,7 +1020,6 @@ class DecoderProcessManager(object):
         self.output_folder = output_folder
         self.decoder = decoder
         self.ctx = mp.get_context('spawn')  # type: ignore
-        print(type(self.ctx))
         self.decoder_metric_queue = self.ctx.Queue()
         self.decoder_process = None  # type: Optional[mp.Process]
 
@@ -1044,7 +1043,6 @@ class DecoderProcessManager(object):
         """
         self.wait_to_finish()
         if self.decoder_metric_queue.empty():
-            print("TRUE")
             return None
         decoded_checkpoint, decoder_metrics = self.decoder_metric_queue.get()
         assert self.decoder_metric_queue.empty()
