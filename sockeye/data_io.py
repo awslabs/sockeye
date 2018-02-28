@@ -20,7 +20,7 @@ import os
 import pickle
 import random
 from abc import ABC, abstractmethod
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from contextlib import ExitStack
 from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sequence, Sized, Tuple
 
@@ -437,12 +437,14 @@ class RawParallelDatasetLoader:
         num_tokens_target = 0
         num_pad_source = 0
         num_pad_target = 0
+        map_buckets2sentence_ids = defaultdict(lambda: defaultdict(int))
 
         # Bucket sentences as padded np arrays
-        for sources, target in zip(zip(*sources_sentences), target_sentences):
+        for sentence_id, (sources, target) in enumerate(zip(zip(*sources_sentences), target_sentences)):
             source_len = len(sources[0])
             target_len = len(target)
             buck_index, buck = get_parallel_bucket(self.buckets, source_len, target_len)
+            ## TODO does this ever happen if we use maxlens from test set? check
             if buck is None:
                 continue  # skip this sentence pair
 
@@ -464,7 +466,10 @@ class RawParallelDatasetLoader:
             # we can try again to compute the label sequence on the fly in next().
             data_label[buck_index][sample_index, :target_len] = target[1:] + [self.eos_id]
 
+            map_buckets2sentence_ids[buck_index][sample_index] = sentence_id
+            
             bucket_sample_index[buck_index] += 1
+        self.map_buckets2sentence_ids = map_buckets2sentence_ids    
 
         for i in range(len(data_source)):
             data_source[i] = mx.nd.array(data_source[i], dtype=self.dtype)
@@ -1424,6 +1429,7 @@ class ParallelSampleIter(BaseParallelSampleIter):
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
                  num_factors: int = 1,
+                 no_shuffle: Optional[bool] = False,
                  dtype='float32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          source_data_name=source_data_name, target_data_name=target_data_name,
@@ -1440,8 +1446,8 @@ class ParallelSampleIter(BaseParallelSampleIter):
                                           for i in range(len(self.data))]
         self.data_permutations = [mx.nd.arange(0, max(1, self.data.source[i].shape[0]))
                                   for i in range(len(self.data))]
-
-        self.reset()
+        if not no_shuffle:
+            self.reset()
 
     def reset(self):
         """

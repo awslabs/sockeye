@@ -1093,3 +1093,74 @@ def add_init_embedding_args(params):
                         help='File to write initialized parameters to.')
     params.add_argument('--encoding', '-c', type=str, default=C.VOCAB_ENCODING,
                         help='Open input vocabularies with specified encoding. Default: %(default)s.')
+    
+def add_scoring_args(params):
+    add_device_args(params)
+    add_logging_args(params)
+    scoring_params = params.add_argument_group("Scoring CLI")
+    
+    scoring_params.add_argument('--source', '-s',
+                               required=True,
+                               type=regular_file(),
+                               default=None,
+                               help='Source file to score, sentence-aligend.')
+    scoring_params.add_argument('--target', '-t',
+                               required=True,
+                               type=regular_file(),
+                               default=None,
+                               help='Target file to score, sentence-aligned.')
+    scoring_params.add_argument('--fill-up',
+                              type=str,
+                              default='replicate',
+                              help=argparse.SUPPRESS)
+    scoring_params.add_argument("--batch-type",
+                              type=str,
+                              default=C.BATCH_TYPE_SENTENCE,
+                              choices=[C.BATCH_TYPE_SENTENCE, C.BATCH_TYPE_WORD],
+                              help="Sentence: each batch contains X sentences, number of words varies. Word: each batch"
+                                   " contains (approximately) X words, number of sentences varies. Default: %(default)s.")
+    scoring_params.add_argument('--batch-size',
+                               type=int_greater_or_equal(1),
+                               default=1,
+                               help='Batch size during scoring. Default: %(default)s.')
+    scoring_params.add_argument('--models', '-m',
+                               required=True,
+                               nargs='+',
+                               help='Model folder(s). With multiple models will return a list of scores (one for each model).')
+    scoring_params.add_argument('--checkpoints', '-c',
+                               default=None,
+                               type=int,
+                               nargs='+',
+                               help='If not given, chooses best checkpoints for model(s). '
+                                    'If specified, must have the same length as --models and be integer') 
+    scoring_params.add_argument('--output-type',
+                               default='score',
+                               choices=C.OUTPUT_HANDLERS,
+                               help='Output type. Default: %(default)s.')
+    scoring_params.add_argument('--output', '-o',
+                                type=str,
+                                help="File to write scores to.")
+    scoring_params.add_argument('--no-bucketing',
+                        action='store_true',
+                        help='Disable bucketing: always unroll the graph to --max-seq-len. Default: %(default)s.')
+
+    scoring_params.add_argument('--bucket-width',
+                        type=int_greater_or_equal(1),
+                        default=10,
+                        help='Width of buckets in tokens. Default: %(default)s.')
+    scoring_params.add_argument('--max-seq-len',
+                        type=multiple_values(num_values=2, greater_or_equal=1),
+                        help='Maximum sequence length in tokens. Default: Maximum length in test data.')
+    scoring_params.add_argument('--source-factors', '-sf',
+                        required=False,
+                        nargs='+',
+                        type=regular_file(),
+                        default=[],
+                        help='File(s) containing additional token-parallel source side factors. Default: %(default)s.')
+    scoring_params.add_argument('--source-factors-num-embed',
+                              type=int,
+                              nargs='+',
+                              default=[],
+                              help='Embedding size for additional source factors. '
+                                   'You must provide as many dimensions as '
+                                   '(validation) source factor files. Default: %(default)s.')    
