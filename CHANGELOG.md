@@ -14,6 +14,9 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Added
 - Optionally store the beam search history to a `json` output using the `beam_store` output handler.
 
+### Changed
+- Use stack operator instead of expand_dims + concat in RNN decoder. Reduces memory usage.
+
 ## [1.17.1]
 ### Changed
  - Updated to [MXNet 1.1.0](https://github.com/apache/incubator-mxnet/tree/1.1.0)
