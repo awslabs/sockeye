@@ -171,7 +171,7 @@ class Attention(object):
         :param source_length: Source length. Shape: (batch_size,).
         :param source_seq_len: Maximum length of source sequences.
         """
-        dynamic_source = mx.sym.expand_dims(mx.sym.expand_dims(mx.sym.zeros_like(source_length), axis=1), axis=2)
+        dynamic_source = mx.sym.reshape(mx.sym.zeros_like(source_length), shape=(-1, 1, 1))
         # dynamic_source: (batch_size, source_seq_len, num_hidden_dynamic_source)
         dynamic_source = mx.sym.broadcast_to(dynamic_source, shape=(0, source_seq_len, self.dynamic_source_num_hidden))
         return AttentionState(context=None, probs=None, dynamic_source=dynamic_source)
