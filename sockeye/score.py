@@ -27,20 +27,22 @@ import mxnet as mx
 import numpy as np
 
 import sockeye
-import sockeye.arguments as arguments
-import sockeye.constants as C
-import sockeye.data_io
+from . import arguments
+from . import constants as C
+from . import data_io
+from . import vocab
+from . import model
+from . import utils
+from . import loss
+from . import translate
 
-import sockeye.output_handler
 from sockeye.log import setup_main_logger
 from sockeye.utils import acquire_gpus, get_num_gpus, log_basic_info
-from sockeye.utils import check_condition, grouper
-import sockeye.vocab
-import sockeye.model
-import sockeye.translate
+from sockeye.utils import check_condition
 
 
-class ScoringModel(sockeye.model.SockeyeModel):
+
+class ScoringModel(model.SockeyeModel):
     """
     Defines a model to score input/output data.
     :param context: The context(s) that MXNet will be run in (GPU(s)/CPU)
@@ -54,8 +56,8 @@ class ScoringModel(sockeye.model.SockeyeModel):
     def __init__(self,
                  model_folder: str,
                  context: List[mx.context.Context],
-                 data_iter: sockeye.data_io.BaseParallelSampleIter,
-                 config: sockeye.model.ModelConfig,
+                 data_iter: data_io.BaseParallelSampleIter,
+                 config: model.ModelConfig,
                  checkpoint: Optional[int] = None,
                  bucketing: bool = None) -> None:
         super().__init__(config)
@@ -74,7 +76,7 @@ class ScoringModel(sockeye.model.SockeyeModel):
         self.module.init_params(arg_params=self.params, allow_missing=False)
 
     
-    def _build_module(self, data_iter: sockeye.data_io.BaseParallelSampleIter):
+    def _build_module(self, data_iter: data_io.BaseParallelSampleIter):
         """
         Initializes model components, creates training symbol and module, and binds it.
         """
@@ -82,12 +84,12 @@ class ScoringModel(sockeye.model.SockeyeModel):
         source = mx.sym.Variable(C.SOURCE_NAME)
         source_words = source.split(num_outputs=self.config.config_embed_source.num_factors,
                                     axis=2, squeeze_axis=True)[0]
-        source_length = sockeye.utils.compute_lengths(source_words)
+        source_length = utils.compute_lengths(source_words)
         target = mx.sym.Variable(C.TARGET_NAME)
-        target_length = sockeye.utils.compute_lengths(target)
+        target_length = utils.compute_lengths(target)
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
 
-        model_loss = sockeye.loss.get_loss(self.config.config_loss)
+        model_loss = loss.get_loss(self.config.config_loss)
 
         data_names = [x[0] for x in data_iter.provide_data]
         label_names = [x[0] for x in data_iter.provide_label]
@@ -130,7 +132,8 @@ class ScoringModel(sockeye.model.SockeyeModel):
             # output layer
             logits = self.output_layer(target_decoded)
             
-            probs = mx.symbol.softmax(logits)
+            #probs = mx.symbol.softmax(logits)
+            # TODO: check if we can use mx.symbol.softmax_cross_entropy
             #probs= mx.symbol.softmax_cross_entropy(logits, labels)
             #token_probs = mx.symbol.pick(probs, labels)
             #log_probs = - mx.symbol.log(token_probs)
@@ -160,7 +163,7 @@ class ScoringModel(sockeye.model.SockeyeModel):
 
     ## TODO: print alignments?
     def score(self, 
-              data_iter: sockeye.data_io.BaseParallelSampleIter,
+              data_iter: data_io.BaseParallelSampleIter,
               mapid: defaultdict(lambda: defaultdict(int)),
               batch_size: int,
               normalize: Optional[bool] = True) -> Dict[int,int]:
@@ -191,30 +194,24 @@ class ScoringModel(sockeye.model.SockeyeModel):
                     labels = batch.label[0][sample_number]
                     #print("sample nr, {}, probs {}, labels {}".format(sample_number,sample_probs.shape, labels.shape))
                     scores = mx.nd.pick(sample_probs, labels)
-                    log_probs = - mx.nd.log(scores)
-                    ## TODO: CE on softmax here?
-                    score = mx.nd.sum(log_probs)
-                    
+                    scores = scores.asnumpy()
+                    log_probs = - np.log(scores)
+                    score = np.nansum(log_probs)
+                    # TODO: inf?
                     if normalize:
-                        score = mx.nd.mean(log_probs)
-                    score = score.asnumpy()
+                        score = np.mean(log_probs)
                     sentence_id = mapid[nbatch][sample_number]  
-                    results[sentence_id] = score[0]
+                    results[sentence_id] = score
                 #else:
                     #logger.info("sample was filler")
         return results        
-            
-                
 
-  
-            
-### TODO: output_handler
 
 def load_models(context: mx.context.Context,
                 batch_size: int,
                 model_folders: List[str],
-                data_iters: List[sockeye.data_io.BaseParallelSampleIter],
-                configs: List[sockeye.data_io.DataConfig],
+                data_iters: List[data_io.BaseParallelSampleIter],
+                configs: List[data_io.DataConfig],
                 checkpoints: Optional[List[int]] = None,
                 bucketing: bool = None) -> List[ScoringModel]: 
     
@@ -250,8 +247,7 @@ def load_models(context: mx.context.Context,
 def create_data_iter_and_vocab(args: argparse.Namespace, 
                                 max_seq_len_source: int,
                                 max_seq_len_target: int,
-                                model_dir: str,
-                                checkpoints: Optional[int])-> Tuple['sockeye.data_io.BaseParallelSampleIter', 'sockeye.data_io.DataConfig']:
+                                model_dir: str)-> Tuple['data_io.BaseParallelSampleIter', 'data_io.DataConfig']:
     """
     Create the data iterator.
 
@@ -259,7 +255,6 @@ def create_data_iter_and_vocab(args: argparse.Namespace,
     :param max_seq_len_source: Max length input.
     :param max_seq_len_target: Max length output.
     :model_dir: model folder to load vocabularies and config from.
-    :param checkpoints: List of checkpoints to use for each model in model_folders. Use None to load best checkpoint.
     :return: The data iterator.
     """
     ### 
@@ -267,16 +262,16 @@ def create_data_iter_and_vocab(args: argparse.Namespace,
     batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
     batch_by_words = args.batch_type == C.BATCH_TYPE_WORD
         
-    source_vocabs = sockeye.vocab.load_source_vocabs(model_dir)
-    target_vocab = sockeye.vocab.vocab_from_json(os.path.join(model_dir, C.VOCAB_TRG_NAME))
+    source_vocabs = vocab.load_source_vocabs(model_dir)
+    target_vocab = vocab.vocab_from_json(os.path.join(model_dir, C.VOCAB_TRG_NAME))
        
     ## Recover the vocabulary path from the data info file:
-    data_info = cast(sockeye.data_io.DataInfo, sockeye.config.Config.load(os.path.join(model_dir, C.DATA_INFO)))
+    data_info = cast(data_io.DataInfo, sockeye.config.Config.load(os.path.join(model_dir, C.DATA_INFO)))
     source_vocab_paths = data_info.source_vocabs
     target_vocab_path = data_info.target_vocab
     
     # get max_seq_len_source and max_seq_len_target from config, warn if smaller than given values
-    config = sockeye.model.SockeyeModel.load_config(os.path.join(model_dir, C.CONFIG_NAME))
+    config = model.SockeyeModel.load_config(os.path.join(model_dir, C.CONFIG_NAME))
     if max_seq_len_source > config.config_data.max_seq_len_source:
             logger.warning("Source sentence of length %d in test set exceeds maximum source sentence length in config of %d",max_seq_len_source, config.config_data.max_seq_len_source)
     if max_seq_len_target > config.config_data.max_seq_len_target:
@@ -291,27 +286,27 @@ def create_data_iter_and_vocab(args: argparse.Namespace,
     sources = [str(os.path.abspath(source)) for source in sources]
     
     #print("sources {} source vocabs {}".format(sources, source_vocabs))
-    sources_sentences = [sockeye.data_io.SequenceReader(source, vocab, add_bos=False) for source, vocab in zip(sources, source_vocabs)]
-    target_sentences = sockeye.data_io.SequenceReader(args.target, target_vocab, add_bos=True, limit=None)
+    sources_sentences = [data_io.SequenceReader(source, vocab, add_bos=False) for source, vocab in zip(sources, source_vocabs)]
+    target_sentences = data_io.SequenceReader(args.target, target_vocab, add_bos=True, limit=None)
     
     ## Pass 1: get target/source length ratios.
-    length_statistics = sockeye.data_io.analyze_sequence_lengths(sources, args.target, source_vocabs, target_vocab, max_seq_len_source, max_seq_len_target)
+    length_statistics = data_io.analyze_sequence_lengths(sources, args.target, source_vocabs, target_vocab, max_seq_len_source, max_seq_len_target)
    
    ## define buckets
     bucketing=not args.no_bucketing
-    buckets = sockeye.data_io.define_parallel_buckets(max_seq_len_source, max_seq_len_target, args.bucket_width, length_statistics.length_ratio_mean) if bucketing else [(max_seq_len_source, max_seq_len_target)]
+    buckets = data_io.define_parallel_buckets(max_seq_len_source, max_seq_len_target, args.bucket_width, length_statistics.length_ratio_mean) if bucketing else [(max_seq_len_source, max_seq_len_target)]
 
     
     ### get iter
     ## 2. pass: Get data statistics
-    data_statistics = sockeye.data_io.get_data_statistics(sources_sentences, 
+    data_statistics = data_io.get_data_statistics(sources_sentences, 
                                                           target_sentences, 
                                                           buckets,
                                                           length_statistics.length_ratio_mean, length_statistics.length_ratio_std,
                                                           source_vocabs, 
                                                           target_vocab)
 
-    bucket_batch_sizes = sockeye.data_io.define_bucket_batch_sizes(buckets,
+    bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                    args.batch_size,
                                                    batch_by_words, 
                                                    batch_num_devices,
@@ -319,7 +314,7 @@ def create_data_iter_and_vocab(args: argparse.Namespace,
 
     data_statistics.log(bucket_batch_sizes)
 
-    data_loader = sockeye.data_io.RawParallelDatasetLoader(buckets=buckets,
+    data_loader = data_io.RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=target_vocab[C.EOS_SYMBOL],
                                            pad_id=C.PAD_ID)
 
@@ -327,7 +322,7 @@ def create_data_iter_and_vocab(args: argparse.Namespace,
                                      data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes, args.fill_up) 
     map_buckets2sentence_ids = data_loader.map_buckets2sentence_ids
     
-    data_iter = sockeye.data_io.ParallelSampleIter(parallel_data,
+    data_iter = data_io.ParallelSampleIter(parallel_data,
                                     buckets,
                                     args.batch_size,
                                     bucket_batch_sizes,
@@ -337,8 +332,8 @@ def create_data_iter_and_vocab(args: argparse.Namespace,
 
 
 def get_max_source_and_target(args: argparse.Namespace) -> Tuple[int, int]:
-    source_lines = sockeye.utils.smart_open(args.source).readlines()
-    target_lines = sockeye.utils.smart_open(args.target).readlines()
+    source_lines = utils.smart_open(args.source).readlines()
+    target_lines = utils.smart_open(args.target).readlines()
     max_len_source = max([len(line.rstrip().split()) for line in source_lines])
     max_len_target = max([len(line.rstrip().split()) for line in target_lines])
     # +1 for EOS
@@ -346,10 +341,11 @@ def get_max_source_and_target(args: argparse.Namespace) -> Tuple[int, int]:
 
 
 def main():
-    ### TODO adapt output_handler
+    ### TODO adapt output_handler?
+    ### TODO: test with factors
     params = argparse.ArgumentParser(description='Scoring CLI')
     
-    sockeye.arguments.add_scoring_args(params)
+    arguments.add_scoring_args(params)
     args = params.parse_args()
 
     
@@ -363,10 +359,13 @@ def main():
         logger = setup_main_logger(__name__,
                                    console=not args.quiet,
                                    file_logging=False)
-    sockeye.utils.log_basic_info(args)
+    utils.log_basic_info(args)
+    
+    if args.checkpoints is not None:
+        check_condition(len(args.checkpoints) == len(args.models), "must provide checkpoints for each model")  
     
     with ExitStack() as exit_stack:
-        context = sockeye.translate._setup_context(args, exit_stack)
+        context = translate._setup_context(args, exit_stack)
         
        
         ## if --max-seq-len given, use this, else get maximum sentence length from test data
@@ -380,8 +379,7 @@ def main():
         data_iters, configs, mapids = [], [], []
         for model in args.models:
             data_iter, config, mapid = create_data_iter_and_vocab(args=args,
-                                                           max_seq_len_source=max_len_source, max_seq_len_target=max_len_target, model_dir=model, 
-                                                           checkpoints=args.checkpoints)
+                                                           max_seq_len_source=max_len_source, max_seq_len_target=max_len_target, model_dir=model)
             data_iters.append(data_iter)
             configs.append(config)
             mapids.append(mapid)
@@ -398,12 +396,13 @@ def main():
         for model, data_iter, mapid in zip(models, data_iters, mapids):
            result = model.score(data_iter, mapid, args.batch_size)
            results.append(result)
+             
+        for sentence_id in range(len(results[0])):
+            for model in range(len(results)):
+                print("model {} : score {}".format(model, results[model][sentence_id]), end=" ")
+            print()
+     
            
-        for sentence_id, score in sorted(results[0].items()):
-            print("sentence id {} result: {}".format(sentence_id, score))
-            for model in range(1, len(results)):
-                print("model {} result: {}".format(model, results[model][sentence_id]))
-            ## TODO output_handler, print output for multiple models
         
 if __name__ == '__main__':
     main()        
