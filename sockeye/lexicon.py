@@ -13,21 +13,20 @@
 
 import argparse
 import collections
-import json
 import logging
 import operator
 import os
-from typing import Dict, Generator, Tuple
+from typing import Dict, Generator, Tuple, Optional
 
 import mxnet as mx
 import numpy as np
 
 from . import arguments
 from . import constants as C
+from . import vocab
 from .data_io import smart_open
 from .log import setup_main_logger, log_sockeye_version
 from .utils import check_condition
-from . import vocab
 
 logger = logging.getLogger(__name__)
 
@@ -223,34 +222,42 @@ class TopKLexicon:
         # Sort and copy top-k trg_ids to lex array row src_id
         for src_id, trg_entries in _lex.items():
             top_k = list(sorted(trg_entries.items(), key=operator.itemgetter(1), reverse=True))[:k]
-            self.lex[src_id, :len(top_k)] = list(sorted(trg_id for (trg_id, _) in top_k))
+            self.lex[src_id, :len(top_k)] = list(trg_id for trg_id, _ in top_k)
             # Free memory after copy
             trg_entries.clear()
         logger.info("Created top-k lexicon from \"%s\", k=%d.", path, k)
 
     def save(self, path: str):
         """
-        Save lexicon in JSON format.  Lexicon will be specific to Sockeye model.
+        Save lexicon in Numpy array format.  Lexicon will be specific to Sockeye model.
 
-        :param path: Path to JSON output file.
+        :param path: Path to Numpy array output file.
         """
-        # Save k, lex array in dict form
-        to_save = [self.lex.shape[1], dict(enumerate(row.tolist() for row in self.lex))]
-        with open(path, "w", encoding=C.VOCAB_ENCODING) as out:
-            json.dump(to_save, out, indent=4, ensure_ascii=False)
+        with open(path, 'wb') as out:
+            np.save(out, self.lex)
+        logger.info("Saved top-k lexicon to \"%s\"", path)
 
-    def load(self, path: str):
+    def load(self, path: str, k: Optional[int] = None):
         """
-        Load lexicon from JSON file.
+        Load lexicon from Numpy array file.
 
-        :param path: Path to JSON file.
+        :param path: Path to Numpy array file.
+        :param k: Optionally load less items than stored in path.
         """
-        with open(path, encoding=C.VOCAB_ENCODING) as inp:
-            k, loaded = json.load(inp)
-            self.lex = np.zeros((len(self.vocab_source), k), dtype=np.int)
-            for (src_id, top_k) in loaded.items():
-                self.lex[int(src_id), :len(top_k)] = top_k
-        logger.info("Loaded top-k lexicon from \"%s\".", path)
+        with open(path, 'rb') as inp:
+            _lex = np.load(inp)
+        loaded_k = _lex.shape[1]
+        if k is not None:
+            top_k = min(k, loaded_k)
+            if k > loaded_k:
+                logger.warning("Can not load top-%d translations from lexicon that "
+                               "contains at most %d entries per source.", k, loaded_k)
+        else:
+            top_k = loaded_k
+        self.lex = np.zeros((len(self.vocab_source), top_k), dtype=_lex.dtype)
+        for src_id, trg_ids in enumerate(_lex):
+            self.lex[src_id, :] = trg_ids[:top_k]
+        logger.info("Loaded top-%d lexicon from \"%s\".", top_k, path)
 
     def get_trg_ids(self, src_ids: np.ndarray) -> np.ndarray:
         """

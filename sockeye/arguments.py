@@ -1033,8 +1033,13 @@ def add_inference_args(params):
     decode_params.add_argument('--restrict-lexicon',
                                type=str,
                                default=None,
-                               help="Specify top-k lexicon to restrict output vocabulary based on source.  See lexicon "
+                               help="Specify top-k lexicon to restrict output vocabulary based on source. See lexicon "
                                     "module. Default: %(default)s.")
+    decode_params.add_argument('--restrict-lexicon-topk',
+                               type=int,
+                               default=None,
+                               help="Specify the number of translations to load for each source word from the lexicon "
+                                    "given with --restrict-lexicon. Default: Load all entries from the lexicon.")
 
     decode_params.add_argument('--output-type',
                                default='translation',
