@@ -41,9 +41,23 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
+def get_symbol_fc():
+    x = mx.sym.Variable(name='x')
+    x = mx.sym.flatten(data=x)
+    sym = mx.sym.FullyConnected(data=x, weight=x, no_bias=True, flatten=True, num_hidden=1)
+    return sym
+
+norm_symbol = get_symbol_fc()
+
+# no fp16 support for mx.nd.norm
+def sym_norm(arr):
+    result = norm_symbol.eval(ctx=mx.gpu(0), x=arr.expand_dims(axis=0))[0]
+    return result.reshape((1,))
+
+
 def global_norm(ndarrays: List[mx.nd.NDArray]) -> float:
     # accumulate in a list, as asscalar is blocking and this way we can run the norm calculation in parallel.
-    norms = [mx.nd.square(mx.nd.norm(arr)) for arr in ndarrays if arr is not None]
+    norms = [sym_norm(arr) for arr in ndarrays if arr is not None]
     return sqrt(sum(norm.asscalar() for norm in norms))
 
 
@@ -106,9 +120,9 @@ class TrainingModel(model.SockeyeModel):
         source = mx.sym.Variable(C.SOURCE_NAME)
         source_words = source.split(num_outputs=self.config.config_embed_source.num_factors,
                                     axis=2, squeeze_axis=True)[0]
-        source_length = utils.compute_lengths(source_words)
+        source_length = utils.compute_lengths(source_words, dtype=self.encoder.dtype)
         target = mx.sym.Variable(C.TARGET_NAME)
-        target_length = utils.compute_lengths(target)
+        target_length = utils.compute_lengths(target, dtype=self.decoder.dtype)
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
 
         model_loss = loss.get_loss(self.config.config_loss)
@@ -154,8 +168,10 @@ class TrainingModel(model.SockeyeModel):
             logits = self.output_layer(target_decoded)
 
             probs = model_loss.get_loss(logits, labels)
-
-            return mx.sym.Group(probs), data_names, label_names
+            symb = mx.sym.Group(probs)
+            with open('dbg_string', 'w') as f:
+                f.write(symb.debug_str())
+            return symb, data_names, label_names
 
         if self.bucketing:
             logger.info("Using bucketing. Default max_seq_len=%s", train_iter.default_bucket_key)
@@ -307,6 +323,11 @@ class TrainingModel(model.SockeyeModel):
             self.module.install_monitor(monitor)
             logger.info("Installed MXNet monitor; pattern='%s'; statistics_func='%s'",
                         mxmonitor_pattern, mxmonitor_stat_func)
+
+        #import sockeye
+        #mon = mx.monitor.Monitor(1)
+        #mon.stat_helper = sockeye.inference.InferenceModel._printing_helper(self.encoder.dtype)
+        #self.module.install_monitor(mon)
 
         self._fit(train_iter, val_iter, output_folder,
                   kvstore=kvstore,

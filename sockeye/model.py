@@ -142,7 +142,7 @@ class SockeyeModel:
             utils.save_params(self.params.copy(), fname)
         logging.info('Saved params to "%s"', fname)
 
-    def load_params_from_file(self, fname: str):
+    def load_params_from_file(self, fname: str, dtype=None):
         """
         Loads and sets model parameters from file.
 
@@ -153,7 +153,17 @@ class SockeyeModel:
                                                      "This is either not a model directory or the first training "
                                                      "checkpoint has not happened yet." % fname)
         self.params, self.aux_params = utils.load_params(fname)
+        if dtype:
+            logger.info('Converting params to %s', dtype.__name__)
+            SockeyeModel.convert_params(self.params, dtype)
         logger.info('Loaded params from "%s"', fname)
+
+    @staticmethod
+    def convert_params(params, dtype):
+        for k, v in params.items():
+            if v.dtype != dtype:
+                logger.info('Converting %s to %s', k, dtype.__name__)
+                params[k] = v.astype(dtype=dtype)
 
     @staticmethod
     def save_version(folder: str):
@@ -207,7 +217,11 @@ class SockeyeModel:
         """
         # encoder & decoder first (to know the decoder depth)
         self.encoder = encoder.get_encoder(self.config.config_encoder)
+        self.encoder.dtype = self.config.config_encoder.dtype
         self.decoder = decoder.get_decoder(self.config.config_decoder)
+        self.decoder.dtype = self.config.config_decoder.dtype
+        logger.info('Encoder %s dtype: %s', type(self.encoder).__name__, self.encoder.dtype.__name__)
+        logger.info('Decoder %s dtype: %s', type(self.decoder).__name__, self.decoder.dtype.__name__)
 
         # source & target embeddings
         embed_weight_source, embed_weight_target, out_weight_target = self._get_embed_weights()
@@ -219,6 +233,9 @@ class SockeyeModel:
         self.embedding_target = encoder.Embedding(self.config.config_embed_target,
                                                   prefix=C.TARGET_EMBEDDING_PREFIX,
                                                   embed_weight=embed_weight_target)
+
+        self.embedding_source.dtype = self.encoder.dtype
+        self.embedding_target.dtype = self.decoder.dtype
 
         # output layer
         self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),

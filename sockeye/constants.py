@@ -230,6 +230,7 @@ ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet",
 # Other argument constants
 TRAINING_ARG_SOURCE = "--source"
 TRAINING_ARG_TARGET = "--target"
+TRAINING_ARG_DTYPE = "--dtype"
 TRAINING_ARG_PREPARED_DATA = "--prepared-data"
 
 VOCAB_ARG_SHARED_VOCAB = "--shared-vocab"
@@ -341,6 +342,9 @@ DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH = 2
 
 LARGE_POSITIVE_VALUE = 99999999.
 LARGE_NEGATIVE_VALUE = -LARGE_POSITIVE_VALUE
+
+LARGE_POSITIVE_VALUE_FP_16 = np.finfo(np.float16).max
+LARGE_NEGATIVE_VALUE_FP_16 = np.finfo(np.float16).min
 
 # data sharding
 SHARD_NAME = "shard.%05d"

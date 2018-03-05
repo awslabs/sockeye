@@ -47,6 +47,16 @@ def get_decoder(config: DecoderConfig) -> 'Decoder':
 
 
 class Decoder(ABC):
+
+    @property
+    def dtype(self):
+        return self._dtype
+
+    @dtype.setter
+    def dtype(self, dtype):
+        self._dtype = dtype
+        logger.info("Decoder %s dtype %s", self.__class__.__name__, dtype.__name__)
+
     """
     Generic decoder interface.
     A decoder needs to implement code to decode a target sequence known in advance (decode_sequence),
@@ -439,7 +449,8 @@ class RecurrentDecoderConfig(Config):
                  state_init: str = C.RNN_DEC_INIT_LAST,
                  context_gating: bool = False,
                  layer_normalization: bool = False,
-                 attention_in_upper_layers: bool = False) -> None:
+                 attention_in_upper_layers: bool = False,
+                 use_fp16: bool = False) -> None:
         super().__init__()
         self.max_seq_len_source = max_seq_len_source
         self.rnn_config = rnn_config
@@ -449,6 +460,7 @@ class RecurrentDecoderConfig(Config):
         self.context_gating = context_gating
         self.layer_normalization = layer_normalization
         self.attention_in_upper_layers = attention_in_upper_layers
+        self.use_fp16 = use_fp16
 
 
 class RecurrentDecoder(Decoder):
@@ -467,6 +479,7 @@ class RecurrentDecoder(Decoder):
         self.config = config
         self.rnn_config = config.rnn_config
         self.attention = rnn_attention.get_attention(config.attention_config, config.max_seq_len_source)
+        self.attention.dtype = self.config.dtype
         self.prefix = prefix
 
         self.num_hidden = self.rnn_config.num_hidden
@@ -684,18 +697,23 @@ class RecurrentDecoder(Decoder):
         """
         return [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
                                (batch_size, source_encoded_max_length, source_encoded_depth),
+                               dtype=self.dtype,
                                layout=C.BATCH_MAJOR),
                 mx.io.DataDesc(C.SOURCE_DYNAMIC_PREVIOUS_NAME,
                                (batch_size, source_encoded_max_length, self.attention.dynamic_source_num_hidden),
+                               dtype=self.dtype,
                                layout=C.BATCH_MAJOR),
                 mx.io.DataDesc(C.SOURCE_LENGTH_NAME,
                                (batch_size,),
+                               dtype=self.dtype,
                                layout="N"),
                 mx.io.DataDesc(C.HIDDEN_PREVIOUS_NAME,
                                (batch_size, self.num_hidden),
+                               dtype=self.dtype,
                                layout="NC")] + \
                [mx.io.DataDesc("%senc2decinit_%d" % (self.prefix, i),
                                (batch_size, num_hidden),
+                               dtype=self.dtype,
                                layout=C.BATCH_MAJOR) for i, (_, num_hidden) in enumerate(
                    sum([rnn.state_shape for rnn in self.get_rnn_cells()], [])
                )]

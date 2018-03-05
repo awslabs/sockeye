@@ -17,6 +17,7 @@ Implementations of different attention mechanisms in sequence-to-sequence models
 import logging
 from typing import Callable, NamedTuple, Optional, Tuple
 
+import numpy as np
 import mxnet as mx
 
 from . import config
@@ -249,7 +250,7 @@ class BilinearAttention(Attention):
             # out: (batch_size, source_seq_len, 1).
             attention_scores = mx.sym.batch_dot(lhs=source_hidden, rhs=query, name="%sbatch_dot" % self.prefix)
 
-            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores)
+            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores, self.dtype)
 
             return AttentionState(context=context,
                                   probs=attention_probs,
@@ -343,7 +344,7 @@ class DotAttention(Attention):
             attention_scores = mx.sym.batch_dot(lhs=source_hidden, rhs=expanded_decoder_state,
                                                 name="%sbatch_dot" % self.prefix)
 
-            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores)
+            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores, self.dtype)
             return AttentionState(context=context,
                                   probs=attention_probs,
                                   dynamic_source=att_state.dynamic_source)
@@ -436,7 +437,7 @@ class MultiHeadDotAttention(Attention):
 
             # context: (batch*heads, num_hidden/head)
             # attention_probs: (batch*heads, length)
-            context, attention_probs = get_context_and_attention_probs(values, lengths, attention_scores)
+            context, attention_probs = get_context_and_attention_probs(values, lengths, attention_scores, self.dtype)
 
             # combine heads
             # (batch*heads, 1, num_hidden/head)
@@ -542,7 +543,7 @@ class LocationAttention(Attention):
             # attention_scores: (batch_size, seq_len, 1)
             attention_scores = mx.sym.expand_dims(data=attention_scores, axis=2)
 
-            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores)
+            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores, self.dtype)
             return AttentionState(context=context,
                                   probs=attention_probs,
                                   dynamic_source=att_state.dynamic_source)
@@ -671,7 +672,7 @@ class MlpAttention(Attention):
                                                      flatten=False,
                                                      name="%sraw_att_score_fc" % self.prefix)
 
-            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores)
+            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores, self.dtype)
 
             dynamic_source = att_state.dynamic_source
             if self.coverage:
@@ -691,7 +692,7 @@ class MlpAttention(Attention):
 
 def get_context_and_attention_probs(values: mx.sym.Symbol,
                                     length: mx.sym.Symbol,
-                                    logits: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
+                                    logits: mx.sym.Symbol, dtype) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
     """
     Returns context vector and attention probabilities
     via a weighted sum over values.
@@ -707,7 +708,7 @@ def get_context_and_attention_probs(values: mx.sym.Symbol,
                                  axis=1,
                                  use_sequence_length=True,
                                  sequence_length=length,
-                                 value=C.LARGE_NEGATIVE_VALUE)
+                                 value=np.finfo(dtype).min)
 
     # (batch_size, seq_len, 1)
     probs = mx.sym.softmax(logits, axis=1, name='attention_softmax')

@@ -266,6 +266,11 @@ def add_training_data_args(params, required=False):
                         required=required,
                         type=regular_file(),
                         help='Target side of parallel training data.')
+    params.add_argument(C.TRAINING_ARG_DTYPE, '-dt',
+                        default='float32',
+                        choices=['float16', 'float32'],
+                        type=str,
+                        help='Data type to use when training a model, float16 or float32. Default: %(default)s')
 
 
 def add_validation_data_params(params):
@@ -1046,6 +1051,18 @@ def add_inference_args(params):
                                help='Beta factor for the length penalty used in beam search: '
                                     '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
 
+    decode_params.add_argument('--encoder-dtype',
+                               default='float32',
+                               choices=['float16', 'float32'],
+                               type=str,
+                               help='Encoder data type. Default: %(default)s')
+
+    decode_params.add_argument('--decoder-dtype',
+                               default='float32',
+                               choices=['float16', 'float32'],
+                               type=str,
+                               help='Decoder data type. Default: %(default)s')
+
 
 def add_evaluate_args(params):
     eval_params = params.add_argument_group("Evaluate parameters")
@@ -1081,14 +1098,14 @@ def add_build_vocab_args(params):
 
 
 def add_init_embedding_args(params):
-    params.add_argument('--weight-files', '-w', required=True, nargs='+',
-                        help='List of input weight files in .npy, .npz or Sockeye parameter format.')
+    params.add_argument('--embeddings', '-e', required=True, nargs='+',
+                        help='List of input embedding weights in .npy format.')
     params.add_argument('--vocabularies-in', '-i', required=True, nargs='+',
                         help='List of input vocabularies as token-index dictionaries in .json format.')
     params.add_argument('--vocabularies-out', '-o', required=True, nargs='+',
                         help='List of output vocabularies as token-index dictionaries in .json format.')
     params.add_argument('--names', '-n', required=True, nargs='+',
-                        help='List of Sockeye parameter names for (embedding) weights.')
+                        help='List of Sockeye parameter names for embedding weights.')
     params.add_argument('--file', '-f', required=True,
                         help='File to write initialized parameters to.')
     params.add_argument('--encoding', '-c', type=str, default=C.VOCAB_ENCODING,

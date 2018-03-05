@@ -129,14 +129,14 @@ def save_graph(symbol: mx.sym.Symbol, filename: str, hide_weights: bool = True):
     dot.render(filename=filename)
 
 
-def compute_lengths(sequence_data: mx.sym.Symbol) -> mx.sym.Symbol:
+def compute_lengths(sequence_data: mx.sym.Symbol, dtype='float32') -> mx.sym.Symbol:
     """
     Computes sequence lengths of PAD_ID-padded data in sequence_data.
 
     :param sequence_data: Input data. Shape: (batch_size, seq_len).
     :return: Length data. Shape: (batch_size,).
     """
-    return mx.sym.sum(mx.sym.broadcast_not_equal(sequence_data, mx.sym.zeros((1,))), axis=1)
+    return mx.sym.sum(mx.sym.broadcast_not_equal(sequence_data, mx.sym.zeros((1,), dtype=dtype)), axis=1)
 
 
 def save_params(arg_params: Mapping[str, mx.nd.NDArray], fname: str,
@@ -405,7 +405,7 @@ def get_alignments(attention_matrix: np.ndarray, threshold: float = .9) -> Itera
                 yield (src_idx, trg_idx)
 
 
-def average_arrays(arrays: List[mx.nd.NDArray]) -> mx.nd.NDArray:
+def average_arrays(arrays: List[mx.nd.NDArray], dtype: str='float32') -> mx.nd.NDArray:
     """
     Take a list of arrays of the same shape and take the element wise average.
 
@@ -790,3 +790,7 @@ def grouper(iterable: Iterable, size: int) -> Iterable:
         if not chunk:
             return
         yield chunk
+
+
+def mode_dtype(use_fp16: bool):
+    return np.float16 if use_fp16 else np.float32

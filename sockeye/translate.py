@@ -20,6 +20,7 @@ import time
 from contextlib import ExitStack
 from typing import Generator, Optional, Iterable, List
 
+import numpy as np
 import mxnet as mx
 from math import ceil
 
@@ -69,7 +70,9 @@ def main():
             softmax_temperature=args.softmax_temperature,
             max_output_length_num_stds=args.max_output_length_num_stds,
             decoder_return_logit_inputs=args.restrict_lexicon is not None,
-            cache_output_layer_w_b=args.restrict_lexicon is not None)
+            cache_output_layer_w_b=args.restrict_lexicon is not None,
+            encoder_dtype=np.dtype(args.encoder_dtype).type,
+            decoder_dtype=np.dtype(args.encoder_dtype).type)
         restrict_lexicon = None # type: TopKLexicon
         store_beam = args.output_type == C.OUTPUT_HANDLER_BEAM_STORE
         if args.restrict_lexicon:
