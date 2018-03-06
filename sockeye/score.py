@@ -166,7 +166,9 @@ class ScoringModel(model.SockeyeModel):
               data_iter: data_io.BaseParallelSampleIter,
               mapid: defaultdict(lambda: defaultdict(int)),
               batch_size: int,
-              normalize: Optional[bool] = True) -> Dict[int,int]:
+              no_bucketing: bool = False,
+              normalize: Optional[bool] = True
+              ) -> Dict[int,int]:
         """
         Reads batches of input/output pairs and scores them.
         :param data_iter: The iterator over the data set.
@@ -177,22 +179,33 @@ class ScoringModel(model.SockeyeModel):
         """
         results = dict()
         
+        #for bucket_id, sample_id in mapid.items():
+            #print("bucket id {} with sample {} ".format(bucket_id, sample_id))
+        #print("batch indexes {}".format(data_iter.batch_indices)) 
+        
+        batch_indices = data_iter.batch_indices
+        
         for nbatch, batch in enumerate(data_iter):
             self.module.forward(batch, is_train=False)
             outputs = self.module.get_outputs()
-            #print("outputs {} {}".format(len(outputs[0]),outputs))
             
             ## split output array into probs per batch
             sample_length = int(len(outputs[0])/batch_size)
            
             probs = mx.nd.array(outputs[0]) ## shape is (t_len*batch_size, t_vocab)
-            
             probs_per_batch = [probs[i*sample_length:(i+1)*sample_length] for i in range(batch_size)]
             
+            ## get bucket index of batch
+            (bucket_index, offset ) = batch_indices[nbatch]
+            print("bucket index {}".format(bucket_index))
+            
             for sample_number, sample_probs in enumerate(probs_per_batch):
-                if sample_number in mapid[nbatch]:
+              
+                mapsample_number = sample_number + offset
+                ## TODO: fix no bucketing 
+                if mapsample_number in mapid[bucket_index] or no_bucketing:
                     labels = batch.label[0][sample_number]
-                    #print("sample nr, {}, probs {}, labels {}".format(sample_number,sample_probs.shape, labels.shape))
+                    #print("probs sample nr, {}, map sample nr {}, probs {}, labels {}".format(sample_number, mapsample_number,sample_probs.shape, labels.shape))
                     scores = mx.nd.pick(sample_probs, labels)
                     scores = scores.asnumpy()
                     log_probs = - np.log(scores)
@@ -200,10 +213,10 @@ class ScoringModel(model.SockeyeModel):
                     # TODO: inf?
                     if normalize:
                         score = np.mean(log_probs)
-                    sentence_id = mapid[nbatch][sample_number]  
+                    sentence_id = mapid[bucket_index][mapsample_number]    
                     results[sentence_id] = score
-                #else:
-                    #logger.info("sample was filler")
+                else: # turn off?    
+                    logger.info("sample {} in batch number {} was filler".format(sample_number, nbatch))
         return results        
 
 
@@ -394,7 +407,7 @@ def main():
         
         results = []
         for model, data_iter, mapid in zip(models, data_iters, mapids):
-           result = model.score(data_iter, mapid, args.batch_size)
+           result = model.score(data_iter, mapid, args.batch_size, args.no_bucketing)
            results.append(result)
              
         for sentence_id in range(len(results[0])):

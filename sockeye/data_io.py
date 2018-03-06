@@ -465,8 +465,11 @@ class RawParallelDatasetLoader:
             # Once MXNet allows item assignments given a list of indices (probably MXNet 1.0): e.g a[[0,1,5,2]] = x,
             # we can try again to compute the label sequence on the fly in next().
             data_label[buck_index][sample_index, :target_len] = target[1:] + [self.eos_id]
-
-            map_buckets2sentence_ids[buck_index][sample_index] = sentence_id
+            
+            if buck_index in map_buckets2sentence_ids:
+                map_buckets2sentence_ids[buck_index].update({sample_index:sentence_id})
+            else:    
+                map_buckets2sentence_ids[buck_index][sample_index] = sentence_id
             
             bucket_sample_index[buck_index] += 1
         self.map_buckets2sentence_ids = map_buckets2sentence_ids    
