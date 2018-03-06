@@ -281,6 +281,7 @@ class EmbeddingConfig(config.Config):
                  vocab_size: int,
                  num_embed: int,
                  dropout: float,
+                 frozen: bool = False,
                  factor_configs: Optional[List[FactorConfig]] = None) -> None:
         super().__init__()
         self.vocab_size = vocab_size
@@ -288,6 +289,7 @@ class EmbeddingConfig(config.Config):
         self.dropout = dropout
         self.factor_configs = factor_configs
         self.num_factors = 1
+        self.frozen = frozen
         if self.factor_configs is not None:
             self.num_factors += len(self.factor_configs)
 
@@ -315,6 +317,8 @@ class Embedding(Encoder):
         if self.embed_weight is None:
             self.embed_weight = mx.sym.Variable(prefix + "weight",
                                                 shape=(self.config.vocab_size, self.config.num_embed))
+        if self.config.frozen:
+            self.embed_weight = mx.sym.BlockGrad(self.embed_weight)
 
         self.embed_factor_weights = []  # type: List[mx.sym.Symbol]
         if self.config.factor_configs is not None:

@@ -591,6 +591,7 @@ def create_model_config(args: argparse.Namespace,
     """
     num_embed_source, num_embed_target = args.num_embed
     embed_dropout_source, embed_dropout_target = args.embed_dropout
+    embed_freeze_source, embed_freeze_target = args.freeze_embed
     source_vocab_size, *source_factor_vocab_sizes = source_vocab_sizes
 
     check_encoder_decoder_args(args)
@@ -615,10 +616,12 @@ def create_model_config(args: argparse.Namespace,
     config_embed_source = encoder.EmbeddingConfig(vocab_size=source_vocab_size,
                                                   num_embed=num_embed_source,
                                                   dropout=embed_dropout_source,
+                                                  frozen=embed_freeze_source,
                                                   factor_configs=source_factor_configs)
 
     config_embed_target = encoder.EmbeddingConfig(vocab_size=target_vocab_size,
                                                   num_embed=num_embed_target,
+                                                  frozen=embed_freeze_target,
                                                   dropout=embed_dropout_target)
 
     config_loss = loss.LossConfig(name=args.loss,
