@@ -57,8 +57,8 @@ def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> flo
 
 def main():
     params = argparse.ArgumentParser(description='Evaluate translations by calculating metrics with '
-                                                 'respect to a reference set. If multiple hypothesis are given the mean'
-                                                 'and standard deviation of the metrics are reported.')
+                                                 'respect to a reference set. If multiple hypotheses files are given'
+                                                 'the mean and standard deviation of the metrics are reported.')
     arguments.add_evaluate_args(params)
     arguments.add_logging_args(params)
     args = params.parse_args()

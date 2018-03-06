@@ -12,7 +12,8 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.17.3]
 ### Changed
-- `sockeye.evaluate` can now handle multiple hypothesis.
+- `sockeye.evaluate` can now handle multiple hypotheses files by simply specifying `--hypotheses file1 file2...`.
+For each metric the mean and standard deviation will be reported across files.
 
 ## [1.17.2]
 ### Added
