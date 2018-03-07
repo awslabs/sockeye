@@ -24,10 +24,6 @@ from typing import Any, cast, Optional, Dict, List, Tuple
 
 import mxnet as mx
 
-from sockeye.config import Config
-from sockeye.log import setup_main_logger
-from sockeye.optimizers import OptimizerConfig
-from sockeye.utils import check_condition
 from . import arguments
 from . import checkpoint_decoder
 from . import constants as C
@@ -46,6 +42,10 @@ from . import training
 from . import transformer
 from . import utils
 from . import vocab
+from .config import Config
+from .log import setup_main_logger
+from .optimizers import OptimizerConfig
+from .utils import check_condition
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
 logger = setup_main_logger(__name__, file_logging=False, console=True)
