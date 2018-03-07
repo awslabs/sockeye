@@ -17,7 +17,9 @@ Evaluation CLI. Prints corpus BLEU
 import argparse
 import logging
 import sys
+import numpy as np
 from typing import Iterable, Optional
+from collections import defaultdict
 
 from contrib import sacrebleu
 from sockeye.log import setup_main_logger, log_sockeye_version
@@ -55,7 +57,8 @@ def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> flo
 
 def main():
     params = argparse.ArgumentParser(description='Evaluate translations by calculating metrics with '
-                                                 'respect to a reference set.')
+                                                 'respect to a reference set. If multiple hypotheses files are given'
+                                                 'the mean and standard deviation of the metrics are reported.')
     arguments.add_evaluate_args(params)
     arguments.add_logging_args(params)
     args = params.parse_args()
@@ -70,35 +73,58 @@ def main():
     logger.info("Arguments: %s", args)
 
     references = [' '.join(e) for e in data_io.read_content(args.references)]
-    hypotheses = [h.strip() for h in args.hypotheses]
-    logger.info("%d hypotheses | %d references", len(hypotheses), len(references))
+    all_hypotheses = [[h.strip() for h in hypotheses] for hypotheses in args.hypotheses]
+    metrics = args.metrics
+    logger.info("%d hypotheses | %d references", len(all_hypotheses), len(references))
 
     if not args.not_strict:
-        utils.check_condition(len(hypotheses) == len(references),
-                              "Number of hypotheses (%d) and references (%d) does not match." % (len(hypotheses),
-                                                                                                 len(references)))
+        for hypotheses in all_hypotheses:
+            utils.check_condition(len(hypotheses) == len(references),
+                                  "Number of hypotheses (%d) and references (%d) does not match." % (len(hypotheses),
+                                                                                                     len(references)))
+    metric_info = []
+    for metric in metrics:
+        metric_info.append("%s\t(s_opt)" % metric)
+    logger.info("\t".join(metric_info))
 
     if not args.sentence:
-        scores = []
-        for metric in args.metrics:
-            if metric == C.BLEU:
-                bleu_score = raw_corpus_bleu(hypotheses, references, args.offset)
-                scores.append("%.6f" % bleu_score)
-            elif metric == C.CHRF:
-                chrf_score = raw_corpus_chrf(hypotheses, references)
-                scores.append("%.6f" % chrf_score)
-        print("\t".join(scores), file=sys.stdout)
-    else:
-        for h, r in zip(hypotheses, references):
-            scores = []
-            for metric in args.metrics:
+        scores = defaultdict(list)
+        for hypotheses in all_hypotheses:
+            for metric in metrics:
                 if metric == C.BLEU:
-                    bleu = raw_corpus_bleu([h], [r], args.offset)
-                    scores.append("%.6f" % bleu)
+                    score = raw_corpus_bleu(hypotheses, references, args.offset)
                 elif metric == C.CHRF:
-                    chrf_score = raw_corpus_chrf(h, r)
-                    scores.append("%.6f" % chrf_score)
-            print("\t".join(scores), file=sys.stdout)
+                    score = raw_corpus_chrf(hypotheses, references)
+                else:
+                    raise ValueError("Unknown metric %s." % metric)
+                scores[metric].append(score)
+        _print_mean_std_score(metrics, scores)
+    else:
+        for hypotheses in all_hypotheses:
+            for h, r in zip(hypotheses, references):
+                scores = defaultdict(list)
+                for metric in metrics:
+                    if metric == C.BLEU:
+                        score = raw_corpus_bleu([h], [r], args.offset)
+                    elif metric == C.CHRF:
+                        score = raw_corpus_chrf(h, r)
+                    else:
+                        raise ValueError("Unknown metric %s." % metric)
+                    scores[metric].append(score)
+                _print_mean_std_score(metrics, scores)
+
+
+def _print_mean_std_score(metrics, scores):
+    scores_mean_std = []
+    for metric in metrics:
+        if len(scores[metric]) > 1:
+            score_mean = np.asscalar(np.mean(scores[metric]))
+            score_std = np.asscalar(np.std(scores[metric], ddof=1))
+            scores_mean_std.append("%.3f\t%.3f" % (score_mean, score_std))
+        else:
+            score = scores[metric][0]
+            scores_mean_std.append("%.3f\t(-)" % score)
+    print("\t".join(scores_mean_std))
 
 
 if __name__ == '__main__':

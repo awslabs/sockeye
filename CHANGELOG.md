@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.17.3]
+### Changed
+- `sockeye.evaluate` can now handle multiple hypotheses files by simply specifying `--hypotheses file1 file2...`.
+For each metric the mean and standard deviation will be reported across files.
+
 ## [1.17.2]
 ### Added
 - Optionally store the beam search history to a `json` output using the `beam_store` output handler.
