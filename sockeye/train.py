@@ -184,7 +184,7 @@ def create_checkpoint_decoder(args: argparse.Namespace,
     :param args: Arguments as returned by argparse.
     :param exit_stack: An ExitStack from contextlib.
     :param train_context: Context for training.
-    :return: A CheckpointDecoder if --decode-and-evaluate != 0, None else.
+    :return: A CheckpointDecoder if --decode-and-evaluate != 0, else None.
     """
     sample_size = args.decode_and_evaluate
     if args.optimized_metric == C.BLEU and sample_size == 0:
@@ -690,26 +690,29 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
     if args.optimizer_params:
         optimizer_params.update(args.optimizer_params)
 
+    weight_init = initializer.get_initializer(default_init_type=args.weight_init,
+                                              default_init_scale=args.weight_init_scale,
+                                              default_init_xavier_rand_type=args.weight_init_xavier_rand_type,
+                                              default_init_xavier_factor_type=args.weight_init_xavier_factor_type,
+                                              embed_init_type=args.embed_weight_init,
+                                              embed_init_sigma=source_vocab_sizes[0] ** -0.5,
+                                              rnn_init_type=args.rnn_h2h_init)
+
+    lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
+                                             args.checkpoint_frequency,
+                                             none_if_negative(args.learning_rate_half_life),
+                                             args.learning_rate_reduce_factor,
+                                             args.learning_rate_reduce_num_not_improved,
+                                             args.learning_rate_schedule,
+                                             args.learning_rate_warmup)
+
     config = OptimizerConfig(name=args.optimizer,
                              params=optimizer_params,
                              kvstore=args.kvstore,
-                             initializer=initializer.get_initializer(
-                                 default_init_type=args.weight_init,
-                                 default_init_scale=args.weight_init_scale,
-                                 default_init_xavier_rand_type=args.weight_init_xavier_rand_type,
-                                 default_init_xavier_factor_type=args.weight_init_xavier_factor_type,
-                                 embed_init_type=args.embed_weight_init,
-                                 embed_init_sigma=source_vocab_sizes[0] ** -0.5,
-                                 rnn_init_type=args.rnn_h2h_init),
+                             initializer=weight_init,
                              gradient_clipping_type=gradient_clipping_type,
                              gradient_clipping_threshold=gradient_clipping_threshold,
-                             lr_scheduler=lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
-                                                                        args.checkpoint_frequency,
-                                                                        none_if_negative(args.learning_rate_half_life),
-                                                                        args.learning_rate_reduce_factor,
-                                                                        args.learning_rate_reduce_num_not_improved,
-                                                                        args.learning_rate_schedule,
-                                                                        args.learning_rate_warmup))
+                             lr_scheduler=lr_sched)
     logger.info("Optimizer: %s", config)
     logger.info("Gradient Compression: %s", gradient_compression_params(args))
     return config
