@@ -32,7 +32,7 @@ archivePrefix = "arXiv",
 }
 ```
 
-If you are interested in collaborating or have any questions, please submit a pull request or issue.
+If you are interested in collaborating or have any questions, please submit a pull request or issue. [Click to find our developer guidelines](docs/development.md).
 You can also send questions to *sockeye-dev-at-amazon-dot-com*.
 
 Recent developments and changes are tracked in our [changelog](https://github.com/awslabs/sockeye/blob/master/CHANGELOG.md).

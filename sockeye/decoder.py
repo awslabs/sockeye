@@ -556,8 +556,8 @@ class RecurrentDecoder(Decoder):
         # layer_states: List[(batch_size, state_num_hidden]
         state = self.get_initial_state(source_encoded, source_encoded_lengths)
 
-        # hidden_all: target_seq_len * (batch_size, 1, rnn_num_hidden)
-        hidden_all = []
+        # hidden_all: target_embed_max_length * (batch_size, rnn_num_hidden)
+        hidden_states = []  # type: List[mx.sym.Symbol]
         # TODO: possible alternative: feed back the context vector instead of the hidden (see lamtram)
         self.reset()
         for seq_idx in range(target_embed_max_length):
@@ -567,13 +567,10 @@ class RecurrentDecoder(Decoder):
                                                 attention_func,
                                                 attention_state,
                                                 seq_idx)
-            # hidden_expanded: (batch_size, 1, rnn_num_hidden)
-            hidden_all.append(mx.sym.expand_dims(data=state.hidden, axis=1))
+            hidden_states.append(state.hidden)
 
-        # concatenate along time axis
-        # hidden_concat: (batch_size, target_seq_len, rnn_num_hidden)
-        hidden_concat = mx.sym.concat(*hidden_all, dim=1, name="%shidden_concat" % self.prefix)
-        return hidden_concat
+        # concatenate along time axis: (batch_size, target_embed_max_length, rnn_num_hidden)
+        return mx.sym.stack(*hidden_states, axis=1, name='%shidden_stack' % self.prefix)
 
     def decode_step(self,
                     step: int,
@@ -1147,7 +1144,7 @@ class ConvolutionalDecoder(Decoder):
         # Note: We can not use mx.sym.zeros, as otherwise shape inference fails.
         # Therefore we need to get a zero array of the right size through other means.
         # (batch_size, 1, 1)
-        zeros = mx.sym.expand_dims(mx.sym.expand_dims(mx.sym.zeros_like(source_encoded_lengths), axis=1), axis=2)
+        zeros = mx.sym.reshape(mx.sym.zeros_like(source_encoded_lengths), shape=(-1, 1, 1))
         # (batch_size, kernel_width-1, num_hidden)
         next_layer_inputs = [mx.sym.tile(data=zeros, reps=(1, kernel_width - 1, num_hidden),
                                          name="%s%d_init" % (self.prefix, layer_idx))

@@ -46,7 +46,7 @@ python3 -m sockeye.train -s train.source \
                          -vt dev.target \
                          --num-embed 32 \
                          --rnn-num-hidden 64 \
-                         --attention-type dot \
+                         --rnn-attention-type dot \
                          --use-cpu \
                          --metrics perplexity accuracy \
                          --max-num-checkpoint-not-improved 3 \

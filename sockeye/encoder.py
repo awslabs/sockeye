@@ -455,7 +455,7 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
         sin = mx.sym.sin(scaled_positions)
         cos = mx.sym.cos(scaled_positions)
 
-        # (batch_size, num_embed/2)
+        # (batch_size, num_embed)
         pos_embedding = mx.sym.concat(sin, cos, dim=1)
 
         if self.scale_up_input:

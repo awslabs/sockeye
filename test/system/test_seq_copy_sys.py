@@ -95,8 +95,8 @@ seed = random.randint(0, 1000)
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 1",
      False,
-     1.01,
-     0.99),
+     1.02,
+     0.98),
     ("Copy:cnn:cnn",
      "--encoder cnn --decoder cnn "
      " --batch-size 16 --num-layers 3 --max-updates 4000"
@@ -194,7 +194,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      "--beam-size 1",
      True, True,
      1.03,
-     0.97),
+     0.96),
     ("Sort:cnn:cnn",
      "--encoder cnn --decoder cnn "
      " --batch-size 16 --num-layers 3 --max-updates 6000"
