@@ -13,6 +13,10 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ## [1.18.0]
 ### Changed
 - Change default target vocab name in model folder to `vocab.trg.0.json`
+- Changed serialization format of top-k lexica to pickle/Numpy instead of JSON.
+
+### Added
+- Added ability to choose a smaller `k` at decoding runtime for lexicon restriction.
 
 ## [1.17.4]
 ### Added
