@@ -197,23 +197,27 @@ class ScoringModel(model.SockeyeModel):
             
             ## get bucket index of batch
             (bucket_index, offset ) = batch_indices[nbatch]
-            print("bucket index {}".format(bucket_index))
             
             for sample_number, sample_probs in enumerate(probs_per_batch):
               
                 mapsample_number = sample_number + offset
-                ## TODO: fix no bucketing 
-                if mapsample_number in mapid[bucket_index] or no_bucketing:
+                
+                if mapsample_number in mapid[bucket_index]:
                     labels = batch.label[0][sample_number]
-                    #print("probs sample nr, {}, map sample nr {}, probs {}, labels {}".format(sample_number, mapsample_number,sample_probs.shape, labels.shape))
+                    #print("probs sample nr, {}, map sample nr {}, probs {}, labels {}".format(sample_number, mapsample_number,sample_probs.shape, labels))
                     scores = mx.nd.pick(sample_probs, labels)
                     scores = scores.asnumpy()
+                    labels = labels.asnumpy()
+                    non_pad_indices = np.where(labels!=0)
+                    #print("labels: {}".format(labels))
+                    #print("non pad: {}".format(non_pad_indices))
+                    scores = np.take(scores,non_pad_indices)
                     log_probs = - np.log(scores)
                     score = np.nansum(log_probs)
                     # TODO: inf?
                     if normalize:
                         score = np.mean(log_probs)
-                    sentence_id = mapid[bucket_index][mapsample_number]    
+                    sentence_id = mapid[bucket_index][mapsample_number]   
                     results[sentence_id] = score
                 else: # turn off?    
                     logger.info("sample {} in batch number {} was filler".format(sample_number, nbatch))
