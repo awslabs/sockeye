@@ -305,7 +305,7 @@ class TrainingModel(model.SockeyeModel):
         self.aux_params = aux_params
         super().save_params_to_file(fname)
 
-    def load_params_from_file(self, fname: str, set_params: bool = True):
+    def load_params_from_file(self, fname: str, allow_missing_params: bool = False):
         """
         Loads parameters from a file and sets the parameters of the underlying module and this model instance.
 
@@ -313,8 +313,9 @@ class TrainingModel(model.SockeyeModel):
         :param set_params: Set the params in the module.
         """
         super().load_params_from_file(fname)  # sets self.params & self.aux_params
-        if set_params:
-            self.module.set_params(arg_params=self.params, aux_params=self.aux_params)
+        self.module.set_params(arg_params=self.params,
+                               aux_params=self.aux_params,
+                               allow_missing=allow_missing_params)
 
     def install_monitor(self, monitor_pattern: str, monitor_stat_func_name: str):
         """
@@ -720,7 +721,7 @@ class EarlyStoppingTrainer:
         self.model.initialize_parameters(self.optimizer_config.initializer, allow_missing_params)
         if params is not None:
             logger.info("Training will start with parameters loaded from '%s'", params)
-            self.model.load_params_from_file(params, set_params=False)
+            self.model.load_params_from_file(params, allow_missing_params=allow_missing_params)
         self.model.log_parameters()
 
     def _initialize_optimizer(self):
