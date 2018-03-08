@@ -1067,8 +1067,9 @@ def add_evaluate_args(params):
                              help="File with references.")
     eval_params.add_argument('--hypotheses', '-i',
                              type=file_or_stdin(),
-                             default=sys.stdin,
-                             help="File with hypotheses. If none will read from stdin. Default: %(default)s.")
+                             default=[sys.stdin],
+                             nargs='+',
+                             help="File(s) with hypotheses. If none will read from stdin. Default: %(default)s.")
     eval_params.add_argument('--metrics',
                              nargs='+',
                              default=[C.BLEU, C.CHRF],

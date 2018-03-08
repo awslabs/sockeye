@@ -1,7 +1,6 @@
 sockeye/__init__.py
 sockeye/arguments.py
 sockeye/average.py
-sockeye/callback.py
 sockeye/checkpoint_decoder.py
 sockeye/config.py
 sockeye/constants.py

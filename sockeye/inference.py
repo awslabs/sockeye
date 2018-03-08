@@ -43,11 +43,11 @@ class InferenceModel(model.SockeyeModel):
     (1) Encoder forward call: encode source sentence and return initial decoder states.
     (2) Decoder forward call: single decoder step: predict next word.
 
-    :param model_folder: Folder to load model from.
+    :param config: Configuration object holding details about the model.
+    :param params_fname: File with model parameters.
     :param context: MXNet context to bind modules to.
     :param beam_size: Beam size.
     :param batch_size: Batch size.
-    :param checkpoint: Checkpoint to load. If None, finds best parameters in model_folder.
     :param softmax_temperature: Optional parameter to control steepness of softmax distribution.
     :param max_output_length_num_stds: Number of standard deviations as safety margin for maximum output length.
     :param decoder_return_logit_inputs: Decoder returns inputs to logit computation instead of softmax over target
@@ -56,34 +56,23 @@ class InferenceModel(model.SockeyeModel):
     """
 
     def __init__(self,
-                 model_folder: str,
+                 config: model.ModelConfig,
+                 params_fname: str,
                  context: mx.context.Context,
                  beam_size: int,
                  batch_size: int,
-                 checkpoint: Optional[int] = None,
                  softmax_temperature: Optional[float] = None,
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  decoder_return_logit_inputs: bool = False,
                  cache_output_layer_w_b: bool = False) -> None:
-        self.model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
-        logger.info("Model version: %s", self.model_version)
-        utils.check_version(self.model_version)
-
-        config = model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
         super().__init__(config)
-
-        self.fname_params = os.path.join(model_folder, C.PARAMS_NAME % checkpoint if checkpoint else C.PARAMS_BEST_NAME)
-
+        self.params_fname = params_fname
+        self.context = context
+        self.beam_size = beam_size
         utils.check_condition(beam_size < self.config.vocab_target_size,
                               'The beam size must be smaller than the target vocabulary size.')
-
-        self.beam_size = beam_size
-        self.softmax_temperature = softmax_temperature
         self.batch_size = batch_size
-        self.context = context
-
-        self._build_model_components()
-
+        self.softmax_temperature = softmax_temperature
         self.max_input_length, self.get_max_output_length = models_max_input_output_length([self],
                                                                                            max_output_length_num_stds)
 
@@ -95,8 +84,8 @@ class InferenceModel(model.SockeyeModel):
         self.decoder_return_logit_inputs = decoder_return_logit_inputs
 
         self.cache_output_layer_w_b = cache_output_layer_w_b
-        self.output_layer_w = None  # type: mx.nd.NDArray
-        self.output_layer_b = None  # type: mx.nd.NDArray
+        self.output_layer_w = None  # type: Optional[mx.nd.NDArray]
+        self.output_layer_b = None  # type: Optional[mx.nd.NDArray]
 
     @property
     def num_source_factors(self) -> int:
@@ -141,7 +130,7 @@ class InferenceModel(model.SockeyeModel):
         self.encoder_module.bind(data_shapes=max_encoder_data_shapes, for_training=False, grad_req="null")
         self.decoder_module.bind(data_shapes=max_decoder_data_shapes, for_training=False, grad_req="null")
 
-        self.load_params_from_file(self.fname_params)
+        self.load_params_from_file(self.params_fname)
         self.encoder_module.init_params(arg_params=self.params, aux_params=self.aux_params, allow_missing=False)
         self.decoder_module.init_params(arg_params=self.params, aux_params=self.aux_params, allow_missing=False)
 
@@ -399,12 +388,22 @@ def load_models(context: mx.context.Context,
         source_vocabs.append(model_source_vocabs)
         target_vocabs.append(vocab.vocab_from_json(os.path.join(model_folder, C.VOCAB_TRG_NAME)))
 
-        inference_model = InferenceModel(model_folder=model_folder,
+        model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
+        logger.info("Model version: %s", model_version)
+        utils.check_version(model_version)
+        model_config = model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
+
+        if checkpoint is None:
+            params_fname = os.path.join(model_folder, C.PARAMS_BEST_NAME)
+        else:
+            params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
+
+        inference_model = InferenceModel(config=model_config,
+                                         params_fname=params_fname,
                                          context=context,
                                          beam_size=beam_size,
                                          batch_size=batch_size,
                                          softmax_temperature=softmax_temperature,
-                                         checkpoint=checkpoint,
                                          decoder_return_logit_inputs=decoder_return_logit_inputs,
                                          cache_output_layer_w_b=cache_output_layer_w_b)
         utils.check_condition(inference_model.num_source_factors == len(model_source_vocabs),

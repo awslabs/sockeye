@@ -17,7 +17,6 @@ Simple Training CLI.
 import argparse
 import json
 import os
-import pickle
 import shutil
 import sys
 from contextlib import ExitStack
@@ -25,10 +24,8 @@ from typing import Any, cast, Optional, Dict, List, Tuple
 
 import mxnet as mx
 
-from sockeye.config import Config
-from sockeye.log import setup_main_logger
-from sockeye.utils import check_condition
 from . import arguments
+from . import checkpoint_decoder
 from . import constants as C
 from . import convolution
 from . import coverage
@@ -45,6 +42,10 @@ from . import training
 from . import transformer
 from . import utils
 from . import vocab
+from .config import Config
+from .log import setup_main_logger
+from .optimizers import OptimizerConfig
+from .utils import check_condition
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
 logger = setup_main_logger(__name__, file_logging=False, console=True)
@@ -100,7 +101,7 @@ def check_arg_compatibility(args: argparse.Namespace):
                         % (args.transformer_model_size, args.num_embed[1]))
 
 
-def check_resume(args: argparse.Namespace, output_folder: str) -> Tuple[bool, str]:
+def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     """
     Check if we should resume a broken training run.
 
@@ -141,7 +142,7 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> Tuple[bool, st
     else:
         os.makedirs(output_folder)
 
-    return resume_training, training_state_dir
+    return resume_training
 
 
 def determine_context(args: argparse.Namespace, exit_stack: ExitStack) -> List[mx.Context]:
@@ -174,26 +175,26 @@ def determine_context(args: argparse.Namespace, exit_stack: ExitStack) -> List[m
     return context
 
 
-def determine_decode_and_evaluate_context(args: argparse.Namespace,
-                                          exit_stack: ExitStack,
-                                          train_context: List[mx.Context]) -> Tuple[int, Optional[mx.Context]]:
+def create_checkpoint_decoder(args: argparse.Namespace,
+                              exit_stack: ExitStack,
+                              train_context: List[mx.Context]) -> Optional[checkpoint_decoder.CheckpointDecoder]:
     """
-    Determine the number of sentences to decode and the context we should run on (CPU or GPU).
+    Returns a checkpoint decoder or None.
 
     :param args: Arguments as returned by argparse.
     :param exit_stack: An ExitStack from contextlib.
     :param train_context: Context for training.
-    :return: The number of sentences to decode and a list with the context(s) to run on.
+    :return: A CheckpointDecoder if --decode-and-evaluate != 0, else None.
     """
-    num_to_decode = args.decode_and_evaluate
-    if args.optimized_metric == C.BLEU and num_to_decode == 0:
+    sample_size = args.decode_and_evaluate
+    if args.optimized_metric == C.BLEU and sample_size == 0:
         logger.info("You chose BLEU as the optimized metric, will turn on BLEU monitoring during training. "
                     "To control how many validation sentences are used for calculating bleu use "
                     "the --decode-and-evaluate argument.")
-        num_to_decode = -1
+        sample_size = -1
 
-    if num_to_decode == 0:
-        return 0, None
+    if sample_size == 0:
+        return None
 
     if args.use_cpu or args.decode_and_evaluate_use_cpu:
         context = mx.cpu()
@@ -216,8 +217,11 @@ def determine_decode_and_evaluate_context(args: argparse.Namespace,
         # default decode context is the last training device
         context = train_context[-1]
 
-    logger.info("Decode and Evaluate Device(s): %s", context)
-    return num_to_decode, context
+    return checkpoint_decoder.CheckpointDecoder(context=context,
+                                                inputs=[args.validation_source] + args.validation_source_factors,
+                                                references=args.validation_target,
+                                                model=args.output,
+                                                sample_size=sample_size)
 
 
 def use_shared_vocab(args: argparse.Namespace) -> bool:
@@ -362,32 +366,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         data_info.save(data_info_fname)
 
         return train_iter, validation_iter, config_data, source_vocabs, target_vocab
-
-
-def create_lr_scheduler(args: argparse.Namespace, resume_training: bool,
-                        training_state_dir: str) -> lr_scheduler.LearningRateScheduler:
-    """
-    Create the learning rate scheduler.
-
-    :param args: Arguments as returned by argparse.
-    :param resume_training: When True, the scheduler will be loaded from disk.
-    :param training_state_dir: Directory where the training state is stored.
-    :return: The learning rate scheduler.
-    """
-    learning_rate_half_life = none_if_negative(args.learning_rate_half_life)
-    # TODO: The loading for continuation of the scheduler is done separately from the other parts
-    if not resume_training:
-        lr_scheduler_instance = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
-                                                              args.checkpoint_frequency,
-                                                              learning_rate_half_life,
-                                                              args.learning_rate_reduce_factor,
-                                                              args.learning_rate_reduce_num_not_improved,
-                                                              args.learning_rate_schedule,
-                                                              args.learning_rate_warmup)
-    else:
-        with open(os.path.join(training_state_dir, C.SCHEDULER_STATE_NAME), "rb") as fp:
-            lr_scheduler_instance = pickle.load(fp)
-    return lr_scheduler_instance
 
 
 def create_encoder_config(args: argparse.Namespace,
@@ -640,40 +618,29 @@ def create_model_config(args: argparse.Namespace,
     return model_config
 
 
-def create_training_model(model_config: model.ModelConfig,
-                          args: argparse.Namespace,
+def create_training_model(config: model.ModelConfig,
                           context: List[mx.Context],
+                          output_dir: str,
                           train_iter: data_io.BaseParallelSampleIter,
-                          lr_scheduler_instance: lr_scheduler.LearningRateScheduler,
-                          resume_training: bool,
-                          training_state_dir: str) -> training.TrainingModel:
+                          args: argparse.Namespace) -> training.TrainingModel:
     """
     Create a training model and load the parameters from disk if needed.
 
-    :param model_config: The configuration for the model.
-    :param args: Arguments as returned by argparse.
+    :param config: The configuration for the model.
     :param context: The context(s) to run on.
+    :param output_dir: Output folder.
     :param train_iter: The training data iterator.
-    :param lr_scheduler_instance: The learning rate scheduler.
-    :param resume_training: When True, the model will be loaded from disk.
-    :param training_state_dir: Directory where the training state is stored.
+    :param args: Arguments as returned by argparse.
     :return: The training model.
     """
-    training_model = training.TrainingModel(config=model_config,
+    training_model = training.TrainingModel(config=config,
                                             context=context,
-                                            train_iter=train_iter,
+                                            output_dir=output_dir,
+                                            provide_data=train_iter.provide_data,
+                                            provide_label=train_iter.provide_label,
+                                            default_bucket_key=train_iter.default_bucket_key,
                                             bucketing=not args.no_bucketing,
-                                            lr_scheduler=lr_scheduler_instance,
                                             gradient_compression_params=gradient_compression_params(args))
-
-    # We may consider loading the params in TrainingModule, for consistency
-    # with the training state saving
-    if resume_training:
-        logger.info("Found partial training in directory %s. Resuming from saved state.", training_state_dir)
-        training_model.load_params_from_file(os.path.join(training_state_dir, C.TRAINING_STATE_PARAMS_NAME))
-    elif args.params:
-        logger.info("Training will initialize from parameters loaded from '%s'", args.params)
-        training_model.load_params_from_file(args.params)
 
     return training_model
 
@@ -689,19 +656,17 @@ def gradient_compression_params(args: argparse.Namespace) -> Optional[Dict[str, 
         return {'type': args.gradient_compression_type, 'threshold': args.gradient_compression_threshold}
 
 
-def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict, str, str, float]:
+def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[int]) -> OptimizerConfig:
     """
-    Defines the optimizer to use and its parameters.
+    Returns an OptimizerConfig.
 
     :param args: Arguments as returned by argparse.
-    :param lr_scheduler_instance: The learning rate scheduler.
+    :param source_vocab_sizes: Source vocabulary sizes.
     :return: The optimizer type and its parameters as well as the kvstore.
     """
-    optimizer = args.optimizer
     optimizer_params = {'wd': args.weight_decay,
                         "learning_rate": args.initial_learning_rate}
-    if lr_scheduler_instance is not None:
-        optimizer_params["lr_scheduler"] = lr_scheduler_instance
+
     gradient_clipping_threshold = none_if_negative(args.gradient_clipping_threshold)
     if gradient_clipping_threshold is None:
         logger.info("Gradient clipping threshold set to negative value. Will not perform gradient clipping.")
@@ -724,16 +689,37 @@ def define_optimizer(args, lr_scheduler_instance) -> Tuple[str, Dict, str, str, 
     # Manually specified params
     if args.optimizer_params:
         optimizer_params.update(args.optimizer_params)
-    logger.info("Optimizer: %s", optimizer)
-    logger.info("Optimizer Parameters: %s", optimizer_params)
-    logger.info("kvstore: %s", args.kvstore)
-    logger.info("Gradient Compression: %s", gradient_compression_params(args))
 
-    return optimizer, optimizer_params, args.kvstore, gradient_clipping_type, gradient_clipping_threshold
+    weight_init = initializer.get_initializer(default_init_type=args.weight_init,
+                                              default_init_scale=args.weight_init_scale,
+                                              default_init_xavier_rand_type=args.weight_init_xavier_rand_type,
+                                              default_init_xavier_factor_type=args.weight_init_xavier_factor_type,
+                                              embed_init_type=args.embed_weight_init,
+                                              embed_init_sigma=source_vocab_sizes[0] ** -0.5,
+                                              rnn_init_type=args.rnn_h2h_init)
+
+    lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
+                                             args.checkpoint_frequency,
+                                             none_if_negative(args.learning_rate_half_life),
+                                             args.learning_rate_reduce_factor,
+                                             args.learning_rate_reduce_num_not_improved,
+                                             args.learning_rate_schedule,
+                                             args.learning_rate_warmup)
+
+    config = OptimizerConfig(name=args.optimizer,
+                             params=optimizer_params,
+                             kvstore=args.kvstore,
+                             initializer=weight_init,
+                             gradient_clipping_type=gradient_clipping_type,
+                             gradient_clipping_threshold=gradient_clipping_threshold,
+                             lr_scheduler=lr_sched)
+    logger.info("Optimizer: %s", config)
+    logger.info("Gradient Compression: %s", gradient_compression_params(args))
+    return config
 
 
 def main():
-    params = argparse.ArgumentParser(description='CLI to train sockeye sequence-to-sequence models.')
+    params = argparse.ArgumentParser(description='Train Sockeye sequence-to-sequence models.')
     arguments.add_train_cli_args(params)
     args = params.parse_args()
 
@@ -741,7 +727,7 @@ def main():
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
-    resume_training, training_state_dir = check_resume(args, output_folder)
+    resume_training = check_resume(args, output_folder)
 
     global logger
     logger = setup_main_logger(__name__,
@@ -754,11 +740,9 @@ def main():
     with ExitStack() as exit_stack:
         context = determine_context(args, exit_stack)
 
-        shared_vocab = use_shared_vocab(args)
-
         train_iter, eval_iter, config_data, source_vocabs, target_vocab = create_data_iters_and_vocabs(
             args=args,
-            shared_vocab=shared_vocab,
+            shared_vocab=use_shared_vocab(args),
             resume_training=resume_training,
             output_folder=output_folder)
 
@@ -772,26 +756,15 @@ def main():
         logger.info('Vocabulary sizes: source=[%s] target=%d',
                     '|'.join([str(size) for size in source_vocab_sizes]),
                     target_vocab_size)
-        lr_scheduler_instance = create_lr_scheduler(args, resume_training, training_state_dir)
 
         model_config = create_model_config(args, source_vocab_sizes, target_vocab_size, config_data)
         model_config.freeze()
 
-        training_model = create_training_model(model_config, args,
-                                               context, train_iter, lr_scheduler_instance,
-                                               resume_training, training_state_dir)
-
-        weight_initializer = initializer.get_initializer(
-            default_init_type=args.weight_init,
-            default_init_scale=args.weight_init_scale,
-            default_init_xavier_rand_type=args.weight_init_xavier_rand_type,
-            default_init_xavier_factor_type=args.weight_init_xavier_factor_type,
-            embed_init_type=args.embed_weight_init,
-            embed_init_sigma=source_vocab_sizes[0] ** -0.5,  # TODO
-            rnn_init_type=args.rnn_h2h_init)
-
-        optimizer, optimizer_params, kvstore, gradient_clipping_type, gradient_clipping_threshold = define_optimizer(
-            args, lr_scheduler_instance)
+        training_model = create_training_model(config=model_config,
+                                               context=context,
+                                               output_dir=output_folder,
+                                               train_iter=train_iter,
+                                               args=args)
 
         # Handle options that override training settings
         max_updates = args.max_updates
@@ -808,36 +781,27 @@ def main():
             min_num_epochs = None
             max_num_epochs = None
 
-        decode_and_evaluate, decode_and_evaluate_context = determine_decode_and_evaluate_context(args,
-                                                                                                 exit_stack,
-                                                                                                 context)
+        trainer = training.EarlyStoppingTrainer(model=training_model,
+                                                optimizer_config=create_optimizer_config(args, source_vocab_sizes),
+                                                max_params_files_to_keep=args.keep_last_params,
+                                                log_to_tensorboard=args.use_tensorboard)
 
-        training_model.fit(train_iter, eval_iter,
-                           output_folder=output_folder,
-                           max_params_files_to_keep=args.keep_last_params,
-                           metrics=args.metrics,
-                           initializer=weight_initializer,
-                           allow_missing_params=args.allow_missing_params,
-                           max_updates=max_updates,
-                           checkpoint_frequency=args.checkpoint_frequency,
-                           optimizer=optimizer, optimizer_params=optimizer_params,
-                           optimized_metric=args.optimized_metric,
-                           gradient_clipping_type=gradient_clipping_type,
-                           clip_gradient_threshold=gradient_clipping_threshold,
-                           kvstore=kvstore,
-                           max_num_not_improved=max_num_checkpoint_not_improved,
-                           min_num_epochs=min_num_epochs,
-                           max_num_epochs=max_num_epochs,
-                           decode_and_evaluate=decode_and_evaluate,
-                           decode_and_evaluate_fname_sources=[args.validation_source] + args.validation_source_factors,
-                           decode_and_evaluate_fname_target=args.validation_target,
-                           decode_and_evaluate_context=decode_and_evaluate_context,
-                           use_tensorboard=args.use_tensorboard,
-                           mxmonitor_pattern=args.monitor_pattern,
-                           mxmonitor_stat_func=args.monitor_stat_func,
-                           lr_decay_param_reset=args.learning_rate_decay_param_reset,
-                           lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset,
-                           resume_training=resume_training)
+        trainer.fit(train_iter=train_iter,
+                    validation_iter=eval_iter,
+                    early_stopping_metric=args.optimized_metric,
+                    metrics=args.metrics,
+                    checkpoint_frequency=args.checkpoint_frequency,
+                    max_num_not_improved=max_num_checkpoint_not_improved,
+                    max_updates=max_updates,
+                    min_num_epochs=min_num_epochs,
+                    max_num_epochs=max_num_epochs,
+                    lr_decay_param_reset=args.learning_rate_decay_param_reset,
+                    lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset,
+                    decoder=create_checkpoint_decoder(args, exit_stack, context),
+                    mxmonitor_pattern=args.monitor_pattern,
+                    mxmonitor_stat_func=args.monitor_stat_func,
+                    allow_missing_parameters=args.allow_missing_params,
+                    existing_parameters=args.params)
 
 
 if __name__ == "__main__":

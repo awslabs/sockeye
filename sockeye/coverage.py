@@ -174,6 +174,7 @@ class GRUCoverage(Coverage):
                 data=mx.sym.expand_dims(data=prev_hidden, axis=1, name="%sexpand_decoder" % self.prefix),
                 axis=1, size=source_seq_len, name="%sbroadcast_decoder" % self.prefix)
 
+            # (batch_size, source_seq_len, 1)
             expanded_att_scores = mx.sym.expand_dims(data=attention_prob_scores,
                                                      axis=2,
                                                      name="%sexpand_attention_scores" % self.prefix)

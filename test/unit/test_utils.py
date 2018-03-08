@@ -22,6 +22,7 @@ import pytest
 
 from sockeye import __version__
 from sockeye import utils
+from sockeye import constants as C
 
 
 @pytest.mark.parametrize("some_list, expected", [
@@ -319,3 +320,19 @@ def test_print_value():
     executor_base.backward()
     executor_print.backward()
     assert np.isclose(executor_base.grad_arrays[1].asnumpy(), executor_print.grad_arrays[1].asnumpy()).all()
+
+
+@pytest.mark.parametrize("new, old, metric, result",
+                         [(0, 0, C.PERPLEXITY, False),
+                          (1.0, 1.0, C.PERPLEXITY, False),
+                          (1.0, 0.9, C.PERPLEXITY, False),
+                          (0.99, 1.0, C.PERPLEXITY, True),
+                          (C.LARGE_POSITIVE_VALUE, np.inf, C.PERPLEXITY, True),
+                          (0, 0, C.BLEU, False),
+                          (1.0, 1.0, C.BLEU, False),
+                          (1.0, 0.9, C.BLEU, True),
+                          (0.99, 1.0, C.BLEU, False),
+                          (C.LARGE_POSITIVE_VALUE, np.inf, C.BLEU, False),
+                         ])
+def test_metric_value_is_better(new, old, metric, result):
+    assert utils.metric_value_is_better(new, old, metric) == result
