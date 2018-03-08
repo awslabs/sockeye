@@ -19,15 +19,15 @@ import os
 import random
 import time
 from contextlib import ExitStack
-from typing import Any, Dict, Iterable, Optional, List
+from typing import Any, Dict, Optional, List
 
 import mxnet as mx
 
 import sockeye.output_handler
 import sockeye.translate
-from . import evaluate
 from . import constants as C
 from . import data_io
+from . import evaluate
 from . import inference
 from . import utils
 
@@ -100,14 +100,18 @@ class CheckpointDecoder:
             else:
                 self.inputs_sentences, self.target_sentences = inputs_sentences, target_sentences
 
+            if sample_size < self.batch_size:
+                self.batch_size = sample_size
+
         for i, factor in enumerate(self.inputs_sentences):
             write_to_file(factor, os.path.join(self.model, C.DECODE_IN_NAME % i))
         write_to_file(self.target_sentences, os.path.join(self.model, C.DECODE_REF_NAME))
 
         self.inputs_sentences = list(zip(*self.inputs_sentences))  # type: List[List[str]]
 
-        logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d)",
-                    max_input_len if max_input_len is not None else -1, beam_size, model, len(self.target_sentences))
+        logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d, context=%s)",
+                    max_input_len if max_input_len is not None else -1, beam_size, model, len(self.target_sentences),
+                    context)
 
     def decode_and_evaluate(self,
                             checkpoint: Optional[int] = None,
@@ -156,7 +160,8 @@ class CheckpointDecoder:
                                                      offset=0.01),
                 C.CHRF_VAL: evaluate.raw_corpus_chrf(hypotheses=translations,
                                                      references=self.target_sentences),
-                C.AVG_TIME: avg_time}
+                C.AVG_TIME: avg_time,
+                C.DECODING_TIME: trans_wall_time}
 
 
 def parallel_subsample(parallel_sequences: List[List[Any]], sample_size: int, seed: int) -> List[Any]:
