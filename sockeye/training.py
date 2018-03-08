@@ -269,6 +269,7 @@ class TrainingModel(model.SockeyeModel):
     def initialize_parameters(self, initializer: mx.init.Initializer, allow_missing_params: bool):
         """
         Initializes the parameters of the underlying module.
+
         :param initializer: Parameter initializer.
         :param allow_missing_params: Whether to allow missing parameters.
         """
@@ -307,6 +308,8 @@ class TrainingModel(model.SockeyeModel):
     def load_params_from_file(self, fname: str):
         """
         Loads parameters from a file and sets the parameters of the underlying module and this model instance.
+
+        :param fname: File name to load parameters from.
         """
         super().load_params_from_file(fname)  # sets self.params & self.aux_params
         self.module.set_params(arg_params=self.params, aux_params=self.aux_params)
@@ -314,6 +317,9 @@ class TrainingModel(model.SockeyeModel):
     def install_monitor(self, monitor_pattern: str, monitor_stat_func_name: str):
         """
         Installs an MXNet monitor onto the underlying module.
+
+        :param monitor_pattern: Pattern string.
+        :param monitor_stat_func_name: Name of monitor statistics function.
         """
         self._monitor = mx.monitor.Monitor(interval=C.MEASURE_SPEED_EVERY,
                                            stat_func=C.MONITOR_STAT_FUNCS.get(monitor_stat_func_name),

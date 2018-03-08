@@ -32,7 +32,6 @@ import fcntl
 import mxnet as mx
 import numpy as np
 
-import sockeye.constants as C
 from sockeye import __version__, constants as C
 from sockeye.log import log_sockeye_version, log_mxnet_version
 
