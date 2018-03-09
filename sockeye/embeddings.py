@@ -118,12 +118,14 @@ def main():
         weights = params[target_embedding_name]
     logger.info("Embedding size: %d", weights.shape[1])
 
+    logger.info("Computing pairwise similarities...")
     sims = compute_sims(weights, args.norm)
 
     # weights (vocab, num_target_embed)
     check_condition(weights.shape[0] == len(vocab),
                     "vocab and embeddings matrix do not match: %d vs. %d" % (weights.shape[0], len(vocab)))
 
+    logger.info("Reading from STDin...")
     for line in sys.stdin:
         tokens = list(utils.get_tokens(line))
         if not tokens:
