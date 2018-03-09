@@ -295,6 +295,8 @@ class TrainingModel(model.SockeyeModel):
             info.append("%s: %s" % (name, array.shape))
             total_parameters += reduce(lambda x, y: x * y, array.shape)
         logger.info("Model parameters: %s", ", ".join(info))
+        if self.fixed_param_names:
+            logger.info("Fixed model parameters: %s", ", ".join(self.fixed_param_names))
         logger.info("Total # of parameters: %d", total_parameters)
 
     def save_params_to_file(self, fname: str):
