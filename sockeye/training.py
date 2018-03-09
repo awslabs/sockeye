@@ -310,7 +310,7 @@ class TrainingModel(model.SockeyeModel):
         Loads parameters from a file and sets the parameters of the underlying module and this model instance.
 
         :param fname: File name to load parameters from.
-        :param set_params: Set the params in the module.
+        :param allow_missing_params: If set, the given parameters are allowed to be a subset of the Module parameters.
         """
         super().load_params_from_file(fname)  # sets self.params & self.aux_params
         self.module.set_params(arg_params=self.params,
