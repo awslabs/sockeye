@@ -224,7 +224,7 @@ ARGS_STATE_NAME = "args.json"
 # Arguments that may differ and still resume training
 ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet",
                    "align_plot_prefix", "sure_align_threshold",
-                   "keep_last_params"]
+                   "keep_last_params", "dry_run"]
 
 # Other argument constants
 TRAINING_ARG_SOURCE = "--source"
