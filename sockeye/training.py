@@ -53,6 +53,7 @@ class TrainingModel(model.SockeyeModel):
     :param bucketing: If True bucketing will be used, if False the computation graph will always be
             unrolled to the full length.
     :param gradient_compression_params: Optional dictionary of gradient compression parameters.
+    :param dry_run: Initialize components but do not perform the actual training.
     """
 
     def __init__(self,
@@ -63,8 +64,10 @@ class TrainingModel(model.SockeyeModel):
                  provide_label: List[mx.io.DataDesc],
                  default_bucket_key: Tuple[int, int],
                  bucketing: bool,
-                 gradient_compression_params: Optional[Dict[str, Any]] = None) -> None:
+                 gradient_compression_params: Optional[Dict[str, Any]] = None,
+                 dry_run: bool = False) -> None:
         super().__init__(config)
+        self.dry_run = dry_run
         self.context = context
         self.output_dir = output_dir
         self._bucketing = bucketing
@@ -165,10 +168,12 @@ class TrainingModel(model.SockeyeModel):
                          force_rebind=True,
                          grad_req='write')
 
-        self.module.symbol.save(os.path.join(self.output_dir, C.SYMBOL_NAME))
+        if not self.dry_run:
+            self.module.symbol.save(os.path.join(self.output_dir, C.SYMBOL_NAME))
 
-        self.save_version(self.output_dir)
-        self.save_config(self.output_dir)
+        if not self.dry_run:
+            self.save_version(self.output_dir)
+            self.save_config(self.output_dir)
 
     def run_forward_backward(self, batch: mx.io.DataBatch, metric: mx.metric.EvalMetric):
         """
@@ -422,7 +427,8 @@ class EarlyStoppingTrainer:
             mxmonitor_pattern: Optional[str] = None,
             mxmonitor_stat_func: Optional[str] = None,
             allow_missing_parameters: bool = False,
-            existing_parameters: Optional[str] = None):
+            existing_parameters: Optional[str] = None,
+            dry_run: bool = False):
         """
         Fits model to data given by train_iter using early-stopping w.r.t data given by val_iter.
         Saves all intermediate and final output to output_folder.
@@ -452,6 +458,8 @@ class EarlyStoppingTrainer:
         :param allow_missing_parameters: Allow missing parameters when initializing model parameters from file.
         :param existing_parameters: Optional filename of existing/pre-trained parameters to initialize from.
 
+        :param dry_run: Do not actually perform training.
+
         :return: Best score on validation data observed during training.
         """
         self._check_args(metrics, early_stopping_metric, lr_decay_opt_states_reset, lr_decay_param_reset, decoder)
@@ -468,9 +476,10 @@ class EarlyStoppingTrainer:
             self._load_training_state(train_iter)
         else:
             self.state = TrainState(early_stopping_metric)
-            self._save_params()
-            self._update_best_params_link()
-            self._save_training_state(train_iter)
+            if not dry_run:
+                self._save_params()
+                self._update_best_params_link()
+                self._save_training_state(train_iter)
             self._update_best_optimizer_states(lr_decay_opt_states_reset)
             logger.info("Training started.")
 
@@ -487,7 +496,7 @@ class EarlyStoppingTrainer:
         tic = time.time()
 
         next_data_batch = train_iter.next()
-        while True:
+        while not dry_run:  # Endless loop, will be exited through break calls
 
             if not train_iter.iter_next():
                 self.state.epoch += 1

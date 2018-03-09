@@ -172,7 +172,8 @@ def test_model_parameters(test_params, expected_params):
               decode_and_evaluate_use_cpu=False,
               decode_and_evaluate_device_id=None,
               seed=13,
-              keep_last_params=-1)),
+              keep_last_params=-1,
+              dry_run=False)),
 ])
 def test_training_arg(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_training_args)

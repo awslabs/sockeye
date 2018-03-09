@@ -101,12 +101,13 @@ def check_arg_compatibility(args: argparse.Namespace):
                         % (args.transformer_model_size, args.num_embed[1]))
 
 
-def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
+def check_resume(args: argparse.Namespace, output_folder: str, dry_run: bool) -> bool:
     """
     Check if we should resume a broken training run.
 
     :param args: Arguments as returned by argparse.
     :param output_folder: Main output folder for the model.
+    :param dry_run: Perform checks but do not modify files on disk.
     :return: Flag signaling if we are resuming training and the directory with
         the training status.
     """
@@ -115,8 +116,9 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     if os.path.exists(output_folder):
         if args.overwrite_output:
             logger.info("Removing existing output folder %s.", output_folder)
-            shutil.rmtree(output_folder)
-            os.makedirs(output_folder)
+            if not dry_run:
+                shutil.rmtree(output_folder)
+                os.makedirs(output_folder)
         elif os.path.exists(training_state_dir):
             with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "r") as fp:
                 old_args = json.load(fp)
@@ -139,8 +141,6 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
         else:
             logger.info("The output folder %s already exists, but no training state or parameter file was found. "
                         "Will start training from scratch.", output_folder)
-    else:
-        os.makedirs(output_folder)
 
     return resume_training
 
@@ -244,7 +244,8 @@ def use_shared_vocab(args: argparse.Namespace) -> bool:
 def create_data_iters_and_vocabs(args: argparse.Namespace,
                                  shared_vocab: bool,
                                  resume_training: bool,
-                                 output_folder: str) -> Tuple['data_io.BaseParallelSampleIter',
+                                 output_folder: str,
+                                 dry_run: bool = False) -> Tuple['data_io.BaseParallelSampleIter',
                                                               'data_io.BaseParallelSampleIter',
                                                               'data_io.DataConfig',
                                                               List[vocab.Vocab], vocab.Vocab]:
@@ -255,6 +256,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     :param shared_vocab: Whether to create a shared vocabulary.
     :param resume_training: Whether to resume training.
     :param output_folder: Output folder.
+    :param dry_run: Create the data structures but do not write anything to disk.
     :return: The data iterators (train, validation, config_data) as well as the source and target vocabularies.
     """
     max_seq_len_source, max_seq_len_target = args.max_seq_len
@@ -361,9 +363,10 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             bucketing=not args.no_bucketing,
             bucket_width=args.bucket_width)
 
-        data_info_fname = os.path.join(output_folder, C.DATA_INFO)
-        logger.info("Writing data config to '%s'", data_info_fname)
-        data_info.save(data_info_fname)
+        if not dry_run:
+            data_info_fname = os.path.join(output_folder, C.DATA_INFO)
+            logger.info("Writing data config to '%s'", data_info_fname)
+            data_info.save(data_info_fname)
 
         return train_iter, validation_iter, config_data, source_vocabs, target_vocab
 
@@ -622,7 +625,8 @@ def create_training_model(config: model.ModelConfig,
                           context: List[mx.Context],
                           output_dir: str,
                           train_iter: data_io.BaseParallelSampleIter,
-                          args: argparse.Namespace) -> training.TrainingModel:
+                          args: argparse.Namespace,
+                          dry_run: bool) -> training.TrainingModel:
     """
     Create a training model and load the parameters from disk if needed.
 
@@ -631,6 +635,7 @@ def create_training_model(config: model.ModelConfig,
     :param output_dir: Output folder.
     :param train_iter: The training data iterator.
     :param args: Arguments as returned by argparse.
+    :param dry_run: Signal the model to not perform training.
     :return: The training model.
     """
     training_model = training.TrainingModel(config=config,
@@ -640,7 +645,8 @@ def create_training_model(config: model.ModelConfig,
                                             provide_label=train_iter.provide_label,
                                             default_bucket_key=train_iter.default_bucket_key,
                                             bucketing=not args.no_bucketing,
-                                            gradient_compression_params=gradient_compression_params(args))
+                                            gradient_compression_params=gradient_compression_params(args),
+                                            dry_run=dry_run)
 
     return training_model
 
@@ -722,20 +728,25 @@ def main():
     params = argparse.ArgumentParser(description='Train Sockeye sequence-to-sequence models.')
     arguments.add_train_cli_args(params)
     args = params.parse_args()
+    dry_run = args.dry_run
 
     utils.seedRNGs(args.seed)
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
-    resume_training = check_resume(args, output_folder)
+    if not os.path.exists(output_folder) and not dry_run:
+        os.makedirs(output_folder)
+    resume_training = check_resume(args, output_folder, dry_run)
 
     global logger
+    logfile_path = os.path.join(output_folder, C.LOG_NAME) if not dry_run else None
     logger = setup_main_logger(__name__,
                                file_logging=True,
-                               console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
+                               console=not args.quiet, path=logfile_path)
     utils.log_basic_info(args)
-    with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "w") as fp:
-        json.dump(vars(args), fp)
+    if not dry_run:
+        with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "w") as fp:
+            json.dump(vars(args), fp)
 
     with ExitStack() as exit_stack:
         context = determine_context(args, exit_stack)
@@ -744,10 +755,11 @@ def main():
             args=args,
             shared_vocab=use_shared_vocab(args),
             resume_training=resume_training,
-            output_folder=output_folder)
+            output_folder=output_folder,
+            dry_run=dry_run)
 
         # Dump the vocabularies if we're just starting up
-        if not resume_training:
+        if not resume_training and not dry_run:
             vocab.save_source_vocabs(source_vocabs, output_folder)
             vocab.vocab_to_json(target_vocab, os.path.join(output_folder, C.VOCAB_TRG_NAME))
 
@@ -764,7 +776,8 @@ def main():
                                                context=context,
                                                output_dir=output_folder,
                                                train_iter=train_iter,
-                                               args=args)
+                                               args=args,
+                                               dry_run=dry_run)
 
         # Handle options that override training settings
         max_updates = args.max_updates
@@ -801,7 +814,8 @@ def main():
                     mxmonitor_pattern=args.monitor_pattern,
                     mxmonitor_stat_func=args.monitor_stat_func,
                     allow_missing_parameters=args.allow_missing_params,
-                    existing_parameters=args.params)
+                    existing_parameters=args.params,
+                    dry_run=dry_run)
 
 
 if __name__ == "__main__":
