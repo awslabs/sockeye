@@ -641,7 +641,7 @@ def create_training_model(config: model.ModelConfig,
                                             default_bucket_key=train_iter.default_bucket_key,
                                             bucketing=not args.no_bucketing,
                                             gradient_compression_params=gradient_compression_params(args),
-                                            fixed_params=args.fix_params)
+                                            fixed_param_names=args.fixed_param_names)
 
     return training_model
 

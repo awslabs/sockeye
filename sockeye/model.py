@@ -60,7 +60,7 @@ class ModelConfig(Config):
                  config_loss: loss.LossConfig,
                  weight_tying: bool = False,
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
-                 weight_normalization: bool = False):
+                 weight_normalization: bool = False) -> None:
         super().__init__()
         self.config_data = config_data
         self.vocab_source_size = vocab_source_size

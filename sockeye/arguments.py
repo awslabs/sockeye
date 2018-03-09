@@ -895,7 +895,7 @@ def add_training_args(params):
                               choices=[C.RNN_INIT_ORTHOGONAL, C.RNN_INIT_ORTHOGONAL_STACKED, C.RNN_INIT_DEFAULT],
                               help="Initialization method for RNN parameters. Default: %(default)s.")
 
-    train_params.add_argument('--fix-params',
+    train_params.add_argument('--fixed-param-names',
                               default=[],
                               nargs='*',
                               help="Names of parameters to fix at training time. Default: %(default)s.")

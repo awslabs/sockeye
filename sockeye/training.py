@@ -53,7 +53,7 @@ class TrainingModel(model.SockeyeModel):
     :param bucketing: If True bucketing will be used, if False the computation graph will always be
             unrolled to the full length.
     :param gradient_compression_params: Optional dictionary of gradient compression parameters.
-    :param fixed_params: Optional list of params to fix during training (i.e. their values will not be trained).
+    :param fixed_param_names: Optional list of params to fix during training (i.e. their values will not be trained).
     """
 
     def __init__(self,
@@ -65,11 +65,11 @@ class TrainingModel(model.SockeyeModel):
                  default_bucket_key: Tuple[int, int],
                  bucketing: bool,
                  gradient_compression_params: Optional[Dict[str, Any]] = None,
-                 fixed_params: Optional[List[str]] = None) -> None:
+                 fixed_param_names: Optional[List[str]] = None) -> None:
         super().__init__(config)
         self.context = context
         self.output_dir = output_dir
-        self.fixed_params = fixed_params
+        self.fixed_param_names = fixed_param_names
         self._bucketing = bucketing
         self._gradient_compression_params = gradient_compression_params
         self._initialize(provide_data, provide_label, default_bucket_key)
@@ -151,7 +151,7 @@ class TrainingModel(model.SockeyeModel):
                                                  default_bucket_key=default_bucket_key,
                                                  context=self.context,
                                                  compression_params=self._gradient_compression_params,
-                                                 fixed_param_names=self.fixed_params)
+                                                 fixed_param_names=self.fixed_param_names)
         else:
             logger.info("No bucketing. Unrolled to (%d,%d)",
                         self.config.config_data.max_seq_len_source, self.config.config_data.max_seq_len_target)
@@ -162,7 +162,7 @@ class TrainingModel(model.SockeyeModel):
                                         logger=logger,
                                         context=self.context,
                                         compression_params=self._gradient_compression_params,
-                                        fixed_param_names=self.fixed_params)
+                                        fixed_param_names=self.fixed_param_names)
 
         self.module.bind(data_shapes=provide_data,
                          label_shapes=provide_label,
