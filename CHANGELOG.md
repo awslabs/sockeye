@@ -14,6 +14,8 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Added
 - Added a flag `--fixed-param-names` to prevent certain parameters from being optimized during training.
   This is useful if you want to keep pre-trained embeddings fixed during training.
+- Added a flag `--dry-run` to `sockeye.train` to not perform any actual training, but print statistics about the model
+  and mode of operation.
 
 ## [1.17.3]
 ### Changed

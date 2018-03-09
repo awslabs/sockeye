@@ -926,6 +926,11 @@ def add_training_args(params):
                               default=-1,
                               help='Keep only the last n params files, use -1 to keep all files. Default: %(default)s')
 
+    train_params.add_argument('--dry-run',
+                              action='store_true',
+                              help="Do not perform any actual training, but print statistics about the model"
+                              " and mode of operation.")
+
 
 def add_train_cli_args(params):
     add_training_io_args(params)
