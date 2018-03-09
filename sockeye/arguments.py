@@ -895,6 +895,11 @@ def add_training_args(params):
                               choices=[C.RNN_INIT_ORTHOGONAL, C.RNN_INIT_ORTHOGONAL_STACKED, C.RNN_INIT_DEFAULT],
                               help="Initialization method for RNN parameters. Default: %(default)s.")
 
+    train_params.add_argument('--fixed-param-names',
+                              default=[],
+                              nargs='*',
+                              help="Names of parameters to fix at training time. Default: %(default)s.")
+
     train_params.add_argument(C.TRAIN_ARGS_MONITOR_BLEU,
                               default=0,
                               type=int,
@@ -1093,8 +1098,9 @@ def add_init_embedding_args(params):
                         help='List of input vocabularies as token-index dictionaries in .json format.')
     params.add_argument('--vocabularies-out', '-o', required=True, nargs='+',
                         help='List of output vocabularies as token-index dictionaries in .json format.')
-    params.add_argument('--names', '-n', required=True, nargs='+',
-                        help='List of Sockeye parameter names for (embedding) weights.')
+    params.add_argument('--names', '-n', nargs='+',
+                        help='List of Sockeye parameter names for (embedding) weights. Default: %(default)s.',
+                        default=[n + "weight" for n in [C.SOURCE_EMBEDDING_PREFIX, C.TARGET_EMBEDDING_PREFIX]])
     params.add_argument('--file', '-f', required=True,
                         help='File to write initialized parameters to.')
     params.add_argument('--encoding', '-c', type=str, default=C.VOCAB_ENCODING,
