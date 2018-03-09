@@ -197,6 +197,25 @@ during translation.
 Additionally you can see the special end-of-sentence symbol `</s>` being added to the target sentence.
 
 
+### Embedding inspection
+
+You can inspect the embeddings learned by the model during training. Sockeye includes a tool to compute pairwise
+similarities (Euclidean distance) for all types in the embeddings space. Given a query token, it returns the nearest
+neighbors in the space.
+You can run it like this:
+
+```
+echo "haus" | python3 -m sockeye.embeddings -m wmt_model -s source
+[INFO:__main__] Arguments: Namespace(checkpoint=None, gamma=1.0, k=5, model='wmt_model', norm=False, side='source')
+Input: haus
+haus id=35
+  gebaeude id=68 sim=0.8498
+  Haus id=1759 sim=0.1441
+  hauser id=295 sim=0.0049
+```
+(Your own output may look different)
+
+
 ### Model ensembling
 
 Deep learning models usually profit from model ensembling.
