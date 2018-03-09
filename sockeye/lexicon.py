@@ -239,7 +239,7 @@ class TopKLexicon:
 
     def load(self, path: str, k: Optional[int] = None):
         """
-        Load lexicon from Numpy array file.
+        Load lexicon from Numpy array file. The top-k target ids will be sorted by increasing target id.
 
         :param path: Path to Numpy array file.
         :param k: Optionally load less items than stored in path.
@@ -256,7 +256,7 @@ class TopKLexicon:
             top_k = loaded_k
         self.lex = np.zeros((len(self.vocab_source), top_k), dtype=_lex.dtype)
         for src_id, trg_ids in enumerate(_lex):
-            self.lex[src_id, :] = trg_ids[:top_k]
+            self.lex[src_id, :] = np.sort(trg_ids[:top_k])
         logger.info("Loaded top-%d lexicon from \"%s\".", top_k, path)
 
     def get_trg_ids(self, src_ids: np.ndarray) -> np.ndarray:

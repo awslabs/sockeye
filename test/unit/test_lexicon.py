@@ -49,10 +49,11 @@ def test_topk_lexicon():
         assert np.all(lex.lex == expected)
 
         # Test save/load
+        expected_sorted = np.sort(expected, axis=1)
         json_lex_path = os.path.join(work_dir, "lex.json")
         lex.save(json_lex_path)
         lex.load(json_lex_path)
-        assert np.all(lex.lex == expected)
+        assert np.all(lex.lex == expected_sorted)
 
         # Test lookup
         trg_ids = lex.get_trg_ids(np.array([[vocab["a"], vocab["c"]]], dtype=np.int))
