@@ -141,13 +141,17 @@ class TrainingModel(model.SockeyeModel):
 
             return mx.sym.Group(probs), data_names, label_names
 
+        fixed_params = None
+        if self.config.fix_params:
+            fixed_params = self.config.fix_params
         if self._bucketing:
             logger.info("Using bucketing. Default max_seq_len=%s", default_bucket_key)
             self.module = mx.mod.BucketingModule(sym_gen=sym_gen,
                                                  logger=logger,
                                                  default_bucket_key=default_bucket_key,
                                                  context=self.context,
-                                                 compression_params=self._gradient_compression_params)
+                                                 compression_params=self._gradient_compression_params,
+                                                 fixed_param_names=fixed_params)
         else:
             logger.info("No bucketing. Unrolled to (%d,%d)",
                         self.config.config_data.max_seq_len_source, self.config.config_data.max_seq_len_target)
@@ -157,7 +161,8 @@ class TrainingModel(model.SockeyeModel):
                                         label_names=label_names,
                                         logger=logger,
                                         context=self.context,
-                                        compression_params=self._gradient_compression_params)
+                                        compression_params=self._gradient_compression_params,
+                                        fixed_param_names=fixed_params)
 
         self.module.bind(data_shapes=provide_data,
                          label_shapes=provide_label,

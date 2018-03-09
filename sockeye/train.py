@@ -614,7 +614,8 @@ def create_model_config(args: argparse.Namespace,
                                      config_loss=config_loss,
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
-                                     weight_normalization=args.weight_normalization)
+                                     weight_normalization=args.weight_normalization,
+                                     fix_params=args.fix_params)
     return model_config
 
 
