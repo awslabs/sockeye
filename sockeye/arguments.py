@@ -156,6 +156,19 @@ def multiple_values(num_values: int = 0,
     return parse
 
 
+def string2bool(string : str) -> bool:
+    """
+    Parses a string as a bool value. This function can be used as the
+    'data_type' argument of multiple_values.
+    """
+    if string in ["True", "true", "1"]:
+        return True
+    elif string in ["False", "false", "0"]:
+        return False
+    else:
+        raise argparse.ArgumentTypeError("Could not parse boolean value '%s'" % string)
+
+
 def file_or_stdin() -> Callable:
     """
     Returns a file descriptor from stdin or opening a file from a given path.
@@ -596,6 +609,10 @@ def add_model_parameters(params):
                               help='Embedding size for additional source factors. '
                                    'You must provide as many dimensions as '
                                    '(validation) source factor files. Default: %(default)s.')
+    model_params.add_argument('--freeze-embed',
+                              type=multiple_values(num_values=2, data_type=string2bool),
+                              default=(False, False),
+                              help='Freeze the embeddings for source or target. Default: %(default)s.')
 
     # attention arguments
     model_params.add_argument('--rnn-attention-type',
@@ -1088,8 +1105,9 @@ def add_init_embedding_args(params):
                         help='List of input vocabularies as token-index dictionaries in .json format.')
     params.add_argument('--vocabularies-out', '-o', required=True, nargs='+',
                         help='List of output vocabularies as token-index dictionaries in .json format.')
-    params.add_argument('--names', '-n', required=True, nargs='+',
-                        help='List of Sockeye parameter names for (embedding) weights.')
+    params.add_argument('--names', '-n', nargs='+',
+                        help='List of Sockeye parameter names for (embedding) weights. Default: %(default)s.',
+                        default=[n + "weight" for n in [C.SOURCE_EMBEDDING_PREFIX, C.TARGET_EMBEDDING_PREFIX]])
     params.add_argument('--file', '-f', required=True,
                         help='File to write initialized parameters to.')
     params.add_argument('--encoding', '-c', type=str, default=C.VOCAB_ENCODING,
