@@ -15,18 +15,20 @@
 Command-line tool to inspect model embeddings.
 """
 import argparse
+import os
 import sys
 from typing import Iterable, Tuple
 
 import mxnet as mx
 import numpy as np
 
-import sockeye.constants as C
-import sockeye.translate
-import sockeye.utils
-import sockeye.vocab
-from sockeye.log import setup_main_logger
-from sockeye.utils import check_condition
+from . import constants as C
+from . import model
+from . import utils
+from .data_io import tokens2ids
+from .log import setup_main_logger
+from .utils import check_condition
+from .vocab import load_source_vocabs, vocab_from_json, reverse_vocab
 
 logger = setup_main_logger(__name__, file_logging=False)
 
@@ -69,13 +71,24 @@ def nearest_k(similarity_matrix: mx.nd.NDArray,
     return zip(indices.asnumpy(), values.asnumpy())
 
 
+def get_embedding_parameter_names(config: model.ModelConfig) -> Tuple[str, str]:
+    if config.weight_tying and C.WEIGHT_TYING_SRC in config.weight_tying_type and \
+            C.WEIGHT_TYING_SRC_TRG_SOFTMAX in config.weight_tying_type:
+        name = "%sweight" % C.SHARED_EMBEDDING_PREFIX
+        return name, name
+    else:
+        return "%sweight" % C.SOURCE_EMBEDDING_PREFIX, "%sweight" % C.TARGET_EMBEDDING_PREFIX
+
+
 def main():
     """
     Command-line tool to inspect model embeddings.
     """
     params = argparse.ArgumentParser(description='Shows nearest neighbours of input tokens in the embedding space.')
-    params.add_argument('--params', '-p', required=True, help='params file to read parameters from')
-    params.add_argument('--vocab', '-v', required=True, help='vocab file')
+    params.add_argument('--model', '-m', required=True,
+                        help='Model folder to load config from.')
+    params.add_argument('--checkpoint', '-c', required=False, type=int, default=None,
+                        help='Optional specific checkpoint to load parameters from. Best params otherwise.')
     params.add_argument('--side', '-s', required=True, choices=['source', 'target'], help='what embeddings to look at')
     params.add_argument('--norm', '-n', action='store_true', help='normalize embeddings to unit length')
     params.add_argument('-k', type=int, default=5, help='Number of neighbours to print')
@@ -84,34 +97,47 @@ def main():
 
     logger.info("Arguments: %s", args)
 
-    vocab = sockeye.vocab.vocab_from_json(args.vocab)
-    vocab_inv = sockeye.vocab.reverse_vocab(vocab)
+    config = model.SockeyeModel.load_config(os.path.join(args.model, C.CONFIG_NAME))
+    source_embedding_name, target_embedding_name = get_embedding_parameter_names(config)
 
-    params, _ = sockeye.utils.load_params(args.params)
-    weights = params[C.SOURCE_EMBEDDING_PREFIX + "weight"]
-    if args.side == 'target':
-        weights = params[C.TARGET_EMBEDDING_PREFIX + "weight"]
+    if args.side == "source":
+        vocab = load_source_vocabs(args.model)[0]
+    else:
+        vocab = vocab_from_json(os.path.join(args.model, C.VOCAB_TRG_NAME))
+    vocab_inv = reverse_vocab(vocab)
+
+    params_fname = C.PARAMS_BEST_NAME
+    if args.checkpoint is not None:
+        params_fname = C.PARAMS_NAME % args.checkpoint
+    params, _ = utils.load_params(os.path.join(args.model, params_fname))
+    if args.side == "source":
+        logger.info("Loading %s", source_embedding_name)
+        weights = params[source_embedding_name]
+    else:
+        logger.info("Loading %s", target_embedding_name)
+        weights = params[target_embedding_name]
     logger.info("Embedding size: %d", weights.shape[1])
 
+    logger.info("Computing pairwise similarities...")
     sims = compute_sims(weights, args.norm)
 
     # weights (vocab, num_target_embed)
     check_condition(weights.shape[0] == len(vocab),
                     "vocab and embeddings matrix do not match: %d vs. %d" % (weights.shape[0], len(vocab)))
 
+    logger.info("Reading from STDin...")
     for line in sys.stdin:
-        line = line.rstrip()
-        for token in line.split():
-            if token not in vocab:
-                sys.stdout.write("\n")
-                logger.error("'%s' not in vocab", token)
-                continue
-            sys.stdout.write("Token: %s [%d]: " % (token, vocab[token]))
-            neighbours = nearest_k(sims, vocab[token], args.k, args.gamma)
-            for i, (wid, score) in enumerate(neighbours, 1):
-                sys.stdout.write("%d. %s[%d] %.4f\t" % (i, vocab_inv[wid], wid, score))
-            sys.stdout.write("\n")
-            sys.stdout.flush()
+        tokens = list(utils.get_tokens(line))
+        if not tokens:
+            continue
+        print("Input:", line.rstrip())
+        ids = tokens2ids(tokens, vocab)
+        for token, token_id in zip(tokens, ids):
+            print("%s id=%d" % (token, token_id))
+            neighbours = nearest_k(sims, token_id, args.k, args.gamma)
+            for i, (token_id, score) in enumerate(neighbours, 1):
+                print("  %s id=%d sim=%.4f" % (vocab_inv[token_id], token_id, score))
+        print()
 
 
 if __name__ == '__main__':
