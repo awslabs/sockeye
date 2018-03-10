@@ -217,30 +217,23 @@ def add_extract_args(params):
 
 
 def add_lexicon_args(params):
-    lexicon_params = params.add_argument_group("Lexicon")
-    lexicon_params.add_argument(
-        "--input",
-        "-i",
-        required=True,
-        type=str,
-        help="Probabilistic lexicon (fast_align format) to use for building top-k lexicon.")
-    lexicon_params.add_argument(
-        "--output",
-        "-o",
-        required=True,
-        type=str,
-        help="JSON file to write top-k lexicon to.")
-    lexicon_params.add_argument(
-        "--model",
-        "-m",
-        required=True,
-        type=str,
-        help="Trained model directory for source and target vocab.")
-    lexicon_params.add_argument(
-        "-k",
-        type=int,
-        default=20,
-        help="Number of target translations to keep per source. Default: %(default)s.")
+    lexicon_params = params.add_argument_group("Model & Top-k")
+    lexicon_params.add_argument("--model", "-m", required=True,
+                                help="Model directory containing source and target vocabularies.")
+    lexicon_params.add_argument("-k", type=int, default=20,
+                                help="Number of target translations to keep per source. Default: %(default)s.")
+
+
+def add_lexicon_create_args(params):
+    lexicon_params = params.add_argument_group("I/O")
+    lexicon_params.add_argument("--input", "-i", required=True,
+                                help="Probabilistic lexicon (fast_align format) to build top-k lexicon from.")
+    lexicon_params.add_argument("--output", "-o", required=True, help="File name to write top-k lexicon to.")
+
+
+def add_lexicon_inspect_args(params):
+    lexicon_params = params.add_argument_group("Lexicon to inspect")
+    lexicon_params.add_argument("--lexicon", "-l", required=True, help="File name of top-k lexicon to inspect.")
 
 
 def add_logging_args(params):

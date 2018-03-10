@@ -13,9 +13,9 @@
 
 import argparse
 import collections
-import logging
 import operator
 import os
+import sys
 from typing import Dict, Generator, Tuple, Optional
 
 import mxnet as mx
@@ -24,11 +24,11 @@ import numpy as np
 from . import arguments
 from . import constants as C
 from . import vocab
-from .data_io import smart_open
+from .data_io import smart_open, get_tokens, tokens2ids
 from .log import setup_main_logger, log_sockeye_version
 from .utils import check_condition
 
-logger = logging.getLogger(__name__)
+logger = setup_main_logger(__name__, console=True, file_logging=False)
 
 
 class Lexicon:
@@ -272,27 +272,67 @@ class TopKLexicon:
         return trg_ids
 
 
-def main():
-    """
-    Commandline interface for building top-k lexicons using during decoding.
-    """
-
-    params = argparse.ArgumentParser(description="Build a top-k lexicon for use during decoding.")
-    arguments.add_lexicon_args(params)
-    arguments.add_logging_args(params)
-    args = params.parse_args()
-
-    logger = setup_main_logger(__name__, console=not args.quiet, file_logging=False)
+def create(args):
+    global logger
+    logger = setup_main_logger('create', console=not args.quiet, file_logging=True, path=args.output + ".log")
     log_sockeye_version(logger)
-
+    logger.info("Creating top-k lexicon from \"%s\"", args.input)
     logger.info("Reading source and target vocab from \"%s\"", args.model)
     vocab_source = vocab.load_source_vocabs(args.model)[0]
     vocab_target = vocab.load_target_vocab(args.model)
-
-    logger.info("Creating top-k lexicon from \"%s\"", args.input)
+    logger.info("Building top-%d lexicon", args.k)
     lexicon = TopKLexicon(vocab_source, vocab_target)
     lexicon.create(args.input, args.k)
     lexicon.save(args.output)
+
+
+def inspect(args):
+    global logger
+    logger = setup_main_logger('inspect', console=True, file_logging=False)
+    log_sockeye_version(logger)
+    logger.info("Inspecting top-k lexicon at \"%s\"", args.lexicon)
+    vocab_source = vocab.load_source_vocabs(args.model)[0]
+    vocab_target = vocab.vocab_from_json(os.path.join(args.model, C.VOCAB_TRG_NAME))
+    vocab_target_inv = vocab.reverse_vocab(vocab_target)
+    lexicon = TopKLexicon(vocab_source, vocab_target)
+    lexicon.load(args.lexicon, args.k)
+    logger.info("Reading from STDIN...")
+    for line in sys.stdin:
+        tokens = list(get_tokens(line))
+        if not tokens:
+            continue
+        ids = tokens2ids(tokens, vocab_source)
+        print("Input:  n=%d" % len(tokens), " ".join("%s(%d)" % (tok, i) for tok, i in zip(tokens, ids)))
+        trg_ids = lexicon.get_trg_ids(np.array(ids))
+        tokens_trg = [vocab_target_inv.get(trg_id, C.UNK_SYMBOL) for trg_id in trg_ids]
+        print("Output: n=%d" % len(tokens_trg), " ".join("%s(%d)" % (tok, i) for tok, i in zip(tokens_trg, trg_ids)))
+        print()
+
+
+def main():
+    """
+    Commandline interface for building/inspecting top-k lexicons using during decoding.
+    """
+    params = argparse.ArgumentParser(description="Create or inspect a top-k lexicon for use during decoding.")
+    subparams = params.add_subparsers(title="Commands")
+
+    params_create = subparams.add_parser('create', description="Create top-k lexicon for use during decoding.")
+    arguments.add_lexicon_args(params_create)
+    arguments.add_lexicon_create_args(params_create)
+    arguments.add_logging_args(params_create)
+    params_create.set_defaults(func=create)
+
+    params_inspect = subparams.add_parser('inspect', description="Inspect top-k lexicon for use during decoding.")
+    arguments.add_lexicon_inspect_args(params_inspect)
+    arguments.add_lexicon_args(params_inspect)
+    params_inspect.set_defaults(func=inspect)
+
+    args = params.parse_args()
+    if 'func' not in args:
+        params.print_help()
+        return 1
+    else:
+        args.func(args)
 
 
 if __name__ == "__main__":
