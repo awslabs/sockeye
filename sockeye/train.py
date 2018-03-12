@@ -78,6 +78,9 @@ def check_arg_compatibility(args: argparse.Namespace):
 
     :param args: Arguments as returned by argparse.
     """
+
+    #TODO: check args compatibility with pointer nets if necessary
+
     check_condition(args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics,
                     "Must optimize either BLEU or one of tracked metrics (--metrics)")
 
@@ -263,6 +266,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
     batch_by_words = args.batch_type == C.BATCH_TYPE_WORD
 
+    use_pointer_nets = args.use_pointer_nets
+
     validation_sources = [args.validation_source] + args.validation_source_factors
     validation_sources = [str(os.path.abspath(source)) for source in validation_sources]
 
@@ -284,7 +289,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
             batch_num_devices=batch_num_devices,
-            fill_up=args.fill_up)
+            fill_up=args.fill_up,
+            use_pointer_nets = use_pointer_nets)
 
         check_condition(len(source_vocabs) == len(args.source_factors_num_embed) + 1,
                         "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
@@ -359,7 +365,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
-            bucket_width=args.bucket_width)
+            bucket_width=args.bucket_width,
+            use_pointer_nets=args.use_pointer_nets)
 
         data_info_fname = os.path.join(output_folder, C.DATA_INFO)
         logger.info("Writing data config to '%s'", data_info_fname)

@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 """
-Defines various constants used througout the project
+Defines various constants used throughout the project
 """
 import mxnet as mx
 import numpy as np
@@ -156,6 +156,7 @@ SOURCE_NAME = "source"
 SOURCE_LENGTH_NAME = "source_length"
 TARGET_NAME = "target"
 TARGET_LABEL_NAME = "target_label"
+POINTER_LABEL_NAME = "pointer_label"
 LEXICON_NAME = "lexicon"
 
 SOURCE_ENCODED_NAME = "encoded_source"

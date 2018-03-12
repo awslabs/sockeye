@@ -331,6 +331,12 @@ def add_training_io_args(params):
     add_vocab_args(params)
     add_training_output_args(params)
     add_monitoring_args(params)
+    add_pointer_args(params)
+
+def add_pointer_args(params):
+    params.add_argument('--use-pointer-nets',
+                        action='store_true',
+                        help='Enable the usage of pointer networks. Default: %(default)s.')
 
 
 def add_bucketing_args(params):
@@ -356,6 +362,7 @@ def add_prepare_data_cli_args(params):
     add_training_data_args(params, required=True)
     add_vocab_args(params)
     add_bucketing_args(params)
+    add_pointer_args(params)
 
     params.add_argument('--num-samples-per-shard',
                         type=int_greater_or_equal(1),
@@ -509,7 +516,6 @@ def add_model_parameters(params):
                               default=False,
                               help="Optionally apply query, key and value projections to the source and target hidden "
                                    "vectors before applying the attention mechanism.")
-
 
     # rnn arguments
     model_params.add_argument('--rnn-cell-type',

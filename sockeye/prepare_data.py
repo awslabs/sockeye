@@ -41,6 +41,8 @@ def main():
     bucketing = not args.no_bucketing
     bucket_width = args.bucket_width
 
+    use_pointer_nets = args.use_pointer_nets
+
     source_paths = [args.source] + args.source_factors
     # NOTE: Pre-existing source factor vocabularies not yet supported for prepare data
     source_factor_vocab_paths = [None] * len(args.source_factors)
@@ -74,7 +76,8 @@ def main():
                          bucket_width=bucket_width,
                          samples_per_shard=samples_per_shard,
                          min_num_shards=minimum_num_shards,
-                         output_prefix=output_folder)
+                         output_prefix=output_folder,
+                         use_pointer_nets=use_pointer_nets)
 
 
 if __name__ == "__main__":
