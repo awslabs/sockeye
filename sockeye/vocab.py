@@ -121,7 +121,7 @@ def save_target_vocab(target_vocab: Vocab, folder: str):
     Saves target vocabulary to folder.
 
     :param target_vocab: Target vocabulary.
-    :param folder: Destination folder
+    :param folder: Destination folder.
     """
     vocab_to_json(target_vocab, os.path.join(folder, C.VOCAB_TRG_NAME % 0))
 
