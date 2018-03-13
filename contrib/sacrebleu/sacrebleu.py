@@ -84,6 +84,12 @@ Sacre BLEU.
 
 # VERSION HISTORY
 
+- 1.2.4 (13 March 2018)
+   - added wmt18/dev datasets (en-et and et-en)
+   - fixed logic with --force
+   - locale-independent installation
+   - added "--echo both" (tab-delimited)
+
 - 1.2.3 (28 January 2018)
    - metrics (`-m`) are now printed in the order requested
    - chrF now prints a version string (including the beta parameter, importantly)
@@ -170,7 +176,7 @@ from typing import List, Iterable, Tuple
 import math
 import unicodedata
 
-VERSION = '1.2.3'
+VERSION = '1.2.4'
 
 try:
     # SIGPIPE is not available on Windows machines, throwing an exception.
@@ -207,6 +213,12 @@ CHRF_BETA = 2
 # Many of these are *.sgm files, which are processed to produced plain text that can be used by this script.
 # The canonical location of unpacked, processed data is $SACREBLEU/$TEST/$SOURCE-$TARGET.{$SOURCE,$TARGET}
 DATASETS = {
+    'wmt18/dev': {
+        'data': ['http://data.statmt.org/wmt18/translation-task/dev.tgz'],
+        'description': 'Development data (Estonian<>English).',
+        'et-en': ['dev/newsdev2018-eten-src.et.sgm', 'dev/newsdev2018-eten-ref.en.sgm'],
+        'en-et': ['dev/newsdev2018-enet-src.en.sgm', 'dev/newsdev2018-enet-ref.et.sgm'],
+    },
     'wmt17': {
         'data': ['http://data.statmt.org/wmt17/translation-task/test.tgz'],
         'description': 'Official evaluation data.',
@@ -445,7 +457,7 @@ DATASETS = {
                  'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/en/zh/en-zh.tgz',
                  'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/zh/en/zh-en.tgz'],
         'description': 'Official evaluation data for IWSLT.',
-        'citation': '@InProceedings{iwslt2017,\n  author    = {Cettolo, Mauro and Federico, Marcello and Bentivogli, Luisa and Niehues, Jan and Stüker, Sebastian and Sudoh, Katsuitho and Yoshino, Koichiro and Federmann, Christian},\n  title     = {Overview of the IWSLT 2017 Evaluation Campaign},\n  booktitle = {14th International Workshop on Spoken Language Translation},\n  month     = {December},\n  year      = {2017},\n  address   = {Tokyo, Japan},\n  pages     = {2--14},\n  url       = {http://workshop2017.iwslt.org/downloads/iwslt2017_proceeding_v2.pdf\n}',
+        'citation': '@InProceedings{iwslt2017,\n  author    = {Cettolo, Mauro and Federico, Marcello and Bentivogli, Luisa and Niehues, Jan and Stüker, Sebastian and Sudoh, Katsuitho and Yoshino, Koichiro and Federmann, Christian},\n  title     = {Overview of the IWSLT 2017 Evaluation Campaign},\n  booktitle = {14th International Workshop on Spoken Language Translation},\n  month     = {December},\n  year      = {2017},\n  address   = {Tokyo, Japan},\n  pages     = {2--14},\n  url       = {http://workshop2017.iwslt.org/downloads/iwslt2017_proceeding_v2.pdf}\n}',
         'en-fr': ['en-fr/IWSLT17.TED.tst2017.en-fr.en.xml', 'fr-en/IWSLT17.TED.tst2017.fr-en.fr.xml'],
         'fr-en': ['fr-en/IWSLT17.TED.tst2017.fr-en.fr.xml', 'en-fr/IWSLT17.TED.tst2017.en-fr.en.xml'],
         'en-de': ['en-de/IWSLT17.TED.tst2017.en-de.en.xml', 'de-en/IWSLT17.TED.tst2017.de-en.de.xml'],
@@ -774,14 +786,14 @@ TOKENIZERS = {
 DEFAULT_TOKENIZER = '13a'
 
 
-def _open(file, encoding='utf-8'):
+def smart_open(file, mode='rt', encoding='utf-8'):
     """Convenience function for reading compressed or plain text files.
     :param file: The file to read.
     :param encoding: The file encoding.
     """
     if file.endswith('.gz'):
-        return gzip.open(file, 'rt', encoding=encoding)
-    return open(file, 'rt', encoding=encoding)
+        return gzip.open(file, mode=mode, encoding=encoding)
+    return open(file, mode=mode, encoding=encoding)
 
 
 def my_log(num):
@@ -934,12 +946,12 @@ def process_to_text(rawfile, txtfile):
     if not os.path.exists(txtfile) or os.path.getsize(txtfile) == 0:
         logging.info("Processing %s to %s", rawfile, txtfile)
         if rawfile.endswith('.sgm') or rawfile.endswith('.sgml'):
-            with _open(rawfile) as fin, open(txtfile, 'wt') as fout:
+            with smart_open(rawfile) as fin, smart_open(txtfile, 'wt') as fout:
                 for line in fin:
                     if line.startswith('<seg '):
                         print(_clean(re.sub(r'<seg.*?>(.*)</seg>.*?', '\\1', line)), file=fout)
         elif rawfile.endswith('.xml'): # IWSLT
-            with _open(rawfile) as fin, open(txtfile, 'wt') as fout:
+            with smart_open(rawfile) as fin, smart_open(txtfile, 'wt') as fout:
                 for line in fin:
                     if line.startswith('<seg '):
                         print(_clean(re.sub(r'<seg.*?>(.*)</seg>.*?', '\\1', line)), file=fout)
@@ -952,10 +964,15 @@ def print_test_set(test_set, langpair, side):
     """
 
     where = download_test_set(test_set, langpair)
-    infile = where[0] if side == 'src' else where[1]
-    with open(infile) as fin:
-        for line in fin:
-            print(line.rstrip())
+    if side == 'both':
+        with smart_open(where[0]) as src_in, smart_open(where[1]) as tgt_in:
+            for src, tgt in zip(src_in, tgt_in):
+                print(src.rstrip(), tgt.rstrip(), sep='\t')
+    else:
+        infile = where[0] if side == 'src' else where[1]
+        with smart_open(infile) as fin:
+            for line in fin:
+                print(line.rstrip())
 
 
 def download_test_set(test_set, langpair=None):
@@ -1106,13 +1123,13 @@ def corpus_bleu(sys_stream, ref_streams, smooth='exp', smooth_floor=0.0, force=F
         if lowercase:
             lines = [x.lower() for x in lines]
 
-        if (not force or tokenize != 'none') and lines[0].rstrip().endswith(' .'):
+        if not (force or tokenize == 'none') and lines[0].rstrip().endswith(' .'):
             tokenized_count += 1
 
             if tokenized_count == 100:
-                logging.warning('That\'s > 100 lines that end in a tokenized period (\'.\')')
+                logging.warning('That\'s 100 lines that end in a tokenized period (\'.\')')
                 logging.warning('It looks like you forgot to detokenize your test data, which may hurt your score.')
-                logging.warning('If you insist your data is tokenized, you can suppress this message with \'--force\'.')
+                logging.warning('If you insist your data is detokenized, or don\'t care, you can suppress this message with \'--force\'.')
 
         output, *refs = [TOKENIZERS[tokenize](x.rstrip()) for x in lines]
 
@@ -1263,8 +1280,8 @@ def main():
                             help='source-target language pair (2-char ISO639-1 codes)')
     arg_parser.add_argument('--download', type=str, default=None,
                             help='download a test set and quit')
-    arg_parser.add_argument('--echo', choices=['src', 'ref'], type=str, default=None,
-                            help='output the source or reference to STDOUT and quit')
+    arg_parser.add_argument('--echo', choices=['src', 'ref', 'both'], type=str, default=None,
+                            help='output the source (src), reference (ref), or both (both, pasted) to STDOUT and quit')
     arg_parser.add_argument('--input', '-i', type=str, default='-',
                             help='Read input from a file instead of STDIN')
     arg_parser.add_argument('refs', nargs='*', default=[],
@@ -1348,11 +1365,11 @@ def main():
     else:
         refs = args.refs
 
-    inputfh = io.TextIOWrapper(sys.stdin.buffer, encoding=args.encoding) if args.input == '-' else _open(args.input, args.encoding)
+    inputfh = io.TextIOWrapper(sys.stdin.buffer, encoding=args.encoding) if args.input == '-' else smart_open(args.input, args.encoding)
     system = inputfh.readlines()
 
     # Read references
-    refs = [_open(x, args.encoding).readlines() for x in refs]
+    refs = [smart_open(x, encoding=args.encoding).readlines() for x in refs]
 
     if args.langpair is not None:
         _, target = args.langpair.split('-')
