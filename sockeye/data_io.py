@@ -509,7 +509,7 @@ def prepare_data(source_fnames: List[str],
     logger.info("Preparing data.")
     # write vocabularies to data folder
     vocab.save_source_vocabs(source_vocabs, output_prefix)
-    vocab.vocab_to_json(target_vocab, os.path.join(output_prefix, C.VOCAB_TRG_NAME))
+    vocab.save_target_vocab(target_vocab, output_prefix)
 
     # Pass 1: get target/source length ratios.
     length_statistics = analyze_sequence_lengths(source_fnames, target_fname, source_vocabs, target_vocab,
@@ -682,7 +682,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                                             "preparing the data." % C.VOCAB_ARG_SHARED_VOCAB)
 
     source_vocabs = vocab.load_source_vocabs(prepared_data_dir)
-    target_vocab = vocab.vocab_from_json(os.path.join(prepared_data_dir, C.VOCAB_TRG_NAME))
+    target_vocab = vocab.load_target_vocab(prepared_data_dir)
 
     check_condition(len(source_vocabs) == len(data_info.sources),
                     "Wrong number of source vocabularies. Found %d, need %d." % (len(source_vocabs),
