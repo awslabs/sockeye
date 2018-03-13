@@ -297,7 +297,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             for i, (v, mv) in enumerate(zip(source_vocabs, model_source_vocabs)):
                 utils.check_condition(vocab.are_identical(v, mv),
                                       "Prepared data and resumed model source vocab %d do not match." % i)
-            model_target_vocab = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_TRG_NAME))
+            model_target_vocab = vocab.load_target_vocab(output_folder)
             utils.check_condition(vocab.are_identical(target_vocab, model_target_vocab),
                                   "Prepared data and resumed model target vocabs do not match.")
 
@@ -314,7 +314,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         if resume_training:
             # Load the existing vocabs created when starting the training run.
             source_vocabs = vocab.load_source_vocabs(output_folder)
-            target_vocab = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_TRG_NAME))
+            target_vocab = vocab.load_target_vocab(output_folder)
 
             # Recover the vocabulary path from the data info file:
             data_info = cast(data_io.DataInfo, Config.load(os.path.join(output_folder, C.DATA_INFO)))
@@ -758,7 +758,7 @@ def main():
         # Dump the vocabularies if we're just starting up
         if not resume_training:
             vocab.save_source_vocabs(source_vocabs, output_folder)
-            vocab.vocab_to_json(target_vocab, os.path.join(output_folder, C.VOCAB_TRG_NAME))
+            vocab.save_target_vocab(target_vocab, output_folder)
 
         source_vocab_sizes = [len(v) for v in source_vocabs]
         target_vocab_size = len(target_vocab)
