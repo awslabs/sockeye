@@ -384,8 +384,9 @@ def load_models(context: mx.context.Context,
 
     for model_folder, checkpoint in zip(model_folders, checkpoints):
         model_source_vocabs = vocab.load_source_vocabs(model_folder)
+        model_target_vocab = vocab.load_target_vocab(model_folder)
         source_vocabs.append(model_source_vocabs)
-        target_vocabs.append(vocab.vocab_from_json(os.path.join(model_folder, C.VOCAB_TRG_NAME)))
+        target_vocabs.append(model_target_vocab)
 
         model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
         logger.info("Model version: %s", model_version)

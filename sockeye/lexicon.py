@@ -280,7 +280,7 @@ def main():
 
     logger.info("Reading source and target vocab from \"%s\"", args.model)
     vocab_source = vocab.load_source_vocabs(args.model)[0]
-    vocab_target = vocab.vocab_from_json(os.path.join(args.model, C.VOCAB_TRG_NAME))
+    vocab_target = vocab.load_target_vocab(args.model)
 
     logger.info("Creating top-k lexicon from \"%s\"", args.input)
     lexicon = TopKLexicon(vocab_source, vocab_target)
