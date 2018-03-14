@@ -13,6 +13,13 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ## [1.18.0]
 ### Changed
 - Change default target vocab name in model folder to `vocab.trg.0.json`
+- Changed serialization format of top-k lexica to pickle/Numpy instead of JSON.
+- `sockeye-lexicon` now supports two subcommands: create & inspect.
+  The former provides the same functionality as the previous CLI.
+  The latter allows users to pass source words to the top-k lexicon to inspect the set of allowed target words.
+
+### Added
+- Added ability to choose a smaller `k` at decoding runtime for lexicon restriction.
 
 ## [1.17.5]
 ### Added
