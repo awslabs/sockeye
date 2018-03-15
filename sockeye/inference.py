@@ -815,38 +815,6 @@ class LengthPenalty:
             return numerator / self.denominator
 
 
-class CoveragePenalty:
-    """
-    Calculates the coverage penalty as
-    weight * sum_X(log(min(sum_Y att(x_i,y_j), 1.0)))
-
-    See Wu et al. 2016 ("weight" here is their beta)
-
-    :param weight: The beta factor for the length penalty (see above).
-    """
-
-    def __init__(self, weight: float = 1.0) -> None:
-        self.weight = weight
-
-    def __call__(self, attentions: mx.nd.NDArray) -> mx.nd.NDArray:
-        """
-        Calculate the coverage penalty for the given attention matrix.
-
-        :param attentions: A (batch x target_len x source_len) matrix of attention weights.
-        :return: The coverage penalty. A scalar or a matrix (batch_size, 1) depending on the input.
-        """
-        penalties = mx.nd.zeros((attentions.shape[0],), ctx=attentions.context)
-        if self.weight > 0.0:
-            penalties = self.weight * mx.nd.sum(mx.nd.log(mx.nd.clip(mx.nd.sum(attentions, axis=1), a_min = 0.00000000000000001, a_max=1.0)), axis=1)
-            # print(attentions.shape, sums.shape)
-            # sum = mx.nd.where(sum
-            # for i in range(attentions.shape[0]):
-            #     source_len = attentions.shape[2]
-            #     penalties[i] = self.weight * sum([math.log(min(mx.nd.sum(attentions[i,sid,:]).asscalar(), 1.0)) for sid in range(source_len)])
-
-        return penalties.expand_dims(axis=1)
-
-
 def _concat_translations(translations: List[Translation], start_id: int, stop_ids: Set[int],
                          length_penalty: LengthPenalty) -> Translation:
     """
@@ -906,7 +874,6 @@ class Translator:
     :param context: MXNet context to bind modules to.
     :param ensemble_mode: Ensemble mode: linear or log_linear combination.
     :param length_penalty: Length penalty instance.
-    :param coverage_penalty: Coverage penalty instance.
     :param beam_prune: Beam pruning difference threshold.
     :param beam_search_stop: The stopping criterium.
     :param models: List of models.
@@ -921,7 +888,6 @@ class Translator:
                  ensemble_mode: str,
                  bucket_source_width: int,
                  length_penalty: LengthPenalty,
-                 coverage_penalty: CoveragePenalty,
                  beam_prune: float,
                  beam_search_stop: str,
                  models: List[InferenceModel],
