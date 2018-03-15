@@ -137,9 +137,12 @@ class CheckpointDecoder:
                                           bucket_source_width=self.bucket_width_source,
                                           length_penalty=inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
                                           beam_prune=0.0,
+                                          beam_search_stop='all',
                                           models=models,
                                           source_vocabs=source_vocabs,
-                                          target_vocab=target_vocab)
+                                          target_vocab=target_vocab,
+                                          restrict_lexicon=None,
+                                          store_beam=False)
         trans_wall_time = 0.0
         translations = []
         with data_io.smart_open(output_name, 'w') as output:
