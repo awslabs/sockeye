@@ -995,8 +995,8 @@ def add_inference_args(params):
     decode_params.add_argument('--beam-prune', '-p',
                                type=float,
                                default=0,
-                               help='Pruning threshold for beam search. All hypotheses with unnormalized scores less than '
-                               'this amount below the best (unnormalized) hypothesis are discarded (0 = off).')
+                               help='Pruning threshold for beam search. All hypotheses with scores not within '
+                               'this amount of the best finished hypothesis are discarded (0 = off). Default: %(default)s')
     decode_params.add_argument('--beam-search-stop',
                                choices='all first'.split(),
                                default='all',

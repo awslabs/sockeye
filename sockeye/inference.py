@@ -1318,7 +1318,9 @@ class Translator:
                     if mx.nd.sum(finished[rows]) > 0:
                         best_score = mx.nd.min(mx.nd.where(finished[rows].expand_dims(axis=1), scores_accumulated[rows], inf_array))
 
-                        to_remove = mx.nd.cast(scores_accumulated[rows,0] - best_score > self.beam_prune, dtype='int32')
+                        # Find, mark (by setting the score to inf), and remove all hypotheses
+                        # whose score is not within self.beam_prune of the best score
+                        to_remove = mx.nd.cast(scores_accumulated[rows, 0] - best_score > self.beam_prune, dtype='int32')
                         scores_accumulated[rows] = mx.nd.where(to_remove, inf_array, scores_accumulated[rows])
                         best_word_indices[rows] = mx.nd.where(to_remove, zeros_array, best_word_indices[rows])
 
@@ -1328,11 +1330,11 @@ class Translator:
                         # mark removed ones as finished so they won't block early exiting
                         finished[rows] = finished[rows] + to_remove
 
-                # Resort the hypotheses
-                sorted_indices = mx.nd.argsort(scores_accumulated[rows,0])
+                # Step 4 normalized newly completed hypotheses, so we need to re-sort.
+                sorted_indices = mx.nd.argsort(scores_accumulated[rows, 0])
                 best_hyp_indices[rows] = mx.nd.take(best_hyp_indices[rows], sorted_indices)
                 best_word_indices[rows] = mx.nd.take(best_word_indices[rows], sorted_indices)
-                scores_accumulated[rows] = mx.nd.take(scores_accumulated[rows,0], sorted_indices.expand_dims(axis=1))
+                scores_accumulated[rows] = mx.nd.take(scores_accumulated[rows, 0], sorted_indices.expand_dims(axis=1))
 
             # (6) get hypotheses and their properties for beam_size winning hypotheses (ascending)
             sequences = mx.nd.take(sequences, best_hyp_indices)
