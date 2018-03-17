@@ -894,7 +894,9 @@ class Translator:
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
-                 store_beam : bool = False) -> None:
+                 store_beam: bool = False,
+                 use_mxnet_topk: bool = False) -> None:
+        self.use_mxnet_topk = use_mxnet_topk
         self.context = context
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
@@ -1287,14 +1289,20 @@ class Translator:
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence. TODO(fhieber): once mx.nd.topk is
             # sped-up no numpy conversion necessary anymore.
-            scores = scores.asnumpy()  # convert to numpy once to minimize cross-device copying
+            if not self.use_mxnet_topk:
+                scores = scores.asnumpy()  # convert to numpy once to minimize cross-device copying
+
             for sentno in range(self.batch_size):
                 rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
                 active_rows = slice(sentno * self.beam_size, sentno * self.beam_size + active_beam_size[sentno])
                 sliced_scores = scores[active_rows]
                 # TODO we could save some tiny amount of time here by not running smallest_k for a finished sent
-                (best_hyp_indices[rows], best_word_indices[rows]), \
-                    scores_accumulated[rows, 0] = utils.smallest_k(sliced_scores, self.beam_size)
+                if not self.use_mxnet_topk:
+                    (best_hyp_indices[rows], best_word_indices[rows]), \
+                        scores_accumulated[rows, 0] = utils.smallest_k(sliced_scores, self.beam_size)
+                else:
+                    (best_hyp_indices[rows], best_word_indices[rows]), \
+                        scores_accumulated[rows, 0] = utils.smallest_k_mx(sliced_scores, self.beam_size)
 
                 # offsetting since the returned smallest_k() indices were slice-relative
                 best_hyp_indices[rows] += rows.start

@@ -86,7 +86,8 @@ def main():
                                           source_vocabs=source_vocabs,
                                           target_vocab=target_vocab,
                                           restrict_lexicon=restrict_lexicon,
-                                          store_beam=store_beam)
+                                          store_beam=store_beam,
+                                          use_mxnet_topk=args.use_mxnet_topk)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
