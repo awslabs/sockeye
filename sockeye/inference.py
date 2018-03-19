@@ -1322,27 +1322,21 @@ class Translator:
                 active_beam_size[sentno] = self.beam_size
 
                 rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
-                if self.beam_prune > 0.0:
-                    if mx.nd.sum(finished[rows]) > 0:
-                        best_score = mx.nd.min(mx.nd.where(finished[rows].expand_dims(axis=1), scores_accumulated[rows], inf_array))
+                if self.beam_prune > 0.0 and mx.nd.sum(finished[rows]) > 0:
+                    best_finished_score = mx.nd.min(mx.nd.where(finished[rows].expand_dims(axis=1), scores_accumulated[rows], inf_array))
 
-                        # Find, mark (by setting the score to inf), and remove all hypotheses
-                        # whose score is not within self.beam_prune of the best score
-                        to_remove = mx.nd.cast(scores_accumulated[rows, 0] - best_score > self.beam_prune, dtype='int32')
-                        scores_accumulated[rows] = mx.nd.where(to_remove, inf_array, scores_accumulated[rows])
-                        best_word_indices[rows] = mx.nd.where(to_remove, zeros_array, best_word_indices[rows])
+                    # Find, mark (by setting the score to inf), and remove all hypotheses
+                    # whose score is not within self.beam_prune of the best score
+                    to_remove = mx.nd.cast(scores_accumulated[rows, 0] - best_finished_score > self.beam_prune, dtype='int32')
+                    scores_accumulated[rows] = mx.nd.where(to_remove, inf_array, scores_accumulated[rows])
+                    best_word_indices[rows] = mx.nd.where(to_remove, zeros_array, best_word_indices[rows])
 
-                        num_removing = int(mx.nd.sum(to_remove).asscalar())
-                        active_beam_size[sentno] = self.beam_size - num_removing
+                    num_removing = int(mx.nd.sum(to_remove).asscalar())
+                    active_beam_size[sentno] = self.beam_size - num_removing
 
-                        # mark removed ones as finished so they won't block early exiting
-                        finished[rows] = finished[rows] + to_remove
-
-                # Step 4 normalized newly completed hypotheses, so we need to re-sort.
-                sorted_indices = mx.nd.argsort(scores_accumulated[rows, 0])
-                best_hyp_indices[rows] = mx.nd.take(best_hyp_indices[rows], sorted_indices)
-                best_word_indices[rows] = mx.nd.take(best_word_indices[rows], sorted_indices)
-                scores_accumulated[rows] = mx.nd.take(scores_accumulated[rows, 0], sorted_indices.expand_dims(axis=1))
+                    # mark removed ones as finished so they won't block early exiting
+                    # TODO: this should have max value of 1
+                    finished[rows] = finished[rows] + to_remove
 
             # (6) get hypotheses and their properties for beam_size winning hypotheses (ascending)
             sequences = mx.nd.take(sequences, best_hyp_indices)
@@ -1359,6 +1353,7 @@ class Translator:
 
             # (6) optionally save beam history
             if self.store_beam:
+                # TODO: fix normalized computation here, also sort
                 unnormalized_scores = scores_accumulated * self.length_penalty(lengths -1)
                 for sent in range(self.batch_size):
                     rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
@@ -1381,7 +1376,8 @@ class Translator:
             finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
 
             if self.beam_search_stop == 'first' and self.batch_size == 1:
-                if finished[0].asscalar() > 0:
+                # TODO: doesn't work for batching
+                if mx.nd.sum(finished).asscalar() > 0:
                     break
             else:
                 if mx.nd.sum(finished).asscalar() == self.batch_size * self.beam_size:  # all finished
@@ -1390,6 +1386,19 @@ class Translator:
             # (8) update models' state with winning hypotheses (ascending)
             for ms in model_states:
                 ms.sort_state(best_hyp_indices)
+
+        # One final sort
+        for sentno in range(self.batch_size):
+            rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
+            best_hyp_indices[rows] = rows.start + mx.nd.argsort(scores_accumulated[rows, 0])
+
+#        print(best_hyp_indices, finished, scores_accumulated, sequences)
+
+        # (6) get hypotheses and their properties for beam_size winning hypotheses (ascending)
+        sequences = mx.nd.take(sequences, best_hyp_indices)
+        attentions = mx.nd.take(attentions, best_hyp_indices)
+        scores_accumulated[:] = mx.nd.take(scores_accumulated[:,0], best_hyp_indices.expand_dims(axis=1))
+        lengths = mx.nd.take(lengths, best_hyp_indices)
 
         return sequences, attentions, scores_accumulated, lengths, beam_histories
 
@@ -1427,6 +1436,7 @@ class Translator:
             else:
                 result.append(Translation(sequence, attention_matrix, score))
         return result
+
 
     def print_beam(self, sequences, scores, finished, active, timestep):
         print('BEAM AT TIME STEP', timestep)
