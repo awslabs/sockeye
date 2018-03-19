@@ -27,7 +27,7 @@ python3 -m sockeye.translate --models model \
 After inference, the graphs can be generated with:
 
 ```
-python3 contrib/vistools/generate_graphs.py -d beam.json -o generated_graphs
+python3 contrib/vistools/generate_graphs.py -d beams.json -o generated_graphs
 ```
 
 The `generated_graphs/` folder will contain one `html` file per sentence. Opening it in your browser will show the interactive graph.

@@ -56,7 +56,7 @@ from networkx.readwrite import json_graph
 
 
 # Pad token used in sockeye
-# Used to filer out pad tokens from the graph
+# Used to filter out pad tokens from the graph
 PAD_TOKEN = "<pad>"
 
 HTML_TEMPLATE = Template("""
@@ -78,7 +78,7 @@ HTML_TEMPLATE = Template("""
 
 
 def _add_graph_level(graph, level, parent_ids, names, scores, normalized_scores):
-    """Adds a levelto the passed graph"""
+    """Adds a level to the passed graph"""
     for i, parent_id in enumerate(parent_ids):
         if names[i] != PAD_TOKEN:
             new_node = (level, i)
@@ -145,9 +145,9 @@ def main():
     PARSER.add_argument(
         "-o", "--output_dir", type=str, required=True,
         help="path to the output directory")
-    ARGS = PARSER.parse_args()
+    args = PARSER.parse_args()
 
-    generate(ARGS.data, ARGS.output_dir)
+    generate(args.data, args.output_dir)
 
 
 if __name__ == "__main__":
