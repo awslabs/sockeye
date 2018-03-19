@@ -1,6 +1,6 @@
 # VisTools
 
-This package generates javascript-based graphs of the beam search performed by sockeye. The graphs show  which nodes were expended at each step, at which step each hypothesis in the beam finished, the tokens chosen at each step, and the normalised and unnormalised scores at each state in the graph. This project is a modified for of [VisTools](https://github.com/OpenNMT/VisTools)
+This package generates javascript-based graphs of the beam search performed by sockeye. The graphs show  which nodes were expended at each step, at which step each hypothesis in the beam finished, the tokens chosen at each step, and the normalised and unnormalised scores at each state in the graph. This project is a modified form of [VisTools](https://github.com/OpenNMT/VisTools).
 
 ## Getting started
 
@@ -34,4 +34,4 @@ The `generated_graphs/` folder will contain one `html` file per sentence. Openin
 
 ## Running tests
 
-To run the tests, run `pytest` from the `vistools` folder.
+To run the tests, run `pytest` from the `vistools` folder. A blank `pytest.ini` has been added so sockeye's main `pytest.ini` doesn't interfere with these tests.
