@@ -1094,22 +1094,22 @@ def add_init_embedding_args(params):
                         help='File to write initialized parameters to.')
     params.add_argument('--encoding', '-c', type=str, default=C.VOCAB_ENCODING,
                         help='Open input vocabularies with specified encoding. Default: %(default)s.')
-    
+
 def add_scoring_args(params):
     add_device_args(params)
     add_logging_args(params)
     scoring_params = params.add_argument_group("Scoring CLI")
-    
+
     scoring_params.add_argument('--source', '-s',
                                required=True,
                                type=regular_file(),
                                default=None,
-                               help='Source file to score, sentence-aligend.')
+                               help='Source file to be scored, sentence-aligned.')
     scoring_params.add_argument('--target', '-t',
                                required=True,
                                type=regular_file(),
                                default=None,
-                               help='Target file to score, sentence-aligned.')
+                               help='Target file to be scored, sentence-aligned.')
     scoring_params.add_argument('--fill-up',
                               type=str,
                               default='replicate',
@@ -1133,10 +1133,11 @@ def add_scoring_args(params):
                                type=int,
                                nargs='+',
                                help='If not given, chooses best checkpoints for model(s). '
-                                    'If specified, must have the same length as --models and be integer') 
+                                    'If specified, must have the same length as --models and be integer')
     scoring_params.add_argument('--output-type',
-                               default='score',
-                               choices=C.OUTPUT_HANDLERS,
+                               default=C.OUTPUT_HANDLER_SCORE,
+                               # scoring does not result in beam history
+                               choices=[H for H in C.OUTPUT_HANDLERS if H != C.OUTPUT_HANDLER_BEAM_STORE],
                                help='Output type. Default: %(default)s.')
     scoring_params.add_argument('--output', '-o',
                                 type=str,
@@ -1164,4 +1165,4 @@ def add_scoring_args(params):
                               default=[],
                               help='Embedding size for additional source factors. '
                                    'You must provide as many dimensions as '
-                                   '(validation) source factor files. Default: %(default)s.')    
+                                   '(validation) source factor files. Default: %(default)s.')

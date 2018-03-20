@@ -50,6 +50,8 @@ def get_output_handler(output_type: str,
         return AlignTextHandler(sure_align_threshold)
     elif output_type == C.OUTPUT_HANDLER_BEAM_STORE:
         return BeamStoringHandler(output_stream)
+    elif output_type == C.OUTPUT_HANDLER_SCORE:
+        return ScoreOutputHandler(output_stream)
     else:
         raise ValueError("unknown output type")
 
@@ -299,4 +301,28 @@ class BeamStoringHandler(OutputHandler):
             # Some outputs can have more than one beam, add the id for bookkeeping
             h["id"] = t_output.id # type: ignore
             self.stream.write("%s\n" % json.dumps(h, sort_keys=True))
+        self.stream.flush()
+
+
+class ScoreOutputHandler(OutputHandler):
+    """
+    Output handler to write scores to a stream. Outputs nothing but
+    the scores.
+
+    :param stream: Stream to write translations to (e.g. sys.stdout).
+    """
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    def handle(self,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
+               t_walltime: float = 0.):
+        """
+        :param t_input: Translator input.
+        :param t_output: Translator output.
+        :param t_walltime: Total walltime for translation.
+        """
+        self.stream.write("{:.3f}\n".format(t_output.score))
         self.stream.flush()
