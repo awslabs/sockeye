@@ -15,9 +15,10 @@
 Implement scoring of existing translations.
 """
 import os
+import logging
+import argparse
 from typing import Optional, List, Dict, Tuple, cast
 from collections import defaultdict
-import logging
 
 import mxnet as mx
 import numpy as np

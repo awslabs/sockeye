@@ -62,13 +62,13 @@ def main():
         if(args.max_seq_len is not None):
             max_len_source, max_len_target = args.max_seq_len
         else:
-            max_len_source, max_len_target = get_max_source_and_target(args)
+            max_len_source, max_len_target = scoring.get_max_source_and_target(args)
         logger.info("Using max length source %d, max length target %d", max_len_source, max_len_target)
 
         ## create iterator for each model (vocabularies can be different)
         data_iters, configs, mapids = [], [], []
         for model in args.models:
-            data_iter, config, mapid = create_data_iter_and_vocab(args=args,
+            data_iter, config, mapid = scoring.create_data_iter_and_vocab(args=args,
                                                            max_seq_len_source=max_len_source, max_seq_len_target=max_len_target, model_dir=model)
             data_iters.append(data_iter)
             configs.append(config)
