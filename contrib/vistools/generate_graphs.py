@@ -64,7 +64,7 @@ HTML_TEMPLATE = Template("""
                          <html lang="en">
                          <head>
                          <meta charset="utf-8">
-                         <title>Beam Search</title>
+                         <title>$SENT - Beam Search</title>
                          <link rel="stylesheet" type="text/css" href="tree.css">
                          <script src="http://d3js.org/d3.v3.min.js"></script>
                          </head>
@@ -112,7 +112,6 @@ def generate(input_data, output_dir):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-
     # Copy required files
     shutil.copy2(path_base+"/templates/tree.css", output_dir)
     shutil.copy2(path_base+"/templates/tree.js", output_dir)
@@ -130,22 +129,21 @@ def generate(input_data, output_dir):
                 json_graph.tree_data(graph, (0, 0)),
                 ensure_ascii=True)
 
-            html_str = HTML_TEMPLATE.substitute(DATA=json_str)
+            html_str = HTML_TEMPLATE.substitute(DATA=json_str, SENT=str(i))
             output_path = os.path.join(output_dir, "{:06d}.html".format(i))
             with open(output_path, "w", encoding="utf-8") as out:
                 out.write(html_str)
     print("Output beams written to: {}".format(output_dir))
 
 def main():
-    PARSER = argparse.ArgumentParser(
-        description="Generate beam search visualizations")
-    PARSER.add_argument(
+    parser = argparse.ArgumentParser(description="Generate beam search visualizations")
+    parser.add_argument(
         "-d", "--data", type=str, required=True,
         help="path to the beam search data file")
-    PARSER.add_argument(
+    parser.add_argument(
         "-o", "--output_dir", type=str, required=True,
         help="path to the output directory")
-    args = PARSER.parse_args()
+    args = parser.parse_args()
 
     generate(args.data, args.output_dir)
 

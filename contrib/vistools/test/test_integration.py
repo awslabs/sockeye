@@ -25,6 +25,6 @@ BEAM_COMPARISONS = [(os.path.join(CWD, "resources", "beams.json"),
 def test_beam_generation(beams, expected_output, tmpdir):
     generate(beams, str(tmpdir))
 
-    # Same files in each dir
+    # Same files in each dir, does not check contents
     result = dircmp(expected_output, str(tmpdir))
     assert result.left_list == result.right_list
