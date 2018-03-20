@@ -27,13 +27,19 @@ from . import scoring
 
 from sockeye.log import setup_main_logger
 from sockeye.utils import check_condition
+from sockeye.output_handler import get_output_handler, OutputHandler
 
-logger = logging.getLogger(__name__)
+logger = setup_main_logger(__name__, file_logging=False)
 
+def score():
+    pass
+
+def read_and_score():
+    pass
 
 def main():
-    ### TODO adapt output_handler?
-    ### TODO: test with factors
+    # TODO adapt output_handler?
+    # TODO: test with factors
     params = argparse.ArgumentParser(description='Scoring CLI')
 
     arguments.add_scoring_args(params)
@@ -57,15 +63,14 @@ def main():
     with ExitStack() as exit_stack:
         context = translate._setup_context(args, exit_stack)
 
-
-        ## if --max-seq-len given, use this, else get maximum sentence length from test data
+        # if --max-seq-len given, use this, else get maximum sentence length from test data
         if(args.max_seq_len is not None):
             max_len_source, max_len_target = args.max_seq_len
         else:
             max_len_source, max_len_target = scoring.get_max_source_and_target(args)
         logger.info("Using max length source %d, max length target %d", max_len_source, max_len_target)
 
-        ## create iterator for each model (vocabularies can be different)
+        # create iterator for each model (vocabularies can be different)
         data_iters, configs, mapids = [], [], []
         for model in args.models:
             data_iter, config, mapid = scoring.create_data_iter_and_vocab(args=args,
@@ -84,8 +89,8 @@ def main():
 
         results = []
         for model, data_iter, mapid in zip(models, data_iters, mapids):
-           result = model.score(data_iter, mapid, args.batch_size, args.no_bucketing)
-           results.append(result)
+            result = model.score(data_iter, mapid, args.batch_size, args.no_bucketing)
+            results.append(result)
 
         for sentence_id in range(len(results[0])):
             for model in range(len(results)):
@@ -93,9 +98,5 @@ def main():
             print()
 
 
-
 if __name__ == '__main__':
     main()
-
-
-
