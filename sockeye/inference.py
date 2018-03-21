@@ -1335,8 +1335,9 @@ class Translator:
                     active_beam_size[sentno] = self.beam_size - num_removing
 
                     # mark removed ones as finished so they won't block early exiting
-                    # TODO: this should have max value of 1
-                    finished[rows] = finished[rows] + to_remove
+                    finished[rows] = mx.nd.clip(finished[rows] + to_remove, 0, 1)
+
+                    # Note: hypotheses are no longer necessarily sorted until the next call to topk()
 
             # (6) get hypotheses and their properties for beam_size winning hypotheses (ascending)
             sequences = mx.nd.take(sequences, best_hyp_indices)
@@ -1353,8 +1354,7 @@ class Translator:
 
             # (6) optionally save beam history
             if self.store_beam:
-                # TODO: fix normalized computation here, also sort
-                unnormalized_scores = scores_accumulated * self.length_penalty(lengths -1)
+                unnormalized_scores = mx.nd.where(finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
                 for sent in range(self.batch_size):
                     rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
 
@@ -1387,14 +1387,12 @@ class Translator:
             for ms in model_states:
                 ms.sort_state(best_hyp_indices)
 
-        # One final sort
+        # (9) Sort the hypotheses within each sentence (normalization for finished hyps breaks the sort)
         for sentno in range(self.batch_size):
             rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
             best_hyp_indices[rows] = rows.start + mx.nd.argsort(scores_accumulated[rows, 0])
 
-#        print(best_hyp_indices, finished, scores_accumulated, sequences)
-
-        # (6) get hypotheses and their properties for beam_size winning hypotheses (ascending)
+        # Make corresponding updates after having sorted
         sequences = mx.nd.take(sequences, best_hyp_indices)
         attentions = mx.nd.take(attentions, best_hyp_indices)
         scores_accumulated[:] = mx.nd.take(scores_accumulated[:,0], best_hyp_indices.expand_dims(axis=1))
