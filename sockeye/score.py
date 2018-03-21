@@ -15,30 +15,49 @@
 Scoring CLI.
 """
 import argparse
-from contextlib import ExitStack
 import logging
+import time
+from contextlib import ExitStack
+from typing import List, DefaultDict
 
 
 from . import arguments
 from . import constants as C
 from . import utils
+from . import data_io
 from . import translate
 from . import scoring
 
 from sockeye.log import setup_main_logger
 from sockeye.utils import check_condition
-from sockeye.output_handler import get_output_handler, OutputHandler
+from sockeye.output_handler import ScoreOutputHandler, OutputHandler
 
 logger = setup_main_logger(__name__, file_logging=False)
 
-def score():
-    pass
 
-def read_and_score():
-    pass
+def score(output_handler: OutputHandler,
+          models: List[scoring.ScoringModel],
+          data_iters: List[data_io.BaseParallelSampleIter],
+          mapids: DefaultDict[DefaultDict[int, int]],
+          scorer: scoring.Scorer) -> None:
+    """
+    """
+    logger.info("Scoring...")
+
+    tic = time.time()
+    scored_outputs = scorer.score(models=models,
+                                  data_iters=data_iters,
+                                  mapids=mapids)
+
+    for scored_output in scored_outputs:
+        output_handler.handle(scored_output)
+
+    total_time = time.time() - tic
+
+    logger.info("Total time taken for scoring: %.4f", total_time)
+
 
 def main():
-    # TODO adapt output_handler?
     # TODO: test with factors
     params = argparse.ArgumentParser(description='Scoring CLI')
 
@@ -74,28 +93,31 @@ def main():
         data_iters, configs, mapids = [], [], []
         for model in args.models:
             data_iter, config, mapid = scoring.create_data_iter_and_vocab(args=args,
-                                                           max_seq_len_source=max_len_source, max_seq_len_target=max_len_target, model_dir=model)
+                                                                          max_seq_len_source=max_len_source,
+                                                                          max_seq_len_target=max_len_target,
+                                                                          model_dir=model)
             data_iters.append(data_iter)
             configs.append(config)
             mapids.append(mapid)
 
-        models = scoring.load_models(context,
-             args.batch_size,
-             args.models,
-             data_iters,
-             configs,
-             args.checkpoints,
-             not args.no_bucketing)
+        models = scoring.load_models(context=context,
+                                     batch_size=args.batch_size,
+                                     model_folders=args.models,
+                                     data_iters=data_iters,
+                                     configs=configs,
+                                     checkpoints=args.checkpoints,
+                                     bucketing=not args.no_bucketing)
 
-        results = []
-        for model, data_iter, mapid in zip(models, data_iters, mapids):
-            result = model.score(data_iter, mapid, args.batch_size, args.no_bucketing)
-            results.append(result)
+        scorer = scoring.Scorer(batch_size=args.batch_size,
+                                no_bucketing=args.no_bucketing)
 
-        for sentence_id in range(len(results[0])):
-            for model in range(len(results)):
-                print("model {} : score {}".format(model, results[model][sentence_id]), end=" ")
-            print()
+        output_handler = ScoreOutputHandler
+
+        score(output_handler=output_handler,
+              models=models,
+              data_iters=data_iters,
+              mapids=mapids,
+              scorer=scorer)
 
 
 if __name__ == '__main__':

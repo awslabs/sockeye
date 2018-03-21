@@ -17,7 +17,7 @@ Implement scoring of existing translations.
 import os
 import logging
 import argparse
-from typing import Optional, List, Dict, Tuple, cast
+from typing import Optional, List, Dict, Tuple, cast, DefaultDict
 from collections import defaultdict
 
 import mxnet as mx
@@ -43,9 +43,10 @@ class ScoringModel(model.SockeyeModel):
     :param context: The context(s) that MXNet will be run in (GPU(s)/CPU)
     :param data_iter: The iterator over the data set.
     :param config: Configuration object holding details about the model.
-    :param checkpoint: Checkpoint to load. If None, finds best parameters in model_folder.
-    :param bucketing: If True bucketing will be used, if False the computation graph will always be
-            unrolled to the full length.
+    :param checkpoint: Checkpoint to load. If None, finds best parameters in
+    model_folder.
+    :param bucketing: If True bucketing will be used, if False the computation
+    graph will always be unrolled to the full length.
     """
 
     def __init__(self,
@@ -87,8 +88,7 @@ class ScoringModel(model.SockeyeModel):
 
         data_names = [x[0] for x in data_iter.provide_data]
         label_names = [x[0] for x in data_iter.provide_label]
-        #scores = [[None] for x in data_iter.provide_label]
-
+        # scores = [[None] for x in data_iter.provide_label]
 
         def sym_gen(seq_lens):
             """
@@ -126,17 +126,8 @@ class ScoringModel(model.SockeyeModel):
             # output layer
             logits = self.output_layer(target_decoded)
 
-            #probs = mx.symbol.softmax(logits)
-            # TODO: check if we can use mx.symbol.softmax_cross_entropy
-            #probs= mx.symbol.softmax_cross_entropy(logits, labels)
-            #token_probs = mx.symbol.pick(probs, labels)
-            #log_probs = - mx.symbol.log(token_probs)
-            #scores = mx.symbol.sum(log_probs, axis=0)
-            #return scores, data_names, label_names
-
             probs = model_loss.get_loss(logits, labels)
             return mx.symbol.Group(probs), data_names, label_names
-
 
         if self.bucketing:
             logger.info("Using bucketing. Default max_seq_len=%s", data_iter.default_bucket_key)
@@ -155,67 +146,155 @@ class ScoringModel(model.SockeyeModel):
                                  context=self.context)
 
 
-    ## TODO: print alignments?
-    def score(self,
-              data_iter: data_io.BaseParallelSampleIter,
-              mapid: defaultdict(lambda: defaultdict(int)),
-              batch_size: int,
-              no_bucketing: bool = False,
-              normalize: Optional[bool] = True
-              ) -> Dict[int,int]:
+Tokens = List[str]
+ScoredBatch = List[Tuple[int, float]]
+ScoredSamples = List[ScoredBatch]
+
+
+class ScoringOutput:
+    """
+    Wraps scorer outputs as TranslatorOutputs.
+    """
+
+    __slots__ = ('sentence_id', 'source_tokens', 'target_tokens', 'scores')
+
+    def __init__(self,
+                 sentence_id: int,
+                 source_tokens: Optional[Tokens] = None,
+                 target_tokens: Optional[Tokens] = None,
+                 scores: List[float]) -> None:
+        self.sentence_id = sentence_id
+        self.source_tokens = source_tokens
+        self.target_tokens = target_tokens
+        self.scores = scores
+
+    def __str__(self):
+        return 'ScoringOutput(%d, %s, %s, %s)' % (self.sentence_id, self.source_tokens, self.target_tokens, str(self.scores))
+
+
+class Scorer:
+
+    def __init__(self,
+                 batch_size: int,
+                 no_bucketing: bool = False,
+                 normalize: Optional[bool] = True) -> None:
+
+        self.batch_size = batch_size
+        self.no_bucketing = no_bucketing
+        self.normalize = normalize
+
+    def _score_batch(self,
+                     model: ScoringModel,
+                     batch: mx.io.DataBatch,
+                     batch_index: Tuple[int, int],
+                     mapid: DefaultDict[DefaultDict[int, int]]
+                     ) -> ScoredBatch:
         """
-        Reads batches of input/output pairs and scores them.
+        Scores a batch of examples, returns a list of tuples (sentence_id, score).
         :param data_iter: The iterator over the data set.
         :param mapid: dictionary that maps input order to samples in buckets.
         :param batch_size: Batch size.
         :param normalize: If true, normalizes score by length of target.
         :return: Dictionary where key=input_id, value=score.
         """
-        results = dict()
+        scored_batch = []
 
-        #for bucket_id, sample_id in mapid.items():
-            #print("bucket id {} with sample {} ".format(bucket_id, sample_id))
-        #print("batch indexes {}".format(data_iter.batch_indices))
+        model.module.forward(batch, is_train=False)
+        outputs = model.module.get_outputs()
 
-        batch_indices = data_iter.batch_indices
+        # split output array into probs per batch
+        sample_length = int(len(outputs[0]) / self.batch_size)
 
-        for nbatch, batch in enumerate(data_iter):
-            self.module.forward(batch, is_train=False)
-            outputs = self.module.get_outputs()
+        probs = mx.nd.array(outputs[0])  # shape is (t_len*batch_size, t_vocab)
+        probs_per_batch = [probs[i*sample_length:(i+1)*sample_length] for i in range(self.batch_size)]
 
-            ## split output array into probs per batch
-            sample_length = int(len(outputs[0])/batch_size)
+        # get bucket index of batch
+        (bucket_index, offset) = batch_index
 
-            probs = mx.nd.array(outputs[0]) ## shape is (t_len*batch_size, t_vocab)
-            probs_per_batch = [probs[i*sample_length:(i+1)*sample_length] for i in range(batch_size)]
+        for sample_number, sample_probs in enumerate(probs_per_batch):
 
-            ## get bucket index of batch
-            (bucket_index, offset ) = batch_indices[nbatch]
+            mapsample_number = sample_number + offset
 
-            for sample_number, sample_probs in enumerate(probs_per_batch):
+            if mapsample_number in mapid[bucket_index]:
+                labels = batch.label[0][sample_number]
+                # print("probs sample nr, {}, map sample nr {}, probs {}, labels {}".format(sample_number, mapsample_number,sample_probs.shape, labels))
+                scores = mx.nd.pick(sample_probs, labels)
+                scores = scores.asnumpy()
+                labels = labels.asnumpy()
+                non_pad_indices = np.where(labels != 0)
+                # print("labels: {}".format(labels))
+                # print("non pad: {}".format(non_pad_indices))
+                scores = np.take(scores, non_pad_indices)
+                log_probs = - np.log(scores)
+                score = np.nansum(log_probs)
+                # TODO: inf?
+                if self.normalize:
+                    score = np.mean(log_probs)
+                sentence_id = mapid[bucket_index][mapsample_number]
 
-                mapsample_number = sample_number + offset
+                scored_batch.append((sentence_id, score))
+            else:  # TODO: turn off?
+                logger.debug("sample {} in batch number {} was filler".format(sample_number, batch_index))
 
-                if mapsample_number in mapid[bucket_index]:
-                    labels = batch.label[0][sample_number]
-                    #print("probs sample nr, {}, map sample nr {}, probs {}, labels {}".format(sample_number, mapsample_number,sample_probs.shape, labels))
-                    scores = mx.nd.pick(sample_probs, labels)
-                    scores = scores.asnumpy()
-                    labels = labels.asnumpy()
-                    non_pad_indices = np.where(labels!=0)
-                    #print("labels: {}".format(labels))
-                    #print("non pad: {}".format(non_pad_indices))
-                    scores = np.take(scores,non_pad_indices)
-                    log_probs = - np.log(scores)
-                    score = np.nansum(log_probs)
-                    # TODO: inf?
-                    if normalize:
-                        score = np.mean(log_probs)
-                    sentence_id = mapid[bucket_index][mapsample_number]
-                    results[sentence_id] = score
-                else: # turn off?
-                    logger.info("sample {} in batch number {} was filler".format(sample_number, nbatch))
-        return results
+        return scored_batch
+
+    def _score_single_model(self,
+                            model: ScoringModel,
+                            model_id: int,
+                            data_iter: data_io.BaseParallelSampleIter,
+                            mapid: DefaultDict) -> ScoredSamples:
+        """
+        """
+        scored_samples = []
+
+        for i, batch in enumerate(data_iter):
+
+                batch_index = data_iter.batch_indices[i]
+                scored_batch = self._score_batch(model=model,
+                                                 model_id=model_id,
+                                                 batch=batch,
+                                                 batch_index=batch_index,
+                                                 mapid=mapid)
+                scored_samples.append(scored_batch)
+
+        return sorted(scored_samples)
+
+    def score(self,
+              models: List[ScoringModel],
+              data_iters: List[data_io.BaseParallelSampleIter],
+              mapids: List[defaultdict(lambda: defaultdict(int))]
+              ) -> List[ScoringOutput]:
+        """
+        Scores all examples returned by an iterator, once for each model.
+        Returns a list of ScoringOutputs.
+        """
+        scored_samples = []
+
+        for index, (model, data_iter, mapid) in enumerate(zip(models, data_iters, mapids)):
+            single_model_scored_samples = self._score_single_model(model=model,
+                                                                   model_id=index,
+                                                                   data_iter=data_iter,
+                                                                   mapid=mapid)
+            scored_samples.append(single_model_scored_samples)
+
+        return self._make_outputs(scored_samples)
+
+    def _make_outputs(self,
+                      scored_samples: ScoredSamples) -> List[ScoringOutput]:
+        """
+        Generates a list of ScoringOutputs from output.
+        """
+        scored_outputs = []
+
+        for sample in zip(*scored_samples):
+            scores = [score for (sentence_id, score) in sample]
+            sentence_id = sample[0][0]
+
+            scored_output = ScoringOutput(sentence_id=sentence_id,
+                                          scores=scores)
+            scored_outputs.append(scored_output)
+
+        return scored_outputs
 
 
 def load_models(context: mx.context.Context,
@@ -245,20 +324,20 @@ def load_models(context: mx.context.Context,
     for model_folder, checkpoint, config, data_iter in zip(model_folders, checkpoints, configs, data_iters):
 
         model = ScoringModel(model_folder=model_folder,
-                               context=context,
-                               data_iter=data_iter,
-                               config=config,
-                               checkpoint=checkpoint,
-                               bucketing=bucketing)
+                             context=context,
+                             data_iter=data_iter,
+                             config=config,
+                             checkpoint=checkpoint,
+                             bucketing=bucketing)
         models.append(model)
 
     return models
 
 
 def create_data_iter_and_vocab(args: argparse.Namespace,
-                                max_seq_len_source: int,
-                                max_seq_len_target: int,
-                                model_dir: str)-> Tuple['data_io.BaseParallelSampleIter', 'data_io.DataConfig']:
+                               max_seq_len_source: int,
+                               max_seq_len_target: int,
+                               model_dir: str)-> Tuple['data_io.BaseParallelSampleIter', 'data_io.DataConfig']:
     """
     Create the data iterator.
 
@@ -288,22 +367,20 @@ def create_data_iter_and_vocab(args: argparse.Namespace,
     if max_seq_len_target > config.config_data.max_seq_len_target:
             logger.warning("Target sentence of length %d in test set exceeds maximum target sentence length in config of %d",max_seq_len_target, config.config_data.max_seq_len_target)
 
-
-
     check_condition(len(args.source_factors) == len(args.source_factors_num_embed),
                         "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (len(args.source_factors), len(args.source_factors_num_embed)))
 
     sources = [args.source] + args.source_factors
     sources = [str(os.path.abspath(source)) for source in sources]
 
-    #print("sources {} source vocabs {}".format(sources, source_vocabs))
+    # print("sources {} source vocabs {}".format(sources, source_vocabs))
     sources_sentences = [data_io.SequenceReader(source, vocab, add_bos=False) for source, vocab in zip(sources, source_vocabs)]
     target_sentences = data_io.SequenceReader(args.target, target_vocab, add_bos=True, limit=None)
 
-    ## Pass 1: get target/source length ratios.
+    # Pass 1: get target/source length ratios.
     length_statistics = data_io.analyze_sequence_lengths(sources, args.target, source_vocabs, target_vocab, max_seq_len_source, max_seq_len_target)
 
-   ## define buckets
+    # define buckets
     bucketing=not args.no_bucketing
     buckets = data_io.define_parallel_buckets(max_seq_len_source, max_seq_len_target, args.bucket_width, length_statistics.length_ratio_mean) if bucketing else [(max_seq_len_source, max_seq_len_target)]
 
@@ -350,9 +427,3 @@ def get_max_source_and_target(args: argparse.Namespace) -> Tuple[int, int]:
     # +1 for EOS
     return max_len_source+1, max_len_target+1
 
-
-class ScoringOutput(inference.TranslatorOutput):
-    """
-    Wrapper for scorer inputs
-    """
-    pass

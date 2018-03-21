@@ -19,6 +19,7 @@ from typing import Optional
 import sockeye.constants as C
 from . import data_io
 from . import inference
+from . import scoring
 from sockeye.utils import plot_attention, print_attention_text, get_alignments
 
 
@@ -309,20 +310,18 @@ class ScoreOutputHandler(OutputHandler):
     Output handler to write scores to a stream. Outputs nothing but
     the scores.
 
-    :param stream: Stream to write translations to (e.g. sys.stdout).
+    :param stream: Stream to write scores to (e.g. sys.stdout).
     """
 
     def __init__(self, stream):
         self.stream = stream
 
     def handle(self,
-               t_input: inference.TranslatorInput,
-               t_output: inference.TranslatorOutput,
-               t_walltime: float = 0.):
+               s_output: scoring.ScoringOutput,
+               s_walltime: float = 0.):
         """
-        :param t_input: Translator input.
-        :param t_output: Translator output.
-        :param t_walltime: Total walltime for translation.
+        :param s_output: Scoring output.
+        :param s_walltime: Total walltime for scoring.
         """
-        self.stream.write("{:.3f}\n".format(t_output.score))
+        self.stream.write(" ".join(["{:.3f}\n".format(score) for score in s_output.scores]))
         self.stream.flush()
