@@ -25,7 +25,6 @@ PAD_ID = 0
 TOKEN_SEPARATOR = " "
 VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
 
-
 ARG_SEPARATOR = ":"
 
 ENCODER_PREFIX = "encoder_"
@@ -77,16 +76,15 @@ FIXED_POSITIONAL_EMBEDDING = "fixed"
 LEARNED_POSITIONAL_EMBEDDING = "learned"
 POSITIONAL_EMBEDDING_TYPES = [NO_POSITIONAL_EMBEDDING, FIXED_POSITIONAL_EMBEDDING, LEARNED_POSITIONAL_EMBEDDING]
 
-
 DEFAULT_INIT_PATTERN = ".*"
 
 # init types
-INIT_XAVIER='xavier'
-INIT_UNIFORM='uniform'
-INIT_TYPES=[INIT_XAVIER, INIT_UNIFORM]
+INIT_XAVIER = 'xavier'
+INIT_UNIFORM = 'uniform'
+INIT_TYPES = [INIT_XAVIER, INIT_UNIFORM]
 
 RAND_TYPE_UNIFORM = 'uniform'
-RAND_TYPE_GAUSSIAN= 'gaussian'
+RAND_TYPE_GAUSSIAN = 'gaussian'
 
 # Embedding init types
 EMBED_INIT_PATTERN = '(%s|%s|%s)weight' % (SOURCE_EMBEDDING_PREFIX, TARGET_EMBEDDING_PREFIX, SHARED_EMBEDDING_PREFIX)
@@ -100,7 +98,6 @@ RNN_INIT_ORTHOGONAL = 'orthogonal'
 RNN_INIT_ORTHOGONAL_STACKED = 'orthogonal_stacked'
 # use the default initializer used also for all other weights
 RNN_INIT_DEFAULT = 'default'
-
 
 # RNN decoder state init types
 RNN_DEC_INIT_ZERO = "zero"
@@ -120,13 +117,13 @@ ATT_COV = "coverage"
 ATT_TYPES = [ATT_BILINEAR, ATT_DOT, ATT_DOT_SCALED, ATT_MH_DOT, ATT_FIXED, ATT_LOC, ATT_MLP, ATT_COV]
 
 # weight tying components
-WEIGHT_TYING_SRC='src'
-WEIGHT_TYING_TRG='trg'
-WEIGHT_TYING_SOFTMAX='softmax'
+WEIGHT_TYING_SRC = 'src'
+WEIGHT_TYING_TRG = 'trg'
+WEIGHT_TYING_SOFTMAX = 'softmax'
 # weight tying types (combinations of above components):
-WEIGHT_TYING_TRG_SOFTMAX='trg_softmax'
-WEIGHT_TYING_SRC_TRG='src_trg'
-WEIGHT_TYING_SRC_TRG_SOFTMAX='src_trg_softmax'
+WEIGHT_TYING_TRG_SOFTMAX = 'trg_softmax'
+WEIGHT_TYING_SRC_TRG = 'src_trg'
+WEIGHT_TYING_SRC_TRG_SOFTMAX = 'src_trg_softmax'
 
 # default decoder prefixes
 RNN_DECODER_PREFIX = DECODER_PREFIX + "rnn_"
@@ -168,6 +165,7 @@ LOGIT_INPUTS_NAME = "logit_inputs"
 LOGITS_NAME = "logits"
 SOFTMAX_NAME = "softmax"
 SOFTMAX_OUTPUT_NAME = SOFTMAX_NAME + "_output"
+SWITCH_PROB_NAME = "switch_prob"
 
 MEASURE_SPEED_EVERY = 50  # measure speed and metrics every X batches
 
@@ -333,6 +331,7 @@ METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, PERPLEXITY: np.inf}
 
 # loss
 CROSS_ENTROPY = 'cross-entropy'
+POINTER_NET_CROSS_ENTROPY = 'pointer-net-cross-entropy'
 
 LOSS_NORM_BATCH = 'batch'
 LOSS_NORM_VALID = "valid"
@@ -351,4 +350,3 @@ DATA_INFO = "data.info"
 DATA_CONFIG = "data.config"
 PREPARED_DATA_VERSION_FILE = "data.version"
 PREPARED_DATA_VERSION = 2
-

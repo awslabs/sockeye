@@ -79,7 +79,7 @@ def check_arg_compatibility(args: argparse.Namespace):
     :param args: Arguments as returned by argparse.
     """
 
-    #TODO: check args compatibility with pointer nets if necessary
+    # TODO: check args compatibility with pointer nets if necessary
 
     check_condition(args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics,
                     "Must optimize either BLEU or one of tracked metrics (--metrics)")
@@ -290,7 +290,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_by_words=batch_by_words,
             batch_num_devices=batch_num_devices,
             fill_up=args.fill_up,
-            use_pointer_nets = use_pointer_nets)
+            use_pointer_nets=use_pointer_nets)
 
         check_condition(len(source_vocabs) == len(args.source_factors_num_embed) + 1,
                         "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
@@ -621,7 +621,8 @@ def create_model_config(args: argparse.Namespace,
                                      config_loss=config_loss,
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
-                                     weight_normalization=args.weight_normalization)
+                                     weight_normalization=args.weight_normalization,
+                                     use_pointer_nets=args.use_pointer_nets)
     return model_config
 
 

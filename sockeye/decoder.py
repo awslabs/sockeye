@@ -366,7 +366,7 @@ class TransformerDecoder(Decoder):
         variables = [mx.sym.Variable(C.SOURCE_ENCODED_NAME),
                      mx.sym.Variable(C.SOURCE_LENGTH_NAME)]
         if target_max_length > 1:  # no cache for initial decoder step
-                variables.append(mx.sym.Variable('cache'))
+            variables.append(mx.sym.Variable('cache'))
         return variables
 
     def state_shapes(self,
@@ -558,6 +558,7 @@ class RecurrentDecoder(Decoder):
 
         # hidden_all: target_embed_max_length * (batch_size, rnn_num_hidden)
         hidden_states = []  # type: List[mx.sym.Symbol]
+        context_vectors = []  # type: List[mx.sym.Symbol]
         # TODO: possible alternative: feed back the context vector instead of the hidden (see lamtram)
         self.reset()
         for seq_idx in range(target_embed_max_length):
@@ -568,9 +569,11 @@ class RecurrentDecoder(Decoder):
                                                 attention_state,
                                                 seq_idx)
             hidden_states.append(state.hidden)
+            context_vectors.append(attention_state.context)
 
         # concatenate along time axis: (batch_size, target_embed_max_length, rnn_num_hidden)
-        return mx.sym.stack(*hidden_states, axis=1, name='%shidden_stack' % self.prefix)
+        return mx.sym.Group([mx.sym.stack(*hidden_states, axis=1, name='%shidden_stack' % self.prefix), \
+                             mx.sym.stack(*context_vectors, axis=1, name='%sattention_stack' % self.prefix)])
 
     def decode_step(self,
                     step: int,

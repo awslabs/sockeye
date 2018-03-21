@@ -41,6 +41,7 @@ class AttentionConfig(config.Config):
     :param config_coverage: Optional coverage configuration.
     :param num_heads: Number of attention heads. Only used for Multi-head dot attention.
     """
+
     def __init__(self,
                  type: str,
                  num_hidden: int,

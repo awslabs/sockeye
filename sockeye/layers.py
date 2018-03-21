@@ -44,7 +44,7 @@ def activation(data: mx.sym.Symbol, act_type: str) -> mx.sym.Symbol:
         return data * mx.sym.Activation(data, act_type="sigmoid")
     elif act_type == C.GELU:
         # Approximation of x * gaussian_cdf(x) used by Hendrycks and Gimpel
-        return 0.5 * data * (1 + mx.sym.Activation((math.sqrt(2 / math.pi) * (data + (0.044715 * (data**3)))),
+        return 0.5 * data * (1 + mx.sym.Activation((math.sqrt(2 / math.pi) * (data + (0.044715 * (data ** 3)))),
                                                    act_type="tanh"))
     else:
         return mx.sym.Activation(data, act_type=act_type)
@@ -212,6 +212,110 @@ class OutputLayer:
                                     flatten=False)
 
 
+class PointerOutputLayer(OutputLayer):
+    """
+    Defines the output layer of Sockeye decoders. Supports weight tying and weight normalization.
+
+    :param hidden_size: Decoder hidden size.
+    :param vocab_size: Target vocabulary size.
+    :param weight_normalization: Whether to apply weight normalization.
+    :param prefix: Prefix used for naming.
+    """
+
+    def __init__(self,
+                 hidden_size: int,
+                 vocab_size: int,
+                 weight: Optional[mx.sym.Symbol],
+                 weight_normalization: bool,
+                 prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX) -> None:
+        super(hidden_size, vocab_size, weight, weight_normalization, prefix=prefix)
+
+    def __call__(self,
+                 hidden: Union[mx.sym.Symbol, mx.nd.NDArray],
+                 context: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
+                 weight: Optional[mx.nd.NDArray] = None,
+                 bias: Optional[mx.nd.NDArray] = None):
+        """
+        Transformation to vocab size + source sentece size, weighted softmax using pointer nets. Returns probabilities.
+
+        :param hidden: Decoder representation for n elements. Shape: (n, self.num_hidden).
+        :param context: Context on the source sentence.
+        :return: Logits. Shape(n, self.vocab_size).
+        """
+
+        if isinstance(hidden, mx.sym.Symbol) and isinstance(context, mx.sym.Symbol):
+            # TODO dropout?
+            # TODO num_hidden fc1 needs to be passed as well as other nets options
+
+            logits_trg = super(hidden, weight=weight, bias=bias)
+            switch_input = mx.sym.concat(context, hidden, axis=1)
+
+            switch_fc1 = mx.sym.FullyConnected(data=switch_input,
+                                               num_hidden=512,
+                                               weight=self.w,
+                                               bias=self.b,
+                                               flatten=False,
+                                               name=C.SWITCH_PROB_NAME + '_fc1')
+
+            # TODO add noisy tanh activation function
+            switch_a1 = mx.sym.Activation(switch_fc1, act_type='tanh')
+
+            switch_fc2 = mx.sym.FullyConnected(data=switch_a1,
+                                               num_hidden=1,
+                                               weight=self.w,
+                                               bias=self.b,
+                                               flatten=False,
+                                               name=C.SWITCH_PROB_NAME + '_fc2')
+
+            switch_prob = mx.sym.Activation(switch_fc2, act_type='tanh')
+
+            probs_trg = mx.sym.softmax(data=logits_trg, axis=1)
+            probs_src = mx.sym.softmax(data=context, axis=1)
+
+            weighted_probs_trg = probs_trg * (1 - switch_prob)
+            weighted_probs_src = probs_src * switch_prob
+
+            return mx.sym.concat(weighted_probs_src, weighted_probs_trg, axis=1, name=C.SOFTMAX_OUTPUT_NAME)
+
+        # Equivalent NDArray implementation (requires passed weights/biases)
+        if isinstance(hidden, mx.nd.NDArray) and (context, mx.nd.NDArray):
+            utils.check_condition(weight is not None and bias is not None,
+                                  "OutputLayer NDArray implementation requires passing weight and bias NDArrays.")
+
+            logits_trg = super(hidden, weight=weight, bias=bias)
+            probs_trg = mx.nd.softmax(data=logits_trg, axis=1)
+            probs_src = mx.nd.softmax(data=context, axis=1)
+            switch_input = mx.nd.concat(context, logits_trg, axis=1)
+
+            switch_fc1 = mx.nd.FullyConnected(data=switch_input,
+                                              num_hidden=self.vocab_size,
+                                              weight=self.w,
+                                              bias=self.b,
+                                              flatten=False,
+                                              name=C.SWITCH_PROB_NAME + "_fc1")
+
+            # TODO add noisy tanh activation function
+            switch_a1 = mx.nd.Activation(switch_fc1, act_type='tanh')
+
+            switch_fc2 = mx.nd.FullyConnected(data=switch_a1,
+                                              num_hidden=1,
+                                              weight=self.w,
+                                              bias=self.b,
+                                              flatten=False,
+                                              name=C.SWITCH_PROB_NAME + "_fc2")
+
+            switch_prob = mx.nd.Activation(switch_fc2, act_type='tanh')
+
+            weighted_probs_trg = probs_trg * switch_prob
+            weighted_probs_src = probs_src * (1 - switch_prob)
+
+            return mx.nd.concat(weighted_probs_src, weighted_probs_trg, axis=1)
+
+        utils.check_condition((isinstance(hidden, mx.nd.NDArray) and (context, mx.sym.Symbol)) or
+                              (isinstance(context, mx.nd.NDArray) and (hidden, mx.sym.Symbol)),
+                              "PointerOutputLayer supports only hidden and context to be of the same kind (Symbol or NDArray).")
+
+
 def split_heads(x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:
     """
     Returns a symbol with head dimension folded into batch and depth divided by the number of heads.
@@ -326,6 +430,7 @@ class MultiHeadAttentionBase:
     :param depth_out: Output depth / number of output units.
     :param dropout: Dropout probability on attention scores
     """
+
     def __init__(self,
                  prefix: str,
                  depth_att: int = 512,
@@ -396,6 +501,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
     :param depth_out: Output depth / number of output units.
     :param dropout: Dropout probability on attention scores
     """
+
     def __init__(self,
                  prefix: str,
                  depth_att: int = 512,
