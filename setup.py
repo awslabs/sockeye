@@ -102,7 +102,7 @@ args = dict(
     tests_require=['pytest', 'pytest-cov'],
 
     extras_require={
-        'optional': ['tensorboard', 'matplotlib'],
+        'optional': ['tensorboard==1.0.0a6', 'matplotlib'],
         'dev': get_requirements('requirements.dev.txt')
     },
 
@@ -110,14 +110,16 @@ args = dict(
 
     entry_points={
         'console_scripts': [
-            'sockeye-train = sockeye.train:main',
-            'sockeye-translate = sockeye.translate:main',
             'sockeye-average = sockeye.average:main',
             'sockeye-embeddings = sockeye.embeddings:main',
             'sockeye-evaluate = sockeye.evaluate:main',
-            'sockeye-vocab = sockeye.vocab:main',
+            'sockeye-extract-parameters = sockeye.extract_parameters:main',
             'sockeye-lexicon = sockeye.lexicon:main',
-            'sockeye-extract = sockeye.extract_parameters:main'
+            'sockeye-init-embed = sockeye.init_embedding:main',
+            'sockeye-prepare-data = sockeye.prepare_data:main',
+            'sockeye-train = sockeye.train:main',
+            'sockeye-translate = sockeye.translate:main',
+            'sockeye-vocab = sockeye.vocab:main'
         ],
     },
 

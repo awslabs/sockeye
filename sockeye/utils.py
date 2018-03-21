@@ -14,10 +14,10 @@
 """
 A set of utility methods.
 """
-import argparse
-import collections
 import errno
-import fcntl
+import glob
+import gzip
+import itertools
 import logging
 import os
 import random
@@ -25,15 +25,14 @@ import shutil
 import subprocess
 import sys
 import time
-import itertools
 from contextlib import contextmanager, ExitStack
-from typing import Mapping, NamedTuple, Any, List, Iterator, Iterable, Set, TextIO, Tuple, Dict, Optional
+from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
 
+import fcntl
 import mxnet as mx
 import numpy as np
 
-import sockeye.constants as C
-from sockeye import __version__
+from sockeye import __version__, constants as C
 from sockeye.log import log_sockeye_version, log_mxnet_version
 
 logger = logging.getLogger(__name__)
@@ -95,15 +94,15 @@ def log_basic_info(args) -> None:
     logger.info("Arguments: %s", args)
 
 
-def seedRNGs(args: argparse.Namespace) -> None:
+def seedRNGs(seed: int) -> None:
     """
     Seed the random number generators (Python, Numpy and MXNet)
 
-    :param args: Arguments as returned by argparse.
+    :param seed: The random seed.
     """
-    np.random.seed(args.seed)
-    random.seed(args.seed)
-    mx.random.seed(args.seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    mx.random.seed(seed)
 
 
 def check_condition(condition: bool, error_message: str):
@@ -132,7 +131,7 @@ def save_graph(symbol: mx.sym.Symbol, filename: str, hide_weights: bool = True):
 
 def compute_lengths(sequence_data: mx.sym.Symbol) -> mx.sym.Symbol:
     """
-    Computes sequence lenghts of PAD_ID-padded data in sequence_data.
+    Computes sequence lengths of PAD_ID-padded data in sequence_data.
 
     :param sequence_data: Input data. Shape: (batch_size, seq_len).
     :return: Length data. Shape: (batch_size,).
@@ -214,6 +213,35 @@ class Accuracy(mx.metric.EvalMetric):
             self.num_inst += n
 
 
+class OnlineMeanAndVariance:
+    def __init__(self) -> None:
+        self._count = 0
+        self._mean = 0.
+        self._M2 = 0.
+
+    def update(self, value: Union[float, int]) -> None:
+        self._count += 1
+        delta = value - self._mean
+        self._mean += delta / self._count
+        delta2 = value - self._mean
+        self._M2 += delta * delta2
+
+    @property
+    def count(self) -> int:
+        return self._count
+
+    @property
+    def mean(self) -> float:
+        return self._mean
+
+    @property
+    def variance(self) -> float:
+        if self._count < 2:
+            return float('nan')
+        else:
+            return self._M2 / self._count
+
+
 def smallest_k(matrix: np.ndarray, k: int,
                only_first_row: bool = False) -> Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]:
     """
@@ -262,6 +290,39 @@ def chunks(some_list: List, n: int) -> Iterable[List]:
         yield some_list[i:i + n]
 
 
+def get_tokens(line: str) -> Iterator[str]:
+    """
+    Yields tokens from input string.
+
+    :param line: Input string.
+    :return: Iterator over tokens.
+    """
+    for token in line.rstrip().split():
+        if len(token) > 0:
+            yield token
+
+
+def smart_open(filename: str, mode: str = "rt", ftype: str = "auto", errors: str = 'replace'):
+    """
+    Returns a file descriptor for filename with UTF-8 encoding.
+    If mode is "rt", file is opened read-only.
+    If ftype is "auto", uses gzip iff filename endswith .gz.
+    If ftype is {"gzip","gz"}, uses gzip.
+
+    Note: encoding error handling defaults to "replace"
+
+    :param filename: The filename to open.
+    :param mode: Reader mode.
+    :param ftype: File type. If 'auto' checks filename suffix for gz to try gzip.open
+    :param errors: Encoding error handling during reading. Defaults to 'replace'
+    :return: File descriptor
+    """
+    if ftype == 'gzip' or ftype == 'gz' or (ftype == 'auto' and filename.endswith(".gz")):
+        return gzip.open(filename, mode=mode, encoding='utf-8', errors=errors)
+    else:
+        return open(filename, mode=mode, encoding='utf-8', errors=errors)
+
+
 def plot_attention(attention_matrix: np.ndarray, source_tokens: List[str], target_tokens: List[str], filename: str):
     """
     Uses matplotlib for creating a visualization of the attention matrix.
@@ -271,7 +332,10 @@ def plot_attention(attention_matrix: np.ndarray, source_tokens: List[str], targe
     :param target_tokens: A list of target tokens.
     :param filename: The file to which the attention visualization will be written to.
     """
-    import matplotlib
+    try:
+        import matplotlib
+    except ImportError:
+        raise RuntimeError("Please install matplotlib.")
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     assert attention_matrix.shape[0] == len(target_tokens)
@@ -373,7 +437,7 @@ def get_num_gpus() -> int:
     return num_gpus
 
 
-def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Optional[Dict[int, Tuple[int, int]]]:
+def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, int]]:
     """
     Returns used and total memory for GPUs identified by the given context list.
 
@@ -384,7 +448,7 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Optional[Dict[int, Tu
         ctx = [ctx]
     ctx = [c for c in ctx if c.device_type == 'gpu']
     if not ctx:
-        return None
+        return {}
     if shutil.which("nvidia-smi") is None:
         logger.warning("Couldn't find nvidia-smi, therefore we assume no GPUs are available.")
         return {}
@@ -398,6 +462,7 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Optional[Dict[int, Tu
     for line in result:
         gpu_id, mem_used, mem_total = line.split(",")
         memory_data[int(gpu_id)] = (int(mem_used), int(mem_total))
+    log_gpu_memory_usage(memory_data)
     return memory_data
 
 
@@ -500,33 +565,44 @@ def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
     candidates_to_request += [remaining_device_ids for _ in range(num_arbitrary_device_ids)]
 
     while True:
+
         with ExitStack() as exit_stack:
-            acquired_gpus = []  # type: List[int]
             any_failed = False
-            for candidates in candidates_to_request:
-                gpu_id = exit_stack.enter_context(GpuFileLock(candidates=candidates, lock_dir=lock_dir))
-                if gpu_id is not None:
-                    acquired_gpus.append(gpu_id)
-                else:
-                    if len(candidates) == 1:
-                        logger.info("Could not acquire GPU %d. It's currently locked.", candidates[0])
-                    any_failed = True
-                    break
-            if not any_failed:
+            acquired_gpus = []  # type: List[int]
+            with GpuFileLock(candidates=["master_lock"], lock_dir=lock_dir) as master_lock:  # type: str
+                # Only one process, determined by the master lock, can try acquiring gpu locks at a time.
+                # This will make sure that we use consecutive device ids whenever possible.
+                if master_lock is not None:
+                    for candidates in candidates_to_request:
+                        gpu_id = exit_stack.enter_context(GpuFileLock(candidates=candidates, lock_dir=lock_dir))
+                        if gpu_id is not None:
+                            acquired_gpus.append(cast(int, gpu_id))
+                        else:
+                            if len(candidates) == 1:
+                                logger.info("Could not acquire GPU %d. It's currently locked.", candidates[0])
+                            any_failed = True
+                            break
+            if master_lock is not None and not any_failed:
                 try:
                     yield acquired_gpus
                 except:
                     raise
                 return
-        # couldn't acquire all GPUs, let's wait and try again later
 
         # randomize so that multiple processes starting at the same time don't retry at a similar point in time
         if retry_wait_rand > 0:
             retry_wait_actual = retry_wait_min + random.randint(0, retry_wait_rand)
         else:
             retry_wait_actual = retry_wait_min
-        logger.info("Not enough GPUs available will try again in %ss." % retry_wait_actual)
+
+        if master_lock is None:
+            logger.info("Another process is acquiring GPUs at the moment will try again in %ss." % retry_wait_actual)
+        else:
+            logger.info("Not enough GPUs available will try again in %ss." % retry_wait_actual)
         time.sleep(retry_wait_actual)
+
+
+GpuDeviceType = TypeVar('GpuDeviceType')
 
 
 class GpuFileLock:
@@ -538,18 +614,24 @@ class GpuFileLock:
     :param lock_dir: The directory for storing the lock file.
     """
 
-    def __init__(self, candidates: List[int], lock_dir: str) -> None:
+    def __init__(self, candidates: List[GpuDeviceType], lock_dir: str) -> None:
         self.candidates = candidates
         self.lock_dir = lock_dir
-        self.lock_file = None  # type: Optional[TextIO]
+        self.lock_file = None  # type: Optional[IO[Any]]
         self.lock_file_path = None  # type: Optional[str]
-        self.gpu_id = None  # type: Optional[int]
+        self.gpu_id = None  # type: Optional[GpuDeviceType]
         self._acquired_lock = False
 
-    def __enter__(self) -> Optional[int]:
+    def __enter__(self) -> Optional[GpuDeviceType]:
         for gpu_id in self.candidates:
-            lockfile_path = os.path.join(self.lock_dir, "sockeye.gpu%d.lock" % gpu_id)
-            lock_file = open(lockfile_path, 'w')
+            lockfile_path = os.path.join(self.lock_dir, "sockeye.gpu{}.lock".format(gpu_id))
+            try:
+                lock_file = open(lockfile_path, 'w')
+            except IOError as e:
+                if errno.EACCES:
+                    logger.warning("GPU {} is currently locked by a different process "
+                                   "(Permission denied).".format(gpu_id))
+                    continue
             try:
                 # exclusive non-blocking lock
                 fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -562,7 +644,7 @@ class GpuFileLock:
                 self.lock_file = lock_file
                 self.lockfile_path = lockfile_path
 
-                logger.info("Acquired GPU %d." % gpu_id)
+                logger.info("Acquired GPU {}.".format(gpu_id))
 
                 return gpu_id
             except IOError as e:
@@ -571,36 +653,17 @@ class GpuFileLock:
                     logger.error("Failed acquiring GPU lock.", exc_info=True)
                     raise
                 else:
-                    logger.debug("GPU %d is currently locked.", gpu_id)
+                    logger.debug("GPU {} is currently locked.".format(gpu_id))
         return None
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.gpu_id is not None:
-            logger.info("Releasing GPU %d.", self.gpu_id)
+            logger.info("Releasing GPU {}.".format(self.gpu_id))
         if self.lock_file is not None:
             if self._acquired_lock:
                 fcntl.flock(self.lock_file, fcntl.LOCK_UN)
             self.lock_file.close()
             os.remove(self.lockfile_path)
-
-
-def namedtuple_with_defaults(typename, field_names, default_values: Mapping[str, Any] = ()) -> NamedTuple:
-    """
-    Create a named tuple with default values.
-
-    :param typename: The name of the new type.
-    :param field_names: The fields the type will have.
-    :param default_values: A mapping from field names to default values.
-    :return: The new named tuple with default values.
-    """
-    T = collections.namedtuple(typename, field_names)
-    T.__new__.__defaults__ = (None,) * len(T._fields)
-    if isinstance(default_values, collections.Mapping):
-        prototype = T(**default_values)
-    else:
-        prototype = T(*default_values)
-    T.__new__.__defaults__ = tuple(prototype)
-    return T
 
 
 def read_metrics_file(path: str) -> List[Dict[str, Any]]:
@@ -634,8 +697,8 @@ def write_metrics_file(metrics: List[Dict[str, Any]], path: str):
     """
     with open(path, 'w') as metrics_out:
         for checkpoint, metric_dict in enumerate(metrics, 1):
-            metrics_str = "\t".join(["%s=%.6f" % (name, value) for name, value in sorted(metric_dict.items())])
-            metrics_out.write("%d\t%s\n" % (checkpoint, metrics_str))
+            metrics_str = "\t".join(["{}={}".format(name, value) for name, value in sorted(metric_dict.items())])
+            metrics_out.write("{}\t{}\n".format(checkpoint, metrics_str))
 
 
 def get_validation_metric_points(model_path: str, metric: str):
@@ -662,7 +725,7 @@ class PrintValue(mx.operator.CustomOp):
     the system logger and 'print_grad=True' for printing information about the
     gradient (out_grad, i.e. "upper part" of the graph).
     """
-    def __init__(self, print_name, print_grad: str, use_logger: str):
+    def __init__(self, print_name, print_grad: str, use_logger: str) -> None:
         super().__init__()
         self.print_name = print_name
         # Note that all the parameters are serialized as strings
@@ -690,7 +753,7 @@ class PrintValue(mx.operator.CustomOp):
 
 @mx.operator.register("PrintValue")
 class PrintValueProp(mx.operator.CustomOpProp):
-    def __init__(self, print_name: str, print_grad: bool = False, use_logger: bool = False):
+    def __init__(self, print_name: str, print_grad: bool = False, use_logger: bool = False) -> None:
         super().__init__(need_top_grad=True)
         self.print_name = print_name
         self.print_grad = print_grad
@@ -719,6 +782,7 @@ def grouper(iterable: Iterable, size: int) -> Iterable:
     Collect data into fixed-length chunks or blocks without discarding underfilled chunks or padding them.
 
     :param iterable: A sequence of inputs.
+    :param size: Chunk size.
     :return: Sequence of chunks.
     """
     it = iter(iterable)
@@ -727,3 +791,33 @@ def grouper(iterable: Iterable, size: int) -> Iterable:
         if not chunk:
             return
         yield chunk
+
+
+def metric_value_is_better(new: float, old: float, metric: str) -> bool:
+    """
+    Returns true if new value is strictly better than old for given metric.
+    """
+    if C.METRIC_MAXIMIZE[metric]:
+        return new > old
+    else:
+        return new < old
+
+
+def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int):
+    """
+    Deletes oldest parameter files from a model folder.
+
+    :param output_folder: Folder where param files are located.
+    :param max_to_keep: Maximum number of files to keep, negative to keep all.
+    :param checkpoint: Current checkpoint (i.e. index of last params file created).
+    :param best_checkpoint: Best checkpoint. The parameter file corresponding to this checkpoint will not be deleted.
+    """
+    if max_to_keep <= 0:
+        return
+    existing_files = glob.glob(os.path.join(output_folder, C.PARAMS_PREFIX + "*"))
+    params_name_with_dir = os.path.join(output_folder, C.PARAMS_NAME)
+    for n in range(0, max(1, checkpoint - max_to_keep + 1)):
+        if n != best_checkpoint:
+            param_fname_n = params_name_with_dir % n
+            if param_fname_n in existing_files:
+                os.remove(param_fname_n)

@@ -11,13 +11,13 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import logging
 import os
 import random
 import sys
-import logging
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 from unittest.mock import patch
 
 import mxnet as mx
@@ -27,12 +27,11 @@ import sockeye.average
 import sockeye.constants as C
 import sockeye.evaluate
 import sockeye.lexicon
+import sockeye.prepare_data
 import sockeye.train
 import sockeye.translate
 import sockeye.utils
-
-from sockeye.evaluate import raw_corpus_bleu
-from sockeye.chrf import corpus_chrf
+from sockeye.evaluate import raw_corpus_bleu, raw_corpus_chrf
 
 logger = logging.getLogger(__name__)
 
@@ -48,17 +47,18 @@ def gaussian_vector(shape, return_symbol=False):
     return mx.sym.random_normal(shape=shape) if return_symbol else np.random.normal(size=shape)
 
 
-def integer_vector(shape, max_value, return_symbol=False):
+def integer_vector(shape, max_value, min_value=1, return_symbol=False):
     """
     Generates a random positive integer tensor
 
     :param shape: shape of the tensor.
     :param max_value: maximum integer value.
+    :param min_value: minimum integer value.
     :param return_symbol: True if the result should be a Symbol, False if it should be an Numpy array.
     :return: A random integer tensor.
     """
-    return mx.sym.round(mx.sym.random_uniform(shape=shape) * max_value) if return_symbol \
-        else np.round(np.random.uniform(size=shape) * max_value)
+    return mx.sym.round(mx.sym.random.uniform(low=min_value, high=max_value, shape=shape)) if return_symbol \
+        else np.random.randint(low=min_value, high=max_value, size=shape)
 
 
 def uniform_vector(shape, min_value=0, max_value=1, return_symbol=False):
@@ -71,7 +71,7 @@ def uniform_vector(shape, min_value=0, max_value=1, return_symbol=False):
     :param return_symbol: True if the result should be a mx.sym.Symbol, False if it should be a Numpy array
     :return:
     """
-    return mx.sym.random_uniform(low=min_value, high=max_value, shape=shape) if return_symbol \
+    return mx.sym.random.uniform(low=min_value, high=max_value, shape=shape) if return_symbol \
         else np.random.uniform(low=min_value, high=max_value, size=shape)
 
 
@@ -90,6 +90,7 @@ def generate_random_sentence(vocab_size, max_len):
 
 
 _DIGITS = "0123456789"
+_MID = 5
 
 
 def generate_digits_file(source_path: str,
@@ -116,6 +117,18 @@ def generate_digits_file(source_path: str,
             print(" ".join(digits), file=target_out)
 
 
+def generate_low_high_factors(source_path: str,
+                              output_path: str):
+    """
+    Writes low/high factor file given a source file of digit sequences.
+    """
+    with open(source_path, 'r') as fin, open(output_path, 'w') as fout:
+        for line in fin:
+            digits = map(int, line.rstrip().split())
+            factors = ["l" if digit < _MID else "h" for digit in digits]
+            print(" ".join(factors), file=fout)
+
+
 def generate_fast_align_lex(lex_path: str):
     """
     Generate a fast_align format lex table for digits.
@@ -136,7 +149,8 @@ def tmp_digits_dataset(prefix: str,
                        dev_line_count: int, dev_max_length: int,
                        test_line_count: int, test_line_count_empty: int, test_max_length: int,
                        sort_target: bool = False,
-                       seed_train: int = 13, seed_dev: int = 13):
+                       seed_train: int = 13, seed_dev: int = 13,
+                       with_source_factors: bool = False):
     with TemporaryDirectory(prefix=prefix) as work_dir:
         # Simple digits files for train/dev data
         train_source_path = os.path.join(work_dir, "train.src")
@@ -158,13 +172,38 @@ def tmp_digits_dataset(prefix: str,
                 'validation_target': dev_target_path,
                 'test_source': test_source_path,
                 'test_target': test_target_path}
+
+        if with_source_factors:
+            train_factor_path = train_source_path + ".factors"
+            dev_factor_path = dev_source_path + ".factors"
+            test_factor_path = test_source_path + ".factors"
+            generate_low_high_factors(train_source_path, train_factor_path)
+            generate_low_high_factors(dev_source_path, dev_factor_path)
+            generate_low_high_factors(test_source_path, test_factor_path)
+            data['train_source_factors'] = [train_factor_path]
+            data['dev_source_factors'] = [dev_factor_path]
+            data['test_source_factors'] = [test_factor_path]
+
         yield data
 
 
 _TRAIN_PARAMS_COMMON = "--use-cpu --max-seq-len {max_len} --source {train_source} --target {train_target}" \
-                       " --validation-source {dev_source} --validation-target {dev_target} --output {model} {quiet}"
+                       " --validation-source {dev_source} --validation-target {dev_target} --output {model} {quiet}" \
+                       " --seed {seed}"
+
+_PREPARE_DATA_COMMON = " --max-seq-len {max_len} --source {train_source} --target {train_target}" \
+                       " --output {output} {quiet}"
+
+_TRAIN_WITH_FACTORS_COMMON = " --source-factors {source_factors}"
+_DEV_WITH_FACTORS_COMMON = " --validation-source-factors {dev_source_factors}"
+
+_TRAIN_PARAMS_PREPARED_DATA_COMMON = "--use-cpu --max-seq-len {max_len} --prepared-data {prepared_data}" \
+                                     " --validation-source {dev_source} --validation-target {dev_target} " \
+                                     "--output {model} {quiet}"
 
 _TRANSLATE_PARAMS_COMMON = "--use-cpu --models {model} --input {input} --output {output} {quiet}"
+
+_TRANSLATE_WITH_FACTORS_COMMON = " --input-factors {input_factors}"
 
 _TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {json}"
 
@@ -180,9 +219,14 @@ def run_train_translate(train_params: str,
                         dev_target_path: str,
                         test_source_path: str,
                         test_target_path: str,
+                        train_source_factor_paths: Optional[List[str]] = None,
+                        dev_source_factor_paths: Optional[List[str]] = None,
+                        test_source_factor_paths: Optional[List[str]] = None,
+                        use_prepared_data: bool = False,
                         max_seq_len: int = 10,
                         restrict_lexicon: bool = False,
                         work_dir: Optional[str] = None,
+                        seed: int = 13,
                         quiet: bool = False) -> Tuple[float, float, float, float]:
     """
     Train a model and translate a dev set.  Report validation perplexity and BLEU.
@@ -196,9 +240,14 @@ def run_train_translate(train_params: str,
     :param dev_target_path: Path to the development target file.
     :param test_source_path: Path to the test source file.
     :param test_target_path: Path to the test target file.
+    :param train_source_factor_paths: Optional list of paths to training source factor files.
+    :param dev_source_factor_paths: Optional list of paths to dev source factor files.
+    :param test_source_factor_paths: Optional list of paths to test source factor files.
+    :param use_prepared_data: Whether to use the prepared data functionality.
     :param max_seq_len: The maximum sequence length.
     :param restrict_lexicon: Additional translation run with top-k lexicon-based vocabulary restriction.
     :param work_dir: The directory to store the model and other outputs in.
+    :param seed: The seed used for training.
     :param quiet: Suppress the console output of training and decoding.
     :return: A tuple containing perplexity, bleu scores for standard and reduced vocab decoding, chrf score.
     """
@@ -207,20 +256,60 @@ def run_train_translate(train_params: str,
     else:
         quiet_arg = ""
     with TemporaryDirectory(dir=work_dir, prefix="test_train_translate.") as work_dir:
-        # Train model
-        model_path = os.path.join(work_dir, "model")
-        params = "{} {} {}".format(sockeye.train.__file__,
-                                   _TRAIN_PARAMS_COMMON.format(train_source=train_source_path,
-                                                               train_target=train_target_path,
-                                                               dev_source=dev_source_path,
-                                                               dev_target=dev_target_path,
-                                                               model=model_path,
-                                                               max_len=max_seq_len,
-                                                               quiet=quiet_arg),
-                                   train_params)
-        logger.info("Starting training with parameters %s.", train_params)
-        with patch.object(sys, "argv", params.split()):
-            sockeye.train.main()
+        # Optionally create prepared data directory
+        if use_prepared_data:
+            prepared_data_path = os.path.join(work_dir, "prepared_data")
+            params = "{} {}".format(sockeye.prepare_data.__file__,
+                                    _PREPARE_DATA_COMMON.format(train_source=train_source_path,
+                                                                train_target=train_target_path,
+                                                                output=prepared_data_path,
+                                                                max_len=max_seq_len,
+                                                                quiet=quiet_arg))
+            if train_source_factor_paths is not None:
+                params += _TRAIN_WITH_FACTORS_COMMON.format(source_factors=" ".join(train_source_factor_paths))
+
+            logger.info("Creating prepared data folder.")
+            with patch.object(sys, "argv", params.split()):
+                sockeye.prepare_data.main()
+            # Train model
+            model_path = os.path.join(work_dir, "model")
+            params = "{} {} {}".format(sockeye.train.__file__,
+                                       _TRAIN_PARAMS_PREPARED_DATA_COMMON.format(prepared_data=prepared_data_path,
+                                                                                 dev_source=dev_source_path,
+                                                                                 dev_target=dev_target_path,
+                                                                                 model=model_path,
+                                                                                 max_len=max_seq_len,
+                                                                                 quiet=quiet_arg),
+                                       train_params)
+
+            if dev_source_factor_paths is not None:
+                params += _DEV_WITH_FACTORS_COMMON.format(dev_source_factors=" ".join(dev_source_factor_paths))
+
+            logger.info("Starting training with parameters %s.", train_params)
+            with patch.object(sys, "argv", params.split()):
+                sockeye.train.main()
+        else:
+            # Train model
+            model_path = os.path.join(work_dir, "model")
+            params = "{} {} {}".format(sockeye.train.__file__,
+                                       _TRAIN_PARAMS_COMMON.format(train_source=train_source_path,
+                                                                   train_target=train_target_path,
+                                                                   dev_source=dev_source_path,
+                                                                   dev_target=dev_target_path,
+                                                                   model=model_path,
+                                                                   max_len=max_seq_len,
+                                                                   seed=seed,
+                                                                   quiet=quiet_arg),
+                                       train_params)
+
+            if train_source_factor_paths is not None:
+                params += _TRAIN_WITH_FACTORS_COMMON.format(source_factors=" ".join(train_source_factor_paths))
+            if dev_source_factor_paths is not None:
+                params += _DEV_WITH_FACTORS_COMMON.format(dev_source_factors=" ".join(dev_source_factor_paths))
+
+            logger.info("Starting training with parameters %s.", train_params)
+            with patch.object(sys, "argv", params.split()):
+                sockeye.train.main()
 
         logger.info("Translating with parameters %s.", translate_params)
         # Translate corpus with the 1st params
@@ -231,6 +320,10 @@ def run_train_translate(train_params: str,
                                                                    output=out_path,
                                                                    quiet=quiet_arg),
                                    translate_params)
+
+        if test_source_factor_paths is not None:
+            params += _TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(test_source_factor_paths))
+
         with patch.object(sys, "argv", params.split()):
             sockeye.translate.main()
 
@@ -243,6 +336,10 @@ def run_train_translate(train_params: str,
                                                                        output=out_path_equiv,
                                                                        quiet=quiet_arg),
                                        translate_params_equiv)
+
+            if test_source_factor_paths is not None:
+                params += _TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(test_source_factor_paths))
+
             with patch.object(sys, "argv", params.split()):
                 sockeye.translate.main()
 
@@ -276,6 +373,10 @@ def run_train_translate(train_params: str,
                                                                           quiet=quiet_arg),
                                           translate_params,
                                           _TRANSLATE_PARAMS_RESTRICT.format(json=json_path))
+
+            if test_source_factor_paths is not None:
+                params += _TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(test_source_factor_paths))
+
             with patch.object(sys, "argv", params.split()):
                 sockeye.translate.main()
 
@@ -298,7 +399,7 @@ def run_train_translate(train_params: str,
 
         # compute metrics
         bleu = raw_corpus_bleu(hypotheses=hypotheses, references=references, offset=0.01)
-        chrf = corpus_chrf(hypotheses=hypotheses, references=references)
+        chrf = raw_corpus_chrf(hypotheses=hypotheses, references=references)
 
         bleu_restrict = None
         if restrict_lexicon:

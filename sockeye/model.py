@@ -14,7 +14,7 @@
 import copy
 import logging
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import cast, Dict, Optional, Tuple, List
 
 import mxnet as mx
 
@@ -38,8 +38,6 @@ class ModelConfig(Config):
     contain these parameters, provide a reasonable default under default_values.
 
     :param config_data: Used training data.
-    :param max_seq_len_source: Maximum source sequence length to unroll during training.
-    :param max_seq_len_target: Maximum target sequence length to unroll during training.
     :param vocab_source_size: Source vocabulary size.
     :param vocab_target_size: Target vocabulary size.
     :param config_embed_source: Embedding config for source.
@@ -50,24 +48,21 @@ class ModelConfig(Config):
     :param weight_tying: Enables weight tying if True.
     :param weight_tying_type: Determines which weights get tied. Must be set if weight_tying is enabled.
     """
+
     def __init__(self,
                  config_data: data_io.DataConfig,
-                 max_seq_len_source: int,
-                 max_seq_len_target: int,
                  vocab_source_size: int,
                  vocab_target_size: int,
-                 config_embed_source: Config,
-                 config_embed_target: Config,
-                 config_encoder: Config,
-                 config_decoder: Config,
+                 config_embed_source: encoder.EmbeddingConfig,
+                 config_embed_target: encoder.EmbeddingConfig,
+                 config_encoder: encoder.EncoderConfig,
+                 config_decoder: decoder.DecoderConfig,
                  config_loss: loss.LossConfig,
                  weight_tying: bool = False,
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
                  weight_normalization: bool = False) -> None:
         super().__init__()
         self.config_data = config_data
-        self.max_seq_len_source = max_seq_len_source
-        self.max_seq_len_target = max_seq_len_target
         self.vocab_source_size = vocab_source_size
         self.vocab_target_size = vocab_target_size
         self.config_embed_source = config_embed_source
@@ -102,13 +97,30 @@ class SockeyeModel:
         self.config = copy.deepcopy(config)
         self.config.freeze()
         logger.info("%s", self.config)
-        self.embedding_source = None  # type: Optional[encoder.Embedding]
-        self.encoder = None  # type: Optional[encoder.Encoder]
-        self.embedding_target = None  # type: Optional[encoder.Embedding]
-        self.decoder = None  # type: Optional[decoder.Decoder]
-        self.output_layer = None  # type: Optional[layers.OutputLayer]
-        self._is_built = False
+
+        # encoder & decoder first (to know the decoder depth)
+        self.encoder = encoder.get_encoder(self.config.config_encoder)
+        self.decoder = decoder.get_decoder(self.config.config_decoder)
+
+        # source & target embeddings
+        embed_weight_source, embed_weight_target, out_weight_target = self._get_embed_weights()
+        self.embedding_source = encoder.Embedding(self.config.config_embed_source,
+                                                  prefix=C.SOURCE_EMBEDDING_PREFIX,
+                                                  embed_weight=embed_weight_source,
+                                                  is_source=True)
+
+        self.embedding_target = encoder.Embedding(self.config.config_embed_target,
+                                                  prefix=C.TARGET_EMBEDDING_PREFIX,
+                                                  embed_weight=embed_weight_target)
+
+        # output layer
+        self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
+                                               vocab_size=self.config.vocab_target_size,
+                                               weight=out_weight_target,
+                                               weight_normalization=self.config.weight_normalization)
+
         self.params = None  # type: Optional[Dict]
+        self.aux_params = None  # type: Optional[Dict]
 
     def save_config(self, folder: str):
         """
@@ -130,7 +142,7 @@ class SockeyeModel:
         """
         config = ModelConfig.load(fname)
         logger.info('ModelConfig loaded from "%s"', fname)
-        return config  # type: ignore
+        return cast(ModelConfig, config)  # type: ignore
 
     def save_params_to_file(self, fname: str):
         """
@@ -138,8 +150,10 @@ class SockeyeModel:
 
         :param fname: Path to save parameters to.
         """
-        assert self._is_built
-        utils.save_params(self.params.copy(), fname)
+        if self.aux_params is not None:
+            utils.save_params(self.params.copy(), fname, self.aux_params.copy())
+        else:
+            utils.save_params(self.params.copy(), fname)
         logging.info('Saved params to "%s"', fname)
 
     def load_params_from_file(self, fname: str):
@@ -148,11 +162,10 @@ class SockeyeModel:
 
         :param fname: Path to load parameters from.
         """
-        assert self._is_built
         utils.check_condition(os.path.exists(fname), "No model parameter file found under %s. "
                                                      "This is either not a model directory or the first training "
                                                      "checkpoint has not happened yet." % fname)
-        self.params, _ = utils.load_params(fname)
+        self.params, self.aux_params = utils.load_params(fname)
         logger.info('Loaded params from "%s"', fname)
 
     @staticmethod
@@ -169,11 +182,11 @@ class SockeyeModel:
     def _get_embed_weights(self) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol]:
         """
         Returns embedding parameters for source and target.
+        When source and target embeddings are shared, they are created here and passed in to each side,
+        instead of being created in the Embedding constructors.
 
         :return: Tuple of source and target parameter symbols.
         """
-        assert isinstance(self.config.config_embed_source, encoder.EmbeddingConfig)
-        assert isinstance(self.config.config_embed_target, encoder.EmbeddingConfig)
         w_embed_source = mx.sym.Variable(C.SOURCE_EMBEDDING_PREFIX + "weight",
                                          shape=(self.config.config_embed_source.vocab_size,
                                                 self.config.config_embed_source.num_embed))
@@ -200,30 +213,3 @@ class SockeyeModel:
                 w_out_target = w_embed_target
 
         return w_embed_source, w_embed_target, w_out_target
-
-    def _build_model_components(self):
-        """
-        Instantiates model components.
-        """
-        # encoder & decoder first (to know the decoder depth)
-        self.encoder = encoder.get_encoder(self.config.config_encoder)
-        self.decoder = decoder.get_decoder(self.config.config_decoder)
-
-        # source & target embeddings
-        embed_weight_source, embed_weight_target, out_weight_target = self._get_embed_weights()
-        assert isinstance(self.config.config_embed_source, encoder.EmbeddingConfig)
-        assert isinstance(self.config.config_embed_target, encoder.EmbeddingConfig)
-        self.embedding_source = encoder.Embedding(self.config.config_embed_source,
-                                                  prefix=C.SOURCE_EMBEDDING_PREFIX,
-                                                  embed_weight=embed_weight_source)
-        self.embedding_target = encoder.Embedding(self.config.config_embed_target,
-                                                  prefix=C.TARGET_EMBEDDING_PREFIX,
-                                                  embed_weight=embed_weight_target)
-
-        # output layer
-        self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
-                                               vocab_size=self.config.vocab_target_size,
-                                               weight=out_weight_target,
-                                               weight_normalization=self.config.weight_normalization)
-
-        self._is_built = True

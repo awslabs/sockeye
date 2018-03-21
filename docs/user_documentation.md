@@ -64,9 +64,9 @@ scratch.
 
 Sockeye can write all evaluation metrics in a tensorboard compatible format.
 This way you can monitor the training progress in the browser.
-If you have not yet installed dmlc's tensorboard fork do so as follows:
+If you have not installed dmlc's fork of tensorboard do so as follows:
 ```bash
-> pip install tensorboard
+> pip install tensorboard==1.0.0a6
 ```
 
 Now when training specify the additional command line parameter `--use-tensorboard` to `sockeye.train`. 

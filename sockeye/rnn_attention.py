@@ -171,7 +171,7 @@ class Attention(object):
         :param source_length: Source length. Shape: (batch_size,).
         :param source_seq_len: Maximum length of source sequences.
         """
-        dynamic_source = mx.sym.expand_dims(mx.sym.expand_dims(mx.sym.zeros_like(source_length), axis=1), axis=2)
+        dynamic_source = mx.sym.reshape(mx.sym.zeros_like(source_length), shape=(-1, 1, 1))
         # dynamic_source: (batch_size, source_seq_len, num_hidden_dynamic_source)
         dynamic_source = mx.sym.broadcast_to(dynamic_source, shape=(0, source_seq_len, self.dynamic_source_num_hidden))
         return AttentionState(context=None, probs=None, dynamic_source=dynamic_source)
@@ -475,8 +475,7 @@ class EncoderLastStateAttention(Attention):
         :param source_seq_len: Maximum length of source sequences.
         :return: Attention callable.
         """
-        source = mx.sym.swapaxes(source, dim1=0, dim2=1)
-        encoder_last_state = mx.sym.SequenceLast(data=source, sequence_length=source_length,
+        encoder_last_state = mx.sym.SequenceLast(data=source, axis=1, sequence_length=source_length,
                                                  use_sequence_length=True)
         fixed_probs = mx.sym.one_hot(source_length - 1, depth=source_seq_len)
 
@@ -690,25 +689,6 @@ class MlpAttention(Attention):
         return attend
 
 
-def mask_attention_scores(logits: mx.sym.Symbol,
-                          length: mx.sym.Symbol) -> mx.sym.Symbol:
-    """
-    Masks attention scores according to sequence length.
-
-    :param logits: Shape: (batch_size, seq_len, 1).
-    :param length: Shape: (batch_size,).
-    :return: Masked logits: (batch_size, seq_len, 1).
-    """
-    # TODO: Masking with 0-1 mask, to avoid the multiplication
-    logits = mx.sym.swapaxes(data=logits, dim1=0, dim2=1)
-    logits = mx.sym.SequenceMask(data=logits,
-                                 use_sequence_length=True,
-                                 sequence_length=length,
-                                 value=C.LARGE_NEGATIVE_VALUE)
-    # (batch_size, seq_len, 1)
-    return mx.sym.swapaxes(data=logits, dim1=0, dim2=1)
-
-
 def get_context_and_attention_probs(values: mx.sym.Symbol,
                                     length: mx.sym.Symbol,
                                     logits: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
@@ -721,8 +701,13 @@ def get_context_and_attention_probs(values: mx.sym.Symbol,
     :param logits: Shape: (batch_size, seq_len, 1).
     :return: context: (batch_size, encoder_num_hidden), attention_probs: (batch_size, seq_len).
     """
+    # masks attention scores according to sequence length.
     # (batch_size, seq_len, 1)
-    logits = mask_attention_scores(logits, length)
+    logits = mx.sym.SequenceMask(data=logits,
+                                 axis=1,
+                                 use_sequence_length=True,
+                                 sequence_length=length,
+                                 value=C.LARGE_NEGATIVE_VALUE)
 
     # (batch_size, seq_len, 1)
     probs = mx.sym.softmax(logits, axis=1, name='attention_softmax')

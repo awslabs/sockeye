@@ -1,4 +1,4 @@
-SacréBLEU provides hassle-free computation of shareable, comparable, and reproducible BLEU scores.
+SacreBLEU provides hassle-free computation of shareable, comparable, and reproducible BLEU scores.
 Inspired by Rico Sennrich's `multi-bleu-detok.perl`, it produces the official WMT scores but works with plain text.
 It also knows all the standard test sets and handles downloading, processing, and tokenization for you.
 
@@ -34,14 +34,14 @@ After tokenizing, translating, and detokenizing it, you can score your decoder o
 
     cat output.detok.txt | sacrebleu -t wmt14 -l de-en
 
-SacréBLEU knows about common WMT test sets, but you can also use it to score system outputs with arbitrary references.
+SacreBLEU knows about common WMT test sets, but you can also use it to score system outputs with arbitrary references.
 It also works in backwards compatible model where you manually specify the reference(s), similar to the format of `multi-bleu.txt`:
 
     cat output.detok.txt | sacrebleu REF1 [REF2 ...]
 
 Note that the system output and references will all be tokenized internally.
 
-SacréBLEU generates version strings like the following.
+SacreBLEU generates version strings like the following.
 Put them in a footnote in your paper!
 Use `--short` for a shorter hash if you like.
 
@@ -55,17 +55,38 @@ Moses itself has a number of implementations as standalone scripts, with little 
 Different flags passed to each of these scripts can produce wide swings in the final score.
 All of these may handle tokenization in different ways.
 On top of this, downloading and managing test sets is a moderate annoyance.
-Sacré bleu!
+Sacre bleu!
 What a mess.
 
-SacréBLEU aims to solve these problems by wrapping the original Papineni reference implementation together with other useful features.
+SacreBLEU aims to solve these problems by wrapping the original Papineni reference implementation together with other useful features.
 The defaults are set the way that BLEU should be computed, and furthermore, the script outputs a short version string that allows others to know exactly what you did.
 As an added bonus, it automatically downloads and manages test sets for you, so that you can simply tell it to score against 'wmt14', without having to hunt down a path on your local file system.
 It is all designed to take BLEU a little more seriously.
 After all, even with all its problems, BLEU is the default and---admit it---well-loved metric of our entire research community.
-Sacré BLEU.
+Sacre BLEU.
 
 # VERSION HISTORY
+
+- 1.2.5 (13 March 2018)
+   - added wmt18/dev datasets (en-et and et-en)
+   - fixed logic with --force
+   - locale-independent installation
+   - added "--echo both" (tab-delimited)
+
+- 1.2.3 (28 January 2018)
+   - metrics (`-m`) are now printed in the order requested
+   - chrF now prints a version string (including the beta parameter, importantly)
+   - attempt to remove dependence on locale setting
+
+- 1.2 (17 January 2018)
+   - added the chrF metric (`-m chrf` or `-m bleu chrf` for both)
+     See 'CHRF: character n-gram F-score for automatic MT evaluation' by Maja Popovic (WMT 2015)
+     [http://www.statmt.org/wmt15/pdf/WMT49.pdf]
+   - added IWSLT 2017 test and tuning sets for DE, FR, and ZH
+     (Thanks to Mauro Cettolo and Marcello Federico).
+   - added `--cite` to produce the citation for easy inclusion in papers
+   - added `--input` (`-i`) to set input to a file instead of STDIN
+   - removed accent mark after objection from UN official
 
 - 1.1.7 (27 November 2017)
    - corpus_bleu() now raises an exception if input streams are different lengths
@@ -113,7 +134,7 @@ Sacré BLEU.
 
 # LICENSE
 
-SacréBLEU is licensed under the Apache 2.0 License.
+SacreBLEU is licensed under the Apache 2.0 License.
 
 # CREDITS
 

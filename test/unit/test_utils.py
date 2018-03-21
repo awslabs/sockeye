@@ -12,14 +12,17 @@
 # permissions and limitations under the License.
 
 import os
+import re
 import tempfile
 
+import math
 import mxnet as mx
 import numpy as np
 import pytest
 
 from sockeye import __version__
 from sockeye import utils
+from sockeye import constants as C
 
 
 @pytest.mark.parametrize("some_list, expected", [
@@ -32,6 +35,7 @@ def test_chunks(some_list, expected):
     chunk_size = 3
     chunked_list = list(utils.chunks(some_list, chunk_size))
     assert chunked_list == expected
+
 
 def test_get_alignments():
     attention_matrix = np.asarray([[0.1, 0.4, 0.5],
@@ -62,6 +66,9 @@ def test_aquire_gpus(tmpdir, requested_device_ids, num_gpus_available, expected)
     with utils.acquire_gpus(requested_device_ids, lock_dir=str(tmpdir),
                             num_gpus_available=num_gpus_available) as acquired_gpus:
         assert set(acquired_gpus) == set(expected)
+        # make sure the master lock does not exist anymore after acquiring
+        # (but rather just one lock per acquired GPU)
+        assert len(tmpdir.listdir()) == len(acquired_gpus)
 
 
 # We expect the following settings to raise a ValueError
@@ -151,13 +158,15 @@ def test_gpu_file_lock_locking(tmpdir):
 
 
 def test_gpu_file_lock_permission_exception(tmpdir):
-    with pytest.raises(PermissionError):
-        tmpdir = tmpdir.mkdir("sub")
-        # remove permissions
-        tmpdir.chmod(0)
+    tmpdir = tmpdir.mkdir("sub")
+    existing_lock = tmpdir.join("sockeye.gpu0.lock")
+    # remove permissions
+    existing_lock.write("")
+    existing_lock.chmod(0)
 
-        with utils.GpuFileLock([0], str(tmpdir)) as lock:
-            assert False, "We expect to raise an exception when aquiring the lock and never reach this code."
+    with utils.GpuFileLock([0, 1], str(tmpdir)) as acquired_lock:
+        # We expect to ignore the file for which we do not have permission and acquire the other device instead
+        assert acquired_lock == 1
 
 
 def test_check_condition_true():
@@ -192,6 +201,54 @@ def test_check_version_checks_major():
     with pytest.raises(utils.SockeyeError) as e:
         utils.check_version(version)
     assert "Given major version (%s) does not match major code version (%s)" % (version, __version__) == str(e.value)
+
+
+def test_version_matches_changelog():
+    """
+    Tests whether the last version mentioned in CHANGELOG.md matches the sockeye version (sockeye/__init__.py).
+    """
+    pattern = re.compile(r'''## \[([0-9.]+)\]''')
+    changelog = open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "CHANGELOG.md")).read()
+    last_changelog_version = pattern.findall(changelog)[0]
+    assert __version__ == last_changelog_version
+
+
+@pytest.mark.parametrize("samples,expected_mean, expected_variance",
+                         [
+                             ([1, 2], 1.5, 0.25),
+                             ([4., 100., 12., -3, 1000, 1., -200], 130.57142857142858, 132975.38775510204),
+                         ])
+def test_online_mean_and_variance(samples, expected_mean, expected_variance):
+    mean_and_variance = utils.OnlineMeanAndVariance()
+    for sample in samples:
+        mean_and_variance.update(sample)
+
+    assert np.isclose(mean_and_variance.mean, expected_mean)
+    assert np.isclose(mean_and_variance.variance, expected_variance)
+
+
+@pytest.mark.parametrize("samples,expected_mean",
+                         [
+                             ([], 0.),
+                             ([5.], 5.),
+                         ])
+def test_online_mean_and_variance_nan(samples, expected_mean):
+    mean_and_variance = utils.OnlineMeanAndVariance()
+    for sample in samples:
+        mean_and_variance.update(sample)
+
+    assert np.isclose(mean_and_variance.mean, expected_mean)
+    assert math.isnan(mean_and_variance.variance)
+
+
+get_tokens_tests = [("this is a line  \n", ["this", "is", "a", "line"]),
+                    (" a  \tb \r \n", ["a", "b"])]
+
+
+@pytest.mark.parametrize("line, expected_tokens", get_tokens_tests)
+def test_get_tokens(line, expected_tokens):
+    tokens = list(utils.get_tokens(line))
+    assert tokens == expected_tokens
 
 
 def test_average_arrays():
@@ -263,3 +320,19 @@ def test_print_value():
     executor_base.backward()
     executor_print.backward()
     assert np.isclose(executor_base.grad_arrays[1].asnumpy(), executor_print.grad_arrays[1].asnumpy()).all()
+
+
+@pytest.mark.parametrize("new, old, metric, result",
+                         [(0, 0, C.PERPLEXITY, False),
+                          (1.0, 1.0, C.PERPLEXITY, False),
+                          (1.0, 0.9, C.PERPLEXITY, False),
+                          (0.99, 1.0, C.PERPLEXITY, True),
+                          (C.LARGE_POSITIVE_VALUE, np.inf, C.PERPLEXITY, True),
+                          (0, 0, C.BLEU, False),
+                          (1.0, 1.0, C.BLEU, False),
+                          (1.0, 0.9, C.BLEU, True),
+                          (0.99, 1.0, C.BLEU, False),
+                          (C.LARGE_POSITIVE_VALUE, np.inf, C.BLEU, False),
+                         ])
+def test_metric_value_is_better(new, old, metric, result):
+    assert utils.metric_value_is_better(new, old, metric) == result

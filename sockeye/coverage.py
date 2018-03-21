@@ -174,6 +174,7 @@ class GRUCoverage(Coverage):
                 data=mx.sym.expand_dims(data=prev_hidden, axis=1, name="%sexpand_decoder" % self.prefix),
                 axis=1, size=source_seq_len, name="%sbroadcast_decoder" % self.prefix)
 
+            # (batch_size, source_seq_len, 1)
             expanded_att_scores = mx.sym.expand_dims(data=attention_prob_scores,
                                                      axis=2,
                                                      name="%sexpand_attention_scores" % self.prefix)
@@ -312,7 +313,4 @@ def mask_coverage(coverage: mx.sym.Symbol, source_length: mx.sym.Symbol) -> mx.s
     :param source_length: Source length. Shape: (batch_size,).
     :return: Masked coverage vector. Shape: (batch_size, seq_len, coverage_num_hidden).
     """
-    coverage = mx.sym.SwapAxis(data=coverage, dim1=0, dim2=1)
-    coverage = mx.sym.SequenceMask(data=coverage, use_sequence_length=True, sequence_length=source_length)
-    coverage = mx.sym.SwapAxis(data=coverage, dim1=0, dim2=1)
-    return coverage
+    return mx.sym.SequenceMask(data=coverage, axis=1, use_sequence_length=True, sequence_length=source_length)

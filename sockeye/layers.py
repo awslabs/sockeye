@@ -342,7 +342,6 @@ class MultiHeadAttentionBase:
         self.depth_per_head = self.depth // self.heads
 
         self.w_h2o = mx.sym.Variable("%sh2o_weight" % prefix)
-        self.b_h2o = mx.sym.Variable("%sh2o_bias" % prefix)
 
     def _attend(self,
                 queries: mx.sym.Symbol,
@@ -379,7 +378,7 @@ class MultiHeadAttentionBase:
         # contexts: (batch, query_max_length, output_depth)
         contexts = mx.sym.FullyConnected(data=contexts,
                                          weight=self.w_h2o,
-                                         bias=self.b_h2o,
+                                         no_bias=True,
                                          num_hidden=self.depth_out,
                                          flatten=False)
 
@@ -405,7 +404,6 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
                  dropout: float = 0.0) -> None:
         super().__init__(prefix, depth_att, heads, depth_out, dropout)
         self.w_i2h = mx.sym.Variable("%si2h_weight" % prefix)
-        self.b_i2h = mx.sym.Variable("%si2h_bias" % prefix)
 
     def __call__(self,
                  inputs: mx.sym.Symbol,
@@ -428,7 +426,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         # combined: (batch, max_length, depth * 3)
         combined = mx.sym.FullyConnected(data=inputs,
                                          weight=self.w_i2h,
-                                         bias=self.b_i2h,
+                                         no_bias=True,
                                          num_hidden=self.depth * 3,
                                          flatten=False,
                                          name="%sqkv_transform" % self.prefix)
@@ -468,9 +466,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                  dropout: float = 0.0) -> None:
         super().__init__(prefix, depth_att, heads, depth_out, dropout)
         self.w_q2h = mx.sym.Variable("%sq2h_weight" % prefix)
-        self.b_q2h = mx.sym.Variable("%sq2h_bias" % prefix)
         self.w_kv2h = mx.sym.Variable("%skv2h_weight" % prefix)
-        self.b_kv2h = mx.sym.Variable("%skv2h_bias" % prefix)
 
     def __call__(self,
                  queries: mx.sym.Symbol,
@@ -492,7 +488,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         # (batch, memory_max_length, depth * 2)
         combined = mx.sym.FullyConnected(data=memory,
                                          weight=self.w_kv2h,
-                                         bias=self.b_kv2h,
+                                         no_bias=True,
                                          num_hidden=self.depth * 2,
                                          flatten=False,
                                          name="%skv_transform" % self.prefix)
@@ -506,14 +502,97 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         # (batch, query_max_length, depth * 2)
         queries = mx.sym.FullyConnected(data=queries,
                                         weight=self.w_q2h,
-                                        bias=self.b_q2h,
+                                        no_bias=True,
                                         num_hidden=self.depth,
                                         flatten=False,
                                         name="%sq_transform" % self.prefix)
         return self._attend(queries,
                             keys,
                             values,
-                            bias=bias)
+                            bias=bias,
+                            lengths=memory_lengths)
+
+
+class ProjectedDotAttention:
+    """
+    Dot attention layer for queries independent from keys/values.
+
+    :param prefix: Attention prefix.
+    :param num_hidden: Attention depth / number of hidden units.
+    """
+
+    def __init__(self,
+                 prefix: str,
+                 num_hidden) -> None:
+        self.prefix = prefix
+        self.num_hidden = num_hidden
+        self.w_q2h = mx.sym.Variable("%sq2h_weight" % prefix)
+        self.b_q2h = mx.sym.Variable("%sq2h_bias" % prefix)
+        self.w_kv2h = mx.sym.Variable("%skv2h_weight" % prefix)
+        self.b_kv2h = mx.sym.Variable("%skv2h_bias" % prefix)
+
+    def __call__(self,
+                 queries: mx.sym.Symbol,
+                 memory: mx.sym.Symbol,
+                 memory_lengths: mx.sym.Symbol) -> mx.sym.Symbol:
+        """
+        Apply project, apply dot attention and return new context vectors.
+
+        :param queries: Symbol of shape (batch, queries_max_length, input_num_hidden).
+        :param memory: Symbol of shape (batch, memory_max_length, input_num_hidden).
+        :param memory_lengths: Symbol of shape (batch, 1).
+        :return: Symbol of shape (batch, queries_max_length, num_hidden).
+        """
+        # (batch, memory_max_length, num_hidden * 2)
+        combined = mx.sym.FullyConnected(data=memory,
+                                         weight=self.w_kv2h,
+                                         bias=self.b_kv2h,
+                                         num_hidden=self.num_hidden * 2,
+                                         flatten=False,
+                                         name="%skv_transform" % self.prefix)
+
+        # split into keys and values
+        # pylint: disable=unbalanced-tuple-unpacking
+        keys, values = mx.sym.split(data=combined, num_outputs=2, axis=2)
+
+        # (batch, queries_max_length, num_hidden)
+        queries = mx.sym.FullyConnected(data=queries,
+                                        weight=self.w_q2h,
+                                        bias=self.b_q2h,
+                                        num_hidden=self.num_hidden,
+                                        flatten=False,
+                                        name="%sq_transform" % self.prefix)
+        # scale by sqrt(num_hidden)
+        queries = queries * (self.num_hidden ** -0.5)
+
+        # (batch, queries_max_length, num_hidden)
+        contexts = dot_attention(queries, keys, values, memory_lengths)
+
+        return contexts
+
+
+class PlainDotAttention:
+    """
+    Dot attention layer for queries independent from keys/values.
+    """
+
+    def __call__(self,
+                 queries: mx.sym.Symbol,
+                 memory: mx.sym.Symbol,
+                 memory_lengths: mx.sym.Symbol) -> mx.sym.Symbol:
+        """
+        Returns a symbol of shape (batch, max_length, output_depth).
+
+        :param queries: Symbol of shape (batch, queries_max_length, input_depth).
+        :param memory: Symbol of shape (batch, memory_max_length, input_depth).
+        :param memory_lengths: Symbol of shape (batch, 1).
+        :return: Symbol of shape (batch, queries_max_length, output_depth).
+        """
+
+        # (batch*heads, queries_max_length, depth_per_head)
+        contexts = dot_attention(queries, memory, memory, memory_lengths)
+
+        return contexts
 
 
 class PositionalEncodings(mx.operator.CustomOp):

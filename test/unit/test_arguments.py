@@ -21,41 +21,38 @@ import sockeye.constants as C
 from itertools import zip_longest
 
 
+# note that while --prepared-data and --source/--target are mutually exclusive this is not the case at the CLI level
 @pytest.mark.parametrize("test_params, expected_params", [
     # mandatory parameters
-    ('--source test_src --target test_tgt '
+    ('--source test_src --target test_tgt --prepared-data prep_data '
      '--validation-source test_validation_src --validation-target test_validation_tgt '
      '--output test_output',
-     dict(source='test_src', target='test_tgt', limit=None,
+     dict(source='test_src', target='test_tgt',
+          source_factors=[],
+          prepared_data='prep_data',
           validation_source='test_validation_src', validation_target='test_validation_tgt',
+          validation_source_factors=[],
           output='test_output', overwrite_output=False,
-          source_vocab=None, target_vocab=None, use_tensorboard=False,
-          monitor_pattern=None, monitor_stat_func='mx_default')),
-
-    # all parameters
-    ('--source test_src --target test_tgt --limit 10 '
-     '--validation-source test_validation_src --validation-target test_validation_tgt '
-     '--output test_output '
-     '--source-vocab test_src_vocab --target-vocab test_tgt_vocab '
-     '--use-tensorboard --overwrite-output',
-     dict(source='test_src', target='test_tgt', limit=10,
-          validation_source='test_validation_src', validation_target='test_validation_tgt',
-          output='test_output', overwrite_output=True,
-          source_vocab='test_src_vocab', target_vocab='test_tgt_vocab', use_tensorboard=True,
-          monitor_pattern=None, monitor_stat_func='mx_default')),
+          source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1,1),
+          no_bucketing=False, bucket_width=10, max_seq_len=(100, 100),
+          monitor_pattern=None, monitor_stat_func='mx_default', use_tensorboard=False)),
 
     # short parameters
-    ('-s test_src -t test_tgt '
+    ('-s test_src -t test_tgt -d prep_data '
      '-vs test_validation_src -vt test_validation_tgt '
      '-o test_output',
-     dict(source='test_src', target='test_tgt', limit=None,
+     dict(source='test_src', target='test_tgt',
+          source_factors=[],
+          prepared_data='prep_data',
           validation_source='test_validation_src', validation_target='test_validation_tgt',
+          validation_source_factors=[],
           output='test_output', overwrite_output=False,
-          source_vocab=None, target_vocab=None, use_tensorboard=False,
-          monitor_pattern=None, monitor_stat_func='mx_default'))
+          source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1,1),
+          no_bucketing=False, bucket_width=10, max_seq_len=(100, 100),
+          monitor_pattern=None, monitor_stat_func='mx_default', use_tensorboard=False))
 ])
 def test_io_args(test_params, expected_params):
-    _test_args(test_params, expected_params, arguments.add_io_args)
+    _test_args(test_params, expected_params, arguments.add_training_io_args)
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
@@ -76,17 +73,16 @@ def test_device_args(test_params, expected_params):
 
 @pytest.mark.parametrize("test_params, expected_params", [
     ('', dict(params=None,
-              num_words=(50000, 50000),
-              word_min_count=(1, 1),
+              allow_missing_params=False,
               num_layers=(1, 1),
               num_embed=(512, 512),
+              source_factors_num_embed=[],
               rnn_attention_type='mlp',
               rnn_attention_num_hidden=None,
               rnn_attention_coverage_type='count',
               rnn_attention_coverage_num_hidden=1,
               weight_tying=False,
               weight_tying_type="trg_softmax",
-              max_seq_len=(100, 100),
               rnn_attention_mhdot_heads=None,
               transformer_attention_heads=8,
               transformer_feed_forward_num_hidden=2048,
@@ -107,6 +103,7 @@ def test_device_args(test_params, expected_params):
               cnn_kernel_width=(3, 5),
               cnn_num_hidden=512,
               cnn_positional_embedding_type="learned",
+              cnn_project_qkv=False,
               layer_normalization=False,
               weight_normalization=False,
               encoder=C.RNN_NAME,
@@ -126,8 +123,6 @@ def test_model_parameters(test_params, expected_params):
     ('', dict(batch_size=64,
               batch_type="sentence",
               fill_up='replicate',
-              no_bucketing=False,
-              bucket_width=10,
               loss=C.CROSS_ENTROPY,
               label_smoothing=0.0,
               loss_normalization_type='valid',
@@ -144,6 +139,8 @@ def test_model_parameters(test_params, expected_params):
               optimizer='adam',
               optimizer_params=None,
               kvstore='device',
+              gradient_compression_type=None,
+              gradient_compression_threshold=0.5,
               min_num_epochs=None,
               max_num_epochs=None,
               initial_learning_rate=0.0003,
@@ -161,6 +158,7 @@ def test_model_parameters(test_params, expected_params):
               learning_rate_decay_optimizer_states_reset='off',
               weight_init='xavier',
               weight_init_scale=2.34,
+              weight_init_xavier_rand_type='uniform',
               weight_init_xavier_factor_type='in',
               embed_weight_init='default',
               rnn_dropout_inputs=(.0, .0),
@@ -169,12 +167,14 @@ def test_model_parameters(test_params, expected_params):
               rnn_decoder_hidden_dropout=.0,
               cnn_hidden_dropout=0.0,
               rnn_forget_bias=0.0,
+              fixed_param_names=[],
               rnn_h2h_init=C.RNN_INIT_ORTHOGONAL,
               decode_and_evaluate=0,
               decode_and_evaluate_use_cpu=False,
               decode_and_evaluate_device_id=None,
               seed=13,
-              keep_last_params=-1)),
+              keep_last_params=-1,
+              dry_run=False)),
 ])
 def test_training_arg(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_training_args)
@@ -182,6 +182,8 @@ def test_training_arg(test_params, expected_params):
 
 @pytest.mark.parametrize("test_params, expected_params", [
     ('-m model', dict(input=None,
+                      input_factors=None,
+                      json_input=False,
                       output=None,
                       checkpoints=None,
                       models=['model'],
@@ -309,7 +311,29 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
     _test_args_subset(test_params, expected_params, expected_params_present, arguments.add_average_args)
 
 
-def _create_argument_values_that_must_be_files(params):
+@pytest.mark.parametrize("test_params, expected_params", [
+    ('--source test_src --target test_tgt --output prepared_data ',
+     dict(source='test_src', target='test_tgt',
+          source_vocab=None,
+          target_vocab=None,
+          source_factors=[],
+          shared_vocab=False,
+          num_words=(50000, 50000),
+          word_min_count=(1,1),
+          no_bucketing=False,
+          bucket_width=10,
+          max_seq_len=(100, 100),
+          min_num_shards=1,
+          num_samples_per_shard=1000000,
+          seed=13,
+          output='prepared_data'
+          ))
+])
+def test_prepare_data_cli_args(test_params, expected_params):
+    _test_args(test_params, expected_params, arguments.add_prepare_data_cli_args)
+
+
+def _create_argument_values_that_must_be_files_or_dirs(params):
     """
     Loop over test_params and create temporary files for training/validation sources/targets.
     """
@@ -320,29 +344,39 @@ def _create_argument_values_that_must_be_files(params):
         return zip_longest(fillvalue=fillvalue, *args)
 
     params = params.split()
-    regular_files_params = {'-vs', '-vt', '-t', '-s', '--source', '--target', '--validation-source', '--validation-target'}
+    regular_files_params = {'-vs', '-vt', '-t', '-s', '--source', '--target',
+                            '--validation-source', '--validation-target'}
+    folder_params = {'--prepared-data', '-d'}
     to_unlink = set()
     for arg, val in grouper(params, 2):
         if arg in regular_files_params and not os.path.isfile(val):
-            to_unlink.add((val, open(val, 'w')))
+            open(val, 'w').close()
+            to_unlink.add(val)
+        if arg in folder_params:
+            os.mkdir(val)
+            to_unlink.add(val)
     return to_unlink
 
 
-def _delete_argument_values_that_must_be_files(to_unlink):
+def _delete_argument_values_that_must_be_files_or_dirs(to_unlink):
     """
-    Close and delete previously created files.
+    Close and delete previously created files or directories.
     """
-    for name, f in to_unlink:
-        f.close()
-        os.unlink(name)
+    for name in to_unlink:
+        if os.path.isfile(name):
+            os.unlink(name)
+        else:
+            os.rmdir(name)
 
 
 def _test_args(test_params, expected_params, args_func):
     test_parser = argparse.ArgumentParser()
     args_func(test_parser)
-    created = _create_argument_values_that_must_be_files(test_params)
-    parsed_params = test_parser.parse_args(test_params.split())
-    _delete_argument_values_that_must_be_files(created)
+    created = _create_argument_values_that_must_be_files_or_dirs(test_params)
+    try:
+        parsed_params = test_parser.parse_args(test_params.split())
+    finally:
+        _delete_argument_values_that_must_be_files_or_dirs(created)
     assert dict(vars(parsed_params)) == expected_params
 
 
@@ -357,9 +391,9 @@ def _test_args_subset(test_params, expected_params, expected_params_present, arg
     """
     test_parser = argparse.ArgumentParser()
     args_func(test_parser)
-    created = _create_argument_values_that_must_be_files(test_params)
+    created = _create_argument_values_that_must_be_files_or_dirs(test_params)
     parsed_params = dict(vars(test_parser.parse_args(test_params.split())))
-    _delete_argument_values_that_must_be_files(created)
+    _delete_argument_values_that_must_be_files_or_dirs(created)
     parsed_params_subset = {k: v for k, v in parsed_params.items() if k in expected_params}
     assert parsed_params_subset == expected_params
     for expected_param_present in expected_params_present:

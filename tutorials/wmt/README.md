@@ -25,7 +25,7 @@ pip install matplotlib
 
 We will visualize training progress using `tensorboard`. Install it using:
 ```bash
-pip install tensorboard
+pip install tensorboard==1.0.0a6
 ```
 
 All of the commands below assume you're running on a CPU.
@@ -92,7 +92,7 @@ python -m sockeye.train -s corpus.tc.BPE.de \
                         --rnn-num-hidden 512 \
                         --rnn-attention-type dot \
                         --max-seq-len 60 \
-                        --monitor-bleu 500 \
+                        --decode-and-evaluate 500 \
                         --use-tensorboard \
                         --use-cpu \
                         -o wmt_model
@@ -110,11 +110,11 @@ Additionally, you can control the batch size (`--batch-size`), the learning rate
 and other parameters relevant for training.
 
 Training will run until the validation perplexity stops improving.
-Alternatively, you can track BLEU on the validation set (`--optimized-metric bleu`).
+Alternatively, you can track BLEU on the validation set and stop early based on BLEU scores (`--optimized-metric bleu`).
 Sockeye will then at every checkpoint start a decoder in a separate process running on the same device as training.
 To make sure the decoder finishes before the next checkpoint one can subsample the validation set for
 BLEU score calculation.
-For example `--monitor-bleu 500` will calculate BLEU on a random subset of 500 sentences.
+For example `--decode-and-evaluate 500` will decode and evaluate BLEU on a random subset of 500 sentences.
 We sample the random subset once and keep it the same during training and also across trainings by
 fixing the random seed.
 Therefore, validation BLEU scores across training runs are comparable.
@@ -195,6 +195,25 @@ This will create a file `align_1.png` that looks similar to this:
 Note that the alignment plot shows the subword units instead of tokens, as this is the representation used by Sockeye 
 during translation.
 Additionally you can see the special end-of-sentence symbol `</s>` being added to the target sentence.
+
+
+### Embedding inspection
+
+You can inspect the embeddings learned by the model during training. Sockeye includes a tool to compute pairwise
+similarities (Euclidean distance) for all types in the embeddings space. Given a query token, it returns the nearest
+neighbors in the space.
+You can run it like this:
+
+```
+echo "haus" | python3 -m sockeye.embeddings -m wmt_model -s source
+[INFO:__main__] Arguments: Namespace(checkpoint=None, gamma=1.0, k=5, model='wmt_model', norm=False, side='source')
+Input: haus
+haus id=35
+  gebaeude id=68 sim=0.8498
+  Haus id=1759 sim=0.1441
+  hauser id=295 sim=0.0049
+```
+(Your own output may look different)
 
 
 ### Model ensembling

@@ -264,6 +264,7 @@ def get_lr_scheduler(scheduler_type: str,
     :param learning_rate_reduce_factor: Factor to reduce learning rate with.
     :param learning_rate_reduce_num_not_improved: Number of checkpoints with no improvement after which learning rate is
            reduced.
+    :param learning_rate_schedule: Optional fixed learning rate schedule.
     :param learning_rate_warmup: Number of batches that the learning rate is linearly increased.
     :raises: ValueError if unknown scheduler_type
     :return: Learning rate scheduler.
