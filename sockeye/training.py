@@ -22,11 +22,11 @@ import random
 import shutil
 import time
 from functools import reduce
+from math import sqrt
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import mxnet as mx
 import numpy as np
-from math import sqrt
 
 from . import checkpoint_decoder
 from . import constants as C
@@ -127,11 +127,22 @@ class TrainingModel(model.SockeyeModel):
 
             # decoder
             # target_decoded: (batch-size, target_len, decoder_depth)
-            target_decoded = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
-                                                          target_embed, target_embed_length, target_embed_seq_len)
+            # TODO: (zappella@) currently we are getting context which is source*att_probs not the two separate vectors
+            target_decoded_and_context = self.decoder.decode_sequence(source_encoded, source_encoded_length,
+                                                                      source_encoded_seq_len,
+                                                                      target_embed, target_embed_length,
+                                                                      target_embed_seq_len)
+
+            target_decoded = target_decoded_and_context[0]
 
             # target_decoded: (batch_size * target_seq_len, decoder_depth)
             target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
+
+            #TODO: context is returned only by recurrent decoder at the moment
+            if len(target_decoded_and_context.list_outputs()) > 1:
+                context = target_decoded_and_context[1]
+                context = mx.sym.reshape(data=context, shape=(-3, 0))
+                # TODO: currently we are not using the context, it will be used in the new output layer implementation
 
             # output layer
             # logits: (batch_size * target_seq_len, target_vocab_size)
