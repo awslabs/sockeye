@@ -892,6 +892,7 @@ class Translator:
                  store_beam: bool = False,
                  use_mxnet_topk: bool = False) -> None:
         self.use_mxnet_topk = use_mxnet_topk
+        self.smallest_k_func = utils.smallest_k_mx if self.use_mxnet_topk else utils.smallest_k
         self.context = context
         self.length_penalty = length_penalty
         self.source_vocabs = source_vocabs
@@ -1287,12 +1288,8 @@ class Translator:
                 rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
                 sliced_scores = scores if t == 1 and self.batch_size == 1 else scores[rows]
                 # TODO we could save some tiny amount of time here by not running smallest_k for a finished sent
-                if not self.use_mxnet_topk:
-                    (best_hyp_indices[rows], best_word_indices[rows]), \
-                        scores_accumulated[rows, 0] = utils.smallest_k(sliced_scores, self.beam_size, t == 1)
-                else:
-                    (best_hyp_indices[rows], best_word_indices[rows]), \
-                        scores_accumulated[rows, 0] = utils.smallest_k_mx(sliced_scores, self.beam_size, t == 1)
+                (best_hyp_indices[rows], best_word_indices[rows]), \
+                    scores_accumulated[rows, 0] = self.smallest_k_func(sliced_scores, self.beam_size, t == 1)
 
                 # offsetting since the returned smallest_k() indices were slice-relative
                 best_hyp_indices[rows] += rows.start
