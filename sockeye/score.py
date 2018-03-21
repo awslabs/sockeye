@@ -30,15 +30,17 @@ from . import scoring
 
 from sockeye.log import setup_main_logger
 from sockeye.utils import check_condition
-from sockeye.output_handler import ScoreOutputHandler, OutputHandler
+from sockeye.output_handler import get_output_handler, OutputHandler
 
 logger = setup_main_logger(__name__, file_logging=False)
 
 
+MappingDict = DefaultDict[int, DefaultDict[int, int]]
+
 def score(output_handler: OutputHandler,
           models: List[scoring.ScoringModel],
           data_iters: List[data_io.BaseParallelSampleIter],
-          mapids: DefaultDict[DefaultDict[int, int]],
+          mapids: List[MappingDict],
           scorer: scoring.Scorer) -> None:
     """
     """
@@ -50,7 +52,7 @@ def score(output_handler: OutputHandler,
                                   mapids=mapids)
 
     for scored_output in scored_outputs:
-        output_handler.handle(scored_output)
+        output_handler.handle(s_output=scored_output)
 
     total_time = time.time() - tic
 
@@ -111,7 +113,9 @@ def main():
         scorer = scoring.Scorer(batch_size=args.batch_size,
                                 no_bucketing=args.no_bucketing)
 
-        output_handler = ScoreOutputHandler
+        output_handler = get_output_handler(output_type=C.OUTPUT_HANDLER_SCORE,
+                                            output_fname=args.output,
+                                            sure_align_threshold=None)
 
         score(output_handler=output_handler,
               models=models,

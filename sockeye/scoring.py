@@ -160,8 +160,8 @@ class ScoringOutput:
 
     def __init__(self,
                  sentence_id: int,
-                 source_tokens: Optional[Tokens] = None,
-                 target_tokens: Optional[Tokens] = None,
+                 source_tokens: Optional[Tokens],
+                 target_tokens: Optional[Tokens],
                  scores: List[float]) -> None:
         self.sentence_id = sentence_id
         self.source_tokens = source_tokens
@@ -171,6 +171,8 @@ class ScoringOutput:
     def __str__(self):
         return 'ScoringOutput(%d, %s, %s, %s)' % (self.sentence_id, self.source_tokens, self.target_tokens, str(self.scores))
 
+
+MappingDict = DefaultDict[int, DefaultDict[int, int]]
 
 class Scorer:
 
@@ -187,7 +189,7 @@ class Scorer:
                      model: ScoringModel,
                      batch: mx.io.DataBatch,
                      batch_index: Tuple[int, int],
-                     mapid: DefaultDict[DefaultDict[int, int]]
+                     mapid: MappingDict
                      ) -> ScoredBatch:
         """
         Scores a batch of examples, returns a list of tuples (sentence_id, score).
@@ -242,7 +244,7 @@ class Scorer:
                             model: ScoringModel,
                             model_id: int,
                             data_iter: data_io.BaseParallelSampleIter,
-                            mapid: DefaultDict) -> ScoredSamples:
+                            mapid: MappingDict) -> ScoredSamples:
         """
         """
         scored_samples = []
@@ -251,18 +253,17 @@ class Scorer:
 
                 batch_index = data_iter.batch_indices[i]
                 scored_batch = self._score_batch(model=model,
-                                                 model_id=model_id,
                                                  batch=batch,
                                                  batch_index=batch_index,
                                                  mapid=mapid)
-                scored_samples.append(scored_batch)
+                scored_samples.extend(scored_batch)
 
         return sorted(scored_samples)
 
     def score(self,
               models: List[ScoringModel],
               data_iters: List[data_io.BaseParallelSampleIter],
-              mapids: List[defaultdict(lambda: defaultdict(int))]
+              mapids: List[MappingDict]
               ) -> List[ScoringOutput]:
         """
         Scores all examples returned by an iterator, once for each model.
@@ -291,6 +292,8 @@ class Scorer:
             sentence_id = sample[0][0]
 
             scored_output = ScoringOutput(sentence_id=sentence_id,
+                                          source_tokens=[],
+                                          target_tokens=[], 
                                           scores=scores)
             scored_outputs.append(scored_output)
 
