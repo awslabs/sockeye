@@ -17,8 +17,7 @@ Implement scoring of existing translations.
 import os
 import logging
 import argparse
-from typing import Optional, List, Dict, Tuple, cast, DefaultDict
-from collections import defaultdict
+from typing import Optional, List, Tuple, cast, DefaultDict
 
 import mxnet as mx
 import numpy as np
@@ -30,7 +29,6 @@ from . import vocab
 from . import model
 from . import utils
 from . import loss
-from . import inference
 
 from sockeye.utils import check_condition
 
@@ -74,6 +72,8 @@ class ScoringModel(model.SockeyeModel):
     def _build_module(self, data_iter: data_io.BaseParallelSampleIter):
         """
         Initializes model components, creates training symbol and module, and binds it.
+
+        :param data_iter: Iterator that provides data and labels.
         """
 
         source = mx.sym.Variable(C.SOURCE_NAME)
@@ -153,7 +153,13 @@ ScoredSamples = List[ScoredBatch]
 
 class ScoringOutput:
     """
-    Wraps scorer outputs as TranslatorOutputs.
+    Wraps the output of scoring.
+
+    :param sentence_id: Id of input sentence.
+    :param source_tokens: Tokens of the source sentence.
+    :param target_tokens: Tokens of the target sentence.
+    :param scores: Scores obtained by this sentence pair, one for each
+    model.
     """
 
     __slots__ = ('sentence_id', 'source_tokens', 'target_tokens', 'scores')
@@ -169,13 +175,25 @@ class ScoringOutput:
         self.scores = scores
 
     def __str__(self):
+        """
+        Returns a string representation of a scoring output.
+        """
         return 'ScoringOutput(%d, %s, %s, %s)' % (self.sentence_id, self.source_tokens, self.target_tokens, str(self.scores))
 
 
 MappingDict = DefaultDict[int, DefaultDict[int, int]]
 
-class Scorer:
 
+class Scorer:
+    """
+    Scorer uses one or several models to score pairs of input strings.
+
+    :param batch_size: Batch size.
+    :param no_bucketing: If False bucketing will be used, if True the
+    computation graph will always be unrolled to the full length.
+    :param normalize: If True, normalize scores by the length of the target
+    sequence.
+    """
     def __init__(self,
                  batch_size: int,
                  no_bucketing: bool = False,
@@ -193,11 +211,12 @@ class Scorer:
                      ) -> ScoredBatch:
         """
         Scores a batch of examples, returns a list of tuples (sentence_id, score).
-        :param data_iter: The iterator over the data set.
-        :param mapid: dictionary that maps input order to samples in buckets.
-        :param batch_size: Batch size.
-        :param normalize: If true, normalizes score by length of target.
-        :return: Dictionary where key=input_id, value=score.
+        :param model: The model used for scoring, an instance of ScoringModel.
+        :param batch: A batch of data that is forwarded through the model.
+        :param batch_index: An identifier for the specific batch.
+        :param mapid: Nested dictionary mapping  positions in buckets to the
+        original ordering in the input.
+        :return: A ScoredBatch which is a list of tuples (sentence_id, score).
         """
         scored_batch = []
 
@@ -242,10 +261,16 @@ class Scorer:
 
     def _score_single_model(self,
                             model: ScoringModel,
-                            model_id: int,
                             data_iter: data_io.BaseParallelSampleIter,
                             mapid: MappingDict) -> ScoredSamples:
         """
+        Scores all batches with a single model. Returns a list of
+        scored samples.
+        :param model: The model used for scoring, an instance of ScoringModel.
+        :param data_iter: Iterator that returns batches of data.
+        :param mapid: Nested dictionary mapping  positions in buckets to the
+        original ordering in the input.
+        :return: ScoredSamples, which is a list of scored batches.
         """
         scored_samples = []
 
@@ -268,12 +293,17 @@ class Scorer:
         """
         Scores all examples returned by an iterator, once for each model.
         Returns a list of ScoringOutputs.
+
+        :param models: The models used for scoring, instances of ScoringModel.
+        :param data_iters: Iterators that return batches of data.
+        :param mapid: Nested dictionaries mapping  positions in buckets to the
+        original ordering in the input.
+        :return: Returns a list of ScoringOutputs.
         """
         scored_samples = []
 
-        for index, (model, data_iter, mapid) in enumerate(zip(models, data_iters, mapids)):
+        for model, data_iter, mapid in zip(models, data_iters, mapids):
             single_model_scored_samples = self._score_single_model(model=model,
-                                                                   model_id=index,
                                                                    data_iter=data_iter,
                                                                    mapid=mapid)
             scored_samples.append(single_model_scored_samples)
@@ -283,7 +313,11 @@ class Scorer:
     def _make_outputs(self,
                       scored_samples: ScoredSamples) -> List[ScoringOutput]:
         """
-        Generates a list of ScoringOutputs from output.
+        Generates a list of ScoringOutputs from scorer output.
+
+        :param scored_samples: A list of scored batches.
+        :return: A list of ScoringOutputs that can be handled by an output
+        handler.
         """
         scored_outputs = []
 
@@ -293,7 +327,7 @@ class Scorer:
 
             scored_output = ScoringOutput(sentence_id=sentence_id,
                                           source_tokens=[],
-                                          target_tokens=[], 
+                                          target_tokens=[],
                                           scores=scores)
             scored_outputs.append(scored_output)
 
@@ -306,7 +340,7 @@ def load_models(context: mx.context.Context,
                 data_iters: List[data_io.BaseParallelSampleIter],
                 configs: List[data_io.DataConfig],
                 checkpoints: Optional[List[int]] = None,
-                bucketing: bool = None) -> List[ScoringModel]:
+                bucketing: bool = False) -> List[ScoringModel]:
 
     """
     Loads a list of models for scoring.
@@ -317,6 +351,8 @@ def load_models(context: mx.context.Context,
     :param data_iter: List of iterators over the data set (one per model, can use different vocabularies).
     :param configs: List of configuration objects holding details about the models (one per model).
     :param checkpoints: List of checkpoints to use for each model in model_folders. Use None to load best checkpoint.
+    :param bucketing: If True bucketing will be used, if False the computation
+    graph will always be unrolled to the full length.
     :return: List of models.
     """
 
@@ -350,20 +386,17 @@ def create_data_iter_and_vocab(args: argparse.Namespace,
     :model_dir: model folder to load vocabularies and config from.
     :return: The data iterator.
     """
-    ###
-
     batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
     batch_by_words = args.batch_type == C.BATCH_TYPE_WORD
 
     source_vocabs = vocab.load_source_vocabs(model_dir)
     target_vocab = vocab.vocab_from_json(os.path.join(model_dir, C.VOCAB_TRG_NAME))
 
-    ## Recover the vocabulary path from the data info file:
+    # Recover the vocabulary path from the data info file:
     data_info = cast(data_io.DataInfo, sockeye.config.Config.load(os.path.join(model_dir, C.DATA_INFO)))
-    source_vocab_paths = data_info.source_vocabs
-    target_vocab_path = data_info.target_vocab
 
-    # get max_seq_len_source and max_seq_len_target from config, warn if smaller than given values
+    # get max_seq_len_source and max_seq_len_target from config,
+    # warn if smaller than given values
     config = model.SockeyeModel.load_config(os.path.join(model_dir, C.CONFIG_NAME))
     if max_seq_len_source > config.config_data.max_seq_len_source:
             logger.warning("Source sentence of length %d in test set exceeds maximum source sentence length in config of %d",max_seq_len_source, config.config_data.max_seq_len_source)
@@ -384,40 +417,40 @@ def create_data_iter_and_vocab(args: argparse.Namespace,
     length_statistics = data_io.analyze_sequence_lengths(sources, args.target, source_vocabs, target_vocab, max_seq_len_source, max_seq_len_target)
 
     # define buckets
-    bucketing=not args.no_bucketing
+    bucketing = not args.no_bucketing
     buckets = data_io.define_parallel_buckets(max_seq_len_source, max_seq_len_target, args.bucket_width, length_statistics.length_ratio_mean) if bucketing else [(max_seq_len_source, max_seq_len_target)]
 
-
-    ### get iter
-    ## 2. pass: Get data statistics
+    # get iterator
+    # Pass 2: Get data statistics
     data_statistics = data_io.get_data_statistics(sources_sentences,
-                                                          target_sentences,
-                                                          buckets,
-                                                          length_statistics.length_ratio_mean, length_statistics.length_ratio_std,
-                                                          source_vocabs,
-                                                          target_vocab)
+                                                  target_sentences,
+                                                  buckets,
+                                                  length_statistics.length_ratio_mean,
+                                                  length_statistics.length_ratio_std,
+                                                  source_vocabs,
+                                                  target_vocab)
 
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
-                                                   args.batch_size,
-                                                   batch_by_words,
-                                                   batch_num_devices,
-                                                   data_statistics.average_len_target_per_bucket)
+                                                           args.batch_size,
+                                                           batch_by_words,
+                                                           batch_num_devices,
+                                                           data_statistics.average_len_target_per_bucket)
 
     data_statistics.log(bucket_batch_sizes)
 
     data_loader = data_io.RawParallelDatasetLoader(buckets=buckets,
-                                           eos_id=target_vocab[C.EOS_SYMBOL],
-                                           pad_id=C.PAD_ID)
+                                                   eos_id=target_vocab[C.EOS_SYMBOL],
+                                                   pad_id=C.PAD_ID)
 
     parallel_data = data_loader.load(sources_sentences, target_sentences,
                                      data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes, args.fill_up)
     map_buckets2sentence_ids = data_loader.map_buckets2sentence_ids
 
     data_iter = data_io.ParallelSampleIter(parallel_data,
-                                    buckets,
-                                    args.batch_size,
-                                    bucket_batch_sizes,
-                                    no_shuffle=True)
+                                           buckets,
+                                           args.batch_size,
+                                           bucket_batch_sizes,
+                                           no_shuffle=True)
 
     return data_iter, config, map_buckets2sentence_ids
 
@@ -429,4 +462,3 @@ def get_max_source_and_target(args: argparse.Namespace) -> Tuple[int, int]:
     max_len_target = max([len(line.rstrip().split()) for line in target_lines])
     # +1 for EOS
     return max_len_source+1, max_len_target+1
-

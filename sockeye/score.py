@@ -37,12 +37,24 @@ logger = setup_main_logger(__name__, file_logging=False)
 
 MappingDict = DefaultDict[int, DefaultDict[int, int]]
 
+
 def score(output_handler: OutputHandler,
           models: List[scoring.ScoringModel],
           data_iters: List[data_io.BaseParallelSampleIter],
           mapids: List[MappingDict],
           scorer: scoring.Scorer) -> None:
     """
+    Scores all batches returned by all iterators, with all models. Calls
+    an output handler to process the results.
+
+    :param output_handler: A handler that will be called with each scoring
+    result.
+    :param models: A list of models that an instance of scoring.Scorer uses
+    to forward batches.
+    :param data_iters: Iterators that return batches of data.
+    :param mapids: Nested dictionaries mapping  positions in buckets to the
+    original ordering in the input.
+    :param scorer: The scorer that will be used to score each line of input.
     """
     logger.info("Scoring...")
 
