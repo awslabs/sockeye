@@ -889,8 +889,9 @@ class Translator:
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
-                 store_beam : bool = False) -> None:
+                 store_beam: bool = False) -> None:
         self.context = context
+        self.smallest_k_func = utils.smallest_k if self.context == mx.cpu() else utils.smallest_k_mx
         self.length_penalty = length_penalty
         self.source_vocabs = source_vocabs
         self.vocab_target = target_vocab
@@ -1278,13 +1279,16 @@ class Translator:
 
             # (3) get beam_size winning hypotheses for each sentence block separately
             # TODO(fhieber): once mx.nd.topk is sped-up no numpy conversion necessary anymore.
-            scores = scores.asnumpy()  # convert to numpy once to minimize cross-device copying
+            if self.context == mx.cpu():
+                scores = scores.asnumpy()  # convert to numpy once to minimize cross-device copying
+
             for sent in range(self.batch_size):
                 rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
                 sliced_scores = scores if t == 1 and self.batch_size == 1 else scores[rows]
                 # TODO we could save some tiny amount of time here by not running smallest_k for a finished sent
                 (best_hyp_indices[rows], best_word_indices[rows]), \
-                scores_accumulated[rows, 0] = utils.smallest_k(sliced_scores, self.beam_size, t == 1)
+                    scores_accumulated[rows, 0] = self.smallest_k_func(sliced_scores, self.beam_size, t == 1)
+
                 # offsetting since the returned smallest_k() indices were slice-relative
                 best_hyp_indices[rows] += rows.start
 
