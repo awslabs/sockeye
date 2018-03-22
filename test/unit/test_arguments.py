@@ -79,6 +79,7 @@ def test_device_args(test_params, expected_params):
               source_factors_num_embed=[],
               rnn_attention_type='mlp',
               rnn_attention_num_hidden=None,
+              rnn_scale_dot_attention=False,
               rnn_attention_coverage_type='count',
               rnn_attention_coverage_num_hidden=1,
               weight_tying=False,
@@ -114,7 +115,8 @@ def test_device_args(test_params, expected_params):
               conv_embed_num_highway_layers=4,
               conv_embed_pool_stride=5,
               conv_embed_add_positional_encodings=False,
-              rnn_attention_in_upper_layers=False))])
+              rnn_attention_in_upper_layers=False))
+])
 def test_model_parameters(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_model_parameters)
 
