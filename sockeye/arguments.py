@@ -603,12 +603,17 @@ def add_model_parameters(params):
     model_params.add_argument('--rnn-attention-use-prev-word', action="store_true",
                               help="Feed the previous target embedding into the attention mechanism.")
 
+    model_params.add_argument('--rnn-scale-dot-attention',
+                              action='store_true',
+                              help='Optional scale before dot product. Only applicable to \'dot\' attention type. '
+                                   '[Vaswani et al, 2017]')
+
     model_params.add_argument('--rnn-attention-coverage-type',
                               choices=["tanh", "sigmoid", "relu", "softrelu", "gru", "count"],
                               default="count",
-                              help="Type of model for updating coverage vectors. 'count' refers to an update method"
+                              help="Type of model for updating coverage vectors. 'count' refers to an update method "
                                    "that accumulates attention scores. 'tanh', 'sigmoid', 'relu', 'softrelu' "
-                                   "use non-linear layers with the respective activation type, and 'gru' uses a"
+                                   "use non-linear layers with the respective activation type, and 'gru' uses a "
                                    "GRU to update the coverage vectors. Default: %(default)s.")
     model_params.add_argument('--rnn-attention-coverage-num-hidden',
                               type=int,
