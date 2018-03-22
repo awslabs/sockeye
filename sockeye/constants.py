@@ -168,7 +168,7 @@ LOGIT_INPUTS_NAME = "logit_inputs"
 LOGITS_NAME = "logits"
 SOFTMAX_NAME = "softmax"
 SOFTMAX_OUTPUT_NAME = SOFTMAX_NAME + "_output"
-SWITCH_PROB_NAME = "swtich_prob"
+SWITCH_PROB_NAME = "switch_prob"
 
 MEASURE_SPEED_EVERY = 50  # measure speed and metrics every X batches
 
@@ -326,7 +326,7 @@ BLEU = 'bleu'
 CHRF = 'chrf'
 BLEU_VAL = BLEU + "-val"
 CHRF_VAL = CHRF + "-val"
-AVG_TIME = "avg-sec-per-sent-val"
+AVG_TIME = "avg-sec-per-sent-ƒval"
 DECODING_TIME = "decode-walltime-val"
 METRICS = [PERPLEXITY, ACCURACY, BLEU]
 METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, PERPLEXITY: False}
@@ -334,7 +334,7 @@ METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, PERPLEXITY: np.inf}
 
 # loss
 CROSS_ENTROPY = 'cross-entropy'
-PN_CROSS_ENTROPY = 'pn-cross-entropy'
+POINTER_NET_CROSS_ENTROPY = 'pointer-net-cross-entropy'
 
 LOSS_NORM_BATCH = 'batch'
 LOSS_NORM_VALID = "valid"

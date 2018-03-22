@@ -117,7 +117,7 @@ class SockeyeModel:
 
         # output layer
         if self.config.use_pointer_nets:
-            assert self.config.config_loss.name == C.PN_CROSS_ENTROPY
+            assert self.config.config_loss.name == C.POINTER_NET_CROSS_ENTROPY
             self.output_layer = layers.PointerOutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                    vocab_size=self.config.vocab_target_size,
                                                    weight=out_weight_target,

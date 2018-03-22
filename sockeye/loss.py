@@ -57,7 +57,7 @@ def get_loss(loss_config: LossConfig) -> 'Loss':
     """
     if loss_config.name == C.CROSS_ENTROPY:
         return CrossEntropyLoss(loss_config)
-    elif loss_config.name == C.PN_CROSS_ENTROPY:
+    elif loss_config.name == C.POINTER_NET_CROSS_ENTROPY:
         return PointerNetsCrossEntropyLoss(loss_config)
     else:
         raise ValueError("unknown loss name: %s" % loss_config.name)
@@ -155,15 +155,13 @@ class PointerNetsCrossEntropyLoss(Loss):
         else:
             raise ValueError("Unknown loss normalization type: %s" % self.loss_config.normalization_type)
 
-        ce_sym = -mx.sym.sum(mx.sym.sum(mx.sym.broadcast_mul(softmax_probs,labels),1))
+        ce_sym = -mx.sym.sum(mx.sym.broadcast_mul(softmax_probs, labels), 1)
 
-        #TODO: normalization?
+        # TODO: normalization?
         return mx.sym.MakeLoss(ce_sym)
-
 
     def create_metric(self) -> "CrossEntropyMetric":
         return CrossEntropyMetric(self.loss_config)
-
 
 
 class CrossEntropyMetric(EvalMetric):
