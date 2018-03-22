@@ -189,6 +189,7 @@ class Scorer:
     Scorer uses one or several models to score pairs of input strings.
 
     :param batch_size: Batch size.
+    :param context: The context(s) that MXNet will be run in (GPU(s)/CPU).
     :param no_bucketing: If False bucketing will be used, if True the
     computation graph will always be unrolled to the full length.
     :param normalize: If True, normalize scores by the length of the target
@@ -196,10 +197,12 @@ class Scorer:
     """
     def __init__(self,
                  batch_size: int,
+                 context: List[mx.context.Context],
                  no_bucketing: bool = False,
                  normalize: Optional[bool] = True) -> None:
 
         self.batch_size = batch_size
+        self.context = context
         self.no_bucketing = no_bucketing
         self.normalize = normalize
 
@@ -226,7 +229,7 @@ class Scorer:
         # split output array into probs per batch
         sample_length = int(len(outputs[0]) / self.batch_size)
 
-        probs = mx.nd.array(outputs[0])  # shape is (t_len*batch_size, t_vocab)
+        probs = mx.nd.array(outputs[0], ctx=self.context)  # shape is (t_len*batch_size, t_vocab)
         probs_per_batch = [probs[i*sample_length:(i+1)*sample_length] for i in range(self.batch_size)]
 
         # get bucket index of batch
@@ -237,7 +240,7 @@ class Scorer:
             mapsample_number = sample_number + offset
 
             if mapsample_number in mapid[bucket_index]:
-                labels = batch.label[0][sample_number]
+                labels = batch.label[0][sample_number].as_in_context(self.context)
                 # print("probs sample nr, {}, map sample nr {}, probs {}, labels {}".format(sample_number, mapsample_number,sample_probs.shape, labels))
                 scores = mx.nd.pick(sample_probs, labels)
                 scores = scores.asnumpy()

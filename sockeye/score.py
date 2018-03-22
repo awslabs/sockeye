@@ -123,6 +123,7 @@ def main():
                                      bucketing=not args.no_bucketing)
 
         scorer = scoring.Scorer(batch_size=args.batch_size,
+                                context=context,
                                 no_bucketing=args.no_bucketing)
 
         output_handler = get_output_handler(output_type=C.OUTPUT_HANDLER_SCORE,
