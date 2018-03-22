@@ -168,6 +168,7 @@ LOGIT_INPUTS_NAME = "logit_inputs"
 LOGITS_NAME = "logits"
 SOFTMAX_NAME = "softmax"
 SOFTMAX_OUTPUT_NAME = SOFTMAX_NAME + "_output"
+SWITCH_PROB_NAME = "swtich_prob"
 
 MEASURE_SPEED_EVERY = 50  # measure speed and metrics every X batches
 
@@ -333,6 +334,7 @@ METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, PERPLEXITY: np.inf}
 
 # loss
 CROSS_ENTROPY = 'cross-entropy'
+PN_CROSS_ENTROPY = 'pn-cross-entropy'
 
 LOSS_NORM_BATCH = 'batch'
 LOSS_NORM_VALID = "valid"

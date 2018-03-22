@@ -57,6 +57,8 @@ def get_loss(loss_config: LossConfig) -> 'Loss':
     """
     if loss_config.name == C.CROSS_ENTROPY:
         return CrossEntropyLoss(loss_config)
+    elif loss_config.name == C.PN_CROSS_ENTROPY:
+        return PointerNetsCrossEntropyLoss(loss_config)
     else:
         raise ValueError("unknown loss name: %s" % loss_config.name)
 
@@ -124,6 +126,44 @@ class CrossEntropyLoss(Loss):
 
     def create_metric(self) -> "CrossEntropyMetric":
         return CrossEntropyMetric(self.loss_config)
+
+
+class PointerNetsCrossEntropyLoss(Loss):
+    """
+    Computes the cross-entropy loss.
+
+    :param loss_config: Loss configuration.
+    """
+
+    def __init__(self, loss_config: LossConfig) -> None:
+        logger.info("Loss: PNCrossEntropy(normalization_type=%s, label_smoothing=%s)",
+                    loss_config.normalization_type, loss_config.label_smoothing)
+        self.loss_config = loss_config
+
+    def get_loss(self, softmax_probs: mx.sym.Symbol, labels: mx.sym.Symbol) -> List[mx.sym.Symbol]:
+        """
+        Returns loss and softmax output symbols given logits and integer-coded labels.
+
+        :param softmax_probs: Shape: (batch_size * target_seq_len, target_vocab_size).
+        :param labels: Shape: (batch_size * target_seq_len,).
+        :return: List of loss symbol.
+        """
+        if self.loss_config.normalization_type == C.LOSS_NORM_VALID:
+            normalization = "valid"
+        elif self.loss_config.normalization_type == C.LOSS_NORM_BATCH:
+            normalization = "null"
+        else:
+            raise ValueError("Unknown loss normalization type: %s" % self.loss_config.normalization_type)
+
+        ce_sym = -mx.sym.sum(mx.sym.sum(mx.sym.broadcast_mul(softmax_probs,labels),1))
+
+        #TODO: normalization?
+        return mx.sym.MakeLoss(ce_sym)
+
+
+    def create_metric(self) -> "CrossEntropyMetric":
+        return CrossEntropyMetric(self.loss_config)
+
 
 
 class CrossEntropyMetric(EvalMetric):

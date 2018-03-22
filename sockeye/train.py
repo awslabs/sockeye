@@ -621,7 +621,8 @@ def create_model_config(args: argparse.Namespace,
                                      config_loss=config_loss,
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
-                                     weight_normalization=args.weight_normalization)
+                                     weight_normalization=args.weight_normalization,
+                                     use_pointer_nets=args.use_pointer_nets)
     return model_config
 
 
@@ -647,7 +648,8 @@ def create_training_model(config: model.ModelConfig,
                                             provide_label=train_iter.provide_label,
                                             default_bucket_key=train_iter.default_bucket_key,
                                             bucketing=not args.no_bucketing,
-                                            gradient_compression_params=gradient_compression_params(args))
+                                            gradient_compression_params=gradient_compression_params(args),
+                                            use_pointer_nets = args.use_pointer_nets)
 
     return training_model
 

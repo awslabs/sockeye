@@ -63,7 +63,8 @@ class TrainingModel(model.SockeyeModel):
                  provide_label: List[mx.io.DataDesc],
                  default_bucket_key: Tuple[int, int],
                  bucketing: bool,
-                 gradient_compression_params: Optional[Dict[str, Any]] = None) -> None:
+                 gradient_compression_params: Optional[Dict[str, Any]] = None,
+                 use_pointer_nets: bool = False) -> None:
         super().__init__(config)
         self.context = context
         self.output_dir = output_dir
@@ -71,6 +72,7 @@ class TrainingModel(model.SockeyeModel):
         self._gradient_compression_params = gradient_compression_params
         self._initialize(provide_data, provide_label, default_bucket_key)
         self._monitor = None  # type: Optional[mx.monitor.Monitor]
+        self.use_pointer_nets = use_pointer_nets
 
     def _initialize(self,
                     provide_data: List[mx.io.DataDesc],
@@ -146,9 +148,12 @@ class TrainingModel(model.SockeyeModel):
 
             # output layer
             # logits: (batch_size * target_seq_len, target_vocab_size)
-            logits = self.output_layer(target_decoded)
-
-            probs = self.model_loss.get_loss(logits, labels)
+            if not self.config.use_pointer_nets:
+                logits = self.output_layer(target_decoded)
+                probs = self.model_loss.get_loss(logits, labels)
+            else:
+                softmax_probs = self.output_layer(target_decoded, context=context)
+                probs = self.model_loss.get_loss(softmax_probs, labels)
 
             return mx.sym.Group(probs), data_names, label_names
 

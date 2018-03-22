@@ -60,7 +60,8 @@ class ModelConfig(Config):
                  config_loss: loss.LossConfig,
                  weight_tying: bool = False,
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
-                 weight_normalization: bool = False) -> None:
+                 weight_normalization: bool = False,
+                 use_pointer_nets: bool = False) -> None:
         super().__init__()
         self.config_data = config_data
         self.vocab_source_size = vocab_source_size
@@ -75,6 +76,7 @@ class ModelConfig(Config):
         self.weight_normalization = weight_normalization
         if weight_tying and weight_tying_type is None:
             raise RuntimeError("weight_tying_type must be specified when using weight_tying.")
+        self.use_pointer_nets = use_pointer_nets
 
 
 class SockeyeModel:
@@ -114,10 +116,17 @@ class SockeyeModel:
                                                   embed_weight=embed_weight_target)
 
         # output layer
-        self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
-                                               vocab_size=self.config.vocab_target_size,
-                                               weight=out_weight_target,
-                                               weight_normalization=self.config.weight_normalization)
+        if self.config.use_pointer_nets:
+            assert self.config.config_loss.name == C.PN_CROSS_ENTROPY
+            self.output_layer = layers.PointerOutputLayer(hidden_size=self.decoder.get_num_hidden(),
+                                                   vocab_size=self.config.vocab_target_size,
+                                                   weight=out_weight_target,
+                                                   weight_normalization=self.config.weight_normalization)
+        else:
+            self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
+                                                   vocab_size=self.config.vocab_target_size,
+                                                   weight=out_weight_target,
+                                                   weight_normalization=self.config.weight_normalization)
 
         self.params = None  # type: Optional[Dict]
         self.aux_params = None  # type: Optional[Dict]
