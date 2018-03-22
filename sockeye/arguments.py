@@ -992,9 +992,6 @@ def add_inference_args(params):
                                type=int_greater_or_equal(1),
                                default=5,
                                help='Size of the beam. Default: %(default)s.')
-    decode_params.add_argument('--use-mxnet-topk',
-                               action='store_true',
-                               help='use mxnet topk')
     decode_params.add_argument('--batch-size',
                                type=int_greater_or_equal(1),
                                default=1,

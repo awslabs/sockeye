@@ -889,11 +889,9 @@ class Translator:
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
-                 store_beam: bool = False,
-                 use_mxnet_topk: bool = False) -> None:
-        self.use_mxnet_topk = use_mxnet_topk
-        self.smallest_k_func = utils.smallest_k_mx if self.use_mxnet_topk else utils.smallest_k
+                 store_beam: bool = False) -> None:
         self.context = context
+        self.smallest_k_func = utils.smallest_k if self.context == mx.cpu() else utils.smallest_k_mx
         self.length_penalty = length_penalty
         self.source_vocabs = source_vocabs
         self.vocab_target = target_vocab
@@ -1281,7 +1279,7 @@ class Translator:
 
             # (3) get beam_size winning hypotheses for each sentence block separately
             # TODO(fhieber): once mx.nd.topk is sped-up no numpy conversion necessary anymore.
-            if not self.use_mxnet_topk:
+            if self.context == mx.cpu():
                 scores = scores.asnumpy()  # convert to numpy once to minimize cross-device copying
 
             for sent in range(self.batch_size):
