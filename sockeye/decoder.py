@@ -34,13 +34,13 @@ logger = logging.getLogger(__name__)
 DecoderConfig = Union['RecurrentDecoderConfig', transformer.TransformerConfig, 'ConvolutionalDecoderConfig']
 
 
-def get_decoder(config: DecoderConfig) -> 'Decoder':
+def get_decoder(config: DecoderConfig, prefix: str) -> 'Decoder':
     if isinstance(config, RecurrentDecoderConfig):
-        return RecurrentDecoder(config=config, prefix=C.RNN_DECODER_PREFIX)
+        return RecurrentDecoder(config=config, prefix=prefix + C.RNN_DECODER_PREFIX)
     elif isinstance(config, ConvolutionalDecoderConfig):
-        return ConvolutionalDecoder(config=config, prefix=C.CNN_DECODER_PREFIX)
+        return ConvolutionalDecoder(config=config, prefix=prefix + C.CNN_DECODER_PREFIX)
     elif isinstance(config, transformer.TransformerConfig):
-        return TransformerDecoder(config=config, prefix=C.TRANSFORMER_DECODER_PREFIX)
+        return TransformerDecoder(config=config, prefix=prefix + C.TRANSFORMER_DECODER_PREFIX)
     else:
         raise ValueError("Unsupported decoder configuration")
 
