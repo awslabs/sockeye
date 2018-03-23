@@ -59,6 +59,6 @@ def test_score(mock_scorer, mock_score_output_handler, mock_scoring_model, mock_
                         models=[mock_scoring_model],
                         data_iters=[mock_data_iterator],
                         mapids=[defaultdict(lambda: defaultdict(int))],
-                        scorer=[mock_scorer])
+                        scorer=mock_scorer)
     # Ensure score gets called once.
     assert mock_scorer.score.call_count == 1
