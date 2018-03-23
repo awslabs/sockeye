@@ -57,7 +57,7 @@ class ScoringModel(model.SockeyeModel):
         super().__init__(config)
         self.context = context
         self.bucketing = bucketing
-        self._build_model_components()
+        #self._build_model_components()
         self.module = self._build_module(data_iter)
 
         self.config = config
@@ -241,22 +241,28 @@ class Scorer:
 
             if mapsample_number in mapid[bucket_index]:
                 labels = batch.label[0][sample_number].as_in_context(self.context)
-                # print("probs sample nr, {}, map sample nr {}, probs {}, labels {}".format(sample_number, mapsample_number,sample_probs.shape, labels))
+                
                 scores = mx.nd.pick(sample_probs, labels)
                 scores = scores.asnumpy()
                 labels = labels.asnumpy()
                 non_pad_indices = np.where(labels != 0)
-                # print("labels: {}".format(labels))
-                # print("non pad: {}".format(non_pad_indices))
                 scores = np.take(scores, non_pad_indices)
                 log_probs = - np.log(scores)
+                log_probs = log_probs.flatten()
+                
+                # remove inf if present and print warning to log file 
+                infs = np.where(log_probs == np.inf)
+                sentence_id = mapid[bucket_index][mapsample_number]
+                if len(infs[0]) >0:
+                    log_probs = np.delete(log_probs, infs)
+                    logger.warning("removed inf in scores at indices {} in sentence {}".format(infs[0], sentence_id))
                 score = np.nansum(log_probs)
-                # TODO: inf?
+                
                 if self.normalize:
                     score = np.mean(log_probs)
-                sentence_id = mapid[bucket_index][mapsample_number]
 
                 scored_batch.append((sentence_id, score))
+                
             else:  # TODO: turn off?
                 logger.debug("sample {} in batch number {} was filler".format(sample_number, batch_index))
 
