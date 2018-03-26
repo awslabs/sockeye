@@ -33,13 +33,13 @@ logger = logging.getLogger(__name__)
 EncoderConfig = Union['RecurrentEncoderConfig', transformer.TransformerConfig, 'ConvolutionalEncoderConfig']
 
 
-def get_encoder(config: EncoderConfig) -> 'Encoder':
+def get_encoder(config: EncoderConfig, prefix: str = '') -> 'Encoder':
     if isinstance(config, RecurrentEncoderConfig):
-        return get_recurrent_encoder(config)
+        return get_recurrent_encoder(config, prefix)
     elif isinstance(config, transformer.TransformerConfig):
-        return get_transformer_encoder(config)
+        return get_transformer_encoder(config, prefix)
     elif isinstance(config, ConvolutionalEncoderConfig):
-        return get_convolutional_encoder(config)
+        return get_convolutional_encoder(config, prefix)
     else:
         raise ValueError("Unsupported encoder configuration")
 
@@ -86,24 +86,26 @@ class ConvolutionalEncoderConfig(config.Config):
         self.positional_embedding_type = positional_embedding_type
 
 
-def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
+def get_recurrent_encoder(config: RecurrentEncoderConfig, prefix: str) -> 'Encoder':
     """
     Returns an encoder stack with a bi-directional RNN, and a variable number of uni-directional forward RNNs.
 
     :param config: Configuration for recurrent encoder.
+    :param prefix: Prefix for variable names.
     :return: Encoder instance.
     """
     # TODO give more control on encoder architecture
     encoders = list()  # type: List[Encoder]
 
     if config.conv_config is not None:
-        encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config, prefix=C.CHAR_SEQ_ENCODER_PREFIX))
+        encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config, prefix=prefix + C.CHAR_SEQ_ENCODER_PREFIX))
         if config.conv_config.add_positional_encoding:
             # If specified, add positional encodings to segment embeddings
             encoders.append(AddSinCosPositionalEmbeddings(num_embed=config.conv_config.num_embed,
                                                           scale_up_input=False,
                                                           scale_down_positions=False,
-                                                          prefix="%sadd_positional_encodings" % C.CHAR_SEQ_ENCODER_PREFIX))
+                                                          prefix="%s%sadd_positional_encodings" %
+                                                                 (prefix, C.CHAR_SEQ_ENCODER_PREFIX)))
         encoders.append(ConvertLayout(C.TIME_MAJOR, num_hidden=encoders[-1].get_num_hidden()))
     else:
         encoders.append(ConvertLayout(C.TIME_MAJOR, num_hidden=0))
@@ -117,7 +119,7 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
 
     # One layer bi-directional RNN:
     encoders.append(BiDirectionalRNNEncoder(rnn_config=config.rnn_config.copy(num_layers=1),
-                                            prefix=C.BIDIRECTIONALRNN_PREFIX,
+                                            prefix=prefix + C.BIDIRECTIONALRNN_PREFIX,
                                             layout=C.TIME_MAJOR))
 
     if config.rnn_config.num_layers > 1:
@@ -126,7 +128,7 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
         remaining_rnn_config = config.rnn_config.copy(num_layers=config.rnn_config.num_layers - 1,
                                                       first_residual_layer=config.rnn_config.first_residual_layer - 1)
         encoders.append(RecurrentEncoder(rnn_config=remaining_rnn_config,
-                                         prefix=C.STACKEDRNN_PREFIX,
+                                         prefix=prefix + C.STACKEDRNN_PREFIX,
                                          layout=C.TIME_MAJOR))
 
     encoders.append(ConvertLayout(C.BATCH_MAJOR, encoders[-1].get_num_hidden()))
@@ -134,12 +136,12 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
     return EncoderSequence(encoders)
 
 
-def get_convolutional_encoder(config: ConvolutionalEncoderConfig) -> 'Encoder':
+def get_convolutional_encoder(config: ConvolutionalEncoderConfig, prefix: str) -> 'Encoder':
     """
     Creates a convolutional encoder.
 
     :param config: Configuration for convolutional encoder.
-    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
+    :param prefix: Prefix for variable names.
     :return: Encoder instance.
     """
     encoders = list()  # type: List[Encoder]
@@ -148,17 +150,18 @@ def get_convolutional_encoder(config: ConvolutionalEncoderConfig) -> 'Encoder':
                                              max_seq_len=config.max_seq_len_source,
                                              fixed_pos_embed_scale_up_input=False,
                                              fixed_pos_embed_scale_down_positions=True,
-                                             prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
+                                             prefix=prefix + C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
     encoders.append(ConvolutionalEncoder(config=config))
     return EncoderSequence(encoders)
 
 
-def get_transformer_encoder(config: transformer.TransformerConfig) -> 'Encoder':
+def get_transformer_encoder(config: transformer.TransformerConfig, prefix: str) -> 'Encoder':
     """
     Returns a Transformer encoder, consisting of an embedding layer with
     positional encodings and a TransformerEncoder instance.
 
     :param config: Configuration for transformer encoder.
+    :param prefix: Prefix for variable names.
     :return: Encoder instance.
     """
     encoders = list()  # type: List[Encoder]
@@ -167,11 +170,11 @@ def get_transformer_encoder(config: transformer.TransformerConfig) -> 'Encoder':
                                              config.max_seq_len_source,
                                              fixed_pos_embed_scale_up_input=True,
                                              fixed_pos_embed_scale_down_positions=False,
-                                             prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
+                                             prefix=prefix + C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
     if config.conv_config is not None:
-        encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
+        encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config, prefix=prefix + C.CHAR_SEQ_ENCODER_PREFIX))
 
-    encoders.append(TransformerEncoder(config))
+    encoders.append(TransformerEncoder(config, prefix=prefix + C.TRANSFORMER_ENCODER_PREFIX))
 
     return EncoderSequence(encoders)
 
@@ -639,7 +642,7 @@ class RecurrentEncoder(Encoder):
     Uni-directional (multi-layered) recurrent encoder.
 
     :param rnn_config: RNN configuration.
-    :param prefix: Prefix.
+    :param prefix: Prefix for variable names.
     :param layout: Data layout.
     """
 
@@ -686,7 +689,7 @@ class BiDirectionalRNNEncoder(Encoder):
     States from both RNNs are concatenated together.
 
     :param rnn_config: RNN configuration.
-    :param prefix: Prefix.
+    :param prefix: Prefix for variable names.
     :param layout: Data layout.
     :param encoder_class: Recurrent encoder class to use.
     """

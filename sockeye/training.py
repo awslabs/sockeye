@@ -140,9 +140,9 @@ class TrainingModel(model.SockeyeModel):
             # logits: (batch_size * target_seq_len, target_vocab_size)
             logits = self.output_layer(target_decoded)
 
-            probs = self.model_loss.get_loss(logits, labels)
+            loss_output = self.model_loss.get_loss(logits, labels)
 
-            return mx.sym.Group(probs), data_names, label_names
+            return mx.sym.Group(loss_output), data_names, label_names
 
         if self._bucketing:
             logger.info("Using bucketing. Default max_seq_len=%s", default_bucket_key)
