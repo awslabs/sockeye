@@ -88,12 +88,13 @@ def _instantiate(cls, params):
     return cls(**valid_params)
 
 
-def get_attention(config: AttentionConfig, max_seq_len: int) -> 'Attention':
+def get_attention(config: AttentionConfig, max_seq_len: int, prefix: str = C.ATTENTION_PREFIX) -> 'Attention':
     """
     Returns an Attention instance based on attention_type.
 
     :param config: Attention configuration.
     :param max_seq_len: Maximum length of source sequences.
+    :param prefix: Name prefix.
     :return: Instance of Attention.
     """
 
@@ -101,6 +102,7 @@ def get_attention(config: AttentionConfig, max_seq_len: int) -> 'Attention':
     params = config.__dict__.copy()
     params.pop('_frozen')
     params['max_seq_len'] = max_seq_len
+    params['prefix'] = prefix
     return _instantiate(att_cls, params)
 
 
@@ -230,10 +232,11 @@ class BilinearAttention(Attention):
 
     :param query_num_hidden: Number of hidden units the source will be projected to.
     :param dtype: data type.
+    :param prefix: Name prefix.
     """
 
-    def __init__(self, query_num_hidden: int, dtype: str = C.DTYPE_FP32) -> None:
-        super().__init__(False, dtype=dtype)
+    def __init__(self, query_num_hidden: int, dtype: str = C.DTYPE_FP32, prefix: str = C.ATTENTION_PREFIX) -> None:
+        super().__init__(False, dtype=dtype, prefix=prefix)
         self.num_hidden = query_num_hidden
         self.s2t_weight = mx.sym.Variable("%ss2t_weight" % self.prefix)
 
@@ -299,6 +302,7 @@ class DotAttention(Attention):
     :param query_num_hidden: Number of hidden units in query.
     :param num_hidden: Number of hidden units.
     :param is_scaled: Optionally scale query before dot product [Vaswani et al, 2017].
+    :param prefix: Name prefix.
     :param dtype: data type.
     """
 
@@ -308,8 +312,9 @@ class DotAttention(Attention):
                  query_num_hidden: int,
                  num_hidden: int,
                  is_scaled: bool = False,
+                 prefix: str = C.ATTENTION_PREFIX,
                  dtype: str = C.DTYPE_FP32) -> None:
-        super().__init__(input_previous_word, dtype=dtype)
+        super().__init__(input_previous_word, dtype=dtype, prefix=prefix)
         self.project_source = source_num_hidden != num_hidden
         self.project_query = query_num_hidden != num_hidden
         self.num_hidden = num_hidden
@@ -386,6 +391,7 @@ class MultiHeadDotAttention(Attention):
     :param input_previous_word: Feed the previous target embedding into the attention mechanism.
     :param source_num_hidden: Number of hidden units.
     :param num_heads: Number of attention heads / independently computed attention scores.
+    :param prefix: Name prefix.
     :param dtype: data type.
     """
 
@@ -393,8 +399,9 @@ class MultiHeadDotAttention(Attention):
                  input_previous_word: bool,
                  source_num_hidden: int,
                  num_heads: int,
+                 prefix: str = C.ATTENTION_PREFIX,
                  dtype: str = C.DTYPE_FP32) -> None:
-        super().__init__(input_previous_word, dtype=dtype)
+        super().__init__(input_previous_word, dtype=dtype, prefix=prefix)
         utils.check_condition(num_heads is not None, "%s requires setting num-heads." % C.ATT_MH_DOT)
         utils.check_condition(source_num_hidden % num_heads == 0,
                               "Number of heads (%d) must divide attention depth (%d)" % (num_heads, source_num_hidden))
@@ -529,14 +536,16 @@ class LocationAttention(Attention):
 
     :param input_previous_word: Feed the previous target embedding into the attention mechanism.
     :param max_seq_len: Maximum length of source sequences.
+    :param prefix: Name prefix.
     :param dtype: data type.
     """
 
     def __init__(self,
                  input_previous_word: bool,
                  max_seq_len: int,
+                 prefix: str = C.ATTENTION_PREFIX,
                  dtype: str = C.DTYPE_FP32) -> None:
-        super().__init__(input_previous_word, dtype=dtype)
+        super().__init__(input_previous_word, dtype=dtype, prefix=prefix)
         self.max_source_seq_len = max_seq_len
         self.location_weight = mx.sym.Variable("%sloc_weight" % self.prefix)
         self.location_bias = mx.sym.Variable("%sloc_bias" % self.prefix)
@@ -604,6 +613,7 @@ class MlpAttention(Attention):
     :param input_previous_word: Feed the previous target embedding into the attention mechanism.
     :param num_hidden: Number of hidden units.
     :param layer_normalization: If true, normalizes hidden layer outputs before tanh activation.
+    :param prefix: Name prefix
     :param dtype: data type.
     """
 
@@ -611,9 +621,11 @@ class MlpAttention(Attention):
                  input_previous_word: bool,
                  num_hidden: int,
                  layer_normalization: bool = False,
+                 prefix: str = C.ATTENTION_PREFIX,
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__(input_previous_word=input_previous_word,
                          dynamic_source_num_hidden=1,
+                         prefix=prefix,
                          dtype=dtype)
         self.attention_num_hidden = num_hidden
         # input (encoder) to hidden
@@ -734,6 +746,7 @@ class MlpCovAttention(MlpAttention):
     :param num_hidden: Number of hidden units.
     :param layer_normalization: If true, normalizes hidden layer outputs before tanh activation.
     :param config_coverage: coverage config.
+    :param prefix: Name prefix.
     :param dtype: data type.
     """
 
@@ -742,10 +755,12 @@ class MlpCovAttention(MlpAttention):
                  num_hidden: int,
                  layer_normalization: bool = False,
                  config_coverage: coverage.CoverageConfig = None,
+                 prefix: str = C.ATTENTION_PREFIX,
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__(input_previous_word=input_previous_word,
                          num_hidden=num_hidden,
                          layer_normalization=layer_normalization,
+                         prefix=prefix,
                          dtype=dtype)
         self.coverage = coverage.get_coverage(config_coverage)
         self.dynamic_source_num_hidden = config_coverage.num_hidden
