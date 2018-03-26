@@ -91,7 +91,7 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, prefix: str) -> 'Encod
     Returns an encoder stack with a bi-directional RNN, and a variable number of uni-directional forward RNNs.
 
     :param config: Configuration for recurrent encoder.
-    :param prefix: Prefix.
+    :param prefix: Prefix for variable names.
     :return: Encoder instance.
     """
     # TODO give more control on encoder architecture
@@ -141,7 +141,7 @@ def get_convolutional_encoder(config: ConvolutionalEncoderConfig, prefix: str) -
     Creates a convolutional encoder.
 
     :param config: Configuration for convolutional encoder.
-    :param prefix: Prefix.
+    :param prefix: Prefix for variable names.
     :return: Encoder instance.
     """
     encoders = list()  # type: List[Encoder]
@@ -161,7 +161,7 @@ def get_transformer_encoder(config: transformer.TransformerConfig, prefix: str) 
     positional encodings and a TransformerEncoder instance.
 
     :param config: Configuration for transformer encoder.
-    :param prefix: Prefix.
+    :param prefix: Prefix for variable names.
     :return: Encoder instance.
     """
     encoders = list()  # type: List[Encoder]
@@ -642,7 +642,7 @@ class RecurrentEncoder(Encoder):
     Uni-directional (multi-layered) recurrent encoder.
 
     :param rnn_config: RNN configuration.
-    :param prefix: Prefix.
+    :param prefix: Prefix for variable names.
     :param layout: Data layout.
     """
 
@@ -689,7 +689,7 @@ class BiDirectionalRNNEncoder(Encoder):
     States from both RNNs are concatenated together.
 
     :param rnn_config: RNN configuration.
-    :param prefix: Prefix.
+    :param prefix: Prefix for variable names.
     :param layout: Data layout.
     :param encoder_class: Recurrent encoder class to use.
     """

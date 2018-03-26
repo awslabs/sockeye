@@ -105,14 +105,14 @@ class SockeyeModel:
         self.decoder = decoder.get_decoder(self.config.config_decoder, prefix=self.prefix)
 
         # source & target embeddings
-        embed_weight_source, embed_weight_target, out_weight_target = self._get_embed_weights(prefix)
+        embed_weight_source, embed_weight_target, out_weight_target = self._get_embed_weights(self.prefix)
         self.embedding_source = encoder.Embedding(self.config.config_embed_source,
-                                                  prefix=prefix + C.SOURCE_EMBEDDING_PREFIX,
+                                                  prefix=self.prefix + C.SOURCE_EMBEDDING_PREFIX,
                                                   embed_weight=embed_weight_source,
                                                   is_source=True)
 
         self.embedding_target = encoder.Embedding(self.config.config_embed_target,
-                                                  prefix=prefix + C.TARGET_EMBEDDING_PREFIX,
+                                                  prefix=self.prefix + C.TARGET_EMBEDDING_PREFIX,
                                                   embed_weight=embed_weight_target)
 
         # output layer
@@ -120,7 +120,7 @@ class SockeyeModel:
                                                vocab_size=self.config.vocab_target_size,
                                                weight=out_weight_target,
                                                weight_normalization=self.config.weight_normalization,
-                                               prefix=prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
+                                               prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
 
         self.params = None  # type: Optional[Dict]
         self.aux_params = None  # type: Optional[Dict]
