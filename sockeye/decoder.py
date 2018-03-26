@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 DecoderConfig = Union['RecurrentDecoderConfig', transformer.TransformerConfig, 'ConvolutionalDecoderConfig']
 
 
-def get_decoder(config: DecoderConfig, prefix: str) -> 'Decoder':
+def get_decoder(config: DecoderConfig, prefix: str = '') -> 'Decoder':
     if isinstance(config, RecurrentDecoderConfig):
         return RecurrentDecoder(config=config, prefix=prefix + C.RNN_DECODER_PREFIX)
     elif isinstance(config, ConvolutionalDecoderConfig):

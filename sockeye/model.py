@@ -101,8 +101,8 @@ class SockeyeModel:
         logger.info("%s", self.config)
 
         # encoder & decoder first (to know the decoder depth)
-        self.encoder = encoder.get_encoder(self.config.config_encoder, self.prefix)
-        self.decoder = decoder.get_decoder(self.config.config_decoder, self.prefix)
+        self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix)
+        self.decoder = decoder.get_decoder(self.config.config_decoder, prefix=self.prefix)
 
         # source & target embeddings
         embed_weight_source, embed_weight_target, out_weight_target = self._get_embed_weights(prefix)
