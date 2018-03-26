@@ -77,35 +77,37 @@ HTML_TEMPLATE = Template("""
                          </html>""")
 
 
-def _add_graph_level(graph, level, parent_ids, names, scores, normalized_scores):
+def _add_graph_level(graph, level, parent_ids, names, scores, normalized_scores,
+                     include_pad):
     """Adds a level to the passed graph"""
     for i, parent_id in enumerate(parent_ids):
-        if names[i] != PAD_TOKEN:
-            new_node = (level, i)
-            parent_node = (level - 1, parent_id)
-            raw_score = '%.3f' % float(scores[i]) if scores[i] is not None else '-inf'
-            norm_score = '%.3f' % float(normalized_scores[i]) if normalized_scores[i] is not None else '-inf'
+        if not include_pad and names[i] == PAD_TOKEN:
+            continue
+        new_node = (level, i)
+        parent_node = (level - 1, parent_id)
+        raw_score = '%.3f' % float(scores[i]) if scores[i] is not None else '-inf'
+        norm_score = '%.3f' % float(normalized_scores[i]) if normalized_scores[i] is not None else '-inf'
 
-            graph.add_node(new_node)
-            graph.node[new_node]["name"] = names[i]
-            graph.node[new_node]["score"] = "[RAW] {}".format(raw_score)
-            graph.node[new_node]["norm_score"] = "[NORM] {}".format(norm_score)
-            graph.node[new_node]["size"] = 100
-            # Add an edge to the parent
-            graph.add_edge(parent_node, new_node)
+        graph.add_node(new_node)
+        graph.node[new_node]["name"] = names[i]
+        graph.node[new_node]["score"] = "[RAW] {}".format(raw_score)
+        graph.node[new_node]["norm_score"] = "[NORM] {}".format(norm_score)
+        graph.node[new_node]["size"] = 100
+        # Add an edge to the parent
+        graph.add_edge(parent_node, new_node)
 
-def create_graph(predicted_ids, parent_ids, scores, normalized_scores):
+def create_graph(predicted_ids, parent_ids, scores, normalized_scores, include_pad):
 
     seq_length = len(predicted_ids)
     graph = nx.DiGraph()
     for level in range(seq_length):
         names = [pred for pred in predicted_ids[level]]
         _add_graph_level(graph, level + 1, parent_ids[level], names,
-                         scores[level], normalized_scores[level])
+                         scores[level], normalized_scores[level], include_pad)
     graph.node[(0, 0)]["name"] = "START"
     return graph
 
-def generate(input_data, output_dir):
+def generate(input_data, output_dir, include_pad=False):
 
     path_base = os.path.dirname(os.path.realpath(__file__))
 
@@ -123,7 +125,8 @@ def generate(input_data, output_dir):
             graph = create_graph(predicted_ids=beam["predicted_tokens"],
                                  parent_ids=beam["parent_ids"],
                                  scores=beam["scores"],
-                                 normalized_scores=beam["normalized_scores"])
+                                 normalized_scores=beam["normalized_scores"],
+                                 include_pad=include_pad)
 
             json_str = json.dumps(
                 json_graph.tree_data(graph, (0, 0)),
@@ -143,9 +146,12 @@ def main():
     parser.add_argument(
         "-o", "--output_dir", type=str, required=True,
         help="path to the output directory")
+    parser.add_argument('--pad', dest='include_pad', action='store_true')
+    parser.add_argument('--no-pad', dest='include_pad', action='store_false')
+    parser.set_defaults(include_pad=False)
     args = parser.parse_args()
 
-    generate(args.data, args.output_dir)
+    generate(args.data, args.output_dir, include_pad=args.include_pad)
 
 
 if __name__ == "__main__":
