@@ -161,7 +161,7 @@ class ScoringOutput:
     model.
     """
 
-    __slots__ = ('sentence_id', 'source_tokens', 'target_tokens', 'scores')
+    __slots__ = ('sentence_id', 'source_tokens', 'target_tokens', 'score')
 
     def __init__(self,
                  sentence_id: int,
