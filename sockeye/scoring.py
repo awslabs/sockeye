@@ -57,7 +57,6 @@ class ScoringModel(model.SockeyeModel):
         super().__init__(config)
         self.context = context
         self.bucketing = bucketing
-        #self._build_model_components()
         self.module = self._build_module(data_iter)
 
         self.config = config
@@ -238,33 +237,27 @@ class Scorer:
         for sample_number, sample_probs in enumerate(probs_per_batch):
 
             mapsample_number = sample_number + offset
-
-            if mapsample_number in mapid[bucket_index]:
-                labels = batch.label[0][sample_number].as_in_context(self.context)
-                
-                scores = mx.nd.pick(sample_probs, labels)
-                scores = scores.asnumpy()
-                labels = labels.asnumpy()
-                non_pad_indices = np.where(labels != 0)
-                scores = np.take(scores, non_pad_indices)
-                log_probs = - np.log(scores)
-                log_probs = log_probs.flatten()
-                
-                # remove inf if present and print warning to log file 
-                infs = np.where(log_probs == np.inf)
+            
+            try:
                 sentence_id = mapid[bucket_index][mapsample_number]
-                if len(infs[0]) >0:
-                    log_probs = np.delete(log_probs, infs)
-                    logger.warning("removed inf in scores at indices {} in sentence {}".format(infs[0], sentence_id))
-                score = np.nansum(log_probs)
-                
-                if self.normalize:
-                    score = np.mean(log_probs)
+            except KeyError:
+                # this sample is a replica to fill up the batch
+                continue
 
-                scored_batch.append((sentence_id, score))
-                
-            else:  # TODO: turn off?
-                logger.debug("sample {} in batch number {} was filler".format(sample_number, batch_index))
+            labels = batch.label[0][sample_number].as_in_context(self.context)
+            
+            scores = mx.nd.pick(sample_probs, labels)
+            # remove scores for padding symbols
+            scores = mx.nd.take(scores, labels != 0)
+            log_probs = - mx.nd.log(scores)
+            log_probs = log_probs.flatten().asnumpy()
+            
+            # mask INF and NAN values
+            score = np.ma.masked_invalid(log_probs).sum()                
+            if self.normalize:
+                score = np.mean(log_probs)
+
+            scored_batch.append((sentence_id, score))
 
         return scored_batch
 
