@@ -87,7 +87,6 @@ class ScoringModel(model.SockeyeModel):
 
         data_names = [x[0] for x in data_iter.provide_data]
         label_names = [x[0] for x in data_iter.provide_label]
-        # scores = [[None] for x in data_iter.provide_label]
 
         def sym_gen(seq_lens):
             """
@@ -146,8 +145,6 @@ class ScoringModel(model.SockeyeModel):
 
 
 Tokens = List[str]
-ScoredBatch = List[Tuple[int, float]]
-ScoredSamples = List[ScoredBatch]
 
 
 class ScoringOutput:
@@ -157,8 +154,8 @@ class ScoringOutput:
     :param sentence_id: Id of input sentence.
     :param source_tokens: Tokens of the source sentence.
     :param target_tokens: Tokens of the target sentence.
-    :param scores: Scores obtained by this sentence pair, one for each
-    model.
+    :param scores: Score obtained by this sentence pair, an average score
+    for an ensemble of models.
     """
 
     __slots__ = ('sentence_id', 'source_tokens', 'target_tokens', 'score')
@@ -181,6 +178,8 @@ class ScoringOutput:
 
 
 MappingDict = DefaultDict[int, DefaultDict[int, int]]
+ScoredBatch = List[Tuple[int, float]]
+ScoredSamples = List[ScoredBatch]
 
 
 class Scorer:
@@ -284,7 +283,7 @@ class Scorer:
         scored samples.
         :param model: The model used for scoring, an instance of ScoringModel.
         :param data_iter: Iterator that returns batches of data.
-        :param mapid: Nested dictionary mapping  positions in buckets to the
+        :param mapid: Nested dictionary mapping positions in buckets to the
         original ordering in the input.
         :return: ScoredSamples, which is a list of scored batches.
         """
