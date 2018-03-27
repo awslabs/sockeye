@@ -1177,3 +1177,8 @@ def add_scoring_args(params):
                               help='Embedding size for additional source factors. '
                                    'You must provide as many dimensions as '
                                    '(validation) source factor files. Default: %(default)s.')
+    scoring_params.add_argument('--ensemble-mode',
+                               type=str,
+                               default='linear',
+                               choices=['linear'],
+                               help='Ensemble mode. Default: %(default)s.')

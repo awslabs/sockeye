@@ -323,6 +323,5 @@ class ScoreOutputHandler(OutputHandler):
         :param s_output: Scoring output.
         :param s_walltime: Total walltime for scoring.
         """
-        self.stream.write(" ".join(["{:.3f}".format(score) for score in s_output.scores]))
-        self.stream.write("\n")
+        self.stream.write("{:.5f}\n".format(s_output.score))
         self.stream.flush()

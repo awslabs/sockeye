@@ -124,6 +124,7 @@ def main():
 
         scorer = scoring.Scorer(batch_size=args.batch_size,
                                 context=context,
+                                ensemble_mode=args.ensemble_mode
                                 no_bucketing=args.no_bucketing)
 
         output_handler = get_output_handler(output_type=C.OUTPUT_HANDLER_SCORE,

@@ -167,17 +167,17 @@ class ScoringOutput:
                  sentence_id: int,
                  source_tokens: Optional[Tokens],
                  target_tokens: Optional[Tokens],
-                 scores: List[float]) -> None:
+                 score: float) -> None:
         self.sentence_id = sentence_id
         self.source_tokens = source_tokens
         self.target_tokens = target_tokens
-        self.scores = scores
+        self.score = score
 
     def __str__(self):
         """
         Returns a string representation of a scoring output.
         """
-        return 'ScoringOutput(%d, %s, %s, %s)' % (self.sentence_id, self.source_tokens, self.target_tokens, str(self.scores))
+        return 'ScoringOutput(%d, %s, %s, %f)' % (self.sentence_id, self.source_tokens, self.target_tokens, self.score)
 
 
 MappingDict = DefaultDict[int, DefaultDict[int, int]]
@@ -189,6 +189,7 @@ class Scorer:
 
     :param batch_size: Batch size.
     :param context: The context(s) that MXNet will be run in (GPU(s)/CPU).
+    :param ensemble_mode: Ensemble mode: linear combination of scores.
     :param no_bucketing: If False bucketing will be used, if True the
     computation graph will always be unrolled to the full length.
     :param normalize: If True, normalize scores by the length of the target
@@ -197,6 +198,7 @@ class Scorer:
     def __init__(self,
                  batch_size: int,
                  context: List[mx.context.Context],
+                 ensemble_mode: str,
                  no_bucketing: bool = False,
                  normalize: Optional[bool] = True) -> None:
 
@@ -204,6 +206,18 @@ class Scorer:
         self.context = context
         self.no_bucketing = no_bucketing
         self.normalize = normalize
+        self.interpolation_func = self._get_interpolation_func(ensemble_mode)
+
+    @staticmethod
+    def _get_interpolation_func(ensemble_mode):
+        if ensemble_mode == 'linear':
+            return Scorer._linear_interpolation
+        else:
+            raise ValueError("unknown interpolation type")
+
+    @staticmethod
+    def _linear_interpolation(predictions):
+        return np.mean(predictions, axis=0)
 
     def _score_batch(self,
                      model: ScoringModel,
@@ -237,7 +251,7 @@ class Scorer:
         for sample_number, sample_probs in enumerate(probs_per_batch):
 
             mapsample_number = sample_number + offset
-            
+
             try:
                 sentence_id = mapid[bucket_index][mapsample_number]
             except KeyError:
@@ -245,15 +259,15 @@ class Scorer:
                 continue
 
             labels = batch.label[0][sample_number].as_in_context(self.context)
-            
+
             scores = mx.nd.pick(sample_probs, labels)
             # remove scores for padding symbols
             scores = mx.nd.take(scores, labels != 0)
             log_probs = - mx.nd.log(scores)
             log_probs = log_probs.flatten().asnumpy()
-            
+
             # mask INF and NAN values
-            score = np.ma.masked_invalid(log_probs).sum()                
+            score = np.ma.masked_invalid(log_probs).sum()
             if self.normalize:
                 score = np.mean(log_probs)
 
@@ -325,12 +339,14 @@ class Scorer:
 
         for sample in zip(*scored_samples):
             scores = [score for (sentence_id, score) in sample]
+            ensemble_score = self.interpolation_func(scores)
+
             sentence_id = sample[0][0]
 
             scored_output = ScoringOutput(sentence_id=sentence_id,
                                           source_tokens=[],
                                           target_tokens=[],
-                                          scores=scores)
+                                          score=ensemble_score)
             scored_outputs.append(scored_output)
 
         return scored_outputs
