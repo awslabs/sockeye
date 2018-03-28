@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.17.5]
+### Added
+- Added a flag `--strip-unknown-words` to `sockeye.translate` to remove any `<unk>` symbols from the output strings.
+
 ## [1.17.4]
 ### Added
 - Added a flag `--fixed-param-names` to prevent certain parameters from being optimized during training.
