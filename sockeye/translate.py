@@ -84,7 +84,8 @@ def main():
                                           source_vocabs=source_vocabs,
                                           target_vocab=target_vocab,
                                           restrict_lexicon=restrict_lexicon,
-                                          store_beam=store_beam)
+                                          store_beam=store_beam,
+                                          strip_unknown_words=args.strip_unknown_words)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
