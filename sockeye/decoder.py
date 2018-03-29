@@ -16,8 +16,7 @@ Decoders for sequence-to-sequence models.
 """
 import logging
 from abc import ABC, abstractmethod
-from typing import Callable, Dict, List, NamedTuple, Tuple, Union
-from typing import Optional
+from typing import Callable, cast, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import mxnet as mx
 
@@ -259,8 +258,8 @@ class TransformerDecoder(Decoder):
         :param states: Arbitrary list of decoder states.
         :return: logit inputs, attention probabilities, next decoder states.
         """
-        # for step > 1, states contains source_encoded, source_encoded_lengths, and a cache tensor
-        source_encoded, source_encoded_lengths = states[:2]  # pylint: disable=unbalanced-tuple-unpacking
+        # for step > 1, states contains source_encoded, source_encoded_lengths, and cache tensors.
+        source_encoded, source_encoded_lengths, *cache = states  # type: ignore
 
         # symbolic indices of the previous word
         indices = mx.sym.arange(start=step - 1, stop=step, step=1, name='indices')
@@ -283,19 +282,17 @@ class TransformerDecoder(Decoder):
         target_bias = transformer.get_autoregressive_bias(step, name="%sbias" % self.prefix)
         target_bias = mx.sym.slice_axis(target_bias, axis=1, begin=-1, end=step)
 
-        # retrieve precomputed self-attention keys & values for each layer from states.
-        layer_caches = self._get_layer_caches_from_states(list(states))
-        cache = []  # type: List[mx.sym.Symbol]
+        new_states = [source_encoded, source_encoded_lengths]
+        layer_caches = self._get_cache_per_layer(cast(List[mx.sym.Symbol], cache))
         for layer, layer_cache in zip(self.layers, layer_caches):
             target = layer(target=target,
                            target_bias=target_bias,
                            source=source_encoded,
                            source_bias=source_bias,
                            cache=layer_cache)
-            # store updated keys and values in the cache.
+            # store updated keys and values in states list.
             # (layer.__call__() has the side-effect of updating contents of layer_cache)
-            cache += [layer_cache['k'], layer_cache['v']]
-        cache = mx.sym.concat(*cache, dim=1, name='new_cache')
+            new_states += [layer_cache['k'], layer_cache['v']]
 
         # (batch_size, 1, model_size)
         target = self.final_process(data=target, prev=None)
@@ -305,32 +302,21 @@ class TransformerDecoder(Decoder):
         # TODO(fhieber): no attention probs for now
         attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
 
-        new_states = [source_encoded, source_encoded_lengths, cache]
         return target, attention_probs, new_states
 
-    def _get_layer_caches_from_states(self, states: List[mx.sym.Symbol]) -> List[Dict[str, Optional[mx.sym.Symbol]]]:
+    def _get_cache_per_layer(self, cache: List[mx.sym.Symbol]) -> List[Dict[str, Optional[mx.sym.Symbol]]]:
         """
-        For decoder time steps > 1 there will be a cache tensor available that contains
+        For decoder time steps > 1 there will be cache tensors available that contain
         previously computed key & value tensors for each transformer layer.
-        The cache tensor passed in is concatenated along the time-axis for efficiency.
 
-        :param states: List of states passed to decode_step().
+        :param cache: List of states passed to decode_step().
         :return: List of layer cache dictionaries.
         """
-        cache = None
-
-        if len(states) == 3:
-            cache = states[2]
-            # len(self.layers) * 2 cache items
-            cache = mx.sym.split(cache, num_outputs=len(self.layers) * 2, axis=1, squeeze_axis=False)
-
         if not cache:  # first decoder step
             return [{'k': None, 'v': None} for _ in range(len(self.layers))]
         else:
-            layer_caches = []  # type: List[Dict[str, Optional[mx.sym.Symbol]]]
-            for i in range(len(self.layers)):
-                layer_caches.append({'k': cache[2 * i + 0], 'v': cache[2 * i + 1]})
-            return layer_caches
+            assert len(cache) == len(self.layers) * 2
+            return [{'k': cache[2 * l + 0], 'v': cache[2 * l + 1]} for l in range(len(self.layers))]
 
     def reset(self):
         pass
@@ -366,7 +352,9 @@ class TransformerDecoder(Decoder):
         variables = [mx.sym.Variable(C.SOURCE_ENCODED_NAME),
                      mx.sym.Variable(C.SOURCE_LENGTH_NAME)]
         if target_max_length > 1:  # no cache for initial decoder step
-                variables.append(mx.sym.Variable('cache'))
+            for l in range(len(self.layers)):
+                variables.append(mx.sym.Variable('cache_l%d_k' % l))
+                variables.append(mx.sym.Variable('cache_l%d_v' % l))
         return variables
 
     def state_shapes(self,
@@ -390,14 +378,13 @@ class TransformerDecoder(Decoder):
                   mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")]
 
         if target_max_length > 1:  # no cache for initial decoder step
-            # the cache tensor passed in and out of the decoder step module contains
-            # all cache tensors concatenated along the time axis
-            # (as all inputs to the module need to of same batch size).
-            shapes.append(mx.io.DataDesc(name='cache',
-                                         shape=(batch_size,
-                                                (target_max_length - 1) * len(self.layers) * 2,
-                                                self.config.model_size),
-                                         layout=C.BATCH_MAJOR))
+            for l in range(len(self.layers)):
+                shapes.append(mx.io.DataDesc(name='cache_l%d_k' % l,
+                                             shape=(batch_size, target_max_length - 1, self.config.model_size),
+                                             layout=C.BATCH_MAJOR))
+                shapes.append(mx.io.DataDesc(name='cache_l%d_v' % l,
+                                             shape=(batch_size, target_max_length - 1, self.config.model_size),
+                                             layout=C.BATCH_MAJOR))
         return shapes
 
     def get_max_seq_len(self) -> Optional[int]:

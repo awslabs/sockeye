@@ -1035,6 +1035,10 @@ def add_inference_args(params):
                                default=None,
                                help="Specify top-k lexicon to restrict output vocabulary based on source.  See lexicon "
                                     "module. Default: %(default)s.")
+    decode_params.add_argument('--strip-unknown-words',
+                               action='store_true',
+                               default=False,
+                               help='Remove any <unk> symbols from outputs. Default: %(default)s.')
 
     decode_params.add_argument('--output-type',
                                default='translation',
