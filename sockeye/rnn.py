@@ -36,6 +36,7 @@ class RNNConfig(Config):
     :param first_residual_layer: First layer with a residual connection (1-based indexes).
            Default is to start at the second layer.
     :param forget_bias: Initial value of forget biases.
+    :param dtype: Data type.
     """
 
     def __init__(self,
@@ -47,7 +48,8 @@ class RNNConfig(Config):
                  dropout_recurrent: float = 0,
                  residual: bool = False,
                  first_residual_layer: int = 2,
-                 forget_bias: float = 0.0) -> None:
+                 forget_bias: float = 0.0,
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.cell_type = cell_type
         self.num_hidden = num_hidden
@@ -58,6 +60,7 @@ class RNNConfig(Config):
         self.residual = residual
         self.first_residual_layer = first_residual_layer
         self.forget_bias = forget_bias
+        self.dtype = dtype
 
 
 class SequentialRNNCellParallelInput(mx.rnn.SequentialRNNCell):
