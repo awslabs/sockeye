@@ -228,7 +228,9 @@ class PointerOutputLayer(OutputLayer):
                  weight: Optional[mx.sym.Symbol],
                  weight_normalization: bool,
                  prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX) -> None:
+
         super().__init__(hidden_size, vocab_size, weight, weight_normalization, prefix)
+
 
     def __call__(self,
                  hidden: Union[mx.sym.Symbol, mx.nd.NDArray],
@@ -240,6 +242,7 @@ class PointerOutputLayer(OutputLayer):
 
         :param hidden: Decoder representation for n elements. Shape: (n, self.num_hidden).
         :param context: Context on the source sentence.
+
         :return: Logits. Shape(n, self.vocab_size).
         """
 
@@ -278,10 +281,11 @@ class PointerOutputLayer(OutputLayer):
 
             return mx.sym.concat(weighted_probs_src, weighted_probs_trg, dim=1, name=C.SOFTMAX_OUTPUT_NAME)
 
+
         # Equivalent NDArray implementation (requires passed weights/biases)
         if isinstance(hidden, mx.nd.NDArray) and (context, mx.nd.NDArray):
             utils.check_condition(weight is not None and bias is not None,
-                                  "OutputLayer NDArray implementation requires passing weight and bias NDArrays.")
+                              "OutputLayer NDArray implementation requires passing weight and bias NDArrays.")
 
             logits_trg = super(hidden, weight=weight, bias=bias)
             probs_trg = mx.nd.softmax(data=logits_trg, axis=1)
@@ -294,6 +298,7 @@ class PointerOutputLayer(OutputLayer):
                                               bias=self.b,
                                               flatten=False,
                                               name=C.SWITCH_PROB_NAME + "_fc1")
+
 
             # TODO add noisy tanh activation function
             switch_a1 = mx.nd.Activation(switch_fc1, act_type='tanh')
@@ -310,7 +315,7 @@ class PointerOutputLayer(OutputLayer):
             weighted_probs_trg = probs_trg * switch_prob
             weighted_probs_src = probs_src * (1 - switch_prob)
 
-            return mx.nd.concat(weighted_probs_src, weighted_probs_trg, axis=1)
+            return mx.nd.concat(weighted_probs_src, weighted_probs_trg, dim=1)
 
         utils.check_condition((isinstance(hidden, mx.nd.NDArray) and (context, mx.sym.Symbol)) or
                               (isinstance(context, mx.nd.NDArray) and (hidden, mx.sym.Symbol)),

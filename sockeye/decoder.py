@@ -355,7 +355,6 @@ class TransformerDecoder(Decoder):
             for l in range(len(self.layers)):
                 variables.append(mx.sym.Variable('cache_l%d_k' % l))
                 variables.append(mx.sym.Variable('cache_l%d_v' % l))
-
         return variables
 
     def state_shapes(self,

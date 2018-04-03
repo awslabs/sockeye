@@ -66,6 +66,7 @@ class TrainingModel(model.SockeyeModel):
                  bucketing: bool,
                  gradient_compression_params: Optional[Dict[str, Any]] = None,
                  fixed_param_names: Optional[List[str]] = None) -> None:
+
         super().__init__(config)
         self.context = context
         self.output_dir = output_dir
@@ -149,6 +150,7 @@ class TrainingModel(model.SockeyeModel):
             if len(target_decoded_and_context.list_outputs()) > 1:
                 context = target_decoded_and_context[1]
                 context = mx.sym.reshape(data=context, shape=(-3, 0))
+
 
             # output layer
             # logits: (batch_size * target_seq_len, target_vocab_size)

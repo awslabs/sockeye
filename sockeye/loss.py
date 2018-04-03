@@ -141,6 +141,7 @@ class PointerNetsCrossEntropyLoss(Loss):
         self.loss_config = loss_config
         self.trg_vocab_size = loss_config.vocab_size
 
+
     def get_loss(self, softmax_probs: mx.sym.Symbol, labels: mx.sym.Symbol) -> List[mx.sym.Symbol]:
         """
         Returns loss and softmax output symbols given logits and integer-coded labels.
@@ -152,6 +153,7 @@ class PointerNetsCrossEntropyLoss(Loss):
 
         trg_label = labels[1]
         pointer_label = labels[0]
+
 
         if self.loss_config.normalization_type == C.LOSS_NORM_VALID:
             normalization = "valid"
@@ -165,6 +167,7 @@ class PointerNetsCrossEntropyLoss(Loss):
         prob = mx.sym.pick(softmax_probs, adjusted_label)
         loss = -mx.sym.log(prob + 1e-8)  # pylint: disable=invalid-unary-operand-type
         return [mx.sym.make_loss(loss, normalization=normalization, name="PN_CE_loss"), mx.sym.BlockGrad(softmax_probs)]
+
 
     def create_metric(self) -> "CrossEntropyMetric":
         return CrossEntropyMetric(self.loss_config)
