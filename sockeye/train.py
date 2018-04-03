@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 from contextlib import ExitStack
 from typing import Any, cast, Optional, Dict, List, Tuple
 
@@ -651,7 +652,8 @@ def create_training_model(config: model.ModelConfig,
                                             provide_label=train_iter.provide_label,
                                             default_bucket_key=train_iter.default_bucket_key,
                                             bucketing=not args.no_bucketing,
-                                            gradient_compression_params=gradient_compression_params(args))
+                                            gradient_compression_params=gradient_compression_params(args),
+                                            fixed_param_names=args.fixed_param_names)
 
     return training_model
 
@@ -733,6 +735,13 @@ def main():
     params = argparse.ArgumentParser(description='Train Sockeye sequence-to-sequence models.')
     arguments.add_train_cli_args(params)
     args = params.parse_args()
+
+    if args.dry_run:
+        # Modify arguments so that we write to a temporary directory and
+        # perform 0 training iterations
+        temp_dir = tempfile.TemporaryDirectory()  # Will be automatically removed
+        args.output = temp_dir.name
+        args.max_updates = 0
 
     utils.seedRNGs(args.seed)
 

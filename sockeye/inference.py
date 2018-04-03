@@ -743,7 +743,6 @@ class Translation:
         self.beam_history = beam_history
 
 
-
 def empty_translation() -> Translation:
     return Translation(target_ids=[], attention_matrix=np.asarray([[0]]), score=-np.inf)
 
@@ -878,6 +877,7 @@ class Translator:
     :param target_vocab: Target vocabulary.
     :param restrict_lexicon: Top-k lexicon to use for target vocabulary restriction.
     :param store_beam: If True, store the beam search history and return it in the TranslatorOutput.
+    :param strip_unknown_words: If True, removes any <unk> symbols from outputs.
     """
 
     def __init__(self,
@@ -889,8 +889,10 @@ class Translator:
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
-                 store_beam : bool = False) -> None:
+                 store_beam: bool = False,
+                 strip_unknown_words: bool = False) -> None:
         self.context = context
+        self.smallest_k_func = utils.smallest_k if self.context == mx.cpu() else utils.smallest_k_mx
         self.length_penalty = length_penalty
         self.source_vocabs = source_vocabs
         self.vocab_target = target_vocab
@@ -900,6 +902,9 @@ class Translator:
         self.start_id = self.vocab_target[C.BOS_SYMBOL]
         assert C.PAD_ID == 0, "pad id should be 0"
         self.stop_ids = {self.vocab_target[C.EOS_SYMBOL], C.PAD_ID}  # type: Set[int]
+        self.strip_ids = self.stop_ids.copy()  # ids to strip from the output
+        if strip_unknown_words:
+            self.strip_ids.add(self.vocab_target[C.UNK_SYMBOL])
         self.models = models
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
@@ -1059,9 +1064,9 @@ class Translator:
         attention_matrix = translation.attention_matrix[1:, :]
 
         target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
+
         target_string = C.TOKEN_SEPARATOR.join(
-            target_token for target_id, target_token in zip(target_ids, target_tokens) if
-            target_id not in self.stop_ids)
+            tok for target_id, tok in zip(target_ids, target_tokens) if target_id not in self.strip_ids)
         attention_matrix = attention_matrix[:, :len(trans_input.tokens)]
 
         if isinstance(translation.beam_history, list):
@@ -1278,13 +1283,16 @@ class Translator:
 
             # (3) get beam_size winning hypotheses for each sentence block separately
             # TODO(fhieber): once mx.nd.topk is sped-up no numpy conversion necessary anymore.
-            scores = scores.asnumpy()  # convert to numpy once to minimize cross-device copying
+            if self.context == mx.cpu():
+                scores = scores.asnumpy()  # convert to numpy once to minimize cross-device copying
+
             for sent in range(self.batch_size):
                 rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
                 sliced_scores = scores if t == 1 and self.batch_size == 1 else scores[rows]
                 # TODO we could save some tiny amount of time here by not running smallest_k for a finished sent
                 (best_hyp_indices[rows], best_word_indices[rows]), \
-                scores_accumulated[rows, 0] = utils.smallest_k(sliced_scores, self.beam_size, t == 1)
+                    scores_accumulated[rows, 0] = self.smallest_k_func(sliced_scores, self.beam_size, t == 1)
+
                 # offsetting since the returned smallest_k() indices were slice-relative
                 best_hyp_indices[rows] += rows.start
 

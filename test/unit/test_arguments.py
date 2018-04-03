@@ -167,12 +167,14 @@ def test_model_parameters(test_params, expected_params):
               rnn_decoder_hidden_dropout=.0,
               cnn_hidden_dropout=0.0,
               rnn_forget_bias=0.0,
+              fixed_param_names=[],
               rnn_h2h_init=C.RNN_INIT_ORTHOGONAL,
               decode_and_evaluate=0,
               decode_and_evaluate_use_cpu=False,
               decode_and_evaluate_device_id=None,
               seed=13,
-              keep_last_params=-1)),
+              keep_last_params=-1,
+              dry_run=False)),
 ])
 def test_training_arg(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_training_args)
@@ -197,7 +199,8 @@ def test_training_arg(test_params, expected_params):
                       sure_align_threshold=0.9,
                       max_output_length_num_stds=2,
                       length_penalty_alpha=1.0,
-                      length_penalty_beta=0.0)),
+                      length_penalty_beta=0.0,
+                      strip_unknown_words=False)),
 ])
 def test_inference_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_inference_args)

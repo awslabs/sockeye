@@ -10,6 +10,17 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.17.5]
+### Added
+- Added a flag `--strip-unknown-words` to `sockeye.translate` to remove any `<unk>` symbols from the output strings.
+
+## [1.17.4]
+### Added
+- Added a flag `--fixed-param-names` to prevent certain parameters from being optimized during training.
+  This is useful if you want to keep pre-trained embeddings fixed during training.
+- Added a flag `--dry-run` to `sockeye.train` to not perform any actual training, but print statistics about the model
+  and mode of operation.
+
 ## [1.17.3]
 ### Changed
 - `sockeye.evaluate` can now handle multiple hypotheses files by simply specifying `--hypotheses file1 file2...`.
