@@ -817,7 +817,7 @@ class EarlyStoppingTrainer:
         actual_best_params_fname = C.PARAMS_NAME % self.state.best_checkpoint
         if os.path.lexists(best_params_path):
             os.remove(best_params_path)
-        os.symlink(actual_best_params_fname, best_params_path)
+        os.link(actual_best_params_fname, best_params_path)
 
     def _update_best_optimizer_states(self, lr_decay_opt_states_reset: str):
         if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
