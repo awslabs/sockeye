@@ -286,10 +286,6 @@ def add_prepared_data_args(params):
 
 
 def add_monitoring_args(params):
-    params.add_argument('--use-tensorboard',
-                        action='store_true',
-                        help='Track metrics through tensorboard. Requires installed tensorboard.')
-
     params.add_argument('--monitor-pattern',
                         default=None,
                         type=str,

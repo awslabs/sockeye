@@ -35,7 +35,7 @@ from itertools import zip_longest
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1,1),
           no_bucketing=False, bucket_width=10, max_seq_len=(100, 100),
-          monitor_pattern=None, monitor_stat_func='mx_default', use_tensorboard=False)),
+          monitor_pattern=None, monitor_stat_func='mx_default')),
 
     # short parameters
     ('-s test_src -t test_tgt -d prep_data '
@@ -49,7 +49,7 @@ from itertools import zip_longest
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1,1),
           no_bucketing=False, bucket_width=10, max_seq_len=(100, 100),
-          monitor_pattern=None, monitor_stat_func='mx_default', use_tensorboard=False))
+          monitor_pattern=None, monitor_stat_func='mx_default'))
 ])
 def test_io_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_training_io_args)
@@ -249,7 +249,6 @@ def test_inference_args(test_params, expected_params):
      '--rnn-attention-type dot '
      '--max-seq-len 60 '
      '--decode-and-evaluate 500 '
-     '--use-tensorboard '
      '--use-cpu '
      '-o wmt_mode',
      dict(
@@ -262,7 +261,6 @@ def test_inference_args(test_params, expected_params):
          rnn_attention_type='dot',
          max_seq_len=(60, 60),
          decode_and_evaluate=500,
-         use_tensorboard=True,
          use_cpu=True,
          # Arguments mentioned in the text, should be renamed in the tutorial if they change:
          rnn_cell_type="lstm",

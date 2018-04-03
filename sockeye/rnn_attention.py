@@ -84,7 +84,7 @@ def _instantiate(cls, params):
         if key in sig_params:
             valid_params[key] = value
         else:
-            logger.warning('Type %s does not support parameter \'%s\'' % (cls.__name__, key))
+            logger.debug('Type %s does not support parameter \'%s\'' % (cls.__name__, key))
     return cls(**valid_params)
 
 

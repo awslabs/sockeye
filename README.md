@@ -105,8 +105,9 @@ running the following:
 where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), or `90` (9.0).
 
 ### Optional dependencies
-In order to track learning curves during training you can optionally install dmlc's fork of tensorboard
- (````pip install tensorboard==1.0.0a6````).
+In order to write training statistics to a Tensorboard event file for visualization, you can optionally install mxboard
+ (````pip install mxboard````). To visualize these, run the Tensorboard tool (`pip install tensorboard tensorflow`) with
+ the logging directory pointed to the training output folder: `tensorboard --logdir <model>`
  
 If you want to create alignment plots you will need to install matplotlib (````pip install matplotlib````).
 
