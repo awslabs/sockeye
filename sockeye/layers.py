@@ -228,7 +228,7 @@ class PointerOutputLayer(OutputLayer):
                  weight: Optional[mx.sym.Symbol],
                  weight_normalization: bool,
                  prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX) -> None:
-        super(hidden_size, vocab_size, weight, weight_normalization, prefix=prefix)
+        super().__init__(hidden_size, vocab_size, weight, weight_normalization, prefix)
 
     def __call__(self,
                  hidden: Union[mx.sym.Symbol, mx.nd.NDArray],
@@ -247,8 +247,9 @@ class PointerOutputLayer(OutputLayer):
             # TODO dropout?
             # TODO num_hidden fc1 needs to be passed as well as other nets options
 
-            logits_trg = super(hidden, weight=weight, bias=bias)
-            switch_input = mx.sym.concat(context, hidden, axis=1)
+            logits_trg = super().__call__(hidden, weight=weight, bias=bias)
+
+            switch_input = mx.sym.concat(context, hidden, dim=1)
 
             switch_fc1 = mx.sym.FullyConnected(data=switch_input,
                                                num_hidden=512,
@@ -275,7 +276,7 @@ class PointerOutputLayer(OutputLayer):
             weighted_probs_trg = probs_trg * (1 - switch_prob)
             weighted_probs_src = probs_src * switch_prob
 
-            return mx.sym.concat(weighted_probs_src, weighted_probs_trg, axis=1, name=C.SOFTMAX_OUTPUT_NAME)
+            return mx.sym.concat(weighted_probs_src, weighted_probs_trg, dim=1, name=C.SOFTMAX_OUTPUT_NAME)
 
         # Equivalent NDArray implementation (requires passed weights/biases)
         if isinstance(hidden, mx.nd.NDArray) and (context, mx.nd.NDArray):

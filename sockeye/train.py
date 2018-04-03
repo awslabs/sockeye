@@ -267,6 +267,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     batch_by_words = args.batch_type == C.BATCH_TYPE_WORD
 
     use_pointer_nets = args.use_pointer_nets
+    if use_pointer_nets:
+        args.loss = C.POINTER_NET_CROSS_ENTROPY
+
 
     validation_sources = [args.validation_source] + args.validation_source_factors
     validation_sources = [str(os.path.abspath(source)) for source in validation_sources]

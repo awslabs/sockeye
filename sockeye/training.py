@@ -154,7 +154,7 @@ class TrainingModel(model.SockeyeModel):
                 probs = self.model_loss.get_loss(logits, labels)
             else:
                 softmax_probs = self.output_layer(target_decoded, context=context)
-                probs = self.model_loss.get_loss(softmax_probs, mx.sym.Group(labels, pointer_labels))
+                probs = self.model_loss.get_loss(softmax_probs, mx.sym.Group([labels, pointer_labels]))
 
             return mx.sym.Group(probs), data_names, label_names
 
