@@ -43,7 +43,7 @@ class AttentionConfig(config.Config):
     :param config_coverage: Optional coverage configuration.
     :param num_heads: Number of attention heads. Only used for Multi-head dot attention.
     :param is_scaled: If 'dot' attentions should be scaled.
-    :param dtype: data type.
+    :param dtype: Data type.
     """
     def __init__(self,
                  type: str,
