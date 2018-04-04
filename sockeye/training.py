@@ -487,6 +487,7 @@ class EarlyStoppingTrainer:
             self._update_best_params_link()
             self._save_training_state(train_iter)
             self._update_best_optimizer_states(lr_decay_opt_states_reset)
+            self.tflogger.log_graph(self.model.current_module.symbol)
             logger.info("Training started.")
 
         metric_train, metric_val, metric_loss = self._create_metrics(metrics, self.model.optimizer, self.model.loss)
@@ -981,7 +982,7 @@ class TensorboardLogger:
             logger.info("Deleting existing Tensorboard log directory '%s'", self.logdir)
             shutil.rmtree(self.logdir)
 
-    def log_metrics(self, metrics: Dict[str, Union[float, int]], checkpoint: int):
+    def log_metrics(self, metrics: Dict[str, Union[float, int, mx.nd.NDArray]], checkpoint: int):
         try:
             from mxboard import SummaryWriter
             with SummaryWriter(logdir=self.logdir) as sw:
@@ -990,6 +991,14 @@ class TensorboardLogger:
                         sw.add_histogram(tag=name, values=value, bins=10, global_step=checkpoint)
                     else:
                         sw.add_scalar(tag=name, value=value, global_step=checkpoint)
+        except ImportError:
+            return
+
+    def log_graph(self, symbol: mx.sym.Symbol):
+        try:
+            from mxboard import SummaryWriter
+            with SummaryWriter(logdir=self.logdir) as sw:
+                sw.add_graph(symbol)
         except ImportError:
             return
 
