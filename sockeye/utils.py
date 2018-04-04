@@ -250,45 +250,41 @@ class OnlineMeanAndVariance:
         else:
             return self._M2 / self._count
 
-
-def smallest_k(matrix: np.ndarray, k: int,
-               only_first_row: bool = False) -> Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]:
+def topk(scores: mx.nd.NDArray, k: int, batch_size: int, t: int, use_mxnet_topk: bool):
     """
     Find the smallest elements in a numpy matrix.
 
-    :param matrix: Any matrix.
-    :param k: The number of smallest elements to return.
+    :param scores: Vocabulary scores for the next beam step. (beam_size * batch_size, target_vocabulary_size)
+    :param k: The number of smallest scores to return.
+    :param batch_size: Number of sentences being decoded at once.
+    :param t: Time step in the beam search
     :param only_first_row: If true the search is constrained to the first row of the matrix.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
-    if only_first_row:
-        flatten = matrix[:1, :].flatten()
+    if t == 1:
+        # Beam size is effectively 1, take only one hypothesis per sentence
+        # (batch_size, target_vocab_size)
+        folded_scores = scores[::k, :]
     else:
-        flatten = matrix.flatten()
+        # (batch_size, beam_size * vocab_size)
+        folded_scores = scores.reshape((batch_size, k * scores.shape[-1]))
 
-    # args are the indices in flatten of the k smallest elements
-    args = np.argpartition(flatten, range(k))[:k]
-    # flatten[args] are the values for args
-    return np.unravel_index(args, matrix.shape), flatten[args]
+    if use_mxnet_topk:
+        values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
+        best_hyp_indices, best_word_indices = np.unravel_index(indices.astype(np.int32).asnumpy().ravel(), scores.shape)
+        values = values.reshape((-1,))
+    else:
+        folded_scores = folded_scores.asnumpy()
+        # Get the scores
+        # Indexes into folded_scores: (batch_size, beam_size)
+        flat_idxs = np.argpartition(folded_scores, range(k))[:, :k]
+        # Score values: (batch_size, beam_size)
+        values = folded_scores[np.arange(folded_scores.shape[0])[:, None], flat_idxs].ravel()
+        best_hyp_indices, best_word_indices = np.unravel_index(flat_idxs.ravel(), scores.shape)
 
-
-def smallest_k_mx(matrix: mx.nd.NDArray, k: int,
-                  only_first_row: bool = False) -> Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]:
-    """
-    Find the smallest elements in a NDarray.
-
-    :param matrix: Any matrix.
-    :param k: The number of smallest elements to return.
-    :param only_first_row: If True the search is constrained to the first row of the matrix.
-    :return: The row indices, column indices and values of the k smallest items in matrix.
-    """
-    if only_first_row:
-        matrix = mx.nd.reshape(matrix[0], shape=(1, -1))
-
-    # pylint: disable=unbalanced-tuple-unpacking
-    values, indices = mx.nd.topk(matrix, axis=None, k=k, ret_typ='both', is_ascend=True)
-
-    return np.unravel_index(indices.astype(np.int32).asnumpy(), matrix.shape), values
+    # Offsetting the indices to match the shape of the scores matrix
+    best_hyp_indices += np.repeat(np.arange(0, batch_size * k, k), k)
+    return best_hyp_indices, best_word_indices, values
 
 
 def chunks(some_list: List, n: int) -> Iterable[List]:

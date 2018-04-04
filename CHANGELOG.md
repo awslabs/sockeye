@@ -14,6 +14,8 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Changed
 - Removed combined linear projection of keys & values in source attention transformer layers for
   performance improvements.
+- The topk operator is performed in a single operation during batch decoding instead of running in a loop over each 
+sentence, bringing speed benefits in batch decoding.
 
 ## [1.18.1]
 ### Added

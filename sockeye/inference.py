@@ -893,7 +893,6 @@ class Translator:
                  store_beam: bool = False,
                  strip_unknown_words: bool = False) -> None:
         self.context = context
-        self.smallest_k_func = utils.smallest_k if self.context == mx.cpu() else utils.smallest_k_mx
         self.length_penalty = length_penalty
         self.source_vocabs = source_vocabs
         self.vocab_target = target_vocab
@@ -1253,6 +1252,12 @@ class Translator:
                 models_output_layer_w.append(m.output_layer_w.take(vocab_slice_ids))
                 models_output_layer_b.append(m.output_layer_b.take(vocab_slice_ids))
 
+        # Select topK to use
+        if self.context == mx.cpu():
+            use_mxnet_topk = False
+        else:
+            use_mxnet_topk = True
+
         # (0) encode source sentence, returns a list
         model_states = self._encode(source, source_length)
 
@@ -1283,19 +1288,8 @@ class Translator:
                 scores = mx.nd.where(finished, pad_dist, scores)
 
             # (3) get beam_size winning hypotheses for each sentence block separately
-            # TODO(fhieber): once mx.nd.topk is sped-up no numpy conversion necessary anymore.
-            if self.context == mx.cpu():
-                scores = scores.asnumpy()  # convert to numpy once to minimize cross-device copying
-
-            for sent in range(self.batch_size):
-                rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
-                sliced_scores = scores if t == 1 and self.batch_size == 1 else scores[rows]
-                # TODO we could save some tiny amount of time here by not running smallest_k for a finished sent
-                (best_hyp_indices[rows], best_word_indices[rows]), \
-                    scores_accumulated[rows, 0] = self.smallest_k_func(sliced_scores, self.beam_size, t == 1)
-
-                # offsetting since the returned smallest_k() indices were slice-relative
-                best_hyp_indices[rows] += rows.start
+            best_hyp_indices[:], best_word_indices[:], scores_accumulated[:, 0] = utils.topk(scores, self.beam_size, self.batch_size,
+                                                                                             t=t, use_mxnet_topk=use_mxnet_topk)
 
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
