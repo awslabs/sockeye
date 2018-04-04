@@ -188,6 +188,13 @@ class TrainingModel(model.SockeyeModel):
         """
         self.module.update()
 
+    def get_gradients(self) -> Dict[str, List[mx.nd.NDArray]]:
+        """
+        Returns a mapping of parameters to gradient arrays, summed across devices.
+        """
+        return {name: mx.nd.add_n(*(exe.grad_arrays[i] for exe in self.executors)) for i, name in
+                enumerate(self.executor_group.arg_names) if name in self.executor_group.param_names}
+
     def get_global_gradient_norm(self) -> float:
         """
         Returns global gradient norm.
@@ -231,8 +238,12 @@ class TrainingModel(model.SockeyeModel):
         return self.module._curr_module if self._bucketing else self.module
 
     @property
+    def executor_group(self):
+        return self.current_module._exec_group
+
+    @property
     def executors(self):
-        return self.current_module._exec_group.execs
+        return self.executor_group.execs
 
     @property
     def loss(self):
@@ -356,7 +367,7 @@ class TrainState:
     """
 
     __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint',
-                 'updates', 'samples', 'gradient_norm', 'metrics', 'start_tic',
+                 'updates', 'samples', 'gradient_norm', 'gradients', 'metrics', 'start_tic',
                  'early_stopping_metric', 'best_metric', 'best_checkpoint']
 
     def __init__(self, early_stopping_metric: str) -> None:
@@ -367,6 +378,7 @@ class TrainState:
         self.updates = 0
         self.samples = 0
         self.gradient_norm = None  # type: Optional[float]
+        self.gradients = None  # type: Optional[Dict[str, List[mx.nd.NDArray]]]
         # stores dicts of metric names & values for each checkpoint
         self.metrics = []  # type: List[Dict]
         self.start_tic = time.time()
@@ -397,20 +409,16 @@ class EarlyStoppingTrainer:
     :param model: TrainingModel instance.
     :param optimizer_config: The optimizer configuration.
     :param max_params_files_to_keep: Maximum number of params files to keep in the output folder (last n are kept).
-    :param log_to_tensorboard: If True write training and evaluation logs to tensorboard event files.
     """
 
     def __init__(self,
                  model: TrainingModel,
                  optimizer_config: OptimizerConfig,
-                 max_params_files_to_keep: int,
-                 log_to_tensorboard: bool = True) -> None:
+                 max_params_files_to_keep: int) -> None:
         self.model = model
         self.optimizer_config = optimizer_config
         self.max_params_files_to_keep = max_params_files_to_keep
-        self.tensorboard_logger = None  # type: Optional[TensorboardLogger]
-        if log_to_tensorboard:
-            self.tensorboard_logger = TensorboardLogger(log_dir=os.path.join(model.output_dir, C.TENSORBOARD_NAME))
+        self.tflogger = TensorboardLogger(logdir=os.path.join(model.output_dir, C.TENSORBOARD_NAME))
         self.state = None  # type: Optional[TrainState]
 
     def fit(self,
@@ -479,6 +487,7 @@ class EarlyStoppingTrainer:
             self._update_best_params_link()
             self._save_training_state(train_iter)
             self._update_best_optimizer_states(lr_decay_opt_states_reset)
+            self.tflogger.log_graph(self.model.current_module.symbol)
             logger.info("Training started.")
 
         metric_train, metric_val, metric_loss = self._create_metrics(metrics, self.model.optimizer, self.model.loss)
@@ -625,6 +634,7 @@ class EarlyStoppingTrainer:
         if self.state.updates > 0 and (self.state.updates + 1) % checkpoint_frequency == 0:
             # compute values for logging to metrics (before rescaling...)
             gradient_norm = self.state.gradient_norm = model.get_global_gradient_norm()
+            self.state.gradients = model.get_gradients()
 
         # note: C.GRADIENT_CLIPPING_TYPE_ABS is handled by the mxnet optimizer directly
         if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
@@ -692,14 +702,17 @@ class EarlyStoppingTrainer:
             if result is not None:
                 decoded_checkpoint, decoder_metrics = result
                 self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
-                if self.tensorboard_logger is not None:
-                    self.tensorboard_logger.log_metrics(decoder_metrics, decoded_checkpoint)
+                self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
             process_manager.start_decoder(self.state.checkpoint)
 
         self.state.metrics.append(checkpoint_metrics)
         utils.write_metrics_file(self.state.metrics, self.metrics_fname)
-        if self.tensorboard_logger is not None:
-            self.tensorboard_logger.log_metrics(checkpoint_metrics, self.state.checkpoint)
+
+        tf_metrics = checkpoint_metrics.copy()
+        tf_metrics.update({"%s_grad" % n: v for n, v in self.state.gradients.items()})
+        arg_params, aux_params = self.model.module.get_params()
+        tf_metrics.update(arg_params)
+        self.tflogger.log_metrics(tf_metrics, self.state.checkpoint)
 
     def _cleanup(self, lr_decay_opt_states_reset: str, process_manager: Optional['DecoderProcessManager'] = None):
         """
@@ -713,8 +726,7 @@ class EarlyStoppingTrainer:
             if result is not None:
                 decoded_checkpoint, decoder_metrics = result
                 self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
-                if self.tensorboard_logger is not None:
-                    self.tensorboard_logger.log_metrics(decoder_metrics, decoded_checkpoint)
+                self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
 
         final_training_state_dirname = os.path.join(self.model.output_dir, C.TRAINING_STATE_DIRNAME)
         if os.path.exists(final_training_state_dirname):
@@ -955,26 +967,41 @@ class EarlyStoppingTrainer:
 
 class TensorboardLogger:
     """
-    Thin wrapper for Tensorboard API to log scalar values.
+    Thin wrapper for MXBoard API to log scalar values.
     """
 
-    def __init__(self, log_dir: str) -> None:
-        try:
-            import tensorboard  # pylint: disable=import-error
-            from tensorboard.summary import scalar
-        except ImportError:
-            raise RuntimeError("Please install tensorboard.")
-        if os.path.exists(log_dir):
-            logger.info("Deleting existing tensorboard log dir %s", log_dir)
-            shutil.rmtree(log_dir)
-        logger.info("Logging training events for Tensorboard at '%s'", log_dir)
-        self.log_dir = log_dir
-        self.summary_writer = tensorboard.FileWriter(log_dir)
-        self.scalar = scalar
+    def __init__(self, logdir: str) -> None:
+        self.logdir = logdir
 
-    def log_metrics(self, metrics: Dict[str, Union[float, int]], checkpoint: int):
-        for name, value in metrics.items():
-            self.summary_writer.add_summary(self.scalar(name=name, scalar=value), global_step=checkpoint)
+        try:
+            import mxboard
+            logger.info("Logging training events for Tensorboard at '%s'", self.logdir)
+        except ImportError:
+            logger.info("mxboard not found. Consider 'pip install mxboard' to log events to Tensorboard.")
+
+        if os.path.exists(self.logdir):
+            logger.info("Deleting existing Tensorboard log directory '%s'", self.logdir)
+            shutil.rmtree(self.logdir)
+
+    def log_metrics(self, metrics: Dict[str, Union[float, int, mx.nd.NDArray]], checkpoint: int):
+        try:
+            from mxboard import SummaryWriter
+            with SummaryWriter(logdir=self.logdir) as sw:
+                for name, value in metrics.items():
+                    if isinstance(value, mx.nd.NDArray):
+                        sw.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
+                    else:
+                        sw.add_scalar(tag=name, value=value, global_step=checkpoint)
+        except ImportError:
+            return
+
+    def log_graph(self, symbol: mx.sym.Symbol):
+        try:
+            from mxboard import SummaryWriter
+            with SummaryWriter(logdir=self.logdir) as sw:
+                sw.add_graph(symbol)
+        except ImportError:
+            return
 
 
 class Speedometer:
