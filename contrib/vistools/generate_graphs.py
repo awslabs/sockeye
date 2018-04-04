@@ -13,11 +13,11 @@
 # limitations under the License.
 
 
-# Modified by Alexander Rush, 2007
+# Modified by Alexander Rush, 2017
 
 # MIT License
 #
-# Copyright (c) 2017 OpenNMT
+# Copyright (c) 2017-present The OpenNMT Authors.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
