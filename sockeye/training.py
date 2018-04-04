@@ -709,7 +709,7 @@ class EarlyStoppingTrainer:
         utils.write_metrics_file(self.state.metrics, self.metrics_fname)
 
         tf_metrics = checkpoint_metrics.copy()
-        tf_metrics.update({"d%s" % n: v for n, v in self.state.gradients.items()})
+        tf_metrics.update({"%s_grad" % n: v for n, v in self.state.gradients.items()})
         tf_metrics.update(self.model.module.get_params()[0])
         self.tflogger.log_metrics(tf_metrics, self.state.checkpoint)
 
@@ -988,7 +988,7 @@ class TensorboardLogger:
             with SummaryWriter(logdir=self.logdir) as sw:
                 for name, value in metrics.items():
                     if isinstance(value, mx.nd.NDArray):
-                        sw.add_histogram(tag=name, values=value, bins=10, global_step=checkpoint)
+                        sw.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
                     else:
                         sw.add_scalar(tag=name, value=value, global_step=checkpoint)
         except ImportError:
