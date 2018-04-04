@@ -793,8 +793,7 @@ def main():
 
         trainer = training.EarlyStoppingTrainer(model=training_model,
                                                 optimizer_config=create_optimizer_config(args, source_vocab_sizes),
-                                                max_params_files_to_keep=args.keep_last_params,
-                                                log_to_tensorboard=args.use_tensorboard)
+                                                max_params_files_to_keep=args.keep_last_params)
 
         trainer.fit(train_iter=train_iter,
                     validation_iter=eval_iter,

@@ -10,6 +10,20 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.1]
+### Added
+- Added Tensorboard logging for all parameter values and gradients as histograms/distributions. The logged values
+  correspond to the current batch at checkpoint time.
+
+### Changed
+- Tensorboard logging now is done with the MXNet compatible 'mxboard' that supports logging of all kinds of events
+  (scalars, histograms, embeddings, etc.). If installed, training events are written out to Tensorboard compatible
+  even files automatically.
+
+### Removed
+- Removed the `--use-tensorboard` argument from `sockeye.train`. Tensorboard logging is now enabled by default if
+  `mxboard` is installed.
+
 ## [1.18.0]
 ### Changed
 - Change default target vocab name in model folder to `vocab.trg.0.json`

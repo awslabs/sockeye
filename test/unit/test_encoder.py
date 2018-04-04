@@ -115,7 +115,7 @@ def test_get_transformer_encoder():
 
     assert type(encoder.encoders[0]) == sockeye.encoder.AddLearnedPositionalEmbeddings
     assert encoder.encoders[0].__dict__.items() >= dict(num_embed=20, max_seq_len=50, prefix='test_source_pos_embed_',
-                                                         dtype='float16').items()
+                                                        dtype='float16').items()
 
     assert type(encoder.encoders[1]) == sockeye.encoder.ConvolutionalEmbeddingEncoder
     assert encoder.encoders[1].__dict__.items() >= dict(num_embed=6, prefix='test_encoder_char_', dtype='float32').items()
