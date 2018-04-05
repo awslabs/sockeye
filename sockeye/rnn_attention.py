@@ -135,7 +135,7 @@ class Attention(object):
 
     :param input_previous_word: Feed the previous target embedding into the attention mechanism.
     :param dynamic_source_num_hidden: Number of hidden units of dynamic source encoding update mechanism.
-    :param dtype: data type.
+    :param dtype: Data type.
     """
 
     __registry = {}  # type: Dict[str, Type['Attention']]
