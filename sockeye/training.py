@@ -967,41 +967,38 @@ class EarlyStoppingTrainer:
 
 class TensorboardLogger:
     """
-    Thin wrapper for MXBoard API to log scalar values.
+    Thin wrapper for MXBoard API to log training events.
     """
 
     def __init__(self, logdir: str) -> None:
         self.logdir = logdir
-
         try:
             import mxboard
             logger.info("Logging training events for Tensorboard at '%s'", self.logdir)
+            if os.path.exists(self.logdir):
+                logger.info("Deleting existing Tensorboard log directory '%s'", self.logdir)
+                shutil.rmtree(self.logdir)
+            self.sw = mxboard.SummaryWriter(logdir=self.logdir)
         except ImportError:
             logger.info("mxboard not found. Consider 'pip install mxboard' to log events to Tensorboard.")
-
-        if os.path.exists(self.logdir):
-            logger.info("Deleting existing Tensorboard log directory '%s'", self.logdir)
-            shutil.rmtree(self.logdir)
+            self.sw = None
 
     def log_metrics(self, metrics: Dict[str, Union[float, int, mx.nd.NDArray]], checkpoint: int):
-        try:
-            from mxboard import SummaryWriter
-            with SummaryWriter(logdir=self.logdir) as sw:
-                for name, value in metrics.items():
-                    if isinstance(value, mx.nd.NDArray):
-                        sw.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
-                    else:
-                        sw.add_scalar(tag=name, value=value, global_step=checkpoint)
-        except ImportError:
+        if self.sw is None:
             return
 
+        for name, value in metrics.items():
+            if isinstance(value, mx.nd.NDArray):
+                self.sw.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
+            else:
+                self.sw.add_scalar(tag=name, value=value, global_step=checkpoint)
+        self.sw.flush()
+
     def log_graph(self, symbol: mx.sym.Symbol):
-        try:
-            from mxboard import SummaryWriter
-            with SummaryWriter(logdir=self.logdir) as sw:
-                sw.add_graph(symbol)
-        except ImportError:
+        if self.sw is None:
             return
+        self.sw.add_graph(symbol)
+        self.sw.flush()
 
 
 class Speedometer:
