@@ -466,12 +466,10 @@ class RawParallelDatasetLoader:
             # we can try again to compute the label sequence on the fly in next().
             data_label[buck_index][sample_index, :target_len] = target[1:] + [self.eos_id]
             
-            if buck_index in map_buckets2sentence_ids:
-                map_buckets2sentence_ids[buck_index].update({sample_index:sentence_id})
-            else:    
-                map_buckets2sentence_ids[buck_index][sample_index] = sentence_id
+            map_buckets2sentence_ids[buck_index][sample_index] = sentence_id
             
             bucket_sample_index[buck_index] += 1
+
         self.map_buckets2sentence_ids = map_buckets2sentence_ids    
 
         for i in range(len(data_source)):
@@ -1269,6 +1267,7 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
                  target_data_name,
                  label_name,
                  num_factors: int = 1,
+                 shuffle: Optional[bool] = True,
                  dtype='float32') -> None:
         super().__init__(batch_size=batch_size)
 
@@ -1279,6 +1278,7 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
         self.target_data_name = target_data_name
         self.label_name = label_name
         self.num_factors = num_factors
+        self.shuffle = shuffle
         self.dtype = dtype
 
         # "Staging area" that needs to fit any size batch we're using by total number of elements.
@@ -1432,11 +1432,11 @@ class ParallelSampleIter(BaseParallelSampleIter):
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
                  num_factors: int = 1,
-                 no_shuffle: Optional[bool] = False,
+                 shuffle: Optional[bool] = False,
                  dtype='float32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          source_data_name=source_data_name, target_data_name=target_data_name,
-                         label_name=label_name, num_factors=num_factors, dtype=dtype)
+                         label_name=label_name, num_factors=num_factors, shuffle=shuffle, dtype=dtype)
 
         # create independent lists to be shuffled
         self.data = ParallelDataSet(list(data.source), list(data.target), list(data.label))
@@ -1449,16 +1449,17 @@ class ParallelSampleIter(BaseParallelSampleIter):
                                           for i in range(len(self.data))]
         self.data_permutations = [mx.nd.arange(0, max(1, self.data.source[i].shape[0]))
                                   for i in range(len(self.data))]
-        if not no_shuffle:
-            self.reset()
+        self.reset()
 
     def reset(self):
         """
         Resets and reshuffles the data.
         """
         self.curr_batch_index = 0
+
         # shuffle batch start indices
-        random.shuffle(self.batch_indices)
+        if self.shuffle:
+            random.shuffle(self.batch_indices)
 
         # restore
         self.data = self.data.permute(self.inverse_data_permutations)

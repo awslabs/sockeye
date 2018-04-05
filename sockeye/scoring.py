@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -22,7 +22,7 @@ from typing import Optional, List, Tuple, cast, DefaultDict
 import mxnet as mx
 import numpy as np
 
-import sockeye
+from . import config
 from . import constants as C
 from . import data_io
 from . import vocab
@@ -38,7 +38,8 @@ logger = logging.getLogger(__name__)
 class ScoringModel(model.SockeyeModel):
     """
     Defines a model to score input/output data.
-    :param context: The context(s) that MXNet will be run in (GPU(s)/CPU)
+
+    :param context: The context(s) that MXNet will be run in (GPU(s)/CPU).
     :param data_iter: The iterator over the data set.
     :param config: Configuration object holding details about the model.
     :param checkpoint: Checkpoint to load. If None, finds best parameters in
@@ -410,15 +411,15 @@ def create_data_iter_and_vocab(args: argparse.Namespace,
     target_vocab = vocab.vocab_from_json(os.path.join(model_dir, C.VOCAB_TRG_NAME))
 
     # Recover the vocabulary path from the data info file:
-    data_info = cast(data_io.DataInfo, sockeye.config.Config.load(os.path.join(model_dir, C.DATA_INFO)))
+    data_info = cast(data_io.DataInfo, config.Config.load(os.path.join(model_dir, C.DATA_INFO)))
 
     # get max_seq_len_source and max_seq_len_target from config,
     # warn if smaller than given values
-    config = model.SockeyeModel.load_config(os.path.join(model_dir, C.CONFIG_NAME))
-    if max_seq_len_source > config.config_data.max_seq_len_source:
-            logger.warning("Source sentence of length %d in test set exceeds maximum source sentence length in config of %d",max_seq_len_source, config.config_data.max_seq_len_source)
-    if max_seq_len_target > config.config_data.max_seq_len_target:
-            logger.warning("Target sentence of length %d in test set exceeds maximum target sentence length in config of %d",max_seq_len_target, config.config_data.max_seq_len_target)
+    config_ = model.SockeyeModel.load_config(os.path.join(model_dir, C.CONFIG_NAME))
+    if max_seq_len_source > config_.config_data.max_seq_len_source:
+            logger.warning("Source sentence of length %d in test set exceeds maximum source sentence length in config of %d",max_seq_len_source, config_.config_data.max_seq_len_source)
+    if max_seq_len_target > config_.config_data.max_seq_len_target:
+            logger.warning("Target sentence of length %d in test set exceeds maximum target sentence length in config of %d",max_seq_len_target, config_.config_data.max_seq_len_target)
 
     check_condition(len(args.source_factors) == len(args.source_factors_num_embed),
                         "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (len(args.source_factors), len(args.source_factors_num_embed)))
@@ -469,7 +470,7 @@ def create_data_iter_and_vocab(args: argparse.Namespace,
                                            bucket_batch_sizes,
                                            no_shuffle=True)
 
-    return data_iter, config, map_buckets2sentence_ids
+    return data_iter, config_, map_buckets2sentence_ids
 
 
 def get_max_source_and_target(args: argparse.Namespace) -> Tuple[int, int]:
