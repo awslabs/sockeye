@@ -333,6 +333,7 @@ def add_training_io_args(params):
     add_monitoring_args(params)
     add_pointer_args(params)
 
+
 def add_pointer_args(params):
     params.add_argument('--use-pointer-nets',
                         action='store_true',
@@ -935,7 +936,7 @@ def add_training_args(params):
     train_params.add_argument('--dry-run',
                               action='store_true',
                               help="Do not perform any actual training, but print statistics about the model"
-                              " and mode of operation.")
+                                   " and mode of operation.")
 
 
 def add_train_cli_args(params):

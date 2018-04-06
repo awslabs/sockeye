@@ -267,11 +267,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
     batch_by_words = args.batch_type == C.BATCH_TYPE_WORD
 
-    use_pointer_nets = args.use_pointer_nets
-    if use_pointer_nets:
-        args.loss = C.POINTER_NET_CROSS_ENTROPY
-
-
     validation_sources = [args.validation_source] + args.validation_source_factors
     validation_sources = [str(os.path.abspath(source)) for source in validation_sources]
 
@@ -293,8 +288,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
             batch_num_devices=batch_num_devices,
-            fill_up=args.fill_up,
-            use_pointer_nets=use_pointer_nets)
+            fill_up=args.fill_up)
 
         check_condition(len(source_vocabs) == len(args.source_factors_num_embed) + 1,
                         "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
@@ -610,7 +604,9 @@ def create_model_config(args: argparse.Namespace,
                                                   num_embed=num_embed_target,
                                                   dropout=embed_dropout_target)
 
-    config_loss = loss.LossConfig(name=args.loss,
+    loss_name = C.POINTER_NET_CROSS_ENTROPY if args.use_pointer_nets else args.loss
+
+    config_loss = loss.LossConfig(name=loss_name,
                                   vocab_size=target_vocab_size,
                                   normalization_type=args.loss_normalization_type,
                                   label_smoothing=args.label_smoothing)
@@ -654,7 +650,6 @@ def create_training_model(config: model.ModelConfig,
                                             bucketing=not args.no_bucketing,
                                             gradient_compression_params=gradient_compression_params(args),
                                             fixed_param_names=args.fixed_param_names)
-
 
     return training_model
 

@@ -560,6 +560,7 @@ class RecurrentDecoder(Decoder):
 
         # concatenate along time axis: (batch_size, target_embed_max_length, rnn_num_hidden)
         return mx.sym.Group([mx.sym.stack(*hidden_states, axis=1, name='%shidden_stack' % self.prefix), \
+                            #expected size: (batch_size, trg_max_length, encoder_num_hidden)
                              mx.sym.stack(*context_vectors, axis=1, name='%sattention_stack' % self.prefix)])
 
     def decode_step(self,

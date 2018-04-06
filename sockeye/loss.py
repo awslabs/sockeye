@@ -127,7 +127,6 @@ class CrossEntropyLoss(Loss):
     def create_metric(self) -> "CrossEntropyMetric":
         return CrossEntropyMetric(self.loss_config)
 
-
 class PointerNetsCrossEntropyLoss(Loss):
     """
     Computes the cross-entropy loss.
@@ -141,7 +140,6 @@ class PointerNetsCrossEntropyLoss(Loss):
         self.loss_config = loss_config
         self.trg_vocab_size = loss_config.vocab_size
 
-
     def get_loss(self, softmax_probs: mx.sym.Symbol, labels: mx.sym.Symbol) -> List[mx.sym.Symbol]:
         """
         Returns loss and softmax output symbols given logits and integer-coded labels.
@@ -151,10 +149,6 @@ class PointerNetsCrossEntropyLoss(Loss):
         :return: List of loss symbol.
         """
 
-        trg_label = labels[1]
-        pointer_label = labels[0]
-
-
         if self.loss_config.normalization_type == C.LOSS_NORM_VALID:
             normalization = "valid"
         elif self.loss_config.normalization_type == C.LOSS_NORM_BATCH:
@@ -162,12 +156,9 @@ class PointerNetsCrossEntropyLoss(Loss):
         else:
             raise ValueError("Unknown loss normalization type: %s" % self.loss_config.normalization_type)
 
-        adjusted_label = mx.sym.where(pointer_label == -1, trg_label, pointer_label + self.trg_vocab_size)
-
-        prob = mx.sym.pick(softmax_probs, adjusted_label)
+        prob = mx.sym.pick(softmax_probs, labels)
         loss = -mx.sym.log(prob + 1e-8)  # pylint: disable=invalid-unary-operand-type
-        return [mx.sym.make_loss(loss, normalization=normalization, name="PN_CE_loss"), mx.sym.BlockGrad(softmax_probs)]
-
+        return [mx.sym.make_loss(loss, normalization=normalization, name="PN_CE_Loss"), mx.sym.BlockGrad(softmax_probs, name=C.SOFTMAX_NAME)]
 
     def create_metric(self) -> "CrossEntropyMetric":
         return CrossEntropyMetric(self.loss_config)
@@ -208,6 +199,9 @@ class CrossEntropyMetric(EvalMetric):
         return loss
 
     def update(self, labels, preds):
+
+
+
         for label, pred in zip(labels, preds):
             batch_size = label.shape[0]
             label = label.as_in_context(pred.context).reshape((label.size,))

@@ -216,7 +216,7 @@ def test_parallel_data_set():
             assert np.array_equal(a1.asnumpy(), a2.asnumpy())
 
     with TemporaryDirectory() as work_dir:
-        dataset = data_io.ParallelDataSet(source, target, label, None)
+        dataset = data_io.ParallelDataSet(source, target, label)
         fname = os.path.join(work_dir, 'dataset')
         dataset.save(fname)
         dataset_loaded = data_io.ParallelDataSet.load(fname)
@@ -233,7 +233,7 @@ def test_parallel_data_set_fill_up():
                                                            batch_by_words=False,
                                                            batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
-    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=1, max_count=5), None)
+    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=1, max_count=5))
 
     dataset_filled_up = dataset.fill_up(bucket_batch_sizes, 'replicate')
     assert len(dataset_filled_up.source) == len(dataset.source)
@@ -276,7 +276,7 @@ def test_parallel_data_set_permute():
                                                            batch_by_words=False,
                                                            batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
-    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5), None).fill_up(
+    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5)).fill_up(
         bucket_batch_sizes, 'replicate')
 
     permutations, inverse_permutations = data_io.get_permutations(dataset.get_bucket_counts())
@@ -307,8 +307,7 @@ def test_get_batch_indices():
                                                            data_target_average_len=[None] * len(buckets))
     dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets=buckets,
                                                                  min_count=1,
-                                                                 max_count=max_bucket_size),
-                                      None)
+                                                                 max_count=max_bucket_size))
 
     indices = data_io.get_batch_indices(dataset, bucket_batch_sizes=bucket_batch_sizes)
 
@@ -491,9 +490,11 @@ def test_get_training_data_iters_with_pointer_labels():
                                                                                        bucketing=True,
                                                                                        bucket_width=10,
                                                                                        use_pointer_nets=True)
+
+
+
         assert isinstance(train_iter, data_io.ParallelSampleIter)
-        assert train_iter.use_pointer_label == True
-        assert len(train_iter.label_names) == 2
+        assert len(train_iter.label_names) == 1
         assert isinstance(val_iter, data_io.ParallelSampleIter)
         assert isinstance(config_data, data_io.DataConfig)
         assert data_info.sources == [data['source']]
@@ -514,28 +515,57 @@ def test_get_training_data_iters_with_pointer_labels():
         # test some batches
         bos_id = vcb[C.BOS_SYMBOL]
         expected_first_target_symbols = np.full((batch_size,), bos_id, dtype='float32')
+
+        first_batch = True
+
         for epoch in range(2):
             while train_iter.iter_next():
                 batch = train_iter.next()
                 assert len(batch.data) == 2
-                assert len(batch.label) == 2
+                assert len(batch.label) == 1
                 assert batch.bucket_key in train_iter.buckets
                 source = batch.data[0].asnumpy()
                 target = batch.data[1].asnumpy()
                 label = batch.label[0].asnumpy()
-                pointer_label = batch.label[1].asnumpy()
+
+                '''
+labels
+
+[[ 6. 10.  8.  4.  3.  0.  0.  0.  0.  0.]
+ [ 6.  7. 11. 11.  3.  0.  0.  0.  0.  0.]
+ [ 8.  5.  6. 12.  5. 11.  3.  0.  0.  0.]
+ [11.  3.  0.  0.  0.  0.  0.  0.  0.  0.]
+ [12. 13.  8.  8.  3.  0.  0.  0.  0.  0.]]
+
+pointer labels
+
+[[ 1.  2.  3.  4. -1.  0.  0.  0.  0.  0.]
+ [ 1.  2.  3.  4. -1.  0.  0.  0.  0.  0.]
+ [ 1.  2.  3.  4.  5.  6. -1.  0.  0.  0.]
+ [ 1. -1.  0.  0.  0.  0.  0.  0.  0.  0.]
+[ 1.  2.  3.  4. -1.  0.  0.  0.  0.  0.]]
+                
+                '''
+
+                #print(label)
+
+                #if first_batch:
+                #    first_batch = False
+                    #the following labels are the same of the original ones
+                #    assert label[0,4] == 3
+                #    assert label[0, 4] == 3
+                #    assert label[3, 1] == 3
+
+                    #the following labels have been replaced using pointing info
+                #    assert label[0, 0] == 15
+                #    assert label[3, 0] == 15
+                #    assert label[4, 3] == 18
+
                 assert source.shape[0] == target.shape[0] == label.shape[0] == batch_size
                 # target first symbol should be BOS
                 assert np.array_equal(target[:, 0], expected_first_target_symbols)
-                # label first symbol should be 2nd target symbol
-                assert np.array_equal(label[:, 0], target[:, 1])
                 # each label sequence contains one EOS symbol
                 assert np.sum(label == vcb[C.EOS_SYMBOL]) == batch_size
-                # we should have one pointer label for each element of the label vector
-                fpl = pointer_label.flatten()
-                fl = label.flatten()
-                for i, v in enumerate(fpl):
-                    assert not (v == 0) ^ (fl[i] == 0)
 
             train_iter.reset()
 
@@ -560,8 +590,8 @@ def test_parallel_sample_iter():
                                                            data_target_average_len=[None] * len(buckets))
 
     dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                                                 bucket_counts=bucket_counts), None)
-    it = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes, False)
+                                                                 bucket_counts=bucket_counts))
+    it = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes)
 
     with TemporaryDirectory() as work_dir:
         # Test 1
@@ -571,7 +601,7 @@ def test_parallel_sample_iter():
         fname = os.path.join(work_dir, "saved_iter")
         it.save_state(fname)
 
-        it_loaded = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes, None)
+        it_loaded = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes, -1, False)
         it_loaded.reset()
         it_loaded.load_state(fname)
         loaded_batch = it_loaded.next()
@@ -582,7 +612,7 @@ def test_parallel_sample_iter():
         expected_batch = it.next()
         it.save_state(fname)
 
-        it_loaded = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes, None)
+        it_loaded = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes, -1, False)
         it_loaded.reset()
         it_loaded.load_state(fname)
 
@@ -593,7 +623,7 @@ def test_parallel_sample_iter():
         it.reset()
         expected_batch = it.next()
         it.save_state(fname)
-        it_loaded = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes, None)
+        it_loaded = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes, -1, False)
         it_loaded.reset()
         it_loaded.load_state(fname)
 
@@ -618,9 +648,9 @@ def test_sharded_parallel_sample_iter():
                                                            data_target_average_len=[None] * len(buckets))
 
     dataset1 = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                                                  bucket_counts=bucket_counts), None)
+                                                                  bucket_counts=bucket_counts))
     dataset2 = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                                                  bucket_counts=bucket_counts), None)
+                                                                  bucket_counts=bucket_counts))
 
     with TemporaryDirectory() as work_dir:
         shard1_fname = os.path.join(work_dir, 'shard1')
@@ -629,8 +659,7 @@ def test_sharded_parallel_sample_iter():
         dataset2.save(shard2_fname)
         shard_fnames = [shard1_fname, shard2_fname]
 
-        it = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes, 'replicate',
-                                               False)
+        it = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes, 'replicate')
 
         with TemporaryDirectory() as work_dir:
             # Test 1
@@ -641,7 +670,7 @@ def test_sharded_parallel_sample_iter():
             it.save_state(fname)
 
             it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                                          'replicate', False)
+                                                          'replicate')
             it_loaded.reset()
             it_loaded.load_state(fname)
             loaded_batch = it_loaded.next()
@@ -653,7 +682,7 @@ def test_sharded_parallel_sample_iter():
             it.save_state(fname)
 
             it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                                          'replicate', False)
+                                                          'replicate')
             it_loaded.reset()
             it_loaded.load_state(fname)
 
@@ -665,7 +694,7 @@ def test_sharded_parallel_sample_iter():
             expected_batch = it.next()
             it.save_state(fname)
             it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                                          'replicate', False)
+                                                          'replicate')
             it_loaded.reset()
             it_loaded.load_state(fname)
 
@@ -693,9 +722,9 @@ def test_sharded_parallel_sample_iter_num_batches():
                                                            data_target_average_len=[None] * len(buckets))
 
     dataset1 = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                                                  bucket_counts=bucket_counts), None)
+                                                                  bucket_counts=bucket_counts))
     dataset2 = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                                                  bucket_counts=bucket_counts), None)
+                                                                  bucket_counts=bucket_counts))
     with TemporaryDirectory() as work_dir:
         shard1_fname = os.path.join(work_dir, 'shard1')
         shard2_fname = os.path.join(work_dir, 'shard2')
@@ -704,7 +733,7 @@ def test_sharded_parallel_sample_iter_num_batches():
         shard_fnames = [shard1_fname, shard2_fname]
 
         it = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                               'replicate', False)
+                                               'replicate')
 
         num_batches_seen = 0
         while it.iter_next():
@@ -728,7 +757,7 @@ def test_sharded_and_parallel_iter_same_num_batches():
                                                            data_target_average_len=[None] * len(buckets))
 
     dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                                                 bucket_counts=bucket_counts), None)
+                                                                 bucket_counts=bucket_counts))
 
     with TemporaryDirectory() as work_dir:
         shard_fname = os.path.join(work_dir, 'shard1')
@@ -736,9 +765,9 @@ def test_sharded_and_parallel_iter_same_num_batches():
         shard_fnames = [shard_fname]
 
         it_sharded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                                       'replicate', False)
+                                                       'replicate')
 
-        it_parallel = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes, False)
+        it_parallel = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes)
 
         num_batches_seen = 0
         while it_parallel.iter_next():

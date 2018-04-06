@@ -87,6 +87,7 @@ class TrainingModel(model.SockeyeModel):
         source_words = source.split(num_outputs=self.config.config_embed_source.num_factors,
                                     axis=2, squeeze_axis=True)[0]
 
+
         self.model_loss = loss.get_loss(self.config.config_loss)
 
         source_length = utils.compute_lengths(source_words)
@@ -96,9 +97,9 @@ class TrainingModel(model.SockeyeModel):
         data_names = [C.SOURCE_NAME, C.TARGET_NAME]
         label_names = [C.TARGET_LABEL_NAME]
 
-        if self.config.use_pointer_nets:
-            pointer_labels = mx.sym.reshape(data=mx.sym.Variable(C.POINTER_LABEL_NAME), shape=(-1,))
-            label_names.append(C.POINTER_LABEL_NAME)
+        #if self.config.use_pointer_nets:
+            #pointer_labels = mx.sym.reshape(data=mx.sym.Variable(C.POINTER_LABEL_NAME), shape=(-1,))
+            #label_names.append(C.POINTER_LABEL_NAME)
 
         # check provide_{data,label} names
         provide_data_names = [d[0] for d in provide_data]
@@ -134,32 +135,32 @@ class TrainingModel(model.SockeyeModel):
                                                            source_embed_seq_len)
 
             # decoder
-            # target_decoded: (batch-size, target_len, decoder_depth)
             # TODO: (zappella@) currently we are getting context which is source*att_probs not the two separate vectors
             target_decoded_and_context = self.decoder.decode_sequence(source_encoded, source_encoded_length,
                                                                       source_encoded_seq_len,
                                                                       target_embed, target_embed_length,
                                                                       target_embed_seq_len)
-
+            # target_decoded: (batch-size, target_len, decoder_depth)
             target_decoded = target_decoded_and_context[0]
 
-            # target_decoded: (batch_size * target_seq_len, decoder_depth)
+            # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
             target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
 
             # TODO: context is returned only by recurrent decoder at the moment
             if len(target_decoded_and_context.list_outputs()) > 1:
                 context = target_decoded_and_context[1]
+                # context: (batch_size * trg_seq_len, encoder_num_hidden)
                 context = mx.sym.reshape(data=context, shape=(-3, 0))
 
-
             # output layer
-            # logits: (batch_size * target_seq_len, target_vocab_size)
             if not self.config.use_pointer_nets:
+                # logits: (batch_size * target_seq_len, target_vocab_size)
                 logits = self.output_layer(target_decoded)
                 probs = self.model_loss.get_loss(logits, labels)
             else:
+                # softmax_probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
                 softmax_probs = self.output_layer(target_decoded, context=context)
-                probs = self.model_loss.get_loss(softmax_probs, mx.sym.Group([labels, pointer_labels]))
+                probs = self.model_loss.get_loss(softmax_probs, labels)
 
             return mx.sym.Group(probs), data_names, label_names
 
@@ -473,7 +474,7 @@ class EarlyStoppingTrainer:
         :param mxmonitor_pattern: Optional pattern to match to monitor weights/gradients/outputs
                with MXNet's monitor. Default is None which means no monitoring.
         :param mxmonitor_stat_func: Choice of statistics function to run on monitored weights/gradients/outputs
-               when using MXNEt's monitor.
+               when using MxNet's monitor.
 
         :param allow_missing_parameters: Allow missing parameters when initializing model parameters from file.
         :param existing_parameters: Optional filename of existing/pre-trained parameters to initialize from.
@@ -798,9 +799,11 @@ class EarlyStoppingTrainer:
         """
         # output_names refers to the list of outputs this metric should use to update itself, e.g. the softmax output
         if metric_name == C.ACCURACY:
-            return utils.Accuracy(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME])
+            return utils.Accuracy(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME],
+                                  label_names=[C.TARGET_LABEL_NAME])
         elif metric_name == C.PERPLEXITY:
-            return mx.metric.Perplexity(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME])
+            return mx.metric.Perplexity(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME],
+                                        label_names=[C.TARGET_LABEL_NAME])
         else:
             raise ValueError("unknown metric name")
 
@@ -810,6 +813,7 @@ class EarlyStoppingTrainer:
         Creates a composite EvalMetric given a list of metric names.
         """
         metrics = [EarlyStoppingTrainer._create_eval_metric(metric_name) for metric_name in metric_names]
+        return mx.metric.create(metrics)
         return mx.metric.create(metrics)
 
     def _create_metrics(self, metrics: List[str], optimizer: mx.optimizer.Optimizer,

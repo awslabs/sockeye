@@ -410,11 +410,13 @@ class RawParallelDatasetLoader:
                  buckets: List[Tuple[int, int]],
                  eos_id: int,
                  pad_id: int,
+                 target_vocab_size: int,
                  dtype: str = 'float32') -> None:
         self.buckets = buckets
         self.eos_id = eos_id
         self.pad_id = pad_id
         self.dtype = dtype
+        self.target_vocab_size = target_vocab_size
         self.aligner = align.Aligner()
 
     def load(self,
@@ -432,13 +434,6 @@ class RawParallelDatasetLoader:
                        for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
         data_label = [np.full((num_samples, target_len), self.pad_id, dtype=self.dtype)
                       for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
-
-        if use_pointer_nets:
-            data_pointer_label = [np.full((num_samples, target_len), self.pad_id, dtype=self.dtype)
-                                  for (source_len, target_len), num_samples in
-                                  zip(self.buckets, num_samples_per_bucket)]
-        else:
-            data_pointer_label = None
 
         bucket_sample_index = [0 for buck in self.buckets]
 
@@ -477,10 +472,11 @@ class RawParallelDatasetLoader:
             if use_pointer_nets:
                 # We use a simple heuristic to detect copied words
                 # The only considered source is the first one [0]
-                data_pointer_label[buck_index][sample_index, :target_len] = self.aligner.get_copy_alignment(sources[0],
-                                                                                                            target[
-                                                                                                            1:] + [
-                                                                                                                self.eos_id])
+                data_pointer_label = self.aligner.get_copy_alignment(sources[0], target[1:])
+                # overwrite the original labels
+                for idx in range(len(data_pointer_label)):
+                    data_label[buck_index][sample_index, idx] = data_label[buck_index][sample_index, idx] if \
+                        data_pointer_label[idx] < 0 else (data_pointer_label[idx] + self.target_vocab_size)
 
             bucket_sample_index[buck_index] += 1
 
@@ -488,15 +484,13 @@ class RawParallelDatasetLoader:
             data_source[i] = mx.nd.array(data_source[i], dtype=self.dtype)
             data_target[i] = mx.nd.array(data_target[i], dtype=self.dtype)
             data_label[i] = mx.nd.array(data_label[i], dtype=self.dtype)
-            if (use_pointer_nets):
-                data_pointer_label[i] = mx.nd.array(data_pointer_label[i], dtype=self.dtype)
 
         if num_tokens_source > 0 and num_tokens_target > 0:
             logger.info("Created bucketed parallel data set. Introduced padding: source=%.1f%% target=%.1f%%)",
                         num_pad_source / num_tokens_source * 100,
                         num_pad_target / num_tokens_target * 100)
 
-        return ParallelDataSet(data_source, data_target, data_label, data_pointer_label)
+        return ParallelDataSet(data_source, data_target, data_label)
 
 
 def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int) -> int:
@@ -560,7 +554,8 @@ def prepare_data(source_fnames: List[str],
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=target_vocab[C.EOS_SYMBOL],
-                                           pad_id=C.PAD_ID)
+                                           pad_id=C.PAD_ID,
+                                           target_vocab_size=len(target_vocab))
 
     # 3. convert each shard to serialized ndarrays
     for shard_idx, (shard_sources, shard_target, shard_stats) in enumerate(shards):
@@ -663,8 +658,7 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
                               buckets=buckets,
                               batch_size=batch_size,
                               bucket_batch_sizes=bucket_batch_sizes,
-                              num_factors=len(validation_sources),
-                              use_pointer_label=use_pointer_nets)
+                              num_factors=len(validation_sources))
 
 
 def get_prepared_data_iters(prepared_data_dir: str,
@@ -675,9 +669,9 @@ def get_prepared_data_iters(prepared_data_dir: str,
                             batch_by_words: bool,
                             batch_num_devices: int,
                             fill_up: str,
-                            use_pointer_nets: bool) -> Tuple['BaseParallelSampleIter',
-                                                             'BaseParallelSampleIter',
-                                                             'DataConfig', List[vocab.Vocab], vocab.Vocab]:
+                            use_pointer_nets: bool = False) -> Tuple['BaseParallelSampleIter',
+                                                                     'BaseParallelSampleIter',
+                                                                     'DataConfig', List[vocab.Vocab], vocab.Vocab]:
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
@@ -731,12 +725,12 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                            batch_size,
                                            bucket_batch_sizes,
                                            fill_up,
-                                           num_factors=len(data_info.sources),
-                                           use_pointer_label=use_pointer_nets)
+                                           num_factors=len(data_info.sources))
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=target_vocab[C.EOS_SYMBOL],
-                                           pad_id=C.PAD_ID)
+                                           pad_id=C.PAD_ID,
+                                           target_vocab_size=len(target_vocab))
 
     validation_iter = get_validation_data_iter(data_loader=data_loader,
                                                validation_sources=validation_sources,
@@ -826,7 +820,8 @@ def get_training_data_iters(sources: List[str],
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=target_vocab[C.EOS_SYMBOL],
-                                           pad_id=C.PAD_ID)
+                                           pad_id=C.PAD_ID,
+                                           target_vocab_size=len(target_vocab))
 
     training_data = data_loader.load(sources_sentences, target_sentences,
                                      data_statistics.num_sents_per_bucket, use_pointer_nets).fill_up(bucket_batch_sizes,
@@ -848,8 +843,7 @@ def get_training_data_iters(sources: List[str],
                                     buckets=buckets,
                                     batch_size=batch_size,
                                     bucket_batch_sizes=bucket_batch_sizes,
-                                    num_factors=len(sources),
-                                    use_pointer_label=use_pointer_nets)
+                                    num_factors=len(sources))
 
     validation_iter = get_validation_data_iter(data_loader=data_loader,
                                                validation_sources=validation_sources,
@@ -1137,23 +1131,15 @@ class ParallelDataSet(Sized):
     def __init__(self,
                  source: List[mx.nd.array],
                  target: List[mx.nd.array],
-                 label: List[mx.nd.array],
-                 pointer_label: List[mx.nd.array]) -> None:
+                 label: List[mx.nd.array]) -> None:
         check_condition(len(source) == len(target) == len(label),
                         "Number of buckets for source/target/label do not match: %d/%d/%d" % (len(source),
                                                                                               len(target),
                                                                                               len(label)))
-        self.use_pointer_label = False
-        if pointer_label is not None:
-            self.use_pointer_label = True
-            check_condition(len(label) == len(pointer_label),
-                            "Number of buckets for label/pointer label do not match: %d/%d." % (
-                                len(label),
-                                len(pointer_label)))
+
         self.source = source
         self.target = target
         self.label = label
-        self.pointer_label = pointer_label
 
     def __len__(self) -> int:
         return len(self.source)
@@ -1166,7 +1152,6 @@ class ParallelDataSet(Sized):
         Saves the dataset to a binary .npy file.
         """
         out = self.source + self.target + self.label
-        out = out + self.pointer_label if self.use_pointer_label else out
         mx.nd.save(fname, out)
 
     @staticmethod
@@ -1186,11 +1171,7 @@ class ParallelDataSet(Sized):
         label = data[2 * n: 3 * n]
         assert len(source) == len(target) == len(label)
 
-        pointer_label = None
-        if use_pointer_nets:
-            pointer_label = data[3 * n:]
-
-        return ParallelDataSet(source, target, label, pointer_label)
+        return ParallelDataSet(source, target, label)
 
     def fill_up(self,
                 bucket_batch_sizes: List[BucketBatchSize],
@@ -1207,7 +1188,6 @@ class ParallelDataSet(Sized):
         source = list(self.source)
         target = list(self.target)
         label = list(self.label)
-        pointer_label = list(self.pointer_label) if self.use_pointer_label else None
 
         rs = np.random.RandomState(seed)
 
@@ -1217,8 +1197,6 @@ class ParallelDataSet(Sized):
             bucket_source = self.source[bucket_idx]
             bucket_target = self.target[bucket_idx]
             bucket_label = self.label[bucket_idx]
-            if (self.use_pointer_label):
-                bucket_pointer_label = self.pointer_label[bucket_idx]
 
             num_samples = bucket_source.shape[0]
 
@@ -1232,20 +1210,17 @@ class ParallelDataSet(Sized):
                     source[bucket_idx] = mx.nd.concat(bucket_source, bucket_source.take(random_indices), dim=0)
                     target[bucket_idx] = mx.nd.concat(bucket_target, bucket_target.take(random_indices), dim=0)
                     label[bucket_idx] = mx.nd.concat(bucket_label, bucket_label.take(random_indices), dim=0)
-                    if self.use_pointer_label:
-                        pointer_label[bucket_idx] = mx.nd.concat(bucket_pointer_label,
-                                                                 bucket_pointer_label.take(random_indices), dim=0)
+
                 else:
                     raise NotImplementedError('Unknown fill-up strategy')
 
-        return ParallelDataSet(source, target, label, pointer_label)
+        return ParallelDataSet(source, target, label)
 
     def permute(self, permutations: List[mx.nd.NDArray]) -> 'ParallelDataSet':
         assert len(self) == len(permutations)
         source = []
         target = []
         label = []
-        pointer_label = [] if self.use_pointer_label else None
 
         for buck_idx in range(len(self)):
             num_samples = self.source[buck_idx].shape[0]
@@ -1254,16 +1229,12 @@ class ParallelDataSet(Sized):
                 source.append(self.source[buck_idx].take(permutation))
                 target.append(self.target[buck_idx].take(permutation))
                 label.append(self.label[buck_idx].take(permutation))
-                if self.use_pointer_label:
-                    pointer_label.append(self.pointer_label[buck_idx].take(permutation))
             else:
                 source.append(self.source[buck_idx])
                 target.append(self.target[buck_idx])
                 label.append(self.label[buck_idx])
-                if self.use_pointer_label:
-                    pointer_label.append(self.pointer_label[buck_idx])
 
-        return ParallelDataSet(source, target, label, pointer_label)
+        return ParallelDataSet(source, target, label)
 
 
 def get_permutations(bucket_counts: List[int]) -> Tuple[List[mx.nd.NDArray], List[mx.nd.NDArray]]:
@@ -1327,8 +1298,6 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
                  source_data_name,
                  target_data_name,
                  label_name,
-                 use_pointer_label,
-                 pointer_label_name,
                  num_factors: int = 1,
                  dtype='float32') -> None:
         super().__init__(batch_size=batch_size)
@@ -1339,8 +1308,6 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
         self.source_data_name = source_data_name
         self.target_data_name = target_data_name
         self.label_name = label_name
-        self.use_pointer_label = use_pointer_label
-        self.pointer_label_name = pointer_label_name
         self.num_factors = num_factors
         self.dtype = dtype
 
@@ -1367,14 +1334,6 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
 
         self.data_names = [self.source_data_name, self.target_data_name]
         self.label_names = [self.label_name]
-
-        if self.use_pointer_label:
-            self.provide_label.append(
-                mx.io.DataDesc(name=self.pointer_label_name,
-                               shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[1]),
-                               layout=C.BATCH_MAJOR))
-
-            self.label_names.append(self.pointer_label_name)
 
     @abstractmethod
     def reset(self):
@@ -1409,30 +1368,25 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                  batch_size,
                  bucket_batch_sizes,
                  fill_up: str,
-                 use_pointer_label: bool,
                  source_data_name=C.SOURCE_NAME,
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
-                 pointer_label_name=C.POINTER_LABEL_NAME,
                  num_factors: int = 1,
                  dtype='float32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          source_data_name=source_data_name, target_data_name=target_data_name,
-                         label_name=label_name, use_pointer_label=use_pointer_label,
-                         pointer_label_name=pointer_label_name, num_factors=num_factors, dtype=dtype)
+                         label_name=label_name, num_factors=num_factors, dtype=dtype)
         assert len(shards_fnames) > 0
         self.shards_fnames = list(shards_fnames)
         self.shard_index = -1
         self.fill_up = fill_up
-        self.use_pointer_label = use_pointer_label
-
         self.reset()
 
     def _load_shard(self):
         shard_fname = self.shards_fnames[self.shard_index]
         logger.info("Loading shard %s.", shard_fname)
 
-        dataset = ParallelDataSet.load(self.shards_fnames[self.shard_index], self.use_pointer_label).fill_up(
+        dataset = ParallelDataSet.load(self.shards_fnames[self.shard_index]).fill_up(
             self.bucket_batch_sizes,
             self.fill_up,
             seed=self.shard_index)
@@ -1442,8 +1396,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                                              bucket_batch_sizes=self.bucket_batch_sizes,
                                              source_data_name=self.source_data_name,
                                              target_data_name=self.target_data_name,
-                                             num_factors=self.num_factors,
-                                             use_pointer_label=self.use_pointer_label)
+                                             num_factors=self.num_factors)
 
     def reset(self):
         if len(self.shards_fnames) > 1:
@@ -1507,21 +1460,17 @@ class ParallelSampleIter(BaseParallelSampleIter):
                  buckets,
                  batch_size,
                  bucket_batch_sizes,
-                 use_pointer_label: bool,
                  source_data_name=C.SOURCE_NAME,
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
-                 pointer_label_name=C.POINTER_LABEL_NAME,
                  num_factors: int = 1,
                  dtype='float32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          source_data_name=source_data_name, target_data_name=target_data_name,
-                         label_name=label_name, use_pointer_label=use_pointer_label,
-                         pointer_label_name=pointer_label_name, num_factors=num_factors, dtype=dtype)
+                         label_name=label_name, num_factors=num_factors, dtype=dtype)
 
         # create independent lists to be shuffled
-        pointer_label = list(data.pointer_label) if use_pointer_label else None
-        self.data = ParallelDataSet(list(data.source), list(data.target), list(data.label), pointer_label)
+        self.data = ParallelDataSet(list(data.source), list(data.target), list(data.label))
 
         # create index tuples (buck_idx, batch_start_pos) into buckets. These will be shuffled.
         self.batch_indices = get_batch_indices(self.data, bucket_batch_sizes)
@@ -1570,8 +1519,6 @@ class ParallelSampleIter(BaseParallelSampleIter):
         target = self.data.target[i][j:j + batch_size]
         data = [source, target]
         label = [self.data.label[i][j:j + batch_size]]
-        if self.use_pointer_label:
-            label.append(self.data.pointer_label[i][j:j + batch_size])
 
         provide_data = [mx.io.DataDesc(name=n, shape=x.shape, layout=C.BATCH_MAJOR) for n, x in
                         zip(self.data_names, data)]

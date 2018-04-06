@@ -217,6 +217,7 @@ class PointerOutputLayer(OutputLayer):
     Defines the output layer of Sockeye decoders. Supports weight tying and weight normalization.
 
     :param hidden_size: Decoder hidden size.
+    :param encoder_hidden_size: Encoder hidden size.
     :param vocab_size: Target vocabulary size.
     :param weight_normalization: Whether to apply weight normalization.
     :param prefix: Prefix used for naming.
@@ -224,12 +225,20 @@ class PointerOutputLayer(OutputLayer):
 
     def __init__(self,
                  hidden_size: int,
+                 encoder_hidden_size: int,
                  vocab_size: int,
                  weight: Optional[mx.sym.Symbol],
                  weight_normalization: bool,
                  prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX) -> None:
 
         super().__init__(hidden_size, vocab_size, weight, weight_normalization, prefix)
+
+        self.num_hidden_fc1 = 512
+
+        self.pn_w1 = mx.sym.Variable("%spn_weight1" % self.prefix, init=mx.init.One(), shape=(self.num_hidden_fc1, encoder_hidden_size+hidden_size))
+        self.pn_w2 = mx.sym.Variable("%spn_weight2" % self.prefix, init=mx.init.One(), shape=(1 , self.num_hidden_fc1))
+        self.b_fc1 = mx.sym.Variable("%sbias_pnfc1" % self.prefix, init=mx.init.One())
+        self.b_fc2 = mx.sym.Variable("%sbias_pnfc2" % self.prefix, init=mx.init.One())
 
 
     def __call__(self,
@@ -240,10 +249,10 @@ class PointerOutputLayer(OutputLayer):
         """
         Transformation to vocab size + source sentece size, weighted softmax using pointer nets. Returns probabilities.
 
-        :param hidden: Decoder representation for n elements. Shape: (n, self.num_hidden).
-        :param context: Context on the source sentence.
+        :param hidden: Decoder representation for n elements. Shape: (batch_size, trg_max_length, rnn_num_hidden ).
+        :param context: Context on the source sentence. Shape: (batch_size, trg_max_length, encoder_num_hidden)
 
-        :return: Logits. Shape(n, self.vocab_size).
+        :return: Logits. Shape(batch_size, self.vocab_size+src_len).
         """
 
         if isinstance(hidden, mx.sym.Symbol) and isinstance(context, mx.sym.Symbol):
@@ -252,70 +261,75 @@ class PointerOutputLayer(OutputLayer):
 
             logits_trg = super().__call__(hidden, weight=weight, bias=bias)
 
+            #shape (batch_size * trg_max_len, encoder_rnn_hid+dec_rnn_hidden)
             switch_input = mx.sym.concat(context, hidden, dim=1)
 
             switch_fc1 = mx.sym.FullyConnected(data=switch_input,
-                                               num_hidden=512,
-                                               weight=self.w,
-                                               bias=self.b,
+            #switch_fc1 = mx.sym.FullyConnected(data=hidden,
+                                               num_hidden=self.num_hidden_fc1,
+                                               weight=self.pn_w1,
+                                               bias=self.b_fc1,
                                                flatten=False,
                                                name=C.SWITCH_PROB_NAME + '_fc1')
 
             # TODO add noisy tanh activation function
-            switch_a1 = mx.sym.Activation(switch_fc1, act_type='tanh')
+            switch_a1 = mx.sym.Activation(switch_fc1, act_type='tanh', name=C.SWITCH_PROB_NAME+'_a1')
 
             switch_fc2 = mx.sym.FullyConnected(data=switch_a1,
                                                num_hidden=1,
-                                               weight=self.w,
-                                               bias=self.b,
+                                               weight=self.pn_w2,
+                                               bias=self.b_fc2,
                                                flatten=False,
                                                name=C.SWITCH_PROB_NAME + '_fc2')
 
-            switch_prob = mx.sym.Activation(switch_fc2, act_type='tanh')
+            switch_prob = mx.sym.Activation(switch_fc2, act_type='tanh', name=C.SWITCH_PROB_NAME+'_a-out')
 
             probs_trg = mx.sym.softmax(data=logits_trg, axis=1)
             probs_src = mx.sym.softmax(data=context, axis=1)
 
-            weighted_probs_trg = probs_trg * (1 - switch_prob)
-            weighted_probs_src = probs_src * switch_prob
+            weighted_probs_src = mx.sym.broadcast_mul(probs_src, switch_prob)
+            weighted_probs_trg = mx.sym.broadcast_mul(probs_trg, (1.0 - switch_prob))
+
 
             return mx.sym.concat(weighted_probs_src, weighted_probs_trg, dim=1, name=C.SOFTMAX_OUTPUT_NAME)
-
 
         # Equivalent NDArray implementation (requires passed weights/biases)
         if isinstance(hidden, mx.nd.NDArray) and (context, mx.nd.NDArray):
             utils.check_condition(weight is not None and bias is not None,
-                              "OutputLayer NDArray implementation requires passing weight and bias NDArrays.")
+                                  "OutputLayer NDArray implementation requires passing weight and bias NDArrays.")
 
-            logits_trg = super(hidden, weight=weight, bias=bias)
-            probs_trg = mx.nd.softmax(data=logits_trg, axis=1)
-            probs_src = mx.nd.softmax(data=context, axis=1)
-            switch_input = mx.nd.concat(context, logits_trg, axis=1)
+            logits_trg = super().__call__(hidden, weight=weight, bias=bias)
+
+            # shape (batch_size * trg_max_len, encoder_rnn_hid+dec_rnn_hidden)
+            switch_input = mx.nd.concat(context, hidden, dim=1)
 
             switch_fc1 = mx.nd.FullyConnected(data=switch_input,
-                                              num_hidden=self.vocab_size,
-                                              weight=self.w,
-                                              bias=self.b,
-                                              flatten=False,
-                                              name=C.SWITCH_PROB_NAME + "_fc1")
-
+                                               # switch_fc1 = mx.sym.FullyConnected(data=hidden,
+                                               num_hidden=self.num_hidden_fc1,
+                                               weight=self.pn_w1,
+                                               bias=self.b_fc1,
+                                               flatten=False,
+                                               name=C.SWITCH_PROB_NAME + '_fc1')
 
             # TODO add noisy tanh activation function
-            switch_a1 = mx.nd.Activation(switch_fc1, act_type='tanh')
+            switch_a1 = mx.nd.Activation(switch_fc1, act_type='tanh', name=C.SWITCH_PROB_NAME + '_a1')
 
             switch_fc2 = mx.nd.FullyConnected(data=switch_a1,
-                                              num_hidden=1,
-                                              weight=self.w,
-                                              bias=self.b,
-                                              flatten=False,
-                                              name=C.SWITCH_PROB_NAME + "_fc2")
+                                               num_hidden=1,
+                                               weight=self.pn_w2,
+                                               bias=self.b_fc2,
+                                               flatten=False,
+                                               name=C.SWITCH_PROB_NAME + '_fc2')
 
-            switch_prob = mx.nd.Activation(switch_fc2, act_type='tanh')
+            switch_prob = mx.nd.Activation(switch_fc2, act_type='tanh', name=C.SWITCH_PROB_NAME + '_a-out')
 
-            weighted_probs_trg = probs_trg * switch_prob
-            weighted_probs_src = probs_src * (1 - switch_prob)
+            probs_trg = mx.nd.softmax(data=logits_trg, axis=1)
+            probs_src = mx.nd.softmax(data=context, axis=1)
 
-            return mx.nd.concat(weighted_probs_src, weighted_probs_trg, dim=1)
+            weighted_probs_src = mx.nd.broadcast_mul(probs_src, switch_prob)
+            weighted_probs_trg = mx.nd.broadcast_mul(probs_trg, (1.0 - switch_prob))
+
+            return mx.nd.concat(weighted_probs_src, weighted_probs_trg, dim=1, name="PN_concat_softmax")
 
         utils.check_condition((isinstance(hidden, mx.nd.NDArray) and (context, mx.sym.Symbol)) or
                               (isinstance(context, mx.nd.NDArray) and (hidden, mx.sym.Symbol)),

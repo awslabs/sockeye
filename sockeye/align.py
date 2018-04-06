@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 import numpy as np
-
+from . import constants as C
 
 class Aligner:
 
@@ -26,7 +26,7 @@ class Aligner:
         # TODO: we need to make these configurable eventually
         PROXIMITY = 10
         MIN_WORD_LENGHT = 2
-        BANNED_WORDS = []
+        BANNED_WORDS = [C.EOS_SYMBOL, C.BOS_SYMBOL]
         default_index = -1
         copied_pos_list = np.ones(len(trg)) * -1
 
@@ -34,7 +34,7 @@ class Aligner:
             # TODO: add min word length by passing the vocabulary of the source to the loader
             is_long_enough = True
 
-            if is_long_enough and current_word not in BANNED_WORDS:
+            if is_long_enough and not current_word in BANNED_WORDS:
                 offset = max(0, i - PROXIMITY)
                 prox_words = src[offset:min(i + PROXIMITY, len(trg))]
                 if current_word in prox_words:
@@ -46,5 +46,4 @@ class Aligner:
                         if p + 1 not in copied_pos_list:
                             copied_pos_list[i] = p + 1
                             break
-
         return copied_pos_list
