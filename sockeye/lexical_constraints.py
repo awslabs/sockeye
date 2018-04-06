@@ -249,7 +249,8 @@ def kbest(time_step: int,
           hypotheses: ConstrainedHypothesis,
           best_ids,
           best_word_ids,
-          best_scores):
+          best_scores,
+          context):
     """
     Builds a list of candidates. These candidates are pulled from three different types: (1) the best items across the whole
     scores matrix, (2) the set of words that must follow existing constraints, and (3) k-best items from each row.
