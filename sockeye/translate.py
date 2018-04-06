@@ -31,6 +31,7 @@ from . import arguments
 from . import constants as C
 from . import data_io
 from . import inference
+from . import lexical_constraints
 
 logger = setup_main_logger(__name__, file_logging=False)
 
@@ -52,6 +53,7 @@ def main():
 
     log_basic_info(args)
 
+    lexical_constraints.BANK_ADJUSTMENT = args.bank_adjustment
     output_handler = get_output_handler(args.output_type,
                                         args.output,
                                         args.sure_align_threshold)
@@ -80,6 +82,9 @@ def main():
                                           bucket_source_width=args.bucket_width,
                                           length_penalty=inference.LengthPenalty(args.length_penalty_alpha,
                                                                                  args.length_penalty_beta),
+                                          coverage_penalty=inference.CoveragePenalty(args.coverage_penalty_beta),
+                                          beam_prune=args.beam_prune,
+                                          stop_criterium=args.beam_stop,
                                           models=models,
                                           source_vocabs=source_vocabs,
                                           target_vocab=target_vocab,
@@ -128,7 +133,10 @@ def make_inputs(inp: Optional[str],
         with ExitStack() as exit_stack:
             streams = [exit_stack.enter_context(data_io.smart_open(i)) for i in inputs]
             for sentence_id, inputs in enumerate(zip(*streams), 1):
-                yield inference.make_input_from_multiple_strings(sentence_id=sentence_id, strings=list(inputs))
+                if json_input:
+                    yield inference.make_input_from_json_string(sentence_id=sentence_id, json_string=inputs[0])
+                else:
+                    yield inference.make_input_from_multiple_strings(sentence_id=sentence_id, strings=list(inputs))
 
 
 def read_and_translate(translator: inference.Translator,
@@ -177,7 +185,8 @@ def read_and_translate(translator: inference.Translator,
         logger.info("Processed 0 lines.")
 
 
-def translate(output_handler: OutputHandler, trans_inputs: List[inference.TranslatorInput],
+def translate(output_handler: OutputHandler,
+              trans_inputs: List[inference.TranslatorInput],
               translator: inference.Translator) -> float:
     """
     Translates each line from source_data, calling output handler after translating a batch.

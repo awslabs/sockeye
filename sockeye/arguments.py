@@ -992,6 +992,11 @@ def add_inference_args(params):
                                type=int_greater_or_equal(1),
                                default=5,
                                help='Size of the beam. Default: %(default)s.')
+    decode_params.add_argument('--beam-prune', '-p',
+                               type=float,
+                               default=0.,
+                               help='Pruning threshold for beam search. All hypotheses with unnormalized scores less than '
+                               'this amount below the best (unnormalized) hypothesis are discarded (0 = no pruning).')
     decode_params.add_argument('--batch-size',
                                type=int_greater_or_equal(1),
                                default=1,
@@ -1039,7 +1044,6 @@ def add_inference_args(params):
                                action='store_true',
                                default=False,
                                help='Remove any <unk> symbols from outputs. Default: %(default)s.')
-
     decode_params.add_argument('--output-type',
                                default='translation',
                                choices=C.OUTPUT_HANDLERS,
@@ -1059,6 +1063,18 @@ def add_inference_args(params):
                                type=float,
                                help='Beta factor for the length penalty used in beam search: '
                                     '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
+    decode_params.add_argument('--coverage-penalty-beta',
+                               default=0.0,
+                               type=float,
+                               help='Beta factor for the coverage penalty used in beam search: %(default)s ')
+    decode_params.add_argument('--bank-adjustment',
+                               choices='even empirical none'.split(),
+                               default='even',
+                               help='How to adjust underfilled banks')
+    decode_params.add_argument('--beam-stop',
+                               choices='all first'.split(),
+                               default='all',
+                               help='Stopping criteria. Quit when (all) hypotheses are finished or when a finished hypothesis is in (first) position')
 
 
 def add_evaluate_args(params):

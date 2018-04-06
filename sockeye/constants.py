@@ -187,6 +187,7 @@ CHUNK_SIZE_PER_BATCH_SEGMENT = 500
 # Inference Input JSON constants
 JSON_TEXT_KEY = "text"
 JSON_FACTORS_KEY = "factors"
+JSON_CONSTRAINTS_KEY = "constraints"
 JSON_ENCODING = "utf-8"
 
 VERSION_NAME = "version"
