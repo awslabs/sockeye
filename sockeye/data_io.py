@@ -414,6 +414,7 @@ class RawParallelDatasetLoader:
         self.eos_id = eos_id
         self.pad_id = pad_id
         self.dtype = dtype
+        self.map_buckets2sentence_ids = None  # type: Optional[List[np.ndarray]]
 
     def load(self,
              sources_sentences: Sequence[Iterable[List[Any]]],
@@ -438,7 +439,7 @@ class RawParallelDatasetLoader:
         num_pad_source = 0
         num_pad_target = 0
 
-        map_buckets2sentence_ids = [np.empty(num_samples, dtype=int) for num_samples in num_samples_per_bucket]
+        self.map_buckets2sentence_ids = [np.empty(num_samples, dtype=int) for num_samples in num_samples_per_bucket]
 
         # Bucket sentences as padded np arrays
         for sentence_id, (sources, target) in enumerate(zip(zip(*sources_sentences), target_sentences)):
@@ -467,11 +468,9 @@ class RawParallelDatasetLoader:
             # we can try again to compute the label sequence on the fly in next().
             data_label[buck_index][sample_index, :target_len] = target[1:] + [self.eos_id]
             
-            map_buckets2sentence_ids[buck_index][sample_index] = sentence_id
+            self.map_buckets2sentence_ids[buck_index][sample_index] = sentence_id
             
-            bucket_sample_index[buck_index] += 1
-
-        self.map_buckets2sentence_ids = map_buckets2sentence_ids    
+            bucket_sample_index[buck_index] += 1  
 
         for i in range(len(data_source)):
             data_source[i] = mx.nd.array(data_source[i], dtype=self.dtype)

@@ -122,8 +122,13 @@ def test_model_parameters(test_params, expected_params):
 @pytest.mark.parametrize("test_params, expected_params", [
     ('', dict(batch_size=64,
               batch_type="sentence",
-              fill_up='replicate',
-              loss=C.CROSS_ENTROPY,
+              fill_up='replicate'))])
+def test_batching_args(test_params, expected_params):
+    _test_args(test_params, expected_params, arguments.add_batching_args)
+
+
+@pytest.mark.parametrize("test_params, expected_params", [
+    ('', dict(loss=C.CROSS_ENTROPY,
               label_smoothing=0.0,
               loss_normalization_type='valid',
               metrics=[C.PERPLEXITY],
