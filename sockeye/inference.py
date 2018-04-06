@@ -1261,8 +1261,6 @@ class Translator:
                 negative log-probs.
         """
 
-        kbest_time = 0.0
-
         # Length of encoded sequence (may differ from initial input length)
         encoded_source_length = self.models[0].encoder.get_encoded_seq_len(source_length)
         utils.check_condition(all(encoded_source_length ==
@@ -1407,14 +1405,9 @@ class Translator:
                 (best_hyp_indices[rows], best_word_indices[rows]), \
                     scores_accumulated[rows, 0] = self.smallest_k_func(sliced_scores, self.beam_size)
 
-                # (best_hyp_indices[rows], best_word_indices[rows]), \
-                #     scores_accumulated[rows, 0] = utils.smallest_k(sliced_scores, self.beam_size, t == 1)
-
-                # _start_time = time.time()
                 if num_constraints[sentno] > 0:
                     best_hyp_indices[rows], best_word_indices[rows], \
                         scores_accumulated[rows], constraints[rows], active_beam_size[sentno] = constrained_kbest(t, active_beam_size[sentno], self.beam_size, max_output_length, sliced_scores, constraints[rows], best_hyp_indices[rows], best_word_indices[rows], scores_accumulated[rows], self.context)
-                # kbest_time += time.time() - _start_time
 
                 # offsetting since the returned smallest_k() indices were slice-relative
                 best_hyp_indices[rows] += rows.start
@@ -1423,29 +1416,16 @@ class Translator:
             if self.restrict_lexicon:
                 best_word_indices[:] = vocab_slice_ids.take(best_word_indices)
 
-            debug = False
-            if debug:
-                print("\nTIMESTEP", t)
-                print(t, 'BEST_HYP', best_hyp_indices)
-                print(t, 'BEST_WORD', best_word_indices)
-                print(t, 'SCORES_ACC', scores_accumulated)
-                print(t, 'SCORES_ACC_NP', scores_accumulated_np)
-
             # now: normalize, prune, and re-sort
             newly_finished = (best_word_indices == self.vocab_target[C.EOS_SYMBOL]).expand_dims(axis=1)
             scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
             # scores_accumulated += self.coverage_penalty(attentions)
-
-            if debug: print(t, 'NORMALIZED', scores_accumulated)
 
             # (x) Prune out low-probability hypotheses
             for sentno in range(self.batch_size):
                 rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
                 if self.beam_prune > 0.0:
                     if mx.nd.sum(finished[rows]) > 0:
-                        if debug:
-                            print(t, sentno, 'FINISHED', finished[rows])
-                            print(t, sentno, 'SCORES', scores_accumulated[rows])
                         best_score = mx.nd.min(mx.nd.where(finished[rows].expand_dims(axis=1), scores_accumulated[rows], inf_array))
 
                         to_remove = mx.nd.cast(scores_accumulated[rows,0] - best_score > self.beam_prune, dtype='int32')
@@ -1457,11 +1437,6 @@ class Translator:
                         active_beam_size[sentno] = self.beam_size - num_removing
 
                         finished[rows] = finished[rows] + to_remove
-
-                        if debug:
-                            print(t, sentno, 'TO_REMOVE', to_remove)
-                            print(t, sentno, 'BESTIES', best_word_indices[rows])
-                            print(t, sentno, 'FINISHED', finished[rows])
 
                 sorted_indices = mx.nd.argsort(scores_accumulated[rows,0])
                 best_hyp_indices[rows] = mx.nd.take(best_hyp_indices[rows], sorted_indices)
@@ -1508,12 +1483,6 @@ class Translator:
 
             #self.print_beam(sequences, scores_accumulated, finished, active_beam_size, t)
 
-            # print('ATTENTION SUMS', ' '.join(['{:.1f}'.format(mx.nd.sum(attentions[0,:,x]).asscalar()) for x in range(source_length)]))
-            # print('COVPEN', self.coverage_penalty(attentions))
-            # for tid in range(t+1):
-            #     print(self.vocab_target_inv[int(sequences[0][tid].asscalar())], ' '.join(['{}/{:.1f}'.format(x, attentions[0][tid][x].asscalar()) for x in range(source_length)]))
-
-
             if self.stop_criterium == 'first':
                 if self.batch_size == 1 and finished[0].asscalar() > 0:
                     break
@@ -1526,7 +1495,6 @@ class Translator:
                 ms.sort_state(best_hyp_indices)
 
         logger.info("Finished after %d / %d steps.", t + 1, max_output_length)
-        # logger.info("Kbest time: %f", kbest_time)
 
         return sequences, attentions, scores_accumulated, lengths, constraints, beam_histories
 
