@@ -437,7 +437,8 @@ class RawParallelDatasetLoader:
         num_tokens_target = 0
         num_pad_source = 0
         num_pad_target = 0
-        map_buckets2sentence_ids = defaultdict(lambda: defaultdict(int))
+
+        map_buckets2sentence_ids = [np.empty(num_samples, dtype=int) for num_samples in num_samples_per_bucket]
 
         # Bucket sentences as padded np arrays
         for sentence_id, (sources, target) in enumerate(zip(zip(*sources_sentences), target_sentences)):
@@ -1328,7 +1329,7 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
 class ShardedParallelSampleIter(BaseParallelSampleIter):
     """
     Goes through the data one shard at a time. The memory consumption is limited by the memory consumption of the
-    largest shard. The order in which shards are traversed is changed with each reset.
+    largest shard. If shuffling is enabled, the order in which shards are traversed is changed with each reset.
     """
 
     def __init__(self,
@@ -1341,10 +1342,11 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
                  num_factors: int = 1,
+                 shuffle: Optional[bool] = True,
                  dtype='float32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          source_data_name=source_data_name, target_data_name=target_data_name,
-                         label_name=label_name, num_factors=num_factors, dtype=dtype)
+                         label_name=label_name, num_factors=num_factors, shuffle=shuffle, dtype=dtype)
         assert len(shards_fnames) > 0
         self.shards_fnames = list(shards_fnames)
         self.shard_index = -1
@@ -1364,22 +1366,24 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                                              bucket_batch_sizes=self.bucket_batch_sizes,
                                              source_data_name=self.source_data_name,
                                              target_data_name=self.target_data_name,
-                                             num_factors=self.num_factors)
+                                             num_factors=self.num_factors,
+                                             shuffle=self.shuffle)
 
     def reset(self):
         if len(self.shards_fnames) > 1:
-            logger.info("Shuffling the shards.")
-            # Making sure to not repeat a shard:
-            if self.shard_index < 0:
-                current_shard_fname = ""
-            else:
-                current_shard_fname = self.shards_fnames[self.shard_index]
-            remaining_shards = [shard for shard in self.shards_fnames if shard != current_shard_fname]
-            next_shard_fname = random.choice(remaining_shards)
-            remaining_shards = [shard for shard in self.shards_fnames if shard != next_shard_fname]
-            random.shuffle(remaining_shards)
+            if self.shuffle:
+                logger.info("Shuffling the shards.")
+                # Making sure to not repeat a shard:
+                if self.shard_index < 0:
+                    current_shard_fname = ""
+                else:
+                    current_shard_fname = self.shards_fnames[self.shard_index]
+                remaining_shards = [shard for shard in self.shards_fnames if shard != current_shard_fname]
+                next_shard_fname = random.choice(remaining_shards)
+                remaining_shards = [shard for shard in self.shards_fnames if shard != next_shard_fname]
+                random.shuffle(remaining_shards)
 
-            self.shards_fnames = [next_shard_fname] + remaining_shards
+                self.shards_fnames = [next_shard_fname] + remaining_shards
 
             self.shard_index = 0
             self._load_shard()
@@ -1432,7 +1436,7 @@ class ParallelSampleIter(BaseParallelSampleIter):
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
                  num_factors: int = 1,
-                 shuffle: Optional[bool] = False,
+                 shuffle: Optional[bool] = True,
                  dtype='float32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          source_data_name=source_data_name, target_data_name=target_data_name,

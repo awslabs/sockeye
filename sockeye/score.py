@@ -17,6 +17,7 @@ Scoring CLI.
 import argparse
 import logging
 import time
+import numpy as np
 from contextlib import ExitStack
 from typing import List, DefaultDict
 
@@ -35,13 +36,10 @@ from sockeye.output_handler import get_output_handler, OutputHandler
 logger = setup_main_logger(__name__, file_logging=False)
 
 
-MappingDict = DefaultDict[int, DefaultDict[int, int]]
-
-
 def score(output_handler: OutputHandler,
           models: List[scoring.ScoringModel],
           data_iters: List[data_io.BaseParallelSampleIter],
-          mapids: List[MappingDict],
+          mapids: List[np.ndarray],
           scorer: scoring.Scorer) -> None:
     """
     Scores all batches returned by all iterators, with all models. Calls

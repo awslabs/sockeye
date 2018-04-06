@@ -178,7 +178,6 @@ class ScoringOutput:
         return 'ScoringOutput(%d, %s, %s, %f)' % (self.sentence_id, self.source_tokens, self.target_tokens, self.score)
 
 
-MappingDict = DefaultDict[int, DefaultDict[int, int]]
 ScoredBatch = List[Tuple[int, float]]
 ScoredSamples = List[ScoredBatch]
 
@@ -223,7 +222,7 @@ class Scorer:
                      model: ScoringModel,
                      batch: mx.io.DataBatch,
                      batch_index: Tuple[int, int],
-                     mapid: MappingDict
+                     mapid: np.ndarray
                      ) -> ScoredBatch:
         """
         Scores a batch of examples, returns a list of tuples (sentence_id, score).
@@ -254,7 +253,7 @@ class Scorer:
 
             try:
                 sentence_id = mapid[bucket_index][mapsample_number]
-            except KeyError:
+            except IndexError:
                 # this sample is a replica to fill up the batch
                 continue
 
@@ -278,7 +277,7 @@ class Scorer:
     def _score_single_model(self,
                             model: ScoringModel,
                             data_iter: data_io.BaseParallelSampleIter,
-                            mapid: MappingDict) -> ScoredSamples:
+                            mapid: np.ndarray) -> ScoredSamples:
         """
         Scores all batches with a single model. Returns a list of
         scored samples.
@@ -304,7 +303,7 @@ class Scorer:
     def score(self,
               models: List[ScoringModel],
               data_iters: List[data_io.BaseParallelSampleIter],
-              mapids: List[MappingDict]
+              mapids: List[np.ndarray]
               ) -> List[ScoringOutput]:
         """
         Scores all examples returned by an iterator, once for each model.
@@ -468,7 +467,7 @@ def create_data_iter_and_vocab(args: argparse.Namespace,
                                            buckets,
                                            args.batch_size,
                                            bucket_batch_sizes,
-                                           no_shuffle=True)
+                                           shuffle=False)
 
     return data_iter, config_, map_buckets2sentence_ids
 
