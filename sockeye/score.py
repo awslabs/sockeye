@@ -73,7 +73,7 @@ def main():
     # TODO: test with factors
     params = argparse.ArgumentParser(description='Scoring CLI')
 
-    arguments.add_scoring_args(params)
+    arguments.add_score_cli_args(params)
     args = params.parse_args()
 
     global logger

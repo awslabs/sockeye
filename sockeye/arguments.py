@@ -655,24 +655,27 @@ def add_model_parameters(params):
                                    "(and all convolutional weight matrices for CNN decoders). Default: %(default)s.")
 
 
-def add_training_args(params):
-    train_params = params.add_argument_group("Training parameters")
 
-    train_params.add_argument('--batch-size', '-b',
+def add_batching_args(params):
+    params.add_argument('--batch-size', '-b',
                               type=int_greater_or_equal(1),
                               default=64,
                               help='Mini-batch size. Default: %(default)s.')
-    train_params.add_argument("--batch-type",
+    params.add_argument("--batch-type",
                               type=str,
                               default=C.BATCH_TYPE_SENTENCE,
                               choices=[C.BATCH_TYPE_SENTENCE, C.BATCH_TYPE_WORD],
                               help="Sentence: each batch contains X sentences, number of words varies. Word: each batch"
                                    " contains (approximately) X words, number of sentences varies. Default: %(default)s.")
 
-    train_params.add_argument('--fill-up',
+    params.add_argument('--fill-up',
                               type=str,
                               default='replicate',
                               help=argparse.SUPPRESS)
+
+
+def add_training_args(params):
+    train_params = params.add_argument_group("Training parameters")
 
     train_params.add_argument('--loss',
                               default=C.CROSS_ENTROPY,
@@ -936,6 +939,7 @@ def add_train_cli_args(params):
     add_training_io_args(params)
     add_model_parameters(params)
     add_training_args(params)
+    add_batching_args(params)
     add_device_args(params)
     add_logging_args(params)
 
@@ -944,6 +948,14 @@ def add_translate_cli_args(params):
     add_inference_args(params)
     add_device_args(params)
     add_logging_args(params)
+
+
+def add_score_cli_args(params):
+    add_device_args(params)
+    add_logging_args(params)
+    add_batching_args(params)
+    add_bucketing_args(params)
+    add_scoring_args(params)
 
 
 def add_inference_args(params):
@@ -1111,38 +1123,22 @@ def add_init_embedding_args(params):
                         help='Open input vocabularies with specified encoding. Default: %(default)s.')
 
 def add_scoring_args(params):
-    add_device_args(params)
-    add_logging_args(params)
-    scoring_params = params.add_argument_group("Scoring CLI")
+    scoring_params = params.add_argument_group("Scoring parameters")
 
     scoring_params.add_argument('--source', '-s',
                                required=True,
                                type=regular_file(),
                                default=None,
-                               help='Source file to be scored, sentence-aligned.')
+                               help='Source file to be scored. One sentence per line.')
     scoring_params.add_argument('--target', '-t',
                                required=True,
                                type=regular_file(),
                                default=None,
-                               help='Target file to be scored, sentence-aligned.')
-    scoring_params.add_argument('--fill-up',
-                              type=str,
-                              default='replicate',
-                              help=argparse.SUPPRESS)
-    scoring_params.add_argument("--batch-type",
-                              type=str,
-                              default=C.BATCH_TYPE_SENTENCE,
-                              choices=[C.BATCH_TYPE_SENTENCE, C.BATCH_TYPE_WORD],
-                              help="Sentence: each batch contains X sentences, number of words varies. Word: each batch"
-                                   " contains (approximately) X words, number of sentences varies. Default: %(default)s.")
-    scoring_params.add_argument('--batch-size',
-                               type=int_greater_or_equal(1),
-                               default=1,
-                               help='Batch size during scoring. Default: %(default)s.')
+                               help='Target file to be scored. One sentence per line.')
     scoring_params.add_argument('--models', '-m',
                                required=True,
                                nargs='+',
-                               help='Model folder(s). With multiple models will return a list of scores (one for each model).')
+                               help='Model folder(s). Use multiple for ensemble scoring.')
     scoring_params.add_argument('--checkpoints', '-c',
                                default=None,
                                type=int,
@@ -1157,17 +1153,6 @@ def add_scoring_args(params):
     scoring_params.add_argument('--output', '-o',
                                 type=str,
                                 help="File to write scores to.")
-    scoring_params.add_argument('--no-bucketing',
-                        action='store_true',
-                        help='Disable bucketing: always unroll the graph to --max-seq-len. Default: %(default)s.')
-
-    scoring_params.add_argument('--bucket-width',
-                        type=int_greater_or_equal(1),
-                        default=10,
-                        help='Width of buckets in tokens. Default: %(default)s.')
-    scoring_params.add_argument('--max-seq-len',
-                        type=multiple_values(num_values=2, greater_or_equal=1),
-                        help='Maximum sequence length in tokens. Default: Maximum length in test data.')
     scoring_params.add_argument('--source-factors', '-sf',
                         required=False,
                         nargs='+',
@@ -1178,9 +1163,7 @@ def add_scoring_args(params):
                               type=int,
                               nargs='+',
                               default=[],
-                              help='Embedding size for additional source factors. '
-                                   'You must provide as many dimensions as '
-                                   '(validation) source factor files. Default: %(default)s.')
+                              help=argparse.SUPPRESS)
     scoring_params.add_argument('--ensemble-mode',
                                type=str,
                                default='linear',
