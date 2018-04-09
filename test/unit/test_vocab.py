@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -14,7 +14,7 @@
 import pytest
 
 import sockeye.constants as C
-from sockeye.vocab import build_vocab
+from sockeye.vocab import build_vocab, get_ordered_tokens_from_vocab
 
 test_vocab = [
         # Example 1
@@ -41,6 +41,7 @@ def test_build_vocab(data, size, min_count, expected):
     vocab = build_vocab(data, size, min_count)
     assert vocab == expected
 
+
 test_constants = [
         # Example 1
         (["one two three", "one two three"], 3, 1, C.VOCAB_SYMBOLS),
@@ -59,3 +60,10 @@ def test_constants_in_vocab(data, size, min_count, constants):
     vocab = build_vocab(data, size, min_count)
     for const in constants:
         assert const in vocab
+
+
+@pytest.mark.parametrize("vocab, expected_output", [({"<pad>": 0, "a": 4, "b": 2}, ["<pad>", "b", "a"]),
+                                                    ({}, [])])
+def test_get_ordered_tokens_from_vocab(vocab, expected_output):
+    assert get_ordered_tokens_from_vocab(vocab) == expected_output
+

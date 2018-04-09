@@ -793,7 +793,9 @@ def main():
 
         trainer = training.EarlyStoppingTrainer(model=training_model,
                                                 optimizer_config=create_optimizer_config(args, source_vocab_sizes),
-                                                max_params_files_to_keep=args.keep_last_params)
+                                                max_params_files_to_keep=args.keep_last_params,
+                                                source_vocabs=source_vocabs,
+                                                target_vocab=target_vocab)
 
         trainer.fit(train_iter=train_iter,
                     validation_iter=eval_iter,

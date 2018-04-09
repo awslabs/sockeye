@@ -18,7 +18,7 @@ import os
 from collections import Counter
 from contextlib import ExitStack
 from itertools import chain, islice
-from typing import Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from . import utils
 from . import constants as C
@@ -229,7 +229,7 @@ def load_or_create_vocabs(source_paths: List[str],
     return [vocab_source] + vocab_source_factors, vocab_target
 
 
-def reverse_vocab(vocab: Mapping) -> InverseVocab:
+def reverse_vocab(vocab: Vocab) -> InverseVocab:
     """
     Returns value-to-key mapping from key-to-value-mapping.
 
@@ -237,6 +237,16 @@ def reverse_vocab(vocab: Mapping) -> InverseVocab:
     :return: A mapping from values to keys.
     """
     return {v: k for k, v in vocab.items()}
+
+
+def get_ordered_tokens_from_vocab(vocab: Vocab) -> List[str]:
+    """
+    Returns the list of tokens in a vocabulary, ordered by increasing vocabulary id.
+
+    :param vocab: Input vocabulary.
+    :return: List of tokens.
+    """
+    return [token for token, token_id in sorted(vocab.items(), key=lambda i: i[1])]
 
 
 def are_identical(*vocabs: Vocab):
