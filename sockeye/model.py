@@ -220,4 +220,22 @@ class SockeyeModel:
                                                                   self.decoder.get_num_hidden()))
                 w_out_target = w_embed_target
 
+        self._embed_weight_source_name = w_embed_source.name
+        self._embed_weight_target_name = w_embed_target.name
+        self._out_weight_target_name = w_out_target.name
         return w_embed_source, w_embed_target, w_out_target
+
+    def get_source_embed_params(self) -> Optional[mx.nd.NDArray]:
+        if self.params is None:
+            return None
+        return self.params.get(self._embed_weight_source_name)
+
+    def get_target_embed_params(self) -> Optional[mx.nd.NDArray]:
+        if self.params is None:
+            return None
+        return self.params.get(self._embed_weight_target_name)
+
+    def get_output_embed_params(self) -> Optional[mx.nd.NDArray]:
+        if self.params is None:
+            return None
+        return self.params.get(self._out_weight_target_name)
