@@ -1292,7 +1292,7 @@ def main():
                             help='use case-insensitive BLEU (default: actual case)')
     arg_parser.add_argument('--smooth', '-s', choices=['exp', 'floor', 'none'], default='exp',
                             help='smoothing method: exponential decay (default), floor (0 count -> 0.01), or none')
-    arg_parser.add_argument('--tokenize', '-tok', choices=[x for x in TOKENIZERS.keys() if x != 'none'], default='13a',
+    arg_parser.add_argument('--tokenize', '-tok', choices=TOKENIZERS.keys(), default='13a',
                             help='tokenization method to use')
     arg_parser.add_argument('--language-pair', '-l', dest='langpair', default=None,
                             help='source-target language pair (2-char ISO639-1 codes)')
@@ -1377,6 +1377,10 @@ def main():
     elif args.test_set is not None and len(args.refs) > 0:
         logging.error('I need exactly one of (a) a predefined test set (-t) or (b) a list of references')
         sys.exit(1)
+
+    if args.test_set is not None and args.tokenize == 'none':
+        logging.warning('Using "--tokenize none" with a predefined test set\n'
+                        '(which is not tokenized). This is probably a bad idea.')
 
     if args.test_set:
         _, *refs = download_test_set(args.test_set, args.langpair)
