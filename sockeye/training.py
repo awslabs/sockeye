@@ -35,6 +35,7 @@ from . import loss
 from . import lr_scheduler
 from . import model
 from . import utils
+from . import vocab
 from .optimizers import BatchState, CheckpointState, SockeyeOptimizer, OptimizerConfig
 
 logger = logging.getLogger(__name__)
@@ -409,16 +410,22 @@ class EarlyStoppingTrainer:
     :param model: TrainingModel instance.
     :param optimizer_config: The optimizer configuration.
     :param max_params_files_to_keep: Maximum number of params files to keep in the output folder (last n are kept).
+    :param source_vocabs: Source vocabulary (and optional source factor vocabularies).
+    :param target_vocab: Target vocabulary.
     """
 
     def __init__(self,
                  model: TrainingModel,
                  optimizer_config: OptimizerConfig,
-                 max_params_files_to_keep: int) -> None:
+                 max_params_files_to_keep: int,
+                 source_vocabs: List[vocab.Vocab],
+                 target_vocab: vocab.Vocab) -> None:
         self.model = model
         self.optimizer_config = optimizer_config
         self.max_params_files_to_keep = max_params_files_to_keep
-        self.tflogger = TensorboardLogger(logdir=os.path.join(model.output_dir, C.TENSORBOARD_NAME))
+        self.tflogger = TensorboardLogger(logdir=os.path.join(model.output_dir, C.TENSORBOARD_NAME),
+                                          source_vocab=source_vocabs[0],
+                                          target_vocab=target_vocab)
         self.state = None  # type: Optional[TrainState]
 
     def fit(self,
@@ -710,9 +717,11 @@ class EarlyStoppingTrainer:
 
         tf_metrics = checkpoint_metrics.copy()
         tf_metrics.update({"%s_grad" % n: v for n, v in self.state.gradients.items()})
-        arg_params, aux_params = self.model.module.get_params()
-        tf_metrics.update(arg_params)
-        self.tflogger.log_metrics(tf_metrics, self.state.checkpoint)
+        tf_metrics.update(self.model.params)
+        self.tflogger.log_metrics(metrics=tf_metrics, checkpoint=self.state.checkpoint)
+        self.tflogger.log_source_embedding(self.model.get_source_embed_params(), self.state.checkpoint)
+        self.tflogger.log_target_embedding(self.model.get_target_embed_params(), self.state.checkpoint)
+        self.tflogger.log_output_embedding(self.model.get_output_embed_params(), self.state.checkpoint)
 
     def _cleanup(self, lr_decay_opt_states_reset: str, process_manager: Optional['DecoderProcessManager'] = None):
         """
@@ -968,17 +977,27 @@ class EarlyStoppingTrainer:
 class TensorboardLogger:
     """
     Thin wrapper for MXBoard API to log training events.
+    Flushes logging events to disk every 60 seconds.
+
+    :param logdir: Directory to write Tensorboard event files to.
+    :param source_vocab: Optional source vocabulary to log source embeddings.
+    :param target_vocab: Optional target vocabulary to log target and output embeddings.
     """
 
-    def __init__(self, logdir: str) -> None:
+    def __init__(self,
+                 logdir: str,
+                 source_vocab: Optional[vocab.Vocab] = None,
+                 target_vocab: Optional[vocab.Vocab] = None) -> None:
         self.logdir = logdir
+        self.source_labels = vocab.get_ordered_tokens_from_vocab(source_vocab) if source_vocab is not None else None
+        self.target_labels = vocab.get_ordered_tokens_from_vocab(target_vocab) if source_vocab is not None else None
         try:
             import mxboard
             logger.info("Logging training events for Tensorboard at '%s'", self.logdir)
             if os.path.exists(self.logdir):
                 logger.info("Deleting existing Tensorboard log directory '%s'", self.logdir)
                 shutil.rmtree(self.logdir)
-            self.sw = mxboard.SummaryWriter(logdir=self.logdir)
+            self.sw = mxboard.SummaryWriter(logdir=self.logdir, flush_secs=60, verbose=False)
         except ImportError:
             logger.info("mxboard not found. Consider 'pip install mxboard' to log events to Tensorboard.")
             self.sw = None
@@ -992,13 +1011,26 @@ class TensorboardLogger:
                 self.sw.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
             else:
                 self.sw.add_scalar(tag=name, value=value, global_step=checkpoint)
-        self.sw.flush()
 
     def log_graph(self, symbol: mx.sym.Symbol):
         if self.sw is None:
             return
         self.sw.add_graph(symbol)
-        self.sw.flush()
+
+    def log_source_embedding(self, embedding: mx.nd.NDArray, checkpoint: int):
+        if self.sw is None or self.source_labels is None:
+            return
+        self.sw.add_embedding(tag="source", embedding=embedding, labels=self.source_labels, global_step=checkpoint)
+
+    def log_target_embedding(self, embedding: mx.nd.NDArray, checkpoint: int):
+        if self.sw is None or self.target_labels is None:
+            return
+        self.sw.add_embedding(tag="target", embedding=embedding, labels=self.target_labels, global_step=checkpoint)
+
+    def log_output_embedding(self, embedding: mx.nd.NDArray, checkpoint: int):
+        if self.sw is None or self.target_labels is None:
+            return
+        self.sw.add_embedding(tag="output", embedding=embedding, labels=self.target_labels, global_step=checkpoint)
 
 
 class Speedometer:
