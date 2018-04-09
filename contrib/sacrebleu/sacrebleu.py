@@ -84,6 +84,10 @@ Sacre BLEU.
 
 # VERSION HISTORY
 
+- 1.2.7 (10 April 2018)
+   - fixed another locale issue (with --echo)
+   - grudgingly enabled `-tok none` from the command line
+
 - 1.2.6 (22 March 2018)
    - added wmt17/ms (Microsoft's [additional ZH-EN references](https://github.com/MicrosoftTranslator/Translator-HumanParityData)).
      Try `sacrebleu -t wmt17/ms --cite`.
@@ -180,7 +184,7 @@ from typing import List, Iterable, Tuple
 import math
 import unicodedata
 
-VERSION = '1.2.6'
+VERSION = '1.2.7'
 
 try:
     # SIGPIPE is not available on Windows machines, throwing an exception.
@@ -1327,6 +1331,10 @@ def main():
     arg_parser.add_argument('-V', '--version', action='version',
                             version='%(prog)s {}'.format(VERSION))
     args = arg_parser.parse_args()
+
+    # Explicitly set the encoding
+    sys.stdin = open(sys.stdin.fileno(), mode='r', encoding='utf-8', buffering=True)
+    sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=True)
 
     if not args.quiet:
         logging.basicConfig(level=logging.INFO, format='sacreBLEU: %(message)s')
