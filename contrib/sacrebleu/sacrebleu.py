@@ -1379,8 +1379,8 @@ def main():
         sys.exit(1)
 
     if args.test_set is not None and args.tokenize == 'none':
-        logging.warning('Using "--tokenize none" with a predefined test set\n'
-                        '(which is not tokenized). This is probably a bad idea.')
+        logging.warning("You are turning off sacrebleu's internal tokenization ('--tokenize none'), presumably to supply\n"
+                        "your own reference tokenization. Published numbers will not be comparable with other papers.\n")
 
     if args.test_set:
         _, *refs = download_test_set(args.test_set, args.langpair)
