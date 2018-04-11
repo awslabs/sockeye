@@ -43,9 +43,9 @@ class CheckpointDecoder:
     :param references: Path to file containing references.
     :param model: Model to load.
     :param max_input_len: Maximum input length.
+    :param batch_size: Batch size.
     :param beam_size: Size of the beam.
     :param bucket_width_source: Source bucket width.
-    :param bucket_width_target: Target bucket width.
     :param length_penalty_alpha: Alpha factor for the length penalty
     :param length_penalty_beta: Beta factor for the length penalty
     :param softmax_temperature: Optional parameter to control steepness of softmax distribution.
@@ -61,6 +61,7 @@ class CheckpointDecoder:
                  references: str,
                  model: str,
                  max_input_len: Optional[int] = None,
+                 batch_size: int = 16,
                  beam_size: int = C.DEFAULT_BEAM_SIZE,
                  bucket_width_source: int = 10,
                  length_penalty_alpha: float = 1.0,
@@ -75,7 +76,7 @@ class CheckpointDecoder:
         self.max_output_length_num_stds = max_output_length_num_stds
         self.ensemble_mode = ensemble_mode
         self.beam_size = beam_size
-        self.batch_size = 16
+        self.batch_size = batch_size
         self.bucket_width_source = bucket_width_source
         self.length_penalty_alpha = length_penalty_alpha
         self.length_penalty_beta = length_penalty_beta
