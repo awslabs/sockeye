@@ -10,23 +10,22 @@
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
-from sockeye.convolution import ConvolutionBlock
 
 """
 Encoders for sequence-to-sequence models.
 """
-import logging
 import inspect
-from math import ceil, floor
+import logging
 from abc import ABC, abstractmethod
+from math import ceil, floor
 from typing import Callable, List, Optional, Tuple, Union, Dict
 
 import mxnet as mx
 
 from . import config
 from . import constants as C
-from . import rnn
 from . import convolution
+from . import rnn
 from . import transformer
 from . import utils
 
@@ -860,7 +859,7 @@ class ConvolutionalEncoder(Encoder):
 
         # initialize the layers of blocks containing a convolution and a GLU, since
         # every layer is shared over all encode calls
-        self.layers = [ConvolutionBlock(
+        self.layers = [convolution.ConvolutionBlock(
             config.cnn_config,
             pad_type='centered',
             prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]

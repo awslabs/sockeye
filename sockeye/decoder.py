@@ -20,7 +20,6 @@ from typing import Callable, cast, Dict, List, NamedTuple, Optional, Tuple, Unio
 
 import mxnet as mx
 
-from sockeye.config import Config
 from . import constants as C
 from . import convolution
 from . import encoder
@@ -29,6 +28,7 @@ from . import rnn
 from . import rnn_attention
 from . import transformer
 from . import utils
+from .config import Config
 
 logger = logging.getLogger(__name__)
 DecoderConfig = Union['RecurrentDecoderConfig', transformer.TransformerConfig, 'ConvolutionalDecoderConfig']
