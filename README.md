@@ -79,7 +79,7 @@ Depending on your version of CUDA, you can do this by running the following:
 > pip install sockeye --no-deps -r requirements.gpu-cu${CUDA_VERSION}.txt
 > rm requirements.gpu-cu${CUDA_VERSION}.txt
 ```
-where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), or `90` (9.0).
+where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), `90` (9.0), or `91` (9.1).
 
 ### Or: From Source
 
@@ -102,7 +102,7 @@ running the following:
 > pip install -r requirements.gpu-cu${CUDA_VERSION}.txt
 > pip install .
 ```
-where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), or `90` (9.0).
+where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), `90` (9.0), or `91` (9.1).
 
 ### Optional dependencies
 In order to write training statistics to a Tensorboard event file for visualization, you can optionally install mxboard
