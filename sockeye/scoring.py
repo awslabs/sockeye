@@ -12,7 +12,9 @@
 # permissions and limitations under the License.
 
 """
-Implement scoring of existing translations.
+Implement scoring of existing translations. Scores are obtained by forwarding
+source sentences through a trained model and computing the probability assigned
+to an existing target sentence.
 """
 import os
 import logging
@@ -145,9 +147,6 @@ class ScoringModel(model.SockeyeModel):
                                  context=self.context)
 
 
-Tokens = List[str]
-
-
 class ScoringOutput:
     """
     Wraps the output of scoring.
@@ -163,8 +162,8 @@ class ScoringOutput:
 
     def __init__(self,
                  sentence_id: int,
-                 source_tokens: Optional[Tokens],
-                 target_tokens: Optional[Tokens],
+                 source_tokens: Optional[vocab.Tokens],
+                 target_tokens: Optional[vocab.Tokens],
                  score: float) -> None:
         self.sentence_id = sentence_id
         self.source_tokens = source_tokens
@@ -188,7 +187,6 @@ class Scorer:
 
     :param batch_size: Batch size.
     :param context: The context(s) that MXNet will be run in (GPU(s)/CPU).
-    :param ensemble_mode: Ensemble mode: linear combination of scores.
     :param no_bucketing: If False bucketing will be used, if True the
     computation graph will always be unrolled to the full length.
     :param normalize: If True, normalize scores by the length of the target
@@ -197,7 +195,6 @@ class Scorer:
     def __init__(self,
                  batch_size: int,
                  context: List[mx.context.Context],
-                 ensemble_mode: str,
                  no_bucketing: bool = False,
                  normalize: Optional[bool] = True) -> None:
 
@@ -205,14 +202,6 @@ class Scorer:
         self.context = context
         self.no_bucketing = no_bucketing
         self.normalize = normalize
-        self.interpolation_func = self._get_interpolation_func(ensemble_mode)
-
-    @staticmethod
-    def _get_interpolation_func(ensemble_mode):
-        if ensemble_mode == 'linear':
-            return Scorer._linear_interpolation
-        else:
-            raise ValueError("unknown interpolation type")
 
     @staticmethod
     def _linear_interpolation(predictions):
@@ -236,18 +225,20 @@ class Scorer:
         scored_batch = []
 
         model.module.forward(batch, is_train=False)
+        # outputs[0]: (batch_size * t_len, t_vocab)
         outputs = model.module.get_outputs()
 
         # split output array into probs per batch
         sample_length = int(len(outputs[0]) / self.batch_size)
 
-        probs = mx.nd.array(outputs[0], ctx=self.context)  # shape is (t_len*batch_size, t_vocab)
-        probs_per_batch = [probs[i*sample_length:(i+1)*sample_length] for i in range(self.batch_size)]
+        # probs: (batch_size, t_len, t_vocab)
+        probs = outputs[0].reshape((self.batch_size, sample_length, -1))
+        probs = probs.as_in_context(self.context)
 
         # get bucket index of batch
         (bucket_index, offset) = batch_index
 
-        for sample_number, sample_probs in enumerate(probs_per_batch):
+        for sample_number, sample_probs in enumerate(probs):
 
             mapsample_number = sample_number + offset
 
@@ -281,6 +272,7 @@ class Scorer:
         """
         Scores all batches with a single model. Returns a list of
         scored samples.
+
         :param model: The model used for scoring, an instance of ScoringModel.
         :param data_iter: Iterator that returns batches of data.
         :param mapid: Nested dictionary mapping positions in buckets to the
@@ -338,7 +330,7 @@ class Scorer:
 
         for sample in zip(*scored_samples):
             scores = [score for (sentence_id, score) in sample]
-            ensemble_score = self.interpolation_func(scores)
+            ensemble_score = self._linear_interpolation(scores)
 
             sentence_id = sample[0][0]
 
@@ -457,7 +449,8 @@ def create_data_iter_and_vocab(args: argparse.Namespace,
 
     data_loader = data_io.RawParallelDatasetLoader(buckets=buckets,
                                                    eos_id=target_vocab[C.EOS_SYMBOL],
-                                                   pad_id=C.PAD_ID)
+                                                   pad_id=C.PAD_ID,
+                                                   skip_if_no_bucket=False)
 
     parallel_data = data_loader.load(sources_sentences, target_sentences,
                                      data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes, args.fill_up)

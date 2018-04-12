@@ -45,8 +45,7 @@ def score(output_handler: OutputHandler,
     Scores all batches returned by all iterators, with all models. Calls
     an output handler to process the results.
 
-    :param output_handler: A handler that will be called with each scoring
-    result.
+    :param output_handler: A handler that will be called with each scoring result.
     :param models: A list of models that an instance of scoring.Scorer uses
     to forward batches.
     :param data_iters: Iterators that return batches of data.
@@ -95,7 +94,7 @@ def main():
         context = translate._setup_context(args, exit_stack)
 
         # if --max-seq-len given, use this, else get maximum sentence length from test data
-        if(args.max_seq_len is not None):
+        if args.max_seq_len is not None:
             max_len_source, max_len_target = args.max_seq_len
         else:
             max_len_source, max_len_target = scoring.get_max_source_and_target(args)
@@ -122,7 +121,6 @@ def main():
 
         scorer = scoring.Scorer(batch_size=args.batch_size,
                                 context=context,
-                                ensemble_mode=args.ensemble_mode,
                                 no_bucketing=args.no_bucketing)
 
         output_handler = get_output_handler(output_type=C.OUTPUT_HANDLER_SCORE,

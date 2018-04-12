@@ -531,7 +531,6 @@ def get_max_input_output_length(supported_max_seq_len_source: Optional[int],
 
 
 BeamHistory = Dict[str, List]
-Tokens = List[str]
 
 
 class TranslatorInput:
@@ -548,8 +547,8 @@ class TranslatorInput:
 
     def __init__(self,
                  sentence_id: int,
-                 tokens: Tokens,
-                 factors: Optional[List[Tokens]] = None,
+                 tokens: vocab.Tokens,
+                 factors: Optional[List[vocab.Tokens]] = None,
                  chunk_id: int = -1) -> None:
         self.sentence_id = sentence_id
         self.chunk_id = chunk_id
@@ -658,8 +657,8 @@ def make_input_from_factored_string(sentence_id: int,
     if model_num_source_factors == 1:
         return make_input_from_plain_string(sentence_id=sentence_id, string=factored_string)
 
-    tokens = []  # type: Tokens
-    factors = [[] for _ in range(model_num_source_factors - 1)]  # type: List[Tokens]
+    tokens = []  # type: vocab.Tokens
+    factors = [[] for _ in range(model_num_source_factors - 1)]  # type: List[vocab.Tokens]
     for token_id, token in enumerate(data_io.get_tokens(factored_string)):
         pieces = token.split(delimiter)
 

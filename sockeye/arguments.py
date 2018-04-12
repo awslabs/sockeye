@@ -1126,46 +1126,41 @@ def add_scoring_args(params):
     scoring_params = params.add_argument_group("Scoring parameters")
 
     scoring_params.add_argument('--source', '-s',
-                               required=True,
-                               type=regular_file(),
-                               default=None,
-                               help='Source file to be scored. One sentence per line.')
+                                required=True,
+                                type=regular_file(),
+                                default=None,
+                                help='Source file to be scored. One sentence per line.')
     scoring_params.add_argument('--target', '-t',
-                               required=True,
-                               type=regular_file(),
-                               default=None,
-                               help='Target file to be scored. One sentence per line.')
+                                required=True,
+                                type=regular_file(),
+                                default=None,
+                                help='Target file to be scored. One sentence per line.')
     scoring_params.add_argument('--models', '-m',
-                               required=True,
-                               nargs='+',
-                               help='Model folder(s). Use multiple for ensemble scoring.')
+                                required=True,
+                                nargs='+',
+                                help='Model folder(s). Use multiple for ensemble scoring.')
     scoring_params.add_argument('--checkpoints', '-c',
-                               default=None,
-                               type=int,
-                               nargs='+',
-                               help='If not given, chooses best checkpoints for model(s). '
-                                    'If specified, must have the same length as --models and be integer')
+                                default=None,
+                                type=int,
+                                nargs='+',
+                                help='If not given, chooses best checkpoints for model(s). '
+                                     'If specified, must have the same length as --models and be integer')
     scoring_params.add_argument('--output-type',
-                               default=C.OUTPUT_HANDLER_SCORE,
-                               # scoring does not result in beam history
-                               choices=[H for H in C.OUTPUT_HANDLERS if H != C.OUTPUT_HANDLER_BEAM_STORE],
-                               help='Output type. Default: %(default)s.')
+                                default=C.OUTPUT_HANDLER_SCORE,
+                                # scoring does not result in beam history
+                                choices=[h for h in C.OUTPUT_HANDLERS if h != C.OUTPUT_HANDLER_BEAM_STORE],
+                                help='Output type. Default: %(default)s.')
     scoring_params.add_argument('--output', '-o',
                                 type=str,
                                 help="File to write scores to.")
     scoring_params.add_argument('--source-factors', '-sf',
-                        required=False,
-                        nargs='+',
-                        type=regular_file(),
-                        default=[],
-                        help='File(s) containing additional token-parallel source side factors. Default: %(default)s.')
+                                required=False,
+                                nargs='+',
+                                type=regular_file(),
+                                default=[],
+                                help='File(s) containing additional token-parallel source side factors. Default: %(default)s.')
     scoring_params.add_argument('--source-factors-num-embed',
-                              type=int,
-                              nargs='+',
-                              default=[],
-                              help=argparse.SUPPRESS)
-    scoring_params.add_argument('--ensemble-mode',
-                               type=str,
-                               default='linear',
-                               choices=['linear'],
-                               help='Ensemble mode. Default: %(default)s.')
+                                type=int,
+                                nargs='+',
+                                default=[],
+                                help=argparse.SUPPRESS)

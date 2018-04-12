@@ -31,7 +31,7 @@ import numpy as np
 from . import config
 from . import constants as C
 from . import vocab
-from .utils import check_condition, smart_open, get_tokens, OnlineMeanAndVariance
+from .utils import check_condition, smart_open, get_tokens, OnlineMeanAndVariance, SockeyeError
 
 logger = logging.getLogger(__name__)
 
@@ -402,6 +402,8 @@ class RawParallelDatasetLoader:
     :param eos_id: End-of-sentence id.
     :param pad_id: Padding id.
     :param eos_id: Unknown id.
+    :param skip_if_no_bucket: If True, sentences are skipped if they do not fit in any bucket. If
+    False, an error is raised in the same situation.
     :param dtype: Data type.
     """
 
@@ -409,11 +411,13 @@ class RawParallelDatasetLoader:
                  buckets: List[Tuple[int, int]],
                  eos_id: int,
                  pad_id: int,
-                 dtype: str = 'float32') -> None:
+                 dtype: str = 'float32',
+                 skip_if_no_bucket: Optional[bool] = True) -> None:
         self.buckets = buckets
         self.eos_id = eos_id
         self.pad_id = pad_id
         self.dtype = dtype
+        self.skip_if_no_bucket = skip_if_no_bucket
         self.map_buckets2sentence_ids = None  # type: Optional[List[np.ndarray]]
 
     def load(self,
@@ -446,9 +450,13 @@ class RawParallelDatasetLoader:
             source_len = len(sources[0])
             target_len = len(target)
             buck_index, buck = get_parallel_bucket(self.buckets, source_len, target_len)
-            ## TODO does this ever happen if we use maxlens from test set? check
+
             if buck is None:
-                continue  # skip this sentence pair
+                if self.skip_if_no_bucket:
+                    continue  # skip this sentence pair
+                else:
+                    error_message = "Segments did not fit in any bucket: %s, %s" % (str(sources), str(target))
+                    raise SockeyeError(error_message)
 
             check_condition(are_token_parallel(sources),
                             "Source sequences are not token-parallel: %s" % (str(sources)))
@@ -467,10 +475,10 @@ class RawParallelDatasetLoader:
             # Once MXNet allows item assignments given a list of indices (probably MXNet 1.0): e.g a[[0,1,5,2]] = x,
             # we can try again to compute the label sequence on the fly in next().
             data_label[buck_index][sample_index, :target_len] = target[1:] + [self.eos_id]
-            
+
             self.map_buckets2sentence_ids[buck_index][sample_index] = sentence_id
-            
-            bucket_sample_index[buck_index] += 1  
+
+            bucket_sample_index[buck_index] += 1
 
         for i in range(len(data_source)):
             data_source[i] = mx.nd.array(data_source[i], dtype=self.dtype)
