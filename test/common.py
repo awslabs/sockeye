@@ -24,6 +24,7 @@ import mxnet as mx
 import numpy as np
 
 import sockeye.average
+import sockeye.checkpoint_decoder
 import sockeye.constants as C
 import sockeye.evaluate
 import sockeye.lexicon
@@ -311,6 +312,20 @@ def run_train_translate(train_params: str,
             with patch.object(sys, "argv", params.split()):
                 sockeye.train.main()
 
+        # run checkpoint decoder on 1% of dev data
+        with open(dev_source_path) as dev_fd:
+            num_dev_sent = sum(1 for _ in dev_fd)
+        sample_size = min(1, int(num_dev_sent * 0.01))
+        cp_decoder = sockeye.checkpoint_decoder.CheckpointDecoder(context=mx.cpu(),
+                                                                  inputs=[dev_source_path],
+                                                                  references=dev_target_path,
+                                                                  model=model_path,
+                                                                  sample_size=sample_size,
+                                                                  batch_size=2,
+                                                                  beam_size=2)
+        cp_metrics = cp_decoder.decode_and_evaluate()
+        logger.info("Checkpoint decoder metrics: %s", cp_metrics)
+
         logger.info("Translating with parameters %s.", translate_params)
         # Translate corpus with the 1st params
         out_path = os.path.join(work_dir, "out.txt")
@@ -394,8 +409,10 @@ def run_train_translate(train_params: str,
         metrics = sockeye.utils.read_metrics_file(path=os.path.join(model_path, C.METRICS_NAME))
         perplexity = min(m[C.PERPLEXITY + '-val'] for m in metrics)
 
-        hypotheses = open(out_path, "r").readlines()
-        references = open(test_target_path, "r").readlines()
+        with open(out_path, "r") as out:
+            hypotheses = out.readlines()
+        with open(test_target_path, "r") as ref:
+            references = ref.readlines()
         assert len(hypotheses) == len(references)
 
         # compute metrics
