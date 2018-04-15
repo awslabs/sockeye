@@ -867,8 +867,8 @@ def _concat_translations(translations: List[Translation], start_id: int, stop_id
 class Translator:
     """
     Translator uses one or several models to translate input.
-    It holds references to vocabularies to take care of encoding input strings as word ids and conversion of target ids
-    into a translation string.
+    The translator holds a reference to vocabularies to convert between word ids and text tokens for input and
+    translation strings.
 
     :param context: MXNet context to bind modules to.
     :param ensemble_mode: Ensemble mode: linear or log_linear combination.
