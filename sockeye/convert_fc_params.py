@@ -32,6 +32,7 @@ if __name__ == '__main__':
     for name, param in params.items():
         if re.match(comb_fc_pat, name):
             print("Found combined FC weight: %s. Will split..." % name)
+            # pylint: disable=unbalanced-tuple-unpacking
             w_k, w_v = mx.nd.split(param, axis=0, num_outputs=2)
             params_new[name.replace('kv2h', "k2h")] = w_k
             params_new[name.replace('kv2h', "v2h")] = w_v
