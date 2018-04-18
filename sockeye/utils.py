@@ -253,9 +253,7 @@ def smallest_k(matrix: np.ndarray, k: int) -> Tuple[Tuple[np.ndarray, np.ndarray
     flatten = matrix.flatten()
 
     # args are the indices in flatten of the k smallest elements
-    args = np.argpartition(flatten, k)[:k]
-    # args are the indices in flatten of the sorted k smallest elements
-    args = args[np.argsort(flatten[args])]
+    args = np.argpartition(flatten, range(k))[:k]
     # flatten[args] are the values for args
     return np.unravel_index(args, matrix.shape), flatten[args]
 

@@ -217,30 +217,23 @@ def add_extract_args(params):
 
 
 def add_lexicon_args(params):
-    lexicon_params = params.add_argument_group("Lexicon")
-    lexicon_params.add_argument(
-        "--input",
-        "-i",
-        required=True,
-        type=str,
-        help="Probabilistic lexicon (fast_align format) to use for building top-k lexicon.")
-    lexicon_params.add_argument(
-        "--output",
-        "-o",
-        required=True,
-        type=str,
-        help="JSON file to write top-k lexicon to.")
-    lexicon_params.add_argument(
-        "--model",
-        "-m",
-        required=True,
-        type=str,
-        help="Trained model directory for source and target vocab.")
-    lexicon_params.add_argument(
-        "-k",
-        type=int,
-        default=20,
-        help="Number of target translations to keep per source. Default: %(default)s.")
+    lexicon_params = params.add_argument_group("Model & Top-k")
+    lexicon_params.add_argument("--model", "-m", required=True,
+                                help="Model directory containing source and target vocabularies.")
+    lexicon_params.add_argument("-k", type=int, default=20,
+                                help="Number of target translations to keep per source. Default: %(default)s.")
+
+
+def add_lexicon_create_args(params):
+    lexicon_params = params.add_argument_group("I/O")
+    lexicon_params.add_argument("--input", "-i", required=True,
+                                help="Probabilistic lexicon (fast_align format) to build top-k lexicon from.")
+    lexicon_params.add_argument("--output", "-o", required=True, help="File name to write top-k lexicon to.")
+
+
+def add_lexicon_inspect_args(params):
+    lexicon_params = params.add_argument_group("Lexicon to inspect")
+    lexicon_params.add_argument("--lexicon", "-l", required=True, help="File name of top-k lexicon to inspect.")
 
 
 def add_logging_args(params):
@@ -293,10 +286,6 @@ def add_prepared_data_args(params):
 
 
 def add_monitoring_args(params):
-    params.add_argument('--use-tensorboard',
-                        action='store_true',
-                        help='Track metrics through tensorboard. Requires installed tensorboard.')
-
     params.add_argument('--monitor-pattern',
                         default=None,
                         type=str,
@@ -610,12 +599,17 @@ def add_model_parameters(params):
     model_params.add_argument('--rnn-attention-use-prev-word', action="store_true",
                               help="Feed the previous target embedding into the attention mechanism.")
 
+    model_params.add_argument('--rnn-scale-dot-attention',
+                              action='store_true',
+                              help='Optional scale before dot product. Only applicable to \'dot\' attention type. '
+                                   '[Vaswani et al, 2017]')
+
     model_params.add_argument('--rnn-attention-coverage-type',
                               choices=["tanh", "sigmoid", "relu", "softrelu", "gru", "count"],
                               default="count",
-                              help="Type of model for updating coverage vectors. 'count' refers to an update method"
+                              help="Type of model for updating coverage vectors. 'count' refers to an update method "
                                    "that accumulates attention scores. 'tanh', 'sigmoid', 'relu', 'softrelu' "
-                                   "use non-linear layers with the respective activation type, and 'gru' uses a"
+                                   "use non-linear layers with the respective activation type, and 'gru' uses a "
                                    "GRU to update the coverage vectors. Default: %(default)s.")
     model_params.add_argument('--rnn-attention-coverage-num-hidden',
                               type=int,
@@ -1042,8 +1036,17 @@ def add_inference_args(params):
     decode_params.add_argument('--restrict-lexicon',
                                type=str,
                                default=None,
-                               help="Specify top-k lexicon to restrict output vocabulary based on source.  See lexicon "
+                               help="Specify top-k lexicon to restrict output vocabulary based on source. See lexicon "
                                     "module. Default: %(default)s.")
+    decode_params.add_argument('--restrict-lexicon-topk',
+                               type=int,
+                               default=None,
+                               help="Specify the number of translations to load for each source word from the lexicon "
+                                    "given with --restrict-lexicon. Default: Load all entries from the lexicon.")
+    decode_params.add_argument('--strip-unknown-words',
+                               action='store_true',
+                               default=False,
+                               help='Remove any <unk> symbols from outputs. Default: %(default)s.')
 
     decode_params.add_argument('--output-type',
                                default='translation',

@@ -38,6 +38,7 @@ ENCODER_DECODER_SETTINGS = [
      " --max-updates 10 --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01"
      " --rnn-dropout-inputs 0.5:0.1 --rnn-dropout-states 0.5:0.1 --embed-dropout 0.1 --rnn-decoder-hidden-dropout 0.01"
      " --rnn-decoder-state-init avg --rnn-encoder-reverse-input --rnn-dropout-recurrent 0.1:0.0"
+     " --rnn-h2h-init orthogonal_stacked"
      " --learning-rate-decay-param-reset --weight-normalization --source-factors-num-embed 5",
      "--beam-size 2",
      False, True, True),
@@ -72,6 +73,7 @@ ENCODER_DECODER_SETTINGS = [
      " --transformer-feed-forward-num-hidden 32"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying --weight-tying-type src_trg_softmax"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
      " --batch-size 8 --max-updates 10"
      " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 2",
