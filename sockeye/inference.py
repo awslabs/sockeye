@@ -1312,7 +1312,8 @@ class Translator:
                 best_word_indices[:] = vocab_slice_ids.take(best_word_indices)
 
             # (4) Normalize the scores of newly finished hypotheses
-            newly_finished = (best_word_indices == self.vocab_target[C.EOS_SYMBOL]).expand_dims(axis=1)
+            all_finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
+            newly_finished = all_finished - finished
             scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
 
             # (5) Prune out low-probability hypotheses
