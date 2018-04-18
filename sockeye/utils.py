@@ -260,7 +260,7 @@ def topk(scores: mx.nd.NDArray,
     Get the lowest k elements per sentence from a `scores` matrix.
 
     :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
-    :param t: Time step in the beam search
+    :param t: Time step in the beam search.
     :param k: The number of smallest scores to return.
     :param batch_size: Number of sentences being decoded at once.
     :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
@@ -289,8 +289,9 @@ def topk(scores: mx.nd.NDArray,
         values = folded_scores[np.arange(folded_scores.shape[0])[:, None], flat_idxs].ravel()
         best_hyp_indices, best_word_indices = np.unravel_index(flat_idxs.ravel(), scores.shape)
 
-    # Offsetting the indices to match the shape of the scores matrix
-    best_hyp_indices += offset
+    if batch_size > 1:
+        # Offsetting the indices to match the shape of the scores matrix
+        best_hyp_indices += offset
     return best_hyp_indices, best_word_indices, values
 
 
