@@ -250,8 +250,11 @@ class OnlineMeanAndVariance:
         else:
             return self._M2 / self._count
 
-def topk(scores: mx.nd.NDArray, k: int, batch_size: int, t: int, use_mxnet_topk: bool)
-         -> Tuple[np.ndarray, np.ndarray, Union[np.ndarray, mx.nd.NDArray]]:
+def topk(scores: mx.nd.NDArray,
+         k: int, 
+         batch_size: int, 
+         t: int, 
+         use_mxnet_topk: bool) -> Tuple[np.ndarray, np.ndarray, Union[np.ndarray, mx.nd.NDArray]]:
     """
     Get the lowest k elements per sentence from a `scores` matrix.
 
