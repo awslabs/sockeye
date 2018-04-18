@@ -167,7 +167,16 @@ def load_params(fname: str) -> Tuple[Dict[str, mx.nd.NDArray], Dict[str, mx.nd.N
     for k, v in save_dict.items():
         tp, name = k.split(':', 1)
         if tp == 'arg':
-            arg_params[name] = v
+            """TODO(fhieber):
+            temporary weight split for models with combined weight for keys & values
+            in transformer source attention layers. This can be removed once with the next major version change."""
+            if "att_enc_kv2h_weight" in name:
+                logger.info("Splitting '%s' parameters into separate k & v matrices.", name)
+                v_split = mx.nd.split(v, axis=0, num_outputs=2)
+                arg_params[name.replace('kv2h', "k2h")] = v_split[0]
+                arg_params[name.replace('kv2h', "v2h")] = v_split[1]
+            else:
+                arg_params[name] = v
         if tp == 'aux':
             aux_params[name] = v
     return arg_params, aux_params

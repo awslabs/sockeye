@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.2]
+### Changed
+- Removed combined linear projection of keys & values in source attention transformer layers for
+  performance improvements.
+
 ## [1.18.1]
 ### Added
 - Added Tensorboard logging for all parameter values and gradients as histograms/distributions. The logged values
