@@ -1252,11 +1252,8 @@ class Translator:
                 models_output_layer_w.append(m.output_layer_w.take(vocab_slice_ids))
                 models_output_layer_b.append(m.output_layer_b.take(vocab_slice_ids))
 
-        # Select topK to use
-        if self.context == mx.cpu():
-            use_mxnet_topk = False
-        else:
-            use_mxnet_topk = True
+        # mxnet implementation is faster on GPUs
+        use_mxnet_topk = self.context != mx.cpu():
 
         # (0) encode source sentence, returns a list
         model_states = self._encode(source, source_length)
