@@ -19,6 +19,7 @@ from typing import Optional
 import sockeye.constants as C
 from . import data_io
 from . import inference
+from . import scoring
 from sockeye.utils import plot_attention, print_attention_text, get_alignments
 
 
@@ -50,6 +51,8 @@ def get_output_handler(output_type: str,
         return AlignTextHandler(sure_align_threshold)
     elif output_type == C.OUTPUT_HANDLER_BEAM_STORE:
         return BeamStoringHandler(output_stream)
+    elif output_type == C.OUTPUT_HANDLER_SCORE:
+        return ScoreOutputHandler(output_stream)
     else:
         raise ValueError("unknown output type")
 
@@ -299,4 +302,26 @@ class BeamStoringHandler(OutputHandler):
             # Some outputs can have more than one beam, add the id for bookkeeping
             h["id"] = t_output.id # type: ignore
             self.stream.write("%s\n" % json.dumps(h, sort_keys=True))
+        self.stream.flush()
+
+
+class ScoreOutputHandler(OutputHandler):
+    """
+    Output handler to write scores to a stream. Outputs nothing but
+    the scores.
+
+    :param stream: Stream to write scores to (e.g. sys.stdout).
+    """
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    def handle(self,
+               s_output: scoring.ScoringOutput,
+               s_walltime: float = 0.):
+        """
+        :param s_output: Scoring output.
+        :param s_walltime: Total walltime for scoring.
+        """
+        self.stream.write("{:.5f}\n".format(s_output.score))
         self.stream.flush()

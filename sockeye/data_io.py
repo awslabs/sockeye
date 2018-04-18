@@ -20,7 +20,7 @@ import os
 import pickle
 import random
 from abc import ABC, abstractmethod
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from contextlib import ExitStack
 from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sequence, Sized, Tuple
 
@@ -31,7 +31,7 @@ import numpy as np
 from . import config
 from . import constants as C
 from . import vocab
-from .utils import check_condition, smart_open, get_tokens, OnlineMeanAndVariance
+from .utils import check_condition, smart_open, get_tokens, OnlineMeanAndVariance, SockeyeError
 
 logger = logging.getLogger(__name__)
 
@@ -402,6 +402,8 @@ class RawParallelDatasetLoader:
     :param eos_id: End-of-sentence id.
     :param pad_id: Padding id.
     :param eos_id: Unknown id.
+    :param skip_if_no_bucket: If True, sentences are skipped if they do not fit in any bucket. If
+    False, an error is raised in the same situation.
     :param dtype: Data type.
     """
 
@@ -409,11 +411,14 @@ class RawParallelDatasetLoader:
                  buckets: List[Tuple[int, int]],
                  eos_id: int,
                  pad_id: int,
-                 dtype: str = 'float32') -> None:
+                 dtype: str = 'float32',
+                 skip_if_no_bucket: Optional[bool] = True) -> None:
         self.buckets = buckets
         self.eos_id = eos_id
         self.pad_id = pad_id
         self.dtype = dtype
+        self.skip_if_no_bucket = skip_if_no_bucket
+        self.map_buckets2sentence_ids = None  # type: Optional[List[np.ndarray]]
 
     def load(self,
              sources_sentences: Sequence[Iterable[List[Any]]],
@@ -438,13 +443,20 @@ class RawParallelDatasetLoader:
         num_pad_source = 0
         num_pad_target = 0
 
+        self.map_buckets2sentence_ids = [np.empty(num_samples, dtype=int) for num_samples in num_samples_per_bucket]
+
         # Bucket sentences as padded np arrays
-        for sources, target in zip(zip(*sources_sentences), target_sentences):
+        for sentence_id, (sources, target) in enumerate(zip(zip(*sources_sentences), target_sentences)):
             source_len = len(sources[0])
             target_len = len(target)
             buck_index, buck = get_parallel_bucket(self.buckets, source_len, target_len)
+
             if buck is None:
-                continue  # skip this sentence pair
+                if self.skip_if_no_bucket:
+                    continue  # skip this sentence pair
+                else:
+                    error_message = "Segments did not fit in any bucket: %s, %s" % (str(sources), str(target))
+                    raise SockeyeError(error_message)
 
             check_condition(are_token_parallel(sources),
                             "Source sequences are not token-parallel: %s" % (str(sources)))
@@ -463,6 +475,8 @@ class RawParallelDatasetLoader:
             # Once MXNet allows item assignments given a list of indices (probably MXNet 1.0): e.g a[[0,1,5,2]] = x,
             # we can try again to compute the label sequence on the fly in next().
             data_label[buck_index][sample_index, :target_len] = target[1:] + [self.eos_id]
+
+            self.map_buckets2sentence_ids[buck_index][sample_index] = sentence_id
 
             bucket_sample_index[buck_index] += 1
 
@@ -1261,6 +1275,7 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
                  target_data_name,
                  label_name,
                  num_factors: int = 1,
+                 shuffle: Optional[bool] = True,
                  dtype='float32') -> None:
         super().__init__(batch_size=batch_size)
 
@@ -1271,6 +1286,7 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
         self.target_data_name = target_data_name
         self.label_name = label_name
         self.num_factors = num_factors
+        self.shuffle = shuffle
         self.dtype = dtype
 
         # "Staging area" that needs to fit any size batch we're using by total number of elements.
@@ -1320,7 +1336,7 @@ class BaseParallelSampleIter(mx.io.DataIter, ABC):
 class ShardedParallelSampleIter(BaseParallelSampleIter):
     """
     Goes through the data one shard at a time. The memory consumption is limited by the memory consumption of the
-    largest shard. The order in which shards are traversed is changed with each reset.
+    largest shard. If shuffling is enabled, the order in which shards are traversed is changed with each reset.
     """
 
     def __init__(self,
@@ -1333,10 +1349,11 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
                  num_factors: int = 1,
+                 shuffle: Optional[bool] = True,
                  dtype='float32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          source_data_name=source_data_name, target_data_name=target_data_name,
-                         label_name=label_name, num_factors=num_factors, dtype=dtype)
+                         label_name=label_name, num_factors=num_factors, shuffle=shuffle, dtype=dtype)
         assert len(shards_fnames) > 0
         self.shards_fnames = list(shards_fnames)
         self.shard_index = -1
@@ -1356,22 +1373,24 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                                              bucket_batch_sizes=self.bucket_batch_sizes,
                                              source_data_name=self.source_data_name,
                                              target_data_name=self.target_data_name,
-                                             num_factors=self.num_factors)
+                                             num_factors=self.num_factors,
+                                             shuffle=self.shuffle)
 
     def reset(self):
         if len(self.shards_fnames) > 1:
-            logger.info("Shuffling the shards.")
-            # Making sure to not repeat a shard:
-            if self.shard_index < 0:
-                current_shard_fname = ""
-            else:
-                current_shard_fname = self.shards_fnames[self.shard_index]
-            remaining_shards = [shard for shard in self.shards_fnames if shard != current_shard_fname]
-            next_shard_fname = random.choice(remaining_shards)
-            remaining_shards = [shard for shard in self.shards_fnames if shard != next_shard_fname]
-            random.shuffle(remaining_shards)
+            if self.shuffle:
+                logger.info("Shuffling the shards.")
+                # Making sure to not repeat a shard:
+                if self.shard_index < 0:
+                    current_shard_fname = ""
+                else:
+                    current_shard_fname = self.shards_fnames[self.shard_index]
+                remaining_shards = [shard for shard in self.shards_fnames if shard != current_shard_fname]
+                next_shard_fname = random.choice(remaining_shards)
+                remaining_shards = [shard for shard in self.shards_fnames if shard != next_shard_fname]
+                random.shuffle(remaining_shards)
 
-            self.shards_fnames = [next_shard_fname] + remaining_shards
+                self.shards_fnames = [next_shard_fname] + remaining_shards
 
             self.shard_index = 0
             self._load_shard()
@@ -1424,10 +1443,11 @@ class ParallelSampleIter(BaseParallelSampleIter):
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
                  num_factors: int = 1,
+                 shuffle: Optional[bool] = True,
                  dtype='float32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          source_data_name=source_data_name, target_data_name=target_data_name,
-                         label_name=label_name, num_factors=num_factors, dtype=dtype)
+                         label_name=label_name, num_factors=num_factors, shuffle=shuffle, dtype=dtype)
 
         # create independent lists to be shuffled
         self.data = ParallelDataSet(list(data.source), list(data.target), list(data.label))
@@ -1440,7 +1460,6 @@ class ParallelSampleIter(BaseParallelSampleIter):
                                           for i in range(len(self.data))]
         self.data_permutations = [mx.nd.arange(0, max(1, self.data.source[i].shape[0]))
                                   for i in range(len(self.data))]
-
         self.reset()
 
     def reset(self):
@@ -1448,8 +1467,10 @@ class ParallelSampleIter(BaseParallelSampleIter):
         Resets and reshuffles the data.
         """
         self.curr_batch_index = 0
+
         # shuffle batch start indices
-        random.shuffle(self.batch_indices)
+        if self.shuffle:
+            random.shuffle(self.batch_indices)
 
         # restore
         self.data = self.data.permute(self.inverse_data_permutations)

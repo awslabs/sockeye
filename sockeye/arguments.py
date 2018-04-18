@@ -649,24 +649,27 @@ def add_model_parameters(params):
                                    "(and all convolutional weight matrices for CNN decoders). Default: %(default)s.")
 
 
-def add_training_args(params):
-    train_params = params.add_argument_group("Training parameters")
 
-    train_params.add_argument('--batch-size', '-b',
+def add_batching_args(params):
+    params.add_argument('--batch-size', '-b',
                               type=int_greater_or_equal(1),
                               default=64,
                               help='Mini-batch size. Default: %(default)s.')
-    train_params.add_argument("--batch-type",
+    params.add_argument("--batch-type",
                               type=str,
                               default=C.BATCH_TYPE_SENTENCE,
                               choices=[C.BATCH_TYPE_SENTENCE, C.BATCH_TYPE_WORD],
                               help="Sentence: each batch contains X sentences, number of words varies. Word: each batch"
                                    " contains (approximately) X words, number of sentences varies. Default: %(default)s.")
 
-    train_params.add_argument('--fill-up',
+    params.add_argument('--fill-up',
                               type=str,
                               default='replicate',
                               help=argparse.SUPPRESS)
+
+
+def add_training_args(params):
+    train_params = params.add_argument_group("Training parameters")
 
     train_params.add_argument('--loss',
                               default=C.CROSS_ENTROPY,
@@ -930,6 +933,7 @@ def add_train_cli_args(params):
     add_training_io_args(params)
     add_model_parameters(params)
     add_training_args(params)
+    add_batching_args(params)
     add_device_args(params)
     add_logging_args(params)
 
@@ -938,6 +942,14 @@ def add_translate_cli_args(params):
     add_inference_args(params)
     add_device_args(params)
     add_logging_args(params)
+
+
+def add_score_cli_args(params):
+    add_device_args(params)
+    add_logging_args(params)
+    add_batching_args(params)
+    add_bucketing_args(params)
+    add_scoring_args(params)
 
 
 def add_inference_args(params):
@@ -1108,3 +1120,46 @@ def add_init_embedding_args(params):
                         help='File to write initialized parameters to.')
     params.add_argument('--encoding', '-c', type=str, default=C.VOCAB_ENCODING,
                         help='Open input vocabularies with specified encoding. Default: %(default)s.')
+
+def add_scoring_args(params):
+    scoring_params = params.add_argument_group("Scoring parameters")
+
+    scoring_params.add_argument('--source', '-s',
+                                required=True,
+                                type=regular_file(),
+                                default=None,
+                                help='Source file to be scored. One sentence per line.')
+    scoring_params.add_argument('--target', '-t',
+                                required=True,
+                                type=regular_file(),
+                                default=None,
+                                help='Target file to be scored. One sentence per line.')
+    scoring_params.add_argument('--models', '-m',
+                                required=True,
+                                nargs='+',
+                                help='Model folder(s). Use multiple for ensemble scoring.')
+    scoring_params.add_argument('--checkpoints', '-c',
+                                default=None,
+                                type=int,
+                                nargs='+',
+                                help='If not given, chooses best checkpoints for model(s). '
+                                     'If specified, must have the same length as --models and be integer')
+    scoring_params.add_argument('--output-type',
+                                default=C.OUTPUT_HANDLER_SCORE,
+                                # scoring does not result in beam history
+                                choices=[h for h in C.OUTPUT_HANDLERS if h != C.OUTPUT_HANDLER_BEAM_STORE],
+                                help='Output type. Default: %(default)s.')
+    scoring_params.add_argument('--output', '-o',
+                                type=str,
+                                help="File to write scores to.")
+    scoring_params.add_argument('--source-factors', '-sf',
+                                required=False,
+                                nargs='+',
+                                type=regular_file(),
+                                default=[],
+                                help='File(s) containing additional token-parallel source side factors. Default: %(default)s.')
+    scoring_params.add_argument('--source-factors-num-embed',
+                                type=int,
+                                nargs='+',
+                                default=[],
+                                help=argparse.SUPPRESS)

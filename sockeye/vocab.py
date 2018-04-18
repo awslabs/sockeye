@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 Vocab = Dict[str, int]
 InverseVocab = Dict[int, str]
-
+Tokens = List[str]
 
 def build_from_paths(paths: List[str], num_words: int = 50000, min_count: int = 1) -> Vocab:
     """
