@@ -251,17 +251,19 @@ class OnlineMeanAndVariance:
             return self._M2 / self._count
 
 def topk(scores: mx.nd.NDArray,
-         k: int, 
-         batch_size: int, 
-         t: int, 
+         t: int,
+         k: int,
+         batch_size: int,
+         offset: np.ndarray,
          use_mxnet_topk: bool) -> Tuple[np.ndarray, np.ndarray, Union[np.ndarray, mx.nd.NDArray]]:
     """
     Get the lowest k elements per sentence from a `scores` matrix.
 
     :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+    :param t: Time step in the beam search
     :param k: The number of smallest scores to return.
     :param batch_size: Number of sentences being decoded at once.
-    :param t: Time step in the beam search
+    :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
     :param use_mxnet_topk: True to use the mxnet implementation or False to use the numpy one.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
@@ -288,7 +290,7 @@ def topk(scores: mx.nd.NDArray,
         best_hyp_indices, best_word_indices = np.unravel_index(flat_idxs.ravel(), scores.shape)
 
     # Offsetting the indices to match the shape of the scores matrix
-    best_hyp_indices += np.repeat(np.arange(0, batch_size * k, k), k)
+    best_hyp_indices += offset
     return best_hyp_indices, best_word_indices, values
 
 

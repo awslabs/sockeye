@@ -19,6 +19,7 @@ import json
 import logging
 import os
 from collections import defaultdict
+from functools import partial
 from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set
 
 import mxnet as mx
@@ -1253,7 +1254,11 @@ class Translator:
                 models_output_layer_b.append(m.output_layer_b.take(vocab_slice_ids))
 
         # mxnet implementation is faster on GPUs
-        use_mxnet_topk = self.context != mx.cpu():
+        use_mxnet_topk = self.context != mx.cpu()
+        # offset for hypothesis indices in batch decoding
+        offset = np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size)
+        topk = partial(utils.topk, k=self.beam_size, batch_size=self.batch_size, offset=offset,
+                       use_mxnet_topk=use_mxnet_topk)
 
         # (0) encode source sentence, returns a list
         model_states = self._encode(source, source_length)
@@ -1285,8 +1290,7 @@ class Translator:
                 scores = mx.nd.where(finished, pad_dist, scores)
 
             # (3) get beam_size winning hypotheses for each sentence block separately
-            best_hyp_indices[:], best_word_indices[:], scores_accumulated[:, 0] = utils.topk(scores, self.beam_size, self.batch_size,
-                                                                                             t=t, use_mxnet_topk=use_mxnet_topk)
+            best_hyp_indices[:], best_word_indices[:], scores_accumulated[:, 0] = topk(scores, t=t)
 
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
