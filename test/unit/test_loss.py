@@ -113,7 +113,6 @@ def test_smoothed_cross_entropy_loss():
     label_grad_sum = executor.grad_dict["labels"].asnumpy().sum()
     assert label_grad_sum == 0
 
-'''
 def test_pointer_net_cross_entropy_loss():
     config = sockeye.loss.LossConfig(name=C.POINTER_NET_CROSS_ENTROPY, vocab_size=3,
                                      normalization_type=C.LOSS_NORM_BATCH)
@@ -129,7 +128,6 @@ def test_pointer_net_cross_entropy_loss():
                             [0.3, 0.3, 0.3, 0.1],
                             [0.25, 0.25, 0.25, 0.25]])
     labels_np = mx.nd.array([1, 0, 2, 3])  # C.PAD_ID == 0
-    pointer_labels_np = mx.nd.array([-1, 0, -1, -1])  # C.PAD_ID == 0
 
     _, loss_shapes, _ = (sym.infer_shape(probs=probs_np.shape, labels=labels_np.shape))
 
@@ -138,12 +136,10 @@ def test_pointer_net_cross_entropy_loss():
 
     executor = sym.simple_bind(ctx=mx.cpu(),
                                probs=probs_np.shape,
-                               labels=labels_np.shape,
-                               pointer_labels=pointer_labels_np.shape)
+                               labels=labels_np.shape)
 
     executor.arg_dict["probs"][:] = probs_np
     executor.arg_dict["labels"][:] = labels_np
-    executor.arg_dict["pointer_labels"][:] = pointer_labels_np
 
     output = executor.forward(is_train=True)
     loss = output[0].asnumpy()
@@ -152,17 +148,17 @@ def test_pointer_net_cross_entropy_loss():
     assert softmax_probs.shape == probs_np.shape
     assert loss.shape == labels_np.shape
 
-    assert np.isclose(loss, [1.60944, 1.20397, 1.20397, 1.38629]).all()
+    assert np.isclose(loss, [1.60944, 1.0498221, 1.20397, 1.38629]).all()
 
     executor.backward()
 
     grad = executor.grad_dict["probs"].asnumpy()
     assert np.isclose(sum(grad[0][:]), grad[0][1])
+    assert np.isclose(sum(grad[1][:]), grad[1][0])
     assert np.isclose(sum(grad[2][:]), grad[2][2])
     assert np.isclose(sum(grad[3][:]), grad[3][3])
-    # this label is adjusted with the pointer label
-    assert np.isclose(sum(grad[1][:]), grad[1][3])
-'''
+
+
 
 @pytest.mark.parametrize("preds, labels, normalization_type, label_smoothing, expected_value",
                          [(mx.nd.array([[0.0, 0.2, 0.8],

@@ -235,11 +235,13 @@ class PointerOutputLayer(OutputLayer):
 
         self.num_hidden_fc1 = 512
 
-        self.pn_w1 = mx.sym.Variable("%spn_weight1" % self.prefix, init=mx.init.One(), shape=(self.num_hidden_fc1, encoder_hidden_size+hidden_size))
-        self.pn_w2 = mx.sym.Variable("%spn_weight2" % self.prefix, init=mx.init.One(), shape=(1 , self.num_hidden_fc1))
+        self.pn_w1 = mx.sym.Variable("%spn_weight1" % self.prefix, init=mx.init.One(),
+                                     shape=(self.num_hidden_fc1, encoder_hidden_size + hidden_size))
+        #TODO: this is only for debugging
+        #self.pn_w2 = mx.sym.Variable("%spn_weight2" % self.prefix, init=mx.init.One(), shape=(1, self.num_hidden_fc1))
+        self.pn_w2 = mx.sym.Variable("%spn_weight2" % self.prefix, init=mx.init.One(), shape=(1, encoder_hidden_size + hidden_size))
         self.b_fc1 = mx.sym.Variable("%sbias_pnfc1" % self.prefix, init=mx.init.One())
         self.b_fc2 = mx.sym.Variable("%sbias_pnfc2" % self.prefix, init=mx.init.One())
-
 
     def __call__(self,
                  hidden: Union[mx.sym.Symbol, mx.nd.NDArray],
@@ -261,11 +263,10 @@ class PointerOutputLayer(OutputLayer):
 
             logits_trg = super().__call__(hidden, weight=weight, bias=bias)
 
-            #shape (batch_size * trg_max_len, encoder_rnn_hid+dec_rnn_hidden)
+            # shape (batch_size * trg_max_len, encoder_rnn_hid+dec_rnn_hidden)
             switch_input = mx.sym.concat(context, hidden, dim=1)
 
             switch_fc1 = mx.sym.FullyConnected(data=switch_input,
-            #switch_fc1 = mx.sym.FullyConnected(data=hidden,
                                                num_hidden=self.num_hidden_fc1,
                                                weight=self.pn_w1,
                                                bias=self.b_fc1,
@@ -275,14 +276,18 @@ class PointerOutputLayer(OutputLayer):
             # TODO add noisy tanh activation function
             switch_a1 = mx.sym.Activation(switch_fc1, act_type='tanh', name=C.SWITCH_PROB_NAME+'_a1')
 
-            switch_fc2 = mx.sym.FullyConnected(data=switch_a1,
-                                               num_hidden=1,
-                                               weight=self.pn_w2,
-                                               bias=self.b_fc2,
-                                               flatten=False,
-                                               name=C.SWITCH_PROB_NAME + '_fc2')
+            switch_fc2 = mx.sym.FullyConnected(data=switch_input,
+                num_hidden = 1,
+                weight = self.pn_w2,
+                bias = self.b_fc2,
+                flatten = False,
+                name = C.SWITCH_PROB_NAME + '_fc2')
 
             switch_prob = mx.sym.Activation(switch_fc2, act_type='tanh', name=C.SWITCH_PROB_NAME+'_a-out')
+            #TODO: currently the code is running but the results are not positive
+            #Below we provide a line to replace the probability provided by the network with an almost constant one
+            #by using the constant probability the perplexity decreases over time
+            #switch_prob = mx.sym.random.uniform(0.1, 0.11, 1)
 
             probs_trg = mx.sym.softmax(data=logits_trg, axis=1)
             probs_src = mx.sym.softmax(data=context, axis=1)
@@ -290,8 +295,8 @@ class PointerOutputLayer(OutputLayer):
             weighted_probs_src = mx.sym.broadcast_mul(probs_src, switch_prob)
             weighted_probs_trg = mx.sym.broadcast_mul(probs_trg, (1.0 - switch_prob))
 
-
             return mx.sym.concat(weighted_probs_src, weighted_probs_trg, dim=1, name=C.SOFTMAX_OUTPUT_NAME)
+
 
         # Equivalent NDArray implementation (requires passed weights/biases)
         if isinstance(hidden, mx.nd.NDArray) and (context, mx.nd.NDArray):
@@ -304,7 +309,6 @@ class PointerOutputLayer(OutputLayer):
             switch_input = mx.nd.concat(context, hidden, dim=1)
 
             switch_fc1 = mx.nd.FullyConnected(data=switch_input,
-                                               # switch_fc1 = mx.sym.FullyConnected(data=hidden,
                                                num_hidden=self.num_hidden_fc1,
                                                weight=self.pn_w1,
                                                bias=self.b_fc1,
@@ -314,7 +318,7 @@ class PointerOutputLayer(OutputLayer):
             # TODO add noisy tanh activation function
             switch_a1 = mx.nd.Activation(switch_fc1, act_type='tanh', name=C.SWITCH_PROB_NAME + '_a1')
 
-            switch_fc2 = mx.nd.FullyConnected(data=switch_a1,
+            switch_fc2 = mx.nd.FullyConnected(data=switch_input,
                                                num_hidden=1,
                                                weight=self.pn_w2,
                                                bias=self.b_fc2,
@@ -322,6 +326,10 @@ class PointerOutputLayer(OutputLayer):
                                                name=C.SWITCH_PROB_NAME + '_fc2')
 
             switch_prob = mx.nd.Activation(switch_fc2, act_type='tanh', name=C.SWITCH_PROB_NAME + '_a-out')
+            # TODO: currently the code is running but the results are not positive
+            # Below we provide a line to replace the probability provided by the network with an almost constant one
+            # by using the constant probability the perplexity decreases over time
+            # switch_prob = mx.sym.random.uniform(0.1, 0.11, 1)
 
             probs_trg = mx.nd.softmax(data=logits_trg, axis=1)
             probs_src = mx.nd.softmax(data=context, axis=1)
