@@ -1024,7 +1024,7 @@ class SequenceReader(Iterable):
                 sequence = tokens2ids(tokens, self.vocab)
             else:
                 sequence = strids2ids(tokens)
-            if not sequence:
+            if len(sequence) == 0:
                 yield None
                 continue
             if vocab is not None and self.add_bos:
@@ -1032,7 +1032,7 @@ class SequenceReader(Iterable):
             yield sequence
 
 
-def parallel_iter(source_iters: Sequence[Iterable], target_iterable: Iterable):
+def parallel_iter(source_iters: Sequence[Iterable[Optional[Any]]], target_iterable: Iterable[Optional[Any]]):
     """
     Yields parallel source(s), target sequences from iterables.
     Checks for token parallelism in source sequences.
@@ -1073,7 +1073,7 @@ def get_parallel_bucket(buckets: List[Tuple[int, int]],
                         length_target: int) -> Optional[Tuple[int, Tuple[int, int]]]:
     """
     Returns bucket index and bucket from a list of buckets, given source and target length.
-    Returns (None, None) if no bucket fits or one or both lengths are 0.
+    Returns (None, None) if no bucket fits.
 
     :param buckets: List of buckets.
     :param length_source: Length of source sequence.
