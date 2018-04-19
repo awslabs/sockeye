@@ -20,6 +20,7 @@ import logging
 import math
 import os
 from collections import defaultdict
+from functools import partial
 from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set
 
 import mxnet as mx
@@ -898,7 +899,6 @@ class Translator:
                  store_beam: bool = False,
                  strip_unknown_words: bool = False) -> None:
         self.context = context
-        self.smallest_k_func = utils.smallest_k if self.context == mx.cpu() else utils.smallest_k_mx
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
         self.beam_search_stop = beam_search_stop
@@ -1260,15 +1260,23 @@ class Translator:
                 models_output_layer_w.append(m.output_layer_w.take(vocab_slice_ids))
                 models_output_layer_b.append(m.output_layer_b.take(vocab_slice_ids))
 
+        # mxnet implementation is faster on GPUs
+        use_mxnet_topk = self.context != mx.cpu()
+        # offset for hypothesis indices in batch decoding
+        offset = np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size)
+        topk = partial(utils.topk, k=self.beam_size, batch_size=self.batch_size, offset=offset,
+                       use_mxnet_topk=use_mxnet_topk)
+
         # (0) encode source sentence, returns a list
         model_states = self._encode(source, source_length)
 
         # more data structures
         zeros_array = mx.nd.zeros((self.beam_size,), ctx=self.context, dtype='int32')
-        inf_array = mx.nd.full((self.beam_size,1), val=np.inf, ctx=self.context, dtype='float32')
+        inf_array_long = mx.nd.full((self.beam_size * self.batch_size, 1), val=np.inf, ctx=self.context, dtype='float32')
+        inf_array = inf_array_long[:self.beam_size]
 
-        # Records the size of the active beam for each sentence (which permits filtering)
-        active_beam_size = [1] * self.batch_size
+        # Records items in the beam that are inactive
+        inactive = mx.nd.array( ([1] + [0] * (self.beam_size - 1)) * (self.batch_size), ctx=self.context)
         for t in range(1, max_output_length):
             # (1) obtain next predictions and advance models' state
             # scores: (batch_size * beam_size, target_vocab_size)
@@ -1280,32 +1288,20 @@ class Translator:
                                                                        models_output_layer_w,
                                                                        models_output_layer_b)
 
-            # (2) Replace finished rows with inf in all columns except column 0, which has the
-            # accumulated model score
+            # (2) Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
+            # finished rows are inf everywhere except column zero, which holds the accumulated model score
             if t > 1:
                 scores = scores + scores_accumulated
                 # this is equivalent to doing this in numpy:
                 #   pad_dist[finished, :] = np.inf
                 #   pad_dist[finished, C.PAD_ID] = scores_accumulated[finished]
-                pad_dist[:, C.PAD_ID] = scores_accumulated[:,0]
+                pad_dist[:, C.PAD_ID] = scores_accumulated[:, 0]
+                pad_dist[:, C.PAD_ID] = mx.nd.where(inactive, inf_array_long[:, 0], scores_accumulated[:, 0])
                 scores = mx.nd.where(finished, pad_dist, scores)
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
-            # far as the active beam size for each sentence. TODO(fhieber): once mx.nd.topk is
-            # sped-up no numpy conversion necessary anymore.
-            if self.context == mx.cpu():
-                scores = scores.asnumpy()  # convert to numpy once to minimize cross-device copying
-
-            for sentno in range(self.batch_size):
-                rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
-                active_rows = slice(sentno * self.beam_size, sentno * self.beam_size + active_beam_size[sentno])
-                sliced_scores = scores[active_rows]
-                # TODO we could save some tiny amount of time here by not running smallest_k for a finished sent
-                (best_hyp_indices[rows], best_word_indices[rows]), \
-                    scores_accumulated[rows, 0] = self.smallest_k_func(sliced_scores, self.beam_size)
-
-                # offsetting since the returned smallest_k() indices were slice-relative
-                best_hyp_indices[rows] += rows.start
+            # far as the active beam size for each sentence.
+            best_hyp_indices[:], best_word_indices[:], scores_accumulated[:, 0] = topk(scores)
 
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
@@ -1319,8 +1315,8 @@ class Translator:
             # (5) Prune out low-probability hypotheses
             for sentno in range(self.batch_size):
 
-                # Set the active beam size to full. It will get reduced if items are filtered.
-                active_beam_size[sentno] = self.beam_size
+                # All rows are now active (after special treatment of start state at t=1)
+                inactive[:] = 0
 
                 rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
                 if self.beam_prune > 0.0 and mx.nd.sum(finished[rows]) > 0:
@@ -1333,7 +1329,8 @@ class Translator:
                     best_word_indices[rows] = mx.nd.where(to_remove, zeros_array, best_word_indices[rows])
 
                     num_removing = int(mx.nd.sum(to_remove).asscalar())
-                    active_beam_size[sentno] = self.beam_size - num_removing
+                    if num_removing > 0:
+                        inactive[self.beam_size - num_removing:] = 1
 
                     # mark removed ones as finished so they won't block early exiting
                     finished[rows] = mx.nd.clip(finished[rows] + to_remove, 0, 1)
