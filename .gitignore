@@ -15,5 +15,6 @@
 *.egg**
 .*.swp
 .mypy_cache
+.pytest_cache
 tags
 sockeye/__pycache__

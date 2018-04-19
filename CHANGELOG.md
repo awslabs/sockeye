@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.3]
+### Changed
+- Training now supports training and validation data that contains empty segments. If a segment is empty, it is skipped
+  during loading and a warning message including the number of empty segments is printed.
+
 ## [1.18.2]
 ### Changed
 - Removed combined linear projection of keys & values in source attention transformer layers for
