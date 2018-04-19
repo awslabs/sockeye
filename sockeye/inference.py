@@ -19,7 +19,7 @@ import json
 import logging
 import os
 from collections import defaultdict
-from functools import partial
+from functools import lru_cache, partial
 from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set
 
 import mxnet as mx
@@ -80,7 +80,6 @@ class InferenceModel(model.SockeyeModel):
         self.encoder_default_bucket_key = None  # type: Optional[int]
         self.decoder_module = None  # type: Optional[mx.mod.BucketingModule]
         self.decoder_default_bucket_key = None  # type: Optional[Tuple[int, int]]
-        self.decoder_data_shapes_cache = None  # type: Optional[Dict]
         self.decoder_return_logit_inputs = decoder_return_logit_inputs
 
         self.cache_output_layer_w_b = cache_output_layer_w_b
@@ -124,7 +123,6 @@ class InferenceModel(model.SockeyeModel):
         self.encoder_module, self.encoder_default_bucket_key = self._get_encoder_module()
         self.decoder_module, self.decoder_default_bucket_key = self._get_decoder_module()
 
-        self.decoder_data_shapes_cache = dict()  # bucket_key -> shape cache
         max_encoder_data_shapes = self._get_encoder_data_shapes(self.encoder_default_bucket_key)
         max_decoder_data_shapes = self._get_decoder_data_shapes(self.decoder_default_bucket_key)
         self.encoder_module.bind(data_shapes=max_encoder_data_shapes, for_training=False, grad_req="null")
@@ -258,22 +256,20 @@ class InferenceModel(model.SockeyeModel):
                                shape=(self.batch_size, bucket_key, self.num_source_factors),
                                layout=C.BATCH_MAJOR)]
 
+    @lru_cache(maxsize=None)
     def _get_decoder_data_shapes(self, bucket_key: Tuple[int, int]) -> List[mx.io.DataDesc]:
         """
         Returns data shapes of the decoder module.
-        Caches results for bucket_keys if called iteratively.
 
         :param bucket_key: Tuple of (maximum input length, maximum target length).
         :return: List of data descriptions.
         """
         source_max_length, target_max_length = bucket_key
-        return self.decoder_data_shapes_cache.setdefault(
-            bucket_key,
-            [mx.io.DataDesc(name=C.TARGET_NAME, shape=(self.batch_size * self.beam_size,), layout="NT")] +
-            self.decoder.state_shapes(self.batch_size * self.beam_size,
-                                      target_max_length,
-                                      self.encoder.get_encoded_seq_len(source_max_length),
-                                      self.encoder.get_num_hidden()))
+        return [mx.io.DataDesc(name=C.TARGET_NAME, shape=(self.batch_size * self.beam_size,), layout="NT")] + \
+               self.decoder.state_shapes(self.batch_size * self.beam_size,
+                                         target_max_length,
+                                         self.encoder.get_encoded_seq_len(source_max_length),
+                                         self.encoder.get_num_hidden())
 
     def run_encoder(self,
                     source: mx.nd.NDArray,

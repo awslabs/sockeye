@@ -1070,7 +1070,7 @@ def get_default_bucket_key(buckets: List[Tuple[int, int]]) -> Tuple[int, int]:
 
 def get_parallel_bucket(buckets: List[Tuple[int, int]],
                         length_source: int,
-                        length_target: int) -> Optional[Tuple[int, Tuple[int, int]]]:
+                        length_target: int) -> Tuple[Optional[int], Optional[Tuple[int, int]]]:
     """
     Returns bucket index and bucket from a list of buckets, given source and target length.
     Returns (None, None) if no bucket fits.
@@ -1080,13 +1080,10 @@ def get_parallel_bucket(buckets: List[Tuple[int, int]],
     :param length_target: Length of target sequence.
     :return: Tuple of (bucket index, bucket), or (None, None) if not fitting.
     """
-    bucket = None, None  # type: Tuple[int, Tuple[int, int]]
-
     for j, (source_bkt, target_bkt) in enumerate(buckets):
         if source_bkt >= length_source and target_bkt >= length_target:
-            bucket = j, (source_bkt, target_bkt)
-            break
-    return bucket
+            return j, (source_bkt, target_bkt)
+    return None, None
 
 
 class ParallelDataSet(Sized):
