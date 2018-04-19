@@ -169,8 +169,9 @@ This will take the best set of parameters found during training and then transla
 write translations to STDOUT.
 
 #### Multi-instance Translate
-Multi-instance can be used to greatly speedup translate.
-For example, you can run mlt-trans.sh to translate 36 instances in AWS EC2 C5.18xlarge platform.
+Multi-instance can be used for speedup translate to get the best performance.
+For example, you can run mlt-trans.sh to translate 24 instances in [AWS EC2 C4.8xlarge](https://aws.amazon.com/ec2/instance-types/) (24 physical cores) or 
+36 instances in [AWS EC2 C5.18xlarge](https://aws.amazon.com/ec2/instance-types/c5/) (36 physical cores).
 ```bash
 > sh mlt-trans.sh <model_name> <file_to_translate> <batch_size>
 ```

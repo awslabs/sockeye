@@ -28,11 +28,13 @@ fi
 
 export KMP_AFFINITY=granularity=fine,noduplicates,compact,1,0
 
-vCPU=`cat /proc/cpuinfo |grep "processor"|wc -l`
-cores=`expr $vCPU / 2`
+SOCKETS=$(grep -w "physical id" /proc/cpuinfo | sort -u | wc -l)
+CORES=$(grep -w "core id" /proc/cpuinfo | sort -u | wc -l)
 
-loop=$cores
-stride=$(($cores/$loop))
+total_cores=$[$SOCKETS*$CORES]
+
+loop=$total_cores
+stride=$(($total_cores/$loop))
 export OMP_NUM_THREADS=$stride
 
 echo 'Translating...'
@@ -55,8 +57,8 @@ diff=$(($end-$start))
 sentences=`cat newstest2016.tc.BPE.de | wc -l`
 speed=`echo "scale=3;$sentences*$loop/$diff"|bc`
 
-echo "Instance nums : " $cores
-echo "Total Processed lines : " $[$sentences*$cores]
+echo "Instance nums : " $total_cores
+echo "Total Processed lines : " $[$sentences*$total_cores]
 echo "Total time(s) : " `echo "scale=3;$diff"|bc`
 echo "speed : " $speed "sent/sec"
 
