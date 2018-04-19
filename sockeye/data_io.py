@@ -16,6 +16,7 @@ Implements data iterators and I/O related functions for sequence-to-sequence mod
 """
 import bisect
 import logging
+import math
 import os
 import pickle
 import random
@@ -24,7 +25,6 @@ from collections import OrderedDict
 from contextlib import ExitStack
 from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sequence, Sized, Tuple
 
-import math
 import mxnet as mx
 import numpy as np
 
@@ -181,25 +181,22 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
     return bucket_batch_sizes
 
 
-def calculate_length_statistics(sources_sentences: Sequence[Iterable[List[Any]]],
-                                target_sentences: Iterable[List[Any]],
+def calculate_length_statistics(source_iterables: Sequence[Iterable[Any]],
+                                target_iterable: Iterable[Any],
                                 max_seq_len_source: int,
                                 max_seq_len_target: int) -> 'LengthStatistics':
     """
     Returns mean and standard deviation of target-to-source length ratios of parallel corpus.
 
-    :param sources_sentences: Source(s) sentences.
-    :param target_sentences: Target sentences.
+    :param source_iterables: Source sequence readers.
+    :param target_iterable: Target sequence reader.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
     :return: The number of sentences as well as the mean and standard deviation of target to source length ratios.
     """
     mean_and_variance = OnlineMeanAndVariance()
 
-    for target, sources in zip(target_sentences, zip(*sources_sentences)):
-        check_condition(are_token_parallel(sources),
-                        "Source sequences are not token-parallel: %s" % (str(sources)))
-
+    for sources, target in parallel_iter(source_iterables, target_iterable):
         source_len = len(sources[0])
         target_len = len(target)
         if source_len > max_seq_len_source or target_len > max_seq_len_target:
@@ -230,8 +227,6 @@ def analyze_sequence_lengths(sources: List[str],
                                                     max_seq_len_source,
                                                     # Take into account the BOS symbol that is added later
                                                     max_seq_len_target - 1)
-    check_condition(all(r.is_done() for r in train_sources_sentences) and train_target_sentences.is_done(),
-                    "Different number of lines in source(s) and target data.")
 
     logger.info("%d sequences of maximum length (%d, %d) in '%s' and '%s'.",
                 length_statistics.num_sents, max_seq_len_source, max_seq_len_target, sources[0], target)
@@ -241,7 +236,7 @@ def analyze_sequence_lengths(sources: List[str],
     return length_statistics
 
 
-def are_token_parallel(sequences: List[Sized]) -> bool:
+def are_token_parallel(sequences: Sequence[Sized]) -> bool:
     """
     Returns True if all sequences in the list have the same length.
     """
@@ -363,14 +358,13 @@ def shard_data(source_fnames: List[str],
                           range(len(source_fnames))]
         target_shards = [exit_stack.enter_context(smart_open(f, mode="wt")) for f in target_shard_fnames]
 
-        source_iters = [SequenceReader(fname, vocab, add_bos=False) for fname, vocab in zip(source_fnames,
+        source_readers = [SequenceReader(fname, vocab, add_bos=False) for fname, vocab in zip(source_fnames,
                                                                                             source_vocabs)]
-        target_iter = SequenceReader(target_fname, target_vocab, add_bos=True)
+        target_reader = SequenceReader(target_fname, target_vocab, add_bos=True)
 
         random_shard_iter = iter(lambda: random.randrange(num_shards), None)
 
-        for sources, target, random_shard_index in zip(zip(*source_iters), target_iter,
-                                                       random_shard_iter):
+        for (sources, target), random_shard_index in zip(parallel_iter(source_readers, target_reader), random_shard_iter):
             random_shard_index = cast(int, random_shard_index)
             source_len = len(sources[0])
             target_len = len(target)
@@ -416,12 +410,12 @@ class RawParallelDatasetLoader:
         self.dtype = dtype
 
     def load(self,
-             sources_sentences: Sequence[Iterable[List[Any]]],
-             target_sentences: Iterable[List[Any]],
+             source_iterables: Sequence[Iterable],
+             target_iterable: Iterable,
              num_samples_per_bucket: List[int]) -> 'ParallelDataSet':
 
         assert len(num_samples_per_bucket) == len(self.buckets)
-        num_factors = len(sources_sentences)
+        num_factors = len(source_iterables)
 
         data_source = [np.full((num_samples, source_len, num_factors), self.pad_id, dtype=self.dtype)
                        for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
@@ -430,7 +424,7 @@ class RawParallelDatasetLoader:
         data_label = [np.full((num_samples, target_len), self.pad_id, dtype=self.dtype)
                       for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
 
-        bucket_sample_index = [0 for buck in self.buckets]
+        bucket_sample_index = [0 for _ in self.buckets]
 
         # track amount of padding introduced through bucketing
         num_tokens_source = 0
@@ -439,15 +433,12 @@ class RawParallelDatasetLoader:
         num_pad_target = 0
 
         # Bucket sentences as padded np arrays
-        for sources, target in zip(zip(*sources_sentences), target_sentences):
+        for sources, target in parallel_iter(source_iterables, target_iterable):
             source_len = len(sources[0])
             target_len = len(target)
             buck_index, buck = get_parallel_bucket(self.buckets, source_len, target_len)
             if buck is None:
                 continue  # skip this sentence pair
-
-            check_condition(are_token_parallel(sources),
-                            "Source sequences are not token-parallel: %s" % (str(sources)))
 
             num_tokens_source += buck[0]
             num_tokens_target += buck[1]
@@ -580,8 +571,8 @@ def prepare_data(source_fnames: List[str],
         version_out.write(str(C.PREPARED_DATA_VERSION))
 
 
-def get_data_statistics(sources_sentences: Sequence[Iterable[List[int]]],
-                        target_sentences: Iterable[List[int]],
+def get_data_statistics(source_readers: Sequence[Iterable],
+                        target_reader: Iterable,
                         buckets: List[Tuple[int, int]],
                         length_ratio_mean: float,
                         length_ratio_std: float,
@@ -590,7 +581,7 @@ def get_data_statistics(sources_sentences: Sequence[Iterable[List[int]]],
     data_stats_accumulator = DataStatisticsAccumulator(buckets, source_vocabs[0], target_vocab,
                                                        length_ratio_mean, length_ratio_std)
 
-    for (sources), target in zip(zip(*sources_sentences), target_sentences):
+    for sources, target in parallel_iter(source_readers, target_reader):
         buck_idx, buck = get_parallel_bucket(buckets, len(sources[0]), len(target))
         data_stats_accumulator.sequence_pair(sources[0], target, buck_idx)
 
@@ -995,11 +986,12 @@ def ids2strids(ids: Iterable[int]) -> str:
     return " ".join(map(str, ids))
 
 
-class SequenceReader(Iterator):
+class SequenceReader(Iterable):
     """
-    Reads sequence samples from path and creates integer id sequences.
+    Reads sequence samples from path and (optionally) creates integer id sequences.
     Streams from disk, instead of loading all samples into memory.
     If vocab is None, the sequences in path are assumed to be integers coded as strings.
+    Empty sequences are yielded as None.
 
     :param path: Path to read data from.
     :param vocab: Optional mapping from strings to integer ids.
@@ -1025,45 +1017,45 @@ class SequenceReader(Iterator):
             check_condition(not add_bos, "Adding a BOS symbol requires a vocabulary")
         self.add_bos = add_bos
         self.limit = limit
-        self._iter = None  # type: Optional[Iterator]
-        self._iterated_once = False
-        self.count = 0
-        self._next = None
 
     def __iter__(self):
-        check_condition(self._next is None, "Can not iterate multiple times simultaneously.")
-        self._iter = read_content(self.path, self.limit)
-        self._next = next(self._iter, None)
-        return self
+        for tokens in read_content(self.path, self.limit):
+            if self.vocab is not None:
+                sequence = tokens2ids(tokens, self.vocab)
+            else:
+                sequence = strids2ids(tokens)
+            if not sequence:
+                yield None
+                continue
+            if vocab is not None and self.add_bos:
+                sequence.insert(0, self.vocab[C.BOS_SYMBOL])
+            yield sequence
 
-    def __next__(self):
-        if self._next is None:
-            raise StopIteration
 
-        tokens = self._next
-        if self.vocab is not None:
-            sequence = tokens2ids(tokens, self.vocab)
-        else:
-            sequence = strids2ids(tokens)
-        check_condition(bool(sequence), "Empty sequence in file %s" % self.path)
+def parallel_iter(source_iters: Sequence[Iterable], target_iterable: Iterable):
+    """
+    Yields parallel source(s), target sequences from iterables.
+    Checks for token parallelism in source sequences.
+    Skips pairs where element in at least one iterable is None.
+    Checks that all iterables have the same number of elements.
+    """
+    num_skipped = 0
+    source_iters = [iter(s) for s in source_iters]
+    target_iter = iter(target_iterable)
+    for sources, target in zip(zip(*source_iters), target_iter):
+        if any((s is None for s in sources)) or target is None:
+            num_skipped += 1
+            continue
+        check_condition(are_token_parallel(sources), "Source sequences are not token-parallel: %s" % (str(sources)))
+        yield sources, target
 
-        if vocab is not None and self.add_bos:
-            sequence.insert(0, self.vocab[C.BOS_SYMBOL])
+    if num_skipped > 0:
+        logger.warning("Parallel reading of sequences skipped %d elements", num_skipped)
 
-        if not self._iterated_once:
-            self.count += 1
-
-        # fetch next element
-        self._next = next(self._iter, None)
-        if self._next is None:
-            self._iter = None
-            if not self._iterated_once:
-                self._iterated_once = True
-
-        return sequence
-
-    def is_done(self):
-        return self._iterated_once and self._next is None
+    check_condition(
+        all(next(cast(Iterator, s), None) is None for s in source_iters) and next(cast(Iterator,target_iter),
+                                                                                  None) is None,
+        "Different number of lines in source(s) and target iterables.")
 
 
 def get_default_bucket_key(buckets: List[Tuple[int, int]]) -> Tuple[int, int]:
@@ -1081,7 +1073,7 @@ def get_parallel_bucket(buckets: List[Tuple[int, int]],
                         length_target: int) -> Optional[Tuple[int, Tuple[int, int]]]:
     """
     Returns bucket index and bucket from a list of buckets, given source and target length.
-    Returns (None, None) if no bucket fits.
+    Returns (None, None) if no bucket fits or one or both lengths are 0.
 
     :param buckets: List of buckets.
     :param length_source: Length of source sequence.
@@ -1089,6 +1081,7 @@ def get_parallel_bucket(buckets: List[Tuple[int, int]],
     :return: Tuple of (bucket index, bucket), or (None, None) if not fitting.
     """
     bucket = None, None  # type: Tuple[int, Tuple[int, int]]
+
     for j, (source_bkt, target_bkt) in enumerate(buckets):
         if source_bkt >= length_source and target_bkt >= length_target:
             bucket = j, (source_bkt, target_bkt)
