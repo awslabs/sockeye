@@ -435,9 +435,12 @@ class EarlyStoppingTrainer:
             metrics: List[str],
             checkpoint_frequency: int,
             max_num_not_improved: int,
+            min_samples: Optional[int] = None,
+            max_samples: Optional[int] = None,
+            min_updates: Optional[int] = None,
             max_updates: Optional[int] = None,
-            min_num_epochs: Optional[int] = None,
-            max_num_epochs: Optional[int] = None,
+            min_epochs: Optional[int] = None,
+            max_epochs: Optional[int] = None,
             lr_decay_param_reset: bool = False,
             lr_decay_opt_states_reset: str = C.LR_DECAY_OPT_STATES_RESET_OFF,
             decoder: Optional[checkpoint_decoder.CheckpointDecoder] = None,
@@ -458,9 +461,12 @@ class EarlyStoppingTrainer:
 
         :param max_num_not_improved: Stop training if early_stopping_metric did not improve for this many checkpoints.
                Use -1 to disable stopping based on early_stopping_metric.
+        :param min_samples: Optional minimum number of samples.
+        :param max_samples: Optional maximum number of samples.
+        :param min_updates: Optional minimum number of update steps.
         :param max_updates: Optional maximum number of update steps.
-        :param min_num_epochs: Optional minimum number of epochs to train, overrides early stopping.
-        :param max_num_epochs: Optional maximum number of epochs to train, overrides early stopping.
+        :param min_epochs: Optional minimum number of epochs to train, overrides early stopping.
+        :param max_epochs: Optional maximum number of epochs to train, overrides early stopping.
 
         :param lr_decay_param_reset: Reset parameters to previous best after a learning rate decay.
         :param lr_decay_opt_states_reset: How to reset optimizer states after a learning rate decay.
@@ -515,12 +521,16 @@ class EarlyStoppingTrainer:
             if not train_iter.iter_next():
                 self.state.epoch += 1
                 train_iter.reset()
-                if max_num_epochs is not None and self.state.epoch == max_num_epochs:
-                    logger.info("Maximum # of epochs (%s) reached.", max_num_epochs)
+                if max_epochs is not None and self.state.epoch == max_epochs:
+                    logger.info("Maximum # of epochs (%s) reached.", max_epochs)
                     break
 
             if max_updates is not None and self.state.updates == max_updates:
                 logger.info("Maximum # of updates (%s) reached.", max_updates)
+                break
+
+            if max_samples is not None and self.state.samples >= max_samples:
+                logger.info("Maximum # of samples (%s) reached", max_samples)
                 break
 
             ######
@@ -601,10 +611,19 @@ class EarlyStoppingTrainer:
                                 max_num_not_improved, self.state.num_not_improved)
                     stop_fit = True
 
-                    if min_num_epochs is not None and self.state.epoch < min_num_epochs:
+                    if min_epochs is not None and self.state.epoch < min_epochs:
                         logger.info("Minimum number of epochs (%d) not reached yet: %d",
-                                    min_num_epochs, self.state.epoch)
+                                    min_epochs, self.state.epoch)
                         stop_fit = False
+
+                    if min_updates is not None and self.state.updates < min_updates:
+                        logger.info("Minimum number of updates (%d) not reached yet: %d",
+                                    min_updates, self.state.updates)
+                        stop_fit = False
+
+                    if min_samples is not None and self.state.samples < min_samples:
+                        logger.info("Minimum number of samples (%d) not reached yet: %d",
+                                    min_samples, self.state.samples)
 
                     if stop_fit:
                         break

@@ -693,10 +693,26 @@ def add_training_args(params):
                               help='Metric to optimize with early stopping {%(choices)s}. '
                                    'Default: %(default)s.')
 
+    train_params.add_argument('--min-updates',
+                              type=int,
+                              default=None,
+                              help='Minimum number of updates/batches to process before training is stopped. '
+                                   'Default: %(default)s.')
     train_params.add_argument('--max-updates',
                               type=int,
                               default=None,
-                              help='Maximum number of updates/batches to process. Default: %(default)s.')
+                              help='Maximum number of updates/batches to process. '
+                                   'If reached training is stopped. Default: %(default)s.')
+    train_params.add_argument('--min-samples',
+                              type=int,
+                              default=None,
+                              help='Minimum number of samples to process before training is stopped. '
+                                   'Default: %(default)s.')
+    train_params.add_argument('--max-samples',
+                              type=int,
+                              default=None,
+                              help='Maximum number of samples to process. '
+                                   'If reached training is stopped. Default: %(default)s.')
     train_params.add_argument(C.TRAIN_ARGS_CHECKPOINT_FREQUENCY,
                               type=int_greater_or_equal(1),
                               default=1000,
@@ -711,12 +727,12 @@ def add_training_args(params):
                               type=int,
                               default=None,
                               help='Minimum number of epochs (passes through the training data) '
-                                   'before fitting is stopped. Default: %(default)s.')
+                                   'before training is stopped. Default: %(default)s.')
     train_params.add_argument('--max-num-epochs',
                               type=int,
                               default=None,
                               help='Maximum number of epochs (passes through the training data) '
-                                   'before fitting is stopped. Default: %(default)s.')
+                                   'before training is stopped. Default: %(default)s.')
 
     train_params.add_argument('--embed-dropout',
                               type=multiple_values(2, data_type=float),
