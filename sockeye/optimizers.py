@@ -200,7 +200,7 @@ class Eve(SockeyeOptimizer):
             else:
                 f_hat = f
                 d = 1.
-            return (f_hat, d)
+            return f_hat, d
 
         batch_d, checkpoint_d = None, None
 

@@ -295,8 +295,8 @@ class BeamStoringHandler(OutputHandler):
         # If the sentence was max_len split, we may have more than one history
         for h in t_output.beam_histories:
             # Add the number of steps in each beam
-            h["number_steps"] = len(h["predicted_tokens"]) # type: ignore
+            h["number_steps"] = len(h["predicted_tokens"])  # type: ignore
             # Some outputs can have more than one beam, add the id for bookkeeping
-            h["id"] = t_output.id # type: ignore
+            h["id"] = t_output.id  # type: ignore
             self.stream.write("%s\n" % json.dumps(h, sort_keys=True))
         self.stream.flush()

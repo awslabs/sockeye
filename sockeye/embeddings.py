@@ -135,8 +135,8 @@ def main():
         for token, token_id in zip(tokens, ids):
             print("%s id=%d" % (token, token_id))
             neighbours = nearest_k(sims, token_id, args.k, args.gamma)
-            for i, (token_id, score) in enumerate(neighbours, 1):
-                print("  %s id=%d sim=%.4f" % (vocab_inv[token_id], token_id, score))
+            for i, (neighbour_id, score) in enumerate(neighbours, 1):
+                print("  %s id=%d sim=%.4f" % (vocab_inv[neighbour_id], neighbour_id, score))
         print()
 
 

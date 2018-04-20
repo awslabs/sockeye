@@ -499,7 +499,6 @@ def add_model_parameters(params):
                               help="Optionally apply query, key and value projections to the source and target hidden "
                                    "vectors before applying the attention mechanism.")
 
-
     # rnn arguments
     model_params.add_argument('--rnn-cell-type',
                               choices=C.CELL_TYPES,

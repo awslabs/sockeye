@@ -824,7 +824,7 @@ def _concat_translations(translations: List[Translation], start_id: int, stop_id
     # Concatenation of all target ids without BOS and EOS
     target_ids = [start_id]
     attention_matrices = []
-    beam_histories = [] # type: List[BeamHistory]
+    beam_histories = []  # type: List[BeamHistory]
     for idx, translation in enumerate(translations):
         assert translation.target_ids[0] == start_id
         if idx == len(translations) - 1:
@@ -908,7 +908,6 @@ class Translator:
         self.batch_size = self.models[0].batch_size
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         self.max_input_length = self.models[0].max_input_length
-        max_output_length = self.models[0].get_max_output_length(self.max_input_length)
         if bucket_source_width > 0:
             self.buckets_source = data_io.define_buckets(self.max_input_length, step=bucket_source_width)
         else:
@@ -1172,7 +1171,8 @@ class Translator:
 
     def _beam_search(self,
                      source: mx.nd.NDArray,
-                     source_length: int) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray, Optional[List[BeamHistory]]]:
+                     source_length: int) -> Tuple[mx.nd.NDArray, mx.nd.NDArray,
+                                                  mx.nd.NDArray, mx.nd.NDArray, Optional[List[BeamHistory]]]:
         """
         Translates multiple sentences using beam search.
 
@@ -1199,7 +1199,7 @@ class Translator:
 
         # Beam history
         if self.store_beam:
-            beam_histories = [defaultdict(list) for _ in range(self.batch_size)] # type: Optional[List[BeamHistory]]
+            beam_histories = [defaultdict(list) for _ in range(self.batch_size)]  # type: Optional[List[BeamHistory]]
         else:
             beam_histories = None
 
@@ -1305,10 +1305,9 @@ class Translator:
             attentions[:, t, :] = attention_scores
             lengths += mx.nd.cast(1 - mx.nd.expand_dims(finished, axis=1), dtype='float32')
 
-
             # (6) optionally save beam history
             if self.store_beam:
-                unnormalized_scores = scores_accumulated * self.length_penalty(lengths -1)
+                unnormalized_scores = scores_accumulated * self.length_penalty(lengths - 1)
                 for sent in range(self.batch_size):
                     rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
 
@@ -1324,7 +1323,6 @@ class Translator:
 
                         beam_histories[sent]["scores"].append(unnormalized_scores[rows].asnumpy().flatten().tolist())
                         beam_histories[sent]["normalized_scores"].append(scores_accumulated[rows].asnumpy().flatten().tolist())
-
 
             # (7) determine which hypotheses in the beam are now finished
             finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
