@@ -603,50 +603,49 @@ def test_sharded_parallel_sample_iter():
 
         it = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes, 'replicate')
 
-        with TemporaryDirectory() as work_dir:
-            # Test 1
+        # Test 1
+        it.next()
+        expected_batch = it.next()
+
+        fname = os.path.join(work_dir, "saved_iter")
+        it.save_state(fname)
+
+        it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
+                                                      'replicate')
+        it_loaded.reset()
+        it_loaded.load_state(fname)
+        loaded_batch = it_loaded.next()
+        assert _data_batches_equal(expected_batch, loaded_batch)
+
+        # Test 2
+        it.reset()
+        expected_batch = it.next()
+        it.save_state(fname)
+
+        it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
+                                                      'replicate')
+        it_loaded.reset()
+        it_loaded.load_state(fname)
+
+        loaded_batch = it_loaded.next()
+        assert _data_batches_equal(expected_batch, loaded_batch)
+
+        # Test 3
+        it.reset()
+        expected_batch = it.next()
+        it.save_state(fname)
+        it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
+                                                      'replicate')
+        it_loaded.reset()
+        it_loaded.load_state(fname)
+
+        loaded_batch = it_loaded.next()
+        assert _data_batches_equal(expected_batch, loaded_batch)
+
+        while it.iter_next():
             it.next()
-            expected_batch = it.next()
-
-            fname = os.path.join(work_dir, "saved_iter")
-            it.save_state(fname)
-
-            it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                                          'replicate')
-            it_loaded.reset()
-            it_loaded.load_state(fname)
-            loaded_batch = it_loaded.next()
-            assert _data_batches_equal(expected_batch, loaded_batch)
-
-            # Test 2
-            it.reset()
-            expected_batch = it.next()
-            it.save_state(fname)
-
-            it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                                          'replicate')
-            it_loaded.reset()
-            it_loaded.load_state(fname)
-
-            loaded_batch = it_loaded.next()
-            assert _data_batches_equal(expected_batch, loaded_batch)
-
-            # Test 3
-            it.reset()
-            expected_batch = it.next()
-            it.save_state(fname)
-            it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                                          'replicate')
-            it_loaded.reset()
-            it_loaded.load_state(fname)
-
-            loaded_batch = it_loaded.next()
-            assert _data_batches_equal(expected_batch, loaded_batch)
-
-            while it.iter_next():
-                it.next()
-                it_loaded.next()
-            assert not it_loaded.iter_next()
+            it_loaded.next()
+        assert not it_loaded.iter_next()
 
 
 def test_sharded_parallel_sample_iter_num_batches():

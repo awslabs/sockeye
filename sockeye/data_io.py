@@ -359,12 +359,13 @@ def shard_data(source_fnames: List[str],
         target_shards = [exit_stack.enter_context(smart_open(f, mode="wt")) for f in target_shard_fnames]
 
         source_readers = [SequenceReader(fname, vocab, add_bos=False) for fname, vocab in zip(source_fnames,
-                                                                                            source_vocabs)]
+                                                                                              source_vocabs)]
         target_reader = SequenceReader(target_fname, target_vocab, add_bos=True)
 
         random_shard_iter = iter(lambda: random.randrange(num_shards), None)
 
-        for (sources, target), random_shard_index in zip(parallel_iter(source_readers, target_reader), random_shard_iter):
+        for (sources, target), random_shard_index in zip(parallel_iter(source_readers, target_reader),
+                                                         random_shard_iter):
             random_shard_index = cast(int, random_shard_index)
             source_len = len(sources[0])
             target_len = len(target)
@@ -1053,7 +1054,7 @@ def parallel_iter(source_iters: Sequence[Iterable[Optional[Any]]], target_iterab
         logger.warning("Parallel reading of sequences skipped %d elements", num_skipped)
 
     check_condition(
-        all(next(cast(Iterator, s), None) is None for s in source_iters) and next(cast(Iterator,target_iter),
+        all(next(cast(Iterator, s), None) is None for s in source_iters) and next(cast(Iterator, target_iter),
                                                                                   None) is None,
         "Different number of lines in source(s) and target iterables.")
 

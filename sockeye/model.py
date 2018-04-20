@@ -14,7 +14,7 @@
 import copy
 import logging
 import os
-from typing import cast, Dict, Optional, Tuple, List
+from typing import cast, Dict, Optional, Tuple
 
 import mxnet as mx
 
