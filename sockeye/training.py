@@ -630,7 +630,7 @@ class EarlyStoppingTrainer:
 
                 tic = time.time()
 
-        self._cleanup(lr_decay_opt_states_reset)
+        self._cleanup(lr_decay_opt_states_reset, process_manager=process_manager)
         logger.info("Training finished. Best checkpoint: %d. Best validation %s: %.6f",
                     self.state.best_checkpoint, early_stopping_metric, self.state.best_metric)
         return self.state.best_metric
@@ -723,7 +723,6 @@ class EarlyStoppingTrainer:
             checkpoint_metrics["%s-val" % name] = value
 
         if process_manager is not None:
-            process_manager.wait_to_finish()
             result = process_manager.collect_results()
             if result is not None:
                 decoded_checkpoint, decoder_metrics = result
@@ -749,12 +748,12 @@ class EarlyStoppingTrainer:
         utils.cleanup_params_files(self.model.output_dir, self.max_params_files_to_keep,
                                    self.state.checkpoint, self.state.best_checkpoint)
         if process_manager is not None:
-            process_manager.wait_to_finish()
             result = process_manager.collect_results()
             if result is not None:
                 decoded_checkpoint, decoder_metrics = result
                 self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
                 self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
+            utils.write_metrics_file(self.state.metrics, self.metrics_fname)
 
         final_training_state_dirname = os.path.join(self.model.output_dir, C.TRAINING_STATE_DIRNAME)
         if os.path.exists(final_training_state_dirname):
@@ -1139,6 +1138,7 @@ class DecoderProcessManager(object):
             return None
         decoded_checkpoint, decoder_metrics = self.decoder_metric_queue.get()
         assert self.decoder_metric_queue.empty()
+        logger.info("Decoder-%d finished: %s", decoded_checkpoint, decoder_metrics)
         return decoded_checkpoint, decoder_metrics
 
     def wait_to_finish(self):
@@ -1147,14 +1147,15 @@ class DecoderProcessManager(object):
         if not self.decoder_process.is_alive():
             self.decoder_process = None
             return
-        logger.warning("Waiting for process %s to finish.", self.decoder_process.name)
+        name = self.decoder_process.name
+        logger.warning("Waiting for process %s to finish.", name)
         wait_start = time.time()
         self.decoder_process.join()
         self.decoder_process = None
         wait_time = int(time.time() - wait_start)
-        logger.warning("Had to wait %d seconds for the checkpoint decoder to finish. Consider increasing the "
+        logger.warning("Had to wait %d seconds for the Checkpoint %s to finish. Consider increasing the "
                        "checkpoint frequency (updates between checkpoints, see %s) or reducing the size of the "
-                       "validation samples that are decoded (see %s)." % (wait_time,
+                       "validation samples that are decoded (see %s)." % (wait_time, name,
                                                                           C.TRAIN_ARGS_CHECKPOINT_FREQUENCY,
                                                                           C.TRAIN_ARGS_MONITOR_BLEU))
 
