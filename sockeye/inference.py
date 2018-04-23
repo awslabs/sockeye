@@ -20,7 +20,7 @@ import logging
 import math
 import os
 from collections import defaultdict
-from functools import partial
+from functools import lru_cache, partial
 from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set
 
 import mxnet as mx
@@ -81,7 +81,6 @@ class InferenceModel(model.SockeyeModel):
         self.encoder_default_bucket_key = None  # type: Optional[int]
         self.decoder_module = None  # type: Optional[mx.mod.BucketingModule]
         self.decoder_default_bucket_key = None  # type: Optional[Tuple[int, int]]
-        self.decoder_data_shapes_cache = None  # type: Optional[Dict]
         self.decoder_return_logit_inputs = decoder_return_logit_inputs
 
         self.cache_output_layer_w_b = cache_output_layer_w_b
@@ -125,7 +124,6 @@ class InferenceModel(model.SockeyeModel):
         self.encoder_module, self.encoder_default_bucket_key = self._get_encoder_module()
         self.decoder_module, self.decoder_default_bucket_key = self._get_decoder_module()
 
-        self.decoder_data_shapes_cache = dict()  # bucket_key -> shape cache
         max_encoder_data_shapes = self._get_encoder_data_shapes(self.encoder_default_bucket_key)
         max_decoder_data_shapes = self._get_decoder_data_shapes(self.decoder_default_bucket_key)
         self.encoder_module.bind(data_shapes=max_encoder_data_shapes, for_training=False, grad_req="null")
@@ -259,22 +257,20 @@ class InferenceModel(model.SockeyeModel):
                                shape=(self.batch_size, bucket_key, self.num_source_factors),
                                layout=C.BATCH_MAJOR)]
 
+    @lru_cache(maxsize=None)
     def _get_decoder_data_shapes(self, bucket_key: Tuple[int, int]) -> List[mx.io.DataDesc]:
         """
         Returns data shapes of the decoder module.
-        Caches results for bucket_keys if called iteratively.
 
         :param bucket_key: Tuple of (maximum input length, maximum target length).
         :return: List of data descriptions.
         """
         source_max_length, target_max_length = bucket_key
-        return self.decoder_data_shapes_cache.setdefault(
-            bucket_key,
-            [mx.io.DataDesc(name=C.TARGET_NAME, shape=(self.batch_size * self.beam_size,), layout="NT")] +
-            self.decoder.state_shapes(self.batch_size * self.beam_size,
-                                      target_max_length,
-                                      self.encoder.get_encoded_seq_len(source_max_length),
-                                      self.encoder.get_num_hidden()))
+        return [mx.io.DataDesc(name=C.TARGET_NAME, shape=(self.batch_size * self.beam_size,), layout="NT")] + \
+               self.decoder.state_shapes(self.batch_size * self.beam_size,
+                                         target_max_length,
+                                         self.encoder.get_encoded_seq_len(source_max_length),
+                                         self.encoder.get_num_hidden())
 
     def run_encoder(self,
                     source: mx.nd.NDArray,
@@ -829,7 +825,7 @@ def _concat_translations(translations: List[Translation], start_id: int, stop_id
     # Concatenation of all target ids without BOS and EOS
     target_ids = [start_id]
     attention_matrices = []
-    beam_histories = [] # type: List[BeamHistory]
+    beam_histories = []  # type: List[BeamHistory]
     for idx, translation in enumerate(translations):
         assert translation.target_ids[0] == start_id
         if idx == len(translations) - 1:
@@ -919,7 +915,6 @@ class Translator:
         self.batch_size = self.models[0].batch_size
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         self.max_input_length = self.models[0].max_input_length
-        max_output_length = self.models[0].get_max_output_length(self.max_input_length)
         if bucket_source_width > 0:
             self.buckets_source = data_io.define_buckets(self.max_input_length, step=bucket_source_width)
         else:
@@ -1183,7 +1178,8 @@ class Translator:
 
     def _beam_search(self,
                      source: mx.nd.NDArray,
-                     source_length: int) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray, Optional[List[BeamHistory]]]:
+                     source_length: int) -> Tuple[mx.nd.NDArray, mx.nd.NDArray,
+                                                  mx.nd.NDArray, mx.nd.NDArray, Optional[List[BeamHistory]]]:
         """
         Translates multiple sentences using beam search.
 
@@ -1210,7 +1206,7 @@ class Translator:
 
         # Beam history
         if self.store_beam:
-            beam_histories = [defaultdict(list) for _ in range(self.batch_size)] # type: Optional[List[BeamHistory]]
+            beam_histories = [defaultdict(list) for _ in range(self.batch_size)]  # type: Optional[List[BeamHistory]]
         else:
             beam_histories = None
 
@@ -1352,6 +1348,7 @@ class Translator:
 
             # (6) optionally save beam history
             if self.store_beam:
+                # lengths - 1?
                 unnormalized_scores = mx.nd.where(finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
                 for sent in range(self.batch_size):
                     rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
@@ -1368,7 +1365,6 @@ class Translator:
 
                         beam_histories[sent]["scores"].append(unnormalized_scores[rows].asnumpy().flatten().tolist())
                         beam_histories[sent]["normalized_scores"].append(scores_accumulated[rows].asnumpy().flatten().tolist())
-
 
             # (7) determine which hypotheses in the beam are now finished
             finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))

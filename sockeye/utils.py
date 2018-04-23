@@ -632,7 +632,7 @@ class GpuFileLock:
             lockfile_path = os.path.join(self.lock_dir, "sockeye.gpu{}.lock".format(gpu_id))
             try:
                 lock_file = open(lockfile_path, 'w')
-            except IOError as e:
+            except IOError:
                 if errno.EACCES:
                     logger.warning("GPU {} is currently locked by a different process "
                                    "(Permission denied).".format(gpu_id))

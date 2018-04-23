@@ -104,7 +104,8 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, prefix: str) -> 'Encod
     encoder_seq = EncoderSequence([], config.dtype)
 
     if config.conv_config is not None:
-        encoder_seq.append(ConvolutionalEmbeddingEncoder, config=config.conv_config, prefix=prefix + C.CHAR_SEQ_ENCODER_PREFIX)
+        encoder_seq.append(ConvolutionalEmbeddingEncoder, config=config.conv_config,
+                           prefix=prefix + C.CHAR_SEQ_ENCODER_PREFIX)
         if config.conv_config.add_positional_encoding:
             # If specified, add positional encodings to segment embeddings
             encoder_seq.append(AddSinCosPositionalEmbeddings,
@@ -149,6 +150,7 @@ def get_convolutional_encoder(config: ConvolutionalEncoderConfig, prefix: str) -
     Creates a convolutional encoder.
 
     :param config: Configuration for convolutional encoder.
+    :param prefix: Prefix for variable names.
     :return: Encoder instance.
     """
     encoder_seq = EncoderSequence([], dtype=config.dtype)
@@ -181,7 +183,8 @@ def get_transformer_encoder(config: transformer.TransformerConfig, prefix: str) 
                                                            prefix=prefix + C.SOURCE_POSITIONAL_EMBEDDING_PREFIX)
     encoder_seq.append(cls, **encoder_params)
     if config.conv_config is not None:
-        encoder_seq.append(ConvolutionalEmbeddingEncoder, config=config.conv_config, prefix=prefix + C.CHAR_SEQ_ENCODER_PREFIX)
+        encoder_seq.append(ConvolutionalEmbeddingEncoder, config=config.conv_config,
+                           prefix=prefix + C.CHAR_SEQ_ENCODER_PREFIX)
 
     encoder_seq.append(TransformerEncoder, config=config, prefix=prefix + C.TRANSFORMER_ENCODER_PREFIX)
 

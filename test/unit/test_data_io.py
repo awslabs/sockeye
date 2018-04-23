@@ -105,8 +105,9 @@ def test_ids2strids(ids, expected_string):
     assert string == expected_string
 
 
-sequence_reader_tests = [(["1 2 3", "2", "14", "2 2 2"], False, False),
+sequence_reader_tests = [(["1 2 3", "2", "", "2 2 2"], False, False),
                          (["a b c", "c"], True, False),
+                         (["a b c", ""], True, False),
                          (["a b c", "c"], True, True)]
 
 
@@ -116,34 +117,93 @@ def test_sequence_reader(sequences, use_vocab, add_bos):
         path = os.path.join(work_dir, 'input')
         with open(path, 'w') as f:
             for sequence in sequences:
-                f.write(sequence + "\n")
+                print(sequence, file=f)
 
         vocabulary = vocab.build_vocab(sequences) if use_vocab else None
 
         reader = data_io.SequenceReader(path, vocab=vocabulary, add_bos=add_bos)
 
         read_sequences = [s for s in reader]
-        assert reader.is_done()
-        assert len(read_sequences) == reader.count
+        assert len(read_sequences) == len(sequences)
 
         if vocabulary is None:
             with pytest.raises(SockeyeError) as e:
                 _ = data_io.SequenceReader(path, vocab=vocabulary, add_bos=True)
             assert str(e.value) == "Adding a BOS symbol requires a vocabulary"
 
-            expected_sequences = [data_io.strids2ids(get_tokens(s)) for s in sequences]
+            expected_sequences = [data_io.strids2ids(get_tokens(s)) if s else None for s in sequences]
             assert read_sequences == expected_sequences
         else:
-            expected_sequences = [data_io.tokens2ids(get_tokens(s), vocabulary) for s in sequences]
+            expected_sequences = [data_io.tokens2ids(get_tokens(s), vocabulary) if s else None for s in sequences]
             if add_bos:
-                expected_sequences = [[vocabulary[C.BOS_SYMBOL]] + s for s in expected_sequences]
+                expected_sequences = [[vocabulary[C.BOS_SYMBOL]] + s if s else None for s in expected_sequences]
             assert read_sequences == expected_sequences
 
-        # check raise for multiple concurrent iters
-        _ = iter(reader)
-        with pytest.raises(SockeyeError) as e:
-            iter(reader)
-        assert str(e.value) == "Can not iterate multiple times simultaneously."
+
+@pytest.mark.parametrize("source_iterables, target_iterable",
+                         [
+                             (
+                                     [[[0], [1, 1], [2], [3, 3, 3]], [[0], [1, 1], [2], [3, 3, 3]]],
+                                     [[0], [1]]
+                             ),
+                             (
+                                     [[[0], [1, 1]], [[0], [1, 1]]],
+                                     [[0], [1, 1], [2], [3, 3, 3]]
+                             ),
+                             (
+                                     [[[0], [1, 1]]],
+                                     [[0], [1, 1], [2], [3, 3, 3]]
+                             ),
+                         ])
+def test_nonparallel_iter(source_iterables, target_iterable):
+    with pytest.raises(SockeyeError) as e:
+        list(data_io.parallel_iter(source_iterables, target_iterable))
+    assert str(e.value) == "Different number of lines in source(s) and target iterables."
+
+
+@pytest.mark.parametrize("source_iterables, target_iterable",
+                         [
+                             (
+                                     [[[0], [1, 1]], [[0], [1]]],
+                                     [[0], [1]]
+                             )
+                         ])
+def test_nontoken_parallel_iter(source_iterables, target_iterable):
+    with pytest.raises(SockeyeError) as e:
+        list(data_io.parallel_iter(source_iterables, target_iterable))
+    assert str(e.value).startswith("Source sequences are not token-parallel")
+
+
+@pytest.mark.parametrize("source_iterables, target_iterable, expected",
+                         [
+                             (
+                                     [[[0], [1, 1]], [[0], [1, 1]]],
+                                     [[0], [1]],
+                                     [(([0], [0]), [0]), (([1, 1], [1, 1]), [1])]
+                             ),
+                             (
+                                     [[[0], None], [[0], None]],
+                                     [[0], [1]],
+                                     [(([0], [0]), [0])]
+                             ),
+                             (
+                                     [[[0], [1, 1]], [[0], [1, 1]]],
+                                     [[0], None],
+                                     [(([0], [0]), [0])]
+                             ),
+                             (
+                                     [[None, [1, 1]], [None, [1, 1]]],
+                                     [None, [1]],
+                                     [(([1, 1], [1, 1]), [1])]
+                             ),
+                             (
+                                     [[None, [1, 1]], [None, [1, 1]]],
+                                     [None, None],
+                                     []
+                             )
+                         ])
+def test_parallel_iter(source_iterables, target_iterable, expected):
+    assert list(data_io.parallel_iter(source_iterables, target_iterable)) == expected
 
 
 def test_sample_based_define_bucket_batch_sizes():
@@ -543,50 +603,49 @@ def test_sharded_parallel_sample_iter():
 
         it = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes, 'replicate')
 
-        with TemporaryDirectory() as work_dir:
-            # Test 1
+        # Test 1
+        it.next()
+        expected_batch = it.next()
+
+        fname = os.path.join(work_dir, "saved_iter")
+        it.save_state(fname)
+
+        it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
+                                                      'replicate')
+        it_loaded.reset()
+        it_loaded.load_state(fname)
+        loaded_batch = it_loaded.next()
+        assert _data_batches_equal(expected_batch, loaded_batch)
+
+        # Test 2
+        it.reset()
+        expected_batch = it.next()
+        it.save_state(fname)
+
+        it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
+                                                      'replicate')
+        it_loaded.reset()
+        it_loaded.load_state(fname)
+
+        loaded_batch = it_loaded.next()
+        assert _data_batches_equal(expected_batch, loaded_batch)
+
+        # Test 3
+        it.reset()
+        expected_batch = it.next()
+        it.save_state(fname)
+        it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
+                                                      'replicate')
+        it_loaded.reset()
+        it_loaded.load_state(fname)
+
+        loaded_batch = it_loaded.next()
+        assert _data_batches_equal(expected_batch, loaded_batch)
+
+        while it.iter_next():
             it.next()
-            expected_batch = it.next()
-
-            fname = os.path.join(work_dir, "saved_iter")
-            it.save_state(fname)
-
-            it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                                          'replicate')
-            it_loaded.reset()
-            it_loaded.load_state(fname)
-            loaded_batch = it_loaded.next()
-            assert _data_batches_equal(expected_batch, loaded_batch)
-
-            # Test 2
-            it.reset()
-            expected_batch = it.next()
-            it.save_state(fname)
-
-            it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                                          'replicate')
-            it_loaded.reset()
-            it_loaded.load_state(fname)
-
-            loaded_batch = it_loaded.next()
-            assert _data_batches_equal(expected_batch, loaded_batch)
-
-            # Test 3
-            it.reset()
-            expected_batch = it.next()
-            it.save_state(fname)
-            it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                                          'replicate')
-            it_loaded.reset()
-            it_loaded.load_state(fname)
-
-            loaded_batch = it_loaded.next()
-            assert _data_batches_equal(expected_batch, loaded_batch)
-
-            while it.iter_next():
-                it.next()
-                it_loaded.next()
-            assert not it_loaded.iter_next()
+            it_loaded.next()
+        assert not it_loaded.iter_next()
 
 
 def test_sharded_parallel_sample_iter_num_batches():

@@ -499,7 +499,6 @@ def add_model_parameters(params):
                               help="Optionally apply query, key and value projections to the source and target hidden "
                                    "vectors before applying the attention mechanism.")
 
-
     # rnn arguments
     model_params.add_argument('--rnn-cell-type',
                               choices=C.CELL_TYPES,
@@ -679,8 +678,8 @@ def add_training_args(params):
     train_params.add_argument('--loss-normalization-type',
                               default=C.LOSS_NORM_VALID,
                               choices=[C.LOSS_NORM_VALID, C.LOSS_NORM_BATCH],
-                              help='How to normalize the loss. By default we normalize by the number '
-                                   'of valid/non-PAD tokens (%s)' % C.LOSS_NORM_VALID)
+                              help='How to normalize the loss. By default loss is normalized by the number '
+                                   'of valid (non-PAD) tokens (%s).' % C.LOSS_NORM_VALID)
 
     train_params.add_argument('--metrics',
                               nargs='+',
@@ -690,13 +689,24 @@ def add_training_args(params):
     train_params.add_argument('--optimized-metric',
                               default=C.PERPLEXITY,
                               choices=C.METRICS,
-                              help='Metric to optimize with early stopping {%(choices)s}. '
-                                   'Default: %(default)s.')
+                              help='Metric to optimize with early stopping {%(choices)s}. Default: %(default)s.')
 
+    train_params.add_argument('--min-updates',
+                              type=int,
+                              default=None,
+                              help='Minimum number of updates before training can stop. Default: %(default)s.')
     train_params.add_argument('--max-updates',
                               type=int,
                               default=None,
-                              help='Maximum number of updates/batches to process. Default: %(default)s.')
+                              help='Maximum number of updates. Default: %(default)s.')
+    train_params.add_argument('--min-samples',
+                              type=int,
+                              default=None,
+                              help='Minimum number of samples before training can stop. Default: %(default)s.')
+    train_params.add_argument('--max-samples',
+                              type=int,
+                              default=None,
+                              help='Maximum number of samples. Default: %(default)s.')
     train_params.add_argument(C.TRAIN_ARGS_CHECKPOINT_FREQUENCY,
                               type=int_greater_or_equal(1),
                               default=1000,
@@ -706,17 +716,16 @@ def add_training_args(params):
                               default=8,
                               help='Maximum number of checkpoints the model is allowed to not improve in '
                                    '<optimized-metric> on validation data before training is stopped. '
-                                   'Default: %(default)s')
+                                   'Default: %(default)s.')
     train_params.add_argument('--min-num-epochs',
                               type=int,
                               default=None,
                               help='Minimum number of epochs (passes through the training data) '
-                                   'before fitting is stopped. Default: %(default)s.')
+                                   'before training can stop. Default: %(default)s.')
     train_params.add_argument('--max-num-epochs',
                               type=int,
                               default=None,
-                              help='Maximum number of epochs (passes through the training data) '
-                                   'before fitting is stopped. Default: %(default)s.')
+                              help='Maximum number of epochs (passes through the training data) Default: %(default)s.')
 
     train_params.add_argument('--embed-dropout',
                               type=multiple_values(2, data_type=float),

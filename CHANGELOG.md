@@ -10,6 +10,20 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.5]
+### Fixed
+- Fixed a problem with trainer not waiting for the last checkpoint decoder (#367).
+
+## [1.18.4]
+### Added
+- Added options to control training length w.r.t number of updates/batches or number of samples:
+  `--min-updates`, `--max-updates`, `--min-samples`, `--max-samples`.
+
+## [1.18.3]
+### Changed
+- Training now supports training and validation data that contains empty segments. If a segment is empty, it is skipped
+  during loading and a warning message including the number of empty segments is printed.
+
 ## [1.18.2]
 ### Changed
 - Removed combined linear projection of keys & values in source attention transformer layers for
