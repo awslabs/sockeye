@@ -1343,7 +1343,6 @@ class Translator:
 
             # (6) optionally save beam history
             if self.store_beam:
-                # lengths - 1?
                 unnormalized_scores = mx.nd.where(finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
                 for sent in range(self.batch_size):
                     rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)

@@ -1076,9 +1076,6 @@ def add_inference_args(params):
                                type=float,
                                help='Beta factor for the length penalty used in beam search: '
                                     '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
-    decode_params.add_argument('--use-mxnet-topk',
-                               action='store_true',
-                               help='Use MXNet\'s topk() instead of numpy\'s.')
 
 def add_evaluate_args(params):
     eval_params = params.add_argument_group("Evaluate parameters")
