@@ -1363,7 +1363,7 @@ class Translator:
             # (7) determine which hypotheses in the beam are now finished
             finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
 
-#            self.print_beam(sequences, scores_accumulated, finished, inactive, t)
+#            self._print_beam(sequences, scores_accumulated, finished, inactive, t)
 
             if self.beam_search_stop == 'first' and self.batch_size == 1:
                 # TODO: doesn't work for batching
@@ -1425,15 +1425,18 @@ class Translator:
                 result.append(Translation(sequence, attention_matrix, score))
         return result
 
-
-    def print_beam(self, sequences, scores, finished, inactive, timestep) -> None:
+    def _print_beam(self,
+                    sequences: mx.nd.NDArray,
+                    accumulated_scores: mx.nd.NDArray,
+                    finished: mx.nd.NDArray,
+                    inactive: mx.nd.NDArray,
+                    timestep: int) -> None:
         """
         Prints the beam for debugging purposes.
-
-        :param sequences: The beam histories.
-        :param scores: The accumulated scores for each item in the beam.
-        :param finished: Indicates which items are finished.
-        :param inactive: Indicates any inactive items.
+        :param sequences: The beam histories (shape: batch_size * beam_size, max_output_len).
+        :param scores: The accumulated scores for each item in the beam (shape: batch_size * beam_size, target_vocab_size).
+        :param finished: Indicates which items are finished (shape: batch_size * beam_size).
+        :param inactive: Indicates any inactive items (shape: batch_size * beam_size).
         :param timestep: The current timestep:
         """
         print('BEAM AT TIME STEP', timestep)
