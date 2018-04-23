@@ -1272,7 +1272,7 @@ class Translator:
         inf_array = inf_array_long[:self.beam_size]
 
         # Records items in the beam that are inactive
-        inactive = mx.nd.array( ([1] + [0] * (self.beam_size - 1)) * (self.batch_size), ctx=self.context)
+        inactive = mx.nd.array( ([0] + [1] * (self.beam_size - 1)) * (self.batch_size), ctx=self.context, dtype='int32')
         for t in range(1, max_output_length):
             # (1) obtain next predictions and advance models' state
             # scores: (batch_size * beam_size, target_vocab_size)
@@ -1286,14 +1286,9 @@ class Translator:
 
             # (2) Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
-            if t > 1:
-                scores = scores + scores_accumulated
-                # this is equivalent to doing this in numpy:
-                #   pad_dist[finished, :] = np.inf
-                #   pad_dist[finished, C.PAD_ID] = scores_accumulated[finished]
-                pad_dist[:, C.PAD_ID] = scores_accumulated[:, 0]
-                pad_dist[:, C.PAD_ID] = mx.nd.where(inactive, inf_array_long[:, 0], scores_accumulated[:, 0])
-                scores = mx.nd.where(finished, pad_dist, scores)
+            scores = scores + scores_accumulated
+            pad_dist[:, C.PAD_ID] = mx.nd.where(inactive, inf_array_long[:, 0], scores_accumulated[:, 0])
+            scores = mx.nd.where(finished + inactive, pad_dist, scores)
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
@@ -1369,6 +1364,8 @@ class Translator:
             # (7) determine which hypotheses in the beam are now finished
             finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
 
+#            self.print_beam(sequences, scores_accumulated, finished, inactive, t)
+
             if self.beam_search_stop == 'first' and self.batch_size == 1:
                 # TODO: doesn't work for batching
                 if mx.nd.sum(finished).asscalar() > 0:
@@ -1430,15 +1427,25 @@ class Translator:
         return result
 
 
-    def print_beam(self, sequences, scores, finished, active, timestep):
+    def print_beam(self, sequences, scores, finished, inactive, timestep) -> None:
+        """
+        Prints the beam for debugging purposes.
+
+        :param sequences: The beam histories.
+        :param scores: The accumulated scores for each item in the beam.
+        :param finished: Indicates which items are finished.
+        :param inactive: Indicates any inactive items.
+        :param timestep: The current timestep:
+        """
         print('BEAM AT TIME STEP', timestep)
         for sentno in range(self.batch_size):
             idx = sentno * self.beam_size
+            # for each hypothesis, print its entire history
             for i in range(self.beam_size):
-                word_ids = [int(x.asscalar()) for x in sequences[idx + i]]
-                hypothesis = ' '.join([self.vocab_target_inv[x] for x in word_ids if x != 0])
                 score = scores[idx + i].asscalar()
-                if i < active[sentno]:
-                    print(i, finished[idx + i].asscalar(), score, hypothesis)
-                else:
+                if inactive[idx + i]:
                     print(i, finished[idx + i].asscalar(), score, '----------')
+                else:
+                    word_ids = [int(x.asscalar()) for x in sequences[idx + i]]
+                    hypothesis = ' '.join([self.vocab_target_inv[x] for x in word_ids if x != 0])
+                    print(i, finished[idx + i].asscalar(), score, hypothesis)
