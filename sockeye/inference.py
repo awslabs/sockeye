@@ -1434,7 +1434,7 @@ class Translator:
         """
         Prints the beam for debugging purposes.
         :param sequences: The beam histories (shape: batch_size * beam_size, max_output_len).
-        :param scores: The accumulated scores for each item in the beam (shape: batch_size * beam_size, target_vocab_size).
+        :param accumulated_scores: The accumulated scores for each item in the beam (shape: batch_size * beam_size, target_vocab_size).
         :param finished: Indicates which items are finished (shape: batch_size * beam_size).
         :param inactive: Indicates any inactive items (shape: batch_size * beam_size).
         :param timestep: The current timestep:
@@ -1444,7 +1444,7 @@ class Translator:
             idx = sentno * self.beam_size
             # for each hypothesis, print its entire history
             for i in range(self.beam_size):
-                score = scores[idx + i].asscalar()
+                score = accumulated_scores[idx + i].asscalar()
                 if inactive[idx + i]:
                     print(i, finished[idx + i].asscalar(), score, '----------')
                 else:
