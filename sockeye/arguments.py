@@ -999,11 +999,11 @@ def add_inference_args(params):
                                type=float,
                                default=0,
                                help='Pruning threshold for beam search. All hypotheses with scores not within '
-                               'this amount of the best finished hypothesis are discarded (0 = off). Default: %(default)s')
+                               'this amount of the best finished hypothesis are discarded (0 = off). Default: %(default)s.')
     decode_params.add_argument('--beam-search-stop',
-                               choices=['all', 'first'],
-                               default='all',
-                               help='Stopping criteria. Quit when (all) hypotheses are finished (default) or when a finished hypothesis is in (first) position')
+                               choices=[C.BEAM_SEARCH_STOP_ALL, C.BEAM_SEARCH_STOP_FIRST],
+                               default=C.BEAM_SEARCH_STOP_ALL,
+                               help='Stopping criteria. Quit when (all) hypotheses are finished (default) or when a finished hypothesis is in (first) position.')
     decode_params.add_argument('--batch-size',
                                type=int_greater_or_equal(1),
                                default=1,

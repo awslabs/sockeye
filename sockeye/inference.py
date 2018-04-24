@@ -921,6 +921,12 @@ class Translator:
             self.buckets_source = [self.max_input_length]
         self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target)), val=np.inf,
                                    ctx=self.context)
+        # These are constants used for manipulation
+        self.zeros_array = mx.nd.zeros((self.beam_size,), ctx=self.context, dtype='int32')
+        self.inf_array_long = mx.nd.full((self.batch_size * self.beam_size, 1), val=np.inf,
+                                         ctx=self.context, dtype='float32')
+        self.inf_array = mx.nd.slice(self.inf_array_long, begin=(0), end=(self.beam_size))
+
         logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s batch_size=%d "
                     "buckets_source=%s)",
                     len(self.models),
@@ -1176,6 +1182,45 @@ class Translator:
             neg_logprobs = self.interpolation_func(probs)
         return neg_logprobs, attention_prob_score
 
+    def _prune(self,
+               accumulated_scores: mx.nd.NDArray,
+               best_word_indices: mx.nd.NDArray,
+               inactive: mx.nd.NDArray,
+               finished: mx.nd.NDArray) -> None:
+        """
+        Prunes the beam. For each sentence, we find the best-scoring completed hypothesis (if any),
+        and then remove all hypotheses for that sentence that are outside the beam relative to that
+        item. Pruned items are marked by setting their entry in `inactive` to 1 and marking them as finished.
+        The four argument are updated in place.
+
+        Note that after pruning, hypotheses are no longer necessarily sorted until the next call to topk().
+
+        TODO: this could be rewritten with batch-level operations.
+
+        :param accumulated_scores: The accumulated scores. Shape: (batch * beam, 1).
+        :param best_word_indices: The row indices indicating the best hypotheses. Shape: (batch * beam).
+        :param inactive: Marks inactive items in the beam. Shape: (batch * beam).
+        :param finished: Marks completed items in the beam. Shape: (batch * beam).
+        """
+        for sentno in range(self.batch_size):
+            rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
+            if mx.nd.sum(finished[rows]) > 0:
+                best_finished_score = mx.nd.min(mx.nd.where(finished[rows].expand_dims(axis=1), accumulated_scores[rows], self.inf_array))
+
+                # Find, mark (by setting the score to inf), and remove all hypotheses
+                # whose score is not within self.beam_prune of the best score
+                to_remove = mx.nd.cast(accumulated_scores[rows, 0] - best_finished_score > self.beam_prune, dtype='int32')
+                accumulated_scores[rows] = mx.nd.where(to_remove, self.inf_array, accumulated_scores[rows])
+                best_word_indices[rows] = mx.nd.where(to_remove, self.zeros_array, best_word_indices[rows])
+
+                num_removing = int(mx.nd.sum(to_remove).asscalar())
+                if num_removing > 0:
+                    inactive[self.beam_size - num_removing:] = 1
+
+                # mark removed ones as finished so they won't block early exiting
+                finished[rows] = mx.nd.clip(finished[rows] + to_remove, 0, 1)
+
+
     def _beam_search(self,
                      source: mx.nd.NDArray,
                      source_length: int) -> Tuple[mx.nd.NDArray, mx.nd.NDArray,
@@ -1266,13 +1311,9 @@ class Translator:
         # (0) encode source sentence, returns a list
         model_states = self._encode(source, source_length)
 
-        # more data structures
-        zeros_array = mx.nd.zeros((self.beam_size,), ctx=self.context, dtype='int32')
-        inf_array_long = mx.nd.full((self.beam_size * self.batch_size, 1), val=np.inf, ctx=self.context, dtype='float32')
-        inf_array = inf_array_long[:self.beam_size]
-
-        # Records items in the beam that are inactive
-        inactive = mx.nd.array( ([0] + [1] * (self.beam_size - 1)) * (self.batch_size), ctx=self.context, dtype='int32')
+        # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
+        # item on the beam for each sentence
+        inactive = mx.nd.array(([0] + [1] * (self.beam_size - 1)) * self.batch_size, ctx=self.context, dtype='int32')
         for t in range(1, max_output_length):
             # (1) obtain next predictions and advance models' state
             # scores: (batch_size * beam_size, target_vocab_size)
@@ -1286,8 +1327,8 @@ class Translator:
 
             # (2) Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
-            scores = scores + scores_accumulated
-            pad_dist[:, C.PAD_ID] = mx.nd.where(inactive, inf_array_long[:, 0], scores_accumulated[:, 0])
+            scores += scores_accumulated
+            pad_dist[:, C.PAD_ID] = mx.nd.where(inactive, self.inf_array_long[:, 0], scores_accumulated[:, 0])
             scores = mx.nd.where(finished + inactive, pad_dist, scores)
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
@@ -1298,37 +1339,21 @@ class Translator:
             if self.restrict_lexicon:
                 best_word_indices[:] = vocab_slice_ids.take(best_word_indices)
 
-            # (4) Normalize the scores of newly finished hypotheses
+            # (4) Normalize the scores of newly finished hypotheses. Note that after this until the
+            # next call to topk(), hypotheses may not be in sorted order.
             all_finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
             newly_finished = all_finished - finished
             scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
+            finished = all_finished
 
-            # (5) Prune out low-probability hypotheses
-            for sentno in range(self.batch_size):
-
+            # (5) Prune out low-probability hypotheses. Pruning works by setting entries `inactive`.
+            if self.beam_prune > 0.0:
+                self._prune(scores_accumulated, best_word_indices, inactive, finished)
+            else:
                 # All rows are now active (after special treatment of start state at t=1)
                 inactive[:] = 0
 
-                rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
-                if self.beam_prune > 0.0 and mx.nd.sum(finished[rows]) > 0:
-                    best_finished_score = mx.nd.min(mx.nd.where(finished[rows].expand_dims(axis=1), scores_accumulated[rows], inf_array))
-
-                    # Find, mark (by setting the score to inf), and remove all hypotheses
-                    # whose score is not within self.beam_prune of the best score
-                    to_remove = mx.nd.cast(scores_accumulated[rows, 0] - best_finished_score > self.beam_prune, dtype='int32')
-                    scores_accumulated[rows] = mx.nd.where(to_remove, inf_array, scores_accumulated[rows])
-                    best_word_indices[rows] = mx.nd.where(to_remove, zeros_array, best_word_indices[rows])
-
-                    num_removing = int(mx.nd.sum(to_remove).asscalar())
-                    if num_removing > 0:
-                        inactive[self.beam_size - num_removing:] = 1
-
-                    # mark removed ones as finished so they won't block early exiting
-                    finished[rows] = mx.nd.clip(finished[rows] + to_remove, 0, 1)
-
-                    # Note: hypotheses are no longer necessarily sorted until the next call to topk()
-
-            # (6) get hypotheses and their properties for beam_size winning hypotheses (ascending)
+            # (6) Update the beam with the hypotheses and their properties for the beam_size winning hypotheses (ascending)
             sequences = mx.nd.take(sequences, best_hyp_indices)
             lengths = mx.nd.take(lengths, best_hyp_indices)
             finished = mx.nd.take(finished, best_hyp_indices)
@@ -1365,8 +1390,8 @@ class Translator:
 
 #            self._print_beam(sequences, scores_accumulated, finished, inactive, t)
 
-            if self.beam_search_stop == 'first' and self.batch_size == 1:
-                # TODO: doesn't work for batching
+            if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST and self.batch_size == 1:
+                # TODO: extend to work with batch_size > 1 (i.e., one stopped for each sentence)
                 if mx.nd.sum(finished).asscalar() > 0:
                     break
             else:
@@ -1377,15 +1402,13 @@ class Translator:
             for ms in model_states:
                 ms.sort_state(best_hyp_indices)
 
-        # (9) Sort the hypotheses within each sentence (normalization for finished hyps breaks the sort)
-        for sentno in range(self.batch_size):
-            rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
-            best_hyp_indices[rows] = rows.start + mx.nd.argsort(scores_accumulated[rows, 0])
-
-        # Make corresponding updates after having sorted
+        # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
+        folded_accumulated_scores = scores_accumulated.reshape((self.batch_size, self.beam_size * scores_accumulated.shape[-1]))
+        indices = mx.nd.argsort(folded_accumulated_scores, axis=1)
+        best_hyp_indices[:], _ = np.unravel_index(indices.astype(np.int32).asnumpy().ravel(), scores_accumulated.shape) + offset
         sequences = mx.nd.take(sequences, best_hyp_indices)
         attentions = mx.nd.take(attentions, best_hyp_indices)
-        scores_accumulated[:] = mx.nd.take(scores_accumulated[:,0], best_hyp_indices.expand_dims(axis=1))
+        scores_accumulated[:] = mx.nd.take(scores_accumulated, best_hyp_indices)
         lengths = mx.nd.take(lengths, best_hyp_indices)
 
         return sequences, attentions, scores_accumulated, lengths, beam_histories
@@ -1439,15 +1462,15 @@ class Translator:
         :param inactive: Indicates any inactive items (shape: batch_size * beam_size).
         :param timestep: The current timestep:
         """
-        print('BEAM AT TIME STEP', timestep)
+        logger.info('BEAM AT TIMESTEP %d', timestep)
         for sentno in range(self.batch_size):
             idx = sentno * self.beam_size
             # for each hypothesis, print its entire history
             for i in range(self.beam_size):
                 score = accumulated_scores[idx + i].asscalar()
                 if inactive[idx + i]:
-                    print(i, finished[idx + i].asscalar(), score, '----------')
+                    logger.info('%d %s %.2f ----------', i, finished[idx + i].asscalar(), score)
                 else:
                     word_ids = [int(x.asscalar()) for x in sequences[idx + i]]
                     hypothesis = ' '.join([self.vocab_target_inv[x] for x in word_ids if x != 0])
-                    print(i, finished[idx + i].asscalar(), score, hypothesis)
+                    logger.info('%d %s %.2f %s', i, finished[idx + i].asscalar(), score, hypothesis)
