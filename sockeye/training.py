@@ -145,6 +145,13 @@ class TrainingModel(model.SockeyeModel):
 
             return mx.sym.Group(loss_output), data_names, label_names
 
+        if self.config.lhuc:
+            # TODO: Is there a better way to get the parameter names?
+            arguments = sym_gen((10, 10))[0].list_arguments()
+            fixed_param_names = [a for a in arguments if not a.endswith("lhuc")]
+        else:
+            fixed_param_names = self.fixed_param_names
+
         if self._bucketing:
             logger.info("Using bucketing. Default max_seq_len=%s", default_bucket_key)
             self.module = mx.mod.BucketingModule(sym_gen=sym_gen,
@@ -152,7 +159,7 @@ class TrainingModel(model.SockeyeModel):
                                                  default_bucket_key=default_bucket_key,
                                                  context=self.context,
                                                  compression_params=self._gradient_compression_params,
-                                                 fixed_param_names=self.fixed_param_names)
+                                                 fixed_param_names=fixed_param_names)
         else:
             logger.info("No bucketing. Unrolled to (%d,%d)",
                         self.config.config_data.max_seq_len_source, self.config.config_data.max_seq_len_target)
@@ -163,7 +170,7 @@ class TrainingModel(model.SockeyeModel):
                                         logger=logger,
                                         context=self.context,
                                         compression_params=self._gradient_compression_params,
-                                        fixed_param_names=self.fixed_param_names)
+                                        fixed_param_names=fixed_param_names)
 
         self.module.bind(data_shapes=provide_data,
                          label_shapes=provide_label,

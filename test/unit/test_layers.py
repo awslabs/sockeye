@@ -48,6 +48,26 @@ def test_layer_normalization():
     assert np.isclose(norm.asnumpy(), expected_norm, atol=1.e-6).all()
 
 
+def test_lhuc():
+    num_hidden = 50
+    batch_size = 10
+
+    input = mx.sym.Variable("input")
+    params = mx.sym.Variable("params")
+    lhuc = sockeye.layers.LHUC(num_hidden=num_hidden, weight=params)
+    with_lhuc = lhuc.apply(inputs=input)
+
+    input_nd = mx.nd.random_uniform(shape=(batch_size, num_hidden))
+    params_same_nd = mx.nd.zeros(shape=(num_hidden,))
+    params_double_nd = mx.nd.ones(shape=(num_hidden,))*20
+
+    out_same = with_lhuc.eval(input=input_nd, params=params_same_nd)[0]
+    assert np.isclose(input_nd.asnumpy(), out_same.asnumpy()).all()
+
+    out_double = with_lhuc.eval(input=input_nd, params=params_double_nd)[0]
+    assert np.isclose(2*input_nd.asnumpy(), out_double.asnumpy()).all()
+
+
 def test_weight_normalization():
     # The norm after the operation should be equal to the scale factor.
     expected_norm = np.asarray([1., 2.])
