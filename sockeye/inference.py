@@ -1209,16 +1209,12 @@ class Translator:
 
                 # Find, mark (by setting the score to inf), and remove all hypotheses
                 # whose score is not within self.beam_prune of the best score
-                to_remove = mx.nd.cast(accumulated_scores[rows, 0] - best_finished_score > self.beam_prune, dtype='int32')
-                accumulated_scores[rows] = mx.nd.where(to_remove, self.inf_array, accumulated_scores[rows])
-                best_word_indices[rows] = mx.nd.where(to_remove, self.zeros_array, best_word_indices[rows])
-
-                num_removing = int(mx.nd.sum(to_remove).asscalar())
-                if num_removing > 0:
-                    inactive[self.beam_size - num_removing:] = 1
+                inactive[rows] = mx.nd.cast(accumulated_scores[rows, 0] - best_finished_score > self.beam_prune, dtype='int32')
+                accumulated_scores[rows, 0] = mx.nd.where(inactive[rows], self.inf_array, accumulated_scores[rows, 0])
+                best_word_indices[rows] = mx.nd.where(inactive[rows], self.zeros_array, best_word_indices[rows])
 
                 # mark removed ones as finished so they won't block early exiting
-                finished[rows] = mx.nd.clip(finished[rows] + to_remove, 0, 1)
+                finished[rows] = mx.nd.clip(finished[rows] + inactive[rows], 0, 1)
 
 
     def _beam_search(self,
@@ -1346,13 +1342,12 @@ class Translator:
             newly_finished = all_finished - finished
             scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
             finished = all_finished
+            # All rows are now active (after special treatment of start state at t=1)
+            inactive[:] = 0
 
             # (5) Prune out low-probability hypotheses. Pruning works by setting entries `inactive`.
             if self.beam_prune > 0.0:
                 self._prune(scores_accumulated, best_word_indices, inactive, finished)
-            else:
-                # All rows are now active (after special treatment of start state at t=1)
-                inactive[:] = 0
 
             # (6) Update the beam with the hypotheses and their properties for the beam_size winning hypotheses (ascending)
             sequences = mx.nd.take(sequences, best_hyp_indices)
