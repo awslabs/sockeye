@@ -1325,7 +1325,8 @@ class Translator:
             # (2) Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
             scores += scores_accumulated
-            pad_dist[:, C.PAD_ID] = mx.nd.where(inactive, self.inf_array_long, scores_accumulated[:, 0])
+            # Items that are finished (but not inactive) get the accumulated score in col 0, otherwise infinity for the whole row
+            pad_dist[:, C.PAD_ID] = mx.nd.where(mx.nd.clip(finished - inactive, 0, 1), scores_accumulated[:, 0], self.inf_array_long)
             scores = mx.nd.where(finished + inactive, pad_dist, scores)
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
@@ -1338,6 +1339,8 @@ class Translator:
 
             # (4) Normalize the scores of newly finished hypotheses. Note that after this until the
             # next call to topk(), hypotheses may not be in sorted order.
+            finished = mx.nd.take(finished, best_hyp_indices)
+            lengths = mx.nd.take(lengths, best_hyp_indices)
             all_finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
             newly_finished = all_finished - finished
             scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
@@ -1351,8 +1354,6 @@ class Translator:
 
             # (6) Update the beam with the hypotheses and their properties for the beam_size winning hypotheses (ascending)
             sequences = mx.nd.take(sequences, best_hyp_indices)
-            lengths = mx.nd.take(lengths, best_hyp_indices)
-            finished = mx.nd.take(finished, best_hyp_indices)
             attention_scores = mx.nd.take(attention_scores, best_hyp_indices)
             attentions = mx.nd.take(attentions, best_hyp_indices)
 
@@ -1402,12 +1403,52 @@ class Translator:
         folded_accumulated_scores = scores_accumulated.reshape((self.batch_size, self.beam_size * scores_accumulated.shape[-1]))
         indices = mx.nd.argsort(folded_accumulated_scores, axis=1)
         best_hyp_indices[:], _ = np.unravel_index(indices.astype(np.int32).asnumpy().ravel(), scores_accumulated.shape) + offset
+        # Now reorder the arrays
         sequences = mx.nd.take(sequences, best_hyp_indices)
+        lengths = mx.nd.take(lengths, best_hyp_indices)
         attentions = mx.nd.take(attentions, best_hyp_indices)
         scores_accumulated[:] = mx.nd.take(scores_accumulated, best_hyp_indices)
-        lengths = mx.nd.take(lengths, best_hyp_indices)
+        finished = mx.nd.take(finished, best_hyp_indices)
 
         return sequences, attentions, scores_accumulated, lengths, beam_histories
+
+    def _get_kth_from_beam(self,
+                           k: int,
+                           sequences: mx.nd.NDArray,
+                           attention_lists: mx.nd.NDArray,
+                           accumulated_scores: mx.nd.NDArray,
+                           lengths: mx.nd.NDArray,
+                           beam_histories: Optional[List[BeamHistory]]) -> List[Translation]:
+        """
+        Return an item from the beam.
+
+        :param k: The item to return (n=1 is the best, n=beam_size is the worst).
+        :param sequences: Array of word ids. Shape: (batch_size * beam_size, bucket_key).
+        :param attention_lists: Array of attentions over source words.
+                                Shape: (batch_size * self.beam_size, max_output_length, encoded_source_length).
+        :param accumulated_scores: Array of length-normalized negative log-probs.
+        :return: Top sequence, top attention matrix, top accumulated score (length-normalized
+                 negative log-probs) and length.
+        """
+        utils.check_condition(k >= 1 and k <= self.beam_size,
+                              "Selected item must be between 1 and %d (the beam size)" % (self.beam_size))
+        utils.check_condition(sequences.shape[0] == attention_lists.shape[0] \
+                              == accumulated_scores.shape[0] == lengths.shape[0], "Shape mismatch")
+        # sequences & accumulated scores are in latest 'k-best order', thus 0th element is best
+        result = []
+        for sent in range(self.batch_size):
+            idx = sent * self.beam_size + (k - 1)
+            length = int(lengths[idx].asscalar())
+            sequence = sequences[idx][:length].asnumpy().tolist()
+            # attention_matrix: (target_seq_len, source_seq_len)
+            attention_matrix = np.stack(attention_lists[idx].asnumpy()[:length, :], axis=0)
+            score = accumulated_scores[idx].asscalar()
+            if beam_histories is not None:
+                history = beam_histories[sent]
+                result.append(Translation(sequence, attention_matrix, score, [history]))
+            else:
+                result.append(Translation(sequence, attention_matrix, score))
+        return result
 
     def _get_best_from_beam(self,
                             sequences: mx.nd.NDArray,
@@ -1425,24 +1466,8 @@ class Translator:
         :return: Top sequence, top attention matrix, top accumulated score (length-normalized
                  negative log-probs) and length.
         """
-        utils.check_condition(sequences.shape[0] == attention_lists.shape[0] \
-                              == accumulated_scores.shape[0] == lengths.shape[0], "Shape mismatch")
-        # sequences & accumulated scores are in latest 'k-best order', thus 0th element is best
-        best = 0
-        result = []
-        for sent in range(self.batch_size):
-            idx = sent * self.beam_size + best
-            length = int(lengths[idx].asscalar())
-            sequence = sequences[idx][:length].asnumpy().tolist()
-            # attention_matrix: (target_seq_len, source_seq_len)
-            attention_matrix = np.stack(attention_lists[idx].asnumpy()[:length, :], axis=0)
-            score = accumulated_scores[idx].asscalar()
-            if beam_histories is not None:
-                history = beam_histories[sent]
-                result.append(Translation(sequence, attention_matrix, score, [history]))
-            else:
-                result.append(Translation(sequence, attention_matrix, score))
-        return result
+
+        return self._get_kth_from_beam(1, sequences, attention_lists, accumulated_scores, lengths, beam_histories)
 
     def _print_beam(self,
                     sequences: mx.nd.NDArray,

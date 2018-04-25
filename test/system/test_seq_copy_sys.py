@@ -200,7 +200,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --batch-size 16 --num-layers 3 --max-updates 6000"
      " --cnn-num-hidden 32 --cnn-positional-embedding-type fixed"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
-     "--beam-size 1",
+     "--beam-size 1 --beam-prune .1",
      False, False,
      1.05,
      0.94)
