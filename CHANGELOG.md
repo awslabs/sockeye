@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.6]
+### Fixed
+- Fixed a problem with learning rate scheduler not properly being loaded when resuming training.
+
 ## [1.18.5]
 ### Fixed
 - Fixed a problem with trainer not waiting for the last checkpoint decoder (#367).
