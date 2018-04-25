@@ -921,9 +921,9 @@ class Translator:
             self.buckets_source = [self.max_input_length]
         self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target)), val=np.inf,
                                    ctx=self.context)
-        # These are constants used for manipulation
+        # These are constants used for manipulation of the beam and scores (particularly for pruning)
         self.zeros_array = mx.nd.zeros((self.beam_size,), ctx=self.context, dtype='int32')
-        self.inf_array_long = mx.nd.full((self.batch_size * self.beam_size, 1), val=np.inf,
+        self.inf_array_long = mx.nd.full((self.batch_size * self.beam_size,), val=np.inf,
                                          ctx=self.context, dtype='float32')
         self.inf_array = mx.nd.slice(self.inf_array_long, begin=(0), end=(self.beam_size))
 
@@ -1205,7 +1205,7 @@ class Translator:
         for sentno in range(self.batch_size):
             rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
             if mx.nd.sum(finished[rows]) > 0:
-                best_finished_score = mx.nd.min(mx.nd.where(finished[rows].expand_dims(axis=1), accumulated_scores[rows], self.inf_array))
+                best_finished_score = mx.nd.min(mx.nd.where(finished[rows], accumulated_scores[rows, 0], self.inf_array))
 
                 # Find, mark (by setting the score to inf), and remove all hypotheses
                 # whose score is not within self.beam_prune of the best score
@@ -1313,7 +1313,8 @@ class Translator:
 
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
         # item on the beam for each sentence
-        inactive = mx.nd.array(([0] + [1] * (self.beam_size - 1)) * self.batch_size, ctx=self.context, dtype='int32')
+        inactive = mx.nd.ones((self.batch_size * self.beam_size), dtype='int32', ctx=self.context)
+        inactive[::self.beam_size] = 0
         for t in range(1, max_output_length):
             # (1) obtain next predictions and advance models' state
             # scores: (batch_size * beam_size, target_vocab_size)
@@ -1328,7 +1329,7 @@ class Translator:
             # (2) Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
             scores += scores_accumulated
-            pad_dist[:, C.PAD_ID] = mx.nd.where(inactive, self.inf_array_long[:, 0], scores_accumulated[:, 0])
+            pad_dist[:, C.PAD_ID] = mx.nd.where(inactive, self.inf_array_long, scores_accumulated[:, 0])
             scores = mx.nd.where(finished + inactive, pad_dist, scores)
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
@@ -1463,14 +1464,9 @@ class Translator:
         :param timestep: The current timestep:
         """
         logger.info('BEAM AT TIMESTEP %d', timestep)
-        for sentno in range(self.batch_size):
-            idx = sentno * self.beam_size
+        for i in range(self.batch_size * self.beam_size):
             # for each hypothesis, print its entire history
-            for i in range(self.beam_size):
-                score = accumulated_scores[idx + i].asscalar()
-                if inactive[idx + i]:
-                    logger.info('%d %s %.2f ----------', i, finished[idx + i].asscalar(), score)
-                else:
-                    word_ids = [int(x.asscalar()) for x in sequences[idx + i]]
-                    hypothesis = ' '.join([self.vocab_target_inv[x] for x in word_ids if x != 0])
-                    logger.info('%d %s %.2f %s', i, finished[idx + i].asscalar(), score, hypothesis)
+            score = accumulated_scores[i].asscalar()
+            word_ids = [int(x.asscalar()) for x in sequences[i]]
+            hypothesis = '----------' if inactive[i] else ' '.join([self.vocab_target_inv[x] for x in word_ids if x != 0])
+            logger.info('%d %d %d %.2f %s', i, finished[i].asscalar(), inactive[i].asscalar(), score, hypothesis)

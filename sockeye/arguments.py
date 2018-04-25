@@ -1003,7 +1003,7 @@ def add_inference_args(params):
     decode_params.add_argument('--beam-search-stop',
                                choices=[C.BEAM_SEARCH_STOP_ALL, C.BEAM_SEARCH_STOP_FIRST],
                                default=C.BEAM_SEARCH_STOP_ALL,
-                               help='Stopping criteria. Quit when (all) hypotheses are finished (default) or when a finished hypothesis is in (first) position.')
+                               help='Stopping criteria. Quit when (all) hypotheses are finished or when a finished hypothesis is in (first) position. Default: %(default)s.')
     decode_params.add_argument('--batch-size',
                                type=int_greater_or_equal(1),
                                default=1,
