@@ -200,7 +200,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --batch-size 16 --num-layers 3 --max-updates 6000"
      " --cnn-num-hidden 32 --cnn-positional-embedding-type fixed"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
-     "--beam-size 1 --beam-prune .1",
+     "--beam-size 1",
      False, False,
      1.05,
      0.94)
@@ -213,7 +213,7 @@ def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                             sort_target=True, seed_train=_SEED_TRAIN_DATA, seed_dev=_SEED_DEV_DATA,
                             with_source_factors=use_source_factor) as data:
         # Test model configuration
-        perplexity, bleu, bleu_restrict, chrf = run_train_translate(train_params=train_params,
+        perplexity, bleu, bleu_restrict, chrf, hyps = run_train_translate(train_params=train_params,
                                                                     translate_params=translate_params,
                                                                     translate_params_equiv=None,
                                                                     train_source_path=data['source'],
@@ -235,6 +235,7 @@ def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                                                                     seed=seed)
         logger.info("test: %s", name)
         logger.info("perplexity=%f, bleu=%f, bleu_restrict=%f chrf=%f", perplexity, bleu, bleu_restrict, chrf)
+        logger.info("hyps=%s", hyps)
         assert perplexity <= perplexity_thresh
         assert bleu >= bleu_thresh
         assert bleu_restrict >= bleu_thresh

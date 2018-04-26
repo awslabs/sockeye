@@ -1454,11 +1454,12 @@ class Translator:
                     timestep: int) -> None:
         """
         Prints the beam for debugging purposes.
+
         :param sequences: The beam histories (shape: batch_size * beam_size, max_output_len).
         :param accumulated_scores: The accumulated scores for each item in the beam (shape: batch_size * beam_size, target_vocab_size).
         :param finished: Indicates which items are finished (shape: batch_size * beam_size).
         :param inactive: Indicates any inactive items (shape: batch_size * beam_size).
-        :param timestep: The current timestep:
+        :param timestep: The current timestep.
         """
         logger.info('BEAM AT TIMESTEP %d', timestep)
         for i in range(self.batch_size * self.beam_size):
