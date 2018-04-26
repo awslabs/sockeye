@@ -201,7 +201,9 @@ class TrainingModel(model.SockeyeModel):
         Returns a mapping of parameters to gradient arrays, summed across devices.
         """
         return {name: mx.nd.add_n(*(exe.grad_arrays[i] for exe in self.executors)) for i, name in
-                enumerate(self.executor_group.arg_names) if name in self.executor_group.param_names}
+                enumerate(self.executor_group.arg_names)
+                if name in self.executor_group.param_names and self.executors[0].grad_arrays[i] is not None}
+                # We may have None if not all parameters are optimized
 
     def get_global_gradient_norm(self) -> float:
         """
