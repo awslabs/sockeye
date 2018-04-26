@@ -213,7 +213,7 @@ def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                             sort_target=True, seed_train=_SEED_TRAIN_DATA, seed_dev=_SEED_DEV_DATA,
                             with_source_factors=use_source_factor) as data:
         # Test model configuration
-        perplexity, bleu, bleu_restrict, chrf, hyps = run_train_translate(train_params=train_params,
+        perplexity, bleu, bleu_restrict, chrf = run_train_translate(train_params=train_params,
                                                                     translate_params=translate_params,
                                                                     translate_params_equiv=None,
                                                                     train_source_path=data['source'],
@@ -235,7 +235,6 @@ def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                                                                     seed=seed)
         logger.info("test: %s", name)
         logger.info("perplexity=%f, bleu=%f, bleu_restrict=%f chrf=%f", perplexity, bleu, bleu_restrict, chrf)
-        logger.info("hyps=%s", hyps)
         assert perplexity <= perplexity_thresh
         assert bleu >= bleu_thresh
         assert bleu_restrict >= bleu_thresh

@@ -29,7 +29,7 @@ ENCODER_DECODER_SETTINGS = [
      " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 2",
      True, False, False),
-    # "Vanilla" LSTM encoder-decoder with attention
+    # "Vanilla" LSTM encoder-decoder with attention, also testing pruning and batching
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 16 --num-embed 8 --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 16 --batch-size 8 --loss cross-entropy --optimized-metric perplexity --max-updates 10"
      " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
