@@ -36,6 +36,7 @@ class RNNConfig(Config):
     :param first_residual_layer: First layer with a residual connection (1-based indexes).
            Default is to start at the second layer.
     :param forget_bias: Initial value of forget biases.
+    :param lhuc: Apply LHUC (Vilar 2018) to the hidden units of the RNN.
     :param dtype: Data type.
     """
 
@@ -319,10 +320,10 @@ class LHUCCell(mx.rnn.ModifierCell):
     """
     Adds a LHUC operation to the output of the cell.
     """
-    def __init__(self, base_cell, num_hidden, dtype):
+    def __init__(self, base_cell, num_hidden, dtype) -> None:
         super().__init__(base_cell)
         self.num_hidden = num_hidden
-        self.lhuc_params = self.params.get('lhuc', shape=(num_hidden,), dtype=dtype, init=mx.init.Uniform(0.1))
+        self.lhuc_params = self.params.get(C.LHUC_NAME, shape=(num_hidden,), dtype=dtype, init=mx.init.Uniform(0.1))
         self.lhuc = LHUC(num_hidden, self.lhuc_params)
 
     def __call__(self, inputs, states):

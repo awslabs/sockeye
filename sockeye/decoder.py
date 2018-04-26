@@ -449,10 +449,10 @@ class RecurrentDecoderConfig(Config):
     :param attention_config: Attention configuration.
     :param hidden_dropout: Dropout probability on next decoder hidden state.
     :param state_init: Type of RNN decoder state initialization: zero, last, average.
+    :param state_init_lhuc: Apply LHUC for encoder to decoder initialization.
     :param context_gating: Whether to use context gating.
     :param layer_normalization: Apply layer normalization.
     :param attention_in_upper_layers: Pass the attention value to all layers in the decoder.
-    :param e2d_lhuc: Apply LHUC for encoder to decoder initialization.
     :param dtype: Data type.
     """
 
@@ -462,10 +462,10 @@ class RecurrentDecoderConfig(Config):
                  attention_config: rnn_attention.AttentionConfig,
                  hidden_dropout: float = .0,  # TODO: move this dropout functionality to OutputLayer
                  state_init: str = C.RNN_DEC_INIT_LAST,
+                 state_init_lhuc: bool = False,
                  context_gating: bool = False,
                  layer_normalization: bool = False,
                  attention_in_upper_layers: bool = False,
-                 e2d_lhuc: bool = False,
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.max_seq_len_source = max_seq_len_source
@@ -473,10 +473,10 @@ class RecurrentDecoderConfig(Config):
         self.attention_config = attention_config
         self.hidden_dropout = hidden_dropout
         self.state_init = state_init
+        self.state_init_lhuc = state_init_lhuc
         self.context_gating = context_gating
         self.layer_normalization = layer_normalization
         self.attention_in_upper_layers = attention_in_upper_layers
-        self.e2d_lhuc = e2d_lhuc
         self.dtype = dtype
 
 
@@ -798,7 +798,7 @@ class RecurrentDecoder(Decoder):
                     init = self.init_norms[state_idx].normalize(init)
                 init = mx.sym.Activation(data=init, act_type="tanh",
                                          name="%senc2dec_inittanh_%d" % (self.prefix, state_idx))
-                if self.config.e2d_lhuc:
+                if self.config.state_init_lhuc:
                     lhuc = layers.LHUC(init_num_hidden, prefix="%senc2decinit_%d_" % (self.prefix, state_idx))
                     init = lhuc.apply(init)
             layer_states.append(init)

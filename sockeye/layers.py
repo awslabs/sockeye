@@ -130,7 +130,7 @@ class LHUC:
         self.num_hidden = num_hidden
         self.prefix = prefix
         if not weight:
-            self.params = mx.sym.Variable(self.prefix + "lhuc",
+            self.params = mx.sym.Variable(self.prefix + C.LHUC_NAME,
                                           shape=(self.num_hidden,),
                                           init=mx.init.Uniform(0.1),
                                           dtype="float32")
@@ -144,7 +144,7 @@ class LHUC:
         # We use a sigmoid with amplitude 2 for weighting the hidden units. The
         # activation is dampened when the value of the sigmoid is close to 0, and
         # strengthened when it's close to 2 (see also original paper)
-        weight_vector = 2*mx.sym.Activation(data=self.params, act_type="sigmoid")
+        weight_vector = 2 * mx.sym.Activation(data=self.params, act_type="sigmoid")
         out = mx.sym.broadcast_mul(weight_vector, inputs, name=name)
 
         return out

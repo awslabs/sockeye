@@ -146,9 +146,8 @@ class TrainingModel(model.SockeyeModel):
             return mx.sym.Group(loss_output), data_names, label_names
 
         if self.config.lhuc:
-            # TODO: Is there a better way to get the parameter names?
-            arguments = sym_gen((10, 10))[0].list_arguments()
-            fixed_param_names = [a for a in arguments if not a.endswith("lhuc")]
+            arguments = sym_gen(default_bucket_key)[0].list_arguments()
+            fixed_param_names = [a for a in arguments if not a.endswith(C.LHUC_NAME)]
         else:
             fixed_param_names = self.fixed_param_names
 

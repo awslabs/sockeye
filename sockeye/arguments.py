@@ -529,11 +529,13 @@ def add_model_parameters(params):
     # TODO: At the moment LHUC is RNN specific. We should support other models as well.
     model_params.add_argument('--lhuc',
                               nargs="+",
-                              default=[],
+                              default=None,
                               choices=C.LHUC_CHOICES,
                               metavar="COMPONENT",
-                              help="Use lhuc, include an amplitude parameter to hidden units. Valid values: %s"
-                              % ", ".join(C.LHUC_CHOICES))
+                              help="Use lhuc (Vilar 2018). Include an amplitude parameter to hidden units for"
+                              " domain adaptation. Needs a pre-trained model. Valid values: {values}. Currently only"
+                              " supported for RNN models. Default: %(default)s.".format(
+                                  values=", ".join(C.LHUC_CHOICES)))
 
     # transformer arguments
     model_params.add_argument('--transformer-model-size',

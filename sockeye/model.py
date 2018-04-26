@@ -47,6 +47,7 @@ class ModelConfig(Config):
     :param config_loss: Loss configuration.
     :param weight_tying: Enables weight tying if True.
     :param weight_tying_type: Determines which weights get tied. Must be set if weight_tying is enabled.
+    :param lhuc: LHUC (Vilar 2018) is applied at some part of the model.
     """
 
     def __init__(self,
