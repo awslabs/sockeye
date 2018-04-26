@@ -17,7 +17,6 @@ Code for inference/translation
 import itertools
 import json
 import logging
-import math
 import os
 from collections import defaultdict
 from functools import lru_cache, partial
@@ -1412,44 +1411,6 @@ class Translator:
 
         return sequences, attentions, scores_accumulated, lengths, beam_histories
 
-    def _get_kth_from_beam(self,
-                           k: int,
-                           sequences: mx.nd.NDArray,
-                           attention_lists: mx.nd.NDArray,
-                           accumulated_scores: mx.nd.NDArray,
-                           lengths: mx.nd.NDArray,
-                           beam_histories: Optional[List[BeamHistory]]) -> List[Translation]:
-        """
-        Return an item from the beam.
-
-        :param k: The item to return (n=1 is the best, n=beam_size is the worst).
-        :param sequences: Array of word ids. Shape: (batch_size * beam_size, bucket_key).
-        :param attention_lists: Array of attentions over source words.
-                                Shape: (batch_size * self.beam_size, max_output_length, encoded_source_length).
-        :param accumulated_scores: Array of length-normalized negative log-probs.
-        :return: Top sequence, top attention matrix, top accumulated score (length-normalized
-                 negative log-probs) and length.
-        """
-        utils.check_condition(k >= 1 and k <= self.beam_size,
-                              "Selected item must be between 1 and %d (the beam size)" % (self.beam_size))
-        utils.check_condition(sequences.shape[0] == attention_lists.shape[0] \
-                              == accumulated_scores.shape[0] == lengths.shape[0], "Shape mismatch")
-        # sequences & accumulated scores are in latest 'k-best order', thus 0th element is best
-        result = []
-        for sent in range(self.batch_size):
-            idx = sent * self.beam_size + (k - 1)
-            length = int(lengths[idx].asscalar())
-            sequence = sequences[idx][:length].asnumpy().tolist()
-            # attention_matrix: (target_seq_len, source_seq_len)
-            attention_matrix = np.stack(attention_lists[idx].asnumpy()[:length, :], axis=0)
-            score = accumulated_scores[idx].asscalar()
-            if beam_histories is not None:
-                history = beam_histories[sent]
-                result.append(Translation(sequence, attention_matrix, score, [history]))
-            else:
-                result.append(Translation(sequence, attention_matrix, score))
-        return result
-
     def _get_best_from_beam(self,
                             sequences: mx.nd.NDArray,
                             attention_lists: mx.nd.NDArray,
@@ -1466,8 +1427,24 @@ class Translator:
         :return: Top sequence, top attention matrix, top accumulated score (length-normalized
                  negative log-probs) and length.
         """
-
-        return self._get_kth_from_beam(1, sequences, attention_lists, accumulated_scores, lengths, beam_histories)
+        utils.check_condition(sequences.shape[0] == attention_lists.shape[0] \
+                              == accumulated_scores.shape[0] == lengths.shape[0], "Shape mismatch")
+        # sequences & accumulated scores are in latest 'k-best order', thus 0th element is best
+        best = 0
+        result = []
+        for sent in range(self.batch_size):
+            idx = sent * self.beam_size + best
+            length = int(lengths[idx].asscalar())
+            sequence = sequences[idx][:length].asnumpy().tolist()
+            # attention_matrix: (target_seq_len, source_seq_len)
+            attention_matrix = np.stack(attention_lists[idx].asnumpy()[:length, :], axis=0)
+            score = accumulated_scores[idx].asscalar()
+            if beam_histories is not None:
+                history = beam_histories[sent]
+                result.append(Translation(sequence, attention_matrix, score, [history]))
+            else:
+                result.append(Translation(sequence, attention_matrix, score))
+        return result
 
     def _print_beam(self,
                     sequences: mx.nd.NDArray,
