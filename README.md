@@ -173,9 +173,9 @@ Multi-instance can be used for speedup translate to get the best performance.
 For example, you can run mlt-trans.sh to translate 24 instances in [AWS EC2 C4.8xlarge](https://aws.amazon.com/ec2/instance-types/) (24 physical cores) or 
 36 instances in [AWS EC2 C5.18xlarge](https://aws.amazon.com/ec2/instance-types/c5/) (36 physical cores).
 ```bash
-> sh mlt-trans.sh <model_name> <file_to_translate> <batch_size>
+> sh mlt-trans.sh <model_name> <file_to_translate> <batch_size>[benchmark(true or false)]
 ```
-Here are some results for reference:
+Here are some benchmark results for reference:
 
 AWS EC2 C4.8xlarge:
  
