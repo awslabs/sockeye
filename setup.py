@@ -77,6 +77,20 @@ if args.requirement is None:
 else:
     install_requires = get_requirements(args.requirement)
 
+entry_points={
+    'console_scripts': [
+        'sockeye-average = sockeye.average:main',
+        'sockeye-embeddings = sockeye.embeddings:main',
+        'sockeye-evaluate = sockeye.evaluate:main',
+        'sockeye-extract-parameters = sockeye.extract_parameters:main',
+        'sockeye-lexicon = sockeye.lexicon:main',
+        'sockeye-init-embed = sockeye.init_embedding:main',
+        'sockeye-prepare-data = sockeye.prepare_data:main',
+        'sockeye-train = sockeye.train:main',
+        'sockeye-translate = sockeye.translate:main',
+        'sockeye-vocab = sockeye.vocab:main'
+    ],
+}
 
 args = dict(
     name='sockeye',
@@ -108,20 +122,7 @@ args = dict(
 
     install_requires=install_requires,
 
-    entry_points={
-        'console_scripts': [
-            'sockeye-average = sockeye.average:main',
-            'sockeye-embeddings = sockeye.embeddings:main',
-            'sockeye-evaluate = sockeye.evaluate:main',
-            'sockeye-extract-parameters = sockeye.extract_parameters:main',
-            'sockeye-lexicon = sockeye.lexicon:main',
-            'sockeye-init-embed = sockeye.init_embedding:main',
-            'sockeye-prepare-data = sockeye.prepare_data:main',
-            'sockeye-train = sockeye.train:main',
-            'sockeye-translate = sockeye.translate:main',
-            'sockeye-vocab = sockeye.vocab:main'
-        ],
-    },
+    entry_points=entry_points,
 
     classifiers = [
         'License :: OSI Approved :: Apache Software License',
