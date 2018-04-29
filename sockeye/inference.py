@@ -920,15 +920,14 @@ class Translator:
         self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target)), val=np.inf,
                                    ctx=self.context)
 
-        # mxnet implementation is faster on GPUs
-        use_mxnet_topk = self.context != mx.cpu()
         # offset for hypothesis indices in batch decoding
         self.offset = np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size)
+        # topk function used in beam search
         self.topk = partial(utils.topk,
                             k=self.beam_size,
                             batch_size=self.batch_size,
                             offset=self.offset,
-                            use_mxnet_topk=use_mxnet_topk)
+                            use_mxnet_topk=self.context != mx.cpu())  # MXNet implementation is faster on GPUs
 
         logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s batch_size=%d "
                     "buckets_source=%s)",
