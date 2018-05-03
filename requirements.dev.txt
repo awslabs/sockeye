@@ -2,6 +2,6 @@ pytest
 pytest-cov
 check-manifest
 matplotlib
-mypy
+mypy>=0.6
 pylint
 twine
