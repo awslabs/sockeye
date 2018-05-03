@@ -165,7 +165,7 @@ class CrossEntropyMetric(EvalMetric):
             batch_size = label.shape[0]
             label = label.as_in_context(pred.context).reshape((label.size,))
 
-            logprob = mx.nd.log(pred + 1e-8)
+            logprob = mx.nd.log(mx.nd.maximum(1e-10, pred))
 
             # ce: (batch*time,)
             if self.loss_config.label_smoothing > 0.0:
