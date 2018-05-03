@@ -12,8 +12,8 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.7]
 ### Added
-- Added support for LHUC (David Vilar, "Learning Hidden Unit Contribution for
-  Adapting Neural Machine Translation Models" NAACL 2018)
+- Added support for LHUC in RNN models (David Vilar, "Learning Hidden Unit
+  Contribution for Adapting Neural Machine Translation Models" NAACL 2018)
 
 ## [1.18.6]
 ### Fixed

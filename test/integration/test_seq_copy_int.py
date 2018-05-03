@@ -95,7 +95,7 @@ ENCODER_DECODER_SETTINGS = [
      " --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 2",
      True, False, False),
-    # Vanilla LSTM like above but activating LSTM. In the normal case you would
+    # Vanilla LSTM like above but activating LHUC. In the normal case you would
     # start with a trained system instead of a random initialized one like here.
     ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 16 --num-embed 8 --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 16 --batch-size 8 --loss cross-entropy --optimized-metric perplexity --max-updates 10"
