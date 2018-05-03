@@ -894,7 +894,8 @@ class EarlyStoppingTrainer:
             utils.check_condition(self.optimizer_config.name != C.OPTIMIZER_EVE,
                                   "Eve optimizer not supported with distributed training.")
             utils.check_condition(
-                not issubclass(type(self.optimizer_config.lr_scheduler), lr_scheduler.AdaptiveLearningRateScheduler),
+                not issubclass(type(self.optimizer_config.lr_scheduler),
+                               lr_scheduler.AdaptiveLearningRateScheduler),
                 "Adaptive learning rate schedulers not supported with a dist kvstore. "
                 "Try a fixed schedule such as %s." % C.LR_SCHEDULER_FIXED_RATE_INV_SQRT_T)
             utils.check_condition(not lr_decay_param_reset, "Parameter reset when the learning rate decays not "
@@ -995,9 +996,9 @@ class EarlyStoppingTrainer:
 
         # (6) Learning rate scheduler
         with open(os.path.join(self.training_state_dirname, C.SCHEDULER_STATE_NAME), "rb") as fp:
-            self.optimizer_config.lr_scheduler = pickle.load(fp)
+            self.optimizer_config.set_lr_scheduler(pickle.load(fp))
         # initialize optimizer again
-        self.model.initialize_optimizer(self.optimizer_config)
+        self._initialize_optimizer()
 
 
 class TensorboardLogger:

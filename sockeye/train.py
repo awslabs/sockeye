@@ -723,8 +723,8 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
                              kvstore=args.kvstore,
                              initializer=weight_init,
                              gradient_clipping_type=gradient_clipping_type,
-                             gradient_clipping_threshold=gradient_clipping_threshold,
-                             lr_scheduler=lr_sched)
+                             gradient_clipping_threshold=gradient_clipping_threshold)
+    config.set_lr_scheduler(lr_sched)
     logger.info("Optimizer: %s", config)
     logger.info("Gradient Compression: %s", gradient_compression_params(args))
     return config

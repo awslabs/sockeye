@@ -18,6 +18,7 @@ import itertools
 import json
 import logging
 import os
+import time
 from collections import defaultdict
 from functools import lru_cache, partial
 from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set
@@ -372,6 +373,8 @@ def load_models(context: mx.context.Context,
                                    restrict lexicon).
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
+    logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
+    load_time_start = time.time()
     models = []  # type: List[InferenceModel]
     source_vocabs = []  # type: List[List[vocab.Vocab]]
     target_vocabs = []  # type: List[vocab.Vocab]
@@ -422,6 +425,8 @@ def load_models(context: mx.context.Context,
     for inference_model in models:
         inference_model.initialize(max_input_len, get_max_output_length)
 
+    load_time = time.time() - load_time_start
+    logger.info("%d model(s) loaded in %.4fs", len(models), load_time)
     return models, source_vocabs[0], target_vocabs[0]
 
 

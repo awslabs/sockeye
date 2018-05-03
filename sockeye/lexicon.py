@@ -16,6 +16,7 @@ import collections
 import operator
 import os
 import sys
+import time
 from typing import Dict, Generator, Tuple, Optional
 
 import mxnet as mx
@@ -244,6 +245,7 @@ class TopKLexicon:
         :param path: Path to Numpy array file.
         :param k: Optionally load less items than stored in path.
         """
+        load_time_start = time.time()
         with open(path, 'rb') as inp:
             _lex = np.load(inp)
         loaded_k = _lex.shape[1]
@@ -257,7 +259,8 @@ class TopKLexicon:
         self.lex = np.zeros((len(self.vocab_source), top_k), dtype=_lex.dtype)
         for src_id, trg_ids in enumerate(_lex):
             self.lex[src_id, :] = np.sort(trg_ids[:top_k])
-        logger.info("Loaded top-%d lexicon from \"%s\".", top_k, path)
+        load_time = time.time() - load_time_start
+        logger.info("Loaded top-%d lexicon from \"%s\" in %.4fs.", top_k, path, load_time)
 
     def get_trg_ids(self, src_ids: np.ndarray) -> np.ndarray:
         """
