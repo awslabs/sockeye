@@ -660,7 +660,8 @@ def add_training_args(params):
                               default=C.BATCH_TYPE_SENTENCE,
                               choices=[C.BATCH_TYPE_SENTENCE, C.BATCH_TYPE_WORD],
                               help="Sentence: each batch contains X sentences, number of words varies. Word: each batch"
-                                   " contains (approximately) X words, number of sentences varies. Default: %(default)s.")
+                                   " contains (approximately) X target words, number of sentences varies. "
+                                   "Default: %(default)s.")
 
     train_params.add_argument('--fill-up',
                               type=str,
