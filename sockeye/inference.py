@@ -931,6 +931,15 @@ class Translator:
                                          ctx=self.context, dtype='float32')
         self.inf_array = mx.nd.slice(self.inf_array_long, begin=(0), end=(self.beam_size))
 
+        # offset for hypothesis indices in batch decoding
+        self.offset = np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size)
+        # topk function used in beam search
+        self.topk = partial(utils.topk,
+                            k=self.beam_size,
+                            batch_size=self.batch_size,
+                            offset=self.offset,
+                            use_mxnet_topk=self.context != mx.cpu())  # MXNet implementation is faster on GPUs
+
         logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s batch_size=%d "
                     "buckets_source=%s)",
                     len(self.models),
@@ -1301,13 +1310,6 @@ class Translator:
                 models_output_layer_w.append(m.output_layer_w.take(vocab_slice_ids))
                 models_output_layer_b.append(m.output_layer_b.take(vocab_slice_ids))
 
-        # mxnet implementation is faster on GPUs
-        use_mxnet_topk = self.context != mx.cpu()
-        # offset for hypothesis indices in batch decoding
-        offset = np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size)
-        topk = partial(utils.topk, k=self.beam_size, batch_size=self.batch_size, offset=offset,
-                       use_mxnet_topk=use_mxnet_topk)
-
         # (0) encode source sentence, returns a list
         model_states = self._encode(source, source_length)
 
@@ -1335,7 +1337,7 @@ class Translator:
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
-            best_hyp_indices[:], best_word_indices[:], scores_accumulated[:, 0] = topk(scores)
+            best_hyp_indices[:], best_word_indices[:], scores_accumulated[:, 0] = self.topk(scores)
 
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
@@ -1370,6 +1372,7 @@ class Translator:
             # (6) optionally save beam history
             if self.store_beam:
                 unnormalized_scores = mx.nd.where(finished, scores_accumulated * self.length_penalty(lengths - 1), scores_accumulated)
+                normalized_scores = mx.nd.where(finished, scores_accumulated, scores_accumulated / self.length_penalty(lengths - 1))
                 for sent in range(self.batch_size):
                     rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
 
@@ -1384,7 +1387,7 @@ class Translator:
                         beam_histories[sent]["parent_ids"].append(shifted_parents.asnumpy().tolist())
 
                         beam_histories[sent]["scores"].append(unnormalized_scores[rows].asnumpy().flatten().tolist())
-                        beam_histories[sent]["normalized_scores"].append(scores_accumulated[rows].asnumpy().flatten().tolist())
+                        beam_histories[sent]["normalized_scores"].append(normalized_scores[rows].asnumpy().flatten().tolist())
 
             # (7) determine which hypotheses in the beam are now finished
             finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
@@ -1404,7 +1407,7 @@ class Translator:
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
         folded_accumulated_scores = scores_accumulated.reshape((self.batch_size, self.beam_size * scores_accumulated.shape[-1]))
         indices = mx.nd.argsort(folded_accumulated_scores, axis=1)
-        best_hyp_indices[:], _ = np.unravel_index(indices.astype(np.int32).asnumpy().ravel(), scores_accumulated.shape) + offset
+        best_hyp_indices[:], _ = np.unravel_index(indices.astype(np.int32).asnumpy().ravel(), scores_accumulated.shape) + self.offset
         # Now reorder the arrays
         sequences = mx.nd.take(sequences, best_hyp_indices)
         lengths = mx.nd.take(lengths, best_hyp_indices)
