@@ -108,9 +108,9 @@ def test_device_args(test_params, expected_params):
               layer_normalization=False,
               weight_normalization=False,
               lhuc=None,
-              encoder=C.RNN_NAME,
+              encoder=C.TRANSFORMER_TYPE,
               conv_embed_max_filter_width=8,
-              decoder=C.RNN_NAME,
+              decoder=C.TRANSFORMER_TYPE,
               conv_embed_output_dim=None,
               conv_embed_num_filters=(200, 200, 250, 250, 300, 300, 300, 300),
               conv_embed_num_highway_layers=4,
@@ -175,7 +175,7 @@ def test_model_parameters(test_params, expected_params):
               rnn_forget_bias=0.0,
               fixed_param_names=[],
               rnn_h2h_init=C.RNN_INIT_ORTHOGONAL,
-              decode_and_evaluate=0,
+              decode_and_evaluate=500,
               decode_and_evaluate_use_cpu=False,
               decode_and_evaluate_device_id=None,
               seed=13,
@@ -239,8 +239,8 @@ def test_inference_args(test_params, expected_params):
           max_num_checkpoint_not_improved=3,
           output="seqcopy_model",
           # The tutorial text mentions that we train a RNN model:
-          encoder="rnn",
-          decoder="rnn"),
+          encoder=C.TRANSFORMER_TYPE,
+          decoder=C.TRANSFORMER_TYPE),
      # Additionally we mention the checkpoint_frequency
      ['checkpoint_frequency']),
     # WMT tutorial
