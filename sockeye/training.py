@@ -745,9 +745,6 @@ class EarlyStoppingTrainer:
         tf_metrics.update({"%s_grad" % n: v for n, v in self.state.gradients.items()})
         tf_metrics.update(self.model.params)
         self.tflogger.log_metrics(metrics=tf_metrics, checkpoint=self.state.checkpoint)
-        self.tflogger.log_source_embedding(self.model.get_source_embed_params(), self.state.checkpoint)
-        self.tflogger.log_target_embedding(self.model.get_target_embed_params(), self.state.checkpoint)
-        self.tflogger.log_output_embedding(self.model.get_output_embed_params(), self.state.checkpoint)
 
     def _cleanup(self, lr_decay_opt_states_reset: str, process_manager: Optional['DecoderProcessManager'] = None):
         """
