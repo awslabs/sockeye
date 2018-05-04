@@ -14,6 +14,9 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Added
 - Added support for LHUC in RNN models (David Vilar, "Learning Hidden Unit
   Contribution for Adapting Neural Machine Translation Models" NAACL 2018)
+  
+### Fixed
+- Word based batching with very small batch sizes.
 
 ## [1.18.6]
 ### Fixed

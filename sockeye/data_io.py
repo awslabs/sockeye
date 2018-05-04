@@ -159,14 +159,14 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
                                                           " buckets: (%d > %d)" % (padded_seq_len, batch_size))
             # Multiple of number of devices (int) closest to target number of words, assuming each sentence is of
             # average length
-            batch_size_seq = batch_num_devices * round((batch_size / average_seq_len) / batch_num_devices)
+            batch_size_seq = batch_num_devices * max(1, round((batch_size / average_seq_len) / batch_num_devices))
             batch_size_word = batch_size_seq * average_seq_len
         else:
             batch_size_seq = batch_size
             batch_size_word = batch_size_seq * average_seq_len
         bucket_batch_sizes.append(BucketBatchSize(bucket, batch_size_seq, batch_size_word))
-        # Track largest number of word samples in a batch
-        largest_total_num_words = max(largest_total_num_words, batch_size_seq * max(*bucket))
+        # Track largest number of target word samples in a batch
+        largest_total_num_words = max(largest_total_num_words, batch_size_seq * padded_seq_len)
 
     # Final step: guarantee that largest bucket by sequence length also has largest total batch size.
     # When batching by sentences, this will already be the case.
