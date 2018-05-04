@@ -1195,7 +1195,7 @@ class Translator:
         Prunes the beam. For each sentence, we find the best-scoring completed hypothesis (if any),
         and then remove all hypotheses for that sentence that are outside the beam relative to that
         item. Pruned items are marked by setting their entry in `inactive` to 1 and marking them as finished.
-        The four argument are updated in place.
+        The four arguments are updated in place.
 
         Note that after pruning, hypotheses are no longer necessarily sorted until the next call to topk().
 
@@ -1369,7 +1369,7 @@ class Translator:
 
             # (6) optionally save beam history
             if self.store_beam:
-                unnormalized_scores = mx.nd.where(finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
+                unnormalized_scores = mx.nd.where(finished, scores_accumulated * self.length_penalty(lengths - 1), scores_accumulated)
                 for sent in range(self.batch_size):
                     rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
 
@@ -1388,8 +1388,6 @@ class Translator:
 
             # (7) determine which hypotheses in the beam are now finished
             finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
-
-#            self._print_beam(sequences, scores_accumulated, finished, inactive, t)
 
             if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST and self.batch_size == 1:
                 # TODO: extend to work with batch_size > 1 (i.e., one stopped for each sentence)
