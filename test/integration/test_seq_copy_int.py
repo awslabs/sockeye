@@ -100,8 +100,10 @@ ENCODER_DECODER_SETTINGS = [
      True, False, False),
     # Vanilla LSTM like above but activating LHUC. In the normal case you would
     # start with a trained system instead of a random initialized one like here.
-    ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 16 --num-embed 8 --rnn-attention-type mlp"
-     " --rnn-attention-num-hidden 16 --batch-size 8 --loss cross-entropy --optimized-metric perplexity --max-updates 10"
+    ("--encoder rnn --decoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 16 --num-embed 8 --rnn-attention-type mlp"
+     " --rnn-attention-num-hidden 16"
+     " --batch-size 8 --batch-type sentence"
+     " --loss cross-entropy --optimized-metric perplexity --max-updates 10"
      " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
      "--beam-size 2",
      True, False, False)]
