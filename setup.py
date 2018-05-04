@@ -13,13 +13,7 @@ ROOT = os.path.dirname(__file__)
 def get_long_description():
     with open(os.path.join(ROOT, 'README.md'), encoding='utf-8') as f:
         markdown_txt = f.read()
-    try:
-        import pypandoc
-        long_description = pypandoc.convert(markdown_txt, 'rst', format='md')
-    except(IOError, ImportError):
-        logging.warning("Could not import package 'pypandoc'. Will not convert markdown readme to rst for PyPI.")
-        long_description = markdown_txt
-    return long_description
+        return markdown_txt
 
 
 def get_version():
@@ -99,6 +93,7 @@ args = dict(
 
     description='Sequence-to-Sequence framework for Neural Machine Translation',
     long_description=get_long_description(),
+    long_description_content_type="text/markdown",
 
     url='https://github.com/awslabs/sockeye',
 
