@@ -112,6 +112,44 @@ class LayerNormalization:
         return inputs_norm
 
 
+class LHUC:
+    """
+    Learning Hidden Unit Contribution
+
+    David Vilar. "Learning Hidden Unit Contribution for Adapting Neural
+    Machine Translation Models" NAACL 2018
+
+    :param num_hidden: Number of hidden units of the layer to be modified.
+    :param weight: Optional parameter vector.
+    :param prefix: Optional prefix for created parameters (if not given as weight).
+    """
+    def __init__(self,
+                 num_hidden: int,
+                 weight: Optional[mx.sym.Symbol] = None,
+                 prefix: str = "") -> None:
+        self.num_hidden = num_hidden
+        self.prefix = prefix
+        if not weight:
+            self.params = mx.sym.Variable(self.prefix + C.LHUC_NAME,
+                                          shape=(self.num_hidden,),
+                                          init=mx.init.Uniform(0.1),
+                                          dtype="float32")
+        else:
+            self.params = weight
+
+    def apply(self,
+              inputs: mx.sym.Symbol,
+              name: Optional[str] = None) -> mx.sym.Symbol:
+
+        # We use a sigmoid with amplitude 2 for weighting the hidden units. The
+        # activation is dampened when the value of the sigmoid is close to 0, and
+        # strengthened when it's close to 2 (see also original paper)
+        weight_vector = 2 * mx.sym.Activation(data=self.params, act_type="sigmoid")
+        out = mx.sym.broadcast_mul(weight_vector, inputs, name=name)
+
+        return out
+
+
 class WeightNormalization:
     """
     Implements Weight Normalization, see Salimans & Kingma 2016 (https://arxiv.org/abs/1602.07868).

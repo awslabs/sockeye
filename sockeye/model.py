@@ -47,6 +47,7 @@ class ModelConfig(Config):
     :param config_loss: Loss configuration.
     :param weight_tying: Enables weight tying if True.
     :param weight_tying_type: Determines which weights get tied. Must be set if weight_tying is enabled.
+    :param lhuc: LHUC (Vilar 2018) is applied at some part of the model.
     """
 
     def __init__(self,
@@ -60,7 +61,8 @@ class ModelConfig(Config):
                  config_loss: loss.LossConfig,
                  weight_tying: bool = False,
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
-                 weight_normalization: bool = False) -> None:
+                 weight_normalization: bool = False,
+                 lhuc: bool = False) -> None:
         super().__init__()
         self.config_data = config_data
         self.vocab_source_size = vocab_source_size
@@ -75,6 +77,7 @@ class ModelConfig(Config):
         self.weight_normalization = weight_normalization
         if weight_tying and weight_tying_type is None:
             raise RuntimeError("weight_tying_type must be specified when using weight_tying.")
+        self.lhuc = lhuc
 
 
 class SockeyeModel:
