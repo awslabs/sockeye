@@ -145,6 +145,12 @@ class TrainingModel(model.SockeyeModel):
 
             return mx.sym.Group(loss_output), data_names, label_names
 
+        if self.config.lhuc:
+            arguments = sym_gen(default_bucket_key)[0].list_arguments()
+            fixed_param_names = [a for a in arguments if not a.endswith(C.LHUC_NAME)]
+        else:
+            fixed_param_names = self.fixed_param_names
+
         if self._bucketing:
             logger.info("Using bucketing. Default max_seq_len=%s", default_bucket_key)
             self.module = mx.mod.BucketingModule(sym_gen=sym_gen,
@@ -152,7 +158,7 @@ class TrainingModel(model.SockeyeModel):
                                                  default_bucket_key=default_bucket_key,
                                                  context=self.context,
                                                  compression_params=self._gradient_compression_params,
-                                                 fixed_param_names=self.fixed_param_names)
+                                                 fixed_param_names=fixed_param_names)
         else:
             logger.info("No bucketing. Unrolled to (%d,%d)",
                         self.config.config_data.max_seq_len_source, self.config.config_data.max_seq_len_target)
@@ -163,7 +169,7 @@ class TrainingModel(model.SockeyeModel):
                                         logger=logger,
                                         context=self.context,
                                         compression_params=self._gradient_compression_params,
-                                        fixed_param_names=self.fixed_param_names)
+                                        fixed_param_names=fixed_param_names)
 
         self.module.bind(data_shapes=provide_data,
                          label_shapes=provide_label,
@@ -194,7 +200,9 @@ class TrainingModel(model.SockeyeModel):
         Returns a mapping of parameters to gradient arrays, summed across devices.
         """
         return {name: mx.nd.add_n(*(exe.grad_arrays[i] for exe in self.executors)) for i, name in
-                enumerate(self.executor_group.arg_names) if name in self.executor_group.param_names}
+                enumerate(self.executor_group.arg_names)
+                if name in self.executor_group.param_names and self.executors[0].grad_arrays[i] is not None}
+                # We may have None if not all parameters are optimized
 
     def get_global_gradient_norm(self) -> float:
         """
