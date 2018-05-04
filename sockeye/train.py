@@ -101,6 +101,11 @@ def check_arg_compatibility(args: argparse.Namespace):
                         "Target embedding size must match transformer model size: %s vs. %s"
                         % (args.transformer_model_size, args.num_embed[1]))
 
+    if args.lhuc:
+        check_condition(args.encoder == C.RNN_NAME or args.decoder == C.RNN_NAME,
+                        "LHUC is only supported for RNN models for now.")
+
+
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     """
@@ -437,7 +442,8 @@ def create_encoder_config(args: argparse.Namespace,
                                      dropout_recurrent=encoder_rnn_dropout_recurrent,
                                      residual=args.rnn_residual_connections,
                                      first_residual_layer=args.rnn_first_residual_layer,
-                                     forget_bias=args.rnn_forget_bias),
+                                     forget_bias=args.rnn_forget_bias,
+                                     lhuc=args.lhuc and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc)),
             conv_config=config_conv,
             reverse_input=args.rnn_encoder_reverse_input)
         encoder_num_hidden = args.rnn_num_hidden
@@ -524,13 +530,15 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int) -> 
                                      dropout_recurrent=decoder_rnn_dropout_recurrent,
                                      residual=args.rnn_residual_connections,
                                      first_residual_layer=args.rnn_first_residual_layer,
-                                     forget_bias=args.rnn_forget_bias),
+                                     forget_bias=args.rnn_forget_bias,
+                                     lhuc=args.lhuc and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc)),
             attention_config=config_attention,
             hidden_dropout=args.rnn_decoder_hidden_dropout,
             state_init=args.rnn_decoder_state_init,
             context_gating=args.rnn_context_gating,
             layer_normalization=args.layer_normalization,
-            attention_in_upper_layers=args.rnn_attention_in_upper_layers)
+            attention_in_upper_layers=args.rnn_attention_in_upper_layers,
+            state_init_lhuc=args.lhuc and (C.LHUC_STATE_INIT in args.lhuc or C.LHUC_ALL in args.lhuc))
 
     return config_decoder
 
@@ -616,7 +624,8 @@ def create_model_config(args: argparse.Namespace,
                                      config_loss=config_loss,
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
-                                     weight_normalization=args.weight_normalization)
+                                     weight_normalization=args.weight_normalization,
+                                     lhuc=bool(args.lhuc))
     return model_config
 
 
@@ -820,7 +829,7 @@ def main():
                     decoder=create_checkpoint_decoder(args, exit_stack, context),
                     mxmonitor_pattern=args.monitor_pattern,
                     mxmonitor_stat_func=args.monitor_stat_func,
-                    allow_missing_parameters=args.allow_missing_params,
+                    allow_missing_parameters=args.allow_missing_params or model_config.lhuc,
                     existing_parameters=args.params)
 
 

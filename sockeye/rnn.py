@@ -17,7 +17,7 @@ from typing import Optional, List, Iterable  # NOQA pylint: disable=unused-impor
 import mxnet as mx
 
 from sockeye.config import Config
-from sockeye.layers import LayerNormalization
+from sockeye.layers import LayerNormalization, LHUC
 from . import constants as C
 from . import utils
 
@@ -36,6 +36,7 @@ class RNNConfig(Config):
     :param first_residual_layer: First layer with a residual connection (1-based indexes).
            Default is to start at the second layer.
     :param forget_bias: Initial value of forget biases.
+    :param lhuc: Apply LHUC (Vilar 2018) to the hidden units of the RNN.
     :param dtype: Data type.
     """
 
@@ -49,6 +50,7 @@ class RNNConfig(Config):
                  residual: bool = False,
                  first_residual_layer: int = 2,
                  forget_bias: float = 0.0,
+                 lhuc: bool = False,
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.cell_type = cell_type
@@ -60,6 +62,7 @@ class RNNConfig(Config):
         self.residual = residual
         self.first_residual_layer = first_residual_layer
         self.forget_bias = forget_bias
+        self.lhuc = lhuc
         self.dtype = dtype
 
 
@@ -156,6 +159,9 @@ def get_stacked_rnn(config: RNNConfig, prefix: str,
             cell = VariationalDropoutCell(cell,
                                           dropout_inputs=config.dropout_inputs,
                                           dropout_states=config.dropout_states)
+
+        if config.lhuc:
+            cell = LHUCCell(cell, config.num_hidden, config.dtype)
 
         # layer_idx is 0 based, whereas first_residual_layer is 1-based
         if config.residual and layer_idx + 1 >= config.first_residual_layer:
@@ -308,6 +314,22 @@ class LayerNormPerGateLSTMCell(mx.rnn.LSTMCell):
                                        mx.sym.Activation(self._norm_layers[4].normalize(next_c), act_type="tanh"),
                                        name='%sout' % name)
         return next_h, [next_h, next_c]
+
+
+class LHUCCell(mx.rnn.ModifierCell):
+    """
+    Adds a LHUC operation to the output of the cell.
+    """
+    def __init__(self, base_cell, num_hidden, dtype) -> None:
+        super().__init__(base_cell)
+        self.num_hidden = num_hidden
+        self.lhuc_params = self.params.get(C.LHUC_NAME, shape=(num_hidden,), dtype=dtype, init=mx.init.Uniform(0.1))
+        self.lhuc = LHUC(num_hidden, self.lhuc_params)
+
+    def __call__(self, inputs, states):
+        output, states = self.base_cell(inputs, states)
+        output = self.lhuc.apply(inputs=output)
+        return output, states
 
 
 class RecurrentDropoutLSTMCell(mx.rnn.LSTMCell):

@@ -107,6 +107,7 @@ def test_device_args(test_params, expected_params):
               cnn_project_qkv=False,
               layer_normalization=False,
               weight_normalization=False,
+              lhuc=None,
               encoder=C.RNN_NAME,
               conv_embed_max_filter_width=8,
               decoder=C.RNN_NAME,

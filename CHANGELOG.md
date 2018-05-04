@@ -11,6 +11,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
 ## [1.18.7]
+### Added
+- Added support for LHUC in RNN models (David Vilar, "Learning Hidden Unit
+  Contribution for Adapting Neural Machine Translation Models" NAACL 2018)
+  
 ### Fixed
 - Word based batching with very small batch sizes.
 

@@ -526,6 +526,16 @@ def add_model_parameters(params):
     model_params.add_argument('--rnn-context-gating', action="store_true",
                               help="Enables a context gate which adaptively weighs the RNN decoder input against the "
                                    "source context vector before each update of the decoder hidden state.")
+    # TODO: At the moment LHUC is RNN specific. We should support other models as well.
+    model_params.add_argument('--lhuc',
+                              nargs="+",
+                              default=None,
+                              choices=C.LHUC_CHOICES,
+                              metavar="COMPONENT",
+                              help="Use LHUC (Vilar 2018). Include an amplitude parameter to hidden units for"
+                              " domain adaptation. Needs a pre-trained model. Valid values: {values}. Currently only"
+                              " supported for RNN models. Default: %(default)s.".format(
+                                  values=", ".join(C.LHUC_CHOICES)))
 
     # transformer arguments
     model_params.add_argument('--transformer-model-size',
