@@ -919,6 +919,16 @@ class Translator:
             self.buckets_source = [self.max_input_length]
         self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target)), val=np.inf,
                                    ctx=self.context)
+
+        # offset for hypothesis indices in batch decoding
+        self.offset = np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size)
+        # topk function used in beam search
+        self.topk = partial(utils.topk,
+                            k=self.beam_size,
+                            batch_size=self.batch_size,
+                            offset=self.offset,
+                            use_mxnet_topk=self.context != mx.cpu())  # MXNet implementation is faster on GPUs
+
         logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s batch_size=%d "
                     "buckets_source=%s)",
                     len(self.models),
@@ -1254,13 +1264,6 @@ class Translator:
                 models_output_layer_w.append(m.output_layer_w.take(vocab_slice_ids))
                 models_output_layer_b.append(m.output_layer_b.take(vocab_slice_ids))
 
-        # mxnet implementation is faster on GPUs
-        use_mxnet_topk = self.context != mx.cpu()
-        # offset for hypothesis indices in batch decoding
-        offset = np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size)
-        topk = partial(utils.topk, k=self.beam_size, batch_size=self.batch_size, offset=offset,
-                       use_mxnet_topk=use_mxnet_topk)
-
         # (0) encode source sentence, returns a list
         model_states = self._encode(source, source_length)
 
@@ -1291,7 +1294,7 @@ class Translator:
                 scores = mx.nd.where(finished, pad_dist, scores)
 
             # (3) get beam_size winning hypotheses for each sentence block separately
-            best_hyp_indices[:], best_word_indices[:], scores_accumulated[:, 0] = topk(scores, t=t)
+            best_hyp_indices[:], best_word_indices[:], scores_accumulated[:, 0] = self.topk(scores, t=t)
 
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
