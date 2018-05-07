@@ -547,16 +547,18 @@ class TranslatorInput:
     :param chunk_id: Chunk id. Defaults to -1.
     """
 
-    __slots__ = ('sentence_id', 'tokens', 'factors', 'chunk_id')
+    __slots__ = ('sentence_id', 'tokens', 'target', 'factors', 'chunk_id')
 
     def __init__(self,
                  sentence_id: int,
                  tokens: Tokens,
+                 target: Optional[str] = None,
                  factors: Optional[List[Tokens]] = None,
                  chunk_id: int = -1) -> None:
         self.sentence_id = sentence_id
         self.chunk_id = chunk_id
         self.tokens = tokens
+        self.target = target
         self.factors = factors
 
     def __str__(self):
@@ -623,7 +625,8 @@ def make_input_from_json_string(sentence_id: int, json_string: str) -> Translato
         jobj = json.loads(json_string, encoding=C.JSON_ENCODING)
         tokens = jobj[C.JSON_TEXT_KEY]
         tokens = list(data_io.get_tokens(tokens))
-        factors = jobj.get(C.JSON_FACTORS_KEY)
+        target = jobj.get(C.JSON_TARGET_KEY, None)
+        factors = jobj.get(C.JSON_FACTORS_KEY, None)
         if isinstance(factors, list):
             factors = [list(data_io.get_tokens(factor)) for factor in factors]
             lengths = [len(f) for f in factors]
@@ -632,7 +635,7 @@ def make_input_from_json_string(sentence_id: int, json_string: str) -> Translato
                 return _bad_input(sentence_id, reason=json_string)
         else:
             factors = None
-        return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
+        return TranslatorInput(sentence_id=sentence_id, tokens=tokens, target=target, factors=factors)
 
     except Exception as e:
         logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
@@ -1052,12 +1055,20 @@ class Translator:
         :return NDArray of source ids and bucket key.
         """
         bucket_key = data_io.get_bucket(max(len(inp.tokens) for inp in trans_inputs), self.buckets_source)
-
         source = mx.nd.zeros((len(trans_inputs), bucket_key, self.num_source_factors), ctx=self.context)
+
+        target = None
+        if any([x.target is not None for x in trans_inputs]):
+            max_output_length = self.models[0].get_max_output_length(self.max_input_length)
+            target = mx.nd.zeros((len(trans_inputs), max_output_length), ctx=self.context)
 
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)
             source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
+
+            if trans_input.target is not None:
+                target_tokens = data_io.tokens2ids([C.BOS_SYMBOL] + trans_input.target.split() + [C.EOS_SYMBOL], self.vocab_target)
+                target[j, :len(target_tokens)] = target_tokens
 
             factors = trans_input.factors if trans_input.factors is not None else []
             num_factors = 1 + len(factors)
@@ -1068,7 +1079,7 @@ class Translator:
                 # fill in as many factors as there are tokens
                 source[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
 
-        return source, bucket_key
+        return source, bucket_key, target
 
     def _make_result(self,
                      trans_input: TranslatorInput,
@@ -1114,7 +1125,8 @@ class Translator:
 
     def _translate_nd(self,
                       source: mx.nd.NDArray,
-                      source_length: int) -> List[Translation]:
+                      source_length: int,
+                      target: Optional[mx.nd.NDArray]) -> List[Translation]:
         """
         Translates source of source_length, given a bucket_key.
 
@@ -1123,7 +1135,8 @@ class Translator:
 
         :return: Sequence of translations.
         """
-        return self._get_best_from_beam(*self._beam_search(source, source_length))
+        result = self._beam_search(source, source_length) if target is None else self._force_decode(source, source_length, target)
+        return self._get_best_from_beam(*result)
 
     def _encode(self, sources: mx.nd.NDArray, source_length: int) -> List[ModelState]:
         """
@@ -1140,8 +1153,8 @@ class Translator:
                      step: int,
                      source_length: int,
                      states: List[ModelState],
-                     models_output_layer_w: List[mx.nd.NDArray],
-                     models_output_layer_b: List[mx.nd.NDArray]) \
+                     models_output_layer_w: List[mx.nd.NDArray] = list(),
+                     models_output_layer_b: List[mx.nd.NDArray] = list()) \
             -> Tuple[mx.nd.NDArray, mx.nd.NDArray, List[ModelState]]:
         """
         Returns decoder predictions (combined from all models), attention scores, and updated states.
@@ -1416,6 +1429,113 @@ class Translator:
         finished = mx.nd.take(finished, best_hyp_indices)
 
         return sequences, attentions, scores_accumulated, lengths, beam_histories
+
+    def _force_decode(self,
+                      source: mx.nd.NDArray,
+                      source_length: int,
+                      target: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray,
+                                                      mx.nd.NDArray, mx.nd.NDArray, Optional[List[BeamHistory]]]:
+        """
+        Translates multiple sentences using beam search.
+
+        :param source: Source ids. Shape: (batch_size, bucket_key).
+        :param source_length: Max source length.
+        :return List of lists of word ids, list of attentions, array of accumulated length-normalized
+                negative log-probs.
+        """
+        # Length of encoded sequence (may differ from initial input length)
+        encoded_source_length = self.models[0].encoder.get_encoded_seq_len(source_length)
+        utils.check_condition(all(encoded_source_length ==
+                                  model.encoder.get_encoded_seq_len(source_length) for model in self.models),
+                              "Models must agree on encoded sequence length")
+
+        utils.check_condition(self.beam_size == 1,
+                              "Forced decoding requires `--beam size 1`")
+
+        # Maximum output length
+        max_output_length = self.models[0].get_max_output_length(source_length)
+
+        # General data structure: each row has batch_size * beam blocks for the 1st sentence, with a full beam,
+        # then the next block for the 2nd sentence and so on
+
+        # sequences: (batch_size * beam_size, output_length), pre-filled with <s> symbols on index 0
+        sequences = mx.nd.full((self.batch_size * self.beam_size, max_output_length), val=C.PAD_ID, ctx=self.context,
+                               dtype='int32')
+        sequences[:, 0] = self.start_id
+
+        lengths = mx.nd.ones((self.batch_size * self.beam_size, 1), ctx=self.context)
+        finished = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
+
+        # attentions: (batch_size * beam_size, output_length, encoded_source_length)
+        attentions = mx.nd.zeros((self.batch_size * self.beam_size, max_output_length, encoded_source_length),
+                                 ctx=self.context)
+
+        # best_hyp_indices: row indices of smallest scores (ascending).
+        best_hyp_indices = mx.nd.array(list(range(self.batch_size * self.beam_size,)), ctx=self.context, dtype='int32')
+        # best_word_indices: column indices of smallest scores (ascending).
+        best_word_indices = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
+        # scores_accumulated: chosen smallest scores in scores (ascending).
+        scores_accumulated = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context)
+
+        # reset all padding distribution cells to np.inf
+        self.pad_dist[:] = np.inf
+
+        # If using a top-k lexicon, select param rows for logit computation that correspond to the
+        # target vocab for this sentence.
+        pad_dist = self.pad_dist
+        vocab_slice_ids = None  # type: mx.nd.NDArray
+
+        # (0) encode source sentence, returns a list
+        model_states = self._encode(source, source_length)
+
+        for t in range(1, max_output_length):
+            # (1) obtain next predictions and advance models' state
+            # scores: (batch_size * beam_size, target_vocab_size)
+            # attention_scores: (batch_size * beam_size, bucket_key)
+            scores, attention_scores, model_states = self._decode_step(sequences,
+                                                                       t,
+                                                                       source_length,
+                                                                       model_states)
+
+            # (2) Special treatment for finished rows, which are inf everywhere except column zero, which holds the accumulated model score
+            scores += scores_accumulated
+            # Items that are finished (but not inactive) get the accumulated score in col 0, otherwise infinity for the whole row
+            pad_dist[:, C.PAD_ID] = mx.nd.where(finished, scores_accumulated[:, 0], self.inf_array_long)
+            scores = mx.nd.where(finished, pad_dist, scores)
+
+            # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
+            # far as the active beam size for each sentence.
+            best_word_indices[:] = target[:,t]
+            scores_accumulated[:, 0] = mx.nd.pick(scores, best_word_indices, axis=1)
+
+            # (4) Normalize the scores of newly finished hypotheses. Note that after this until the
+            # next call to topk(), hypotheses may not be in sorted order.
+            finished = mx.nd.take(finished, best_hyp_indices)
+            lengths = mx.nd.take(lengths, best_hyp_indices)
+            all_finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
+            newly_finished = all_finished - finished
+            scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
+            finished = all_finished
+
+            # (6) Update the beam with the hypotheses and their properties for the beam_size winning hypotheses (ascending)
+            sequences = mx.nd.take(sequences, best_hyp_indices)
+            attention_scores = mx.nd.take(attention_scores, best_hyp_indices)
+            attentions = mx.nd.take(attentions, best_hyp_indices)
+
+            # (7) update best hypotheses, their attention lists and lengths (only for non-finished hyps)
+            # pylint: disable=unsupported-assignment-operation
+            sequences[:, t] = best_word_indices
+            attentions[:, t, :] = attention_scores
+            lengths += mx.nd.cast(1 - mx.nd.expand_dims(finished, axis=1), dtype='float32')
+
+            # (7) determine which hypotheses in the beam are now finished
+            finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
+
+            # (8) update models' state with winning hypotheses (ascending)
+            for ms in model_states:
+                ms.sort_state(best_hyp_indices)
+
+        return sequences, attentions, scores_accumulated, lengths, None
 
     def _get_best_from_beam(self,
                             sequences: mx.nd.NDArray,
