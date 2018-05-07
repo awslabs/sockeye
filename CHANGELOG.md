@@ -10,6 +10,13 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.9]
+### Added
+- Reorganized beam search. Normalization is applied only to completed hypotheses, and pruning of
+  hypotheses (logprob against highest-scoring completed hypothesis) can be specified with
+  `--beam-prune X`
+- Enabled stopping at first completed hypothesis with `--beam-search-stop first` (default is 'all')
+
 ## [1.18.8]
 ### Removed
 - Removed tensorboard logging of embedding & output parameters at every checkpoint. This used a lot of disk space.
@@ -18,7 +25,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Added
 - Added support for LHUC in RNN models (David Vilar, "Learning Hidden Unit
   Contribution for Adapting Neural Machine Translation Models" NAACL 2018)
-  
+
 ### Fixed
 - Word based batching with very small batch sizes.
 
