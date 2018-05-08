@@ -880,7 +880,6 @@ class EarlyStoppingTrainer:
         """
         Helper function that checks various configuration compatibilities.
         """
-        utils.check_condition(early_stopping_metric in metrics, "Early stopping metric must be tracked.")
         utils.check_condition(len(metrics) > 0, "At least one metric must be provided.")
         for metric in metrics:
             utils.check_condition(metric in C.METRICS, "Unknown metric to track during training: %s" % metric)
