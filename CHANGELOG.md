@@ -10,6 +10,78 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.9]
+### Fixed
+- Fixed a problem with lhuc boolean flags passed as None.
+
+### Added
+- Reorganized beam search. Normalization is applied only to completed hypotheses, and pruning of
+  hypotheses (logprob against highest-scoring completed hypothesis) can be specified with
+  `--beam-prune X`
+- Enabled stopping at first completed hypothesis with `--beam-search-stop first` (default is 'all')
+
+## [1.18.8]
+### Removed
+- Removed tensorboard logging of embedding & output parameters at every checkpoint. This used a lot of disk space.
+
+## [1.18.7]
+### Added
+- Added support for LHUC in RNN models (David Vilar, "Learning Hidden Unit
+  Contribution for Adapting Neural Machine Translation Models" NAACL 2018)
+
+### Fixed
+- Word based batching with very small batch sizes.
+
+## [1.18.6]
+### Fixed
+- Fixed a problem with learning rate scheduler not properly being loaded when resuming training.
+
+## [1.18.5]
+### Fixed
+- Fixed a problem with trainer not waiting for the last checkpoint decoder (#367).
+
+## [1.18.4]
+### Added
+- Added options to control training length w.r.t number of updates/batches or number of samples:
+  `--min-updates`, `--max-updates`, `--min-samples`, `--max-samples`.
+
+## [1.18.3]
+### Changed
+- Training now supports training and validation data that contains empty segments. If a segment is empty, it is skipped
+  during loading and a warning message including the number of empty segments is printed.
+
+## [1.18.2]
+### Changed
+- Removed combined linear projection of keys & values in source attention transformer layers for
+  performance improvements.
+- The topk operator is performed in a single operation during batch decoding instead of running in a loop over each 
+sentence, bringing speed benefits in batch decoding.
+
+## [1.18.1]
+### Added
+- Added Tensorboard logging for all parameter values and gradients as histograms/distributions. The logged values
+  correspond to the current batch at checkpoint time.
+
+### Changed
+- Tensorboard logging now is done with the MXNet compatible 'mxboard' that supports logging of all kinds of events
+  (scalars, histograms, embeddings, etc.). If installed, training events are written out to Tensorboard compatible
+  even files automatically.
+
+### Removed
+- Removed the `--use-tensorboard` argument from `sockeye.train`. Tensorboard logging is now enabled by default if
+  `mxboard` is installed.
+
+## [1.18.0]
+### Changed
+- Change default target vocab name in model folder to `vocab.trg.0.json`
+- Changed serialization format of top-k lexica to pickle/Numpy instead of JSON.
+- `sockeye-lexicon` now supports two subcommands: create & inspect.
+  The former provides the same functionality as the previous CLI.
+  The latter allows users to pass source words to the top-k lexicon to inspect the set of allowed target words.
+
+### Added
+- Added ability to choose a smaller `k` at decoding runtime for lexicon restriction.
+
 ## [1.17.5]
 ### Added
 - Added a flag `--strip-unknown-words` to `sockeye.translate` to remove any `<unk>` symbols from the output strings.

@@ -43,9 +43,9 @@ class CheckpointDecoder:
     :param references: Path to file containing references.
     :param model: Model to load.
     :param max_input_len: Maximum input length.
+    :param batch_size: Batch size.
     :param beam_size: Size of the beam.
     :param bucket_width_source: Source bucket width.
-    :param bucket_width_target: Target bucket width.
     :param length_penalty_alpha: Alpha factor for the length penalty
     :param length_penalty_beta: Beta factor for the length penalty
     :param softmax_temperature: Optional parameter to control steepness of softmax distribution.
@@ -61,6 +61,7 @@ class CheckpointDecoder:
                  references: str,
                  model: str,
                  max_input_len: Optional[int] = None,
+                 batch_size: int = 16,
                  beam_size: int = C.DEFAULT_BEAM_SIZE,
                  bucket_width_source: int = 10,
                  length_penalty_alpha: float = 1.0,
@@ -75,7 +76,7 @@ class CheckpointDecoder:
         self.max_output_length_num_stds = max_output_length_num_stds
         self.ensemble_mode = ensemble_mode
         self.beam_size = beam_size
-        self.batch_size = 16
+        self.batch_size = batch_size
         self.bucket_width_source = bucket_width_source
         self.length_penalty_alpha = length_penalty_alpha
         self.length_penalty_beta = length_penalty_beta
@@ -132,13 +133,17 @@ class CheckpointDecoder:
             [checkpoint],
             softmax_temperature=self.softmax_temperature,
             max_output_length_num_stds=self.max_output_length_num_stds)
-        translator = inference.Translator(self.context,
-                                          self.ensemble_mode,
-                                          self.bucket_width_source,
-                                          inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
-                                          models,
-                                          source_vocabs,
-                                          target_vocab)
+        translator = inference.Translator(context=self.context,
+                                          ensemble_mode=self.ensemble_mode,
+                                          bucket_source_width=self.bucket_width_source,
+                                          length_penalty=inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
+                                          beam_prune=0.0,
+                                          beam_search_stop='all',
+                                          models=models,
+                                          source_vocabs=source_vocabs,
+                                          target_vocab=target_vocab,
+                                          restrict_lexicon=None,
+                                          store_beam=False)
         trans_wall_time = 0.0
         translations = []
         with data_io.smart_open(output_name, 'w') as output:

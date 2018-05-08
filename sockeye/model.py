@@ -14,7 +14,7 @@
 import copy
 import logging
 import os
-from typing import cast, Dict, Optional, Tuple, List
+from typing import cast, Dict, Optional, Tuple
 
 import mxnet as mx
 
@@ -47,6 +47,7 @@ class ModelConfig(Config):
     :param config_loss: Loss configuration.
     :param weight_tying: Enables weight tying if True.
     :param weight_tying_type: Determines which weights get tied. Must be set if weight_tying is enabled.
+    :param lhuc: LHUC (Vilar 2018) is applied at some part of the model.
     """
 
     def __init__(self,
@@ -60,7 +61,8 @@ class ModelConfig(Config):
                  config_loss: loss.LossConfig,
                  weight_tying: bool = False,
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
-                 weight_normalization: bool = False) -> None:
+                 weight_normalization: bool = False,
+                 lhuc: bool = False) -> None:
         super().__init__()
         self.config_data = config_data
         self.vocab_source_size = vocab_source_size
@@ -75,6 +77,7 @@ class ModelConfig(Config):
         self.weight_normalization = weight_normalization
         if weight_tying and weight_tying_type is None:
             raise RuntimeError("weight_tying_type must be specified when using weight_tying.")
+        self.lhuc = lhuc
 
 
 class SockeyeModel:
@@ -91,33 +94,36 @@ class SockeyeModel:
     time.
 
     :param config: Model configuration.
+    :param prefix: Name prefix for all parameters of this model.
     """
 
-    def __init__(self, config: ModelConfig) -> None:
+    def __init__(self, config: ModelConfig, prefix: str = '') -> None:
         self.config = copy.deepcopy(config)
         self.config.freeze()
+        self.prefix = prefix
         logger.info("%s", self.config)
 
         # encoder & decoder first (to know the decoder depth)
-        self.encoder = encoder.get_encoder(self.config.config_encoder)
-        self.decoder = decoder.get_decoder(self.config.config_decoder)
+        self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix)
+        self.decoder = decoder.get_decoder(self.config.config_decoder, prefix=self.prefix)
 
         # source & target embeddings
-        embed_weight_source, embed_weight_target, out_weight_target = self._get_embed_weights()
+        embed_weight_source, embed_weight_target, out_weight_target = self._get_embed_weights(self.prefix)
         self.embedding_source = encoder.Embedding(self.config.config_embed_source,
-                                                  prefix=C.SOURCE_EMBEDDING_PREFIX,
+                                                  prefix=self.prefix + C.SOURCE_EMBEDDING_PREFIX,
                                                   embed_weight=embed_weight_source,
                                                   is_source=True)
 
         self.embedding_target = encoder.Embedding(self.config.config_embed_target,
-                                                  prefix=C.TARGET_EMBEDDING_PREFIX,
+                                                  prefix=self.prefix + C.TARGET_EMBEDDING_PREFIX,
                                                   embed_weight=embed_weight_target)
 
         # output layer
         self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                vocab_size=self.config.vocab_target_size,
                                                weight=out_weight_target,
-                                               weight_normalization=self.config.weight_normalization)
+                                               weight_normalization=self.config.weight_normalization,
+                                               prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
 
         self.params = None  # type: Optional[Dict]
         self.aux_params = None  # type: Optional[Dict]
@@ -166,6 +172,10 @@ class SockeyeModel:
                                                      "This is either not a model directory or the first training "
                                                      "checkpoint has not happened yet." % fname)
         self.params, self.aux_params = utils.load_params(fname)
+        utils.check_condition(all(name.startswith(self.prefix) for name in self.params.keys()),
+                              "Not all parameter names start with model prefix '%s'" % self.prefix)
+        utils.check_condition(all(name.startswith(self.prefix) for name in self.aux_params.keys()),
+                              "Not all auxiliary parameter names start with model prefix '%s'" % self.prefix)
         logger.info('Loaded params from "%s"', fname)
 
     @staticmethod
@@ -179,28 +189,29 @@ class SockeyeModel:
         with open(fname, "w") as out:
             out.write(__version__)
 
-    def _get_embed_weights(self) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol]:
+    def _get_embed_weights(self, prefix: str) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol]:
         """
         Returns embedding parameters for source and target.
         When source and target embeddings are shared, they are created here and passed in to each side,
         instead of being created in the Embedding constructors.
 
+        :param prefix: Prefix.
         :return: Tuple of source and target parameter symbols.
         """
-        w_embed_source = mx.sym.Variable(C.SOURCE_EMBEDDING_PREFIX + "weight",
+        w_embed_source = mx.sym.Variable(prefix + C.SOURCE_EMBEDDING_PREFIX + "weight",
                                          shape=(self.config.config_embed_source.vocab_size,
                                                 self.config.config_embed_source.num_embed))
-        w_embed_target = mx.sym.Variable(C.TARGET_EMBEDDING_PREFIX + "weight",
+        w_embed_target = mx.sym.Variable(prefix + C.TARGET_EMBEDDING_PREFIX + "weight",
                                          shape=(self.config.config_embed_target.vocab_size,
                                                 self.config.config_embed_target.num_embed))
-        w_out_target = mx.sym.Variable("target_output_weight",
+        w_out_target = mx.sym.Variable(prefix + "target_output_weight",
                                        shape=(self.config.vocab_target_size, self.decoder.get_num_hidden()))
 
         if self.config.weight_tying:
             if C.WEIGHT_TYING_SRC in self.config.weight_tying_type \
                     and C.WEIGHT_TYING_TRG in self.config.weight_tying_type:
                 logger.info("Tying the source and target embeddings.")
-                w_embed_source = w_embed_target = mx.sym.Variable(C.SHARED_EMBEDDING_PREFIX + "weight",
+                w_embed_source = w_embed_target = mx.sym.Variable(prefix + C.SHARED_EMBEDDING_PREFIX + "weight",
                                                                   shape=(self.config.config_embed_source.vocab_size,
                                                                          self.config.config_embed_source.num_embed))
 
@@ -212,4 +223,22 @@ class SockeyeModel:
                                                                   self.decoder.get_num_hidden()))
                 w_out_target = w_embed_target
 
+        self._embed_weight_source_name = w_embed_source.name
+        self._embed_weight_target_name = w_embed_target.name
+        self._out_weight_target_name = w_out_target.name
         return w_embed_source, w_embed_target, w_out_target
+
+    def get_source_embed_params(self) -> Optional[mx.nd.NDArray]:
+        if self.params is None:
+            return None
+        return self.params.get(self._embed_weight_source_name)
+
+    def get_target_embed_params(self) -> Optional[mx.nd.NDArray]:
+        if self.params is None:
+            return None
+        return self.params.get(self._embed_weight_target_name)
+
+    def get_output_embed_params(self) -> Optional[mx.nd.NDArray]:
+        if self.params is None:
+            return None
+        return self.params.get(self._out_weight_target_name)

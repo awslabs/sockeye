@@ -2,6 +2,8 @@ pytest
 pytest-cov
 check-manifest
 matplotlib
-mypy
+mypy>=0.6
 pylint
-twine
+setuptools>=38.6.0
+twine>=1.11.0
+wheel>=0.31.0

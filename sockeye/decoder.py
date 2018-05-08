@@ -16,11 +16,10 @@ Decoders for sequence-to-sequence models.
 """
 import logging
 from abc import ABC, abstractmethod
-from typing import Callable, cast, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import Callable, cast, Dict, List, NamedTuple, Optional, Tuple, Union, Type
 
 import mxnet as mx
 
-from sockeye.config import Config
 from . import constants as C
 from . import convolution
 from . import encoder
@@ -29,20 +28,14 @@ from . import rnn
 from . import rnn_attention
 from . import transformer
 from . import utils
+from .config import Config
 
 logger = logging.getLogger(__name__)
 DecoderConfig = Union['RecurrentDecoderConfig', transformer.TransformerConfig, 'ConvolutionalDecoderConfig']
 
 
-def get_decoder(config: DecoderConfig) -> 'Decoder':
-    if isinstance(config, RecurrentDecoderConfig):
-        return RecurrentDecoder(config=config, prefix=C.RNN_DECODER_PREFIX)
-    elif isinstance(config, ConvolutionalDecoderConfig):
-        return ConvolutionalDecoder(config=config, prefix=C.CNN_DECODER_PREFIX)
-    elif isinstance(config, transformer.TransformerConfig):
-        return TransformerDecoder(config=config, prefix=C.TRANSFORMER_DECODER_PREFIX)
-    else:
-        raise ValueError("Unsupported decoder configuration")
+def get_decoder(config: DecoderConfig, prefix: str = '') -> 'Decoder':
+    return Decoder.get_decoder(config, prefix)
 
 
 class Decoder(ABC):
@@ -53,7 +46,48 @@ class Decoder(ABC):
     The latter is typically used for inference graphs in beam search.
     For the inference module to be able to keep track of decoder's states
     a decoder provides methods to return initial states (init_states), state variables and their shapes.
+
+    :param dtype: Data type.
     """
+
+    __registry = {}  # type: Dict[Type[DecoderConfig], Tuple[Type['Decoder'], str]]
+
+    @classmethod
+    def register(cls, config_type: Type[DecoderConfig], suffix: str):
+        """
+        Registers decoder type for configuration. Suffix is appended to decoder prefix.
+
+        :param config_type: Configuration type for decoder.
+        :param suffix: String to append to decoder prefix.
+
+        :return: Class decorator.
+        """
+        def wrapper(target_cls):
+            cls.__registry[config_type] = (target_cls, suffix)
+            return target_cls
+
+        return wrapper
+
+    @classmethod
+    def get_decoder(cls, config: DecoderConfig, prefix: str) -> 'Decoder':
+        """
+        Creates decoder based on config type.
+
+        :param config: Decoder config.
+        :param prefix: Prefix to prepend for decoder.
+
+        :return: Decoder instance.
+        """
+        config_type = type(config)
+        if config_type not in cls.__registry:
+            raise ValueError('Unsupported decoder configuration %s' % config_type.__name__)
+        decoder_cls, suffix = cls.__registry[config_type]
+        # TODO: move final suffix/prefix construction logic into config builder
+        return decoder_cls(config=config, prefix=prefix + suffix)
+
+    @abstractmethod
+    def __init__(self, dtype):
+        self.dtype = dtype
 
     @abstractmethod
     def decode_sequence(self,
@@ -162,6 +196,7 @@ class Decoder(ABC):
         return None
 
 
+@Decoder.register(transformer.TransformerConfig, C.TRANSFORMER_DECODER_PREFIX)
 class TransformerDecoder(Decoder):
     """
     Transformer decoder as in Vaswani et al, 2017: Attention is all you need.
@@ -178,6 +213,7 @@ class TransformerDecoder(Decoder):
     def __init__(self,
                  config: transformer.TransformerConfig,
                  prefix: str = C.TRANSFORMER_DECODER_PREFIX) -> None:
+        super().__init__(config.dtype)
         self.config = config
         self.prefix = prefix
         self.layers = [transformer.TransformerDecoderBlock(
@@ -413,9 +449,11 @@ class RecurrentDecoderConfig(Config):
     :param attention_config: Attention configuration.
     :param hidden_dropout: Dropout probability on next decoder hidden state.
     :param state_init: Type of RNN decoder state initialization: zero, last, average.
+    :param state_init_lhuc: Apply LHUC for encoder to decoder initialization.
     :param context_gating: Whether to use context gating.
     :param layer_normalization: Apply layer normalization.
     :param attention_in_upper_layers: Pass the attention value to all layers in the decoder.
+    :param dtype: Data type.
     """
 
     def __init__(self,
@@ -424,20 +462,25 @@ class RecurrentDecoderConfig(Config):
                  attention_config: rnn_attention.AttentionConfig,
                  hidden_dropout: float = .0,  # TODO: move this dropout functionality to OutputLayer
                  state_init: str = C.RNN_DEC_INIT_LAST,
+                 state_init_lhuc: bool = False,
                  context_gating: bool = False,
                  layer_normalization: bool = False,
-                 attention_in_upper_layers: bool = False) -> None:
+                 attention_in_upper_layers: bool = False,
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.max_seq_len_source = max_seq_len_source
         self.rnn_config = rnn_config
         self.attention_config = attention_config
         self.hidden_dropout = hidden_dropout
         self.state_init = state_init
+        self.state_init_lhuc = state_init_lhuc
         self.context_gating = context_gating
         self.layer_normalization = layer_normalization
         self.attention_in_upper_layers = attention_in_upper_layers
+        self.dtype = dtype
 
 
+@Decoder.register(RecurrentDecoderConfig, C.RNN_DECODER_PREFIX)
 class RecurrentDecoder(Decoder):
     """
     RNN Decoder with attention.
@@ -450,10 +493,13 @@ class RecurrentDecoder(Decoder):
     def __init__(self,
                  config: RecurrentDecoderConfig,
                  prefix: str = C.RNN_DECODER_PREFIX) -> None:
+        super().__init__(config.dtype)
         # TODO: implement variant without input feeding
         self.config = config
         self.rnn_config = config.rnn_config
-        self.attention = rnn_attention.get_attention(config.attention_config, config.max_seq_len_source)
+        self.attention = rnn_attention.get_attention(config.attention_config,
+                                                     config.max_seq_len_source,
+                                                     prefix + C.ATTENTION_PREFIX)
         self.prefix = prefix
 
         self.num_hidden = self.rnn_config.num_hidden
@@ -752,6 +798,9 @@ class RecurrentDecoder(Decoder):
                     init = self.init_norms[state_idx].normalize(init)
                 init = mx.sym.Activation(data=init, act_type="tanh",
                                          name="%senc2dec_inittanh_%d" % (self.prefix, state_idx))
+                if self.config.state_init_lhuc:
+                    lhuc = layers.LHUC(init_num_hidden, prefix="%senc2decinit_%d_" % (self.prefix, state_idx))
+                    init = lhuc.apply(init)
             layer_states.append(init)
 
         return RecurrentDecoderState(hidden, layer_states)
@@ -873,6 +922,7 @@ class ConvolutionalDecoderConfig(Config):
     :param num_layers: The number of convolutional layers.
     :param positional_embedding_type: The type of positional embedding.
     :param hidden_dropout: Dropout probability on next decoder hidden state.
+    :param dtype: Data type.
     """
 
     def __init__(self,
@@ -883,7 +933,8 @@ class ConvolutionalDecoderConfig(Config):
                  num_layers: int,
                  positional_embedding_type: str,
                  project_qkv: bool = False,
-                 hidden_dropout: float = .0) -> None:
+                 hidden_dropout: float = .0,
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.cnn_config = cnn_config
         self.max_seq_len_target = max_seq_len_target
@@ -893,8 +944,10 @@ class ConvolutionalDecoderConfig(Config):
         self.positional_embedding_type = positional_embedding_type
         self.project_qkv = project_qkv
         self.hidden_dropout = hidden_dropout
+        self.dtype = dtype
 
 
+@Decoder.register(ConvolutionalDecoderConfig, C.CNN_DECODER_PREFIX)
 class ConvolutionalDecoder(Decoder):
     """
     Convolutional decoder similar to Gehring et al. 2017.
@@ -917,7 +970,7 @@ class ConvolutionalDecoder(Decoder):
     def __init__(self,
                  config: ConvolutionalDecoderConfig,
                  prefix: str = C.DECODER_PREFIX) -> None:
-        super().__init__()
+        super().__init__(config.dtype)
         self.config = config
         self.prefix = prefix
 

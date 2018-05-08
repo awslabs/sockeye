@@ -29,6 +29,7 @@ from . import utils
 
 logger = setup_main_logger(__name__, console=True, file_logging=False)
 
+
 def _extract(param_names: List[str],
              params: Dict[str, mx.nd.NDArray],
              ext_params: Dict[str, np.ndarray]) -> List[str]:
@@ -63,7 +64,7 @@ def extract(param_path: str,
     logger.info("Loading parameters from '%s'", param_path)
     arg_params, aux_params = utils.load_params(param_path)
 
-    ext_params = {} # type: Dict[str, np.ndarray]
+    ext_params = {}  # type: Dict[str, np.ndarray]
     param_names = _extract(param_names, arg_params, ext_params)
     param_names = _extract(param_names, aux_params, ext_params)
 
@@ -103,7 +104,7 @@ def main():
     ext_params = extract(param_path, args.names, args.list_all)
     
     if len(ext_params) > 0:
-        utils.check_condition(args.output != None, "An output filename must be specified. (Use --output)")
+        utils.check_condition(args.output is not None, "An output filename must be specified. (Use --output)")
         logger.info("Writting extracted parameters to '%s'", args.output)
         np.savez_compressed(args.output, **ext_params)
 

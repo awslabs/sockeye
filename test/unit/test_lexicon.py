@@ -21,7 +21,6 @@ import sockeye.lexicon
 
 
 def test_topk_lexicon():
-
     lexicon = ["a\ta\t-0.6931471805599453",
                "a\tb\t-1.2039728043259361",
                "a\tc\t-1.6094379124341003",
@@ -44,19 +43,19 @@ def test_topk_lexicon():
         # Test against known lexicon
         expected = np.zeros((len(C.VOCAB_SYMBOLS) + len(vocab_list), k), dtype=np.int)
         # a -> special + a b
-        expected[len(C.VOCAB_SYMBOLS),:2] = [len(C.VOCAB_SYMBOLS), len(C.VOCAB_SYMBOLS) + 1]
+        expected[len(C.VOCAB_SYMBOLS), :2] = [len(C.VOCAB_SYMBOLS), len(C.VOCAB_SYMBOLS) + 1]
         # b -> special + b
-        expected[len(C.VOCAB_SYMBOLS) + 1,:1] = [len(C.VOCAB_SYMBOLS) + 1]
+        expected[len(C.VOCAB_SYMBOLS) + 1, :1] = [len(C.VOCAB_SYMBOLS) + 1]
         assert np.all(lex.lex == expected)
 
         # Test save/load
+        expected_sorted = np.sort(expected, axis=1)
         json_lex_path = os.path.join(work_dir, "lex.json")
         lex.save(json_lex_path)
         lex.load(json_lex_path)
-        assert np.all(lex.lex == expected)
+        assert np.all(lex.lex == expected_sorted)
 
         # Test lookup
-
         trg_ids = lex.get_trg_ids(np.array([[vocab["a"], vocab["c"]]], dtype=np.int))
         expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["a", "b"]], dtype=np.int)
         assert np.all(trg_ids == expected)
@@ -67,4 +66,20 @@ def test_topk_lexicon():
 
         trg_ids = lex.get_trg_ids(np.array([[vocab["c"]]], dtype=np.int))
         expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS], dtype=np.int)
+        assert np.all(trg_ids == expected)
+
+        # Test load with smaller k
+        small_k = k - 1
+        lex.load(json_lex_path, k=small_k)
+        assert lex.lex.shape[1] == small_k
+        trg_ids = lex.get_trg_ids(np.array([[vocab["a"]]], dtype=np.int))
+        expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["a"]], dtype=np.int)
+        assert np.all(trg_ids == expected)
+
+        # Test load with larger k
+        large_k = k + 1
+        lex.load(json_lex_path, k=large_k)
+        assert lex.lex.shape[1] == k
+        trg_ids = lex.get_trg_ids(np.array([[vocab["a"], vocab["c"]]], dtype=np.int))
+        expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["a", "b"]], dtype=np.int)
         assert np.all(trg_ids == expected)

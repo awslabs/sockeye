@@ -26,6 +26,8 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+BANK_ADJUSTMENT = 'even'
+
 ConstraintSet = NamedTuple('Constraint', [
     ('word_ids', List[int]),
     ('sequence_markers', List[int])
@@ -175,12 +177,11 @@ class NullHypothesis(ConstrainedHypothesis):
         return True
 
 
-def get_bank_sizes(num_constraints, beam_size, time_step, max_length, candidates):
+def get_bank_sizes(num_constraints, beam_size, time_step, candidates):
     """
-    :param C: The number of constraints.
-    :param k: The beam size.
-    :param t: The timestep.
-    :param N: The maximum sentence length.
+    :param num_constraints: The number of constraints.
+    :param beam_size: The beam size.
+    :param time_step: The timestep.
     :param candidates: The empirical counts of number of candidates in each bank.
     :return: A distribution over banks.
     """
@@ -241,16 +242,15 @@ class Candidate(NamedTuple('Candidate', [
         return '({}, {}, {}, {})'.format(self.row, self.col, self.score, self.constraints.numMet())
 
 
-def kbest(time_step: int,
-          active_beam_size: int,
-          beam_size: int,
-          max_output_length: int,
-          scores: mx.ndarray,
-          hypotheses: ConstrainedHypothesis,
-          best_ids,
-          best_word_ids,
-          best_scores,
-          context):
+def topk(time_step: int,
+         active_beam_size: int,
+         beam_size: int,
+         scores: mx.ndarray,
+         hypotheses: ConstrainedHypothesis,
+         best_ids,
+         best_word_ids,
+         best_scores,
+         context):
     """
     Builds a list of candidates. These candidates are pulled from three different types: (1) the best items across the whole
     scores matrix, (2) the set of words that must follow existing constraints, and (3) k-best items from each row.
@@ -258,12 +258,11 @@ def kbest(time_step: int,
     :param time_step: The timestep.
     :param active_beam_size: the active beam size
     :param beam_size: The length of the kbest list to produce.
-    :param max_output_length: The sentence maximum length.
     :param hypotheses: the list of hypothesis objects
     :param scores: the numpy array containing scores
     :param best_ids:
     :param best_word_ids:
-    :param best_scores
+    :param best_scores:
     """
 
     def get_scalar(obj, dtype):
@@ -324,10 +323,7 @@ def kbest(time_step: int,
     pruned_candidates = []
 
     # Adjust allocated bank sizes if there are too few candidates in any of them
-    bank_sizes = get_bank_sizes(num_constraints, beam_size, time_step, max_output_length, counts)
-
-    # logger.info("Time: bank_sizes: %f", time.time() - _start_time)
-    # _start_time = time.time()
+    bank_sizes = get_bank_sizes(num_constraints, beam_size, time_step, counts)
 
     counts = [x for x in bank_sizes]
     # sort candidates into the allocated banks

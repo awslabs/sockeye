@@ -18,7 +18,7 @@ import os
 from collections import Counter
 from contextlib import ExitStack
 from itertools import chain, islice
-from typing import Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from . import utils
 from . import constants as C
@@ -116,6 +116,16 @@ def save_source_vocabs(source_vocabs: List[Vocab], folder: str):
         vocab_to_json(vocab, os.path.join(folder, C.VOCAB_SRC_NAME % i))
 
 
+def save_target_vocab(target_vocab: Vocab, folder: str):
+    """
+    Saves target vocabulary to folder.
+
+    :param target_vocab: Target vocabulary.
+    :param folder: Destination folder.
+    """
+    vocab_to_json(target_vocab, os.path.join(folder, C.VOCAB_TRG_NAME % 0))
+
+
 def load_source_vocabs(folder: str) -> List[Vocab]:
     """
     Loads source vocabularies from folder. The first element in the list is the primary source vocabulary.
@@ -126,6 +136,16 @@ def load_source_vocabs(folder: str) -> List[Vocab]:
     """
     return [vocab_from_json(os.path.join(folder, fname)) for fname in
             sorted([f for f in os.listdir(folder) if f.startswith(C.VOCAB_SRC_PREFIX)])]
+
+
+def load_target_vocab(folder: str) -> Vocab:
+    """
+    Loads target vocabulary from folder.
+
+    :param folder: Source folder.
+    :return: Target vocabulary
+    """
+    return vocab_from_json(os.path.join(folder, C.VOCAB_TRG_NAME % 0))
 
 
 def load_or_create_vocab(data: str, vocab_path: Optional[str], num_words: int, word_min_count: int) -> Vocab:
@@ -209,7 +229,7 @@ def load_or_create_vocabs(source_paths: List[str],
     return [vocab_source] + vocab_source_factors, vocab_target
 
 
-def reverse_vocab(vocab: Mapping) -> InverseVocab:
+def reverse_vocab(vocab: Vocab) -> InverseVocab:
     """
     Returns value-to-key mapping from key-to-value-mapping.
 
@@ -217,6 +237,16 @@ def reverse_vocab(vocab: Mapping) -> InverseVocab:
     :return: A mapping from values to keys.
     """
     return {v: k for k, v in vocab.items()}
+
+
+def get_ordered_tokens_from_vocab(vocab: Vocab) -> List[str]:
+    """
+    Returns the list of tokens in a vocabulary, ordered by increasing vocabulary id.
+
+    :param vocab: Input vocabulary.
+    :return: List of tokens.
+    """
+    return [token for token, token_id in sorted(vocab.items(), key=lambda i: i[1])]
 
 
 def are_identical(*vocabs: Vocab):

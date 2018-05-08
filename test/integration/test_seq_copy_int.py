@@ -38,6 +38,7 @@ ENCODER_DECODER_SETTINGS = [
      " --max-updates 10 --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01"
      " --rnn-dropout-inputs 0.5:0.1 --rnn-dropout-states 0.5:0.1 --embed-dropout 0.1 --rnn-decoder-hidden-dropout 0.01"
      " --rnn-decoder-state-init avg --rnn-encoder-reverse-input --rnn-dropout-recurrent 0.1:0.0"
+     " --rnn-h2h-init orthogonal_stacked"
      " --learning-rate-decay-param-reset --weight-normalization --source-factors-num-embed 5",
      "--beam-size 2",
      False, True, True),
@@ -72,6 +73,7 @@ ENCODER_DECODER_SETTINGS = [
      " --transformer-feed-forward-num-hidden 32"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying --weight-tying-type src_trg_softmax"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
      " --batch-size 8 --max-updates 10"
      " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 2",
@@ -91,6 +93,13 @@ ENCODER_DECODER_SETTINGS = [
      " --batch-size 16 --num-layers 3 --max-updates 10 --checkpoint-frequency 10"
      " --cnn-num-hidden 32 --cnn-positional-embedding-type fixed"
      " --optimizer adam --initial-learning-rate 0.001",
+     "--beam-size 2",
+     True, False, False),
+    # Vanilla LSTM like above but activating LHUC. In the normal case you would
+    # start with a trained system instead of a random initialized one like here.
+    ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 16 --num-embed 8 --rnn-attention-type mlp"
+     " --rnn-attention-num-hidden 16 --batch-size 8 --loss cross-entropy --optimized-metric perplexity --max-updates 10"
+     " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
      "--beam-size 2",
      True, False, False)]
 

@@ -18,7 +18,7 @@ import argparse
 import sys
 import time
 from contextlib import ExitStack
-from typing import Generator, Optional, Iterable, List
+from typing import Generator, Optional, List
 
 import mxnet as mx
 from math import ceil
@@ -51,9 +51,12 @@ def main():
     if args.checkpoints is not None:
         check_condition(len(args.checkpoints) == len(args.models), "must provide checkpoints for each model")
 
+    if args.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
+        check_condition(args.batch_size == 1,
+                        "Early stopping (--beam-search-stop %s) not supported with batching" % (C.BEAM_SEARCH_STOP_FIRST))
+
     log_basic_info(args)
 
-    lexical_constraints.BANK_ADJUSTMENT = args.bank_adjustment
     output_handler = get_output_handler(args.output_type,
                                         args.output,
                                         args.sure_align_threshold)
@@ -72,19 +75,18 @@ def main():
             max_output_length_num_stds=args.max_output_length_num_stds,
             decoder_return_logit_inputs=args.restrict_lexicon is not None,
             cache_output_layer_w_b=args.restrict_lexicon is not None)
-        restrict_lexicon = None # type: TopKLexicon
-        store_beam = args.output_type == C.OUTPUT_HANDLER_BEAM_STORE
+        restrict_lexicon = None  # type: Optional[TopKLexicon]
         if args.restrict_lexicon:
             restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
-            restrict_lexicon.load(args.restrict_lexicon)
+            restrict_lexicon.load(args.restrict_lexicon, k=args.restrict_lexicon_topk)
+        store_beam = args.output_type == C.OUTPUT_HANDLER_BEAM_STORE
         translator = inference.Translator(context=context,
                                           ensemble_mode=args.ensemble_mode,
                                           bucket_source_width=args.bucket_width,
                                           length_penalty=inference.LengthPenalty(args.length_penalty_alpha,
                                                                                  args.length_penalty_beta),
-                                          coverage_penalty=inference.CoveragePenalty(args.coverage_penalty_beta),
                                           beam_prune=args.beam_prune,
-                                          stop_criterium=args.beam_stop,
+                                          beam_search_stop=args.beam_search_stop,
                                           models=models,
                                           source_vocabs=source_vocabs,
                                           target_vocab=target_vocab,

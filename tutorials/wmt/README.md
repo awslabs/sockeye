@@ -23,9 +23,9 @@ If you haven't installed the library yet you can do so by running:
 pip install matplotlib
 ```
 
-We will visualize training progress using `tensorboard`. Install it using:
+We will visualize training progress using Tensorboard and its MXNet adaptor, `mxboard`. Install it using:
 ```bash
-pip install tensorboard==1.0.0a6
+pip install tensorboard mxboard
 ```
 
 All of the commands below assume you're running on a CPU.
@@ -93,7 +93,6 @@ python -m sockeye.train -s corpus.tc.BPE.de \
                         --rnn-attention-type dot \
                         --max-seq-len 60 \
                         --decode-and-evaluate 500 \
-                        --use-tensorboard \
                         --use-cpu \
                         -o wmt_model
 ```
@@ -130,10 +129,9 @@ the metrics file and tensorboard.
 In addition to printing training and validation metrics on stdout Sockeye also keeps track of them in
 the file `wmt_model/metrics`. Here you find all relevant metrics that were calculated during checkpointing.
 
-[tensorboard](https://github.com/dmlc/tensorboard) allows for monitoring training and validation metrics in a browser.
-In the training command above we enabled tracking of metrics in a tensorboard compatible way
-by specifying `--use-tensorboard`. With this we can simply point tensorboard to the model directory or any of its parent
-directories:
+[tensorboard](https://github.com/awslabs/mxboard) allows for monitoring training and validation metrics in a browser.
+If you have installed it (`pip install mxboard`), Sockeye will log training events in a Tensorboard file that can be
+visualized with Tensorboard (`pip install tensorboard`)
 
 ```bash
 tensorboard --logdir .
