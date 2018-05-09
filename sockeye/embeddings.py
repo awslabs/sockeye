@@ -28,7 +28,7 @@ from . import utils
 from .data_io import tokens2ids
 from .log import setup_main_logger
 from .utils import check_condition
-from .vocab import load_source_vocabs, vocab_from_json, reverse_vocab
+from .vocab import load_source_vocabs, load_target_vocab, reverse_vocab
 
 logger = setup_main_logger(__name__, file_logging=False)
 
@@ -103,7 +103,7 @@ def main():
     if args.side == "source":
         vocab = load_source_vocabs(args.model)[0]
     else:
-        vocab = vocab_from_json(os.path.join(args.model, C.VOCAB_TRG_NAME))
+        vocab = load_target_vocab(args.model)
     vocab_inv = reverse_vocab(vocab)
 
     params_fname = C.PARAMS_BEST_NAME
@@ -135,8 +135,8 @@ def main():
         for token, token_id in zip(tokens, ids):
             print("%s id=%d" % (token, token_id))
             neighbours = nearest_k(sims, token_id, args.k, args.gamma)
-            for i, (token_id, score) in enumerate(neighbours, 1):
-                print("  %s id=%d sim=%.4f" % (vocab_inv[token_id], token_id, score))
+            for i, (neighbour_id, score) in enumerate(neighbours, 1):
+                print("  %s id=%d sim=%.4f" % (vocab_inv[neighbour_id], neighbour_id, score))
         print()
 
 

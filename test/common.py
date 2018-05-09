@@ -24,6 +24,7 @@ import mxnet as mx
 import numpy as np
 
 import sockeye.average
+import sockeye.checkpoint_decoder
 import sockeye.constants as C
 import sockeye.evaluate
 import sockeye.lexicon
@@ -140,7 +141,7 @@ def generate_fast_align_lex(lex_path: str):
             print("{0}\t{0}\t0".format(digit), file=lex_out)
 
 
-_LEXICON_PARAMS_COMMON = "-i {input} -m {model} -k 1 -o {json} {quiet}"
+_LEXICON_CREATE_PARAMS_COMMON = "create -i {input} -m {model} -k {topk} -o {lexicon} {quiet}"
 
 
 @contextmanager
@@ -205,7 +206,7 @@ _TRANSLATE_PARAMS_COMMON = "--use-cpu --models {model} --input {input} --output 
 
 _TRANSLATE_WITH_FACTORS_COMMON = " --input-factors {input_factors}"
 
-_TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {json}"
+_TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {lexicon} --restrict-lexicon-topk {topk}"
 
 _EVAL_PARAMS_COMMON = "--hypotheses {hypotheses} --references {references} --metrics {metrics} {quiet}"
 
@@ -311,6 +312,20 @@ def run_train_translate(train_params: str,
             with patch.object(sys, "argv", params.split()):
                 sockeye.train.main()
 
+        # run checkpoint decoder on 1% of dev data
+        with open(dev_source_path) as dev_fd:
+            num_dev_sent = sum(1 for _ in dev_fd)
+        sample_size = min(1, int(num_dev_sent * 0.01))
+        cp_decoder = sockeye.checkpoint_decoder.CheckpointDecoder(context=mx.cpu(),
+                                                                  inputs=[dev_source_path],
+                                                                  references=dev_target_path,
+                                                                  model=model_path,
+                                                                  sample_size=sample_size,
+                                                                  batch_size=2,
+                                                                  beam_size=2)
+        cp_metrics = cp_decoder.decode_and_evaluate()
+        logger.info("Checkpoint decoder metrics: %s", cp_metrics)
+
         logger.info("Translating with parameters %s.", translate_params)
         # Translate corpus with the 1st params
         out_path = os.path.join(work_dir, "out.txt")
@@ -354,15 +369,16 @@ def run_train_translate(train_params: str,
         out_restrict_path = os.path.join(work_dir, "out-restrict.txt")
         if restrict_lexicon:
             # fast_align lex table
-            lex_path = os.path.join(work_dir, "lex")
-            generate_fast_align_lex(lex_path)
-            # Top-K JSON
-            json_path = os.path.join(work_dir, "json")
+            ttable_path = os.path.join(work_dir, "ttable")
+            generate_fast_align_lex(ttable_path)
+            # Top-K lexicon
+            lexicon_path = os.path.join(work_dir, "lexicon")
             params = "{} {}".format(sockeye.lexicon.__file__,
-                                    _LEXICON_PARAMS_COMMON.format(input=lex_path,
-                                                                  model=model_path,
-                                                                  json=json_path,
-                                                                  quiet=quiet_arg))
+                                    _LEXICON_CREATE_PARAMS_COMMON.format(input=ttable_path,
+                                                                         model=model_path,
+                                                                         topk=20,
+                                                                         lexicon=lexicon_path,
+                                                                         quiet=quiet_arg))
             with patch.object(sys, "argv", params.split()):
                 sockeye.lexicon.main()
             # Translate corpus with restrict-lexicon
@@ -372,7 +388,7 @@ def run_train_translate(train_params: str,
                                                                           output=out_restrict_path,
                                                                           quiet=quiet_arg),
                                           translate_params,
-                                          _TRANSLATE_PARAMS_RESTRICT.format(json=json_path))
+                                          _TRANSLATE_PARAMS_RESTRICT.format(lexicon=lexicon_path, topk=1))
 
             if test_source_factor_paths is not None:
                 params += _TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(test_source_factor_paths))
@@ -393,8 +409,10 @@ def run_train_translate(train_params: str,
         metrics = sockeye.utils.read_metrics_file(path=os.path.join(model_path, C.METRICS_NAME))
         perplexity = min(m[C.PERPLEXITY + '-val'] for m in metrics)
 
-        hypotheses = open(out_path, "r").readlines()
-        references = open(test_target_path, "r").readlines()
+        with open(out_path, "r") as out:
+            hypotheses = out.readlines()
+        with open(test_target_path, "r") as ref:
+            references = ref.readlines()
         assert len(hypotheses) == len(references)
 
         # compute metrics

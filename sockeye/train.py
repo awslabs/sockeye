@@ -104,6 +104,11 @@ def check_arg_compatibility(args: argparse.Namespace):
                         "Target embedding size must match transformer model size: %s vs. %s"
                         % (args.transformer_model_size, args.num_embed[1]))
 
+    if args.lhuc is not None:
+        check_condition(args.encoder == C.RNN_NAME or args.decoder == C.RNN_NAME,
+                        "LHUC is only supported for RNN models for now.")
+
+
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     """
@@ -300,7 +305,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             for i, (v, mv) in enumerate(zip(source_vocabs, model_source_vocabs)):
                 utils.check_condition(vocab.are_identical(v, mv),
                                       "Prepared data and resumed model source vocab %d do not match." % i)
-            model_target_vocab = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_TRG_NAME))
+            model_target_vocab = vocab.load_target_vocab(output_folder)
             utils.check_condition(vocab.are_identical(target_vocab, model_target_vocab),
                                   "Prepared data and resumed model target vocabs do not match.")
 
@@ -317,7 +322,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         if resume_training:
             # Load the existing vocabs created when starting the training run.
             source_vocabs = vocab.load_source_vocabs(output_folder)
-            target_vocab = vocab.vocab_from_json(os.path.join(output_folder, C.VOCAB_TRG_NAME))
+            target_vocab = vocab.load_target_vocab(output_folder)
 
             # Recover the vocabulary path from the data info file:
             data_info = cast(data_io.DataInfo, Config.load(os.path.join(output_folder, C.DATA_INFO)))
@@ -441,7 +446,8 @@ def create_encoder_config(args: argparse.Namespace,
                                      dropout_recurrent=encoder_rnn_dropout_recurrent,
                                      residual=args.rnn_residual_connections,
                                      first_residual_layer=args.rnn_first_residual_layer,
-                                     forget_bias=args.rnn_forget_bias),
+                                     forget_bias=args.rnn_forget_bias,
+                                     lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc)),
             conv_config=config_conv,
             reverse_input=args.rnn_encoder_reverse_input)
         encoder_num_hidden = args.rnn_num_hidden
@@ -511,7 +517,8 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int) -> 
                                                          query_num_hidden=args.rnn_num_hidden,
                                                          layer_normalization=args.layer_normalization,
                                                          config_coverage=config_coverage,
-                                                         num_heads=args.rnn_attention_mhdot_heads)
+                                                         num_heads=args.rnn_attention_mhdot_heads,
+                                                         is_scaled=args.rnn_scale_dot_attention)
 
         _, decoder_rnn_dropout_inputs = args.rnn_dropout_inputs
         _, decoder_rnn_dropout_states = args.rnn_dropout_states
@@ -527,13 +534,15 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int) -> 
                                      dropout_recurrent=decoder_rnn_dropout_recurrent,
                                      residual=args.rnn_residual_connections,
                                      first_residual_layer=args.rnn_first_residual_layer,
-                                     forget_bias=args.rnn_forget_bias),
+                                     forget_bias=args.rnn_forget_bias,
+                                     lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc)),
             attention_config=config_attention,
             hidden_dropout=args.rnn_decoder_hidden_dropout,
             state_init=args.rnn_decoder_state_init,
             context_gating=args.rnn_context_gating,
             layer_normalization=args.layer_normalization,
-            attention_in_upper_layers=args.rnn_attention_in_upper_layers)
+            attention_in_upper_layers=args.rnn_attention_in_upper_layers,
+            state_init_lhuc=args.lhuc is not None and (C.LHUC_STATE_INIT in args.lhuc or C.LHUC_ALL in args.lhuc))
 
     return config_decoder
 
@@ -622,7 +631,8 @@ def create_model_config(args: argparse.Namespace,
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
                                      weight_normalization=args.weight_normalization,
-                                     use_pointer_nets=args.use_pointer_nets)
+                                     use_pointer_nets=args.use_pointer_nets,
+                                     lhuc=args.lhuc is not None)
     return model_config
 
 
@@ -720,8 +730,8 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
                              kvstore=args.kvstore,
                              initializer=weight_init,
                              gradient_clipping_type=gradient_clipping_type,
-                             gradient_clipping_threshold=gradient_clipping_threshold,
-                             lr_scheduler=lr_sched)
+                             gradient_clipping_threshold=gradient_clipping_threshold)
+    config.set_lr_scheduler(lr_sched)
     logger.info("Optimizer: %s", config)
     logger.info("Gradient Compression: %s", gradient_compression_params(args))
     return config
@@ -765,7 +775,7 @@ def main():
         # Dump the vocabularies if we're just starting up
         if not resume_training:
             vocab.save_source_vocabs(source_vocabs, output_folder)
-            vocab.vocab_to_json(target_vocab, os.path.join(output_folder, C.VOCAB_TRG_NAME))
+            vocab.save_target_vocab(target_vocab, output_folder)
 
         source_vocab_sizes = [len(v) for v in source_vocabs]
         target_vocab_size = len(target_vocab)
@@ -783,24 +793,31 @@ def main():
                                                args=args)
 
         # Handle options that override training settings
+        min_updates = args.min_updates
         max_updates = args.max_updates
+        min_samples = args.min_samples
+        max_samples = args.max_samples
         max_num_checkpoint_not_improved = args.max_num_checkpoint_not_improved
-        min_num_epochs = args.min_num_epochs
-        max_num_epochs = args.max_num_epochs
-        if min_num_epochs is not None and max_num_epochs is not None:
-            check_condition(min_num_epochs <= max_num_epochs,
+        min_epochs = args.min_num_epochs
+        max_epochs = args.max_num_epochs
+        if min_epochs is not None and max_epochs is not None:
+            check_condition(min_epochs <= max_epochs,
                             "Minimum number of epochs must be smaller than maximum number of epochs")
         # Fixed training schedule always runs for a set number of updates
         if args.learning_rate_schedule:
+            min_updates = None
             max_updates = sum(num_updates for (_, num_updates) in args.learning_rate_schedule)
             max_num_checkpoint_not_improved = -1
-            min_num_epochs = None
-            max_num_epochs = None
+            min_samples = None
+            max_samples = None
+            min_epochs = None
+            max_epochs = None
 
         trainer = training.EarlyStoppingTrainer(model=training_model,
                                                 optimizer_config=create_optimizer_config(args, source_vocab_sizes),
                                                 max_params_files_to_keep=args.keep_last_params,
-                                                log_to_tensorboard=args.use_tensorboard)
+                                                source_vocabs=source_vocabs,
+                                                target_vocab=target_vocab)
 
         trainer.fit(train_iter=train_iter,
                     validation_iter=eval_iter,
@@ -808,15 +825,18 @@ def main():
                     metrics=args.metrics,
                     checkpoint_frequency=args.checkpoint_frequency,
                     max_num_not_improved=max_num_checkpoint_not_improved,
+                    min_samples=min_samples,
+                    max_samples=max_samples,
+                    min_updates=min_updates,
                     max_updates=max_updates,
-                    min_num_epochs=min_num_epochs,
-                    max_num_epochs=max_num_epochs,
+                    min_epochs=min_epochs,
+                    max_epochs=max_epochs,
                     lr_decay_param_reset=args.learning_rate_decay_param_reset,
                     lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset,
                     decoder=create_checkpoint_decoder(args, exit_stack, context),
                     mxmonitor_pattern=args.monitor_pattern,
                     mxmonitor_stat_func=args.monitor_stat_func,
-                    allow_missing_parameters=args.allow_missing_params,
+                    allow_missing_parameters=args.allow_missing_params or model_config.lhuc,
                     existing_parameters=args.params)
 
 

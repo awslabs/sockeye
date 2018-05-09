@@ -182,7 +182,8 @@ class CrossEntropyMetric(EvalMetric):
         super().__init__(name, output_names=output_names, label_names=label_names)
         self.loss_config = loss_config
 
-    def cross_entropy(self, pred, label, ignore):
+    @staticmethod
+    def cross_entropy(pred, label, ignore):
         prob = mx.nd.pick(pred, label.astype(dtype="int32"))
         prob = prob * (1 - ignore) + ignore
         loss = -mx.nd.log(prob + 1e-8)  # pylint: disable=invalid-unary-operand-type
@@ -192,8 +193,7 @@ class CrossEntropyMetric(EvalMetric):
         label_dist = mx.nd.one_hot(indices=label.astype(dtype='int32'),
                                    depth=self.loss_config.vocab_size,
                                    on_value=1.0 - self.loss_config.label_smoothing,
-                                   off_value=self.loss_config.label_smoothing /
-                                             (self.loss_config.vocab_size - 1.0))
+                                   off_value=self.loss_config.label_smoothing / (self.loss_config.vocab_size - 1.0))
         label_dist = mx.nd.where(1 - ignore, label_dist, mx.nd.zeros_like(label_dist))
         loss = label_dist * (- mx.nd.log(pred + 1e-8))  # pylint: disable=invalid-unary-operand-type
         return loss

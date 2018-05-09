@@ -1,6 +1,10 @@
 # Sockeye
 
-[![Documentation Status](https://readthedocs.org/projects/sockeye/badge/?version=latest)](http://sockeye.readthedocs.io/en/latest/?badge=latest) [![Build Status](https://travis-ci.org/awslabs/sockeye.svg?branch=master)](https://travis-ci.org/awslabs/sockeye)
+[![PyPI version](https://badge.fury.io/py/sockeye.svg)](https://badge.fury.io/py/sockeye)
+[![GitHub license](https://img.shields.io/github/license/awslabs/sockeye.svg)](https://github.com/awslabs/sockeye/blob/master/LICENSE)
+[![GitHub issues](https://img.shields.io/github/issues/awslabs/sockeye.svg)](https://github.com/awslabs/sockeye/issues)
+[![Build Status](https://travis-ci.org/awslabs/sockeye.svg?branch=master)](https://travis-ci.org/awslabs/sockeye)
+[![Documentation Status](https://readthedocs.org/projects/sockeye/badge/?version=latest)](http://sockeye.readthedocs.io/en/latest/?badge=latest)
 
 This package contains the Sockeye project,
 a sequence-to-sequence framework for Neural Machine Translation based on Apache MXNet Incubating.
@@ -79,7 +83,7 @@ Depending on your version of CUDA, you can do this by running the following:
 > pip install sockeye --no-deps -r requirements.gpu-cu${CUDA_VERSION}.txt
 > rm requirements.gpu-cu${CUDA_VERSION}.txt
 ```
-where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), or `90` (9.0).
+where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), `90` (9.0), or `91` (9.1).
 
 ### Or: From Source
 
@@ -102,11 +106,12 @@ running the following:
 > pip install -r requirements.gpu-cu${CUDA_VERSION}.txt
 > pip install .
 ```
-where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), or `90` (9.0).
+where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), `90` (9.0), or `91` (9.1).
 
 ### Optional dependencies
-In order to track learning curves during training you can optionally install dmlc's fork of tensorboard
- (````pip install tensorboard==1.0.0a6````).
+In order to write training statistics to a Tensorboard event file for visualization, you can optionally install mxboard
+ (````pip install mxboard````). To visualize these, run the Tensorboard tool (`pip install tensorboard tensorflow`) with
+ the logging directory pointed to the training output folder: `tensorboard --logdir <model>`
  
 If you want to create alignment plots you will need to install matplotlib (````pip install matplotlib````).
 

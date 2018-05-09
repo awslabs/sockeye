@@ -15,6 +15,7 @@ import pytest
 
 import sockeye.average as average
 
+
 @pytest.mark.parametrize(
     "test_points, expected_top_n, size, maximize", [
         ([(1.1, 3), (2.2, 2), (3.3, 1)], [(3.3, 1), (2.2, 2), (1.1, 3)], 3, True),

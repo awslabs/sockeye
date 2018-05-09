@@ -12,7 +12,6 @@
 # permissions and limitations under the License.
 
 import logging
-from typing import Optional
 
 import mxnet as mx
 import numpy as np

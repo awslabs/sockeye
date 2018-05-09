@@ -38,8 +38,7 @@ class OptimizerConfig(config.Config):
                  kvstore: str,
                  initializer: mx.initializer.Initializer,
                  gradient_clipping_type: str,
-                 gradient_clipping_threshold: Optional[float],
-                 lr_scheduler: Optional[LearningRateScheduler]) -> None:
+                 gradient_clipping_threshold: Optional[float]) -> None:
         super().__init__()
         self.name = name
         self.params = params
@@ -47,9 +46,13 @@ class OptimizerConfig(config.Config):
         self.initializer = initializer
         self.gradient_clipping_type = gradient_clipping_type
         self.gradient_clipping_threshold = gradient_clipping_threshold
-        self.lr_scheduler = lr_scheduler
-        if lr_scheduler is not None:
-            self.params["lr_scheduler"] = lr_scheduler
+
+    @property
+    def lr_scheduler(self) -> Optional[LearningRateScheduler]:
+        return self.params.get("lr_scheduler", None)
+
+    def set_lr_scheduler(self, lr_scheduler: Optional[LearningRateScheduler]):
+        self.params["lr_scheduler"] = lr_scheduler
 
 
 class SockeyeOptimizer(mx.optimizer.Optimizer):
@@ -200,7 +203,7 @@ class Eve(SockeyeOptimizer):
             else:
                 f_hat = f
                 d = 1.
-            return (f_hat, d)
+            return f_hat, d
 
         batch_d, checkpoint_d = None, None
 

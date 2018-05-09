@@ -35,6 +35,7 @@ from . import loss
 from . import lr_scheduler
 from . import model
 from . import utils
+from . import vocab
 from .optimizers import BatchState, CheckpointState, SockeyeOptimizer, OptimizerConfig
 
 logger = logging.getLogger(__name__)
@@ -156,13 +157,19 @@ class TrainingModel(model.SockeyeModel):
             if not self.config.use_pointer_nets:
                 # logits: (batch_size * target_seq_len, target_vocab_size)
                 logits = self.output_layer(target_decoded)
-                probs = self.model_loss.get_loss(logits, labels)
+                loss_output = self.model_loss.get_loss(logits, labels)
             else:
                 # softmax_probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
                 softmax_probs = self.output_layer(target_decoded, context=context)
-                probs = self.model_loss.get_loss(softmax_probs, labels)
+                loss_output = self.model_loss.get_loss(softmax_probs, labels)
 
-            return mx.sym.Group(probs), data_names, label_names
+            return mx.sym.Group(loss_output), data_names, label_names
+
+        if self.config.lhuc:
+            arguments = sym_gen(default_bucket_key)[0].list_arguments()
+            fixed_param_names = [a for a in arguments if not a.endswith(C.LHUC_NAME)]
+        else:
+            fixed_param_names = self.fixed_param_names
 
         if self._bucketing:
             logger.info("Using bucketing. Default max_seq_len=%s", default_bucket_key)
@@ -171,7 +178,7 @@ class TrainingModel(model.SockeyeModel):
                                                  default_bucket_key=default_bucket_key,
                                                  context=self.context,
                                                  compression_params=self._gradient_compression_params,
-                                                 fixed_param_names=self.fixed_param_names)
+                                                 fixed_param_names=fixed_param_names)
         else:
             logger.info("No bucketing. Unrolled to (%d,%d)",
                         self.config.config_data.max_seq_len_source, self.config.config_data.max_seq_len_target)
@@ -182,7 +189,7 @@ class TrainingModel(model.SockeyeModel):
                                         logger=logger,
                                         context=self.context,
                                         compression_params=self._gradient_compression_params,
-                                        fixed_param_names=self.fixed_param_names)
+                                        fixed_param_names=fixed_param_names)
 
         self.module.bind(data_shapes=provide_data,
                          label_shapes=provide_label,
@@ -207,6 +214,15 @@ class TrainingModel(model.SockeyeModel):
         Updates parameters of the module.
         """
         self.module.update()
+
+    def get_gradients(self) -> Dict[str, List[mx.nd.NDArray]]:
+        """
+        Returns a mapping of parameters to gradient arrays, summed across devices.
+        """
+        return {name: mx.nd.add_n(*(exe.grad_arrays[i] for exe in self.executors)) for i, name in
+                enumerate(self.executor_group.arg_names)
+                if name in self.executor_group.param_names and self.executors[0].grad_arrays[i] is not None}
+                # We may have None if not all parameters are optimized
 
     def get_global_gradient_norm(self) -> float:
         """
@@ -251,8 +267,12 @@ class TrainingModel(model.SockeyeModel):
         return self.module._curr_module if self._bucketing else self.module
 
     @property
+    def executor_group(self):
+        return self.current_module._exec_group
+
+    @property
     def executors(self):
-        return self.current_module._exec_group.execs
+        return self.executor_group.execs
 
     @property
     def loss(self):
@@ -376,7 +396,7 @@ class TrainState:
     """
 
     __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint',
-                 'updates', 'samples', 'gradient_norm', 'metrics', 'start_tic',
+                 'updates', 'samples', 'gradient_norm', 'gradients', 'metrics', 'start_tic',
                  'early_stopping_metric', 'best_metric', 'best_checkpoint']
 
     def __init__(self, early_stopping_metric: str) -> None:
@@ -387,6 +407,7 @@ class TrainState:
         self.updates = 0
         self.samples = 0
         self.gradient_norm = None  # type: Optional[float]
+        self.gradients = None  # type: Optional[Dict[str, List[mx.nd.NDArray]]]
         # stores dicts of metric names & values for each checkpoint
         self.metrics = []  # type: List[Dict]
         self.start_tic = time.time()
@@ -417,20 +438,22 @@ class EarlyStoppingTrainer:
     :param model: TrainingModel instance.
     :param optimizer_config: The optimizer configuration.
     :param max_params_files_to_keep: Maximum number of params files to keep in the output folder (last n are kept).
-    :param log_to_tensorboard: If True write training and evaluation logs to tensorboard event files.
+    :param source_vocabs: Source vocabulary (and optional source factor vocabularies).
+    :param target_vocab: Target vocabulary.
     """
 
     def __init__(self,
                  model: TrainingModel,
                  optimizer_config: OptimizerConfig,
                  max_params_files_to_keep: int,
-                 log_to_tensorboard: bool = True) -> None:
+                 source_vocabs: List[vocab.Vocab],
+                 target_vocab: vocab.Vocab) -> None:
         self.model = model
         self.optimizer_config = optimizer_config
         self.max_params_files_to_keep = max_params_files_to_keep
-        self.tensorboard_logger = None  # type: Optional[TensorboardLogger]
-        if log_to_tensorboard:
-            self.tensorboard_logger = TensorboardLogger(log_dir=os.path.join(model.output_dir, C.TENSORBOARD_NAME))
+        self.tflogger = TensorboardLogger(logdir=os.path.join(model.output_dir, C.TENSORBOARD_NAME),
+                                          source_vocab=source_vocabs[0],
+                                          target_vocab=target_vocab)
         self.state = None  # type: Optional[TrainState]
 
     def fit(self,
@@ -440,9 +463,12 @@ class EarlyStoppingTrainer:
             metrics: List[str],
             checkpoint_frequency: int,
             max_num_not_improved: int,
+            min_samples: Optional[int] = None,
+            max_samples: Optional[int] = None,
+            min_updates: Optional[int] = None,
             max_updates: Optional[int] = None,
-            min_num_epochs: Optional[int] = None,
-            max_num_epochs: Optional[int] = None,
+            min_epochs: Optional[int] = None,
+            max_epochs: Optional[int] = None,
             lr_decay_param_reset: bool = False,
             lr_decay_opt_states_reset: str = C.LR_DECAY_OPT_STATES_RESET_OFF,
             decoder: Optional[checkpoint_decoder.CheckpointDecoder] = None,
@@ -463,9 +489,12 @@ class EarlyStoppingTrainer:
 
         :param max_num_not_improved: Stop training if early_stopping_metric did not improve for this many checkpoints.
                Use -1 to disable stopping based on early_stopping_metric.
+        :param min_samples: Optional minimum number of samples.
+        :param max_samples: Optional maximum number of samples.
+        :param min_updates: Optional minimum number of update steps.
         :param max_updates: Optional maximum number of update steps.
-        :param min_num_epochs: Optional minimum number of epochs to train, overrides early stopping.
-        :param max_num_epochs: Optional maximum number of epochs to train, overrides early stopping.
+        :param min_epochs: Optional minimum number of epochs to train, overrides early stopping.
+        :param max_epochs: Optional maximum number of epochs to train, overrides early stopping.
 
         :param lr_decay_param_reset: Reset parameters to previous best after a learning rate decay.
         :param lr_decay_opt_states_reset: How to reset optimizer states after a learning rate decay.
@@ -499,6 +528,7 @@ class EarlyStoppingTrainer:
             self._update_best_params_link()
             self._save_training_state(train_iter)
             self._update_best_optimizer_states(lr_decay_opt_states_reset)
+            self.tflogger.log_graph(self.model.current_module.symbol)
             logger.info("Training started.")
 
         metric_train, metric_val, metric_loss = self._create_metrics(metrics, self.model.optimizer, self.model.loss)
@@ -519,12 +549,16 @@ class EarlyStoppingTrainer:
             if not train_iter.iter_next():
                 self.state.epoch += 1
                 train_iter.reset()
-                if max_num_epochs is not None and self.state.epoch == max_num_epochs:
-                    logger.info("Maximum # of epochs (%s) reached.", max_num_epochs)
+                if max_epochs is not None and self.state.epoch == max_epochs:
+                    logger.info("Maximum # of epochs (%s) reached.", max_epochs)
                     break
 
             if max_updates is not None and self.state.updates == max_updates:
                 logger.info("Maximum # of updates (%s) reached.", max_updates)
+                break
+
+            if max_samples is not None and self.state.samples >= max_samples:
+                logger.info("Maximum # of samples (%s) reached", max_samples)
                 break
 
             ######
@@ -605,17 +639,26 @@ class EarlyStoppingTrainer:
                                 max_num_not_improved, self.state.num_not_improved)
                     stop_fit = True
 
-                    if min_num_epochs is not None and self.state.epoch < min_num_epochs:
+                    if min_epochs is not None and self.state.epoch < min_epochs:
                         logger.info("Minimum number of epochs (%d) not reached yet: %d",
-                                    min_num_epochs, self.state.epoch)
+                                    min_epochs, self.state.epoch)
                         stop_fit = False
+
+                    if min_updates is not None and self.state.updates < min_updates:
+                        logger.info("Minimum number of updates (%d) not reached yet: %d",
+                                    min_updates, self.state.updates)
+                        stop_fit = False
+
+                    if min_samples is not None and self.state.samples < min_samples:
+                        logger.info("Minimum number of samples (%d) not reached yet: %d",
+                                    min_samples, self.state.samples)
 
                     if stop_fit:
                         break
 
                 tic = time.time()
 
-        self._cleanup(lr_decay_opt_states_reset)
+        self._cleanup(lr_decay_opt_states_reset, process_manager=process_manager)
         logger.info("Training finished. Best checkpoint: %d. Best validation %s: %.6f",
                     self.state.best_checkpoint, early_stopping_metric, self.state.best_metric)
         return self.state.best_metric
@@ -645,6 +688,7 @@ class EarlyStoppingTrainer:
         if self.state.updates > 0 and (self.state.updates + 1) % checkpoint_frequency == 0:
             # compute values for logging to metrics (before rescaling...)
             gradient_norm = self.state.gradient_norm = model.get_global_gradient_norm()
+            self.state.gradients = model.get_gradients()
 
         # note: C.GRADIENT_CLIPPING_TYPE_ABS is handled by the mxnet optimizer directly
         if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
@@ -707,19 +751,20 @@ class EarlyStoppingTrainer:
             checkpoint_metrics["%s-val" % name] = value
 
         if process_manager is not None:
-            process_manager.wait_to_finish()
             result = process_manager.collect_results()
             if result is not None:
                 decoded_checkpoint, decoder_metrics = result
                 self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
-                if self.tensorboard_logger is not None:
-                    self.tensorboard_logger.log_metrics(decoder_metrics, decoded_checkpoint)
+                self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
             process_manager.start_decoder(self.state.checkpoint)
 
         self.state.metrics.append(checkpoint_metrics)
         utils.write_metrics_file(self.state.metrics, self.metrics_fname)
-        if self.tensorboard_logger is not None:
-            self.tensorboard_logger.log_metrics(checkpoint_metrics, self.state.checkpoint)
+
+        tf_metrics = checkpoint_metrics.copy()
+        tf_metrics.update({"%s_grad" % n: v for n, v in self.state.gradients.items()})
+        tf_metrics.update(self.model.params)
+        self.tflogger.log_metrics(metrics=tf_metrics, checkpoint=self.state.checkpoint)
 
     def _cleanup(self, lr_decay_opt_states_reset: str, process_manager: Optional['DecoderProcessManager'] = None):
         """
@@ -728,13 +773,12 @@ class EarlyStoppingTrainer:
         utils.cleanup_params_files(self.model.output_dir, self.max_params_files_to_keep,
                                    self.state.checkpoint, self.state.best_checkpoint)
         if process_manager is not None:
-            process_manager.wait_to_finish()
             result = process_manager.collect_results()
             if result is not None:
                 decoded_checkpoint, decoder_metrics = result
                 self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
-                if self.tensorboard_logger is not None:
-                    self.tensorboard_logger.log_metrics(decoder_metrics, decoded_checkpoint)
+                self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
+            utils.write_metrics_file(self.state.metrics, self.metrics_fname)
 
         final_training_state_dirname = os.path.join(self.model.output_dir, C.TRAINING_STATE_DIRNAME)
         if os.path.exists(final_training_state_dirname):
@@ -870,7 +914,8 @@ class EarlyStoppingTrainer:
             utils.check_condition(self.optimizer_config.name != C.OPTIMIZER_EVE,
                                   "Eve optimizer not supported with distributed training.")
             utils.check_condition(
-                not issubclass(type(self.optimizer_config.lr_scheduler), lr_scheduler.AdaptiveLearningRateScheduler),
+                not issubclass(type(self.optimizer_config.lr_scheduler),
+                               lr_scheduler.AdaptiveLearningRateScheduler),
                 "Adaptive learning rate schedulers not supported with a dist kvstore. "
                 "Try a fixed schedule such as %s." % C.LR_SCHEDULER_FIXED_RATE_INV_SQRT_T)
             utils.check_condition(not lr_decay_param_reset, "Parameter reset when the learning rate decays not "
@@ -971,33 +1016,68 @@ class EarlyStoppingTrainer:
 
         # (6) Learning rate scheduler
         with open(os.path.join(self.training_state_dirname, C.SCHEDULER_STATE_NAME), "rb") as fp:
-            self.optimizer_config.lr_scheduler = pickle.load(fp)
+            self.optimizer_config.set_lr_scheduler(pickle.load(fp))
         # initialize optimizer again
-        self.model.initialize_optimizer(self.optimizer_config)
+        self._initialize_optimizer()
 
 
 class TensorboardLogger:
     """
-    Thin wrapper for Tensorboard API to log scalar values.
+    Thin wrapper for MXBoard API to log training events.
+    Flushes logging events to disk every 60 seconds.
+
+    :param logdir: Directory to write Tensorboard event files to.
+    :param source_vocab: Optional source vocabulary to log source embeddings.
+    :param target_vocab: Optional target vocabulary to log target and output embeddings.
     """
 
-    def __init__(self, log_dir: str) -> None:
+    def __init__(self,
+                 logdir: str,
+                 source_vocab: Optional[vocab.Vocab] = None,
+                 target_vocab: Optional[vocab.Vocab] = None) -> None:
+        self.logdir = logdir
+        self.source_labels = vocab.get_ordered_tokens_from_vocab(source_vocab) if source_vocab is not None else None
+        self.target_labels = vocab.get_ordered_tokens_from_vocab(target_vocab) if source_vocab is not None else None
         try:
-            import tensorboard  # pylint: disable=import-error
-            from tensorboard.summary import scalar
+            import mxboard
+            logger.info("Logging training events for Tensorboard at '%s'", self.logdir)
+            if os.path.exists(self.logdir):
+                logger.info("Deleting existing Tensorboard log directory '%s'", self.logdir)
+                shutil.rmtree(self.logdir)
+            self.sw = mxboard.SummaryWriter(logdir=self.logdir, flush_secs=60, verbose=False)
         except ImportError:
-            raise RuntimeError("Please install tensorboard.")
-        if os.path.exists(log_dir):
-            logger.info("Deleting existing tensorboard log dir %s", log_dir)
-            shutil.rmtree(log_dir)
-        logger.info("Logging training events for Tensorboard at '%s'", log_dir)
-        self.log_dir = log_dir
-        self.summary_writer = tensorboard.FileWriter(log_dir)
-        self.scalar = scalar
+            logger.info("mxboard not found. Consider 'pip install mxboard' to log events to Tensorboard.")
+            self.sw = None
 
-    def log_metrics(self, metrics: Dict[str, Union[float, int]], checkpoint: int):
+    def log_metrics(self, metrics: Dict[str, Union[float, int, mx.nd.NDArray]], checkpoint: int):
+        if self.sw is None:
+            return
+
         for name, value in metrics.items():
-            self.summary_writer.add_summary(self.scalar(name=name, scalar=value), global_step=checkpoint)
+            if isinstance(value, mx.nd.NDArray):
+                self.sw.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
+            else:
+                self.sw.add_scalar(tag=name, value=value, global_step=checkpoint)
+
+    def log_graph(self, symbol: mx.sym.Symbol):
+        if self.sw is None:
+            return
+        self.sw.add_graph(symbol)
+
+    def log_source_embedding(self, embedding: mx.nd.NDArray, checkpoint: int):
+        if self.sw is None or self.source_labels is None:
+            return
+        self.sw.add_embedding(tag="source", embedding=embedding, labels=self.source_labels, global_step=checkpoint)
+
+    def log_target_embedding(self, embedding: mx.nd.NDArray, checkpoint: int):
+        if self.sw is None or self.target_labels is None:
+            return
+        self.sw.add_embedding(tag="target", embedding=embedding, labels=self.target_labels, global_step=checkpoint)
+
+    def log_output_embedding(self, embedding: mx.nd.NDArray, checkpoint: int):
+        if self.sw is None or self.target_labels is None:
+            return
+        self.sw.add_embedding(tag="output", embedding=embedding, labels=self.target_labels, global_step=checkpoint)
 
 
 class Speedometer:
@@ -1087,6 +1167,7 @@ class DecoderProcessManager(object):
             return None
         decoded_checkpoint, decoder_metrics = self.decoder_metric_queue.get()
         assert self.decoder_metric_queue.empty()
+        logger.info("Decoder-%d finished: %s", decoded_checkpoint, decoder_metrics)
         return decoded_checkpoint, decoder_metrics
 
     def wait_to_finish(self):
@@ -1095,14 +1176,15 @@ class DecoderProcessManager(object):
         if not self.decoder_process.is_alive():
             self.decoder_process = None
             return
-        logger.warning("Waiting for process %s to finish.", self.decoder_process.name)
+        name = self.decoder_process.name
+        logger.warning("Waiting for process %s to finish.", name)
         wait_start = time.time()
         self.decoder_process.join()
         self.decoder_process = None
         wait_time = int(time.time() - wait_start)
-        logger.warning("Had to wait %d seconds for the checkpoint decoder to finish. Consider increasing the "
+        logger.warning("Had to wait %d seconds for the Checkpoint %s to finish. Consider increasing the "
                        "checkpoint frequency (updates between checkpoints, see %s) or reducing the size of the "
-                       "validation samples that are decoded (see %s)." % (wait_time,
+                       "validation samples that are decoded (see %s)." % (wait_time, name,
                                                                           C.TRAIN_ARGS_CHECKPOINT_FREQUENCY,
                                                                           C.TRAIN_ARGS_MONITOR_BLEU))
 

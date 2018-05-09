@@ -143,7 +143,7 @@ class GRUCoverage(Coverage):
     def __init__(self, coverage_num_hidden: int, layer_normalization: bool) -> None:
         super().__init__()
         self.num_hidden = coverage_num_hidden
-        gru_prefix= "%sgru" % self.prefix
+        gru_prefix = "%sgru" % self.prefix
         if layer_normalization:
             self.gru = rnn.LayerNormPerGateGRUCell(self.num_hidden, prefix=gru_prefix)
         else:

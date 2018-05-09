@@ -11,7 +11,7 @@ pylint --rcfile=pylintrc test -E
 TESTS_LINT_RESULT=$?
 
 # Run mypy, we are currently limiting to modules in typechecked-files
-mypy --ignore-missing-imports --follow-imports=silent @typechecked-files
+mypy --ignore-missing-imports --follow-imports=silent @typechecked-files --no-strict-optional
 MYPY_RESULT=$?
 
 [ $SOCKEYE_LINT_RESULT -ne 0 ] && echo 'pylint found errors in the sockeye package' && exit 1
