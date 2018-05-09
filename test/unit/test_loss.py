@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -143,18 +143,14 @@ def test_cross_entropy_metric(preds, labels, normalization_type, label_smoothing
 
 
 def test_cross_entropy_internal():
-    config = sockeye.loss.LossConfig(name=C.CROSS_ENTROPY,
-                                     vocab_size=3,
-                                     normalization_type='valid',
-                                     label_smoothing=0.0)
-    metric = sockeye.loss.CrossEntropyMetric(config)
-
-    pred = mx.nd.array([0.0, 0.2, 0.8])
+    pred = mx.nd.array([[0.0, 0.2, 0.8]])
+    logprob = mx.nd.log(pred + 1e-8)
     label = mx.nd.array([2])
     expected_cross_entropy = -np.log(0.8 + 1e-8) / 1.0
 
-    cross_entropy = metric.cross_entropy(pred, label, ignore=(label == C.PAD_ID)).sum()
-    cross_entropy_smoothed = metric.cross_entropy_smoothed(pred, label, ignore=(label == C.PAD_ID)).sum()
+    cross_entropy = sockeye.loss.CrossEntropyMetric.cross_entropy(logprob, label).sum()
+    cross_entropy_smoothed = sockeye.loss.CrossEntropyMetric.cross_entropy_smoothed(logprob, label,
+                                                                                    alpha=0.0, num_classes=3).sum()
 
     assert np.isclose(cross_entropy.asnumpy(), expected_cross_entropy)
     assert np.isclose(cross_entropy_smoothed.asnumpy(), expected_cross_entropy)
