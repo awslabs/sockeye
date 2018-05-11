@@ -70,6 +70,7 @@ from . import vocab
 
 logger = setup_main_logger(__name__, console=True, file_logging=False)
 
+
 def init_weight(weight: np.ndarray,
                 vocab_in: Dict[str, int],
                 vocab_out: Dict[str, int],
@@ -133,16 +134,16 @@ def main():
     args = params.parse_args()
 
     if len(args.weight_files) != len(args.vocabularies_in) or \
-       len(args.weight_files) != len(args.vocabularies_out) or \
-       len(args.weight_files) != len(args.names):
-           logger.error("Exactly the same number of 'input weight files', 'input vocabularies', "
-                        "'output vocabularies' and 'Sockeye parameter names' should be provided.")
-           sys.exit(1)
+            len(args.weight_files) != len(args.vocabularies_out) or \
+            len(args.weight_files) != len(args.names):
+        logger.error("Exactly the same number of 'input weight files', 'input vocabularies', "
+                     "'output vocabularies' and 'Sockeye parameter names' should be provided.")
+        sys.exit(1)
 
-    params = {} # type: Dict[str, mx.nd.NDArray]
-    weight_file_cache = {} # type: Dict[str, np.ndarray]
-    for weight_file, vocab_in_file, vocab_out_file, name in zip(args.weight_files, args.vocabularies_in, \
-                                                               args.vocabularies_out, args.names):
+    params = {}  # type: Dict[str, mx.nd.NDArray]
+    weight_file_cache = {}  # type: Dict[str, np.ndarray]
+    for weight_file, vocab_in_file, vocab_out_file, name in zip(args.weight_files, args.vocabularies_in,
+                                                                args.vocabularies_out, args.names):
         weight = load_weight(weight_file, name, weight_file_cache)
         logger.info('Loading input/output vocabularies: %s %s', vocab_in_file, vocab_out_file)
         vocab_in = vocab.vocab_from_json(vocab_in_file, encoding=args.encoding)

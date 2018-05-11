@@ -15,11 +15,10 @@ import argparse
 import json
 import logging
 import os
-import pickle
 from collections import Counter
 from contextlib import ExitStack
 from itertools import chain, islice
-from typing import Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from . import utils
 from . import constants as C
@@ -80,19 +79,7 @@ def build_vocab(data: Iterable[str], num_words: int = 50000, min_count: int = 1)
     return word_to_id
 
 
-def vocab_to_pickle(vocab: Mapping, path: str):
-    """
-    Saves vocabulary in pickle format.
-
-    :param vocab: Vocabulary mapping.
-    :param path: Output file path.
-    """
-    with open(path, 'wb') as out:
-        pickle.dump(vocab, out)
-        logger.info('Vocabulary saved to "%s"', path)
-
-
-def vocab_to_json(vocab: Mapping, path: str):
+def vocab_to_json(vocab: Vocab, path: str):
     """
     Saves vocabulary in human-readable json.
 
@@ -104,38 +91,12 @@ def vocab_to_json(vocab: Mapping, path: str):
         logger.info('Vocabulary saved to "%s"', path)
 
 
-def vocab_from_json_or_pickle(path) -> Vocab:
-    """
-    Try loading the json version of the vocab and fall back to pickle for backwards compatibility.
-
-    :param path: Path to vocab without the json suffix. If it exists the `path` + '.json' will be loaded as a JSON
-        object and otherwise `path` is loaded as a pickle object.
-    :return: The loaded vocabulary.
-    """
-    if os.path.exists(path + C.JSON_SUFFIX):
-        return vocab_from_json(path + C.JSON_SUFFIX)
-    else:
-        return vocab_from_pickle(path)
-
-
-def vocab_from_pickle(path: str) -> Vocab:
-    """
-    Saves vocabulary in pickle format.
-
-    :param path: Path to pickle file containing the vocabulary.
-    :return: The loaded vocabulary.
-    """
-    with open(path, 'rb') as inp:
-        vocab = pickle.load(inp)
-        logger.info('Vocabulary (%d words) loaded from "%s"', len(vocab), path)
-        return vocab
-
-
 def vocab_from_json(path: str, encoding: str = C.VOCAB_ENCODING) -> Vocab:
     """
     Saves vocabulary in json format.
 
     :param path: Path to json file containing the vocabulary.
+    :param encoding: Vocabulary encoding.
     :return: The loaded vocabulary.
     """
     with open(path, encoding=encoding) as inp:
@@ -144,17 +105,91 @@ def vocab_from_json(path: str, encoding: str = C.VOCAB_ENCODING) -> Vocab:
         return vocab
 
 
-def load_or_create_vocab(data: str, vocab_path: Optional[str],
-                         num_words: int, word_min_count: int):
-    return build_from_paths(paths=[data],
-                            num_words=num_words,
-                            min_count=word_min_count) if vocab_path is None else vocab_from_json(vocab_path)
+def save_source_vocabs(source_vocabs: List[Vocab], folder: str):
+    """
+    Saves source vocabularies (primary surface form vocabulary) and optional factor vocabularies to folder.
+
+    :param source_vocabs: List of source vocabularies.
+    :param folder: Destination folder.
+    """
+    for i, vocab in enumerate(source_vocabs):
+        vocab_to_json(vocab, os.path.join(folder, C.VOCAB_SRC_NAME % i))
 
 
-def load_or_create_vocabs(source: str, target: str, source_vocab_path: Optional[str], target_vocab_path: Optional[str],
+def save_target_vocab(target_vocab: Vocab, folder: str):
+    """
+    Saves target vocabulary to folder.
+
+    :param target_vocab: Target vocabulary.
+    :param folder: Destination folder.
+    """
+    vocab_to_json(target_vocab, os.path.join(folder, C.VOCAB_TRG_NAME % 0))
+
+
+def load_source_vocabs(folder: str) -> List[Vocab]:
+    """
+    Loads source vocabularies from folder. The first element in the list is the primary source vocabulary.
+    Other elements correspond to optional additional source factor vocabularies found in folder.
+
+    :param folder: Source folder.
+    :return: List of vocabularies.
+    """
+    return [vocab_from_json(os.path.join(folder, fname)) for fname in
+            sorted([f for f in os.listdir(folder) if f.startswith(C.VOCAB_SRC_PREFIX)])]
+
+
+def load_target_vocab(folder: str) -> Vocab:
+    """
+    Loads target vocabulary from folder.
+
+    :param folder: Source folder.
+    :return: Target vocabulary
+    """
+    return vocab_from_json(os.path.join(folder, C.VOCAB_TRG_NAME % 0))
+
+
+def load_or_create_vocab(data: str, vocab_path: Optional[str], num_words: int, word_min_count: int) -> Vocab:
+    """
+    If the vocabulary path is defined, the vocabulary is loaded from the path.
+    Otherwise, it is built from the data file. No writing to disk occurs.
+    """
+    if vocab_path is None:
+        return build_from_paths(paths=[data], num_words=num_words, min_count=word_min_count)
+    else:
+        return vocab_from_json(vocab_path)
+
+
+def load_or_create_vocabs(source_paths: List[str],
+                          target_path: str,
+                          source_vocab_paths: List[Optional[str]],
+                          target_vocab_path: Optional[str],
                           shared_vocab: bool,
                           num_words_source: int, word_min_count_source: int,
-                          num_words_target: int, word_min_count_target: int) -> Tuple[Vocab, Vocab]:
+                          num_words_target: int, word_min_count_target: int) -> Tuple[List[Vocab], Vocab]:
+    """
+    Returns vocabularies for source files (including factors) and target.
+    If the respective vocabulary paths are not None, the vocabulary is read from the path and returned.
+    Otherwise, it is built from the support and saved to the path.
+
+    :param source_paths: The path to the source text (and optional token-parallel factor files).
+    :param target_path: The target text.
+    :param source_vocab_paths: The source vocabulary path (and optional factor vocabulary paths).
+    :param target_vocab_path: The target vocabulary path.
+    :param shared_vocab: Whether the source and target vocabularies are shared.
+    :param num_words_source: Number of words in the source vocabulary.
+    :param word_min_count_source: Minimum frequency of words in the source vocabulary.
+    :param num_words_target: Number of words in the target vocabulary.
+    :param word_min_count_target: Minimum frequency of words in the target vocabulary.
+    :return: List of source vocabularies (for source and factors), and target vocabulary.
+    """
+    source_path, *source_factor_paths = source_paths
+    source_vocab_path, *source_factor_vocab_paths = source_vocab_paths
+
+    logger.info("=============================")
+    logger.info("Loading/creating vocabularies")
+    logger.info("=============================")
+    logger.info("(1) Surface form vocabularies (source & target)")
+
     if shared_vocab:
         if source_vocab_path and target_vocab_path:
             vocab_source = vocab_from_json(source_vocab_path)
@@ -163,26 +198,38 @@ def load_or_create_vocabs(source: str, target: str, source_vocab_path: Optional[
                                   "Shared vocabulary requires identical source and target vocabularies. "
                                   "The vocabularies in %s and %s are not identical." % (source_vocab_path,
                                                                                         target_vocab_path))
+
         elif source_vocab_path is None and target_vocab_path is None:
             utils.check_condition(num_words_source == num_words_target,
                                   "A shared vocabulary requires the number of source and target words to be the same.")
             utils.check_condition(word_min_count_source == word_min_count_target,
                                   "A shared vocabulary requires the minimum word count for source and target "
                                   "to be the same.")
-            vocab_source = vocab_target = build_from_paths(paths=[source, target],
+            vocab_source = vocab_target = build_from_paths(paths=[source_path, target_path],
                                                            num_words=num_words_source,
                                                            min_count=word_min_count_source)
+
         else:
             vocab_path = source_vocab_path if source_vocab_path is not None else target_vocab_path
             logger.info("Using %s as a shared source/target vocabulary." % vocab_path)
             vocab_source = vocab_target = vocab_from_json(vocab_path)
+
     else:
-        vocab_source = load_or_create_vocab(source, source_vocab_path, num_words_source, word_min_count_source)
-        vocab_target = load_or_create_vocab(target, target_vocab_path, num_words_target, word_min_count_target)
-    return vocab_source, vocab_target
+        vocab_source = load_or_create_vocab(source_path, source_vocab_path, num_words_source, word_min_count_source)
+        vocab_target = load_or_create_vocab(target_path, target_vocab_path, num_words_target, word_min_count_target)
+
+    vocab_source_factors = []  # type: List[Vocab]
+    if source_factor_paths:
+        logger.info("(2) Additional source factor vocabularies")
+        # source factor vocabs are always created
+        for factor_path, factor_vocab_path in zip(source_factor_paths, source_factor_vocab_paths):
+            vocab_source_factors.append(load_or_create_vocab(factor_path, factor_vocab_path,
+                                                             num_words_source, word_min_count_target))
+
+    return [vocab_source] + vocab_source_factors, vocab_target
 
 
-def reverse_vocab(vocab: Mapping) -> InverseVocab:
+def reverse_vocab(vocab: Vocab) -> InverseVocab:
     """
     Returns value-to-key mapping from key-to-value-mapping.
 
@@ -190,6 +237,16 @@ def reverse_vocab(vocab: Mapping) -> InverseVocab:
     :return: A mapping from values to keys.
     """
     return {v: k for k, v in vocab.items()}
+
+
+def get_ordered_tokens_from_vocab(vocab: Vocab) -> List[str]:
+    """
+    Returns the list of tokens in a vocabulary, ordered by increasing vocabulary id.
+
+    :param vocab: Input vocabulary.
+    :return: List of tokens.
+    """
+    return [token for token, token_id in sorted(vocab.items(), key=lambda i: i[1])]
 
 
 def are_identical(*vocabs: Vocab):
@@ -216,7 +273,7 @@ def main():
 
     vocab = build_from_paths(args.inputs, num_words=num_words, min_count=word_min_count)
     logger.info("Vocabulary size: %d ", len(vocab))
-    vocab_to_json(vocab, args.output + C.JSON_SUFFIX)
+    vocab_to_json(vocab, args.output)
 
 
 if __name__ == "__main__":

@@ -84,6 +84,26 @@ Sacre BLEU.
 
 # VERSION HISTORY
 
+- 1.2.7 (10 April 2018)
+   - fixed another locale issue (with --echo)
+   - grudgingly enabled `-tok none` from the command line
+
+- 1.2.6 (22 March 2018)
+   - added wmt17/ms (Microsoft's [additional ZH-EN references](https://github.com/MicrosoftTranslator/Translator-HumanParityData)).
+     Try `sacrebleu -t wmt17/ms --cite`.
+   - `--echo ref` now pastes together all references, if there is more than one
+
+- 1.2.5 (13 March 2018)
+   - added wmt18/dev datasets (en-et and et-en)
+   - fixed logic with --force
+   - locale-independent installation
+   - added "--echo both" (tab-delimited)
+
+- 1.2.3 (28 January 2018)
+   - metrics (`-m`) are now printed in the order requested
+   - chrF now prints a version string (including the beta parameter, importantly)
+   - attempt to remove dependence on locale setting
+
 - 1.2 (17 January 2018)
    - added the chrF metric (`-m chrf` or `-m bleu chrf` for both)
      See 'CHRF: character n-gram F-score for automatic MT evaluation' by Maja Popovic (WMT 2015)
@@ -92,7 +112,7 @@ Sacre BLEU.
      (Thanks to Mauro Cettolo and Marcello Federico).
    - added `--cite` to produce the citation for easy inclusion in papers
    - added `--input` (`-i`) to set input to a file instead of STDIN
-   - removed accent mark (on private suggestion)
+   - removed accent mark after objection from UN official
 
 - 1.1.7 (27 November 2017)
    - corpus_bleu() now raises an exception if input streams are different lengths
@@ -152,10 +172,10 @@ The official version can be found at github.com/awslabs/sockeye, under `contrib/
 import argparse
 import gzip
 import logging
+import io
 import os
 import re
 import sys
-import tarfile
 import urllib.request
 from collections import Counter, namedtuple
 from itertools import zip_longest
@@ -164,7 +184,7 @@ from typing import List, Iterable, Tuple
 import math
 import unicodedata
 
-VERSION = '1.2.1'
+VERSION = '1.2.7'
 
 try:
     # SIGPIPE is not available on Windows machines, throwing an exception.
@@ -192,8 +212,7 @@ NGRAM_ORDER = 4
 # Default values for CHRF
 CHRF_ORDER = 6
 # default to 2 (per http://www.aclweb.org/anthology/W16-2341)
-CHRF_BETA = 2.0
-CHRF_REMOVE_WS = True
+CHRF_BETA = 2
 
 # This defines data locations.
 # At the top level are test sets.
@@ -202,6 +221,12 @@ CHRF_REMOVE_WS = True
 # Many of these are *.sgm files, which are processed to produced plain text that can be used by this script.
 # The canonical location of unpacked, processed data is $SACREBLEU/$TEST/$SOURCE-$TARGET.{$SOURCE,$TARGET}
 DATASETS = {
+    'wmt18/dev': {
+        'data': ['http://data.statmt.org/wmt18/translation-task/dev.tgz'],
+        'description': 'Development data (Estonian<>English).',
+        'et-en': ['dev/newsdev2018-eten-src.et.sgm', 'dev/newsdev2018-eten-ref.en.sgm'],
+        'en-et': ['dev/newsdev2018-enet-src.en.sgm', 'dev/newsdev2018-enet-ref.et.sgm'],
+    },
     'wmt17': {
         'data': ['http://data.statmt.org/wmt17/translation-task/test.tgz'],
         'description': 'Official evaluation data.',
@@ -244,6 +269,13 @@ DATASETS = {
         'en-zh': ['dev/newsdev2017-enzh-src.en.sgm', 'dev/newsdev2017-enzh-ref.zh.sgm'],
         'lv-en': ['dev/newsdev2017-lven-src.lv.sgm', 'dev/newsdev2017-lven-ref.en.sgm'],
         'zh-en': ['dev/newsdev2017-zhen-src.zh.sgm', 'dev/newsdev2017-zhen-ref.en.sgm'],
+    },
+    'wmt17/ms': {
+        'data': ['https://github.com/MicrosoftTranslator/Translator-HumanParityData/archive/master.zip',
+                 'http://data.statmt.org/wmt17/translation-task/test-update-1.tgz'],
+        'description': 'Additional Chinese-English references from Microsoft Research.',
+        'citation': '@inproceedings{achieving-human-parity-on-automatic-chinese-to-english-news-translation,\n  author = {Hassan Awadalla, Hany and Aue, Anthony and Chen, Chang and Chowdhary, Vishal and Clark, Jonathan and Federmann, Christian and Huang, Xuedong and Junczys-Dowmunt, Marcin and Lewis, Will and Li, Mu and Liu, Shujie and Liu, Tie-Yan and Luo, Renqian and Menezes, Arul and Qin, Tao and Seide, Frank and Tan, Xu and Tian, Fei and Wu, Lijun and Wu, Shuangzhi and Xia, Yingce and Zhang, Dongdong and Zhang, Zhirui and Zhou, Ming},\n  title = {Achieving Human Parity on Automatic Chinese to English News Translation},\n  booktitle = {},\n  year = {2018},\n  month = {March},\n  abstract = {Machine translation has made rapid advances in recent years. Millions of people are using it today in online translation systems and mobile applications in order to communicate across language barriers. The question naturally arises whether such systems can approach or achieve parity with human translations. In this paper, we first address the problem of how to define and accurately measure human parity in translation. We then describe Microsoft’s machine translation system and measure the quality of its translations on the widely used WMT 2017 news translation task from Chinese to English. We find that our latest neural machine translation system has reached a new state-of-the-art, and that the translation quality is at human parity when compared to professional human translations. We also find that it significantly exceeds the quality of crowd-sourced non-professional translations.},\n  publisher = {},\n  url = {https://www.microsoft.com/en-us/research/publication/achieving-human-parity-on-automatic-chinese-to-english-news-translation/},\n  address = {},\n  pages = {},\n  journal = {},\n  volume = {},\n  chapter = {},\n  isbn = {},\n}',
+        'zh-en': ['newstest2017-zhen-src.zh.sgm', 'newstest2017-zhen-ref.en.sgm', 'Translator-HumanParityData-master/Translator-HumanParityData/References/Translator-HumanParityData-Reference-HT.txt', 'Translator-HumanParityData-master/Translator-HumanParityData/References/Translator-HumanParityData-Reference-PE.txt'],
     },
     'wmt16': {
         'data': ['http://data.statmt.org/wmt16/translation-task/test.tgz'],
@@ -440,7 +472,7 @@ DATASETS = {
                  'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/en/zh/en-zh.tgz',
                  'https://wit3.fbk.eu/archive/2017-01-ted-test/texts/zh/en/zh-en.tgz'],
         'description': 'Official evaluation data for IWSLT.',
-        'citation': '@InProceedings{iwslt2017,\n  author    = {Cettolo, Mauro and Federico, Marcello and Bentivogli, Luisa and Niehues, Jan and Stüker, Sebastian and Sudoh, Katsuitho and Yoshino, Koichiro and Federmann, Christian},\n  title     = {Overview of the IWSLT 2017 Evaluation Campaign},\n  booktitle = {14th International Workshop on Spoken Language Translation},\n  month     = {December},\n  year      = {2017},\n  address   = {Tokyo, Japan},\n  pages     = {2--14},\n  url       = {http://workshop2017.iwslt.org/downloads/iwslt2017_proceeding_v2.pdf\n}',
+        'citation': '@InProceedings{iwslt2017,\n  author    = {Cettolo, Mauro and Federico, Marcello and Bentivogli, Luisa and Niehues, Jan and Stüker, Sebastian and Sudoh, Katsuitho and Yoshino, Koichiro and Federmann, Christian},\n  title     = {Overview of the IWSLT 2017 Evaluation Campaign},\n  booktitle = {14th International Workshop on Spoken Language Translation},\n  month     = {December},\n  year      = {2017},\n  address   = {Tokyo, Japan},\n  pages     = {2--14},\n  url       = {http://workshop2017.iwslt.org/downloads/iwslt2017_proceeding_v2.pdf}\n}',
         'en-fr': ['en-fr/IWSLT17.TED.tst2017.en-fr.en.xml', 'fr-en/IWSLT17.TED.tst2017.fr-en.fr.xml'],
         'fr-en': ['fr-en/IWSLT17.TED.tst2017.fr-en.fr.xml', 'en-fr/IWSLT17.TED.tst2017.en-fr.en.xml'],
         'en-de': ['en-de/IWSLT17.TED.tst2017.en-de.en.xml', 'de-en/IWSLT17.TED.tst2017.de-en.de.xml'],
@@ -769,14 +801,14 @@ TOKENIZERS = {
 DEFAULT_TOKENIZER = '13a'
 
 
-def _open(file, encoding='utf-8'):
+def smart_open(file, mode='rt', encoding='utf-8'):
     """Convenience function for reading compressed or plain text files.
     :param file: The file to read.
     :param encoding: The file encoding.
     """
     if file.endswith('.gz'):
-        return gzip.open(file, 'rt', encoding=encoding)
-    return open(file, 'rt', encoding=encoding)
+        return gzip.open(file, mode=mode, encoding=encoding)
+    return open(file, mode=mode, encoding=encoding)
 
 
 def my_log(num):
@@ -792,7 +824,7 @@ def my_log(num):
     return math.log(num)
 
 
-def build_signature(args, numrefs):
+def bleu_signature(args, numrefs):
     """
     Builds a signature that uniquely identifies the scoring parameters used.
     :param args: the arguments passed into the script
@@ -813,6 +845,42 @@ def build_signature(args, numrefs):
     signature = {'tok': args.tokenize,
                  'version': VERSION,
                  'smooth': args.smooth,
+                 'numrefs': numrefs,
+                 'case': 'lc' if args.lc else 'mixed'}
+
+    if args.test_set is not None:
+        signature['test'] = args.test_set
+
+    if args.langpair is not None:
+        signature['lang'] = args.langpair
+
+    sigstr = '+'.join(['{}.{}'.format(abbr[x] if args.short else x, signature[x]) for x in sorted(signature.keys())])
+
+    return sigstr
+
+
+def chrf_signature(args, numrefs):
+    """
+    Builds a signature that uniquely identifies the scoring parameters used.
+    :param args: the arguments passed into the script
+    :return: the chrF signature
+    """
+
+    # Abbreviations for the signature
+    abbr = {
+        'test': 't',
+        'lang': 'l',
+        'numchars': 'n',
+        'space': 's',
+        'case': 'c',
+        'numrefs': '#',
+        'version': 'v'
+    }
+
+    signature = {'tok': args.tokenize,
+                 'version': VERSION,
+                 'space': args.chrf_whitespace,
+                 'numchars': args.chrf_order,
                  'numrefs': numrefs,
                  'case': 'lc' if args.lc else 'mixed'}
 
@@ -893,15 +961,19 @@ def process_to_text(rawfile, txtfile):
     if not os.path.exists(txtfile) or os.path.getsize(txtfile) == 0:
         logging.info("Processing %s to %s", rawfile, txtfile)
         if rawfile.endswith('.sgm') or rawfile.endswith('.sgml'):
-            with _open(rawfile) as fin, open(txtfile, 'wt') as fout:
+            with smart_open(rawfile) as fin, smart_open(txtfile, 'wt') as fout:
                 for line in fin:
                     if line.startswith('<seg '):
                         print(_clean(re.sub(r'<seg.*?>(.*)</seg>.*?', '\\1', line)), file=fout)
         elif rawfile.endswith('.xml'): # IWSLT
-            with _open(rawfile) as fin, open(txtfile, 'wt') as fout:
+            with smart_open(rawfile) as fin, smart_open(txtfile, 'wt') as fout:
                 for line in fin:
                     if line.startswith('<seg '):
                         print(_clean(re.sub(r'<seg.*?>(.*)</seg>.*?', '\\1', line)), file=fout)
+        elif rawfile.endswith('.txt'): # wmt17/ms
+            with smart_open(rawfile) as fin, smart_open(txtfile, 'wt') as fout:
+                for line in fin:
+                    print(line.rstrip(), file=fout)
 
 def print_test_set(test_set, langpair, side):
     """Prints to STDOUT the specified side of the specified test set
@@ -910,11 +982,15 @@ def print_test_set(test_set, langpair, side):
     :param side: 'src' for source, 'ref' for reference
     """
 
-    where = download_test_set(test_set, langpair)
-    infile = where[0] if side == 'src' else where[1]
-    with open(infile) as fin:
-        for line in fin:
-            print(line.rstrip())
+    files = download_test_set(test_set, langpair)
+    if side == 'src':
+        files = [files[0]]
+    elif side == 'ref':
+        files.pop(0)
+
+    streams = [smart_open(file) for file in files]
+    for lines in zip(*streams):
+        print('\t'.join(map(lambda x: x.rstrip(), lines)))
 
 
 def download_test_set(test_set, langpair=None):
@@ -923,9 +999,6 @@ def download_test_set(test_set, langpair=None):
     :param langpair: the language pair (needed for some datasets)
     :return: the set of processed files
     """
-
-    # if not data.has_key(test_set):
-    #     return None
 
     outdir = os.path.join(SACREBLEU, test_set)
     if not os.path.exists(outdir):
@@ -949,8 +1022,15 @@ def download_test_set(test_set, langpair=None):
 
             # Extract the tarball
             logging.info('Extracting %s', tarball)
-            tar = tarfile.open(tarball)
-            tar.extractall(path=rawdir)
+            if tarball.endswith('.tar.gz') or tarball.endswith('.tgz'):
+                import tarfile
+                tar = tarfile.open(tarball)
+                tar.extractall(path=rawdir)
+            elif tarball.endswith('.zip'):
+                import zipfile
+                zipfile = zipfile.ZipFile(tarball, 'r')
+                zipfile.extractall(path=rawdir)
+                zipfile.close()
 
     found = []
 
@@ -1065,13 +1145,13 @@ def corpus_bleu(sys_stream, ref_streams, smooth='exp', smooth_floor=0.0, force=F
         if lowercase:
             lines = [x.lower() for x in lines]
 
-        if (not force or tokenize != 'none') and lines[0].rstrip().endswith(' .'):
+        if not (force or tokenize == 'none') and lines[0].rstrip().endswith(' .'):
             tokenized_count += 1
 
             if tokenized_count == 100:
-                logging.warning('That\'s > 100 lines that end in a tokenized period (\'.\')')
+                logging.warning('That\'s 100 lines that end in a tokenized period (\'.\')')
                 logging.warning('It looks like you forgot to detokenize your test data, which may hurt your score.')
-                logging.warning('If you insist your data is tokenized, you can suppress this message with \'--force\'.')
+                logging.warning('If you insist your data is detokenized, or don\'t care, you can suppress this message with \'--force\'.')
 
         output, *refs = [TOKENIZERS[tokenize](x.rstrip()) for x in lines]
 
@@ -1111,7 +1191,7 @@ def delete_whitespace(text: str) -> str:
 def get_sentence_statistics(hypothesis: str,
                             reference: str,
                             order: int = CHRF_ORDER,
-                            remove_whitespace: bool = CHRF_REMOVE_WS) -> List[float]:
+                            remove_whitespace: bool = True) -> List[float]:
     hypothesis = delete_whitespace(hypothesis) if remove_whitespace else hypothesis
     reference = delete_whitespace(reference) if remove_whitespace else reference
     statistics = [0] * (order * 3)
@@ -1129,7 +1209,7 @@ def get_sentence_statistics(hypothesis: str,
 def get_corpus_statistics(hypotheses: Iterable[str],
                           references: Iterable[str],
                           order: int = CHRF_ORDER,
-                          remove_whitespace: bool = CHRF_REMOVE_WS) -> List[float]:
+                          remove_whitespace: bool = True) -> List[float]:
     corpus_statistics = [0] * (order * 3)
     for hypothesis, reference in zip(hypotheses, references):
         statistics = get_sentence_statistics(hypothesis, reference, order=order, remove_whitespace=remove_whitespace)
@@ -1157,7 +1237,7 @@ def _avg_precision_and_recall(statistics: List[float], order: int) -> Tuple[floa
     return avg_precision, avg_recall
 
 
-def _chrf(avg_precision, avg_recall, beta: float = CHRF_BETA) -> float:
+def _chrf(avg_precision, avg_recall, beta: int = CHRF_BETA) -> float:
     if avg_precision + avg_recall == 0:
         return 0.0
     beta_square = beta ** 2
@@ -1169,7 +1249,7 @@ def corpus_chrf(hypotheses: Iterable[str],
                 references: Iterable[str],
                 order: int = CHRF_ORDER,
                 beta: float = CHRF_BETA,
-                remove_whitespace: bool = CHRF_REMOVE_WS) -> float:
+                remove_whitespace: bool = True) -> float:
     """
     Computes Chrf on a corpus.
 
@@ -1189,7 +1269,7 @@ def sentence_chrf(hypothesis: str,
                   reference: str,
                   order: int = CHRF_ORDER,
                   beta: float = CHRF_BETA,
-                  remove_whitespace: bool = CHRF_REMOVE_WS) -> float:
+                  remove_whitespace: bool = True) -> float:
     """
     Computes ChrF on a single sentence pair.
 
@@ -1216,24 +1296,26 @@ def main():
                             help='use case-insensitive BLEU (default: actual case)')
     arg_parser.add_argument('--smooth', '-s', choices=['exp', 'floor', 'none'], default='exp',
                             help='smoothing method: exponential decay (default), floor (0 count -> 0.01), or none')
-    arg_parser.add_argument('--tokenize', '-tok', choices=[x for x in TOKENIZERS.keys() if x != 'none'], default='13a',
+    arg_parser.add_argument('--tokenize', '-tok', choices=TOKENIZERS.keys(), default='13a',
                             help='tokenization method to use')
     arg_parser.add_argument('--language-pair', '-l', dest='langpair', default=None,
                             help='source-target language pair (2-char ISO639-1 codes)')
     arg_parser.add_argument('--download', type=str, default=None,
                             help='download a test set and quit')
-    arg_parser.add_argument('--echo', choices=['src', 'ref'], type=str, default=None,
-                            help='output the source or reference to STDOUT and quit')
+    arg_parser.add_argument('--echo', choices=['src', 'ref', 'both'], type=str, default=None,
+                            help='output the source (src), reference (ref), or both (both, pasted) to STDOUT and quit')
     arg_parser.add_argument('--input', '-i', type=str, default='-',
                             help='Read input from a file instead of STDIN')
     arg_parser.add_argument('refs', nargs='*', default=[],
                             help='optional list of references (for backwards-compatibility with older scripts)')
-    arg_parser.add_argument('--metrics', '-m', choices=['bleu', 'chrf'], nargs='+', default='bleu',
+    arg_parser.add_argument('--metrics', '-m', choices=['bleu', 'chrf'], nargs='+', default=['bleu'],
                             help='metrics to compute (default: bleu)')
     arg_parser.add_argument('--chrf-order', type=int, default=CHRF_ORDER,
                             help='chrf character order (default: %(default)s)')
-    arg_parser.add_argument('--chrf-beta', type=float, default=CHRF_BETA,
+    arg_parser.add_argument('--chrf-beta', type=int, default=CHRF_BETA,
                             help='chrf BETA parameter (default: %(default)s)')
+    arg_parser.add_argument('--chrf-whitespace', action='store_true', default=False,
+                            help='include whitespace in chrF calculation (default: %(default)s)')
     arg_parser.add_argument('--short', default=False, action='store_true',
                             help='produce a shorter (less human readable) signature')
     arg_parser.add_argument('--score-only', '-b', default=False, action='store_true',
@@ -1249,6 +1331,10 @@ def main():
     arg_parser.add_argument('-V', '--version', action='version',
                             version='%(prog)s {}'.format(VERSION))
     args = arg_parser.parse_args()
+
+    # Explicitly set the encoding
+    sys.stdin = open(sys.stdin.fileno(), mode='r', encoding='utf-8', buffering=True)
+    sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=True)
 
     if not args.quiet:
         logging.basicConfig(level=logging.INFO, format='sacreBLEU: %(message)s')
@@ -1300,27 +1386,31 @@ def main():
         logging.error('I need exactly one of (a) a predefined test set (-t) or (b) a list of references')
         sys.exit(1)
 
+    if args.test_set is not None and args.tokenize == 'none':
+        logging.warning("You are turning off sacrebleu's internal tokenization ('--tokenize none'), presumably to supply\n"
+                        "your own reference tokenization. Published numbers will not be comparable with other papers.\n")
+
     if args.test_set:
         _, *refs = download_test_set(args.test_set, args.langpair)
     else:
         refs = args.refs
 
-    inputfh = sys.stdin if args.input == '-' else _open(args.input, args.encoding)
+    inputfh = io.TextIOWrapper(sys.stdin.buffer, encoding=args.encoding) if args.input == '-' else smart_open(args.input, encoding=args.encoding)
     system = inputfh.readlines()
 
     # Read references
-    refs = [_open(x, args.encoding).readlines() for x in refs]
+    refs = [smart_open(x, encoding=args.encoding).readlines() for x in refs]
 
     if args.langpair is not None:
         _, target = args.langpair.split('-')
-        if target == 'zh' and args.tokenize != 'zh':
+        if target == 'zh' and 'bleu' in args.metrics and args.tokenize != 'zh':
             logging.warning('You should also pass "--tok zh" when scoring Chinese...')
 
     try:
         if 'bleu' in args.metrics:
             bleu = corpus_bleu(system, refs, smooth=args.smooth, force=args.force, lowercase=args.lc, tokenize=args.tokenize)
         if 'chrf' in args.metrics:
-            chrf = corpus_chrf(system, refs[0], beta=args.chrf_beta, order=args.chrf_order)
+            chrf = corpus_chrf(system, refs[0], beta=args.chrf_beta, order=args.chrf_order, remove_whitespace=not args.chrf_whitespace)
     except EOFError:
         logging.error('The input and reference stream(s) were of different lengths.\n')
         if args.test_set is not None:
@@ -1333,20 +1423,23 @@ def main():
                           args.test_set)
         sys.exit(1)
 
-    if 'bleu' in args.metrics:
-        if args.score_only:
-            print('{:.2f}'.format(bleu.score))
-        else:
-            version_str = build_signature(args, len(refs))
-            print(
-                'BLEU+{} = {:.2f} {:.1f}/{:.1f}/{:.1f}/{:.1f} (BP = {:.3f} ratio = {:.3f} hyp_len = {:d} ref_len = {:d})'.format(
-                    version_str, bleu.score, bleu.precisions[0], bleu.precisions[1], bleu.precisions[2],
-                    bleu.precisions[3], bleu.bp, bleu.sys_len / bleu.ref_len, bleu.sys_len, bleu.ref_len))
-    if 'chrf' in args.metrics:
-        if args.score_only:
-            print('{:.2f}'.format(chrf))
-        else:
-            print('CHRF = {:.2f}'.format(chrf))
+    for metric in args.metrics:
+        if metric == 'bleu':
+            if args.score_only:
+                print('{:.2f}'.format(bleu.score))
+            else:
+                version_str = bleu_signature(args, len(refs))
+                print(
+                    'BLEU+{} = {:.2f} {:.1f}/{:.1f}/{:.1f}/{:.1f} (BP = {:.3f} ratio = {:.3f} hyp_len = {:d} ref_len = {:d})'.format(
+                        version_str, bleu.score, bleu.precisions[0], bleu.precisions[1], bleu.precisions[2],
+                        bleu.precisions[3], bleu.bp, bleu.sys_len / bleu.ref_len, bleu.sys_len, bleu.ref_len))
+
+        elif metric == 'chrf':
+            if args.score_only:
+                print('{:.2f}'.format(chrf))
+            else:
+                version_str = chrf_signature(args, len(refs))
+                print('chrF{:d}+{} = {:.2f}'.format(args.chrf_beta, version_str, chrf))
 
 
 if __name__ == '__main__':

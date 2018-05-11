@@ -19,9 +19,32 @@ import sockeye.rnn
 import sockeye.constants as C
 import sockeye.coverage
 import sockeye.decoder
+import sockeye.transformer
 from test.common import gaussian_vector, integer_vector
 
 step_tests = [(C.GRU_TYPE, True), (C.LSTM_TYPE, False)]
+
+
+def test_get_decoder():
+    config = sockeye.transformer.TransformerConfig(
+        model_size=20,
+        attention_heads=10,
+        feed_forward_num_hidden=30,
+        act_type='test_act',
+        num_layers=50,
+        dropout_attention=0.5,
+        dropout_act=0.6,
+        dropout_prepost=0.1,
+        positional_embedding_type=C.FIXED_POSITIONAL_EMBEDDING,
+        preprocess_sequence=C.FIXED_POSITIONAL_EMBEDDING,
+        postprocess_sequence='test_post_seq',
+        max_seq_len_source=60,
+        max_seq_len_target=70,
+        conv_config=None)
+    decoder = sockeye.decoder.get_decoder(config, 'test_')
+
+    assert type(decoder) == sockeye.decoder.TransformerDecoder
+    assert decoder.prefix == 'test_' + C.TRANSFORMER_DECODER_PREFIX
 
 
 @pytest.mark.parametrize("cell_type, context_gating", step_tests)

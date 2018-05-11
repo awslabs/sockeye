@@ -11,7 +11,7 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-from typing import Dict, Optional
+from typing import Dict, Optional, TYPE_CHECKING
 
 import mxnet as mx
 import numpy as np
@@ -19,6 +19,9 @@ import numpy as np
 from . import config
 from . import constants as C
 from . import layers
+
+if TYPE_CHECKING:
+    from . import encoder
 
 
 class TransformerConfig(config.Config):
@@ -37,7 +40,8 @@ class TransformerConfig(config.Config):
                  postprocess_sequence: str,
                  max_seq_len_source: int,
                  max_seq_len_target: int,
-                 conv_config: Optional['ConvolutionalEmbeddingConfig'] = None) -> None:  # type: ignore
+                 conv_config: Optional['encoder.ConvolutionalEmbeddingConfig'] = None,
+                 dtype: str = C.DTYPE_FP32) -> None:  # type: ignore
         super().__init__()
         self.model_size = model_size
         self.attention_heads = attention_heads
@@ -53,6 +57,7 @@ class TransformerConfig(config.Config):
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
         self.conv_config = conv_config
+        self.dtype = dtype
 
 
 class TransformerEncoderBlock:
@@ -287,14 +292,13 @@ class VariableLengthBias(mx.operator.CustomOp):
         # lengths: (batch_size,)
         lengths = in_data[0]
 
-        # (max_length, batch_size)
-        data = mx.nd.zeros((self.max_length, lengths.shape[0]), ctx=lengths.context)
+        # (batch_size, max_length)
+        data = mx.nd.zeros((lengths.shape[0], self.max_length), ctx=lengths.context)
         data = mx.nd.SequenceMask(data=data,
                                   use_sequence_length=True,
                                   sequence_length=lengths,
+                                  axis=1,
                                   value=C.LARGE_NEGATIVE_VALUE)
-        # (batch_size, max_length)
-        data = mx.nd.swapaxes(data, dim1=0, dim2=1)
         self.assign(out_data[0], req[0], data)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
@@ -368,22 +372,22 @@ class AutoRegressiveBias(mx.operator.CustomOp):
     length=4
 
     0 1 1 1
-    0 0 1 1   * -99999
+    0 0 1 1   * LARGE_NEGATIVE_VALUE
     0 0 0 1
     0 0 0 0
     """
 
-    def __init__(self, length: int) -> None:
+    def __init__(self, length: int, ctx: mx.Context) -> None:
         super().__init__()
-        self.bias = self.get_bias(length)
+        self.bias = self.get_bias(length, ctx)
 
     @staticmethod
-    def get_bias(length: int):
+    def get_bias(length: int, ctx: mx.Context):
         # matrix with lower triangle and main diagonal set to 0, upper triangle set to 1
         upper_triangle = np.triu(np.ones((length, length)), k=1)
         # (1, length, length)
-        bias = -99999999. * np.reshape(upper_triangle, (1, length, length))
-        return mx.nd.array(bias)
+        bias = C.LARGE_NEGATIVE_VALUE * np.reshape(upper_triangle, (1, length, length))
+        return mx.nd.array(bias, ctx=ctx)
 
     def forward(self, is_train, req, in_data, out_data, aux):
         self.assign(out_data[0], req[0], self.bias)
@@ -412,4 +416,4 @@ class AutoRegressiveBiasProp(mx.operator.CustomOpProp):
         return [], [np.float32], []
 
     def create_operator(self, ctx, shapes, dtypes):
-        return AutoRegressiveBias(length=self.length)
+        return AutoRegressiveBias(length=self.length, ctx=ctx)

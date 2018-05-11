@@ -15,6 +15,7 @@
 A set of utility methods.
 """
 import errno
+import glob
 import gzip
 import itertools
 import logging
@@ -31,8 +32,7 @@ import fcntl
 import mxnet as mx
 import numpy as np
 
-import sockeye.constants as C
-from sockeye import __version__
+from sockeye import __version__, constants as C
 from sockeye.log import log_sockeye_version, log_mxnet_version
 
 logger = logging.getLogger(__name__)
@@ -131,7 +131,7 @@ def save_graph(symbol: mx.sym.Symbol, filename: str, hide_weights: bool = True):
 
 def compute_lengths(sequence_data: mx.sym.Symbol) -> mx.sym.Symbol:
     """
-    Computes sequence lenghts of PAD_ID-padded data in sequence_data.
+    Computes sequence lengths of PAD_ID-padded data in sequence_data.
 
     :param sequence_data: Input data. Shape: (batch_size, seq_len).
     :return: Length data. Shape: (batch_size,).
@@ -167,7 +167,16 @@ def load_params(fname: str) -> Tuple[Dict[str, mx.nd.NDArray], Dict[str, mx.nd.N
     for k, v in save_dict.items():
         tp, name = k.split(':', 1)
         if tp == 'arg':
-            arg_params[name] = v
+            """TODO(fhieber):
+            temporary weight split for models with combined weight for keys & values
+            in transformer source attention layers. This can be removed once with the next major version change."""
+            if "att_enc_kv2h_weight" in name:
+                logger.info("Splitting '%s' parameters into separate k & v matrices.", name)
+                v_split = mx.nd.split(v, axis=0, num_outputs=2)
+                arg_params[name.replace('kv2h', "k2h")] = v_split[0]
+                arg_params[name.replace('kv2h', "v2h")] = v_split[1]
+            else:
+                arg_params[name] = v
         if tp == 'aux':
             aux_params[name] = v
     return arg_params, aux_params
@@ -242,46 +251,42 @@ class OnlineMeanAndVariance:
             return self._M2 / self._count
 
 
-def smallest_k(matrix: np.ndarray, k: int,
-               only_first_row: bool = False) -> Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]:
+def topk(scores: mx.nd.NDArray,
+         k: int,
+         batch_size: int,
+         offset: np.ndarray,
+         use_mxnet_topk: bool) -> Tuple[np.ndarray, np.ndarray, Union[np.ndarray, mx.nd.NDArray]]:
     """
-    Find the smallest elements in a numpy matrix.
+    Get the lowest k elements per sentence from a `scores` matrix.
 
-    :param matrix: Any matrix.
-    :param k: The number of smallest elements to return.
-    :param only_first_row: If true the search is constrained to the first row of the matrix.
+    :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+    :param k: The number of smallest scores to return.
+    :param batch_size: Number of sentences being decoded at once.
+    :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+    :param use_mxnet_topk: True to use the mxnet implementation or False to use the numpy one.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
-    if only_first_row:
-        flatten = matrix[:1, :].flatten()
+    # (batch_size, beam_size * target_vocab_size)
+    folded_scores = scores.reshape((batch_size, k * scores.shape[-1]))
+
+    if use_mxnet_topk:
+        # pylint: disable=unbalanced-tuple-unpacking
+        values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
+        best_hyp_indices, best_word_indices = np.unravel_index(indices.astype(np.int32).asnumpy().ravel(), scores.shape)
+        values = values.reshape((-1,))
     else:
-        flatten = matrix.flatten()
+        folded_scores = folded_scores.asnumpy()
+        # Get the scores
+        # Indexes into folded_scores: (batch_size, beam_size)
+        flat_idxs = np.argpartition(folded_scores, range(k))[:, :k]
+        # Score values: (batch_size, beam_size)
+        values = folded_scores[np.arange(folded_scores.shape[0])[:, None], flat_idxs].ravel()
+        best_hyp_indices, best_word_indices = np.unravel_index(flat_idxs.ravel(), scores.shape)
 
-    # args are the indices in flatten of the k smallest elements
-    args = np.argpartition(flatten, k)[:k]
-    # args are the indices in flatten of the sorted k smallest elements
-    args = args[np.argsort(flatten[args])]
-    # flatten[args] are the values for args
-    return np.unravel_index(args, matrix.shape), flatten[args]
-
-
-def smallest_k_mx(matrix: mx.nd.NDArray, k: int,
-                  only_first_row: bool = False) -> Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]:
-    """
-    Find the smallest elements in a NDarray.
-
-    :param matrix: Any matrix.
-    :param k: The number of smallest elements to return.
-    :param only_first_row: If True the search is constrained to the first row of the matrix.
-    :return: The row indices, column indices and values of the k smallest items in matrix.
-    """
-    if only_first_row:
-        matrix = mx.nd.reshape(matrix[0], shape=(1, -1))
-
-    # pylint: disable=unbalanced-tuple-unpacking
-    values, indices = mx.nd.topk(matrix, axis=None, k=k, ret_typ='both', is_ascend=True)
-
-    return np.unravel_index(indices.astype(np.int32).asnumpy(), matrix.shape), values
+    if batch_size > 1:
+        # Offsetting the indices to match the shape of the scores matrix
+        best_hyp_indices += offset
+    return best_hyp_indices, best_word_indices, values
 
 
 def chunks(some_list: List, n: int) -> Iterable[List]:
@@ -437,7 +442,7 @@ def get_num_gpus() -> int:
     return num_gpus
 
 
-def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Optional[Dict[int, Tuple[int, int]]]:
+def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, int]]:
     """
     Returns used and total memory for GPUs identified by the given context list.
 
@@ -448,7 +453,7 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Optional[Dict[int, Tu
         ctx = [ctx]
     ctx = [c for c in ctx if c.device_type == 'gpu']
     if not ctx:
-        return None
+        return {}
     if shutil.which("nvidia-smi") is None:
         logger.warning("Couldn't find nvidia-smi, therefore we assume no GPUs are available.")
         return {}
@@ -462,6 +467,7 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Optional[Dict[int, Tu
     for line in result:
         gpu_id, mem_used, mem_total = line.split(",")
         memory_data[int(gpu_id)] = (int(mem_used), int(mem_total))
+    log_gpu_memory_usage(memory_data)
     return memory_data
 
 
@@ -626,7 +632,7 @@ class GpuFileLock:
             lockfile_path = os.path.join(self.lock_dir, "sockeye.gpu{}.lock".format(gpu_id))
             try:
                 lock_file = open(lockfile_path, 'w')
-            except IOError as e:
+            except IOError:
                 if errno.EACCES:
                     logger.warning("GPU {} is currently locked by a different process "
                                    "(Permission denied).".format(gpu_id))
@@ -781,6 +787,7 @@ def grouper(iterable: Iterable, size: int) -> Iterable:
     Collect data into fixed-length chunks or blocks without discarding underfilled chunks or padding them.
 
     :param iterable: A sequence of inputs.
+    :param size: Chunk size.
     :return: Sequence of chunks.
     """
     it = iter(iterable)
@@ -789,3 +796,33 @@ def grouper(iterable: Iterable, size: int) -> Iterable:
         if not chunk:
             return
         yield chunk
+
+
+def metric_value_is_better(new: float, old: float, metric: str) -> bool:
+    """
+    Returns true if new value is strictly better than old for given metric.
+    """
+    if C.METRIC_MAXIMIZE[metric]:
+        return new > old
+    else:
+        return new < old
+
+
+def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int):
+    """
+    Deletes oldest parameter files from a model folder.
+
+    :param output_folder: Folder where param files are located.
+    :param max_to_keep: Maximum number of files to keep, negative to keep all.
+    :param checkpoint: Current checkpoint (i.e. index of last params file created).
+    :param best_checkpoint: Best checkpoint. The parameter file corresponding to this checkpoint will not be deleted.
+    """
+    if max_to_keep <= 0:
+        return
+    existing_files = glob.glob(os.path.join(output_folder, C.PARAMS_PREFIX + "*"))
+    params_name_with_dir = os.path.join(output_folder, C.PARAMS_NAME)
+    for n in range(0, max(1, checkpoint - max_to_keep + 1)):
+        if n != best_checkpoint:
+            param_fname_n = params_name_with_dir % n
+            if param_fname_n in existing_files:
+                os.remove(param_fname_n)

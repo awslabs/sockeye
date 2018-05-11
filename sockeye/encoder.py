@@ -10,22 +10,22 @@
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
-from sockeye.convolution import ConvolutionBlock
 
 """
 Encoders for sequence-to-sequence models.
 """
+import inspect
 import logging
-from math import ceil, floor
 from abc import ABC, abstractmethod
-from typing import Callable, List, Optional, Tuple, Union
+from math import ceil, floor
+from typing import Callable, List, Optional, Tuple, Union, Dict
 
 import mxnet as mx
 
-from sockeye.config import Config
+from . import config
 from . import constants as C
-from . import rnn
 from . import convolution
+from . import rnn
 from . import transformer
 from . import utils
 
@@ -33,43 +33,47 @@ logger = logging.getLogger(__name__)
 EncoderConfig = Union['RecurrentEncoderConfig', transformer.TransformerConfig, 'ConvolutionalEncoderConfig']
 
 
-def get_encoder(config: EncoderConfig) -> 'Encoder':
+def get_encoder(config: EncoderConfig, prefix: str = '') -> 'Encoder':
     if isinstance(config, RecurrentEncoderConfig):
-        return get_recurrent_encoder(config)
+        return get_recurrent_encoder(config, prefix)
     elif isinstance(config, transformer.TransformerConfig):
-        return get_transformer_encoder(config)
+        return get_transformer_encoder(config, prefix)
     elif isinstance(config, ConvolutionalEncoderConfig):
-        return get_convolutional_encoder(config)
+        return get_convolutional_encoder(config, prefix)
     else:
         raise ValueError("Unsupported encoder configuration")
 
 
-class RecurrentEncoderConfig(Config):
+class RecurrentEncoderConfig(config.Config):
     """
     Recurrent encoder configuration.
 
     :param rnn_config: RNN configuration.
     :param conv_config: Optional configuration for convolutional embedding.
     :param reverse_input: Reverse embedding sequence before feeding into RNN.
+    :param dtype: Data type.
     """
 
     def __init__(self,
                  rnn_config: rnn.RNNConfig,
                  conv_config: Optional['ConvolutionalEmbeddingConfig'] = None,
-                 reverse_input: bool = False) -> None:
+                 reverse_input: bool = False,
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.rnn_config = rnn_config
         self.conv_config = conv_config
         self.reverse_input = reverse_input
+        self.dtype = dtype
 
 
-class ConvolutionalEncoderConfig(Config):
+class ConvolutionalEncoderConfig(config.Config):
     """
     Convolutional encoder configuration.
 
     :param cnn_config: CNN configuration.
     :param num_layers: The number of convolutional layers on top of the embeddings.
     :param positional_embedding_type: The type of positional embedding.
+    :param dtype: Data type.
     """
 
     def __init__(self,
@@ -77,109 +81,126 @@ class ConvolutionalEncoderConfig(Config):
                  max_seq_len_source: int,
                  cnn_config: convolution.ConvolutionConfig,
                  num_layers: int,
-                 positional_embedding_type: str) -> None:
+                 positional_embedding_type: str,
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.num_embed = num_embed
         self.num_layers = num_layers
         self.cnn_config = cnn_config
         self.max_seq_len_source = max_seq_len_source
         self.positional_embedding_type = positional_embedding_type
+        self.dtype = dtype
 
 
-def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
+def get_recurrent_encoder(config: RecurrentEncoderConfig, prefix: str) -> 'Encoder':
     """
     Returns an encoder stack with a bi-directional RNN, and a variable number of uni-directional forward RNNs.
 
     :param config: Configuration for recurrent encoder.
+    :param prefix: Prefix for variable names.
     :return: Encoder instance.
     """
     # TODO give more control on encoder architecture
-    encoders = list()  # type: List[Encoder]
+    encoder_seq = EncoderSequence([], config.dtype)
 
     if config.conv_config is not None:
-        encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config, prefix=C.CHAR_SEQ_ENCODER_PREFIX))
+        encoder_seq.append(ConvolutionalEmbeddingEncoder, config=config.conv_config,
+                           prefix=prefix + C.CHAR_SEQ_ENCODER_PREFIX)
         if config.conv_config.add_positional_encoding:
             # If specified, add positional encodings to segment embeddings
-            encoders.append(AddSinCosPositionalEmbeddings(num_embed=config.conv_config.num_embed,
-                                                          scale_up_input=False,
-                                                          scale_down_positions=False,
-                                                          prefix="%sadd_positional_encodings" % C.CHAR_SEQ_ENCODER_PREFIX))
-        encoders.append(ConvertLayout(C.TIME_MAJOR, num_hidden=encoders[-1].get_num_hidden()))
+            encoder_seq.append(AddSinCosPositionalEmbeddings,
+                               num_embed=config.conv_config.num_embed,
+                               scale_up_input=False,
+                               scale_down_positions=False,
+                               prefix="%s%sadd_positional_encodings" % (prefix, C.CHAR_SEQ_ENCODER_PREFIX))
+        encoder_seq.append(ConvertLayout, infer_hidden=True, target_layout=C.TIME_MAJOR)
     else:
-        encoders.append(ConvertLayout(C.TIME_MAJOR, num_hidden=0))
+        encoder_seq.append(ConvertLayout, target_layout=C.TIME_MAJOR, num_hidden=0)
 
     if config.reverse_input:
-        encoders.append(ReverseSequence(num_hidden=encoders[-1].get_num_hidden()))
+        encoder_seq.append(ReverseSequence, infer_hidden=True)
 
     if config.rnn_config.residual:
         utils.check_condition(config.rnn_config.first_residual_layer >= 2,
                               "Residual connections on the first encoder layer are not supported")
 
     # One layer bi-directional RNN:
-    encoders.append(BiDirectionalRNNEncoder(rnn_config=config.rnn_config.copy(num_layers=1),
-                                            prefix=C.BIDIRECTIONALRNN_PREFIX,
-                                            layout=C.TIME_MAJOR))
+    encoder_seq.append(BiDirectionalRNNEncoder,
+                       rnn_config=config.rnn_config.copy(num_layers=1),
+                       prefix=prefix + C.BIDIRECTIONALRNN_PREFIX,
+                       layout=C.TIME_MAJOR)
 
     if config.rnn_config.num_layers > 1:
         # Stacked uni-directional RNN:
         # Because we already have a one layer bi-rnn we reduce the num_layers as well as the first_residual_layer.
         remaining_rnn_config = config.rnn_config.copy(num_layers=config.rnn_config.num_layers - 1,
                                                       first_residual_layer=config.rnn_config.first_residual_layer - 1)
-        encoders.append(RecurrentEncoder(rnn_config=remaining_rnn_config,
-                                         prefix=C.STACKEDRNN_PREFIX,
-                                         layout=C.TIME_MAJOR))
+        encoder_seq.append(RecurrentEncoder,
+                           rnn_config=remaining_rnn_config,
+                           prefix=prefix + C.STACKEDRNN_PREFIX,
+                           layout=C.TIME_MAJOR)
 
-    encoders.append(ConvertLayout(C.BATCH_MAJOR, encoders[-1].get_num_hidden()))
+    encoder_seq.append(ConvertLayout, infer_hidden=True, target_layout=C.BATCH_MAJOR)
 
-    return EncoderSequence(encoders)
+    return encoder_seq
 
 
-def get_convolutional_encoder(config: ConvolutionalEncoderConfig) -> 'Encoder':
+def get_convolutional_encoder(config: ConvolutionalEncoderConfig, prefix: str) -> 'Encoder':
     """
     Creates a convolutional encoder.
 
     :param config: Configuration for convolutional encoder.
-    :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
+    :param prefix: Prefix for variable names.
     :return: Encoder instance.
     """
-    encoders = list()  # type: List[Encoder]
-    encoders.append(get_positional_embedding(config.positional_embedding_type,
-                                             config.num_embed,
-                                             max_seq_len=config.max_seq_len_source,
-                                             fixed_pos_embed_scale_up_input=False,
-                                             fixed_pos_embed_scale_down_positions=True,
-                                             prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
-    encoders.append(ConvolutionalEncoder(config=config))
-    return EncoderSequence(encoders)
+    encoder_seq = EncoderSequence([], dtype=config.dtype)
+    cls, encoder_params = _get_positional_embedding_params(config.positional_embedding_type,
+                                                           config.num_embed,
+                                                           max_seq_len=config.max_seq_len_source,
+                                                           fixed_pos_embed_scale_up_input=False,
+                                                           fixed_pos_embed_scale_down_positions=True,
+                                                           prefix=prefix + C.SOURCE_POSITIONAL_EMBEDDING_PREFIX)
+    encoder_seq.append(cls, **encoder_params)
+    encoder_seq.append(ConvolutionalEncoder, config=config)
+    return encoder_seq
 
 
-def get_transformer_encoder(config: transformer.TransformerConfig) -> 'Encoder':
+def get_transformer_encoder(config: transformer.TransformerConfig, prefix: str) -> 'Encoder':
     """
     Returns a Transformer encoder, consisting of an embedding layer with
     positional encodings and a TransformerEncoder instance.
 
     :param config: Configuration for transformer encoder.
+    :param prefix: Prefix for variable names.
     :return: Encoder instance.
     """
-    encoders = list()  # type: List[Encoder]
-    encoders.append(get_positional_embedding(config.positional_embedding_type,
-                                             config.model_size,
-                                             config.max_seq_len_source,
-                                             fixed_pos_embed_scale_up_input=True,
-                                             fixed_pos_embed_scale_down_positions=False,
-                                             prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX))
+    encoder_seq = EncoderSequence([], dtype=config.dtype)
+    cls, encoder_params = _get_positional_embedding_params(config.positional_embedding_type,
+                                                           config.model_size,
+                                                           config.max_seq_len_source,
+                                                           fixed_pos_embed_scale_up_input=True,
+                                                           fixed_pos_embed_scale_down_positions=False,
+                                                           prefix=prefix + C.SOURCE_POSITIONAL_EMBEDDING_PREFIX)
+    encoder_seq.append(cls, **encoder_params)
     if config.conv_config is not None:
-        encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
+        encoder_seq.append(ConvolutionalEmbeddingEncoder, config=config.conv_config,
+                           prefix=prefix + C.CHAR_SEQ_ENCODER_PREFIX)
 
-    encoders.append(TransformerEncoder(config))
+    encoder_seq.append(TransformerEncoder, config=config, prefix=prefix + C.TRANSFORMER_ENCODER_PREFIX)
 
-    return EncoderSequence(encoders)
+    return encoder_seq
 
 
 class Encoder(ABC):
     """
     Generic encoder interface.
+
+    :param dtype: Data type.
     """
+
+    @abstractmethod
+    def __init__(self, dtype):
+        self.dtype = dtype
 
     @abstractmethod
     def encode(self,
@@ -222,10 +243,12 @@ class ConvertLayout(Encoder):
 
     :param target_layout: The target layout to convert to (C.BATCH_MAJOR or C.TIMEMAJOR).
     :param num_hidden: The number of hidden units of the previous encoder.
+    :param dtype: Data type.
     """
 
-    def __init__(self, target_layout: str, num_hidden: int) -> None:
+    def __init__(self, target_layout: str, num_hidden: int, dtype: str = C.DTYPE_FP32) -> None:
         assert target_layout == C.BATCH_MAJOR or target_layout == C.TIME_MAJOR
+        super().__init__(dtype)
         self.num_hidden = num_hidden
         self.target_layout = target_layout
 
@@ -251,9 +274,12 @@ class ConvertLayout(Encoder):
 class ReverseSequence(Encoder):
     """
     Reverses the input sequence. Requires time-major layout.
+
+    :param dtype: Data type.
     """
 
-    def __init__(self, num_hidden: int) -> None:
+    def __init__(self, num_hidden: int, dtype: str = C.DTYPE_FP32) -> None:
+        super().__init__(dtype)
         self.num_hidden = num_hidden
 
     def encode(self,
@@ -267,16 +293,31 @@ class ReverseSequence(Encoder):
         return self.num_hidden
 
 
-class EmbeddingConfig(Config):
+class FactorConfig(config.Config):
+
+    def __init__(self, vocab_size: int, num_embed: int) -> None:
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.num_embed = num_embed
+
+
+class EmbeddingConfig(config.Config):
 
     def __init__(self,
                  vocab_size: int,
                  num_embed: int,
-                 dropout: float) -> None:
+                 dropout: float,
+                 factor_configs: Optional[List[FactorConfig]] = None,
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
         self.dropout = dropout
+        self.factor_configs = factor_configs
+        self.num_factors = 1
+        if self.factor_configs is not None:
+            self.num_factors += len(self.factor_configs)
+        self.dtype = dtype
 
 
 class Embedding(Encoder):
@@ -286,18 +327,30 @@ class Embedding(Encoder):
     :param config: Embedding config.
     :param prefix: Name prefix for symbols of this encoder.
     :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
+    :param is_source: Whether this is the source embedding instance. Default: False.
     """
 
     def __init__(self,
                  config: EmbeddingConfig,
                  prefix: str,
-                 embed_weight: Optional[mx.sym.Symbol] = None) -> None:
+                 embed_weight: Optional[mx.sym.Symbol] = None,
+                 is_source: bool = False) -> None:
+        super().__init__(config.dtype)
         self.config = config
         self.prefix = prefix
         self.embed_weight = embed_weight
+        self.is_source = is_source
+
         if self.embed_weight is None:
             self.embed_weight = mx.sym.Variable(prefix + "weight",
                                                 shape=(self.config.vocab_size, self.config.num_embed))
+
+        self.embed_factor_weights = []  # type: List[mx.sym.Symbol]
+        if self.config.factor_configs is not None:
+            # Factors weights aren't shared so they're not passed in and we create them here.
+            for i, fc in enumerate(self.config.factor_configs):
+                self.embed_factor_weights.append(mx.sym.Variable(prefix + "factor%d_weight" % i,
+                                                                 shape=(fc.vocab_size, fc.num_embed)))
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -311,11 +364,32 @@ class Embedding(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
+        factor_embeddings = []  # type: List[mx.sym.Symbol]
+        if self.is_source:
+            data, *data_factors = mx.sym.split(data=data,
+                                               num_outputs=self.config.num_factors,
+                                               axis=2,
+                                               squeeze_axis=True, name=self.prefix + "factor_split")
+
+            if self.config.factor_configs is not None:
+                for i, (factor_data, factor_config, factor_weight) in enumerate(zip(data_factors,
+                                                                                    self.config.factor_configs,
+                                                                                    self.embed_factor_weights)):
+                    factor_embeddings.append(mx.sym.Embedding(data=factor_data,
+                                                              input_dim=factor_config.vocab_size,
+                                                              weight=factor_weight,
+                                                              output_dim=factor_config.num_embed,
+                                                              name=self.prefix + "factor%d_embed" % i))
+
         embedding = mx.sym.Embedding(data=data,
                                      input_dim=self.config.vocab_size,
                                      weight=self.embed_weight,
                                      output_dim=self.config.num_embed,
                                      name=self.prefix + "embed")
+
+        if self.config.factor_configs is not None:
+            embedding = mx.sym.concat(embedding, *factor_embeddings, dim=2, name=self.prefix + "embed_plus_factors")
+
         if self.config.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.config.dropout, name="source_embed_dropout")
 
@@ -350,15 +424,18 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
     :param prefix: Name prefix for symbols of this encoder.
     :param scale_up_input: If True, scales input data up by num_embed ** 0.5.
     :param scale_down_positions: If True, scales positional embeddings down by num_embed ** -0.5.
+    :param dtype: Data type.
     """
 
     def __init__(self,
                  num_embed: int,
                  prefix: str,
                  scale_up_input: bool,
-                 scale_down_positions: bool) -> None:
+                 scale_down_positions: bool,
+                 dtype: str = C.DTYPE_FP32) -> None:
         utils.check_condition(num_embed % 2 == 0, "Positional embeddings require an even embedding size it "
                                                   "is however %d." % num_embed)
+        super().__init__(dtype)
         self.scale_up_input = scale_up_input
         self.scale_down_positions = scale_down_positions
         self.num_embed = num_embed
@@ -410,7 +487,7 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
         sin = mx.sym.sin(scaled_positions)
         cos = mx.sym.cos(scaled_positions)
 
-        # (batch_size, num_embed/2)
+        # (batch_size, num_embed)
         pos_embedding = mx.sym.concat(sin, cos, dim=1)
 
         if self.scale_up_input:
@@ -434,13 +511,16 @@ class AddLearnedPositionalEmbeddings(PositionalEncoder):
     :param max_seq_len: Maximum sequence length.
     :param prefix: Name prefix for symbols of this encoder.
     :param embed_weight: Optionally use an existing embedding matrix instead of creating a new one.
+    :param dtype: Data type.
     """
 
     def __init__(self,
                  num_embed: int,
                  max_seq_len: int,
                  prefix: str,
-                 embed_weight: Optional[mx.sym.Symbol] = None) -> None:
+                 embed_weight: Optional[mx.sym.Symbol] = None,
+                 dtype: str = C.DTYPE_FP32) -> None:
+        super().__init__(dtype)
         self.num_embed = num_embed
         self.max_seq_len = max_seq_len
         self.prefix = prefix
@@ -499,9 +579,12 @@ class AddLearnedPositionalEmbeddings(PositionalEncoder):
 class NoOpPositionalEmbeddings(PositionalEncoder):
     """
     Simple NoOp pos embedding. It does not modify the data, but avoids lots of if statements.
+
+    :param dtype: Data type.
     """
 
-    def __init__(self, num_embed) -> None:
+    def __init__(self, num_embed, dtype: str = C.DTYPE_FP32) -> None:
+        super().__init__(dtype)
         self.num_embed = num_embed
 
     def encode(self,
@@ -519,25 +602,40 @@ class NoOpPositionalEmbeddings(PositionalEncoder):
         return self.num_embed
 
 
+def _get_positional_embedding_params(positional_embedding_type: str,
+                                     num_embed: int,
+                                     max_seq_len: int,
+                                     fixed_pos_embed_scale_up_input: bool = False,
+                                     fixed_pos_embed_scale_down_positions: bool = False,
+                                     prefix: str = '') -> Tuple[Callable, Dict]:
+    if positional_embedding_type == C.FIXED_POSITIONAL_EMBEDDING:
+        return AddSinCosPositionalEmbeddings, dict(num_embed=num_embed,
+                                                   scale_up_input=fixed_pos_embed_scale_up_input,
+                                                   scale_down_positions=fixed_pos_embed_scale_down_positions,
+                                                   prefix=prefix)
+    elif positional_embedding_type == C.LEARNED_POSITIONAL_EMBEDDING:
+        return AddLearnedPositionalEmbeddings, dict(num_embed=num_embed,
+                                                    max_seq_len=max_seq_len,
+                                                    prefix=prefix)
+    elif positional_embedding_type == C.NO_POSITIONAL_EMBEDDING:
+        return NoOpPositionalEmbeddings, dict(num_embed=num_embed)
+    else:
+        raise ValueError("Unknown positional embedding type %s" % positional_embedding_type)
+
+
 def get_positional_embedding(positional_embedding_type: str,
                              num_embed: int,
                              max_seq_len: int,
                              fixed_pos_embed_scale_up_input: bool = False,
                              fixed_pos_embed_scale_down_positions: bool = False,
                              prefix: str = '') -> PositionalEncoder:
-    if positional_embedding_type == C.FIXED_POSITIONAL_EMBEDDING:
-        return AddSinCosPositionalEmbeddings(num_embed=num_embed,
-                                             scale_up_input=fixed_pos_embed_scale_up_input,
-                                             scale_down_positions=fixed_pos_embed_scale_down_positions,
-                                             prefix=prefix)
-    elif positional_embedding_type == C.LEARNED_POSITIONAL_EMBEDDING:
-        return AddLearnedPositionalEmbeddings(num_embed=num_embed,
-                                              max_seq_len=max_seq_len,
-                                              prefix=prefix)
-    elif positional_embedding_type == C.NO_POSITIONAL_EMBEDDING:
-        return NoOpPositionalEmbeddings(num_embed=num_embed)
-    else:
-        raise ValueError("Unknown positional embedding type %s" % positional_embedding_type)
+    cls, encoder_params = _get_positional_embedding_params(positional_embedding_type,
+                                                           num_embed,
+                                                           max_seq_len,
+                                                           fixed_pos_embed_scale_up_input,
+                                                           fixed_pos_embed_scale_down_positions,
+                                                           prefix)
+    return cls(**encoder_params)
 
 
 class EncoderSequence(Encoder):
@@ -545,9 +643,11 @@ class EncoderSequence(Encoder):
     A sequence of encoders is itself an encoder.
 
     :param encoders: List of encoders.
+    :param dtype: Data type.
     """
 
-    def __init__(self, encoders: List[Encoder]) -> None:
+    def __init__(self, encoders: List[Encoder], dtype: str = C.DTYPE_FP32) -> None:
+        super().__init__(dtype)
         self.encoders = encoders
 
     def encode(self,
@@ -588,13 +688,35 @@ class EncoderSequence(Encoder):
                            for encoder in self.encoders if encoder.get_max_seq_len() is not None), default=None)
         return max_seq_len
 
+    def append(self, cls, infer_hidden: bool = False, **kwargs) -> Encoder:
+        """
+        Extends sequence with new Encoder. 'dtype' gets passed into Encoder instance if not present in parameters
+        and supported by specific Encoder type.
+
+        :param cls: Encoder type.
+        :param infer_hidden: If number of hidden should be inferred from previous encoder.
+        :param kwargs: Named arbitrary parameters for Encoder.
+
+        :return: Instance of Encoder.
+        """
+        params = dict(kwargs)
+        if infer_hidden:
+            params['num_hidden'] = self.get_num_hidden()
+
+        sig_params = inspect.signature(cls.__init__).parameters
+        if 'dtype' in sig_params and 'dtype' not in kwargs:
+            params['dtype'] = self.dtype
+        encoder = cls(**params)
+        self.encoders.append(encoder)
+        return encoder
+
 
 class RecurrentEncoder(Encoder):
     """
     Uni-directional (multi-layered) recurrent encoder.
 
     :param rnn_config: RNN configuration.
-    :param prefix: Prefix.
+    :param prefix: Prefix for variable names.
     :param layout: Data layout.
     """
 
@@ -602,6 +724,7 @@ class RecurrentEncoder(Encoder):
                  rnn_config: rnn.RNNConfig,
                  prefix: str = C.STACKEDRNN_PREFIX,
                  layout: str = C.TIME_MAJOR) -> None:
+        super().__init__(rnn_config.dtype)
         self.rnn_config = rnn_config
         self.layout = layout
         self.rnn = rnn.get_stacked_rnn(rnn_config, prefix)
@@ -641,7 +764,7 @@ class BiDirectionalRNNEncoder(Encoder):
     States from both RNNs are concatenated together.
 
     :param rnn_config: RNN configuration.
-    :param prefix: Prefix.
+    :param prefix: Prefix for variable names.
     :param layout: Data layout.
     :param encoder_class: Recurrent encoder class to use.
     """
@@ -653,6 +776,7 @@ class BiDirectionalRNNEncoder(Encoder):
                  encoder_class: Callable = RecurrentEncoder) -> None:
         utils.check_condition(rnn_config.num_hidden % 2 == 0,
                               "num_hidden must be a multiple of 2 for BiDirectionalRNNEncoders.")
+        super().__init__(rnn_config.dtype)
         self.rnn_config = rnn_config
         self.internal_rnn_config = rnn_config.copy(num_hidden=rnn_config.num_hidden // 2)
         if layout[0] == 'N':
@@ -730,6 +854,7 @@ class ConvolutionalEncoder(Encoder):
     def __init__(self,
                  config: ConvolutionalEncoderConfig,
                  prefix: str = C.CNN_ENCODER_PREFIX) -> None:
+        super().__init__(config.dtype)
         self.config = config
 
         # initialize the weights of the linear transformation required for the residual connections
@@ -737,7 +862,7 @@ class ConvolutionalEncoder(Encoder):
 
         # initialize the layers of blocks containing a convolution and a GLU, since
         # every layer is shared over all encode calls
-        self.layers = [ConvolutionBlock(
+        self.layers = [convolution.ConvolutionBlock(
             config.cnn_config,
             pad_type='centered',
             prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
@@ -785,6 +910,7 @@ class TransformerEncoder(Encoder):
     def __init__(self,
                  config: transformer.TransformerConfig,
                  prefix: str = C.TRANSFORMER_ENCODER_PREFIX) -> None:
+        super().__init__(config.dtype)
         self.config = config
         self.prefix = prefix
         self.layers = [transformer.TransformerEncoderBlock(
@@ -829,7 +955,7 @@ class TransformerEncoder(Encoder):
         return self.config.model_size
 
 
-class ConvolutionalEmbeddingConfig(Config):
+class ConvolutionalEmbeddingConfig(config.Config):
     """
     Convolutional embedding encoder configuration.
 
@@ -841,6 +967,7 @@ class ConvolutionalEmbeddingConfig(Config):
     :param num_highway_layers: Number of highway layers for segment embeddings.
     :param dropout: Dropout probability.
     :param add_positional_encoding: Dropout probability.
+    :param dtype: Data type.
     """
 
     def __init__(self,
@@ -851,7 +978,8 @@ class ConvolutionalEmbeddingConfig(Config):
                  pool_stride: int = 5,
                  num_highway_layers: int = 4,
                  dropout: float = 0.0,
-                 add_positional_encoding: bool = False) -> None:
+                 add_positional_encoding: bool = False,
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.num_embed = num_embed
         self.output_dim = output_dim
@@ -863,6 +991,7 @@ class ConvolutionalEmbeddingConfig(Config):
         self.add_positional_encoding = add_positional_encoding
         if self.output_dim is None:
             self.output_dim = sum(self.num_filters)
+        self.dtype = dtype
 
 
 class ConvolutionalEmbeddingEncoder(Encoder):
@@ -882,6 +1011,7 @@ class ConvolutionalEmbeddingEncoder(Encoder):
                  prefix: str = C.CHAR_SEQ_ENCODER_PREFIX) -> None:
         utils.check_condition(len(config.num_filters) == config.max_filter_width,
                               "num_filters must have max_filter_width elements.")
+        super().__init__(config.dtype)
         self.num_embed = config.num_embed
         self.output_dim = config.output_dim
         self.max_filter_width = config.max_filter_width

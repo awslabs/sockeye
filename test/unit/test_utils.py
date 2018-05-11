@@ -12,6 +12,7 @@
 # permissions and limitations under the License.
 
 import os
+import re
 import tempfile
 
 import math
@@ -21,6 +22,7 @@ import pytest
 
 from sockeye import __version__
 from sockeye import utils
+from sockeye import constants as C
 
 
 @pytest.mark.parametrize("some_list, expected", [
@@ -201,6 +203,16 @@ def test_check_version_checks_major():
     assert "Given major version (%s) does not match major code version (%s)" % (version, __version__) == str(e.value)
 
 
+def test_version_matches_changelog():
+    """
+    Tests whether the last version mentioned in CHANGELOG.md matches the sockeye version (sockeye/__init__.py).
+    """
+    pattern = re.compile(r'''## \[([0-9.]+)\]''')
+    changelog = open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "CHANGELOG.md")).read()
+    last_changelog_version = pattern.findall(changelog)[0]
+    assert __version__ == last_changelog_version
+
+
 @pytest.mark.parametrize("samples,expected_mean, expected_variance",
                          [
                              ([1, 2], 1.5, 0.25),
@@ -308,3 +320,19 @@ def test_print_value():
     executor_base.backward()
     executor_print.backward()
     assert np.isclose(executor_base.grad_arrays[1].asnumpy(), executor_print.grad_arrays[1].asnumpy()).all()
+
+
+@pytest.mark.parametrize("new, old, metric, result",
+                         [(0, 0, C.PERPLEXITY, False),
+                          (1.0, 1.0, C.PERPLEXITY, False),
+                          (1.0, 0.9, C.PERPLEXITY, False),
+                          (0.99, 1.0, C.PERPLEXITY, True),
+                          (C.LARGE_POSITIVE_VALUE, np.inf, C.PERPLEXITY, True),
+                          (0, 0, C.BLEU, False),
+                          (1.0, 1.0, C.BLEU, False),
+                          (1.0, 0.9, C.BLEU, True),
+                          (0.99, 1.0, C.BLEU, False),
+                          (C.LARGE_POSITIVE_VALUE, np.inf, C.BLEU, False),
+                         ])
+def test_metric_value_is_better(new, old, metric, result):
+    assert utils.metric_value_is_better(new, old, metric) == result

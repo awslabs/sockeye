@@ -67,6 +67,26 @@ Sacre BLEU.
 
 # VERSION HISTORY
 
+- 1.2.7 (10 April 2018)
+   - fixed another locale issue (with --echo)
+   - grudgingly enabled `-tok none` from the command line
+
+- 1.2.6 (22 March 2018)
+   - added wmt17/ms (Microsoft's [additional ZH-EN references](https://github.com/MicrosoftTranslator/Translator-HumanParityData)).
+     Try `sacrebleu -t wmt17/ms --cite`.
+   - `--echo ref` now pastes together all references, if there is more than one
+
+- 1.2.5 (13 March 2018)
+   - added wmt18/dev datasets (en-et and et-en)
+   - fixed logic with --force
+   - locale-independent installation
+   - added "--echo both" (tab-delimited)
+
+- 1.2.3 (28 January 2018)
+   - metrics (`-m`) are now printed in the order requested
+   - chrF now prints a version string (including the beta parameter, importantly)
+   - attempt to remove dependence on locale setting
+
 - 1.2 (17 January 2018)
    - added the chrF metric (`-m chrf` or `-m bleu chrf` for both)
      See 'CHRF: character n-gram F-score for automatic MT evaluation' by Maja Popovic (WMT 2015)
@@ -75,7 +95,7 @@ Sacre BLEU.
      (Thanks to Mauro Cettolo and Marcello Federico).
    - added `--cite` to produce the citation for easy inclusion in papers
    - added `--input` (`-i`) to set input to a file instead of STDIN
-   - removed accent mark (on private suggestion)
+   - removed accent mark after objection from UN official
 
 - 1.1.7 (27 November 2017)
    - corpus_bleu() now raises an exception if input streams are different lengths

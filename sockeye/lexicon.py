@@ -13,23 +13,23 @@
 
 import argparse
 import collections
-import json
-import logging
 import operator
 import os
-from typing import Dict, Generator, Tuple
+import sys
+import time
+from typing import Dict, Generator, Tuple, Optional
 
 import mxnet as mx
 import numpy as np
 
 from . import arguments
 from . import constants as C
-from .data_io import smart_open
+from . import vocab
+from .data_io import smart_open, get_tokens, tokens2ids
 from .log import setup_main_logger, log_sockeye_version
 from .utils import check_condition
-from . import vocab
 
-logger = logging.getLogger(__name__)
+logger = setup_main_logger(__name__, console=True, file_logging=False)
 
 
 class Lexicon:
@@ -223,34 +223,44 @@ class TopKLexicon:
         # Sort and copy top-k trg_ids to lex array row src_id
         for src_id, trg_entries in _lex.items():
             top_k = list(sorted(trg_entries.items(), key=operator.itemgetter(1), reverse=True))[:k]
-            self.lex[src_id, :len(top_k)] = list(sorted(trg_id for (trg_id, _) in top_k))
+            self.lex[src_id, :len(top_k)] = list(trg_id for trg_id, _ in top_k)
             # Free memory after copy
             trg_entries.clear()
         logger.info("Created top-k lexicon from \"%s\", k=%d.", path, k)
 
     def save(self, path: str):
         """
-        Save lexicon in JSON format.  Lexicon will be specific to Sockeye model.
+        Save lexicon in Numpy array format.  Lexicon will be specific to Sockeye model.
 
-        :param path: Path to JSON output file.
+        :param path: Path to Numpy array output file.
         """
-        # Save k, lex array in dict form
-        to_save = [self.lex.shape[1], dict(enumerate(row.tolist() for row in self.lex))]
-        with open(path, "w", encoding=C.VOCAB_ENCODING) as out:
-            json.dump(to_save, out, indent=4, ensure_ascii=False)
+        with open(path, 'wb') as out:
+            np.save(out, self.lex)
+        logger.info("Saved top-k lexicon to \"%s\"", path)
 
-    def load(self, path: str):
+    def load(self, path: str, k: Optional[int] = None):
         """
-        Load lexicon from JSON file.
+        Load lexicon from Numpy array file. The top-k target ids will be sorted by increasing target id.
 
-        :param path: Path to JSON file.
+        :param path: Path to Numpy array file.
+        :param k: Optionally load less items than stored in path.
         """
-        with open(path, encoding=C.VOCAB_ENCODING) as inp:
-            k, loaded = json.load(inp)
-            self.lex = np.zeros((len(self.vocab_source), k), dtype=np.int)
-            for (src_id, top_k) in loaded.items():
-                self.lex[int(src_id), :len(top_k)] = top_k
-        logger.info("Loaded top-k lexicon from \"%s\".", path)
+        load_time_start = time.time()
+        with open(path, 'rb') as inp:
+            _lex = np.load(inp)
+        loaded_k = _lex.shape[1]
+        if k is not None:
+            top_k = min(k, loaded_k)
+            if k > loaded_k:
+                logger.warning("Can not load top-%d translations from lexicon that "
+                               "contains at most %d entries per source.", k, loaded_k)
+        else:
+            top_k = loaded_k
+        self.lex = np.zeros((len(self.vocab_source), top_k), dtype=_lex.dtype)
+        for src_id, trg_ids in enumerate(_lex):
+            self.lex[src_id, :] = np.sort(trg_ids[:top_k])
+        load_time = time.time() - load_time_start
+        logger.info("Loaded top-%d lexicon from \"%s\" in %.4fs.", top_k, path, load_time)
 
     def get_trg_ids(self, src_ids: np.ndarray) -> np.ndarray:
         """
@@ -265,27 +275,67 @@ class TopKLexicon:
         return trg_ids
 
 
-def main():
-    """
-    Commandline interface for building top-k lexicons using during decoding.
-    """
-
-    params = argparse.ArgumentParser(description="Build a top-k lexicon for use during decoding.")
-    arguments.add_lexicon_args(params)
-    arguments.add_logging_args(params)
-    args = params.parse_args()
-
-    logger = setup_main_logger(__name__, console=not args.quiet, file_logging=False)
+def create(args):
+    global logger
+    logger = setup_main_logger('create', console=not args.quiet, file_logging=True, path=args.output + ".log")
     log_sockeye_version(logger)
-
-    logger.info("Reading source and target vocab from \"%s\"", args.model)
-    vocab_source = vocab.vocab_from_json_or_pickle(os.path.join(args.model, C.VOCAB_SRC_NAME))
-    vocab_target = vocab.vocab_from_json_or_pickle(os.path.join(args.model, C.VOCAB_TRG_NAME))
-
     logger.info("Creating top-k lexicon from \"%s\"", args.input)
+    logger.info("Reading source and target vocab from \"%s\"", args.model)
+    vocab_source = vocab.load_source_vocabs(args.model)[0]
+    vocab_target = vocab.load_target_vocab(args.model)
+    logger.info("Building top-%d lexicon", args.k)
     lexicon = TopKLexicon(vocab_source, vocab_target)
     lexicon.create(args.input, args.k)
     lexicon.save(args.output)
+
+
+def inspect(args):
+    global logger
+    logger = setup_main_logger('inspect', console=True, file_logging=False)
+    log_sockeye_version(logger)
+    logger.info("Inspecting top-k lexicon at \"%s\"", args.lexicon)
+    vocab_source = vocab.load_source_vocabs(args.model)[0]
+    vocab_target = vocab.vocab_from_json(os.path.join(args.model, C.VOCAB_TRG_NAME))
+    vocab_target_inv = vocab.reverse_vocab(vocab_target)
+    lexicon = TopKLexicon(vocab_source, vocab_target)
+    lexicon.load(args.lexicon, args.k)
+    logger.info("Reading from STDIN...")
+    for line in sys.stdin:
+        tokens = list(get_tokens(line))
+        if not tokens:
+            continue
+        ids = tokens2ids(tokens, vocab_source)
+        print("Input:  n=%d" % len(tokens), " ".join("%s(%d)" % (tok, i) for tok, i in zip(tokens, ids)))
+        trg_ids = lexicon.get_trg_ids(np.array(ids))
+        tokens_trg = [vocab_target_inv.get(trg_id, C.UNK_SYMBOL) for trg_id in trg_ids]
+        print("Output: n=%d" % len(tokens_trg), " ".join("%s(%d)" % (tok, i) for tok, i in zip(tokens_trg, trg_ids)))
+        print()
+
+
+def main():
+    """
+    Commandline interface for building/inspecting top-k lexicons using during decoding.
+    """
+    params = argparse.ArgumentParser(description="Create or inspect a top-k lexicon for use during decoding.")
+    subparams = params.add_subparsers(title="Commands")
+
+    params_create = subparams.add_parser('create', description="Create top-k lexicon for use during decoding.")
+    arguments.add_lexicon_args(params_create)
+    arguments.add_lexicon_create_args(params_create)
+    arguments.add_logging_args(params_create)
+    params_create.set_defaults(func=create)
+
+    params_inspect = subparams.add_parser('inspect', description="Inspect top-k lexicon for use during decoding.")
+    arguments.add_lexicon_inspect_args(params_inspect)
+    arguments.add_lexicon_args(params_inspect)
+    params_inspect.set_defaults(func=inspect)
+
+    args = params.parse_args()
+    if 'func' not in args:
+        params.print_help()
+        return 1
+    else:
+        args.func(args)
 
 
 if __name__ == "__main__":

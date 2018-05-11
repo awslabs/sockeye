@@ -150,7 +150,8 @@ class LearningRateSchedulerInvSqrtT(LearningRateScheduler):
         self.log_every_t = int(half_life * updates_per_checkpoint)
 
     def __call__(self, num_updates: int):
-        lr = min(self.base_lr / sqrt(1 + num_updates * self.factor), self._warmup(num_updates) if self.warmup > 0 else C.LARGE_POSITIVE_VALUE)
+        lr = min(self.base_lr / sqrt(1 + num_updates * self.factor),
+                 self._warmup(num_updates) if self.warmup > 0 else C.LARGE_POSITIVE_VALUE)
         # Note: this method is called once per parameter for the same t. Making sure to just log once.
         if num_updates > self.t_last_log and num_updates % self.log_every_t == 0:
             logger.info("Learning rate currently at %1.2e", lr)
@@ -180,7 +181,8 @@ class LearningRateSchedulerInvT(LearningRateScheduler):
         self.log_every_t = int(half_life * updates_per_checkpoint)
 
     def __call__(self, num_updates: int):
-        lr = min(self.base_lr / (1 + num_updates * self.factor), self._warmup(num_updates) if self.warmup > 0 else C.LARGE_POSITIVE_VALUE)
+        lr = min(self.base_lr / (1 + num_updates * self.factor),
+                 self._warmup(num_updates) if self.warmup > 0 else C.LARGE_POSITIVE_VALUE)
         # Note: this method is called once per parameter for the same t. Making sure to just log once.
         if num_updates > self.t_last_log and num_updates % self.log_every_t == 0:
             logger.info("Learning rate currently at %1.2e", lr)
@@ -264,6 +266,7 @@ def get_lr_scheduler(scheduler_type: str,
     :param learning_rate_reduce_factor: Factor to reduce learning rate with.
     :param learning_rate_reduce_num_not_improved: Number of checkpoints with no improvement after which learning rate is
            reduced.
+    :param learning_rate_schedule: Optional fixed learning rate schedule.
     :param learning_rate_warmup: Number of batches that the learning rate is linearly increased.
     :raises: ValueError if unknown scheduler_type
     :return: Learning rate scheduler.

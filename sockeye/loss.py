@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -144,41 +144,49 @@ class CrossEntropyMetric(EvalMetric):
         super().__init__(name, output_names=output_names, label_names=label_names)
         self.loss_config = loss_config
 
-    def cross_entropy(self, pred, label, ignore):
-        prob = mx.nd.pick(pred, label.astype(dtype="int32"))
-        prob = prob * (1 - ignore) + ignore
-        loss = -mx.nd.log(prob + 1e-8)  # pylint: disable=invalid-unary-operand-type
-        return loss
+    @staticmethod
+    def cross_entropy(logprob, label):
+        ce = -mx.nd.pick(logprob, label)  # pylint: disable=invalid-unary-operand-type
+        return ce
 
-    def cross_entropy_smoothed(self, pred, label, ignore):
-        label_dist = mx.nd.one_hot(indices=label.astype(dtype='int32'),
-                                   depth=self.loss_config.vocab_size,
-                                   on_value=1.0 - self.loss_config.label_smoothing,
-                                   off_value=self.loss_config.label_smoothing /
-                                             (self.loss_config.vocab_size - 1.0))
-        label_dist = mx.nd.where(1 - ignore, label_dist, mx.nd.zeros_like(label_dist))
-        loss = label_dist * (- mx.nd.log(pred + 1e-8))  # pylint: disable=invalid-unary-operand-type
-        return loss
+    @staticmethod
+    def cross_entropy_smoothed(logprob, label, alpha, num_classes):
+        ce = CrossEntropyMetric.cross_entropy(logprob, label)
+        # gain for each incorrect class
+        per_class_gain = alpha / (num_classes - 1)
+        # discounted loss for correct class
+        ce *= 1 - alpha - per_class_gain
+        # add gain for incorrect classes to total cross-entropy
+        ce -= mx.nd.sum(logprob * per_class_gain, axis=-1, keepdims=False)
+        return ce
 
     def update(self, labels, preds):
         for label, pred in zip(labels, preds):
             batch_size = label.shape[0]
             label = label.as_in_context(pred.context).reshape((label.size,))
-            # Ignore padding
-            # TODO: contribute ignoring padding for cross-entropy back to MXNet
-            ignore = (label == C.PAD_ID).astype(dtype=pred.dtype)
 
+            logprob = mx.nd.log(mx.nd.maximum(1e-10, pred))
+
+            # ce: (batch*time,)
             if self.loss_config.label_smoothing > 0.0:
-                loss = self.cross_entropy_smoothed(pred, label, ignore)
+                ce = self.cross_entropy_smoothed(logprob, label,
+                                                 alpha=self.loss_config.label_smoothing,
+                                                 num_classes=self.loss_config.vocab_size)
             else:
-                loss = self.cross_entropy(pred, label, ignore)
+                ce = self.cross_entropy(logprob, label)
 
-            # Sum, normalizing if needed
+            # mask pad tokens
+            valid = (label != C.PAD_ID).astype(dtype=pred.dtype)
+            ce *= valid
+
+            ce = mx.nd.sum(ce)
             if self.loss_config.normalization_type == C.LOSS_NORM_VALID:
-                loss = loss / mx.nd.sum(1 - ignore)
+                num_valid = mx.nd.sum(valid)
+                ce /= num_valid
                 self.num_inst += 1
             elif self.loss_config.normalization_type == C.LOSS_NORM_BATCH:
                 # When not normalizing, we divide by the batch size (number of sequences)
                 # NOTE: This is different from MXNet's metrics
                 self.num_inst += batch_size
-            self.sum_metric += mx.nd.sum(loss).asscalar()
+
+            self.sum_metric += ce.asscalar()

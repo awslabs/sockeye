@@ -23,9 +23,9 @@ If you haven't installed the library yet you can do so by running:
 pip install matplotlib
 ```
 
-We will visualize training progress using `tensorboard`. Install it using:
+We will visualize training progress using Tensorboard and its MXNet adaptor, `mxboard`. Install it using:
 ```bash
-pip install tensorboard
+pip install tensorboard mxboard
 ```
 
 All of the commands below assume you're running on a CPU.
@@ -93,7 +93,6 @@ python -m sockeye.train -s corpus.tc.BPE.de \
                         --rnn-attention-type dot \
                         --max-seq-len 60 \
                         --decode-and-evaluate 500 \
-                        --use-tensorboard \
                         --use-cpu \
                         -o wmt_model
 ```
@@ -130,10 +129,9 @@ the metrics file and tensorboard.
 In addition to printing training and validation metrics on stdout Sockeye also keeps track of them in
 the file `wmt_model/metrics`. Here you find all relevant metrics that were calculated during checkpointing.
 
-[tensorboard](https://github.com/dmlc/tensorboard) allows for monitoring training and validation metrics in a browser.
-In the training command above we enabled tracking of metrics in a tensorboard compatible way
-by specifying `--use-tensorboard`. With this we can simply point tensorboard to the model directory or any of its parent
-directories:
+[tensorboard](https://github.com/awslabs/mxboard) allows for monitoring training and validation metrics in a browser.
+If you have installed it (`pip install mxboard`), Sockeye will log training events in a Tensorboard file that can be
+visualized with Tensorboard (`pip install tensorboard`)
 
 ```bash
 tensorboard --logdir .
@@ -195,6 +193,25 @@ This will create a file `align_1.png` that looks similar to this:
 Note that the alignment plot shows the subword units instead of tokens, as this is the representation used by Sockeye 
 during translation.
 Additionally you can see the special end-of-sentence symbol `</s>` being added to the target sentence.
+
+
+### Embedding inspection
+
+You can inspect the embeddings learned by the model during training. Sockeye includes a tool to compute pairwise
+similarities (Euclidean distance) for all types in the embeddings space. Given a query token, it returns the nearest
+neighbors in the space.
+You can run it like this:
+
+```
+echo "haus" | python3 -m sockeye.embeddings -m wmt_model -s source
+[INFO:__main__] Arguments: Namespace(checkpoint=None, gamma=1.0, k=5, model='wmt_model', norm=False, side='source')
+Input: haus
+haus id=35
+  gebaeude id=68 sim=0.8498
+  Haus id=1759 sim=0.1441
+  hauser id=295 sim=0.0049
+```
+(Your own output may look different)
 
 
 ### Model ensembling

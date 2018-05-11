@@ -16,12 +16,10 @@ Decoders for sequence-to-sequence models.
 """
 import logging
 from abc import ABC, abstractmethod
-from typing import Callable, Dict, List, NamedTuple, Tuple, Union
-from typing import Optional
+from typing import Callable, cast, Dict, List, NamedTuple, Optional, Tuple, Union, Type
 
 import mxnet as mx
 
-from sockeye.config import Config
 from . import constants as C
 from . import convolution
 from . import encoder
@@ -30,20 +28,14 @@ from . import rnn
 from . import rnn_attention
 from . import transformer
 from . import utils
+from .config import Config
 
 logger = logging.getLogger(__name__)
 DecoderConfig = Union['RecurrentDecoderConfig', transformer.TransformerConfig, 'ConvolutionalDecoderConfig']
 
 
-def get_decoder(config: DecoderConfig) -> 'Decoder':
-    if isinstance(config, RecurrentDecoderConfig):
-        return RecurrentDecoder(config=config, prefix=C.RNN_DECODER_PREFIX)
-    elif isinstance(config, ConvolutionalDecoderConfig):
-        return ConvolutionalDecoder(config=config, prefix=C.CNN_DECODER_PREFIX)
-    elif isinstance(config, transformer.TransformerConfig):
-        return TransformerDecoder(config=config, prefix=C.TRANSFORMER_DECODER_PREFIX)
-    else:
-        raise ValueError("Unsupported decoder configuration")
+def get_decoder(config: DecoderConfig, prefix: str = '') -> 'Decoder':
+    return Decoder.get_decoder(config, prefix)
 
 
 class Decoder(ABC):
@@ -54,7 +46,48 @@ class Decoder(ABC):
     The latter is typically used for inference graphs in beam search.
     For the inference module to be able to keep track of decoder's states
     a decoder provides methods to return initial states (init_states), state variables and their shapes.
+
+    :param dtype: Data type.
     """
+
+    __registry = {}  # type: Dict[Type[DecoderConfig], Tuple[Type['Decoder'], str]]
+
+    @classmethod
+    def register(cls, config_type: Type[DecoderConfig], suffix: str):
+        """
+        Registers decoder type for configuration. Suffix is appended to decoder prefix.
+
+        :param config_type: Configuration type for decoder.
+        :param suffix: String to append to decoder prefix.
+
+        :return: Class decorator.
+        """
+        def wrapper(target_cls):
+            cls.__registry[config_type] = (target_cls, suffix)
+            return target_cls
+
+        return wrapper
+
+    @classmethod
+    def get_decoder(cls, config: DecoderConfig, prefix: str) -> 'Decoder':
+        """
+        Creates decoder based on config type.
+
+        :param config: Decoder config.
+        :param prefix: Prefix to prepend for decoder.
+
+        :return: Decoder instance.
+        """
+        config_type = type(config)
+        if config_type not in cls.__registry:
+            raise ValueError('Unsupported decoder configuration %s' % config_type.__name__)
+        decoder_cls, suffix = cls.__registry[config_type]
+        # TODO: move final suffix/prefix construction logic into config builder
+        return decoder_cls(config=config, prefix=prefix + suffix)
+
+    @abstractmethod
+    def __init__(self, dtype):
+        self.dtype = dtype
 
     @abstractmethod
     def decode_sequence(self,
@@ -163,6 +196,7 @@ class Decoder(ABC):
         return None
 
 
+@Decoder.register(transformer.TransformerConfig, C.TRANSFORMER_DECODER_PREFIX)
 class TransformerDecoder(Decoder):
     """
     Transformer decoder as in Vaswani et al, 2017: Attention is all you need.
@@ -179,6 +213,7 @@ class TransformerDecoder(Decoder):
     def __init__(self,
                  config: transformer.TransformerConfig,
                  prefix: str = C.TRANSFORMER_DECODER_PREFIX) -> None:
+        super().__init__(config.dtype)
         self.config = config
         self.prefix = prefix
         self.layers = [transformer.TransformerDecoderBlock(
@@ -259,8 +294,8 @@ class TransformerDecoder(Decoder):
         :param states: Arbitrary list of decoder states.
         :return: logit inputs, attention probabilities, next decoder states.
         """
-        # for step > 1, states contains source_encoded, source_encoded_lengths, and a cache tensor
-        source_encoded, source_encoded_lengths = states[:2]  # pylint: disable=unbalanced-tuple-unpacking
+        # for step > 1, states contains source_encoded, source_encoded_lengths, and cache tensors.
+        source_encoded, source_encoded_lengths, *cache = states  # type: ignore
 
         # symbolic indices of the previous word
         indices = mx.sym.arange(start=step - 1, stop=step, step=1, name='indices')
@@ -283,19 +318,17 @@ class TransformerDecoder(Decoder):
         target_bias = transformer.get_autoregressive_bias(step, name="%sbias" % self.prefix)
         target_bias = mx.sym.slice_axis(target_bias, axis=1, begin=-1, end=step)
 
-        # retrieve precomputed self-attention keys & values for each layer from states.
-        layer_caches = self._get_layer_caches_from_states(list(states))
-        cache = []  # type: List[mx.sym.Symbol]
+        new_states = [source_encoded, source_encoded_lengths]
+        layer_caches = self._get_cache_per_layer(cast(List[mx.sym.Symbol], cache))
         for layer, layer_cache in zip(self.layers, layer_caches):
             target = layer(target=target,
                            target_bias=target_bias,
                            source=source_encoded,
                            source_bias=source_bias,
                            cache=layer_cache)
-            # store updated keys and values in the cache.
+            # store updated keys and values in states list.
             # (layer.__call__() has the side-effect of updating contents of layer_cache)
-            cache += [layer_cache['k'], layer_cache['v']]
-        cache = mx.sym.concat(*cache, dim=1, name='new_cache')
+            new_states += [layer_cache['k'], layer_cache['v']]
 
         # (batch_size, 1, model_size)
         target = self.final_process(data=target, prev=None)
@@ -305,32 +338,21 @@ class TransformerDecoder(Decoder):
         # TODO(fhieber): no attention probs for now
         attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
 
-        new_states = [source_encoded, source_encoded_lengths, cache]
         return target, attention_probs, new_states
 
-    def _get_layer_caches_from_states(self, states: List[mx.sym.Symbol]) -> List[Dict[str, Optional[mx.sym.Symbol]]]:
+    def _get_cache_per_layer(self, cache: List[mx.sym.Symbol]) -> List[Dict[str, Optional[mx.sym.Symbol]]]:
         """
-        For decoder time steps > 1 there will be a cache tensor available that contains
+        For decoder time steps > 1 there will be cache tensors available that contain
         previously computed key & value tensors for each transformer layer.
-        The cache tensor passed in is concatenated along the time-axis for efficiency.
 
-        :param states: List of states passed to decode_step().
+        :param cache: List of states passed to decode_step().
         :return: List of layer cache dictionaries.
         """
-        cache = None
-
-        if len(states) == 3:
-            cache = states[2]
-            # len(self.layers) * 2 cache items
-            cache = mx.sym.split(cache, num_outputs=len(self.layers) * 2, axis=1, squeeze_axis=False)
-
         if not cache:  # first decoder step
             return [{'k': None, 'v': None} for _ in range(len(self.layers))]
         else:
-            layer_caches = []  # type: List[Dict[str, Optional[mx.sym.Symbol]]]
-            for i in range(len(self.layers)):
-                layer_caches.append({'k': cache[2 * i + 0], 'v': cache[2 * i + 1]})
-            return layer_caches
+            assert len(cache) == len(self.layers) * 2
+            return [{'k': cache[2 * l + 0], 'v': cache[2 * l + 1]} for l in range(len(self.layers))]
 
     def reset(self):
         pass
@@ -366,7 +388,9 @@ class TransformerDecoder(Decoder):
         variables = [mx.sym.Variable(C.SOURCE_ENCODED_NAME),
                      mx.sym.Variable(C.SOURCE_LENGTH_NAME)]
         if target_max_length > 1:  # no cache for initial decoder step
-                variables.append(mx.sym.Variable('cache'))
+            for l in range(len(self.layers)):
+                variables.append(mx.sym.Variable('cache_l%d_k' % l))
+                variables.append(mx.sym.Variable('cache_l%d_v' % l))
         return variables
 
     def state_shapes(self,
@@ -390,14 +414,13 @@ class TransformerDecoder(Decoder):
                   mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")]
 
         if target_max_length > 1:  # no cache for initial decoder step
-            # the cache tensor passed in and out of the decoder step module contains
-            # all cache tensors concatenated along the time axis
-            # (as all inputs to the module need to of same batch size).
-            shapes.append(mx.io.DataDesc(name='cache',
-                                         shape=(batch_size,
-                                                (target_max_length - 1) * len(self.layers) * 2,
-                                                self.config.model_size),
-                                         layout=C.BATCH_MAJOR))
+            for l in range(len(self.layers)):
+                shapes.append(mx.io.DataDesc(name='cache_l%d_k' % l,
+                                             shape=(batch_size, target_max_length - 1, self.config.model_size),
+                                             layout=C.BATCH_MAJOR))
+                shapes.append(mx.io.DataDesc(name='cache_l%d_v' % l,
+                                             shape=(batch_size, target_max_length - 1, self.config.model_size),
+                                             layout=C.BATCH_MAJOR))
         return shapes
 
     def get_max_seq_len(self) -> Optional[int]:
@@ -426,9 +449,11 @@ class RecurrentDecoderConfig(Config):
     :param attention_config: Attention configuration.
     :param hidden_dropout: Dropout probability on next decoder hidden state.
     :param state_init: Type of RNN decoder state initialization: zero, last, average.
+    :param state_init_lhuc: Apply LHUC for encoder to decoder initialization.
     :param context_gating: Whether to use context gating.
     :param layer_normalization: Apply layer normalization.
     :param attention_in_upper_layers: Pass the attention value to all layers in the decoder.
+    :param dtype: Data type.
     """
 
     def __init__(self,
@@ -437,20 +462,25 @@ class RecurrentDecoderConfig(Config):
                  attention_config: rnn_attention.AttentionConfig,
                  hidden_dropout: float = .0,  # TODO: move this dropout functionality to OutputLayer
                  state_init: str = C.RNN_DEC_INIT_LAST,
+                 state_init_lhuc: bool = False,
                  context_gating: bool = False,
                  layer_normalization: bool = False,
-                 attention_in_upper_layers: bool = False) -> None:
+                 attention_in_upper_layers: bool = False,
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.max_seq_len_source = max_seq_len_source
         self.rnn_config = rnn_config
         self.attention_config = attention_config
         self.hidden_dropout = hidden_dropout
         self.state_init = state_init
+        self.state_init_lhuc = state_init_lhuc
         self.context_gating = context_gating
         self.layer_normalization = layer_normalization
         self.attention_in_upper_layers = attention_in_upper_layers
+        self.dtype = dtype
 
 
+@Decoder.register(RecurrentDecoderConfig, C.RNN_DECODER_PREFIX)
 class RecurrentDecoder(Decoder):
     """
     RNN Decoder with attention.
@@ -463,10 +493,13 @@ class RecurrentDecoder(Decoder):
     def __init__(self,
                  config: RecurrentDecoderConfig,
                  prefix: str = C.RNN_DECODER_PREFIX) -> None:
+        super().__init__(config.dtype)
         # TODO: implement variant without input feeding
         self.config = config
         self.rnn_config = config.rnn_config
-        self.attention = rnn_attention.get_attention(config.attention_config, config.max_seq_len_source)
+        self.attention = rnn_attention.get_attention(config.attention_config,
+                                                     config.max_seq_len_source,
+                                                     prefix + C.ATTENTION_PREFIX)
         self.prefix = prefix
 
         self.num_hidden = self.rnn_config.num_hidden
@@ -556,8 +589,8 @@ class RecurrentDecoder(Decoder):
         # layer_states: List[(batch_size, state_num_hidden]
         state = self.get_initial_state(source_encoded, source_encoded_lengths)
 
-        # hidden_all: target_seq_len * (batch_size, 1, rnn_num_hidden)
-        hidden_all = []
+        # hidden_all: target_embed_max_length * (batch_size, rnn_num_hidden)
+        hidden_states = []  # type: List[mx.sym.Symbol]
         # TODO: possible alternative: feed back the context vector instead of the hidden (see lamtram)
         self.reset()
         for seq_idx in range(target_embed_max_length):
@@ -567,13 +600,10 @@ class RecurrentDecoder(Decoder):
                                                 attention_func,
                                                 attention_state,
                                                 seq_idx)
-            # hidden_expanded: (batch_size, 1, rnn_num_hidden)
-            hidden_all.append(mx.sym.expand_dims(data=state.hidden, axis=1))
+            hidden_states.append(state.hidden)
 
-        # concatenate along time axis
-        # hidden_concat: (batch_size, target_seq_len, rnn_num_hidden)
-        hidden_concat = mx.sym.concat(*hidden_all, dim=1, name="%shidden_concat" % self.prefix)
-        return hidden_concat
+        # concatenate along time axis: (batch_size, target_embed_max_length, rnn_num_hidden)
+        return mx.sym.stack(*hidden_states, axis=1, name='%shidden_stack' % self.prefix)
 
     def decode_step(self,
                     step: int,
@@ -724,25 +754,19 @@ class RecurrentDecoder(Decoder):
         :param source_encoded_length: Lengths of source sequences. Shape: (batch_size,).
         :return: Decoder state.
         """
-        # TODO (tdomhan): Due to a bug in swapaxes we need to avoid in-place gradient additions, see:
-        # https://github.com/apache/incubator-mxnet/pull/9495
-        source_encoded = mx.sym.identity(source_encoded)
-        # The mx.sym.Sequence* operators expect time-major data.
-        # TODO (tdomhan): Use the `axis` argument instead of transposing once the new MXNet version becomes available.
-        # (see https://github.com/apache/incubator-mxnet/pull/9306)
-        # (source_encoded_max_length, batch_size, encoder_depth)
-        source_encoded_time_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_time_major')
-
         # we derive the shape of hidden and layer_states from some input to enable
         # shape inference for the batch dimension during inference.
         # (batch_size, 1)
         zeros = mx.sym.expand_dims(mx.sym.zeros_like(source_encoded_length), axis=1)
         # last encoder state: (batch, num_hidden)
-        source_encoded_last = mx.sym.SequenceLast(data=source_encoded_time_major,
+        source_encoded_last = mx.sym.SequenceLast(data=source_encoded,
+                                                  axis=1,
                                                   sequence_length=source_encoded_length,
                                                   use_sequence_length=True) \
             if self.config.state_init == C.RNN_DEC_INIT_LAST else None
-        source_masked = mx.sym.SequenceMask(data=source_encoded_time_major,
+        # source_masked: (batch_size, source_seq_len, encoder_num_hidden)
+        source_masked = mx.sym.SequenceMask(data=source_encoded,
+                                            axis=1,
                                             sequence_length=source_encoded_length,
                                             use_sequence_length=True,
                                             value=0.) if self.config.state_init == C.RNN_DEC_INIT_AVG else None
@@ -760,7 +784,7 @@ class RecurrentDecoder(Decoder):
                     init = source_encoded_last
                 elif self.config.state_init == C.RNN_DEC_INIT_AVG:
                     # (batch_size, encoder_num_hidden)
-                    init = mx.sym.broadcast_div(mx.sym.sum(source_masked, axis=0, keepdims=False),
+                    init = mx.sym.broadcast_div(mx.sym.sum(source_masked, axis=1, keepdims=False),
                                                 mx.sym.expand_dims(source_encoded_length, axis=1))
                 else:
                     raise ValueError("Unknown decoder state init type '%s'" % self.config.state_init)
@@ -774,6 +798,9 @@ class RecurrentDecoder(Decoder):
                     init = self.init_norms[state_idx].normalize(init)
                 init = mx.sym.Activation(data=init, act_type="tanh",
                                          name="%senc2dec_inittanh_%d" % (self.prefix, state_idx))
+                if self.config.state_init_lhuc:
+                    lhuc = layers.LHUC(init_num_hidden, prefix="%senc2decinit_%d_" % (self.prefix, state_idx))
+                    init = lhuc.apply(init)
             layer_states.append(init)
 
         return RecurrentDecoderState(hidden, layer_states)
@@ -895,6 +922,7 @@ class ConvolutionalDecoderConfig(Config):
     :param num_layers: The number of convolutional layers.
     :param positional_embedding_type: The type of positional embedding.
     :param hidden_dropout: Dropout probability on next decoder hidden state.
+    :param dtype: Data type.
     """
 
     def __init__(self,
@@ -905,7 +933,8 @@ class ConvolutionalDecoderConfig(Config):
                  num_layers: int,
                  positional_embedding_type: str,
                  project_qkv: bool = False,
-                 hidden_dropout: float = .0) -> None:
+                 hidden_dropout: float = .0,
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.cnn_config = cnn_config
         self.max_seq_len_target = max_seq_len_target
@@ -915,8 +944,10 @@ class ConvolutionalDecoderConfig(Config):
         self.positional_embedding_type = positional_embedding_type
         self.project_qkv = project_qkv
         self.hidden_dropout = hidden_dropout
+        self.dtype = dtype
 
 
+@Decoder.register(ConvolutionalDecoderConfig, C.CNN_DECODER_PREFIX)
 class ConvolutionalDecoder(Decoder):
     """
     Convolutional decoder similar to Gehring et al. 2017.
@@ -939,7 +970,7 @@ class ConvolutionalDecoder(Decoder):
     def __init__(self,
                  config: ConvolutionalDecoderConfig,
                  prefix: str = C.DECODER_PREFIX) -> None:
-        super().__init__()
+        super().__init__(config.dtype)
         self.config = config
         self.prefix = prefix
 
@@ -1153,7 +1184,7 @@ class ConvolutionalDecoder(Decoder):
         # Note: We can not use mx.sym.zeros, as otherwise shape inference fails.
         # Therefore we need to get a zero array of the right size through other means.
         # (batch_size, 1, 1)
-        zeros = mx.sym.expand_dims(mx.sym.expand_dims(mx.sym.zeros_like(source_encoded_lengths), axis=1), axis=2)
+        zeros = mx.sym.reshape(mx.sym.zeros_like(source_encoded_lengths), shape=(-1, 1, 1))
         # (batch_size, kernel_width-1, num_hidden)
         next_layer_inputs = [mx.sym.tile(data=zeros, reps=(1, kernel_width - 1, num_hidden),
                                          name="%s%d_init" % (self.prefix, layer_idx))

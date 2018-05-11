@@ -97,7 +97,7 @@ LOGGING_CONFIGS = {
 }
 
 
-def _is_python34() -> bool:
+def is_python34() -> bool:
     version = sys.version_info
     return version[0] == 3 and version[1] == 4
 
@@ -125,7 +125,7 @@ def setup_main_logger(name: str, file_logging=True, console=True, path: Optional
     logger = logging.getLogger(name)
 
     def exception_hook(exc_type, exc_value, exc_traceback):
-        if _is_python34():
+        if is_python34():
             # Python3.4 does not seem to handle logger.exception() well
             import traceback
             traceback = "".join(traceback.format_tb(exc_traceback)) + exc_type.name

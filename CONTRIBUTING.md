@@ -1,1 +1,1 @@
-docs/development.md
+[CONTRIBUTING](docs/development.md)

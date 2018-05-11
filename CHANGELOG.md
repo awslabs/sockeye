@@ -10,6 +10,138 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.10]
+### Fixed
+- Re-allow early stopping w.r.t BLEU
+
+## [1.18.9]
+### Fixed
+- Fixed a problem with lhuc boolean flags passed as None.
+
+### Added
+- Reorganized beam search. Normalization is applied only to completed hypotheses, and pruning of
+  hypotheses (logprob against highest-scoring completed hypothesis) can be specified with
+  `--beam-prune X`
+- Enabled stopping at first completed hypothesis with `--beam-search-stop first` (default is 'all')
+
+## [1.18.8]
+### Removed
+- Removed tensorboard logging of embedding & output parameters at every checkpoint. This used a lot of disk space.
+
+## [1.18.7]
+### Added
+- Added support for LHUC in RNN models (David Vilar, "Learning Hidden Unit
+  Contribution for Adapting Neural Machine Translation Models" NAACL 2018)
+
+### Fixed
+- Word based batching with very small batch sizes.
+
+## [1.18.6]
+### Fixed
+- Fixed a problem with learning rate scheduler not properly being loaded when resuming training.
+
+## [1.18.5]
+### Fixed
+- Fixed a problem with trainer not waiting for the last checkpoint decoder (#367).
+
+## [1.18.4]
+### Added
+- Added options to control training length w.r.t number of updates/batches or number of samples:
+  `--min-updates`, `--max-updates`, `--min-samples`, `--max-samples`.
+
+## [1.18.3]
+### Changed
+- Training now supports training and validation data that contains empty segments. If a segment is empty, it is skipped
+  during loading and a warning message including the number of empty segments is printed.
+
+## [1.18.2]
+### Changed
+- Removed combined linear projection of keys & values in source attention transformer layers for
+  performance improvements.
+- The topk operator is performed in a single operation during batch decoding instead of running in a loop over each 
+sentence, bringing speed benefits in batch decoding.
+
+## [1.18.1]
+### Added
+- Added Tensorboard logging for all parameter values and gradients as histograms/distributions. The logged values
+  correspond to the current batch at checkpoint time.
+
+### Changed
+- Tensorboard logging now is done with the MXNet compatible 'mxboard' that supports logging of all kinds of events
+  (scalars, histograms, embeddings, etc.). If installed, training events are written out to Tensorboard compatible
+  even files automatically.
+
+### Removed
+- Removed the `--use-tensorboard` argument from `sockeye.train`. Tensorboard logging is now enabled by default if
+  `mxboard` is installed.
+
+## [1.18.0]
+### Changed
+- Change default target vocab name in model folder to `vocab.trg.0.json`
+- Changed serialization format of top-k lexica to pickle/Numpy instead of JSON.
+- `sockeye-lexicon` now supports two subcommands: create & inspect.
+  The former provides the same functionality as the previous CLI.
+  The latter allows users to pass source words to the top-k lexicon to inspect the set of allowed target words.
+
+### Added
+- Added ability to choose a smaller `k` at decoding runtime for lexicon restriction.
+
+## [1.17.5]
+### Added
+- Added a flag `--strip-unknown-words` to `sockeye.translate` to remove any `<unk>` symbols from the output strings.
+
+## [1.17.4]
+### Added
+- Added a flag `--fixed-param-names` to prevent certain parameters from being optimized during training.
+  This is useful if you want to keep pre-trained embeddings fixed during training.
+- Added a flag `--dry-run` to `sockeye.train` to not perform any actual training, but print statistics about the model
+  and mode of operation.
+
+## [1.17.3]
+### Changed
+- `sockeye.evaluate` can now handle multiple hypotheses files by simply specifying `--hypotheses file1 file2...`.
+For each metric the mean and standard deviation will be reported across files.
+
+## [1.17.2]
+### Added
+- Optionally store the beam search history to a `json` output using the `beam_store` output handler.
+
+### Changed
+- Use stack operator instead of expand_dims + concat in RNN decoder. Reduces memory usage.
+
+## [1.17.1]
+### Changed
+ - Updated to [MXNet 1.1.0](https://github.com/apache/incubator-mxnet/tree/1.1.0)
+
+## [1.17.0]
+### Added
+ - Source factors, as described in
+
+   Linguistic Input Features Improve Neural Machine Translation (Sennrich \& Haddow, WMT 2016)
+   [PDF](http://www.aclweb.org/anthology/W16-2209.pdf) [bibtex](http://www.aclweb.org/anthology/W16-2209.bib)
+
+   Additional source factors are enabled by passing `--source-factors file1 [file2 ...]` (`-sf`), where file1, etc. are
+   token-parallel to the source (`-s`).
+   An analogous parameter, `--validation-source-factors`, is used to pass factors for validation data.
+   The flag `--source-factors-num-embed D1 [D2 ...]` denotes the embedding dimensions and is required if source factor
+   files are given. Factor embeddings are concatenated to the source embeddings dimension (`--num-embed`).
+
+   At test time, the input sentence and its factors can be passed in via STDIN or command-line arguments.
+   - For STDIN, the input and factors should be in a token-based factored format, e.g.,
+     `word1|factor1|factor2|... w2|f1|f2|... ...1`.
+   - You can also use file arguments, which mirrors training: `--input` takes the path to a file containing the source,
+     and `--input-factors` a list of files containing token-parallel factors.
+   At test time, an exception is raised if the number of expected factors does not
+   match the factors passed along with the input.
+   
+ - Removed bias parameters from multi-head attention layers of the transformer.
+
+## [1.16.6]
+### Changed
+ - Loading/Saving auxiliary parameters of the models. Before aux parameters were not saved or used for initialization.
+ Therefore the parameters of certain layers were ignored (e.g., BatchNorm) and randomly initialized. This change
+ enables to properly load, save and initialize the layers which use auxiliary parameters.
+
 ## [1.16.5]
 ### Changed
  - Device locking: Only one process will be acquiring GPUs at a time.

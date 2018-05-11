@@ -13,13 +13,7 @@ ROOT = os.path.dirname(__file__)
 def get_long_description():
     with open(os.path.join(ROOT, 'README.md'), encoding='utf-8') as f:
         markdown_txt = f.read()
-    try:
-        import pypandoc
-        long_description = pypandoc.convert(markdown_txt, 'rst', format='md')
-    except(IOError, ImportError):
-        logging.warning("Could not import package 'pypandoc'. Will not convert markdown readme to rst for PyPI.")
-        long_description = markdown_txt
-    return long_description
+        return markdown_txt
 
 
 def get_version():
@@ -77,6 +71,20 @@ if args.requirement is None:
 else:
     install_requires = get_requirements(args.requirement)
 
+entry_points={
+    'console_scripts': [
+        'sockeye-average = sockeye.average:main',
+        'sockeye-embeddings = sockeye.embeddings:main',
+        'sockeye-evaluate = sockeye.evaluate:main',
+        'sockeye-extract-parameters = sockeye.extract_parameters:main',
+        'sockeye-lexicon = sockeye.lexicon:main',
+        'sockeye-init-embed = sockeye.init_embedding:main',
+        'sockeye-prepare-data = sockeye.prepare_data:main',
+        'sockeye-train = sockeye.train:main',
+        'sockeye-translate = sockeye.translate:main',
+        'sockeye-vocab = sockeye.vocab:main'
+    ],
+}
 
 args = dict(
     name='sockeye',
@@ -85,6 +93,7 @@ args = dict(
 
     description='Sequence-to-Sequence framework for Neural Machine Translation',
     long_description=get_long_description(),
+    long_description_content_type="text/markdown",
 
     url='https://github.com/awslabs/sockeye',
 
@@ -102,26 +111,13 @@ args = dict(
     tests_require=['pytest', 'pytest-cov'],
 
     extras_require={
-        'optional': ['tensorboard', 'matplotlib'],
+        'optional': ['mxboard', 'matplotlib'],
         'dev': get_requirements('requirements.dev.txt')
     },
 
     install_requires=install_requires,
 
-    entry_points={
-        'console_scripts': [
-            'sockeye-average = sockeye.average:main',
-            'sockeye-embeddings = sockeye.embeddings:main',
-            'sockeye-evaluate = sockeye.evaluate:main',
-            'sockeye-extract-parameters = sockeye.extract_parameters:main',
-            'sockeye-lexicon = sockeye.lexicon:main',
-            'sockeye-init-embed = sockeye.init_embedding:main',
-            'sockeye-prepare-data = sockeye.prepare_data:main',
-            'sockeye-train = sockeye.train:main',
-            'sockeye-translate = sockeye.translate:main',
-            'sockeye-vocab = sockeye.vocab:main'
-        ],
-    },
+    entry_points=entry_points,
 
     classifiers = [
         'License :: OSI Approved :: Apache Software License',
