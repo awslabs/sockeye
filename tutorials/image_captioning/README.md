@@ -1,18 +1,9 @@
-# Sockeye Captioner
+# Image Captioning
 
 This module extends Sockeye to perform image captioning. It follows the same logic of sequence-to-sequence frameworks, which consist of encoder-decoder models.
 In this case the encoder takes an image instead of a sentence and encodes it in a feature representation.
 This is decoded with attention (optionally) using exactly the same models of Sockeye (RNNs, transformers, or CNNs).
 
-
-## Dependencies
-
-Sockeye Captioner requires:
-- **Python3**
-- [MXNet-1.0.0](https://github.com/apache/incubator-mxnet/tree/1.0.0)
-- numpy
-- Pillow
-- matplotlib (optional for visualization)
 
 ## Installation
 
