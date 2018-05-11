@@ -110,12 +110,12 @@ class SockeyeModel:
         # source & target embeddings
         embed_weight_source, embed_weight_target, out_weight_target = self._get_embed_weights(self.prefix)
         if isinstance(self.config.config_embed_source, encoder.PassThroughEmbeddingConfig):
-            self.embedding_source = encoder.PassThroughEmbedding(self.config.config_embed_source)
+            self.embedding_source = encoder.PassThroughEmbedding(self.config.config_embed_source) # type: encoder.Encoder
         else:
             self.embedding_source = encoder.Embedding(self.config.config_embed_source,
                                                     prefix=self.prefix + C.SOURCE_EMBEDDING_PREFIX,
                                                     embed_weight=embed_weight_source,
-                                                    is_source=True)
+                                                    is_source=True)  # type: encoder.Encoder
 
         self.embedding_target = encoder.Embedding(self.config.config_embed_target,
                                                   prefix=self.prefix + C.TARGET_EMBEDDING_PREFIX,

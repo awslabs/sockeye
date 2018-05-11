@@ -101,7 +101,7 @@ class ImageCaptioner(Translator):
         :param sentence: Input image path.
         :return: Input for translate method.
         """
-        return TranslatorInput(id=sentence_id, sentence=sentence.rstrip(), tokens=[])
+        return TranslatorInput(sentence_id=sentence_id, tokens=[sentence], factors=None)
 
     def translate(self, trans_inputs: List[TranslatorInput]) -> List[TranslatorOutput]:
         """

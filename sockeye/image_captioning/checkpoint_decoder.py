@@ -37,6 +37,9 @@ class CheckpointDecoderImageModel(CheckpointDecoder):
 
     :param source_image_size: Size of the image feed into the net.
     :param image_root: Root where the images are stored.
+    :param max_output_length: Max length of the generated sentence.
+    :param use_feature_loader: True if features are loaded instead of images.
+    :param kwargs: Arguments passed to `sockeye.checkpoint_decoder.CheckpointDecoder`.
     """
 
     def __init__(self,
@@ -63,21 +66,29 @@ class CheckpointDecoderImageModel(CheckpointDecoder):
         :return: Mapping of metric names to scores.
         """
 
-        models, vocab_source, vocab_target = inference.load_models(self.context,
-                                                                   self.max_input_len,
-                                                                   self.beam_size,
-                                                                   self.batch_size,
-                                                                   [self.model],
-                                                                   [checkpoint],
-                                                                   softmax_temperature=self.softmax_temperature,
-                                                                   max_output_length_num_stds=self.max_output_length_num_stds,
-                                                                   source_image_size=tuple(self.source_image_size),
-                                                                   forced_max_output_len=self.max_output_length)
-        translator = inference.ImageCaptioner(self.context,
-                                              self.ensemble_mode,
-                                              inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
-                                              models,
-                                              vocab_target,
+        models, vocab_source, vocab_target = inference.load_models(
+                                                context=self.context,
+                                                max_input_len=self.max_input_len,
+                                                beam_size=self.beam_size,
+                                                batch_size=self.batch_size,
+                                                model_folders=[self.model],
+                                                checkpoints=[checkpoint],
+                                                softmax_temperature=self.softmax_temperature,
+                                                max_output_length_num_stds=self.max_output_length_num_stds,
+                                                source_image_size=tuple(self.source_image_size),
+                                                forced_max_output_len=self.max_output_length
+                                            )
+        translator = inference.ImageCaptioner(context=self.context,
+                                              ensemble_mode=self.ensemble_mode,
+                                              bucket_source_width=0,
+                                              length_penalty=inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
+                                              beam_prune=0.0,
+                                              beam_search_stop='all',
+                                              models=models,
+                                              source_vocabs=None,
+                                              target_vocab=vocab_target,
+                                              restrict_lexicon=None,
+                                              store_beam=False,
                                               source_image_size=tuple(self.source_image_size),
                                               source_root=self.image_root,
                                               use_feature_loader=self.use_feature_loader)

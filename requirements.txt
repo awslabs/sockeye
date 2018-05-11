@@ -2,3 +2,4 @@ pyyaml
 mxnet==1.1.0
 numpy>=1.12
 typing
+pillow

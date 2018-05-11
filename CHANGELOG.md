@@ -10,9 +10,20 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.11]
+### Added
+- Introducing the image captioning module. Type of models supported: ConvNet encoder - Sockeye NMT decoders
+- Image encoder that extracts features using preetrained nets: `image_captioning.encoder`
+- Feature extraction script to dump features to disk `image_captioning.extract_features`
+- Pass-through embedding, since we do not need it for images
+- Image-text iterator that loads features on the fly during training with the option of loading all to memory: `image_captioning.data_io`
+- Training and inference pipelines for image captioning: `image_captioning.train`, `image_captioning.inference` and `image_captioning.captioner`
+- README with instructions on how to use the image captioning module: `image_captioning/README.md`
+- Visualization script that loads images and captions (prediction+ground truth) and display them: `image_captioning.visualize`
+
 ## [1.18.10]
 ### Fixed
-- Re-allow early stopping w.r.t BLEU
+-- Re-allow early stopping w.r.t BLEU
 
 ## [1.18.9]
 ### Fixed

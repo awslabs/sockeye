@@ -31,7 +31,7 @@ from . import transformer
 from . import utils
 
 logger = logging.getLogger(__name__)
-EncoderConfig = Union['RecurrentEncoderConfig', transformer.TransformerConfig, 'ConvolutionalEncoderConfig', 'ImageLoadedCnnEncoderConfig']
+EncoderConfig = Union['RecurrentEncoderConfig', transformer.TransformerConfig, 'ConvolutionalEncoderConfig', 'ImageLoadedCnnEncoderConfig']  # type: ignore
 
 
 def get_encoder(config: EncoderConfig, prefix: str = '') -> 'Encoder':

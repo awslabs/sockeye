@@ -92,9 +92,10 @@ Now we can train an one-layer LSTM with attention for image captioning model as 
         --checkpoint-frequency 200 \
         --weight-normalization
 ```
-You can use the option `--load-all-features-to-memory` which loads all the features to memory. This is possible depending on the size of the dataset/features and amount of available CPU memory.
+Use the option `--load-all-features-to-memory` to load all the features to memory. This is possible depending on the size of the dataset/features and amount of available CPU memory.
 There is an initial overhead to load the feature (training does not start immediately), but with the big advantage that training is 15X-20X faster.
 
+You can add the options `--decode-and-evaluate 200 --max-output-length 60` to perform captioning of the part of the validation set (200 samples in this case) during training.
 
 ### Image to Text
 

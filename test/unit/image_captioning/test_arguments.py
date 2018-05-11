@@ -17,7 +17,7 @@ import pytest
 import sockeye.image_captioning.arguments as arguments
 import sockeye.constants as C
 
-from ..test_arguments import _test_args
+from test.unit.test_arguments import _test_args
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
