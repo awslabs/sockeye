@@ -65,7 +65,8 @@ class InferenceModel(model.SockeyeModel):
                  softmax_temperature: Optional[float] = None,
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  decoder_return_logit_inputs: bool = False,
-                 cache_output_layer_w_b: bool = False) -> None:
+                 cache_output_layer_w_b: bool = False,
+                 forced_max_output_len: Optional[int] = None) -> None:
         super().__init__(config)
         self.params_fname = params_fname
         self.context = context
@@ -75,7 +76,8 @@ class InferenceModel(model.SockeyeModel):
         self.batch_size = batch_size
         self.softmax_temperature = softmax_temperature
         self.max_input_length, self.get_max_output_length = models_max_input_output_length([self],
-                                                                                           max_output_length_num_stds)
+                                                                                           max_output_length_num_stds,
+                                                                                           forced_max_output_len=forced_max_output_len)
 
         self.encoder_module = None  # type: Optional[mx.mod.BucketingModule]
         self.encoder_default_bucket_key = None  # type: Optional[int]
@@ -352,7 +354,8 @@ def load_models(context: mx.context.Context,
                 softmax_temperature: Optional[float] = None,
                 max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                 decoder_return_logit_inputs: bool = False,
-                cache_output_layer_w_b: bool = False) -> Tuple[List[InferenceModel],
+                cache_output_layer_w_b: bool = False,
+                forced_max_output_len: Optional[int] = None) -> Tuple[List[InferenceModel],
                                                                List[vocab.Vocab],
                                                                vocab.Vocab]:
     """
@@ -371,6 +374,7 @@ def load_models(context: mx.context.Context,
                                         vocabulary.  Used when logits/softmax are handled separately.
     :param cache_output_layer_w_b: Models cache weights and biases for logit computation as NumPy arrays (used with
                                    restrict lexicon).
+    :param forced_max_output_len: An optional overwrite of the maximum output length.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
@@ -421,7 +425,9 @@ def load_models(context: mx.context.Context,
     # set a common max_output length for all models.
     max_input_len, get_max_output_length = models_max_input_output_length(models,
                                                                           max_output_length_num_stds,
-                                                                          max_input_len)
+                                                                          max_input_len,
+                                                                          forced_max_output_len=forced_max_output_len)
+
     for inference_model in models:
         inference_model.initialize(max_input_len, get_max_output_length)
 
@@ -432,7 +438,8 @@ def load_models(context: mx.context.Context,
 
 def models_max_input_output_length(models: List[InferenceModel],
                                    num_stds: int,
-                                   forced_max_input_len: Optional[int] = None) -> Tuple[int, Callable]:
+                                   forced_max_input_len: Optional[int] = None,
+                                   forced_max_output_len: Optional[int] = None) -> Tuple[int, Callable]:
     """
     Returns a function to compute maximum output length given a fixed number of standard deviations as a
     safety margin, and the current input length.
@@ -443,6 +450,7 @@ def models_max_input_output_length(models: List[InferenceModel],
     :param num_stds: Number of standard deviations to add as a safety margin. If -1, returned maximum output lengths
                      will always be 2 * input_length.
     :param forced_max_input_len: An optional overwrite of the maximum input length.
+    :param forced_max_output_len: An optional overwrite of the maximum output length.
     :return: The maximum input length and a function to get the output length given the input length.
     """
     max_mean = max(model.length_ratio_mean for model in models)
@@ -459,19 +467,21 @@ def models_max_input_output_length(models: List[InferenceModel],
     return get_max_input_output_length(supported_max_seq_len_source,
                                        supported_max_seq_len_target,
                                        training_max_seq_len_source,
-                                       forced_max_input_len=forced_max_input_len,
                                        length_ratio_mean=max_mean,
                                        length_ratio_std=max_std,
-                                       num_stds=num_stds)
+                                       num_stds=num_stds,
+                                       forced_max_input_len=forced_max_input_len,
+                                       forced_max_output_len=forced_max_output_len)
 
 
 def get_max_input_output_length(supported_max_seq_len_source: Optional[int],
                                 supported_max_seq_len_target: Optional[int],
                                 training_max_seq_len_source: Optional[int],
-                                forced_max_input_len: Optional[int],
                                 length_ratio_mean: float,
                                 length_ratio_std: float,
-                                num_stds: int) -> Tuple[int, Callable]:
+                                num_stds: int,
+                                forced_max_input_len: Optional[int] = None,
+                                forced_max_output_len: Optional[int] = None) -> Tuple[int, Callable]:
     """
     Returns a function to compute maximum output length given a fixed number of standard deviations as a
     safety margin, and the current input length. It takes into account optional maximum source and target lengths.
@@ -479,12 +489,13 @@ def get_max_input_output_length(supported_max_seq_len_source: Optional[int],
     :param supported_max_seq_len_source: The maximum source length supported by the models.
     :param supported_max_seq_len_target: The maximum target length supported by the models.
     :param training_max_seq_len_source: The maximum source length observed during training.
-    :param forced_max_input_len: An optional overwrite of the maximum input length.
     :param length_ratio_mean: The mean of the length ratio that was calculated on the raw sequences with special
            symbols such as EOS or BOS.
     :param length_ratio_std: The standard deviation of the length ratio.
     :param num_stds: The number of standard deviations the target length may exceed the mean target length (as long as
            the supported maximum length allows for this).
+    :param forced_max_input_len: An optional overwrite of the maximum input length.
+    :param forced_max_output_len: An optional overwrite of the maximum out length.
     :return: The maximum input length and a function to get the output length given the input length.
     """
     space_for_bos = 1
@@ -527,8 +538,10 @@ def get_max_input_output_length(supported_max_seq_len_source: Optional[int],
         that the mean length ratio computed on the training data do not include these special symbols.
         (see data_io.analyze_sequence_lengths)
         """
-
-        return int(np.ceil(factor * input_length)) + space_for_bos + space_for_eos
+        if forced_max_output_len is not None:
+            return forced_max_output_len
+        else:
+            return int(np.ceil(factor * input_length)) + space_for_bos + space_for_eos
 
     return max_input_len, get_max_output_length
 

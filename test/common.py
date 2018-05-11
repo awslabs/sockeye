@@ -34,6 +34,12 @@ import sockeye.translate
 import sockeye.utils
 from sockeye.evaluate import raw_corpus_bleu, raw_corpus_chrf
 
+try:
+    import sockeye.image_captioning.train
+    import sockeye.image_captioning.captioner
+except:
+    logging.warning("Image captioning module not loaded. Tests will fail.")
+
 logger = logging.getLogger(__name__)
 
 

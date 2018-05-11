@@ -109,10 +109,13 @@ class SockeyeModel:
 
         # source & target embeddings
         embed_weight_source, embed_weight_target, out_weight_target = self._get_embed_weights(self.prefix)
-        self.embedding_source = encoder.Embedding(self.config.config_embed_source,
-                                                  prefix=self.prefix + C.SOURCE_EMBEDDING_PREFIX,
-                                                  embed_weight=embed_weight_source,
-                                                  is_source=True)
+        if isinstance(self.config.config_embed_source, encoder.PassThroughEmbeddingConfig):
+            self.embedding_source = encoder.PassThroughEmbedding(self.config.config_embed_source)
+        else:
+            self.embedding_source = encoder.Embedding(self.config.config_embed_source,
+                                                    prefix=self.prefix + C.SOURCE_EMBEDDING_PREFIX,
+                                                    embed_weight=embed_weight_source,
+                                                    is_source=True)
 
         self.embedding_target = encoder.Embedding(self.config.config_embed_target,
                                                   prefix=self.prefix + C.TARGET_EMBEDDING_PREFIX,
@@ -198,12 +201,15 @@ class SockeyeModel:
         :param prefix: Prefix.
         :return: Tuple of source and target parameter symbols.
         """
-        w_embed_source = mx.sym.Variable(prefix + C.SOURCE_EMBEDDING_PREFIX + "weight",
+        w_embed_source = None
+        if not isinstance(self.config.config_embed_source, encoder.PassThroughEmbeddingConfig):
+            w_embed_source = mx.sym.Variable(prefix + C.SOURCE_EMBEDDING_PREFIX + "weight",
                                          shape=(self.config.config_embed_source.vocab_size,
                                                 self.config.config_embed_source.num_embed))
         w_embed_target = mx.sym.Variable(prefix + C.TARGET_EMBEDDING_PREFIX + "weight",
                                          shape=(self.config.config_embed_target.vocab_size,
                                                 self.config.config_embed_target.num_embed))
+
         w_out_target = mx.sym.Variable(prefix + "target_output_weight",
                                        shape=(self.config.vocab_target_size, self.decoder.get_num_hidden()))
 
@@ -223,7 +229,9 @@ class SockeyeModel:
                                                                   self.decoder.get_num_hidden()))
                 w_out_target = w_embed_target
 
-        self._embed_weight_source_name = w_embed_source.name
+        self._embed_weight_source_name = None
+        if w_embed_source is not None:
+            self._embed_weight_source_name = w_embed_source.name
         self._embed_weight_target_name = w_embed_target.name
         self._out_weight_target_name = w_out_target.name
         return w_embed_source, w_embed_target, w_out_target
