@@ -177,11 +177,10 @@ class NullHypothesis(ConstrainedHypothesis):
         return True
 
 
-def get_bank_sizes(num_constraints, beam_size, time_step, candidates):
+def get_bank_sizes(num_constraints, beam_size, candidates):
     """
     :param num_constraints: The number of constraints.
     :param beam_size: The beam size.
-    :param time_step: The timestep.
     :param candidates: The empirical counts of number of candidates in each bank.
     :return: A distribution over banks.
     """
@@ -190,36 +189,21 @@ def get_bank_sizes(num_constraints, beam_size, time_step, candidates):
     bank_size = beam_size // num_banks
     remainder = beam_size - bank_size * num_banks
 
-    if BANK_ADJUSTMENT == 'even':
-        assigned = [bank_size for x in range(num_banks)]
-        assigned[-1] += remainder
+    assigned = [bank_size for x in range(num_banks)]
+    assigned[-1] += remainder
 
-        for i in range(len(assigned)):
-            deficit = candidates[i] - assigned[i]
-            while deficit < 0:
-                # sort whole list by distance from i
-                for j in sorted(list(range(i - 1, -1, -1)) + list(range(i + 1, len(assigned))),
-                                key=lambda x: abs(x - i)):
-                    capacity = candidates[j] - assigned[j]
-                    if capacity > 0:
-                        transfer = min(abs(deficit), capacity)
-                        deficit += transfer
-                        assigned[i] -= transfer
-                        assigned[j] += transfer
-    elif BANK_ADJUSTMENT == 'empirical':
-        total = sum(candidates)
-        assigned = [max(1 if x > 0.0 else 0, int(x / total * beam_size)) for x in candidates]
-        # small adjustment if needed
-        if sum(assigned) < beam_size:
-            assigned[0] += (beam_size - sum(assigned))
-        elif sum(assigned) > beam_size:
-            i = sorted(enumerate(assigned), key=lambda x: x[1], reverse=True)[0][0]
-            assigned[i] -= sum(assigned) - beam_size
-
-    elif BANK_ADJUSTMENT == 'none':
-        assigned = [min(bank_size, candidates[i]) for i in range(len(candidates))]
-        shortage = beam_size - sum(assigned)
-        assigned[0] += shortage
+    for i in range(len(assigned)):
+        deficit = candidates[i] - assigned[i]
+        while deficit < 0:
+            # sort whole list by distance from i
+            for j in sorted(list(range(i - 1, -1, -1)) + list(range(i + 1, len(assigned))),
+                            key=lambda x: abs(x - i)):
+                capacity = candidates[j] - assigned[j]
+                if capacity > 0:
+                    transfer = min(abs(deficit), capacity)
+                    deficit += transfer
+                    assigned[i] -= transfer
+                    assigned[j] += transfer
 
     return assigned
 
@@ -242,27 +226,27 @@ class Candidate(NamedTuple('Candidate', [
         return '({}, {}, {}, {})'.format(self.row, self.col, self.score, self.constraints.numMet())
 
 
-def topk(time_step: int,
-         active_beam_size: int,
-         beam_size: int,
+def topk(beam_size: int,
+         inactive: mx.ndarray
          scores: mx.ndarray,
          hypotheses: ConstrainedHypothesis,
          best_ids,
          best_word_ids,
-         best_scores,
+         sequence_scores,
          context):
     """
     Builds a list of candidates. These candidates are pulled from three different types: (1) the best items across the whole
     scores matrix, (2) the set of words that must follow existing constraints, and (3) k-best items from each row.
 
-    :param time_step: The timestep.
-    :param active_beam_size: the active beam size
     :param beam_size: The length of the kbest list to produce.
+    :param inactive: Array listing inactive rows.
+    :param scores: The scores array.
     :param hypotheses: the list of hypothesis objects
-    :param scores: the numpy array containing scores
     :param best_ids:
     :param best_word_ids:
-    :param best_scores:
+    :param sequence_scores:
+    :param context: The MXNet device context.
+    :return:
     """
 
     def get_scalar(obj, dtype):
@@ -279,19 +263,22 @@ def topk(time_step: int,
 
     candidates = set()
     # (1) Add all of the top-k items (which were passed) in as long as they pass the constraints
-    for row, col, score in zip(best_ids, best_word_ids, best_scores):
+    for row, col, seq_score in zip(best_ids, best_word_ids, sequence_scores):
         row = int(row.asscalar())
         col = int(col.asscalar())
-        score = float(score.asscalar())
+        seq_score = float(seq_score.asscalar())
         if hypotheses[row].isValid(col):
             new_constraint = hypotheses[row].advance(col)
-            cand = Candidate(row, col, score, new_constraint)
+            cand = Candidate(row, col, seq_score, new_constraint)
             candidates.add(cand)
 
     # (2,3) For each hypothesis, we add (2) all the constraints that could follow it and
     # (3) the best item (constrained or not) in that row
     best_next = argmin(scores, axis=1)
-    for row in range(active_beam_size):
+    for row in range(beam_size):
+        if inactive[row]:
+            continue
+
         hyp = hypotheses[row]
 
         # (2) add all the constraints that could extend this
@@ -323,7 +310,7 @@ def topk(time_step: int,
     pruned_candidates = []
 
     # Adjust allocated bank sizes if there are too few candidates in any of them
-    bank_sizes = get_bank_sizes(num_constraints, beam_size, time_step, counts)
+    bank_sizes = get_bank_sizes(num_constraints, beam_size, counts)
 
     counts = [x for x in bank_sizes]
     # sort candidates into the allocated banks
@@ -334,8 +321,8 @@ def topk(time_step: int,
         if counts[bank] >= 0:
             pruned_candidates.append(cand)
 
+    # pad the beam
     new_active_beam_size = len(pruned_candidates)
-
     while len(pruned_candidates) < beam_size:
         pruned_candidates.append(pruned_candidates[new_active_beam_size-1])
 
@@ -343,7 +330,7 @@ def topk(time_step: int,
             np.array([x.col for x in pruned_candidates]),
             np.array([[x.score] for x in pruned_candidates]),
             [x.constraints for x in pruned_candidates],
-            new_active_beam_size)
+            inactive)
 
 
 def main():

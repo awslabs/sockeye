@@ -188,6 +188,9 @@ JSON_FACTORS_KEY = "factors"
 JSON_CONSTRAINTS_KEY = "constraints"
 JSON_ENCODING = "utf-8"
 
+# Lexical constraints
+BANK_ADJUSTMENT = 'even'
+
 VERSION_NAME = "version"
 CONFIG_NAME = "config"
 LOG_NAME = "log"

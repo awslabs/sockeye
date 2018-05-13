@@ -1446,18 +1446,15 @@ class Translator:
             for sentno in range(self.batch_size):
                 if num_constraints[sentno] > 0:
                     rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
-                    active_rows = slice(sentno * self.beam_size, sentno * self.beam_size + active_beam_size[sentno])
-                    sliced_scores = scores[active_rows]
-                    best_hyp_indices[rows], best_word_indices[rows], \
-                        scores_accumulated[rows], constraints[rows], active_beam_size[sentno] = constrained_topk(t,
-                                                                                                                 active_beam_size[sentno],
-                                                                                                                 self.beam_size,
-                                                                                                                 sliced_scores,
-                                                                                                                 constraints[rows],
-                                                                                                                 best_hyp_indices[rows],
-                                                                                                                 best_word_indices[rows],
-                                                                                                                 scores_accumulated[rows],
-                                                                                                                 self.context)
+                    best_hyp_indices[rows], best_word_indices[rows], scores_accumulated[rows], \
+                        constraints[rows], inactive[rows] = constrained_topk(self.beam_size,
+                                                                             inactive[rows],
+                                                                             scores[rows],
+                                                                             constraints[rows],
+                                                                             best_hyp_indices[rows],
+                                                                             best_word_indices[rows],
+                                                                             scores_accumulated[rows],
+                                                                             self.context)
 
                     # offsetting since the returned smallest_k() indices were slice-relative
                     best_hyp_indices[rows] += rows.start
