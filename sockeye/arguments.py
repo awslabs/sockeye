@@ -1067,10 +1067,6 @@ def add_inference_args(params):
                                default=0.0,
                                type=float,
                                help='Beta factor for the coverage penalty used in beam search: %(default)s ')
-    decode_params.add_argument('--bank-adjustment',
-                               choices='even empirical none'.split(),
-                               default='even',
-                               help='How to adjust underfilled banks')
     decode_params.add_argument('--beam-stop',
                                choices='all first'.split(),
                                default='all',

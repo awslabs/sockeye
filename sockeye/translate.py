@@ -53,7 +53,6 @@ def main():
 
     log_basic_info(args)
 
-    lexical_constraints.BANK_ADJUSTMENT = args.bank_adjustment
     output_handler = get_output_handler(args.output_type,
                                         args.output,
                                         args.sure_align_threshold)

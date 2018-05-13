@@ -189,36 +189,21 @@ def get_bank_sizes(num_constraints, beam_size, time_step, max_length, candidates
     bank_size = beam_size // num_banks
     remainder = beam_size - bank_size * num_banks
 
-    if BANK_ADJUSTMENT == 'even':
-        assigned = [bank_size for x in range(num_banks)]
-        assigned[-1] += remainder
+    assigned = [bank_size for x in range(num_banks)]
+    assigned[-1] += remainder
 
-        for i in range(len(assigned)):
-            deficit = candidates[i] - assigned[i]
-            while deficit < 0:
-                # sort whole list by distance from i
-                for j in sorted(list(range(i - 1, -1, -1)) + list(range(i + 1, len(assigned))),
-                                key=lambda x: abs(x - i)):
-                    capacity = candidates[j] - assigned[j]
-                    if capacity > 0:
-                        transfer = min(abs(deficit), capacity)
-                        deficit += transfer
-                        assigned[i] -= transfer
-                        assigned[j] += transfer
-    elif BANK_ADJUSTMENT == 'empirical':
-        total = sum(candidates)
-        assigned = [max(1 if x > 0.0 else 0, int(x / total * beam_size)) for x in candidates]
-        # small adjustment if needed
-        if sum(assigned) < beam_size:
-            assigned[0] += (beam_size - sum(assigned))
-        elif sum(assigned) > beam_size:
-            i = sorted(enumerate(assigned), key=lambda x: x[1], reverse=True)[0][0]
-            assigned[i] -= sum(assigned) - beam_size
-
-    elif BANK_ADJUSTMENT == 'none':
-        assigned = [min(bank_size, candidates[i]) for i in range(len(candidates))]
-        shortage = beam_size - sum(assigned)
-        assigned[0] += shortage
+    for i in range(len(assigned)):
+        deficit = candidates[i] - assigned[i]
+        while deficit < 0:
+            # sort whole list by distance from i
+            for j in sorted(list(range(i - 1, -1, -1)) + list(range(i + 1, len(assigned))),
+                            key=lambda x: abs(x - i)):
+                capacity = candidates[j] - assigned[j]
+                if capacity > 0:
+                    transfer = min(abs(deficit), capacity)
+                    deficit += transfer
+                    assigned[i] -= transfer
+                    assigned[j] += transfer
 
     return assigned
 
