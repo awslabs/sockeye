@@ -33,9 +33,9 @@ from itertools import zip_longest
           validation_source='test_validation_src', validation_target='test_validation_tgt',
           validation_source_factors=[],
           output='test_output', overwrite_output=False,
-          source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1,1),
+          source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1, 1),
           no_bucketing=False, bucket_width=10, max_seq_len=(100, 100),
-          monitor_pattern=None, monitor_stat_func='mx_default', use_tensorboard=False)),
+          monitor_pattern=None, monitor_stat_func='mx_default')),
 
     # short parameters
     ('-s test_src -t test_tgt -d prep_data '
@@ -47,9 +47,9 @@ from itertools import zip_longest
           validation_source='test_validation_src', validation_target='test_validation_tgt',
           validation_source_factors=[],
           output='test_output', overwrite_output=False,
-          source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1,1),
+          source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1, 1),
           no_bucketing=False, bucket_width=10, max_seq_len=(100, 100),
-          monitor_pattern=None, monitor_stat_func='mx_default', use_tensorboard=False))
+          monitor_pattern=None, monitor_stat_func='mx_default'))
 ])
 def test_io_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_training_io_args)
@@ -79,6 +79,7 @@ def test_device_args(test_params, expected_params):
               source_factors_num_embed=[],
               rnn_attention_type='mlp',
               rnn_attention_num_hidden=None,
+              rnn_scale_dot_attention=False,
               rnn_attention_coverage_type='count',
               rnn_attention_coverage_num_hidden=1,
               weight_tying=False,
@@ -106,6 +107,7 @@ def test_device_args(test_params, expected_params):
               cnn_project_qkv=False,
               layer_normalization=False,
               weight_normalization=False,
+              lhuc=None,
               encoder=C.RNN_NAME,
               conv_embed_max_filter_width=8,
               decoder=C.RNN_NAME,
@@ -114,7 +116,8 @@ def test_device_args(test_params, expected_params):
               conv_embed_num_highway_layers=4,
               conv_embed_pool_stride=5,
               conv_embed_add_positional_encodings=False,
-              rnn_attention_in_upper_layers=False))])
+              rnn_attention_in_upper_layers=False))
+])
 def test_model_parameters(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_model_parameters)
 
@@ -128,7 +131,6 @@ def test_model_parameters(test_params, expected_params):
               loss_normalization_type='valid',
               metrics=[C.PERPLEXITY],
               optimized_metric=C.PERPLEXITY,
-              max_updates=None,
               checkpoint_frequency=1000,
               max_num_checkpoint_not_improved=8,
               embed_dropout=(.0, .0),
@@ -141,6 +143,10 @@ def test_model_parameters(test_params, expected_params):
               kvstore='device',
               gradient_compression_type=None,
               gradient_compression_threshold=0.5,
+              min_samples=None,
+              max_samples=None,
+              min_updates=None,
+              max_updates=None,
               min_num_epochs=None,
               max_num_epochs=None,
               initial_learning_rate=0.0003,
@@ -188,18 +194,19 @@ def test_training_arg(test_params, expected_params):
                       checkpoints=None,
                       models=['model'],
                       beam_size=5,
+                      beam_prune=0,
                       batch_size=1,
                       chunk_size=None,
                       ensemble_mode='linear',
                       bucket_width=10,
                       max_input_len=None,
                       restrict_lexicon=None,
+                      restrict_lexicon_topk=None,
                       softmax_temperature=None,
                       output_type='translation',
                       sure_align_threshold=0.9,
                       max_output_length_num_stds=2,
-                      beam_prune=0.0,
-                      beam_stop='all',
+                      beam_search_stop='all',
                       length_penalty_alpha=1.0,
                       length_penalty_beta=0.0,
                       strip_unknown_words=False)),
@@ -248,7 +255,6 @@ def test_inference_args(test_params, expected_params):
      '--rnn-attention-type dot '
      '--max-seq-len 60 '
      '--decode-and-evaluate 500 '
-     '--use-tensorboard '
      '--use-cpu '
      '-o wmt_mode',
      dict(
@@ -261,7 +267,6 @@ def test_inference_args(test_params, expected_params):
          rnn_attention_type='dot',
          max_seq_len=(60, 60),
          decode_and_evaluate=500,
-         use_tensorboard=True,
          use_cpu=True,
          # Arguments mentioned in the text, should be renamed in the tutorial if they change:
          rnn_cell_type="lstm",
@@ -322,7 +327,7 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           source_factors=[],
           shared_vocab=False,
           num_words=(50000, 50000),
-          word_min_count=(1,1),
+          word_min_count=(1, 1),
           no_bucketing=False,
           bucket_width=10,
           max_seq_len=(100, 100),

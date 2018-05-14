@@ -231,34 +231,28 @@ class Candidate(NamedTuple('Candidate', [
         return '({}, {}, {}, {})'.format(self.row, self.col, self.score, self.constraints.numMet())
 
 
-def kbest(active_beam_size: int,
-          beam_size: int,
-          scores: mx.ndarray,
-          hypotheses: ConstrainedHypothesis,
-          best_ids,
-          best_word_ids,
-          best_scores,
-          context):
+def topk(beam_size: int,
+         inactive: mx.ndarray,
+         scores: mx.ndarray,
+         hypotheses: ConstrainedHypothesis,
+         best_ids,
+         best_word_ids,
+         sequence_scores,
+         context):
     """
     Builds a list of candidates. These candidates are pulled from three different types: (1) the best items across the whole
     scores matrix, (2) the set of words that must follow existing constraints, and (3) k-best items from each row.
 
-    :param active_beam_size: the active beam size
     :param beam_size: The length of the kbest list to produce.
+    :param inactive: Array listing inactive rows.
+    :param scores: The scores array.
     :param hypotheses: the list of hypothesis objects
-    :param scores: the numpy array containing scores
     :param best_ids:
     :param best_word_ids:
-    :param best_scores
+    :param sequence_scores:
+    :param context: The MXNet device context.
+    :return:
     """
-
-    def get_scalar(obj, dtype):
-        if context == mx.cpu():
-            return dtype(obj)
-        else:
-            return dtype(obj.asscalar())
-
-    argmin = np.argmin if context == mx.cpu() else mx.ndarray.argmin
 
     num_constraints = hypotheses[0].size()
 
@@ -266,33 +260,36 @@ def kbest(active_beam_size: int,
 
     candidates = set()
     # (1) Add all of the top-k items (which were passed) in as long as they pass the constraints
-    for row, col, score in zip(best_ids, best_word_ids, best_scores):
+    for row, col, seq_score in zip(best_ids, best_word_ids, sequence_scores):
         row = int(row.asscalar())
         col = int(col.asscalar())
-        score = float(score.asscalar())
+        seq_score = float(seq_score.asscalar())
         if hypotheses[row].isValid(col):
             new_constraint = hypotheses[row].advance(col)
-            cand = Candidate(row, col, score, new_constraint)
+            cand = Candidate(row, col, seq_score, new_constraint)
             candidates.add(cand)
 
     # (2,3) For each hypothesis, we add (2) all the constraints that could follow it and
     # (3) the best item (constrained or not) in that row
-    best_next = argmin(scores, axis=1)
-    for row in range(active_beam_size):
+    best_next = mx.ndarray.argmin(scores, axis=1)
+    for row in range(beam_size):
+        if inactive[row]:
+            continue
+
         hyp = hypotheses[row]
 
         # (2) add all the constraints that could extend this
         nextones = hyp.allowed()
 
         # (3) add the single-best item after this (if it's valid)
-        col = get_scalar(best_next[row], dtype=int)
+        col = int(best_next[row].asscalar())
         if hyp.isValid(col):
             nextones.append(col)
 
         # Now, create new candidates for each of these items
         for col in nextones:
             new_constraint = hyp.advance(col)
-            score = get_scalar(scores[row,col], dtype=float)
+            score = scores[row,col].asscalar()
             cand = Candidate(row, col, score, new_constraint)
             candidates.add(cand)
 
@@ -324,8 +321,8 @@ def kbest(active_beam_size: int,
         if counts[bank] >= 0:
             pruned_candidates.append(cand)
 
+    # pad the beam
     new_active_beam_size = len(pruned_candidates)
-
     while len(pruned_candidates) < beam_size:
         pruned_candidates.append(pruned_candidates[new_active_beam_size-1])
 
@@ -333,7 +330,7 @@ def kbest(active_beam_size: int,
             np.array([x.col for x in pruned_candidates]),
             np.array([[x.score] for x in pruned_candidates]),
             [x.constraints for x in pruned_candidates],
-            new_active_beam_size)
+            inactive)
 
 
 def main():

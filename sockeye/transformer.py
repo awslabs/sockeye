@@ -11,7 +11,7 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-from typing import Dict, Optional
+from typing import Dict, Optional, TYPE_CHECKING
 
 import mxnet as mx
 import numpy as np
@@ -19,6 +19,9 @@ import numpy as np
 from . import config
 from . import constants as C
 from . import layers
+
+if TYPE_CHECKING:
+    from . import encoder
 
 
 class TransformerConfig(config.Config):
@@ -37,7 +40,8 @@ class TransformerConfig(config.Config):
                  postprocess_sequence: str,
                  max_seq_len_source: int,
                  max_seq_len_target: int,
-                 conv_config: Optional['ConvolutionalEmbeddingConfig'] = None) -> None:  # type: ignore
+                 conv_config: Optional['encoder.ConvolutionalEmbeddingConfig'] = None,
+                 dtype: str = C.DTYPE_FP32) -> None:  # type: ignore
         super().__init__()
         self.model_size = model_size
         self.attention_heads = attention_heads
@@ -53,6 +57,7 @@ class TransformerConfig(config.Config):
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
         self.conv_config = conv_config
+        self.dtype = dtype
 
 
 class TransformerEncoderBlock:

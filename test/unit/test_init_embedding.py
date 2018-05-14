@@ -18,6 +18,7 @@ import mxnet as mx
 
 import sockeye.init_embedding as init_embedding
 
+
 @pytest.mark.parametrize(
     "embed, vocab_in, vocab_out, expected_embed_init", [
         (np.array([[1, 1, 1], [2, 2, 2], [3, 3, 3]]),

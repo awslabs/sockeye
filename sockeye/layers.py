@@ -112,6 +112,44 @@ class LayerNormalization:
         return inputs_norm
 
 
+class LHUC:
+    """
+    Learning Hidden Unit Contribution
+
+    David Vilar. "Learning Hidden Unit Contribution for Adapting Neural
+    Machine Translation Models" NAACL 2018
+
+    :param num_hidden: Number of hidden units of the layer to be modified.
+    :param weight: Optional parameter vector.
+    :param prefix: Optional prefix for created parameters (if not given as weight).
+    """
+    def __init__(self,
+                 num_hidden: int,
+                 weight: Optional[mx.sym.Symbol] = None,
+                 prefix: str = "") -> None:
+        self.num_hidden = num_hidden
+        self.prefix = prefix
+        if not weight:
+            self.params = mx.sym.Variable(self.prefix + C.LHUC_NAME,
+                                          shape=(self.num_hidden,),
+                                          init=mx.init.Uniform(0.1),
+                                          dtype="float32")
+        else:
+            self.params = weight
+
+    def apply(self,
+              inputs: mx.sym.Symbol,
+              name: Optional[str] = None) -> mx.sym.Symbol:
+
+        # We use a sigmoid with amplitude 2 for weighting the hidden units. The
+        # activation is dampened when the value of the sigmoid is close to 0, and
+        # strengthened when it's close to 2 (see also original paper)
+        weight_vector = 2 * mx.sym.Activation(data=self.params, act_type="sigmoid")
+        out = mx.sym.broadcast_mul(weight_vector, inputs, name=name)
+
+        return out
+
+
 class WeightNormalization:
     """
     Implements Weight Normalization, see Salimans & Kingma 2016 (https://arxiv.org/abs/1602.07868).
@@ -466,7 +504,8 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                  dropout: float = 0.0) -> None:
         super().__init__(prefix, depth_att, heads, depth_out, dropout)
         self.w_q2h = mx.sym.Variable("%sq2h_weight" % prefix)
-        self.w_kv2h = mx.sym.Variable("%skv2h_weight" % prefix)
+        self.w_k2h = mx.sym.Variable("%sk2h_weight" % prefix)
+        self.w_v2h = mx.sym.Variable("%sv2h_weight" % prefix)
 
     def __call__(self,
                  queries: mx.sym.Symbol,
@@ -485,27 +524,30 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         :param bias: Optional 3d bias tensor to mask attention scores.
         :return: Symbol of shape (batch, query_seq_len, output_depth).
         """
-        # (batch, memory_max_length, depth * 2)
-        combined = mx.sym.FullyConnected(data=memory,
-                                         weight=self.w_kv2h,
-                                         no_bias=True,
-                                         num_hidden=self.depth * 2,
-                                         flatten=False,
-                                         name="%skv_transform" % self.prefix)
-
-        # split into query, keys and values
-        # (batch, memory_max_length, depth)
-        # NOTE: requires depth to be equal across all 2 parts.
-        # pylint: disable=unbalanced-tuple-unpacking
-        keys, values = mx.sym.split(data=combined, num_outputs=2, axis=2)
-
-        # (batch, query_max_length, depth * 2)
+        # (batch, query_max_length, depth)
         queries = mx.sym.FullyConnected(data=queries,
                                         weight=self.w_q2h,
                                         no_bias=True,
                                         num_hidden=self.depth,
                                         flatten=False,
                                         name="%sq_transform" % self.prefix)
+
+        # (batch, memory_max_length, depth)
+        keys = mx.sym.FullyConnected(data=memory,
+                                     weight=self.w_k2h,
+                                     no_bias=True,
+                                     num_hidden=self.depth,
+                                     flatten=False,
+                                     name="%sk_transform" % self.prefix)
+
+        # (batch, memory_max_length, depth)
+        values = mx.sym.FullyConnected(data=memory,
+                                       weight=self.w_v2h,
+                                       no_bias=True,
+                                       num_hidden=self.depth,
+                                       flatten=False,
+                                       name="%sv_transform" % self.prefix)
+
         return self._attend(queries,
                             keys,
                             values,

@@ -167,7 +167,16 @@ def load_params(fname: str) -> Tuple[Dict[str, mx.nd.NDArray], Dict[str, mx.nd.N
     for k, v in save_dict.items():
         tp, name = k.split(':', 1)
         if tp == 'arg':
-            arg_params[name] = v
+            """TODO(fhieber):
+            temporary weight split for models with combined weight for keys & values
+            in transformer source attention layers. This can be removed once with the next major version change."""
+            if "att_enc_kv2h_weight" in name:
+                logger.info("Splitting '%s' parameters into separate k & v matrices.", name)
+                v_split = mx.nd.split(v, axis=0, num_outputs=2)
+                arg_params[name.replace('kv2h', "k2h")] = v_split[0]
+                arg_params[name.replace('kv2h', "v2h")] = v_split[1]
+            else:
+                arg_params[name] = v
         if tp == 'aux':
             aux_params[name] = v
     return arg_params, aux_params
@@ -242,34 +251,42 @@ class OnlineMeanAndVariance:
             return self._M2 / self._count
 
 
-def smallest_k(matrix: np.ndarray, k: int) -> Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]:
+def topk(scores: mx.nd.NDArray,
+         k: int,
+         batch_size: int,
+         offset: np.ndarray,
+         use_mxnet_topk: bool) -> Tuple[np.ndarray, np.ndarray, Union[np.ndarray, mx.nd.NDArray]]:
     """
-    Find the smallest elements in a numpy matrix.
+    Get the lowest k elements per sentence from a `scores` matrix.
 
-    :param matrix: Any matrix.
-    :param k: The number of smallest elements to return.
+    :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+    :param k: The number of smallest scores to return.
+    :param batch_size: Number of sentences being decoded at once.
+    :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+    :param use_mxnet_topk: True to use the mxnet implementation or False to use the numpy one.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
-    flatten = matrix.flatten()
+    # (batch_size, beam_size * target_vocab_size)
+    folded_scores = scores.reshape((batch_size, k * scores.shape[-1]))
 
-    # args are the indices in flatten of the k smallest elements
-    args = np.argpartition(flatten, range(k))[:k]
-    # flatten[args] are the values for args
-    return np.unravel_index(args, matrix.shape), flatten[args]
+    if use_mxnet_topk:
+        # pylint: disable=unbalanced-tuple-unpacking
+        values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
+        best_hyp_indices, best_word_indices = np.unravel_index(indices.astype(np.int32).asnumpy().ravel(), scores.shape)
+        values = values.reshape((-1,))
+    else:
+        folded_scores = folded_scores.asnumpy()
+        # Get the scores
+        # Indexes into folded_scores: (batch_size, beam_size)
+        flat_idxs = np.argpartition(folded_scores, range(k))[:, :k]
+        # Score values: (batch_size, beam_size)
+        values = folded_scores[np.arange(folded_scores.shape[0])[:, None], flat_idxs].ravel()
+        best_hyp_indices, best_word_indices = np.unravel_index(flat_idxs.ravel(), scores.shape)
 
-
-def smallest_k_mx(matrix: mx.nd.NDArray, k: int) -> Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]:
-    """
-    Find the smallest elements in a NDarray.
-
-    :param matrix: Any matrix.
-    :param k: The number of smallest elements to return.
-    :return: The row indices, column indices and values of the k smallest items in matrix.
-    """
-    # pylint: disable=unbalanced-tuple-unpacking
-    values, indices = mx.nd.topk(matrix, axis=None, k=k, ret_typ='both', is_ascend=True)
-
-    return np.unravel_index(indices.astype(np.int32).asnumpy(), matrix.shape), values
+    if batch_size > 1:
+        # Offsetting the indices to match the shape of the scores matrix
+        best_hyp_indices += offset
+    return best_hyp_indices, best_word_indices, values
 
 
 def chunks(some_list: List, n: int) -> Iterable[List]:
@@ -615,7 +632,7 @@ class GpuFileLock:
             lockfile_path = os.path.join(self.lock_dir, "sockeye.gpu{}.lock".format(gpu_id))
             try:
                 lock_file = open(lockfile_path, 'w')
-            except IOError as e:
+            except IOError:
                 if errno.EACCES:
                     logger.warning("GPU {} is currently locked by a different process "
                                    "(Permission denied).".format(gpu_id))

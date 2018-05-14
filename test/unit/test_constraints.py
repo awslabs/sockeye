@@ -23,7 +23,7 @@ import sockeye.constants as C
 import sockeye.data_io
 import sockeye.inference
 from sockeye.utils import SockeyeError
-from sockeye.lexical_constraints import kbest, get_bank_sizes, ConstrainedHypothesis
+from sockeye.lexical_constraints import topk, get_bank_sizes, ConstrainedHypothesis
 
 EOS_ID = 3
 

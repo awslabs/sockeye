@@ -23,7 +23,9 @@ import json
 import copy
 import sys
 import os
+import time
 from collections import defaultdict
+from functools import lru_cache, partial
 from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set
 
 import mxnet as mx
@@ -35,7 +37,7 @@ from . import lexicon
 from . import model
 from . import utils
 from . import vocab
-from .lexical_constraints import RawConstraintList, ConstrainedHypothesis, kbest as constrained_kbest
+from .lexical_constraints import RawConstraintList, ConstrainedHypothesis, topk as constrained_topk
 from .log import is_python34
 
 logger = logging.getLogger(__name__)
@@ -86,7 +88,6 @@ class InferenceModel(model.SockeyeModel):
         self.encoder_default_bucket_key = None  # type: Optional[int]
         self.decoder_module = None  # type: Optional[mx.mod.BucketingModule]
         self.decoder_default_bucket_key = None  # type: Optional[Tuple[int, int]]
-        self.decoder_data_shapes_cache = None  # type: Optional[Dict]
         self.decoder_return_logit_inputs = decoder_return_logit_inputs
 
         self.cache_output_layer_w_b = cache_output_layer_w_b
@@ -130,7 +131,6 @@ class InferenceModel(model.SockeyeModel):
         self.encoder_module, self.encoder_default_bucket_key = self._get_encoder_module()
         self.decoder_module, self.decoder_default_bucket_key = self._get_decoder_module()
 
-        self.decoder_data_shapes_cache = dict()  # bucket_key -> shape cache
         max_encoder_data_shapes = self._get_encoder_data_shapes(self.encoder_default_bucket_key)
         max_decoder_data_shapes = self._get_decoder_data_shapes(self.decoder_default_bucket_key)
         self.encoder_module.bind(data_shapes=max_encoder_data_shapes, for_training=False, grad_req="null")
@@ -264,22 +264,20 @@ class InferenceModel(model.SockeyeModel):
                                shape=(self.batch_size, bucket_key, self.num_source_factors),
                                layout=C.BATCH_MAJOR)]
 
+    @lru_cache(maxsize=None)
     def _get_decoder_data_shapes(self, bucket_key: Tuple[int, int]) -> List[mx.io.DataDesc]:
         """
         Returns data shapes of the decoder module.
-        Caches results for bucket_keys if called iteratively.
 
         :param bucket_key: Tuple of (maximum input length, maximum target length).
         :return: List of data descriptions.
         """
         source_max_length, target_max_length = bucket_key
-        return self.decoder_data_shapes_cache.setdefault(
-            bucket_key,
-            [mx.io.DataDesc(name=C.TARGET_NAME, shape=(self.batch_size * self.beam_size,), layout="NT")] +
-            self.decoder.state_shapes(self.batch_size * self.beam_size,
-                                      target_max_length,
-                                      self.encoder.get_encoded_seq_len(source_max_length),
-                                      self.encoder.get_num_hidden()))
+        return [mx.io.DataDesc(name=C.TARGET_NAME, shape=(self.batch_size * self.beam_size,), layout="NT")] + \
+               self.decoder.state_shapes(self.batch_size * self.beam_size,
+                                         target_max_length,
+                                         self.encoder.get_encoded_seq_len(source_max_length),
+                                         self.encoder.get_num_hidden())
 
     def run_encoder(self,
                     source: mx.nd.NDArray,
@@ -383,6 +381,8 @@ def load_models(context: mx.context.Context,
                                    restrict lexicon).
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
+    logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
+    load_time_start = time.time()
     models = []  # type: List[InferenceModel]
     source_vocabs = []  # type: List[List[vocab.Vocab]]
     target_vocabs = []  # type: List[vocab.Vocab]
@@ -392,8 +392,9 @@ def load_models(context: mx.context.Context,
 
     for model_folder, checkpoint in zip(model_folders, checkpoints):
         model_source_vocabs = vocab.load_source_vocabs(model_folder)
+        model_target_vocab = vocab.load_target_vocab(model_folder)
         source_vocabs.append(model_source_vocabs)
-        target_vocabs.append(vocab.vocab_from_json(os.path.join(model_folder, C.VOCAB_TRG_NAME)))
+        target_vocabs.append(model_target_vocab)
 
         model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
         logger.info("Model version: %s", model_version)
@@ -432,6 +433,8 @@ def load_models(context: mx.context.Context,
     for inference_model in models:
         inference_model.initialize(max_input_len, get_max_output_length)
 
+    load_time = time.time() - load_time_start
+    logger.info("%d model(s) loaded in %.4fs", len(models), load_time)
     return models, source_vocabs[0], target_vocabs[0]
 
 
@@ -847,7 +850,7 @@ def _concat_translations(translations: List[Translation], start_id: int, stop_id
     # Concatenation of all target ids without BOS and EOS
     target_ids = [start_id]
     attention_matrices = []
-    beam_histories = [] # type: List[BeamHistory]
+    beam_histories = []  # type: List[BeamHistory]
     for idx, translation in enumerate(translations):
         assert translation.target_ids[0] == start_id
         if idx == len(translations) - 1:
@@ -887,12 +890,14 @@ def _concat_translations(translations: List[Translation], start_id: int, stop_id
 class Translator:
     """
     Translator uses one or several models to translate input.
-    It holds references to vocabularies to takes care of encoding input strings as word ids and conversion
-    of target ids into a translation string.
+    The translator holds a reference to vocabularies to convert between word ids and text tokens for input and
+    translation strings.
 
     :param context: MXNet context to bind modules to.
     :param ensemble_mode: Ensemble mode: linear or log_linear combination.
     :param length_penalty: Length penalty instance.
+    :param beam_prune: Beam pruning difference threshold.
+    :param beam_search_stop: The stopping criterium.
     :param models: List of models.
     :param source_vocabs: Source vocabularies.
     :param target_vocab: Target vocabulary.
@@ -907,7 +912,7 @@ class Translator:
                  bucket_source_width: int,
                  length_penalty: LengthPenalty,
                  beam_prune: float,
-                 stop_criterium: str,
+                 beam_search_stop: str,
                  models: List[InferenceModel],
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
@@ -915,10 +920,9 @@ class Translator:
                  store_beam: bool = False,
                  strip_unknown_words: bool = False) -> None:
         self.context = context
-        self.smallest_k_func = utils.smallest_k if self.context == mx.cpu() else utils.smallest_k_mx
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
-        self.stop_criterium = stop_criterium
+        self.beam_search_stop = beam_search_stop
         self.source_vocabs = source_vocabs
         self.vocab_target = target_vocab
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
@@ -936,13 +940,27 @@ class Translator:
         self.batch_size = self.models[0].batch_size
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         self.max_input_length = self.models[0].max_input_length
-        max_output_length = self.models[0].get_max_output_length(self.max_input_length)
         if bucket_source_width > 0:
             self.buckets_source = data_io.define_buckets(self.max_input_length, step=bucket_source_width)
         else:
             self.buckets_source = [self.max_input_length]
         self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target)), val=np.inf,
                                    ctx=self.context)
+        # These are constants used for manipulation of the beam and scores (particularly for pruning)
+        self.zeros_array = mx.nd.zeros((self.beam_size,), ctx=self.context, dtype='int32')
+        self.inf_array_long = mx.nd.full((self.batch_size * self.beam_size,), val=np.inf,
+                                         ctx=self.context, dtype='float32')
+        self.inf_array = mx.nd.slice(self.inf_array_long, begin=(0), end=(self.beam_size))
+
+        # offset for hypothesis indices in batch decoding
+        self.offset = np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size)
+        # topk function used in beam search
+        self.topk = partial(utils.topk,
+                            k=self.beam_size,
+                            batch_size=self.batch_size,
+                            offset=self.offset,
+                            use_mxnet_topk=self.context != mx.cpu())  # MXNet implementation is faster on GPUs
+
         logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s batch_size=%d "
                     "buckets_source=%s)",
                     len(self.models),
@@ -1212,6 +1230,41 @@ class Translator:
             neg_logprobs = self.interpolation_func(probs)
         return neg_logprobs, attention_prob_score
 
+    def _prune(self,
+               accumulated_scores: mx.nd.NDArray,
+               best_word_indices: mx.nd.NDArray,
+               inactive: mx.nd.NDArray,
+               finished: mx.nd.NDArray) -> None:
+        """
+        Prunes the beam. For each sentence, we find the best-scoring completed hypothesis (if any),
+        and then remove all hypotheses for that sentence that are outside the beam relative to that
+        item. Pruned items are marked by setting their entry in `inactive` to 1 and marking them as finished.
+        The four arguments are updated in place.
+
+        Note that after pruning, hypotheses are no longer necessarily sorted until the next call to topk().
+
+        TODO: this could be rewritten with batch-level operations.
+
+        :param accumulated_scores: The accumulated scores. Shape: (batch * beam, 1).
+        :param best_word_indices: The row indices indicating the best hypotheses. Shape: (batch * beam).
+        :param inactive: Marks inactive items in the beam. Shape: (batch * beam).
+        :param finished: Marks completed items in the beam. Shape: (batch * beam).
+        """
+        for sentno in range(self.batch_size):
+            rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
+            if mx.nd.sum(finished[rows]) > 0:
+                best_finished_score = mx.nd.min(mx.nd.where(finished[rows], accumulated_scores[rows, 0], self.inf_array))
+
+                # Find, mark (by setting the score to inf), and remove all hypotheses
+                # whose score is not within self.beam_prune of the best score
+                inactive[rows] = mx.nd.cast(accumulated_scores[rows, 0] - best_finished_score > self.beam_prune, dtype='int32')
+                accumulated_scores[rows, 0] = mx.nd.where(inactive[rows], self.inf_array, accumulated_scores[rows, 0])
+                best_word_indices[rows] = mx.nd.where(inactive[rows], self.zeros_array, best_word_indices[rows])
+
+                # mark removed ones as finished so they won't block early exiting
+                finished[rows] = mx.nd.clip(finished[rows] + inactive[rows], 0, 1)
+
+
     def _beam_search(self,
                      source: mx.nd.NDArray,
                      source_length: int,
@@ -1256,7 +1309,7 @@ class Translator:
 
         # Beam history
         if self.store_beam:
-            beam_histories = [defaultdict(list) for _ in range(self.batch_size)] # type: Optional[List[BeamHistory]]
+            beam_histories = [defaultdict(list) for _ in range(self.batch_size)]  # type: Optional[List[BeamHistory]]
         else:
             beam_histories = None
 
@@ -1326,11 +1379,10 @@ class Translator:
                 else:
                     constraints[idx:idx+self.beam_size] = [None] * self.beam_size
 
-        # more data structures
-        zeros_array = mx.nd.zeros((self.beam_size,), ctx=self.context, dtype='int32')
-        inf_array = mx.nd.full((self.beam_size,1), val=np.inf, ctx=self.context, dtype='float32')
-
-        active_beam_size = [1] * self.batch_size
+        # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
+        # item on the beam for each sentence
+        inactive = mx.nd.ones((self.batch_size * self.beam_size), dtype='int32', ctx=self.context)
+        inactive[::self.beam_size] = 0
         for t in range(1, max_output_length):
             # (1) obtain next predictions and advance models' state
             # scores: (batch_size * beam_size, target_vocab_size)
@@ -1342,77 +1394,59 @@ class Translator:
                                                                        models_output_layer_w,
                                                                        models_output_layer_b)
 
-            # (2) compute length-normalized accumulated scores in place
-            # this is the mechanism by which we ensure that finished hypotheses do not having anything added unto them.
-            if t > 1:
-                scores = scores + scores_accumulated
+            # (2) Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
+            # finished rows are inf everywhere except column zero, which holds the accumulated model score
+            scores += scores_accumulated
+            # Items that are finished (but not inactive) get the accumulated score in col 0, otherwise infinity for the whole row
+            pad_dist[:, C.PAD_ID] = mx.nd.where(mx.nd.clip(finished - inactive, 0, 1), scores_accumulated[:, 0], self.inf_array_long)
+            scores = mx.nd.where(finished + inactive, pad_dist, scores)
 
-                # this is equivalent to doing this in numpy:
-                #   pad_dist[finished, :] = np.inf
-                #   pad_dist[finished, C.PAD_ID] = scores_accumulated[finished]
-                pad_dist[:, C.PAD_ID] = scores_accumulated[:, 0]
-                scores = mx.nd.where(finished, pad_dist, scores)
+            # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
+            # far as the active beam size for each sentence.
+            best_hyp_indices[:], best_word_indices[:], scores_accumulated[:, 0] = self.topk(scores)
 
-            # (3) get beam_size winning hypotheses for each sentence block separately
-            # TODO(fhieber): once mx.nd.topk is sped-up no numpy conversion necessary anymore.
-            if self.context == mx.cpu():
-                scores = scores.asnumpy()  # convert to numpy once to minimize cross-device copying
-
+            # Constraints for constrained decoding are processed sentence by sentence
             for sentno in range(self.batch_size):
-                rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
-                active_rows = slice(sentno * self.beam_size, sentno * self.beam_size + active_beam_size[sentno])
-                sliced_scores = scores[active_rows]
-                # TODO we could save some tiny amount of time here by not running smallest_k for a finished sent
-                (best_hyp_indices[rows], best_word_indices[rows]), \
-                    scores_accumulated[rows, 0] = self.smallest_k_func(sliced_scores, self.beam_size)
-
                 if num_constraints[sentno] > 0:
-                    best_hyp_indices[rows], best_word_indices[rows], \
-                        scores_accumulated[rows], constraints[rows], active_beam_size[sentno] = constrained_kbest(active_beam_size[sentno], self.beam_size, sliced_scores, constraints[rows], best_hyp_indices[rows], best_word_indices[rows], scores_accumulated[rows], self.context)
+                    rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
+                    best_hyp_indices[rows], best_word_indices[rows], scores_accumulated[rows], \
+                        constraints[rows], inactive[rows] = constrained_topk(self.beam_size,
+                                                                             inactive[rows],
+                                                                             scores[rows],
+                                                                             constraints[rows],
+                                                                             best_hyp_indices[rows],
+                                                                             best_word_indices[rows],
+                                                                             scores_accumulated[rows],
+                                                                             self.context)
 
-                # offsetting since the returned smallest_k() indices were slice-relative
-                best_hyp_indices[rows] += rows.start
+                    # offsetting since the returned smallest_k() indices were slice-relative
+                    best_hyp_indices[rows] += rows.start
 
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
                 best_word_indices[:] = vocab_slice_ids.take(best_word_indices)
 
-            # now: normalize, prune, and re-sort
-            newly_finished = (best_word_indices == self.vocab_target[C.EOS_SYMBOL]).expand_dims(axis=1)
-            scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
-
-            # (x) Prune out low-probability hypotheses
-            for sentno in range(self.batch_size):
-                rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
-                if self.beam_prune > 0.0:
-                    if mx.nd.sum(finished[rows]) > 0:
-                        best_score = mx.nd.min(mx.nd.where(finished[rows].expand_dims(axis=1), scores_accumulated[rows], inf_array))
-
-                        to_remove = mx.nd.cast(scores_accumulated[rows,0] - best_score > self.beam_prune, dtype='int32')
-                        scores_accumulated[rows] = mx.nd.where(to_remove, inf_array, scores_accumulated[rows])
-                        best_word_indices[rows] = mx.nd.where(to_remove, zeros_array, best_word_indices[rows])
-                        # scores_accumulated[rows] = mx.nd.where(to_remove.expand_dims(axis=1), mx.nd.cast(inf_array.expand_dims(axis=1), dtype='float32'), scores_accumulated[rows])
-
-                        num_removing = int(mx.nd.sum(to_remove).asscalar())
-                        active_beam_size[sentno] = self.beam_size - num_removing
-
-                        finished[rows] = finished[rows] + to_remove
-
-                sorted_indices = mx.nd.argsort(scores_accumulated[rows,0])
-                best_hyp_indices[rows] = mx.nd.take(best_hyp_indices[rows], sorted_indices)
-                best_word_indices[rows] = mx.nd.take(best_word_indices[rows], sorted_indices)
-                scores_accumulated[rows] = mx.nd.take(scores_accumulated[rows,0], sorted_indices.expand_dims(axis=1))
-                if num_constraints[sentno] > 0:
-                    constraints[rows] = [constraints[int(x.asscalar())] for x in sorted_indices]
-
-            # (4) get hypotheses and their properties for beam_size winning hypotheses (ascending)
-            sequences = mx.nd.take(sequences, best_hyp_indices)
-            lengths = mx.nd.take(lengths, best_hyp_indices)
+            # (4) Normalize the scores of newly finished hypotheses. Note that after this until the
+            # next call to topk(), hypotheses may not be in sorted order.
             finished = mx.nd.take(finished, best_hyp_indices)
+            lengths = mx.nd.take(lengths, best_hyp_indices)
+            all_finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
+            newly_finished = all_finished - finished
+            scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
+            finished = all_finished
+            # All rows are now active (after special treatment of start state at t=1)
+            inactive[:] = 0
+
+            # (5) Prune out low-probability hypotheses. Pruning works by setting entries `inactive`.
+            if self.beam_prune > 0.0:
+                self._prune(scores_accumulated, best_word_indices, inactive, finished)
+
+            # (6) Update the beam with the hypotheses and their properties for the beam_size winning hypotheses (ascending)
+            sequences = mx.nd.take(sequences, best_hyp_indices)
             attention_scores = mx.nd.take(attention_scores, best_hyp_indices)
             attentions = mx.nd.take(attentions, best_hyp_indices)
 
-            # (5) update best hypotheses, their attention lists and lengths (only for non-finished hyps)
+            # (7) update best hypotheses, their attention lists and lengths (only for non-finished hyps)
             # pylint: disable=unsupported-assignment-operation
             sequences[:, t] = best_word_indices
             attentions[:, t, :] = attention_scores
@@ -1420,7 +1454,8 @@ class Translator:
 
             # (6) optionally save beam history
             if self.store_beam:
-                unnormalized_scores = scores_accumulated * self.length_penalty(lengths -1)
+                unnormalized_scores = mx.nd.where(finished, scores_accumulated * self.length_penalty(lengths - 1), scores_accumulated)
+                normalized_scores = mx.nd.where(finished, scores_accumulated, scores_accumulated / self.length_penalty(lengths - 1))
                 for sent in range(self.batch_size):
                     rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
 
@@ -1435,16 +1470,14 @@ class Translator:
                         beam_histories[sent]["parent_ids"].append(shifted_parents.asnumpy().tolist())
 
                         beam_histories[sent]["scores"].append(unnormalized_scores[rows].asnumpy().flatten().tolist())
-                        beam_histories[sent]["normalized_scores"].append(scores_accumulated[rows].asnumpy().flatten().tolist())
-
+                        beam_histories[sent]["normalized_scores"].append(normalized_scores[rows].asnumpy().flatten().tolist())
 
             # (7) determine which hypotheses in the beam are now finished
             finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
 
-            #self.print_beam(sequences, scores_accumulated, finished, active_beam_size, t)
-
-            if self.stop_criterium == 'first':
-                if self.batch_size == 1 and finished[0].asscalar() > 0:
+            if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST and self.batch_size == 1:
+                # TODO: extend to work with batch_size > 1 (i.e., one stopped for each sentence)
+                if mx.nd.sum(finished).asscalar() > 0:
                     break
             else:
                 if mx.nd.sum(finished).asscalar() == self.batch_size * self.beam_size:  # all finished
@@ -1454,7 +1487,20 @@ class Translator:
             for ms in model_states:
                 ms.sort_state(best_hyp_indices)
 
-        logger.info("Finished after %d / %d steps.", t + 1, max_output_length)
+        logger.debug("Finished after %d / %d steps.", t + 1, max_output_length)
+
+        # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
+        folded_accumulated_scores = scores_accumulated.reshape((self.batch_size, self.beam_size * scores_accumulated.shape[-1]))
+        indices = mx.nd.argsort(folded_accumulated_scores, axis=1)
+        best_hyp_indices[:], _ = np.unravel_index(indices.astype(np.int32).asnumpy().ravel(), scores_accumulated.shape) + self.offset
+        # Now reorder the arrays
+        sequences = mx.nd.take(sequences, best_hyp_indices)
+        lengths = mx.nd.take(lengths, best_hyp_indices)
+        attentions = mx.nd.take(attentions, best_hyp_indices)
+        scores_accumulated[:] = mx.nd.take(scores_accumulated, best_hyp_indices)
+        finished = mx.nd.take(finished, best_hyp_indices)
+
+        # TODO: update constraints
 
         return sequences, attentions, scores_accumulated, lengths, constraints, beam_histories
 
@@ -1509,15 +1555,25 @@ class Translator:
                 result.append(Translation(sequence, attention_matrix, score))
         return result
 
-    def print_beam(self, sequences, scores, finished, active, timestep):
-        print('BEAM AT TIME STEP', timestep)
-        for sentno in range(self.batch_size):
-            idx = sentno * self.beam_size
-            for i in range(self.beam_size):
-                word_ids = [int(x.asscalar()) for x in sequences[idx + i]]
-                hypothesis = ' '.join([self.vocab_target_inv[x] for x in word_ids if x != 0])
-                score = scores[idx + i].asscalar()
-                if i < active[sentno]:
-                    print(i, finished[idx + i].asscalar(), score, hypothesis)
-                else:
-                    print(i, finished[idx + i].asscalar(), score, '----------')
+    def _print_beam(self,
+                    sequences: mx.nd.NDArray,
+                    accumulated_scores: mx.nd.NDArray,
+                    finished: mx.nd.NDArray,
+                    inactive: mx.nd.NDArray,
+                    timestep: int) -> None:
+        """
+        Prints the beam for debugging purposes.
+
+        :param sequences: The beam histories (shape: batch_size * beam_size, max_output_len).
+        :param accumulated_scores: The accumulated scores for each item in the beam (shape: batch_size * beam_size, target_vocab_size).
+        :param finished: Indicates which items are finished (shape: batch_size * beam_size).
+        :param inactive: Indicates any inactive items (shape: batch_size * beam_size).
+        :param timestep: The current timestep.
+        """
+        logger.info('BEAM AT TIMESTEP %d', timestep)
+        for i in range(self.batch_size * self.beam_size):
+            # for each hypothesis, print its entire history
+            score = accumulated_scores[i].asscalar()
+            word_ids = [int(x.asscalar()) for x in sequences[i]]
+            hypothesis = '----------' if inactive[i] else ' '.join([self.vocab_target_inv[x] for x in word_ids if x != 0])
+            logger.info('%d %d %d %.2f %s', i, finished[i].asscalar(), inactive[i].asscalar(), score, hypothesis)

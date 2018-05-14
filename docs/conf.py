@@ -39,6 +39,7 @@ class MockModule(MagicMock):
     def __getattr__(cls, name):
         return MockClass(name)
 
+
 MOCK_MODULES = ['mxnet', 'mxnet.metric', 'numpy']
 sys.modules.update((mod_name, MockModule()) for mod_name in MOCK_MODULES)
 
