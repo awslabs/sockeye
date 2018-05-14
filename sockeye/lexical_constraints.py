@@ -26,12 +26,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-BANK_ADJUSTMENT = 'even'
-
-ConstraintSet = NamedTuple('Constraint', [
-    ('word_ids', List[int]),
-    ('sequence_markers', List[int])
-])
+RawConstraintList = List[List[int]]
 
 class ConstrainedHypothesis:
     """
@@ -40,14 +35,21 @@ class ConstrainedHypothesis:
     A non-sequence constraint is a single word and can therefore be followed by anything, whereas a sequence constraint must be followed by a particular word (the next word in the sequence).
     This class also records which constraints have been met.
     """
-    def __init__(self, constraint_list: List[Tuple[int,int]], eos_id) -> None:
-        # constraints records the words of the constraints, as a list
-        # is_sequence records, for each constraint, whether it is the non-final word of a phrasal constraint.
-        self.constraints, self.is_sequence = constraint_list
+    def __init__(self, constraint_list: RawConstraintList, eos_id: int) -> None:
+
+        # `constraints` records the words of the constraints, as a list.
+        # `is_sequence` is a parallel array that records, for each corresponding constraint,
+        self.constraints = []
+        self.is_sequence = []
+        for phrase in constraint_list:
+            self.constraints += phrase
+            self.is_sequence += [1] * len(phrase)
+            self.is_sequence[-1] = 0
+
         self.eos_id = eos_id
 
         # no constraints have been met
-        self.met = [0 for x in self.constraints]
+        self.met = [False for x in self.constraints]
         self.lastMet = -1
 
     def __len__(self):
@@ -59,7 +61,7 @@ class ConstrainedHypothesis:
     def __str__(self):
         s = []
         for i, id in enumerate(self.constraints):
-            s.append(str(id) if self.met[i] == 0 else 'X')
+            s.append(str(id) if self.met[i] is False else 'X')
             if self.is_sequence[i]: s.append('->')
         return ' '.join(s)
 
@@ -91,32 +93,36 @@ class ConstrainedHypothesis:
         :return: The ID of the next required word, or -1 if any word can follow
         """
         items = []
-        # Add extensions of sequential constraints
+        # Add extensions of a started-but-incomplete sequential constraint
         if self.lastMet != -1 and self.is_sequence[self.lastMet] == 1:
             items.append(self.constraints[self.lastMet + 1])
 
         # Add all constraints that aren't non-initial sequences
         else:
             for i, id in enumerate(self.constraints):
-                if self.met[i] == 0 and (i == 0 or not self.is_sequence[i - 1]):
+                if self.met[i] is False and (i == 0 or not self.is_sequence[i - 1]):
                     items.append(self.constraints[i])
 
         return items
 
     def finished(self) -> bool:
+        """
+        Return true if all the constraints have been met.
+
+        :return: True if all the constraints are met.
+        """
         return self.numNeeded() == 0
 
     def isValid(self, wordid) -> bool:
-        """Ensure </s> is only generated when the hypothesis is completed."""
+        """
+        Ensures </s> is only generated when the hypothesis is completed.
+
+        :param wordid: The wordid to validate.
+        :return: True if all constraints are already met or the word ID is not the EOS id.
+        """
         return self.finished() or wordid != self.eos_id
 
-    def copy(self):
-        newobj = ConstrainedHypothesis((self.constraints, self.is_sequence), self.eos_id)
-        newobj.lastMet = self.lastMet
-        newobj.met = [x for x in self.met]
-        return newobj
-
-    def advance(self, word_id: int):
+    def advance(self, word_id: int) -> 'ConstrainedHypothesis':
         """
         Updates the constraints object based on advancing on word_id.
         There is a complication, in that we may have started but not
@@ -127,22 +133,21 @@ class ConstrainedHypothesis:
 
         :param word_id: The word ID to advance on.
         :return: A deep copy of the object, advanced on word_id.
-
         """
 
-        obj = self.copy()
+        obj = copy.deepcopy(self)
 
-        # first, check if we're updating a sequential constraint
+        # First, check if we're updating a sequential constraint.
         if obj.lastMet != -1 and obj.is_sequence[obj.lastMet] == 1:
             if word_id == obj.constraints[obj.lastMet + 1]:
                 # Here, the word matches what we expect next in the constraint, so we update everything
-                obj.met[obj.lastMet + 1] = 1
+                obj.met[obj.lastMet + 1] = True
                 obj.lastMet += 1
             else:
                 # Here, the word is not the expected next word of the constraint, so we back out of the constraint.
                 index = obj.lastMet
                 while obj.is_sequence[index]:
-                    obj.met[index] = 0
+                    obj.met[index] = False
                     index -= 1
                 obj.lastMet = -1
 
@@ -153,7 +158,7 @@ class ConstrainedHypothesis:
                 l = list(zip(obj.constraints, [0] + obj.is_sequence[:-1], obj.met))
                 q = (word_id, 0, 0)
                 pos = l.index(q)
-                obj.met[pos] = 1
+                obj.met[pos] = True
                 obj.lastMet = pos
 
             except:
@@ -177,7 +182,7 @@ class NullHypothesis(ConstrainedHypothesis):
         return True
 
 
-def get_bank_sizes(num_constraints, beam_size, candidates):
+def get_bank_sizes(num_constraints, beam_size, candidates) -> List[int]:
     """
     :param num_constraints: The number of constraints.
     :param beam_size: The beam size.
@@ -227,7 +232,7 @@ class Candidate(NamedTuple('Candidate', [
 
 
 def topk(beam_size: int,
-         inactive: mx.ndarray
+         inactive: mx.ndarray,
          scores: mx.ndarray,
          hypotheses: ConstrainedHypothesis,
          best_ids,
@@ -249,14 +254,6 @@ def topk(beam_size: int,
     :return:
     """
 
-    def get_scalar(obj, dtype):
-        if context == mx.cpu():
-            return dtype(obj)
-        else:
-            return dtype(obj.asscalar())
-
-    argmin = np.argmin if context == mx.cpu() else mx.ndarray.argmin
-
     num_constraints = hypotheses[0].size()
 
     _start_time = time.time()
@@ -274,7 +271,7 @@ def topk(beam_size: int,
 
     # (2,3) For each hypothesis, we add (2) all the constraints that could follow it and
     # (3) the best item (constrained or not) in that row
-    best_next = argmin(scores, axis=1)
+    best_next = mx.ndarray.argmin(scores, axis=1)
     for row in range(beam_size):
         if inactive[row]:
             continue
@@ -285,14 +282,14 @@ def topk(beam_size: int,
         nextones = hyp.allowed()
 
         # (3) add the single-best item after this (if it's valid)
-        col = get_scalar(best_next[row], dtype=int)
-        if hypotheses[row].isValid(col):
+        col = int(best_next[row].asscalar())
+        if hyp.isValid(col):
             nextones.append(col)
 
         # Now, create new candidates for each of these items
         for col in nextones:
-            new_constraint = hypotheses[row].advance(col)
-            score = get_scalar(scores[row,col], dtype=float)
+            new_constraint = hyp.advance(col)
+            score = scores[row,col].asscalar()
             cand = Candidate(row, col, score, new_constraint)
             candidates.add(cand)
 
@@ -311,6 +308,9 @@ def topk(beam_size: int,
 
     # Adjust allocated bank sizes if there are too few candidates in any of them
     bank_sizes = get_bank_sizes(num_constraints, beam_size, counts)
+
+    # logger.info("Time: bank_sizes: %f", time.time() - _start_time)
+    # _start_time = time.time()
 
     counts = [x for x in bank_sizes]
     # sort candidates into the allocated banks
