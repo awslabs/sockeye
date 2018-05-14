@@ -85,10 +85,20 @@ Depending on the amount of RAM you have available you might want to reduce size 
 head -n 200000 corpus.tc.BPE.de > corpus.tc.BPE.de.tmp && mv corpus.tc.BPE.de.tmp corpus.tc.BPE.de
 head -n 200000 corpus.tc.BPE.en > corpus.tc.BPE.en.tmp && mv corpus.tc.BPE.en.tmp corpus.tc.BPE.en
 ```
-That said, we can now kick off the training process:
+
+Before we start training we will prepare the training data by splitting it into shards and serializing it in matrix format:
 ```bash
-python -m sockeye.train -s corpus.tc.BPE.de \
+python -m sockeye.prepare_data \
+                        -s corpus.tc.BPE.de \
                         -t corpus.tc.BPE.en \
+                        -o prepared_data
+```
+While this is an optional step it has the advantage of considerably lowering the time needed before training starts and also limiting the memory usage as only one shard is loaded into memory at a time.
+
+
+We can now kick off the training process:
+```bash
+python -m sockeye.train -d prepared_data\
                         -vs newstest2016.tc.BPE.de \
                         -vt newstest2016.tc.BPE.en \
                         --encoder rnn \
