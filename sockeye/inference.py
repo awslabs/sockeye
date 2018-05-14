@@ -35,7 +35,7 @@ from . import lexicon
 from . import model
 from . import utils
 from . import vocab
-from .lexical_constraints import ConstraintSet, ConstrainedHypothesis, kbest as constrained_kbest
+from .lexical_constraints import RawConstraintList, ConstrainedHypothesis, kbest as constrained_kbest
 from .log import is_python34
 
 logger = logging.getLogger(__name__)
@@ -797,38 +797,6 @@ class ModelState:
             result += 'SUBSTATE {} = {}\n'.format(i, state)
         return result
 
-
-class CoveragePenalty:
-    """
-    Calculates the coverage penalty as
-    weight * sum_X(log(min(sum_Y att(x_i,y_j), 1.0)))
-
-    See Wu et al. 2016 ("weight" here is their beta)
-
-    :param weight: The beta factor for the length penalty (see above).
-    """
-
-    def __init__(self, weight: float = 1.0) -> None:
-        self.weight = weight
-
-    def __call__(self, attentions: mx.nd.NDArray) -> mx.nd.NDArray:
-        """
-        Calculate the coverage penalty for the given attention matrix.
-
-        :param attentions: A (batch x target_len x source_len) matrix of attention weights.
-        :return: The coverage penalty. A scalar or a matrix (batch_size, 1) depending on the input.
-        """
-        penalties = mx.nd.zeros((attentions.shape[0],), ctx=attentions.context)
-        if self.weight > 0.0:
-            penalties = self.weight * mx.nd.sum(mx.nd.log(mx.nd.clip(mx.nd.sum(attentions, axis=1), a_min = 0.00000000000000001, a_max=1.0)), axis=1)
-            # print(attentions.shape, sums.shape)
-            # sum = mx.nd.where(sum
-            # for i in range(attentions.shape[0]):
-            #     source_len = attentions.shape[2]
-            #     penalties[i] = self.weight * sum([math.log(min(mx.nd.sum(attentions[i,sid,:]).asscalar(), 1.0)) for sid in range(source_len)])
-
-        return penalties.expand_dims(axis=1)
-
 class LengthPenalty:
     """
     Calculates the length penalty as:
@@ -938,7 +906,6 @@ class Translator:
                  ensemble_mode: str,
                  bucket_source_width: int,
                  length_penalty: LengthPenalty,
-                 coverage_penalty: CoveragePenalty,
                  beam_prune: float,
                  stop_criterium: str,
                  models: List[InferenceModel],
@@ -950,7 +917,6 @@ class Translator:
         self.context = context
         self.smallest_k_func = utils.smallest_k if self.context == mx.cpu() else utils.smallest_k_mx
         self.length_penalty = length_penalty
-        self.coverage_penalty = coverage_penalty
         self.beam_prune = beam_prune
         self.stop_criterium = stop_criterium
         self.source_vocabs = source_vocabs
@@ -1080,19 +1046,20 @@ class Translator:
 
         return results
 
-#    def _get_inference_input(self, inputs: List[Tuple[List[str], List[str], str]]) -> Tuple[mx.nd.NDArray, int, List[lexconstr.ConstraintSet]]:
-    def _get_inference_input(self, trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray, int, List[ConstraintSet]]:
+    def _get_inference_input(self, trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray, int, List[RawConstraintList]]:
         """
-        Returns NDArray of source ids (shape=(batch_size, bucket_key, num_factors)) and corresponding bucket_key.
-        Also checks correctness of translator inputs.
+        Assembles the numerical data for the batch.
+        This comprises an NDArray for the source sentences, the bucket key (padded source length), and a list of
+        raw constraint lists, one for each sentence in the batch. Each raw constraint list contains phrases in
+        the form of lists of integers in the target language vocabulary.
 
         :param trans_inputs: List of TranslatorInputs.
-        :return NDArray of source ids and bucket key.
+        :return NDArray of source ids (shape=(batch_size, bucket_key, num_factors)) and bucket key.
         """
 
         bucket_key = data_io.get_bucket(max(len(inp.tokens) for inp in trans_inputs), self.buckets_source)
         source = mx.nd.zeros((len(trans_inputs), bucket_key, self.num_source_factors), ctx=self.context)
-        constraint_sets = []
+        constraints = []
 
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)
@@ -1108,16 +1075,14 @@ class Translator:
 
                 source[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
 
-            constraints = trans_input.constraints if trans_input.constraints is not None else []
             tokens = []  # the concatenated list of constraints, as numbers
             markers = [] # markers that indicate whether each words is a non-final word of a multi-word constraint
-            for phrase in constraints:
-                for i, word in enumerate(phrase, 1):
-                    tokens.append(self.vocab_target.get(word, self.vocab_target[C.UNK_SYMBOL]))
-                    markers.append(0 if (i == len(phrase)) else 1)
-            constraint_sets.append(ConstraintSet(tokens, markers))
+            if trans_input.constraints is not None:
+                constraints.append([data_io.tokens2ids(phrase, self.vocab_target) for phrase in trans_input.constraints])
+            else:
+                constraints.append([])
 
-        return source, bucket_key, constraint_sets
+        return source, bucket_key, constraints
 
     def _make_result(self,
                      trans_input: TranslatorInput,
@@ -1164,7 +1129,7 @@ class Translator:
     def _translate_nd(self,
                       source: mx.nd.NDArray,
                       source_length: int,
-                      constraint_list: List[ConstraintSet]) -> List[Translation]:
+                      constraints: List[List[int]]) -> List[Translation]:
         """
         Translates source of source_length, given a bucket_key.
 
@@ -1175,7 +1140,7 @@ class Translator:
         :return: Sequence of translations.
         """
 
-        return self._get_item_from_beam(*self._beam_search(source, source_length, constraint_list))
+        return self._get_item_from_beam(*self._beam_search(source, source_length, constraints))
 
     def _encode(self, sources: mx.nd.NDArray, source_length: int) -> List[ModelState]:
         """
@@ -1250,13 +1215,18 @@ class Translator:
     def _beam_search(self,
                      source: mx.nd.NDArray,
                      source_length: int,
-                     constraint_list: List[ConstraintSet] = []) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray, Optional[List[BeamHistory]]]:
+                     constraint_list: List[RawConstraintList] = []) -> Tuple[mx.nd.NDArray,
+                                                                             mx.nd.NDArray,
+                                                                             mx.nd.NDArray,
+                                                                             mx.nd.NDArray,
+                                                                             Optional[List[BeamHistory]]]:
         """
         Translates multiple sentences using beam search.
 
         :param source: Source ids. Shape: (batch_size, bucket_key).
         :param source_length: Max source length.
-        :param constraint_list: A list of sets of words and phrases that must appear in the output.
+        :param constraint_list: A list (for each sentence in the batch) of lists (each phrase) of
+                list of IDs (words in each phrase) that must appear in the output.
         :return List of lists of word ids, list of attentions, array of accumulated length-normalized
                 negative log-probs.
         """
@@ -1341,25 +1311,17 @@ class Translator:
 
         # (0) encode source sentence, returns a list
         model_states = self._encode(source, source_length)
-        # print('MODEL STATES 0')
-        # print(model_states[0])
 
-        # if watchstr is not None and len(watchstr) > 0:
-        #     sentence = '<s> {} </s>'.format(watchstr)
-        #     watchstr = [self.vocab_target.get(x) for x in sentence.split()]
-        #     logger.info("Watching: ", sentence)
-
+        # Initialize the beam to track constraint sets, where target-side lexical constraints are present
         num_constraints = [0] * self.batch_size
-        if len(constraint_list) > 0 and constraint_list[0] is not None:
+        if len(constraint_list) > 0 and any(constraint_list):
             for i in range(self.batch_size):
-                this_set = constraint_list[i]
-#                print(i, this_set)
-                _count = len(this_set.word_ids)
-                num_constraints[i] = _count
+                raw_list = constraint_list[i]
+                num_constraints[i] = sum([len(phrase) for phrase in raw_list])
 
                 idx = i * self.beam_size
-                if _count > 0:
-                    hyp = ConstrainedHypothesis(this_set, self.vocab_target[C.EOS_SYMBOL])
+                if num_constraints[i] > 0:
+                    hyp = ConstrainedHypothesis(raw_list, self.vocab_target[C.EOS_SYMBOL])
                     constraints[idx:idx+self.beam_size] = [hyp.advance(self.start_id) for x in range(self.beam_size)]
                 else:
                     constraints[idx:idx+self.beam_size] = [None] * self.beam_size
@@ -1368,7 +1330,6 @@ class Translator:
         zeros_array = mx.nd.zeros((self.beam_size,), ctx=self.context, dtype='int32')
         inf_array = mx.nd.full((self.beam_size,1), val=np.inf, ctx=self.context, dtype='float32')
 
-        # print('\n'.join([str(x) for x in constraints]))
         active_beam_size = [1] * self.batch_size
         for t in range(1, max_output_length):
             # (1) obtain next predictions and advance models' state
@@ -1407,7 +1368,7 @@ class Translator:
 
                 if num_constraints[sentno] > 0:
                     best_hyp_indices[rows], best_word_indices[rows], \
-                        scores_accumulated[rows], constraints[rows], active_beam_size[sentno] = constrained_kbest(t, active_beam_size[sentno], self.beam_size, max_output_length, sliced_scores, constraints[rows], best_hyp_indices[rows], best_word_indices[rows], scores_accumulated[rows], self.context)
+                        scores_accumulated[rows], constraints[rows], active_beam_size[sentno] = constrained_kbest(active_beam_size[sentno], self.beam_size, sliced_scores, constraints[rows], best_hyp_indices[rows], best_word_indices[rows], scores_accumulated[rows], self.context)
 
                 # offsetting since the returned smallest_k() indices were slice-relative
                 best_hyp_indices[rows] += rows.start
@@ -1419,7 +1380,6 @@ class Translator:
             # now: normalize, prune, and re-sort
             newly_finished = (best_word_indices == self.vocab_target[C.EOS_SYMBOL]).expand_dims(axis=1)
             scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
-            # scores_accumulated += self.coverage_penalty(attentions)
 
             # (x) Prune out low-probability hypotheses
             for sentno in range(self.batch_size):

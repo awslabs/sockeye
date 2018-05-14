@@ -81,7 +81,6 @@ def main():
                                           bucket_source_width=args.bucket_width,
                                           length_penalty=inference.LengthPenalty(args.length_penalty_alpha,
                                                                                  args.length_penalty_beta),
-                                          coverage_penalty=inference.CoveragePenalty(args.coverage_penalty_beta),
                                           beam_prune=args.beam_prune,
                                           stop_criterium=args.beam_stop,
                                           models=models,
