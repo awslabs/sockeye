@@ -247,8 +247,7 @@ def test_inference_args(test_params, expected_params):
      # Additionally we mention the checkpoint_frequency
      ['checkpoint_frequency']),
     # WMT tutorial
-    ('-s corpus.tc.BPE.de '
-     '-t corpus.tc.BPE.en '
+    ('-d train_data '
      '-vs newstest2016.tc.BPE.de '
      '-vt newstest2016.tc.BPE.en '
      '--encoder rnn '
@@ -261,8 +260,9 @@ def test_inference_args(test_params, expected_params):
      '--use-cpu '
      '-o wmt_mode',
      dict(
-         source="corpus.tc.BPE.de",
-         target="corpus.tc.BPE.en",
+         source=None,
+         target=None,
+         prepared_data="train_data",
          validation_source="newstest2016.tc.BPE.de",
          validation_target="newstest2016.tc.BPE.en",
          num_embed=(256, 256),
@@ -320,6 +320,29 @@ def test_tutorial_translate_args(test_params, expected_params, expected_params_p
 ])
 def test_tutorial_averaging_args(test_params, expected_params, expected_params_present):
     _test_args_subset(test_params, expected_params, expected_params_present, arguments.add_average_args)
+
+
+@pytest.mark.parametrize("test_params, expected_params", [
+    # WMT tutorial
+    ('--source corpus.tc.BPE.de --target corpus.tc.BPE.en --output train_data ',
+     dict(source='corpus.tc.BPE.de', target='corpus.tc.BPE.en',
+          source_vocab=None,
+          target_vocab=None,
+          source_factors=[],
+          shared_vocab=False,
+          num_words=(50000, 50000),
+          word_min_count=(1, 1),
+          no_bucketing=False,
+          bucket_width=10,
+          max_seq_len=(100, 100),
+          min_num_shards=1,
+          num_samples_per_shard=1000000,
+          seed=13,
+          output='train_data'
+          ))
+])
+def test_tutorial_prepare_data_cli_args(test_params, expected_params):
+    _test_args(test_params, expected_params, arguments.add_prepare_data_cli_args)
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
