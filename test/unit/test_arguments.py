@@ -199,7 +199,6 @@ def test_training_arg(test_params, expected_params):
                       sure_align_threshold=0.9,
                       max_output_length_num_stds=2,
                       beam_prune=0.0,
-                      coverage_penalty_beta=0.0,
                       beam_stop='all',
                       length_penalty_alpha=1.0,
                       length_penalty_beta=0.0,
