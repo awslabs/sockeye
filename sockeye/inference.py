@@ -355,7 +355,8 @@ def load_models(context: mx.context.Context,
                 max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                 decoder_return_logit_inputs: bool = False,
                 cache_output_layer_w_b: bool = False,
-                forced_max_output_len: Optional[int] = None) -> Tuple[List[InferenceModel],
+                forced_max_output_len: Optional[int] = None,
+                override_dtype: Optional[str] = None) -> Tuple[List[InferenceModel],
                                                                List[vocab.Vocab],
                                                                vocab.Vocab]:
     """
@@ -375,6 +376,7 @@ def load_models(context: mx.context.Context,
     :param cache_output_layer_w_b: Models cache weights and biases for logit computation as NumPy arrays (used with
                                    restrict lexicon).
     :param forced_max_output_len: An optional overwrite of the maximum output length.
+    :param override_dtype: Overrides dtype of encoder and decoder defined at training time to a different one.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
@@ -396,6 +398,9 @@ def load_models(context: mx.context.Context,
         logger.info("Model version: %s", model_version)
         utils.check_version(model_version)
         model_config = model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
+        if override_dtype is not None:
+            model_config.config_encoder.dtype = override_dtype
+            model_config.config_decoder.dtype = override_dtype
 
         if checkpoint is None:
             params_fname = os.path.join(model_folder, C.PARAMS_BEST_NAME)
