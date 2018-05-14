@@ -53,6 +53,16 @@ COMMON_TRAINING_PARAMS = " --checkpoint-frequency 1000 --optimizer adam --initia
      True,
      1.03,
      0.98),
+    ("Copy:lstm:pruning",
+     "--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
+     " --rnn-attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity"
+     " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
+     " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --max-updates 4000 --weight-normalization"
+     " --gradient-clipping-type norm --gradient-clipping-threshold 10",
+     "--beam-size 5 --batch-size 2 --beam-prune 1",
+     True,
+     1.03,
+     0.98),
     ("Copy:chunking",
      "--encoder rnn --decoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
      " --rnn-attention-type mlp --rnn-attention-num-hidden 32"

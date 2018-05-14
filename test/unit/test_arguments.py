@@ -194,6 +194,7 @@ def test_training_arg(test_params, expected_params):
                       checkpoints=None,
                       models=['model'],
                       beam_size=5,
+                      beam_prune=0,
                       batch_size=1,
                       chunk_size=None,
                       ensemble_mode='linear',
@@ -205,9 +206,11 @@ def test_training_arg(test_params, expected_params):
                       output_type='translation',
                       sure_align_threshold=0.9,
                       max_output_length_num_stds=2,
+                      beam_search_stop='all',
                       length_penalty_alpha=1.0,
                       length_penalty_beta=0.0,
-                      strip_unknown_words=False)),
+                      strip_unknown_words=False,
+                      override_dtype=None)),
 ])
 def test_inference_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_inference_args)

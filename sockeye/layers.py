@@ -129,7 +129,7 @@ class LHUC:
                  prefix: str = "") -> None:
         self.num_hidden = num_hidden
         self.prefix = prefix
-        if not weight:
+        if weight is None:
             self.params = mx.sym.Variable(self.prefix + C.LHUC_NAME,
                                           shape=(self.num_hidden,),
                                           init=mx.init.Uniform(0.1),

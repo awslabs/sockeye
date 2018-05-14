@@ -50,6 +50,10 @@ def main():
     if args.checkpoints is not None:
         check_condition(len(args.checkpoints) == len(args.models), "must provide checkpoints for each model")
 
+    if args.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
+        check_condition(args.batch_size == 1,
+                        "Early stopping (--beam-search-stop %s) not supported with batching" % (C.BEAM_SEARCH_STOP_FIRST))
+
     log_basic_info(args)
 
     output_handler = get_output_handler(args.output_type,
@@ -58,6 +62,11 @@ def main():
 
     with ExitStack() as exit_stack:
         context = _setup_context(args, exit_stack)
+
+        if args.override_dtype == C.DTYPE_FP16:
+            logger.warning('Experimental feature \'--override-dtype float16\' has been used. '
+                           'This feature may be removed or change its behaviour in future. '
+                           'DO NOT USE IT IN PRODUCTION!')
 
         models, source_vocabs, target_vocab = inference.load_models(
             context=context,
@@ -69,7 +78,8 @@ def main():
             softmax_temperature=args.softmax_temperature,
             max_output_length_num_stds=args.max_output_length_num_stds,
             decoder_return_logit_inputs=args.restrict_lexicon is not None,
-            cache_output_layer_w_b=args.restrict_lexicon is not None)
+            cache_output_layer_w_b=args.restrict_lexicon is not None,
+            override_dtype=args.override_dtype)
         restrict_lexicon = None  # type: Optional[TopKLexicon]
         if args.restrict_lexicon:
             restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
@@ -80,6 +90,8 @@ def main():
                                           bucket_source_width=args.bucket_width,
                                           length_penalty=inference.LengthPenalty(args.length_penalty_alpha,
                                                                                  args.length_penalty_beta),
+                                          beam_prune=args.beam_prune,
+                                          beam_search_stop=args.beam_search_stop,
                                           models=models,
                                           source_vocabs=source_vocabs,
                                           target_vocab=target_vocab,

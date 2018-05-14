@@ -1010,6 +1010,15 @@ def add_inference_args(params):
                                type=int_greater_or_equal(1),
                                default=5,
                                help='Size of the beam. Default: %(default)s.')
+    decode_params.add_argument('--beam-prune', '-p',
+                               type=float,
+                               default=0,
+                               help='Pruning threshold for beam search. All hypotheses with scores not within '
+                               'this amount of the best finished hypothesis are discarded (0 = off). Default: %(default)s.')
+    decode_params.add_argument('--beam-search-stop',
+                               choices=[C.BEAM_SEARCH_STOP_ALL, C.BEAM_SEARCH_STOP_FIRST],
+                               default=C.BEAM_SEARCH_STOP_ALL,
+                               help='Stopping criteria. Quit when (all) hypotheses are finished or when a finished hypothesis is in (first) position. Default: %(default)s.')
     decode_params.add_argument('--batch-size',
                                type=int_greater_or_equal(1),
                                default=1,
@@ -1082,7 +1091,11 @@ def add_inference_args(params):
                                type=float,
                                help='Beta factor for the length penalty used in beam search: '
                                     '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
-
+    decode_params.add_argument('--override-dtype',
+                               default=None,
+                               type=str,
+                               help='EXPERIMENTAL: may be changed or removed in future. Overrides training dtype of '
+                                    'encoders and decoders during inference. Default: %(default)s')
 
 def add_evaluate_args(params):
     eval_params = params.add_argument_group("Evaluate parameters")

@@ -252,7 +252,6 @@ class OnlineMeanAndVariance:
 
 
 def topk(scores: mx.nd.NDArray,
-         t: int,
          k: int,
          batch_size: int,
          offset: np.ndarray,
@@ -261,20 +260,14 @@ def topk(scores: mx.nd.NDArray,
     Get the lowest k elements per sentence from a `scores` matrix.
 
     :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
-    :param t: Time step in the beam search.
     :param k: The number of smallest scores to return.
     :param batch_size: Number of sentences being decoded at once.
     :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
     :param use_mxnet_topk: True to use the mxnet implementation or False to use the numpy one.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
-    if t == 1:
-        # Beam size is effectively 1, take only one hypothesis per sentence
-        # (batch_size, target_vocab_size)
-        folded_scores = scores[::k, :]
-    else:
-        # (batch_size, beam_size * target_vocab_size)
-        folded_scores = scores.reshape((batch_size, k * scores.shape[-1]))
+    # (batch_size, beam_size * target_vocab_size)
+    folded_scores = scores.reshape((batch_size, k * scores.shape[-1]))
 
     if use_mxnet_topk:
         # pylint: disable=unbalanced-tuple-unpacking
@@ -833,3 +826,31 @@ def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, 
             param_fname_n = params_name_with_dir % n
             if param_fname_n in existing_files:
                 os.remove(param_fname_n)
+
+
+def cast_conditionally(data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
+    """
+    Workaround until no-op cast will be fixed in MXNet codebase.
+    Creates cast symbol only if dtype is different from default one, i.e. float32.
+
+    :param data: Input symbol.
+    :param dtype: Target dtype.
+    :return: Cast symbol or just data symbol.
+    """
+    if dtype != C.DTYPE_FP32:
+        return mx.sym.cast(data=data, dtype=dtype)
+    return data
+
+
+def uncast_conditionally(data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
+    """
+    Workaround until no-op cast will be fixed in MXNet codebase.
+    Creates cast to float32 symbol only if dtype is different from default one, i.e. float32.
+
+    :param data: Input symbol.
+    :param dtype: Input symbol dtype.
+    :return: Cast symbol or just data symbol.
+    """
+    if dtype != C.DTYPE_FP32:
+        return mx.sym.cast(data=data, dtype=C.DTYPE_FP32)
+    return data

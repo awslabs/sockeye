@@ -10,11 +10,25 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [1.18.9]
+## [1.18.11]
 ### Changed
 - Default training parameters have been changed to reflect the setup used in our arXiv paper. Specifically, the default
   is now to train a 6 layer Transformer model with word based batching. Additionally, BLEU scores from a checkpoint
   decoder are now monitored by default.
+
+## [1.18.10]
+### Fixed
+- Re-allow early stopping w.r.t BLEU
+
+## [1.18.9]
+### Fixed
+- Fixed a problem with lhuc boolean flags passed as None.
+
+### Added
+- Reorganized beam search. Normalization is applied only to completed hypotheses, and pruning of
+  hypotheses (logprob against highest-scoring completed hypothesis) can be specified with
+  `--beam-prune X`
+- Enabled stopping at first completed hypothesis with `--beam-search-stop first` (default is 'all')
 
 ## [1.18.8]
 ### Removed
@@ -24,7 +38,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Added
 - Added support for LHUC in RNN models (David Vilar, "Learning Hidden Unit
   Contribution for Adapting Neural Machine Translation Models" NAACL 2018)
-  
+
 ### Fixed
 - Word based batching with very small batch sizes.
 
