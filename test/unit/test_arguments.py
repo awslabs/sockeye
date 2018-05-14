@@ -248,6 +248,8 @@ def test_inference_args(test_params, expected_params):
      '-t corpus.tc.BPE.en '
      '-vs newstest2016.tc.BPE.de '
      '-vt newstest2016.tc.BPE.en '
+     '--encoder rnn '
+     '--decoder rnn '
      '--num-embed 256 '
      '--rnn-num-hidden 512 '
      '--rnn-attention-type dot '
@@ -268,8 +270,8 @@ def test_inference_args(test_params, expected_params):
          use_cpu=True,
          # Arguments mentioned in the text, should be renamed in the tutorial if they change:
          rnn_cell_type="lstm",
-         encoder=C.TRANSFORMER_TYPE,
-         decoder=C.TRANSFORMER_TYPE,
+         encoder=C.RNN_NAME,
+         decoder=C.RNN_NAME,
          optimizer="adam"),
      ["num_layers",
       "rnn_residual_connections",
