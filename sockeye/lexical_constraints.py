@@ -34,10 +34,13 @@ class ConstrainedHypothesis:
     A constraint is of two types: sequence or non-sequence.
     A non-sequence constraint is a single word and can therefore be followed by anything, whereas a sequence constraint must be followed by a particular word (the next word in the sequence).
     This class also records which constraints have been met.
+
+    :param constraint_list: A list of zero or raw constraints (each represented as a list of integers).
+    :param eos_id: The end-of-sentence ID.
     """
     def __init__(self, constraint_list: RawConstraintList, eos_id: int) -> None:
 
-        # `constraints` records the words of the constraints, as a list.
+        # `constraints` records the words of the constraints, as a list (duplicates allowed).
         # `is_sequence` is a parallel array that records, for each corresponding constraint,
         self.constraints = []
         self.is_sequence = []
@@ -52,32 +55,32 @@ class ConstrainedHypothesis:
         self.met = [False for x in self.constraints]
         self.lastMet = -1
 
-    def __len__(self):
+    def __len__(self) -> int:
         """
         :return: The number of constraints.
         """
         return len(self.constraints)
 
-    def __str__(self):
+    def __str__(self) -> str:
         s = []
         for i, id in enumerate(self.constraints):
             s.append(str(id) if self.met[i] is False else 'X')
             if self.is_sequence[i]: s.append('->')
         return ' '.join(s)
 
-    def size(self):
+    def size(self) -> int:
         """
         :return: the number of constraints
         """
         return len(self.constraints)
 
-    def numMet(self):
+    def numMet(self) -> int:
         """
         :return: the number of constraints that have been met.
         """
         return sum(self.met)
 
-    def numNeeded(self):
+    def numNeeded(self) -> int:
         """
         :return: the number of un-met constraints.
         """
@@ -85,7 +88,7 @@ class ConstrainedHypothesis:
 
     def allowed(self) -> List[int]:
         """
-        Returns the set of *constrained* words that could follow this one.
+        Returns the set of constrained words that could follow this one.
         For unfinished phrasal constraints, it is the next word in the phrase.
         In other cases, it is a list of unmet constraints.
         If all constraints are met, an empty set is returned.
@@ -167,7 +170,7 @@ class ConstrainedHypothesis:
         return obj
 
 
-class NullHypothesis(ConstrainedHypothesis):
+class InvalidHypothesis(ConstrainedHypothesis):
     """
     Represents an invalid state in the beam.
     """
@@ -213,7 +216,7 @@ def get_bank_sizes(num_constraints, beam_size, candidates) -> List[int]:
     return assigned
 
 
-class Candidate(NamedTuple('Candidate', [
+class ConstraintCandidate(NamedTuple('Candidate', [
     ('row', int),
     ('col', int),
     ('score', float),
@@ -234,22 +237,22 @@ class Candidate(NamedTuple('Candidate', [
 def topk(beam_size: int,
          inactive: mx.ndarray,
          scores: mx.ndarray,
-         hypotheses: ConstrainedHypothesis,
-         best_ids,
-         best_word_ids,
-         sequence_scores,
-         context):
+         hypotheses: List[ConstrainedHypothesis],
+         best_ids: mx.ndarray,
+         best_word_ids: mx.ndarray,
+         sequence_scores: mx.ndarray,
+         context: mx.context.Context) -> Tuple[np.array, np.array, np.array, List[ConstrainedHypothesis], mx.nd.array]:
     """
     Builds a list of candidates. These candidates are pulled from three different types: (1) the best items across the whole
     scores matrix, (2) the set of words that must follow existing constraints, and (3) k-best items from each row.
 
     :param beam_size: The length of the kbest list to produce.
-    :param inactive: Array listing inactive rows.
-    :param scores: The scores array.
-    :param hypotheses: the list of hypothesis objects
-    :param best_ids:
-    :param best_word_ids:
-    :param sequence_scores:
+    :param inactive: Array listing inactive rows (shape: (beam_size,)).
+    :param scores: The scores array (shape: (beam_size, target_vocab_size)).
+    :param hypotheses: The list of hypothesis objects.
+    :param best_ids: The current list of best hypotheses (shape: (beam_size,)).
+    :param best_word_ids: The parallel list of best word IDs (shape: (beam_size,)).
+    :param sequence_scores: (shape: (beam_size, 1)).
     :param context: The MXNet device context.
     :return:
     """
@@ -266,7 +269,7 @@ def topk(beam_size: int,
         seq_score = float(seq_score.asscalar())
         if hypotheses[row].isValid(col):
             new_constraint = hypotheses[row].advance(col)
-            cand = Candidate(row, col, seq_score, new_constraint)
+            cand = ConstraintCandidate(row, col, seq_score, new_constraint)
             candidates.add(cand)
 
     # (2,3) For each hypothesis, we add (2) all the constraints that could follow it and
@@ -290,18 +293,18 @@ def topk(beam_size: int,
         for col in nextones:
             new_constraint = hyp.advance(col)
             score = scores[row,col].asscalar()
-            cand = Candidate(row, col, score, new_constraint)
+            cand = ConstraintCandidate(row, col, score, new_constraint)
             candidates.add(cand)
 
-    new_kbest = sorted(candidates, key=attrgetter('score'))
+    sorted_candidates = sorted(candidates, key=attrgetter('score'))
 
     # pad the beam if not full
-    while len(new_kbest) < beam_size:
-        new_kbest.append(Candidate(0, 0, np.inf, NullHypothesis()))
+    # while len(sorted_candidates) < beam_size:
+    #     sorted_candidates.append(ConstraintCandidate(0, 0, np.inf, InvalidHypothesis()))
 
     # The number of hypotheses in each bank
     counts = [0 for x in range(num_constraints + 1)]
-    for cand in new_kbest:
+    for cand in sorted_candidates:
         counts[cand.constraints.numMet()] += 1
 
     pruned_candidates = []
@@ -314,7 +317,7 @@ def topk(beam_size: int,
 
     counts = [x for x in bank_sizes]
     # sort candidates into the allocated banks
-    for i, cand in enumerate(new_kbest):
+    for i, cand in enumerate(sorted_candidates):
         bank = cand.constraints.numMet()
         counts[bank] -= 1
 
@@ -335,45 +338,64 @@ def topk(beam_size: int,
 
 def main():
     """
-    Usage: python3 -m sockeye.lexical_constraints [--bpe BPE_MODEL] [-c "constraint1" ["constraint2"]]
+    Usage: python3 -m sockeye.lexical_constraints [--bpe BPE_MODEL]
 
-    Reads sentences on STDIN and generates the JSON format that can be used when passing `--json-input`
+    Reads sentences and constraints on STDIN (tab-delimited) and generates the JSON format that can be used when passing `--json-input`
     to sockeye.translate.
-
-    Constraints can be provided as a list of quoted arguments to -c. For a stream of sentence / constraint
-    pairs, you can specify the constraints following the sentence on STDIN, tab-delimited.
 
     e.g.,
 
-        echo "This is a test" | python3 -m sockeye.lexical_constraints -c "test" "longer test"
+        echo -e "Dies ist ein Test .\tThis is\ttest" | python3 -m sockeye.lexical_constraints
 
-    is equivalent to
+    will produce the following JSON object:
 
-        echo -e "This is a test\ttest\tlonger test" | python3 -m sockeye.lexical_constraints
+        { "text": "Dies ist ein Test .", "constraints": ["This is", "test"] }
+
+    If you have a BPE model
+
+        echo -e "Dies ist ein Test .\tThis is\ttest" | python3 -m sockeye.lexical_constraints --bpe /path/to/bpe.model
+
+    You might get instead:
+
+        { "text": "Dies ist ein Te@@ st .", "constraints": ["This is", "te@@ st"] }
+
+    You can then translate this object by passing it to Sockeye on STDIN as follows:
+
+        python3 -m sockeye.translate -m /path/to/model --json-input --beam-size 20 --beam-prune 20
+
+    (Note the recommended Sockeye parameters).
     """
-
 
     import argparse
     import sys
     import json
 
     parser = argparse.ArgumentParser(description='Generate lexical constraint JSON format for Sockeye')
-    parser.add_argument('--bpe', default=None, help='Location of BPE model to apply')
+    parser.add_argument('--bpe', '-b', default=None, help='Location of BPE model to apply (shared source and target)')
+    parser.add_argument('--bpe-source', '-bs', default=None, help='Location of source BPE model')
+    parser.add_argument('--bpe-target', '-bt', default=None, help='Location of target BPE model')
     parser.add_argument('--add-sos', action='store_true', help='add <s> token')
     parser.add_argument('--add-eos', action='store_true', help='add </s> token')
     parser.add_argument('--constraints', '-c', nargs='*', type=str, default=[], help="List of target-side constraints")
     args = parser.parse_args()
 
-    bpe = None
-    if args.bpe is not None:
+    if args.bpe is not None or args.bpe_source is not None or args.bpe_target is not None:
         try:
-            import apply_bpe
+            from apply_bpe import BPE
         except:
-            print("Couldn't load BPE module. Is it in your PYTHONPATH?", file=sys.stderr)
+            logger.error("Couldn't load BPE module. Is it in your PYTHONPATH?")
+            sys.exit(1)
 
-        bpe = apply_bpe.BPE(open(args.bpe))
+    source_bpe = target_bpe = None
+    if args.bpe is not None:
+        source_bpe = target_bpe = BPE(open(args.bpe))
+    if args.bpe_source is not None:
+        source_bpe = BPE(open(args.bpe_source))
+    if args.bpe_target is not None:
+        target_bpe = BPE(open(args.bpe_target))
 
-    def maybe_segment(phr: str) -> str:
+    def maybe_segment(bpe: BPE,
+                      phr: str) -> str:
         """
         Applies BPE if enabled.
         """
@@ -385,29 +407,24 @@ def main():
     for line in sys.stdin:
         line = line.rstrip()
 
-        if '\t' in line:
-            # Constraints are in fields 2+
-            source, *constraints = line.split('\t')
-        else:
-            source = line
-            constraints = args.constraints
+        # Constraints are in fields 2+
+        source, *constraints = line.split('\t')
 
         for i, constraint in enumerate(constraints):
             phrase = ''
             if args.add_sos:
                 phrase += C.BOS_SYMBOL + ' '
-            phrase += maybe_segment(constraint)
+            phrase += maybe_segment(target_bpe, constraint)
             if args.add_eos:
                 phrase += ' ' + C.EOS_SYMBOL
 
             constraints[i] = phrase
 
-        obj = { 'text': maybe_segment(source) }
+        obj = { 'text': maybe_segment(source_bpe, source) }
         if len(constraints) > 0:
             obj['constraints'] = constraints
 
-        print(json.dumps(obj, ensure_ascii=False))
-
+        print(json.dumps(obj, ensure_ascii=False), flush=True)
 
 if __name__ == '__main__':
     main()
