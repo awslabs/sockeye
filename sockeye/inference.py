@@ -1262,13 +1262,11 @@ class Translator:
         for sentno in range(self.batch_size):
             rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
             if mx.nd.sum(finished[rows]) > 0:
-                best_finished_score = mx.nd.min(
-                    mx.nd.where(finished[rows], accumulated_scores[rows, 0], self.inf_array))
+                best_finished_score = mx.nd.min(mx.nd.where(finished[rows], accumulated_scores[rows, 0], self.inf_array))
 
                 # Find, mark (by setting the score to inf), and remove all hypotheses
                 # whose score is not within self.beam_prune of the best score
-                inactive[rows] = mx.nd.cast(accumulated_scores[rows, 0] - best_finished_score > self.beam_prune,
-                                            dtype='int32')
+                inactive[rows] = mx.nd.cast(accumulated_scores[rows, 0] - best_finished_score > self.beam_prune, dtype='int32')
                 accumulated_scores[rows, 0] = mx.nd.where(inactive[rows], self.inf_array, accumulated_scores[rows, 0])
                 best_word_indices[rows] = mx.nd.where(inactive[rows], self.zeros_array, best_word_indices[rows])
 
@@ -1377,8 +1375,7 @@ class Translator:
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
             scores += scores_accumulated
             # Items that are finished (but not inactive) get the accumulated score in col 0, otherwise infinity for the whole row
-            pad_dist[:, C.PAD_ID] = mx.nd.where(mx.nd.clip(finished - inactive, 0, 1), scores_accumulated[:, 0],
-                                                self.inf_array_long)
+            pad_dist[:, C.PAD_ID] = mx.nd.where(mx.nd.clip(finished - inactive, 0, 1), scores_accumulated[:, 0], self.inf_array_long)
             scores = mx.nd.where(finished + inactive, pad_dist, scores)
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
@@ -1395,8 +1392,7 @@ class Translator:
             lengths = mx.nd.take(lengths, best_hyp_indices)
             all_finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
             newly_finished = all_finished - finished
-            scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths),
-                                             scores_accumulated)
+            scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
             finished = all_finished
             # All rows are now active (after special treatment of start state at t=1)
             inactive[:] = 0
@@ -1418,10 +1414,8 @@ class Translator:
 
             # (6) optionally save beam history
             if self.store_beam:
-                unnormalized_scores = mx.nd.where(finished, scores_accumulated * self.length_penalty(lengths - 1),
-                                                  scores_accumulated)
-                normalized_scores = mx.nd.where(finished, scores_accumulated,
-                                                scores_accumulated / self.length_penalty(lengths - 1))
+                unnormalized_scores = mx.nd.where(finished, scores_accumulated * self.length_penalty(lengths - 1), scores_accumulated)
+                normalized_scores = mx.nd.where(finished, scores_accumulated, scores_accumulated / self.length_penalty(lengths - 1))
                 for sent in range(self.batch_size):
                     rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
 
@@ -1430,14 +1424,13 @@ class Translator:
                     if any(x for x in best_word_indices_sent if x != C.PAD_ID):
                         beam_histories[sent]["predicted_ids"].append(best_word_indices_sent)
                         beam_histories[sent]["predicted_tokens"].append([self.vocab_target_inv[x] for x in
-                                                                         best_word_indices_sent])
+                                                                    best_word_indices_sent])
                         # for later sentences in the matrix, shift from e.g. [5, 6, 7, 8, 6] to [0, 1, 3, 4, 1]
                         shifted_parents = best_hyp_indices[rows] - (sent * self.beam_size)
                         beam_histories[sent]["parent_ids"].append(shifted_parents.asnumpy().tolist())
 
                         beam_histories[sent]["scores"].append(unnormalized_scores[rows].asnumpy().flatten().tolist())
-                        beam_histories[sent]["normalized_scores"].append(
-                            normalized_scores[rows].asnumpy().flatten().tolist())
+                        beam_histories[sent]["normalized_scores"].append(normalized_scores[rows].asnumpy().flatten().tolist())
 
             # (7) determine which hypotheses in the beam are now finished
             finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
@@ -1455,11 +1448,9 @@ class Translator:
                 ms.sort_state(best_hyp_indices)
 
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
-        folded_accumulated_scores = scores_accumulated.reshape(
-            (self.batch_size, self.beam_size * scores_accumulated.shape[-1]))
+        folded_accumulated_scores = scores_accumulated.reshape((self.batch_size, self.beam_size * scores_accumulated.shape[-1]))
         indices = mx.nd.argsort(folded_accumulated_scores, axis=1)
-        best_hyp_indices[:], _ = np.unravel_index(indices.astype(np.int32).asnumpy().ravel(),
-                                                  scores_accumulated.shape) + self.offset
+        best_hyp_indices[:], _ = np.unravel_index(indices.astype(np.int32).asnumpy().ravel(), scores_accumulated.shape) + self.offset
         # Now reorder the arrays
         sequences = mx.nd.take(sequences, best_hyp_indices)
         lengths = mx.nd.take(lengths, best_hyp_indices)
@@ -1524,6 +1515,5 @@ class Translator:
             # for each hypothesis, print its entire history
             score = accumulated_scores[i].asscalar()
             word_ids = [int(x.asscalar()) for x in sequences[i]]
-            hypothesis = '----------' if inactive[i] else ' '.join(
-                [self.vocab_target_inv[x] for x in word_ids if x != 0])
+            hypothesis = '----------' if inactive[i] else ' '.join([self.vocab_target_inv[x] for x in word_ids if x != 0])
             logger.info('%d %d %d %.2f %s', i, finished[i].asscalar(), inactive[i].asscalar(), score, hypothesis)

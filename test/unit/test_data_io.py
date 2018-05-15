@@ -121,14 +121,14 @@ def test_sequence_reader(sequences, use_vocab, add_bos, add_eos):
 
         vocabulary = vocab.build_vocab(sequences) if use_vocab else None
 
-        reader = data_io.SequenceReader(path, vocab=vocabulary, add_bos=add_bos, add_eos=add_eos)
+        reader = data_io.SequenceReader(path, vocabulary=vocabulary, add_bos=add_bos, add_eos=add_eos)
 
         read_sequences = [s for s in reader]
         assert len(read_sequences) == len(sequences)
 
         if vocabulary is None:
             with pytest.raises(SockeyeError) as e:
-                _ = data_io.SequenceReader(path, vocab=vocabulary, add_bos=True)
+                _ = data_io.SequenceReader(path, vocabulary=vocabulary, add_bos=True)
             assert str(e.value) == "Adding a BOS or EOS symbol requires a vocabulary"
 
             expected_sequences = [data_io.strids2ids(get_tokens(s)) if s else None for s in sequences]

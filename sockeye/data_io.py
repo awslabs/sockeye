@@ -999,21 +999,21 @@ class SequenceReader(Iterable):
 
     def __init__(self,
                  path: str,
-                 vocab: Optional[vocab.Vocab] = None,
+                 vocabulary: Optional[vocab.Vocab] = None,
                  add_bos: bool = False,
                  add_eos: bool = False,
                  limit: Optional[int] = None) -> None:
         self.path = path
-        self.vocab = vocab
+        self.vocab = vocabulary
         self.bos_id = None
         self.eos_id = None
-        if vocab is not None:
-            assert C.UNK_SYMBOL in vocab
-            assert vocab[C.PAD_SYMBOL] == C.PAD_ID
-            assert C.BOS_SYMBOL in vocab
-            assert C.EOS_SYMBOL in vocab
-            self.bos_id = vocab[C.BOS_SYMBOL]
-            self.eos_id = vocab[C.EOS_SYMBOL]
+        if vocabulary is not None:
+            assert C.UNK_SYMBOL in vocabulary
+            assert vocabulary[C.PAD_SYMBOL] == C.PAD_ID
+            assert C.BOS_SYMBOL in vocabulary
+            assert C.EOS_SYMBOL in vocabulary
+            self.bos_id = vocabulary[C.BOS_SYMBOL]
+            self.eos_id = vocabulary[C.EOS_SYMBOL]
         else:
             check_condition(not add_bos and not add_eos, "Adding a BOS or EOS symbol requires a vocabulary")
         self.add_bos = add_bos
