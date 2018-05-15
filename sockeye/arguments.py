@@ -335,8 +335,7 @@ def add_bucketing_args(params):
     params.add_argument('--max-seq-len',
                         type=multiple_values(num_values=2, greater_or_equal=1),
                         default=(100, 100),
-                        help='Maximum sequence length in tokens. Note that the target side will be extended by '
-                             'the <BOS> (beginning of sentence) token, increasing the effective target length. '
+                        help='Maximum sequence length in tokens.'
                              'Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
 
 

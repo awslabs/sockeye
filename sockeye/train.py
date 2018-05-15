@@ -264,6 +264,10 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     :return: The data iterators (train, validation, config_data) as well as the source and target vocabularies.
     """
     max_seq_len_source, max_seq_len_target = args.max_seq_len
+    # The maximum length is the length before we add the BOS/EOS symbols
+    max_seq_len_source = max_seq_len_source + C.SPACE_FOR_XOS
+    max_seq_len_target = max_seq_len_target + C.SPACE_FOR_XOS
+
     num_words_source, num_words_target = args.num_words
     word_min_count_source, word_min_count_target = args.word_min_count
     batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)

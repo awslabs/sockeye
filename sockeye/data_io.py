@@ -217,16 +217,13 @@ def analyze_sequence_lengths(sources: List[str],
                              vocab_target: vocab.Vocab,
                              max_seq_len_source: int,
                              max_seq_len_target: int) -> 'LengthStatistics':
-    train_sources_sentences = [SequenceReader(source, vocab, add_bos=False) for source, vocab in
+    train_sources_sentences = [SequenceReader(source, vocab, add_eos=True) for source, vocab in
                                zip(sources, vocab_sources)]
-    # Length statistics are calculated on the raw sentences without special tokens, such as the BOS, as these can
-    # have a a large impact on the length ratios, especially with lots of short sequences.
-    train_target_sentences = SequenceReader(target, vocab_target, add_bos=False)
+    train_target_sentences = SequenceReader(target, vocab_target, add_bos=True)
 
     length_statistics = calculate_length_statistics(train_sources_sentences, train_target_sentences,
                                                     max_seq_len_source,
-                                                    # Take into account the BOS symbol that is added later
-                                                    max_seq_len_target - 1)
+                                                    max_seq_len_target)
 
     logger.info("%d sequences of maximum length (%d, %d) in '%s' and '%s'.",
                 length_statistics.num_sents, max_seq_len_source, max_seq_len_target, sources[0], target)
@@ -358,8 +355,8 @@ def shard_data(source_fnames: List[str],
                           range(len(source_fnames))]
         target_shards = [exit_stack.enter_context(smart_open(f, mode="wt")) for f in target_shard_fnames]
 
-        source_readers = [SequenceReader(fname, vocab, add_bos=False) for fname, vocab in zip(source_fnames,
-                                                                                              source_vocabs)]
+        source_readers = [SequenceReader(fname, vocab, add_eos=True) for fname, vocab in zip(source_fnames,
+                                                                                             source_vocabs)]
         target_reader = SequenceReader(target_fname, target_vocab, add_bos=True)
 
         random_shard_iter = iter(lambda: random.randrange(num_shards), None)
@@ -610,7 +607,7 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
                                                             source_vocabs, target_vocab,
                                                             max_seq_len_source, max_seq_len_target)
 
-    validation_sources_sentences = [SequenceReader(source, vocab, add_bos=False) for source, vocab in
+    validation_sources_sentences = [SequenceReader(source, vocab, add_eos=True) for source, vocab in
                                     zip(validation_sources, source_vocabs)]
     validation_target_sentences = SequenceReader(validation_target, target_vocab, add_bos=True, limit=None)
 
@@ -770,7 +767,7 @@ def get_training_data_iters(sources: List[str],
                                       length_statistics.length_ratio_mean) if bucketing else [
         (max_seq_len_source, max_seq_len_target)]
 
-    sources_sentences = [SequenceReader(source, vocab, add_bos=False) for source, vocab in zip(sources, source_vocabs)]
+    sources_sentences = [SequenceReader(source, vocab, add_eos=True) for source, vocab in zip(sources, source_vocabs)]
     target_sentences = SequenceReader(target, target_vocab, add_bos=True)
 
     # 2. pass: Get data statistics
@@ -1004,19 +1001,23 @@ class SequenceReader(Iterable):
                  path: str,
                  vocab: Optional[vocab.Vocab],
                  add_bos: bool = False,
+                 add_eos: bool = False,
                  limit: Optional[int] = None) -> None:
         self.path = path
         self.vocab = vocab
         self.bos_id = None
+        self.eos_id = None
         if vocab is not None:
             assert C.UNK_SYMBOL in vocab
             assert vocab[C.PAD_SYMBOL] == C.PAD_ID
             assert C.BOS_SYMBOL in vocab
             assert C.EOS_SYMBOL in vocab
             self.bos_id = vocab[C.BOS_SYMBOL]
+            self.eos_id = vocab[C.EOS_SYMBOL]
         else:
-            check_condition(not add_bos, "Adding a BOS symbol requires a vocabulary")
+            check_condition(not add_bos and not add_eos, "Adding a BOS or EOS symbol requires a vocabulary")
         self.add_bos = add_bos
+        self.add_eos = add_eos
         self.limit = limit
 
     def __iter__(self):
@@ -1028,8 +1029,10 @@ class SequenceReader(Iterable):
             if len(sequence) == 0:
                 yield None
                 continue
-            if vocab is not None and self.add_bos:
-                sequence.insert(0, self.vocab[C.BOS_SYMBOL])
+            if self.add_bos:
+                sequence.insert(0, self.bos_id)
+            if self.add_eos:
+                sequence.append(self.eos_id)
             yield sequence
 
 
