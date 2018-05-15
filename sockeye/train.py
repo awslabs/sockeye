@@ -263,7 +263,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     :param max_seq_len_source: Source maximum sequence length.
     :param max_seq_len_target: Target maximum sequence length.
     :param shared_vocab: Whether to create a shared vocabulary.
-    :param shared_vocab: Whether to create a shared vocabulary.
     :param resume_training: Whether to resume training.
     :param output_folder: Output folder.
     :return: The data iterators (train, validation, config_data) as well as the source and target vocabularies.
