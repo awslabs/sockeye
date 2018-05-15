@@ -98,13 +98,17 @@ class ConstrainedHypothesis:
         items = []
         # Add extensions of a started-but-incomplete sequential constraint
         if self.lastMet != -1 and self.is_sequence[self.lastMet] == 1:
-            items.append(self.constraints[self.lastMet + 1])
+            word_id = self.constraints[self.lastMet + 1]
+            if word_id != self.eos_id or self.numNeeded() == 1:
+                items.append(word_id)
 
         # Add all constraints that aren't non-initial sequences
         else:
             for i, id in enumerate(self.constraints):
                 if self.met[i] is False and (i == 0 or not self.is_sequence[i - 1]):
-                    items.append(self.constraints[i])
+                    word_id = self.constraints[i]
+                    if word_id != self.eos_id or self.numNeeded() == 1:
+                        items.append(word_id)
 
         return items
 
@@ -123,7 +127,7 @@ class ConstrainedHypothesis:
         :param wordid: The wordid to validate.
         :return: True if all constraints are already met or the word ID is not the EOS id.
         """
-        return self.finished() or wordid != self.eos_id
+        return self.finished() or wordid != self.eos_id or (self.numNeeded() == 1 and self.allowed() == [self.eos_id])
 
     def advance(self, word_id: int) -> 'ConstrainedHypothesis':
         """
@@ -170,23 +174,12 @@ class ConstrainedHypothesis:
         return obj
 
 
-class InvalidHypothesis(ConstrainedHypothesis):
-    """
-    Represents an invalid state in the beam.
-    """
-
-    def __init__(self):
-        super().__init__(([], []), 0)
-
-    def isValid(self, word_id):
-        return False
-
-    def finished(self):
-        return True
-
-
 def get_bank_sizes(num_constraints, beam_size, candidates) -> List[int]:
     """
+    Evenly distributes the beam across the banks, where each bank is a portion of the beam devoted
+    to hypotheses having met the same number of constraints, 0..num_constraints.
+    After the assignment, banks with more slots than candidates are adjusted.
+
     :param num_constraints: The number of constraints.
     :param beam_size: The beam size.
     :param candidates: The empirical counts of number of candidates in each bank.
@@ -197,30 +190,29 @@ def get_bank_sizes(num_constraints, beam_size, candidates) -> List[int]:
     bank_size = beam_size // num_banks
     remainder = beam_size - bank_size * num_banks
 
+    # Distribute any remainder to the end
     assigned = [bank_size for x in range(num_banks)]
     assigned[-1] += remainder
 
-    for i in range(len(assigned)):
-        deficit = candidates[i] - assigned[i]
-        while deficit < 0:
-            # sort whole list by distance from i
-            for j in sorted(list(range(i - 1, -1, -1)) + list(range(i + 1, len(assigned))),
-                            key=lambda x: abs(x - i)):
-                capacity = candidates[j] - assigned[j]
-                if capacity > 0:
-                    transfer = min(abs(deficit), capacity)
-                    deficit += transfer
-                    assigned[i] -= transfer
-                    assigned[j] += transfer
+    # Now, moving right to left, push extra allocation to earlier buckets.
+    # This encodes a bias for higher buckets, but if no candidates are found, space
+    # will be made in lower buckets. This may not be the best strategy, but it is important
+    # that you start pushing from the bucket that is assigned the remainder, for cases where
+    # num_constraints >= beam_size.
+    for i in reversed(range(num_banks)):
+        overfill = assigned[i] - candidates[i]
+        if overfill > 0:
+            assigned[i] -= overfill
+            assigned[(i - 1) % num_banks] += overfill
 
     return assigned
 
 
-class ConstraintCandidate(NamedTuple('Candidate', [
+class ConstrainedCandidate(NamedTuple('Candidate', [
     ('row', int),
     ('col', int),
     ('score', float),
-    ('constraints', ConstrainedHypothesis)
+    ('hypothesis', ConstrainedHypothesis)
 ])):
     __slots__ = ()
 
@@ -231,7 +223,7 @@ class ConstraintCandidate(NamedTuple('Candidate', [
         return self.row == other.row and self.col == other.col
 
     def __str__(self):
-        return '({}, {}, {}, {})'.format(self.row, self.col, self.score, self.constraints.numMet())
+        return '({}, {}, {}, {})'.format(self.row, self.col, self.score, self.hypothesis.numMet())
 
 
 def topk(beam_size: int,
@@ -268,8 +260,8 @@ def topk(beam_size: int,
         col = int(col.asscalar())
         seq_score = float(seq_score.asscalar())
         if hypotheses[row].isValid(col):
-            new_constraint = hypotheses[row].advance(col)
-            cand = ConstraintCandidate(row, col, seq_score, new_constraint)
+            new_item = hypotheses[row].advance(col)
+            cand = ConstrainedCandidate(row, col, seq_score, new_item)
             candidates.add(cand)
 
     # (2,3) For each hypothesis, we add (2) all the constraints that could follow it and
@@ -291,48 +283,42 @@ def topk(beam_size: int,
 
         # Now, create new candidates for each of these items
         for col in nextones:
-            new_constraint = hyp.advance(col)
+            new_item = hyp.advance(col)
             score = scores[row,col].asscalar()
-            cand = ConstraintCandidate(row, col, score, new_constraint)
+            cand = ConstrainedCandidate(row, col, score, new_item)
             candidates.add(cand)
 
     sorted_candidates = sorted(candidates, key=attrgetter('score'))
 
-    # pad the beam if not full
-    # while len(sorted_candidates) < beam_size:
-    #     sorted_candidates.append(ConstraintCandidate(0, 0, np.inf, InvalidHypothesis()))
-
     # The number of hypotheses in each bank
     counts = [0 for x in range(num_constraints + 1)]
     for cand in sorted_candidates:
-        counts[cand.constraints.numMet()] += 1
+        counts[cand.hypothesis.numMet()] += 1
 
     pruned_candidates = []
 
     # Adjust allocated bank sizes if there are too few candidates in any of them
     bank_sizes = get_bank_sizes(num_constraints, beam_size, counts)
 
-    # logger.info("Time: bank_sizes: %f", time.time() - _start_time)
-    # _start_time = time.time()
-
-    counts = [x for x in bank_sizes]
-    # sort candidates into the allocated banks
+    # Sort the candidates into the allocated banks
     for i, cand in enumerate(sorted_candidates):
-        bank = cand.constraints.numMet()
-        counts[bank] -= 1
+        bank = cand.hypothesis.numMet()
 
-        if counts[bank] >= 0:
+        if bank_sizes[bank] > 0:
             pruned_candidates.append(cand)
+            bank_sizes[bank] -= 1
 
-    # pad the beam
-    new_active_beam_size = len(pruned_candidates)
-    while len(pruned_candidates) < beam_size:
-        pruned_candidates.append(pruned_candidates[new_active_beam_size-1])
+    inactive[:len(pruned_candidates)] = 0
+
+    # Pad the beam so array assignment still works
+    if len(pruned_candidates) < beam_size:
+        inactive[len(pruned_candidates):] = 1
+        pruned_candidates += [pruned_candidates[len(pruned_candidates)-1]] * (beam_size - len(pruned_candidates))
 
     return (np.array([x.row for x in pruned_candidates]),
             np.array([x.col for x in pruned_candidates]),
             np.array([[x.score] for x in pruned_candidates]),
-            [x.constraints for x in pruned_candidates],
+            [x.hypothesis for x in pruned_candidates],
             inactive)
 
 

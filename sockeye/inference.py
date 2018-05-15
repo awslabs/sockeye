@@ -1020,6 +1020,10 @@ class Translator:
 
             # oversized input
             elif len(trans_input.tokens) > self.max_input_length:
+                if trans_input.constraints is not None:
+                    raise RuntimeException(
+                        "Input %d has length (%d) that exceeds max input length (%d), but it has target-side constraints, and so can't be split")
+
                 logger.debug(
                     "Input %d has length (%d) that exceeds max input length (%d). Splitting into chunks of size %d.",
                     trans_input.sentence_id, len(trans_input.tokens), self.buckets_source[-1], self.max_input_length)
@@ -1028,6 +1032,9 @@ class Translator:
             # regular input
             else:
                 input_chunks.append(trans_input)
+
+            if trans_input.constraints is not None:
+                logger.info("Input %d with constraints: %s", trans_input.sentence_id, ", ".join(" ".join(x) for x in trans_input.constraints))
 
         # Sort longest to shortest (to rather fill batches of shorter than longer sequences)
         input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.tokens), reverse=True)
@@ -1040,7 +1047,8 @@ class Translator:
             if rest > 0:
                 logger.debug("Extending the last batch to the full batch size (%d)", self.batch_size)
                 batch = batch + [batch[0]] * rest
-            batch_translations = self._translate_nd(*self._get_inference_input(batch))
+            source_nd, bucket, constraints = self._get_inference_input(batch)
+            batch_translations = self._translate_nd(source_nd, bucket, constraints)
             # truncate to remove filler translations
             if rest > 0:
                 batch_translations = batch_translations[:-rest]
@@ -1407,8 +1415,8 @@ class Translator:
 
             # Constraints for constrained decoding are processed sentence by sentence
             for sentno in range(self.batch_size):
+                rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
                 if num_constraints[sentno] > 0:
-                    rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
                     best_hyp_indices[rows], best_word_indices[rows], scores_accumulated[rows], \
                         constraints[rows], inactive[rows] = constrained_topk(self.beam_size,
                                                                              inactive[rows],
@@ -1422,6 +1430,10 @@ class Translator:
                     # offsetting since the returned smallest_k() indices were slice-relative
                     best_hyp_indices[rows] += rows.start
 
+                else:
+                    # All rows are now active (after special treatment of start state at t=1)
+                    inactive[rows] = 0
+
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
                 best_word_indices[:] = vocab_slice_ids.take(best_word_indices)
@@ -1434,8 +1446,6 @@ class Translator:
             newly_finished = all_finished - finished
             scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
             finished = all_finished
-            # All rows are now active (after special treatment of start state at t=1)
-            inactive[:] = 0
 
             # (5) Prune out low-probability hypotheses. Pruning works by setting entries `inactive`.
             if self.beam_prune > 0.0:
@@ -1499,8 +1509,7 @@ class Translator:
         attentions = mx.nd.take(attentions, best_hyp_indices)
         scores_accumulated[:] = mx.nd.take(scores_accumulated, best_hyp_indices)
         finished = mx.nd.take(finished, best_hyp_indices)
-
-        # TODO: update constraints
+        constraints = [constraints[int(x.asscalar())] for x in best_hyp_indices]
 
         return sequences, attentions, scores_accumulated, lengths, constraints, beam_histories
 

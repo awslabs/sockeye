@@ -38,7 +38,7 @@ Test how the banks are allocated. Given a number of constraints (C), the beam si
 a number of candidates for each bank [0..C], return the allocation of the k spots of the
 beam to the banks.
 """
-@pytest.mark.parametrize("num_constraints, beam_size, counts, allocation",
+@pytest.mark.parametrize("num_constraints, beam_size, counts, expected_allocation",
                          [
                              # no constraints: allocate all items to bin 0
                              (0, 5, [5], [5]),
@@ -63,8 +63,10 @@ beam to the banks.
                              # more constraints than beam spots: all slots to last bank
                              (3, 2, [4,2,2,3], [0,0,0,2]),
                          ])
-def test_constraints_bank_allocation(num_constraints, beam_size, counts, allocation):
-    assert get_bank_sizes(num_constraints, beam_size, counts) == allocation
+def test_constraints_bank_allocation(num_constraints, beam_size, counts, expected_allocation):
+    allocation = get_bank_sizes(num_constraints, beam_size, counts)
+    assert sum(allocation) == beam_size
+    assert allocation == expected_allocation
 
 """
 Make sure the internal representation is correct.
