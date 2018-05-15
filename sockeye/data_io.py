@@ -217,9 +217,8 @@ def analyze_sequence_lengths(sources: List[str],
                              vocab_target: vocab.Vocab,
                              max_seq_len_source: int,
                              max_seq_len_target: int) -> 'LengthStatistics':
-    train_sources_sentences = [SequenceReader(source, vocab, add_eos=True) for source, vocab in
-                               zip(sources, vocab_sources)]
-    train_target_sentences = SequenceReader(target, vocab_target, add_bos=True)
+    train_sources_sentences, train_target_sentences = create_sequence_readers(sources, target, vocab_sources,
+                                                                              vocab_target)
 
     length_statistics = calculate_length_statistics(train_sources_sentences, train_target_sentences,
                                                     max_seq_len_source,
@@ -355,9 +354,8 @@ def shard_data(source_fnames: List[str],
                           range(len(source_fnames))]
         target_shards = [exit_stack.enter_context(smart_open(f, mode="wt")) for f in target_shard_fnames]
 
-        source_readers = [SequenceReader(fname, vocab, add_eos=True) for fname, vocab in zip(source_fnames,
-                                                                                             source_vocabs)]
-        target_reader = SequenceReader(target_fname, target_vocab, add_bos=True)
+        source_readers, target_reader = create_sequence_readers(source_fnames, target_fname,
+                                                                source_vocabs, target_vocab)
 
         random_shard_iter = iter(lambda: random.randrange(num_shards), None)
 
@@ -532,8 +530,8 @@ def prepare_data(source_fnames: List[str],
 
     # 3. convert each shard to serialized ndarrays
     for shard_idx, (shard_sources, shard_target, shard_stats) in enumerate(shards):
-        sources_sentences = [SequenceReader(s, vocab=None) for s in shard_sources]
-        target_sentences = SequenceReader(shard_target, vocab=None)
+        sources_sentences = [SequenceReader(s) for s in shard_sources]
+        target_sentences = SequenceReader(shard_target)
         dataset = data_loader.load(sources_sentences, target_sentences, shard_stats.num_sents_per_bucket)
         shard_fname = os.path.join(output_prefix, C.SHARD_NAME % shard_idx)
         shard_stats.log()
@@ -606,10 +604,9 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
     validation_length_statistics = analyze_sequence_lengths(validation_sources, validation_target,
                                                             source_vocabs, target_vocab,
                                                             max_seq_len_source, max_seq_len_target)
-
-    validation_sources_sentences = [SequenceReader(source, vocab, add_eos=True) for source, vocab in
-                                    zip(validation_sources, source_vocabs)]
-    validation_target_sentences = SequenceReader(validation_target, target_vocab, add_bos=True, limit=None)
+    validation_sources_sentences, validation_target_sentences = create_sequence_readers(validation_sources,
+                                                                                        validation_target,
+                                                                                        source_vocabs, target_vocab)
 
     validation_data_statistics = get_data_statistics(validation_sources_sentences,
                                                      validation_target_sentences,
@@ -767,8 +764,7 @@ def get_training_data_iters(sources: List[str],
                                       length_statistics.length_ratio_mean) if bucketing else [
         (max_seq_len_source, max_seq_len_target)]
 
-    sources_sentences = [SequenceReader(source, vocab, add_eos=True) for source, vocab in zip(sources, source_vocabs)]
-    target_sentences = SequenceReader(target, target_vocab, add_bos=True)
+    sources_sentences, target_sentences = create_sequence_readers(sources, target, source_vocabs, target_vocab)
 
     # 2. pass: Get data statistics
     data_statistics = get_data_statistics(sources_sentences, target_sentences, buckets,
@@ -999,7 +995,7 @@ class SequenceReader(Iterable):
 
     def __init__(self,
                  path: str,
-                 vocab: Optional[vocab.Vocab],
+                 vocab: Optional[vocab.Vocab] = None,
                  add_bos: bool = False,
                  add_eos: bool = False,
                  limit: Optional[int] = None) -> None:
@@ -1034,6 +1030,13 @@ class SequenceReader(Iterable):
             if self.add_eos:
                 sequence.append(self.eos_id)
             yield sequence
+
+
+def create_sequence_readers(sources, target, vocab_sources, vocab_target):
+    source_sequence_readers = [SequenceReader(source, vocab, add_eos=True) for source, vocab in
+                               zip(sources, vocab_sources)]
+    target_sequence_reader = SequenceReader(target, vocab_target, add_bos=True)
+    return source_sequence_readers, target_sequence_reader
 
 
 def parallel_iter(source_iters: Sequence[Iterable[Optional[Any]]], target_iterable: Iterable[Optional[Any]]):

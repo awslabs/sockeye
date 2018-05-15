@@ -55,7 +55,6 @@ def main():
     logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
                 max_seq_len_source, max_seq_len_target)
 
-
     source_vocabs, target_vocab = vocab.load_or_create_vocabs(
         source_paths=source_paths,
         target_path=args.target,
