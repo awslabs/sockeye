@@ -235,7 +235,8 @@ def topk(beam_size: int,
          sequence_scores: mx.ndarray,
          context: mx.context.Context) -> Tuple[np.array, np.array, np.array, List[ConstrainedHypothesis], mx.nd.array]:
     """
-    Builds a list of candidates. These candidates are pulled from three different types: (1) the best items across the whole
+    Builds a new topk list such that the beam contains hypotheses having completed different numbers of constraints.
+    These items are built from three different types: (1) the best items across the whole
     scores matrix, (2) the set of words that must follow existing constraints, and (3) k-best items from each row.
 
     :param beam_size: The length of the kbest list to produce.
@@ -246,7 +247,8 @@ def topk(beam_size: int,
     :param best_word_ids: The parallel list of best word IDs (shape: (beam_size,)).
     :param sequence_scores: (shape: (beam_size, 1)).
     :param context: The MXNet device context.
-    :return:
+    :return: A tuple containing the best hypothesis rows, the best hypothesis words, the scores,
+        the updated constrained hypotheses, and the updated set of inactive hypotheses.
     """
 
     num_constraints = hypotheses[0].size()
@@ -264,7 +266,7 @@ def topk(beam_size: int,
             cand = ConstrainedCandidate(row, col, seq_score, new_item)
             candidates.add(cand)
 
-    # (2,3) For each hypothesis, we add (2) all the constraints that could follow it and
+    # For each hypothesis, we add (2) all the constraints that could follow it and
     # (3) the best item (constrained or not) in that row
     best_next = mx.ndarray.argmin(scores, axis=1)
     for row in range(beam_size):
@@ -288,6 +290,8 @@ def topk(beam_size: int,
             cand = ConstrainedCandidate(row, col, score, new_item)
             candidates.add(cand)
 
+    # Sort the candidates. After allocating the beam across the banks, we will pick the top items
+    # for each bank from this list
     sorted_candidates = sorted(candidates, key=attrgetter('score'))
 
     # The number of hypotheses in each bank
@@ -295,12 +299,11 @@ def topk(beam_size: int,
     for cand in sorted_candidates:
         counts[cand.hypothesis.numMet()] += 1
 
-    pruned_candidates = []
-
     # Adjust allocated bank sizes if there are too few candidates in any of them
     bank_sizes = get_bank_sizes(num_constraints, beam_size, counts)
 
     # Sort the candidates into the allocated banks
+    pruned_candidates = []
     for i, cand in enumerate(sorted_candidates):
         bank = cand.hypothesis.numMet()
 
