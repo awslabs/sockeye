@@ -1026,7 +1026,7 @@ class Translator:
             # oversized input
             elif len(trans_input.tokens) > self.max_input_length:
                 if trans_input.constraints is not None:
-                    raise RuntimeException(
+                    raise RuntimeError(
                         "Input %d has length (%d) that exceeds max input length (%d), but it has target-side constraints, and so can't be split")
 
                 logger.debug(
@@ -1052,8 +1052,7 @@ class Translator:
             if rest > 0:
                 logger.debug("Extending the last batch to the full batch size (%d)", self.batch_size)
                 batch = batch + [batch[0]] * rest
-            source_nd, bucket, constraints = self._get_inference_input(batch)
-            batch_translations = self._translate_nd(source_nd, bucket, constraints)
+            batch_translations = self._translate_nd(*self._get_inference_input(batch))
             # truncate to remove filler translations
             if rest > 0:
                 batch_translations = batch_translations[:-rest]
@@ -1106,8 +1105,6 @@ class Translator:
 
                 source[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
 
-            tokens = []  # the concatenated list of constraints, as numbers
-            markers = [] # markers that indicate whether each words is a non-final word of a multi-word constraint
             if trans_input.constraints is not None:
                 constraints.append([data_io.tokens2ids(phrase, self.vocab_target) for phrase in trans_input.constraints])
             else:
@@ -1160,7 +1157,7 @@ class Translator:
     def _translate_nd(self,
                       source: mx.nd.NDArray,
                       source_length: int,
-                      constraints: List[List[int]]) -> List[Translation]:
+                      constraints: List[RawConstraintList]) -> List[Translation]:
         """
         Translates source of source_length, given a bucket_key.
 
@@ -1320,12 +1317,6 @@ class Translator:
         else:
             beam_histories = None
 
-        # Beam history
-        if self.store_beam:
-            beam_histories = [defaultdict(list) for _ in range(self.batch_size)]  # type: Optional[List[BeamHistory]]
-        else:
-            beam_histories = None
-
         lengths = mx.nd.ones((self.batch_size * self.beam_size, 1), ctx=self.context)
         finished = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
 
@@ -1341,7 +1332,7 @@ class Translator:
         scores_accumulated = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context)
 
         # for constrained decoding
-        constraints = [None] * self.batch_size * self.beam_size
+        constraints = [[]] * self.batch_size * self.beam_size
 
         # reset all padding distribution cells to np.inf
         self.pad_dist[:] = np.inf
@@ -1390,7 +1381,7 @@ class Translator:
                     hyp = ConstrainedHypothesis(raw_list, self.vocab_target[C.EOS_SYMBOL])
                     constraints[idx:idx+self.beam_size] = [hyp.advance(self.start_id) for x in range(self.beam_size)]
                 else:
-                    constraints[idx:idx+self.beam_size] = [None] * self.beam_size
+                    constraints[idx:idx+self.beam_size] = [] * self.beam_size
 
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
         # item on the beam for each sentence
@@ -1546,7 +1537,7 @@ class Translator:
 
             # If lexical output constraints were used, there may be some incomplete hypotheses.
             # This code skips over them.
-            if constraints is not None and constraints[idx] is not None:
+            if constraints is not None and constraints[idx] != []:
                 best = idx
                 for best, hyp in enumerate(constraints[idx:idx+self.beam_size], idx):
                     if hyp.finished():
