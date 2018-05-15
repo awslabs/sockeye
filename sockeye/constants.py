@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -82,6 +82,11 @@ DEFAULT_INIT_PATTERN = ".*"
 INIT_XAVIER = 'xavier'
 INIT_UNIFORM = 'uniform'
 INIT_TYPES = [INIT_XAVIER, INIT_UNIFORM]
+
+INIT_XAVIER_FACTOR_TYPE_IN = "in"
+INIT_XAVIER_FACTOR_TYPE_OUT = "out"
+INIT_XAVIER_FACTOR_TYPE_AVG = "avg"
+INIT_XAVIER_FACTOR_TYPES = [INIT_XAVIER_FACTOR_TYPE_IN, INIT_XAVIER_FACTOR_TYPE_OUT, INIT_XAVIER_FACTOR_TYPE_AVG]
 
 RAND_TYPE_UNIFORM = 'uniform'
 RAND_TYPE_GAUSSIAN = 'gaussian'

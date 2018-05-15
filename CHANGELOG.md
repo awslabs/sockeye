@@ -10,6 +10,14 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.11]
+### Changed
+- Default training parameters have been changed to reflect the setup used in our arXiv paper. Specifically, the default
+  is now to train a 6 layer Transformer model with word based batching. The only difference to the paper is that weight
+  tying is still turned off by default, as there may be use cases in which tying the source and target vocabularies is
+  not appropriate. Turn it on using `--weight-tying --weight-tying-type=src_trg_softmax`. Additionally, BLEU scores from
+  a checkpoint decoder are now monitored by default.
+
 ## [1.18.10]
 ### Fixed
 - Re-allow early stopping w.r.t BLEU
