@@ -34,7 +34,7 @@ from itertools import zip_longest
           validation_source_factors=[],
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1, 1),
-          no_bucketing=False, bucket_width=10, max_seq_len=(100, 100),
+          no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
           monitor_pattern=None, monitor_stat_func='mx_default')),
 
     # short parameters
@@ -48,7 +48,7 @@ from itertools import zip_longest
           validation_source_factors=[],
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1, 1),
-          no_bucketing=False, bucket_width=10, max_seq_len=(100, 100),
+          no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
           monitor_pattern=None, monitor_stat_func='mx_default'))
 ])
 def test_io_args(test_params, expected_params):
@@ -356,7 +356,7 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           word_min_count=(1, 1),
           no_bucketing=False,
           bucket_width=10,
-          max_seq_len=(100, 100),
+          max_seq_len=(99, 99),
           min_num_shards=1,
           num_samples_per_shard=1000000,
           seed=13,

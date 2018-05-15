@@ -48,7 +48,13 @@ def main():
 
     num_words_source, num_words_target = args.num_words
     word_min_count_source, word_min_count_target = args.word_min_count
-    max_len_source, max_len_target = args.max_seq_len
+    max_seq_len_source, max_seq_len_target = args.max_seq_len
+    # The maximum length is the length before we add the BOS/EOS symbols
+    max_seq_len_source = max_seq_len_source + C.SPACE_FOR_XOS
+    max_seq_len_target = max_seq_len_target + C.SPACE_FOR_XOS
+    logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
+                max_seq_len_source, max_seq_len_target)
+
 
     source_vocabs, target_vocab = vocab.load_or_create_vocabs(
         source_paths=source_paths,
@@ -68,8 +74,8 @@ def main():
                          source_vocab_paths=source_vocab_paths,
                          target_vocab_path=args.target_vocab,
                          shared_vocab=args.shared_vocab,
-                         max_seq_len_source=max_len_source,
-                         max_seq_len_target=max_len_target,
+                         max_seq_len_source=max_seq_len_source,
+                         max_seq_len_target=max_seq_len_target,
                          bucketing=bucketing,
                          bucket_width=bucket_width,
                          samples_per_shard=samples_per_shard,
