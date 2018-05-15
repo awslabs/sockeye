@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -556,7 +556,8 @@ def prepare_data(source_fnames: List[str],
     config_data = DataConfig(data_statistics=data_statistics,
                              max_seq_len_source=max_seq_len_source,
                              max_seq_len_target=max_seq_len_target,
-                             num_source_factors=len(source_fnames))
+                             num_source_factors=len(source_fnames),
+                             source_with_eos=True)
     config_data_fname = os.path.join(output_prefix, C.DATA_CONFIG)
     logger.info("Writing data config to '%s'", config_data_fname)
     config_data.save(config_data_fname)
@@ -796,7 +797,8 @@ def get_training_data_iters(sources: List[str],
     config_data = DataConfig(data_statistics=data_statistics,
                              max_seq_len_source=max_seq_len_source,
                              max_seq_len_target=max_seq_len_target,
-                             num_source_factors=len(sources))
+                             num_source_factors=len(sources),
+                             source_with_eos=True)
 
     train_iter = ParallelSampleIter(data=training_data,
                                     buckets=buckets,
@@ -925,12 +927,14 @@ class DataConfig(config.Config):
                  data_statistics: DataStatistics,
                  max_seq_len_source: int,
                  max_seq_len_target: int,
-                 num_source_factors: int) -> None:
+                 num_source_factors: int,
+                 source_with_eos: bool = False) -> None:
         super().__init__()
         self.data_statistics = data_statistics
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
         self.num_source_factors = num_source_factors
+        self.source_with_eos = source_with_eos
 
 
 def read_content(path: str, limit: Optional[int] = None) -> Iterator[List[str]]:

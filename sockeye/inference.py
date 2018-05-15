@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -342,6 +342,10 @@ class InferenceModel(model.SockeyeModel):
     def length_ratio_std(self) -> float:
         return self.config.config_data.data_statistics.length_ratio_std
 
+    @property
+    def source_with_eos(self) -> bool:
+        return self.config.config_data.source_with_eos
+
 
 def load_models(context: mx.context.Context,
                 max_input_len: Optional[int],
@@ -422,6 +426,11 @@ def load_models(context: mx.context.Context,
     for fi in range(len(first_model_vocabs)):
         utils.check_condition(vocab.are_identical(*[source_vocabs[i][fi] for i in range(len(source_vocabs))]),
                               "Source vocabulary ids do not match. Factor %d" % fi)
+
+    source_with_eos = models[0].source_with_eos
+    utils.check_condition(all(source_with_eos == m.source_with_eos for m in models),
+                          "All models must match either take an additional EOS symbol on the source side or not. "
+                          "Did you try combining models trained with different versions?")
 
     # set a common max_output length for all models.
     max_input_len, get_max_output_length = models_max_input_output_length(models,
@@ -590,6 +599,13 @@ class TranslatorInput:
                                   tokens=self.tokens[i:i + chunk_size],
                                   factors=factors,
                                   chunk_id=chunk_id)
+
+    def with_eos(self):
+        return TranslatorInput(self.sentence_id,
+                               self.tokens + [C.EOS_SYMBOL],
+                               [factor + [C.EOS_SYMBOL] for factor in self.factors]
+                               if self.factors is not None else None,
+                               self.chunk_id)
 
 
 class BadTranslatorInput(TranslatorInput):
@@ -919,6 +935,9 @@ class Translator:
         if strip_unknown_words:
             self.strip_ids.add(self.vocab_target[C.UNK_SYMBOL])
         self.models = models
+        utils.check_condition(all(models[0].source_with_eos == m.source_with_eos for m in models),
+                              "The source_with_eos property must match across models.")
+        self.source_with_eos = models[0].source_with_eos
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
         self.batch_size = self.models[0].batch_size
@@ -1001,17 +1020,37 @@ class Translator:
             # empty input
             elif len(trans_input.tokens) == 0:
                 translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
-
-            # oversized input
-            elif len(trans_input.tokens) > self.max_input_length:
-                logger.debug(
-                    "Input %d has length (%d) that exceeds max input length (%d). Splitting into chunks of size %d.",
-                    trans_input.sentence_id, len(trans_input.tokens), self.buckets_source[-1], self.max_input_length)
-                input_chunks.extend(list(trans_input.chunks(self.max_input_length)))
-
-            # regular input
             else:
-                input_chunks.append(trans_input)
+                # TODO(tdomhan): Remove branch without EOS with next major version bump, as future models with always be trained with source side EOS symbols
+                if self.source_with_eos:
+                    max_input_length_without_eos = self.max_input_length - C.SPACE_FOR_XOS
+                    # oversized input
+                    if len(trans_input.tokens) > max_input_length_without_eos:
+                        logger.debug(
+                            "Input %d has length (%d) that exceeds max input length (%d). "
+                            "Splitting into chunks of size %d.",
+                            trans_input.sentence_id, len(trans_input.tokens),
+                            self.buckets_source[-1], max_input_length_without_eos)
+                        input_chunks.extend([trans_input_chunk.with_eos()
+                                             for trans_input_chunk in
+                                             trans_input.chunks(max_input_length_without_eos)])
+                    # regular input
+                    else:
+                        input_chunks.append(trans_input.with_eos())
+                else:
+                    # oversized input
+                    if len(trans_input.tokens) > self.max_input_length:
+                        logger.debug(
+                            "Input %d has length (%d) that exceeds max input length (%d). "
+                            "Splitting into chunks of size %d.",
+                            trans_input.sentence_id, len(trans_input.tokens),
+                            self.buckets_source[-1], self.max_input_length)
+                        input_chunks.extend([trans_input_chunk
+                                             for trans_input_chunk in
+                                             trans_input.chunks(self.max_input_length)])
+                    # regular input
+                    else:
+                        input_chunks.append(trans_input)
 
         # Sort longest to shortest (to rather fill batches of shorter than longer sequences)
         input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.tokens), reverse=True)
@@ -1223,17 +1262,18 @@ class Translator:
         for sentno in range(self.batch_size):
             rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
             if mx.nd.sum(finished[rows]) > 0:
-                best_finished_score = mx.nd.min(mx.nd.where(finished[rows], accumulated_scores[rows, 0], self.inf_array))
+                best_finished_score = mx.nd.min(
+                    mx.nd.where(finished[rows], accumulated_scores[rows, 0], self.inf_array))
 
                 # Find, mark (by setting the score to inf), and remove all hypotheses
                 # whose score is not within self.beam_prune of the best score
-                inactive[rows] = mx.nd.cast(accumulated_scores[rows, 0] - best_finished_score > self.beam_prune, dtype='int32')
+                inactive[rows] = mx.nd.cast(accumulated_scores[rows, 0] - best_finished_score > self.beam_prune,
+                                            dtype='int32')
                 accumulated_scores[rows, 0] = mx.nd.where(inactive[rows], self.inf_array, accumulated_scores[rows, 0])
                 best_word_indices[rows] = mx.nd.where(inactive[rows], self.zeros_array, best_word_indices[rows])
 
                 # mark removed ones as finished so they won't block early exiting
                 finished[rows] = mx.nd.clip(finished[rows] + inactive[rows], 0, 1)
-
 
     def _beam_search(self,
                      source: mx.nd.NDArray,
@@ -1337,7 +1377,8 @@ class Translator:
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
             scores += scores_accumulated
             # Items that are finished (but not inactive) get the accumulated score in col 0, otherwise infinity for the whole row
-            pad_dist[:, C.PAD_ID] = mx.nd.where(mx.nd.clip(finished - inactive, 0, 1), scores_accumulated[:, 0], self.inf_array_long)
+            pad_dist[:, C.PAD_ID] = mx.nd.where(mx.nd.clip(finished - inactive, 0, 1), scores_accumulated[:, 0],
+                                                self.inf_array_long)
             scores = mx.nd.where(finished + inactive, pad_dist, scores)
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
@@ -1354,7 +1395,8 @@ class Translator:
             lengths = mx.nd.take(lengths, best_hyp_indices)
             all_finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
             newly_finished = all_finished - finished
-            scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
+            scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths),
+                                             scores_accumulated)
             finished = all_finished
             # All rows are now active (after special treatment of start state at t=1)
             inactive[:] = 0
@@ -1376,8 +1418,10 @@ class Translator:
 
             # (6) optionally save beam history
             if self.store_beam:
-                unnormalized_scores = mx.nd.where(finished, scores_accumulated * self.length_penalty(lengths - 1), scores_accumulated)
-                normalized_scores = mx.nd.where(finished, scores_accumulated, scores_accumulated / self.length_penalty(lengths - 1))
+                unnormalized_scores = mx.nd.where(finished, scores_accumulated * self.length_penalty(lengths - 1),
+                                                  scores_accumulated)
+                normalized_scores = mx.nd.where(finished, scores_accumulated,
+                                                scores_accumulated / self.length_penalty(lengths - 1))
                 for sent in range(self.batch_size):
                     rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
 
@@ -1386,13 +1430,14 @@ class Translator:
                     if any(x for x in best_word_indices_sent if x != C.PAD_ID):
                         beam_histories[sent]["predicted_ids"].append(best_word_indices_sent)
                         beam_histories[sent]["predicted_tokens"].append([self.vocab_target_inv[x] for x in
-                                                                    best_word_indices_sent])
+                                                                         best_word_indices_sent])
                         # for later sentences in the matrix, shift from e.g. [5, 6, 7, 8, 6] to [0, 1, 3, 4, 1]
                         shifted_parents = best_hyp_indices[rows] - (sent * self.beam_size)
                         beam_histories[sent]["parent_ids"].append(shifted_parents.asnumpy().tolist())
 
                         beam_histories[sent]["scores"].append(unnormalized_scores[rows].asnumpy().flatten().tolist())
-                        beam_histories[sent]["normalized_scores"].append(normalized_scores[rows].asnumpy().flatten().tolist())
+                        beam_histories[sent]["normalized_scores"].append(
+                            normalized_scores[rows].asnumpy().flatten().tolist())
 
             # (7) determine which hypotheses in the beam are now finished
             finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
@@ -1410,9 +1455,11 @@ class Translator:
                 ms.sort_state(best_hyp_indices)
 
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
-        folded_accumulated_scores = scores_accumulated.reshape((self.batch_size, self.beam_size * scores_accumulated.shape[-1]))
+        folded_accumulated_scores = scores_accumulated.reshape(
+            (self.batch_size, self.beam_size * scores_accumulated.shape[-1]))
         indices = mx.nd.argsort(folded_accumulated_scores, axis=1)
-        best_hyp_indices[:], _ = np.unravel_index(indices.astype(np.int32).asnumpy().ravel(), scores_accumulated.shape) + self.offset
+        best_hyp_indices[:], _ = np.unravel_index(indices.astype(np.int32).asnumpy().ravel(),
+                                                  scores_accumulated.shape) + self.offset
         # Now reorder the arrays
         sequences = mx.nd.take(sequences, best_hyp_indices)
         lengths = mx.nd.take(lengths, best_hyp_indices)
@@ -1477,5 +1524,6 @@ class Translator:
             # for each hypothesis, print its entire history
             score = accumulated_scores[i].asscalar()
             word_ids = [int(x.asscalar()) for x in sequences[i]]
-            hypothesis = '----------' if inactive[i] else ' '.join([self.vocab_target_inv[x] for x in word_ids if x != 0])
+            hypothesis = '----------' if inactive[i] else ' '.join(
+                [self.vocab_target_inv[x] for x in word_ids if x != 0])
             logger.info('%d %d %d %.2f %s', i, finished[i].asscalar(), inactive[i].asscalar(), score, hypothesis)

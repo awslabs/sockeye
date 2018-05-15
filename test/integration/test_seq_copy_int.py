@@ -13,6 +13,7 @@
 
 import pytest
 
+import sockeye.constants as C
 from test.common import run_train_translate, tmp_digits_dataset
 
 _TRAIN_LINE_COUNT = 100
@@ -151,7 +152,7 @@ def test_seq_copy(train_params: str,
                             train_source_factor_paths=train_source_factor_paths,
                             dev_source_factor_paths=dev_source_factor_paths,
                             test_source_factor_paths=test_source_factor_paths,
-                            max_seq_len=_LINE_MAX_LENGTH + 1,
+                            max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
                             restrict_lexicon=restrict_lexicon,
                             work_dir=data['work_dir'],
                             use_prepared_data=use_prepared_data)

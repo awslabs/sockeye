@@ -18,6 +18,7 @@ import pytest
 
 logger = logging.getLogger(__name__)
 
+import sockeye.constants as C
 from test.common import tmp_digits_dataset, run_train_translate
 
 _TRAIN_LINE_COUNT = 10000
@@ -141,7 +142,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
                                                                     test_source_path=data['test_source'],
                                                                     test_target_path=data['test_target'],
                                                                     use_prepared_data=use_prepared_data,
-                                                                    max_seq_len=_LINE_MAX_LENGTH + 1,
+                                                                    max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
                                                                     restrict_lexicon=True,
                                                                     work_dir=data['work_dir'],
                                                                     seed=seed)
@@ -256,7 +257,7 @@ def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                                                                     test_source_factor_paths=data.get(
                                                                         'test_source_factors'),
                                                                     use_prepared_data=use_prepared_data,
-                                                                    max_seq_len=_LINE_MAX_LENGTH + 1,
+                                                                    max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
                                                                     restrict_lexicon=True,
                                                                     work_dir=data['work_dir'],
                                                                     seed=seed)
