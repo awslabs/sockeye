@@ -21,9 +21,9 @@ Felix Hieber, Tobias Domhan, Michael Denkowski, David Vilar, Artem Sokolov, Ann 
 ```
 @article{Sockeye:17,
    author = {Hieber, Felix and Domhan, Tobias and Denkowski, Michael
-           and Vilar, David and Sokolov, Artem, and Clifton, Ann and Post, Matt},
+           and Vilar, David and Sokolov, Artem and Clifton, Ann and Post, Matt},
     title = "{Sockeye: A Toolkit for Neural Machine Translation}",
-  journal = {ArXiv e-prints},
+  journal = {arXiv preprint arXiv:1712.05690},
 archivePrefix = "arXiv",
    eprint = {1712.05690},
  primaryClass = "cs.CL",

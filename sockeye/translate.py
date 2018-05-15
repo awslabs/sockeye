@@ -64,6 +64,11 @@ def main():
     with ExitStack() as exit_stack:
         context = _setup_context(args, exit_stack)
 
+        if args.override_dtype == C.DTYPE_FP16:
+            logger.warning('Experimental feature \'--override-dtype float16\' has been used. '
+                           'This feature may be removed or change its behaviour in future. '
+                           'DO NOT USE IT IN PRODUCTION!')
+
         models, source_vocabs, target_vocab = inference.load_models(
             context=context,
             max_input_len=args.max_input_len,
@@ -74,7 +79,8 @@ def main():
             softmax_temperature=args.softmax_temperature,
             max_output_length_num_stds=args.max_output_length_num_stds,
             decoder_return_logit_inputs=args.restrict_lexicon is not None,
-            cache_output_layer_w_b=args.restrict_lexicon is not None)
+            cache_output_layer_w_b=args.restrict_lexicon is not None,
+            override_dtype=args.override_dtype)
         restrict_lexicon = None  # type: Optional[TopKLexicon]
         if args.restrict_lexicon:
             restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)

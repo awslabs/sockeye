@@ -200,6 +200,7 @@ class Encoder(ABC):
 
     @abstractmethod
     def __init__(self, dtype):
+        logger.info('{}.{} dtype: {}'.format(self.__module__, self.__class__.__name__, dtype))
         self.dtype = dtype
 
     @abstractmethod
@@ -932,6 +933,7 @@ class TransformerEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data data, data_length, seq_len.
         """
+        data = utils.cast_conditionally(data, self.dtype)
         if self.config.dropout_prepost > 0.0:
             data = mx.sym.Dropout(data=data, p=self.config.dropout_prepost)
 
@@ -941,11 +943,12 @@ class TransformerEncoder(Encoder):
                                                                        num_heads=self.config.attention_heads,
                                                                        fold_heads=True,
                                                                        name="%sbias" % self.prefix), axis=1)
-
+        bias = utils.cast_conditionally(bias, self.dtype)
         for i, layer in enumerate(self.layers):
             # (batch_size, seq_len, config.model_size)
             data = layer(data, bias)
         data = self.final_process(data=data, prev=None)
+        data = utils.uncast_conditionally(data, self.dtype)
         return data, data_length, seq_len
 
     def get_num_hidden(self) -> int:
