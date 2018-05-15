@@ -429,7 +429,7 @@ def load_models(context: mx.context.Context,
 
     source_with_eos = models[0].source_with_eos
     utils.check_condition(all(source_with_eos == m.source_with_eos for m in models),
-                          "All models must match either take an additional EOS symbol on the source side or not. "
+                          "All models must agree on using source-side EOS symbols or not. "
                           "Did you try combining models trained with different versions?")
 
     # set a common max_output length for all models.
@@ -600,7 +600,10 @@ class TranslatorInput:
                                   factors=factors,
                                   chunk_id=chunk_id)
 
-    def with_eos(self):
+    def with_eos(self) -> 'TranslatorInput':
+        """
+        :return: A new translator input with EOS appended to the tokens and factors.
+        """
         return TranslatorInput(self.sentence_id,
                                self.tokens + [C.EOS_SYMBOL],
                                [factor + [C.EOS_SYMBOL] for factor in self.factors]

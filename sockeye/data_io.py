@@ -1036,7 +1036,18 @@ class SequenceReader(Iterable):
             yield sequence
 
 
-def create_sequence_readers(sources, target, vocab_sources, vocab_target):
+def create_sequence_readers(sources: List[str], target: str,
+                            vocab_sources: List[vocab.Vocab],
+                            vocab_target: vocab.Vocab) -> Tuple[List[SequenceReader], SequenceReader]:
+    """
+    Create source readers with EOS and target readers with BOS.
+
+    :param sources: The file names of source data and factors.
+    :param target: The file name of the target data.
+    :param vocab_sources: The source vocabularies.
+    :param vocab_target: The target vocabularies.
+    :return: The source sequence readers and the target reader.
+    """
     source_sequence_readers = [SequenceReader(source, vocab, add_eos=True) for source, vocab in
                                zip(sources, vocab_sources)]
     target_sequence_reader = SequenceReader(target, vocab_target, add_bos=True)

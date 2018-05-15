@@ -334,7 +334,7 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           word_min_count=(1, 1),
           no_bucketing=False,
           bucket_width=10,
-          max_seq_len=(100, 100),
+          max_seq_len=(99, 99),
           min_num_shards=1,
           num_samples_per_shard=1000000,
           seed=13,
