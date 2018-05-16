@@ -590,6 +590,7 @@ class RecurrentDecoder(Decoder):
         if self.config.enc_last_hidden_concat_to_embedding:
             enc_last_hidden = mx.sym.SequenceLast(data=source_encoded,
                                      sequence_length=source_encoded_lengths,
+                                     axis=1,
                                      use_sequence_length=True)
 
         # get recurrent attention function conditioned on source
