@@ -31,10 +31,9 @@ from . import transformer
 from . import utils
 
 logger = logging.getLogger(__name__)
-EncoderConfig = Union['RecurrentEncoderConfig', transformer.TransformerConfig, 'ConvolutionalEncoderConfig', 'ImageLoadedCnnEncoderConfig']  # type: ignore
 
 
-def get_encoder(config: EncoderConfig, prefix: str = '') -> 'Encoder':
+def get_encoder(config: 'EncoderConfig', prefix: str = '') -> 'Encoder':
     if isinstance(config, RecurrentEncoderConfig):
         return get_recurrent_encoder(config, prefix)
     elif isinstance(config, transformer.TransformerConfig):
@@ -1213,3 +1212,6 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         Returns the size of the encoded sequence.
         """
         return int(ceil(seq_len / self.pool_stride))
+
+
+EncoderConfig = Union[RecurrentEncoderConfig, transformer.TransformerConfig, ConvolutionalEncoderConfig, 'ImageLoadedCnnEncoderConfig']  # type: ignore
