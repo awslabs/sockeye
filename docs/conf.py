@@ -40,7 +40,7 @@ class MockModule(MagicMock):
         return MockClass(name)
 
 
-MOCK_MODULES = ['mxnet', 'mxnet.metric', 'numpy']
+MOCK_MODULES = ['mxnet', 'mxnet.metric', 'numpy', 'sockeye.optimizers']
 sys.modules.update((mod_name, MockModule()) for mod_name in MOCK_MODULES)
 
 
