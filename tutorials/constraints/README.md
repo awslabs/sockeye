@@ -13,18 +13,16 @@ This file describes how to use lexical constraints; for more technical informati
 
 You need a [trained model](../wmt/README.md).
 
-You need to be careful to apply the same preprocessing to your test data that you applied at training time.  In
-particular, if you used [BPE](http://github.com/rsennrich/subword-nmt), it's important to ensure that your constraints
-have also been split with BPE, since Sockeye itself does not do this.
+You need to be careful to apply the same preprocessing to your test data that you applied at training time, including
+any [subword processing](http://github.com/rsennrich/subword-nmt), since Sockeye itself does not do this.
 
 Constraints must be encoded with a JSON object.
 This JSON object can be produced with the provided script:
 
-    echo -e "This is a test .\tconstraint\tmultiword constraint" \
-      | python3 -m sockeye.lexical_constraints --bpe model/bpe.model" \
-      | python3 -m sockeye.translate -m model --json-input --beam-size 20 --beam-prune 20 [other args]
+    echo -e "This is a test .\tconstraint\tmulti@@ word const@@ raint" \
+      | python3 -m sockeye.lexical_constraints
 
-The script optionally applies BPE and creates a Python object with the constraints encoded as follows (except on one line):
+The script creates a Python object with the constraints encoded as follows (except on one line):
 
     { 'text': 'This is a test .',
       'constraints': ['constr@@ aint',
@@ -35,7 +33,7 @@ input (without that flag, it will treat the JSON input as a regular sentence). W
 beam a little bit and enable beam pruning:
 
     echo -e "This is a test .\tconstraint\tmultiword constraint" \
-      | python3 -m sockeye.lexical_constraints --bpe model/bpe.model" \
-      | python3 -m sockeye.translate -m model --json-input --beam-size 20 --beam-prune 20 [other args]
+      | python3 -m sockeye.lexical_constraints \
+      | python3 -m sockeye.translate -m /path/to/model --json-input --beam-size 20 --beam-prune 20 [other args]
 
 You will get a translation with the required constraints as part of the output.

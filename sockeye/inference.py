@@ -1319,6 +1319,7 @@ class Translator:
                                                                                                      mx.nd.NDArray,
                                                                                                      mx.nd.NDArray,
                                                                                                      mx.nd.NDArray,
+                                                                                                     List[constrained.ConstrainedHypothesis],
                                                                                                      Optional[List[BeamHistory]]]:
         """
         Translates multiple sentences using beam search.

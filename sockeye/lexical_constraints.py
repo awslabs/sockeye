@@ -362,28 +362,10 @@ def main():
     import json
 
     parser = argparse.ArgumentParser(description='Generate lexical constraint JSON format for Sockeye')
-    parser.add_argument('--bpe', '-b', default=None, help='Location of BPE model to apply (shared source and target)')
-    parser.add_argument('--bpe-source', '-bs', default=None, help='Location of source BPE model')
-    parser.add_argument('--bpe-target', '-bt', default=None, help='Location of target BPE model')
     parser.add_argument('--constraints', '-c', nargs='*', type=str, default=[], help="List of target-side constraints")
     args = parser.parse_args()
 
-    if args.bpe is not None or args.bpe_source is not None or args.bpe_target is not None:
-        try:
-            from apply_bpe import BPE
-        except:
-            logger.error("Couldn't load BPE module. Is it in your PYTHONPATH?")
-            sys.exit(1)
-
     glossary = [C.BOS_SYMBOL, C.EOS_SYMBOL]
-
-    source_bpe = target_bpe = None
-    if args.bpe is not None:
-        source_bpe = target_bpe = BPE(open(args.bpe), glossaries=glossary)
-    if args.bpe_source is not None:
-        source_bpe = BPE(open(args.bpe_source), glossaries=glossary)
-    if args.bpe_target is not None:
-        target_bpe = BPE(open(args.bpe_target), glossaries=glossary)
 
     for line in sys.stdin:
         line = line.rstrip()
@@ -391,9 +373,9 @@ def main():
         # Constraints are in fields 2+
         source, *constraints = line.split('\t')
 
-        obj = { 'text': source_bpe.segment(source) if source_bpe else source }
+        obj = { 'text': source }
         if len(constraints) > 0:
-            obj['constraints'] = [target_bpe.segment(phr) if target_bpe else phr for phr in constraints]
+            obj['constraints'] = constraints
 
         print(json.dumps(obj, ensure_ascii=False), flush=True)
 
