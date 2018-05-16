@@ -641,12 +641,10 @@ class RecurrentDecoder(Decoder):
         # Get last state from source (batch_size, num_target_embed)
         enc_last_hidden = None
         if self.config.enc_last_hidden_concat_to_embedding:
-            source_encoded_time_major = mx.sym.swapaxes(source_encoded,
-                                                        dim1=0, dim2=1,
-                                                        name='source_encoded_batch_major')
-            enc_last_hidden = mx.sym.SequenceLast(data=source_encoded_time_major,
-                                 sequence_length=source_encoded_length,
-                                 use_sequence_length=True)
+            enc_last_hidden = mx.sym.SequenceLast(data=source_encoded,
+                                                  sequence_length=source_encoded_length,
+                                                  axis=1,
+                                                  use_sequence_length=True)
 
         attention_func = self.attention.on(source_encoded, source_encoded_length, source_encoded_max_length)
 

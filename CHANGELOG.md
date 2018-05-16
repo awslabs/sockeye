@@ -12,14 +12,9 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.13]
 ### Added
-- Introducing the image captioning module. Type of models supported: ConvNet encoder - Sockeye NMT decoders
-- Image encoder that extracts features using preetrained nets: `image_captioning.encoder`
-- Feature extraction script to dump features to disk `image_captioning.extract_features`
-- Pass-through embedding, since we do not need it for images
-- Image-text iterator that loads features on the fly during training with the option of loading all to memory: `image_captioning.data_io`
-- Training and inference pipelines for image captioning: `image_captioning.train`, `image_captioning.inference` and `image_captioning.captioner`
-- README with instructions on how to use the image captioning module: `image_captioning/README.md`
-- Visualization script that loads images and captions (prediction+ground truth) and display them: `image_captioning.visualize`
+- Introducing the image captioning module. Type of models supported: ConvNet encoder - Sockeye NMT decoders. This includes also a feature extraction script,
+an image-text iterator that loads features, training and inference pipelines and a visualization script that loads images and captions.
+See [this tutorial](tutorials/image_captioning) for its usage.
 
 ## [1.18.12]
 ### Changed

@@ -20,7 +20,6 @@ import math
 import os
 import pickle
 import random
-import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from contextlib import ExitStack
@@ -28,7 +27,6 @@ from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sequence
 
 import mxnet as mx
 import numpy as np
-import matplotlib.pyplot as plt
 
 from . import config
 from . import constants as C
@@ -269,7 +267,7 @@ class DataStatisticsAccumulator:
 
     def __init__(self,
                  buckets: List[Tuple[int, int]],
-                 vocab_source: Dict[str, int],
+                 vocab_source: Optional[Dict[str, int]],
                  vocab_target: Dict[str, int],
                  length_ratio_mean: float,
                  length_ratio_std: float) -> None:

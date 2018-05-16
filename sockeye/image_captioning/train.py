@@ -109,6 +109,8 @@ def create_checkpoint_decoder(args: argparse.Namespace,
 
 
 def create_data_iters_and_vocab(args: argparse.Namespace,
+                                max_seq_len_source: int,
+                                max_seq_len_target: int,
                                 resume_training: bool,
                                 output_folder: str) -> Tuple['data_io.BaseParallelSampleIter',
                                                              'data_io.BaseParallelSampleIter',
@@ -117,12 +119,13 @@ def create_data_iters_and_vocab(args: argparse.Namespace,
     Create the data iterators and the vocabularies.
 
     :param args: Arguments as returned by argparse.
+    :param max_seq_len_source: Source maximum sequence length.
+    :param max_seq_len_target: Target maximum sequence length.
     :param resume_training: Whether to resume training.
     :param output_folder: Output folder.
     :return: The data iterators (train, validation, config_data) as well as the source and target vocabularies.
     """
 
-    _, max_seq_len_target = args.max_seq_len
     _, num_words_target = args.num_words
     _, word_min_count_target = args.word_min_count
     batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
@@ -204,21 +207,24 @@ def create_encoder_config(args: argparse.Namespace) -> Tuple[Config, int]:
 
 def create_model_config(args: argparse.Namespace,
                         vocab_target_size: int,
+                        max_seq_len_source: int,
+                        max_seq_len_target: int,
                         config_data: data_io.DataConfig) -> model.ModelConfig:
     """
     Create a ModelConfig from the argument given in the command line.
 
     :param args: Arguments as returned by argparse.
     :param vocab_target_size: The size of the target vocabulary.
+    :param max_seq_len_source: Maximum source sequence length.
+    :param max_seq_len_target: Maximum target sequence length.
     :param config_data: Data config.
     :return: The model configuration.
     """
-    _, max_seq_len_target = args.max_seq_len
     num_embed_source, num_embed_target = args.num_embed
     _, embed_dropout_target = args.embed_dropout
 
     config_encoder, encoder_num_hidden = create_encoder_config(args)
-    config_decoder = create_decoder_config(args, encoder_num_hidden)
+    config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target)
 
     config_embed_source = encoder.PassThroughEmbeddingConfig()
     config_embed_target = encoder.EmbeddingConfig(vocab_size=vocab_target_size,
@@ -280,6 +286,13 @@ def main():
     with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "w") as fp:
         json.dump(vars(args), fp)
 
+    max_seq_len_source, max_seq_len_target = args.max_seq_len
+    # The maximum length is the length before we add the BOS/EOS symbols
+    max_seq_len_source = max_seq_len_source + C.SPACE_FOR_XOS
+    max_seq_len_target = max_seq_len_target + C.SPACE_FOR_XOS
+    logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
+                max_seq_len_source, max_seq_len_target)
+
     with ExitStack() as exit_stack:
         context = determine_context(args, exit_stack)
 
@@ -289,8 +302,12 @@ def main():
 
         train_iter, eval_iter, config_data, target_vocab = create_data_iters_and_vocab(
             args=args,
+            max_seq_len_source=max_seq_len_source,
+            max_seq_len_target=max_seq_len_target,
             resume_training=resume_training,
             output_folder=output_folder)
+        max_seq_len_source = config_data.max_seq_len_source
+        max_seq_len_target = config_data.max_seq_len_target
 
         # Dump the vocabularies if we're just starting up
         if not resume_training:
@@ -299,7 +316,10 @@ def main():
         target_vocab_size = len(target_vocab)
         logger.info("Vocabulary sizes: target=%d", target_vocab_size)
 
-        model_config = create_model_config(args, target_vocab_size, config_data)
+        model_config = create_model_config(args=args,
+                                           vocab_target_size=target_vocab_size,
+                                           max_seq_len_source=max_seq_len_source, max_seq_len_target=max_seq_len_target,
+                                           config_data=config_data)
         model_config.freeze()
 
         training_model = create_training_model(config=model_config,

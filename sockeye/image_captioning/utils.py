@@ -16,7 +16,6 @@ A set of utility methods for images.
 """
 import numpy as np
 import os
-from PIL import Image
 from shutil import copyfile
 from typing import List, Optional
 
@@ -26,6 +25,12 @@ from sockeye.log import setup_main_logger
 # in the main function)
 logger = setup_main_logger(__name__, file_logging=False, console=True)
 
+# Try to load, raise if not installed
+try:
+    from PIL import Image
+except ImportError as e:
+    logger.warn("Please install pillow to use the image_captioning module.")
+    raise e
 
 def copy_mx_model_to(model_path, model_epoch, output_folder):
     """

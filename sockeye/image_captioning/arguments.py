@@ -81,7 +81,7 @@ def add_image_size_args(params):
     params.add_argument('--source-image-size', '-sis',
                         nargs='+', type=int,
                         default=[3, 224, 224],
-                        help='Source images are resized to this size. It must fit the input shape of the network')
+                        help='Source images are resized to this size. It must fit the input shape of the network. Default: %(default)s.')
 
 
 def add_image_model_parameters(params):
@@ -99,21 +99,21 @@ def add_image_model_parameters(params):
                                    "the sufix -symbol.json or -0000.params")
     model_params.add_argument('--image-encoder-model-epoch', type=int,
                               default=0,
-                              help="Epoch of the model to load.")
+                              help="Epoch of the model to load. Default: %(default)s.")
     model_params.add_argument('--image-encoder-layer', type=str,
                               default="stage4_unit3_conv3",
                               help="This string specifies the name of the layer from the image model used as "
-                                   "representation. The possible names can be found in the model file .json.")
+                                   "representation. The possible names can be found in the model file .json. Default: %(default)s.")
     model_params.add_argument('--image-encoder-conv-map-size', type=int,
                               default=49,
                               help="Expected size of the feature map related to the layer specified in "
                                    "--image-encoder-layer. If the conv map has shape 2048*7*7, the value "
-                                   "of this parameter will be 7*7, thus 49.")
+                                   "of this parameter will be 7*7, thus 49. Default: %(default)s.")
     model_params.add_argument('--image-encoder-num-hidden', type=int,
                               default=512,
                               help="Number of hidden units of the fully-connected layer that encode "
                                    "the original features. Suggested to be of dimension which is lower "
-                                   "than the original dimension.")
+                                   "than the original dimension. Default: %(default)s.")
     model_params.add_argument('--no-image-encoder-global-descriptor',
                               action="store_false",
                               help="The image encodes can be augmented with a global descriptor, which is "

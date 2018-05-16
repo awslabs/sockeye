@@ -22,34 +22,34 @@ _TEST_MAX_LENGTH = 20
 
 ENCODER_DECODER_SETTINGS = [
     # LSTM decoder with attention
-    ("--encoder image-pretrain-cnn --decoder rnn --rnn-cell-type lstm --batch-size 8 --optimizer adam "
+    ("--encoder image-pretrain-cnn --decoder rnn --rnn-cell-type lstm --batch-size 12 --optimizer adam "
      "--initial-learning-rate 0.0003 --gradient-clipping-threshold 1.0 --bucket-width 2 "
      "--fill-up replicate --rnn-num-hidden 32 --rnn-decoder-state-init zero --weight-normalization "
      "--checkpoint-frequency 10 --max-updates 10",
      "--beam-size 2"),
     # LSTM decoder with attention: no global, encoder hiddens 128, rnn last, load all feats to mem
     ("--encoder image-pretrain-cnn --image-encoder-num-hidden 128 --no-image-encoder-global-descriptor "
-     "--decoder rnn --rnn-cell-type lstm --batch-size 8 --optimizer adam --load-all-features-to-memory "
+     "--decoder rnn --rnn-cell-type lstm --batch-size 12 --optimizer adam --load-all-features-to-memory "
      "--initial-learning-rate 0.0003 --gradient-clipping-threshold 1.0 --bucket-width 2 "
      "--fill-up replicate --rnn-num-hidden 32 --rnn-decoder-state-init last --weight-normalization "
      "--checkpoint-frequency 10 --max-updates 10",
      "--beam-size 2"),
     # 2-layer LSTM decoder with attention and dropout
-    ("--encoder image-pretrain-cnn --decoder rnn --rnn-cell-type lstm --batch-size 8 --optimizer adam "
+    ("--encoder image-pretrain-cnn --decoder rnn --rnn-cell-type lstm --batch-size 12 --optimizer adam "
      "--initial-learning-rate 0.0003 --gradient-clipping-threshold 1.0 --bucket-width 2 "
      "--fill-up replicate --rnn-num-hidden 32 --rnn-decoder-state-init zero "
      "--weight-normalization --num-layers 1:2 --rnn-dropout-states 1.0:0.2 "
      "--checkpoint-frequency 10 --max-updates 10",
      "--beam-size 2"),
     # Transformer decoder
-    ("--encoder image-pretrain-cnn --decoder transformer --batch-size 8 --num-embed 16 "
+    ("--encoder image-pretrain-cnn --decoder transformer --batch-size 12 --num-embed 16 "
      "--transformer-attention-heads 2 --transformer-model-size 16 "
      "--optimizer adam --initial-learning-rate 0.0003 --gradient-clipping-threshold 1.0 --bucket-width 2 "
      "--fill-up replicate --rnn-decoder-state-init zero "
      "--checkpoint-frequency 10 --max-updates 10",
      "--beam-size 2"),
     # 3-layer CNN decoder
-    ("--encoder image-pretrain-cnn --decoder cnn --num-layers 3 --batch-size 8 "
+    ("--encoder image-pretrain-cnn --decoder cnn --num-layers 3 --batch-size 12 "
      "--optimizer adam --initial-learning-rate 0.0003 "
      "--fill-up replicate --cnn-num-hidden 32 --image-encoder-num-hidden 32 --cnn-positional-embedding-type fixed "
      "--checkpoint-frequency 10 --max-updates 10",
