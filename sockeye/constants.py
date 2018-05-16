@@ -24,6 +24,8 @@ PAD_SYMBOL = "<pad>"
 PAD_ID = 0
 TOKEN_SEPARATOR = " "
 VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
+# reserve extra space for the EOS or BOS symbol that is added to both source and target
+SPACE_FOR_XOS = 1
 
 ARG_SEPARATOR = ":"
 

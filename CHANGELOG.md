@@ -10,10 +10,15 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [1.18.12]
+## [1.18.13]
 ### Added
 - Added decoding with target-side lexical constraints.
 - Documentation provided in the `tutorials/constraints` directory.
+
+## [1.18.12]
+### Changed
+- All source side sequences now get appended an additional end-of-sentence (EOS) symbol. This change is backwards
+  compatible meaning that inference with older models will still work without the EOS symbol.
 
 ## [1.18.11]
 ### Changed
