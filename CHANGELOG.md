@@ -12,8 +12,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.13]
 ### Added
-- Added decoding with target-side lexical constraints.
-- Documentation provided in the `tutorials/constraints` directory.
+- Added decoding with target-side lexical constraints (documentation in `tutorials/constraints`).
 
 ## [1.18.12]
 ### Changed

@@ -16,7 +16,7 @@ import logging
 import re
 import time
 
-from typing import Dict, List, NamedTuple, Tuple
+from typing import Dict, List, Optional, Tuple
 from operator import attrgetter
 
 from . import constants as C
@@ -37,13 +37,26 @@ class ConstrainedHypothesis:
     A non-sequence constraint is a single word and can therefore be followed by anything, whereas a sequence constraint must be followed by a particular word (the next word in the sequence).
     This class also records which constraints have been met.
 
+    A list of raw constraints is maintained internally as two parallel arrays. The following raw constraint
+    represents two phrases that must appear in the output: 14 and 19 35 14.
+
+        raw constraint: [[14], [19, 35, 14]]
+
+    This is represented internally as:
+
+        constraints: [14 19 35 14]
+        is_sequence: [ 1  1  0  0
+
     :param constraint_list: A list of zero or raw constraints (each represented as a list of integers).
     :param eos_id: The end-of-sentence ID.
     """
-    def __init__(self, constraint_list: RawConstraintList, eos_id: int) -> None:
+    def __init__(self,
+                 constraint_list: RawConstraintList,
+                 eos_id: int) -> None:
 
         # `constraints` records the words of the constraints, as a list (duplicates allowed).
         # `is_sequence` is a parallel array that records, for each corresponding constraint,
+        #    whether the current word is the non-final word of a phrasal constraint.
         self.constraints = []  # type: List[int]
         self.is_sequence = []  # type: List[bool]
         for phrase in constraint_list:
@@ -55,7 +68,7 @@ class ConstrainedHypothesis:
 
         # no constraints have been met
         self.met = [False for x in self.constraints]
-        self.lastMet = -1
+        self.last_met = -1
 
     def __len__(self) -> int:
         """
@@ -98,17 +111,17 @@ class ConstrainedHypothesis:
 
         :return: The ID of the next required word, or -1 if any word can follow
         """
-        items = []
+        items = []  # type: List[int]
         # Add extensions of a started-but-incomplete sequential constraint
-        if self.lastMet != -1 and self.is_sequence[self.lastMet] == 1:
-            word_id = self.constraints[self.lastMet + 1]
+        if self.last_met != -1 and self.is_sequence[self.last_met] == 1:
+            word_id = self.constraints[self.last_met + 1]
             if word_id != self.eos_id or self.num_needed() == 1:
                 items.append(word_id)
 
         # Add all constraints that aren't non-initial sequences
         else:
             for i, word_id in enumerate(self.constraints):
-                if self.met[i] is False and (i == 0 or not self.is_sequence[i - 1]):
+                if not self.met[i] and (i == 0 or not self.is_sequence[i - 1]):
                     if word_id != self.eos_id or self.num_needed() == 1:
                         items.append(word_id)
 
@@ -135,10 +148,10 @@ class ConstrainedHypothesis:
         """
         Updates the constraints object based on advancing on word_id.
         There is a complication, in that we may have started but not
-        yet completed a multi-word constraint.  We need to constraints
-        to be added as unconstrained words, so if the next word is a
-        invalid, we need to back out of marking the current phrase as
-        met constraints.
+        yet completed a multi-word constraint.  We need to allow constraints
+        to be added as unconstrained words, so if the next word is
+        invalid, we must "back out" of the current (incomplete) phrase,
+        re-setting all of its words as unmet.
 
         :param word_id: The word ID to advance on.
         :return: A deep copy of the object, advanced on word_id.
@@ -147,18 +160,18 @@ class ConstrainedHypothesis:
         obj = copy.deepcopy(self)
 
         # First, check if we're updating a sequential constraint.
-        if obj.lastMet != -1 and obj.is_sequence[obj.lastMet] == 1:
-            if word_id == obj.constraints[obj.lastMet + 1]:
+        if obj.last_met != -1 and obj.is_sequence[obj.last_met] == 1:
+            if word_id == obj.constraints[obj.last_met + 1]:
                 # Here, the word matches what we expect next in the constraint, so we update everything
-                obj.met[obj.lastMet + 1] = True
-                obj.lastMet += 1
+                obj.met[obj.last_met + 1] = True
+                obj.last_met += 1
             else:
                 # Here, the word is not the expected next word of the constraint, so we back out of the constraint.
-                index = obj.lastMet
+                index = obj.last_met
                 while obj.is_sequence[index]:
                     obj.met[index] = False
                     index -= 1
-                obj.lastMet = -1
+                obj.last_met = -1
 
         # next, check if we can meet a single-word constraint
         else:
@@ -168,7 +181,7 @@ class ConstrainedHypothesis:
                 q = (word_id, 0, 0)
                 pos = l.index(q)
                 obj.met[pos] = True
-                obj.lastMet = pos
+                obj.last_met = pos
 
             except:
                 pass
@@ -176,7 +189,32 @@ class ConstrainedHypothesis:
         return obj
 
 
-def get_bank_sizes(num_constraints, beam_size, candidates) -> List[int]:
+def init_batch(raw_constraints: List[RawConstraintList],
+               beam_size: int,
+               start_id: int,
+               eos_id: int) -> List[Optional[ConstrainedHypothesis]]:
+    """
+    :param raw_constraints: The list of raw constraints (list of list of IDs).
+    :param beam_size: The beam size.
+    :param start_id: The target-language vocabulary ID of the SOS symbol.
+    :param eos_id: The target-language vocabulary ID of the EOS symbol.
+    :return: A list of ConstrainedHypothesis objects (shape: (batch_size * beam_size,)).
+    """
+    constraints = [None] * (len(raw_constraints) * beam_size)
+    if any(raw_constraints):
+        for i, raw_list in enumerate(raw_constraints):
+            num_constraints = sum([len(phrase) for phrase in raw_list])
+            idx = i * beam_size
+            if num_constraints > 0:
+                hyp = ConstrainedHypothesis(raw_list, eos_id)
+                constraints[idx:idx+beam_size] = [hyp.advance(start_id) for x in range(beam_size)]
+
+    return constraints
+
+
+def get_bank_sizes(num_constraints: int,
+                   beam_size: int,
+                   candidate_counts: List[int]) -> List[int]:
     """
     Evenly distributes the beam across the banks, where each bank is a portion of the beam devoted
     to hypotheses having met the same number of constraints, 0..num_constraints.
@@ -184,7 +222,7 @@ def get_bank_sizes(num_constraints, beam_size, candidates) -> List[int]:
 
     :param num_constraints: The number of constraints.
     :param beam_size: The beam size.
-    :param candidates: The empirical counts of number of candidates in each bank.
+    :param candidate_counts: The empirical counts of number of candidates in each bank.
     :return: A distribution over banks.
     """
 
@@ -202,7 +240,7 @@ def get_bank_sizes(num_constraints, beam_size, candidates) -> List[int]:
     # that you start pushing from the bucket that is assigned the remainder, for cases where
     # num_constraints >= beam_size.
     for i in reversed(range(num_banks)):
-        overfill = assigned[i] - candidates[i]
+        overfill = assigned[i] - candidate_counts[i]
         if overfill > 0:
             assigned[i] -= overfill
             assigned[(i - 1) % num_banks] += overfill
@@ -210,13 +248,27 @@ def get_bank_sizes(num_constraints, beam_size, candidates) -> List[int]:
     return assigned
 
 
-class ConstrainedCandidate(NamedTuple('Candidate', [
-    ('row', int),
-    ('col', int),
-    ('score', float),
-    ('hypothesis', ConstrainedHypothesis)
-])):
-    __slots__ = ()
+class ConstrainedCandidate:
+    """
+    Object used to hold candidates for the beam in topk().
+
+    :param row: The row in the scores matrix.
+    :param col: The column (word ID) in the scores matrix.
+    :param score: the associated accumulated score.
+    :param hypothesis: The ConstrainedHypothesis containing information about met constraints.
+    """
+
+    __slots__ = ('row', 'col', 'score', 'hypothesis')
+
+    def __init__(self,
+                 row: int,
+                 col: int,
+                 score: float,
+                 hypothesis: ConstrainedHypothesis):
+        self.row = row
+        self.col = col
+        self.score = score
+        self.hypothesis = hypothesis
 
     def __hash__(self):
         return hash((self.row, self.col))
@@ -255,15 +307,13 @@ def topk(beam_size: int,
 
     num_constraints = hypotheses[0].size()
 
-    _start_time = time.time()
-
     candidates = set()
     # (1) Add all of the top-k items (which were passed) in as long as they pass the constraints
     for row, col, seq_score in zip(best_ids, best_word_ids, sequence_scores):
         row = int(row.asscalar())
         col = int(col.asscalar())
-        seq_score = float(seq_score.asscalar())
         if hypotheses[row].is_valid(col):
+            seq_score = float(seq_score.asscalar())
             new_item = hypotheses[row].advance(col)
             cand = ConstrainedCandidate(row, col, seq_score, new_item)
             candidates.add(cand)
@@ -288,7 +338,7 @@ def topk(beam_size: int,
         # Now, create new candidates for each of these items
         for col in nextones:
             new_item = hyp.advance(col)
-            score = scores[row,col].asscalar()
+            score = scores[row, col].asscalar()
             cand = ConstrainedCandidate(row, col, score, new_item)
             candidates.add(cand)
 
@@ -305,7 +355,7 @@ def topk(beam_size: int,
     bank_sizes = get_bank_sizes(num_constraints, beam_size, counts)
 
     # Sort the candidates into the allocated banks
-    pruned_candidates = []
+    pruned_candidates = []  # type: List[ConstrainedCandidate]
     for i, cand in enumerate(sorted_candidates):
         bank = cand.hypothesis.num_met()
 
@@ -342,14 +392,7 @@ def main():
 
         { "text": "Dies ist ein Test .", "constraints": ["This is", "test"] }
 
-    If you have a BPE model
-
-        echo -e "Dies ist ein Test .\tThis is\ttest" | python3 -m sockeye.lexical_constraints --bpe /path/to/bpe.model
-
-    You might get instead:
-
-        { "text": "Dies ist ein Te@@ st .", "constraints": ["This is", "te@@ st"] }
-
+    Make sure you apply all preprocessing (tokenization, BPE, etc.) to both the source and the target-side constraints.
     You can then translate this object by passing it to Sockeye on STDIN as follows:
 
         python3 -m sockeye.translate -m /path/to/model --json-input --beam-size 20 --beam-prune 20
@@ -362,10 +405,7 @@ def main():
     import json
 
     parser = argparse.ArgumentParser(description='Generate lexical constraint JSON format for Sockeye')
-    parser.add_argument('--constraints', '-c', nargs='*', type=str, default=[], help="List of target-side constraints")
     args = parser.parse_args()
-
-    glossary = [C.BOS_SYMBOL, C.EOS_SYMBOL]
 
     for line in sys.stdin:
         line = line.rstrip()

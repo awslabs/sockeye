@@ -1038,11 +1038,16 @@ class Translator:
             elif len(trans_input.tokens) == 0:
                 translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
             else:
-                # TODO(tdomhan): Remove branch without EOS with next major version bump, as future models with always be trained with source side EOS symbols
+                # TODO(tdomhan): Remove branch without EOS with next major version bump, as future models witll always be trained with source side EOS symbols
                 if self.source_with_eos:
                     max_input_length_without_eos = self.max_input_length - C.SPACE_FOR_XOS
                     # oversized input
                     if len(trans_input.tokens) > max_input_length_without_eos:
+                        if len(trans_input.tokens) > self.max_input_length:
+                            if trans_input.constraints is not None:
+                                raise RuntimeError(
+                                    "Input %d has length (%d) that exceeds max input length (%d), but it has target-side constraints, and so can't be split")
+
                         logger.debug(
                             "Input %d has length (%d) that exceeds max input length (%d). "
                             "Splitting into chunks of size %d.",
@@ -1114,7 +1119,7 @@ class Translator:
 
         return results
 
-    def _get_inference_input(self, trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray, int, List[constrained.RawConstraintList]]:
+    def _get_inference_input(self, trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray, int, List[Optional[constrained.RawConstraintList]]]:
         """
         Assembles the numerical data for the batch.
         This comprises an NDArray for the source sentences, the bucket key (padded source length), and a list of
@@ -1122,12 +1127,12 @@ class Translator:
         the form of lists of integers in the target language vocabulary.
 
         :param trans_inputs: List of TranslatorInputs.
-        :return NDArray of source ids (shape=(batch_size, bucket_key, num_factors)) and bucket key.
+        :return NDArray of source ids (shape=(batch_size, bucket_key, num_factors)), bucket key, a list of raw constraint lists.
         """
 
         bucket_key = data_io.get_bucket(max(len(inp.tokens) for inp in trans_inputs), self.buckets_source)
         source = mx.nd.zeros((len(trans_inputs), bucket_key, self.num_source_factors), ctx=self.context)
-        constraints = []  # type: List[constrained.RawConstraintList]
+        raw_constraints = [None for x in range(self.batch_size)]  # type: List[constrained.RawConstraintList]
 
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)
@@ -1144,11 +1149,9 @@ class Translator:
                 source[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
 
             if trans_input.constraints is not None:
-                constraints.append([data_io.tokens2ids(phrase, self.vocab_target) for phrase in trans_input.constraints])
-            else:
-                constraints.append([])
+                raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in trans_input.constraints]
 
-        return source, bucket_key, constraints
+        return source, bucket_key, raw_constraints
 
     def _make_result(self,
                      trans_input: TranslatorInput,
@@ -1195,7 +1198,7 @@ class Translator:
     def _translate_nd(self,
                       source: mx.nd.NDArray,
                       source_length: int,
-                      constraints: List[constrained.RawConstraintList]) -> List[Translation]:
+                      raw_constraints: List[Optional[constrained.RawConstraintList]]) -> List[Translation]:
         """
         Translates source of source_length, given a bucket_key.
 
@@ -1206,7 +1209,7 @@ class Translator:
         :return: Sequence of translations.
         """
 
-        return self._get_item_from_beam(*self._beam_search(source, source_length, constraints))
+        return self._get_item_from_beam(*self._beam_search(source, source_length, raw_constraints))
 
     def _encode(self, sources: mx.nd.NDArray, source_length: int) -> List[ModelState]:
         """
@@ -1315,18 +1318,18 @@ class Translator:
     def _beam_search(self,
                      source: mx.nd.NDArray,
                      source_length: int,
-                     constraint_list: Optional[List[constrained.RawConstraintList]] = None) -> Tuple[mx.nd.NDArray,
-                                                                                                     mx.nd.NDArray,
-                                                                                                     mx.nd.NDArray,
-                                                                                                     mx.nd.NDArray,
-                                                                                                     List[constrained.ConstrainedHypothesis],
-                                                                                                     Optional[List[BeamHistory]]]:
+                     raw_constraint_list: List[Optional[constrained.RawConstraintList]] = None) -> Tuple[mx.nd.NDArray,
+                                                                                                         mx.nd.NDArray,
+                                                                                                         mx.nd.NDArray,
+                                                                                                         mx.nd.NDArray,
+                                                                                                         List[Optional[constrained.ConstrainedHypothesis]],
+                                                                                                         Optional[List[BeamHistory]]]:
         """
         Translates multiple sentences using beam search.
 
         :param source: Source ids. Shape: (batch_size, bucket_key).
         :param source_length: Max source length.
-        :param constraint_list: A list (for each sentence in the batch) of lists (each phrase) of
+        :param raw_constraint_list: A list (for each sentence in the batch) of lists (each phrase) of
                 list of IDs (words in each phrase) that must appear in the output.
         :return List of lists of word ids, list of attentions, array of accumulated length-normalized
                 negative log-probs.
@@ -1368,9 +1371,6 @@ class Translator:
         # scores_accumulated: chosen smallest scores in scores (ascending).
         scores_accumulated = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context)
 
-        # for constrained decoding
-        constraints = [[] for i in range(self.batch_size * self.beam_size)]
-
         # reset all padding distribution cells to np.inf
         self.pad_dist[:] = np.inf
 
@@ -1407,18 +1407,7 @@ class Translator:
         model_states = self._encode(source, source_length)
 
         # Initialize the beam to track constraint sets, where target-side lexical constraints are present
-        num_constraints = [0] * self.batch_size
-        if len(constraint_list) > 0 and any(constraint_list):
-            for i in range(self.batch_size):
-                raw_list = constraint_list[i]
-                num_constraints[i] = sum([len(phrase) for phrase in raw_list])
-
-                idx = i * self.beam_size
-                if num_constraints[i] > 0:
-                    hyp = constrained.ConstrainedHypothesis(raw_list, self.vocab_target[C.EOS_SYMBOL])
-                    constraints[idx:idx+self.beam_size] = [hyp.advance(self.start_id) for x in range(self.beam_size)]
-                else:
-                    constraints[idx:idx+self.beam_size] = [] * self.beam_size
+        constraints = constrained.init_batch(raw_constraint_list, self.beam_size, self.start_id, self.vocab_target[C.EOS_SYMBOL])
 
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
         # item on the beam for each sentence
@@ -1447,10 +1436,10 @@ class Translator:
             best_hyp_indices[:], best_word_indices[:], scores_accumulated[:, 0] = self.topk(scores)
 
             # Constraints for constrained decoding are processed sentence by sentence
-            if any(num_constraints):
+            if any(raw_constraint_list):
                 for sentno in range(self.batch_size):
                     rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
-                    if num_constraints[sentno] > 0:
+                    if raw_constraint_list[sentno] is not None:
                         best_hyp_indices[rows], best_word_indices[rows], scores_accumulated[rows], \
                             constraints[rows], inactive[rows] = constrained.topk(self.beam_size,
                                                                                  inactive[rows],
@@ -1552,7 +1541,7 @@ class Translator:
                             attention_lists: mx.nd.NDArray,
                             accumulated_scores: mx.nd.NDArray,
                             lengths: mx.nd.NDArray,
-                            constraints: List[constrained.ConstrainedHypothesis],
+                            constraints: List[Optional[constrained.ConstrainedHypothesis]],
                             beam_histories: Optional[List[BeamHistory]],
                             desired_index: int = 0) -> List[Translation]:
         """
@@ -1572,7 +1561,7 @@ class Translator:
         result = []
         for sent in range(self.batch_size):
             idx = sent * self.beam_size + desired_index
-            if constraints is not None and constraints[idx]:
+            if constraints[idx]:
                 best = idx
                 for best, hyp in enumerate(constraints[idx:idx+self.beam_size], idx):
                     if hyp.finished():

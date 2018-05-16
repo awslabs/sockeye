@@ -77,12 +77,12 @@ a parallel array is used to mark which words are part of a phrasal constraint.
                          [
                              # No constraints
                              ([], [], []),
-                             # Single single-word constraint
+                             # One single-word constraint
                              ([[17]], [17], [0]),
                              # Multiple multiple-word constraints.
-                             ([[1, 2], [3, 4]], [1, 2, 3, 4], [True, False, True, False]),
+                             ([[11, 12], [13, 14]], [11, 12, 13, 14], [True, False, True, False]),
                              # Multiple constraints
-                             ([[1, 2, 3], [4], [5]], [1, 2, 3, 4, 5], [True, True, False, False, False]),
+                             ([[11, 12, 13], [14], [15]], [11, 12, 13, 14, 15], [True, True, False, False, False]),
                          ])
 def test_constraints_setup(raw_constraints, internal_constraints, internal_is_sequence):
     hyp = ConstrainedHypothesis(raw_constraints, EOS_ID)
@@ -107,9 +107,9 @@ Ensures that advance() works correctly. advance()
                              # Single simple met constraint
                              ([[17]], [17], []),
                              # Met first word of a phrasal constraint, return just next word of phrasal
-                             ([[1, 2], [3, 4]], [1], [2]),
+                             ([[11, 12], [13, 14]], [11], [12]),
                              # Completed phrase, have only single-word ones
-                             ([[1, 2, 3], [4], [5]], [1, 2, 3], [4, 5]),
+                             ([[11, 12, 13], [14], [15]], [11, 12, 13], [14, 15]),
                          ])
 def test_constraints_advance(raw_constraints, met, unmet):
     hyp = ConstrainedHypothesis(raw_constraints, EOS_ID)
@@ -132,11 +132,11 @@ Returns the list of unmet constraints.
                              # Single simple met constraint
                              ([[17]], [17], []),
                              # Met first word of a phrasal constraint, return just next word of phrasal
-                             ([[1, 2], [3, 4]], [1], [2]),
+                             ([[11, 12], [13, 14]], [11], [12]),
                              # Completed phrase, have only single-word ones
-                             ([[1, 2, 3], [4], [5]], [1, 2, 3], [4, 5]),
+                             ([[11, 12, 13], [14], [15]], [11, 12, 13], [14, 15]),
                              # Same word twice
-                             ([[1], [1]], [], [1, 1]),
+                             ([[11], [11]], [], [11, 11]),
                          ])
 def test_constraints_extend(raw_constraints, met, unmet):
     hyp = ConstrainedHypothesis(raw_constraints, EOS_ID)
