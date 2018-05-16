@@ -603,12 +603,16 @@ class TranslatorInput:
         :param chunk_size: The maximum size of a chunk.
         :return: A generator of TranslatorInputs, one for each chunk created.
         """
+        constraints = self.constraints
         for chunk_id, i in enumerate(range(0, len(self), chunk_size)):
             factors = [factor[i:i + chunk_size] for factor in self.factors] if self.factors is not None else None
             yield TranslatorInput(sentence_id=self.sentence_id,
                                   tokens=self.tokens[i:i + chunk_size],
                                   factors=factors,
+                                  constraints=constraints,
                                   chunk_id=chunk_id)
+
+            constraints = None
 
     def with_eos(self) -> 'TranslatorInput':
         """
@@ -1038,15 +1042,18 @@ class Translator:
             elif len(trans_input.tokens) == 0:
                 translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
             else:
-                # TODO(tdomhan): Remove branch without EOS with next major version bump, as future models witll always be trained with source side EOS symbols
+                # TODO(tdomhan): Remove branch without EOS with next major version bump, as future models will always be trained with source side EOS symbols
                 if self.source_with_eos:
                     max_input_length_without_eos = self.max_input_length - C.SPACE_FOR_XOS
                     # oversized input
                     if len(trans_input.tokens) > max_input_length_without_eos:
                         if len(trans_input.tokens) > self.max_input_length:
                             if trans_input.constraints is not None:
-                                raise RuntimeError(
-                                    "Input %d has length (%d) that exceeds max input length (%d), but it has target-side constraints, and so can't be split")
+                                logger.warning(
+                                    'Input %d has length (%d) that exceeds max input length (%d), '
+                                    'triggering internal splitting. Placing all target-side constraints '
+                                    'with the first chunk, which is probably wrong.',
+                                    trans_input.sentence_id, len(trans_input.tokens), self.max_input_length)
 
                         logger.debug(
                             "Input %d has length (%d) that exceeds max input length (%d). "
@@ -1063,8 +1070,11 @@ class Translator:
                     # oversized input
                     if len(trans_input.tokens) > self.max_input_length:
                         if trans_input.constraints is not None:
-                            raise RuntimeError(
-                                "Input %d has length (%d) that exceeds max input length (%d), but it has target-side constraints, and so can't be split")
+                            logger.warning(
+                                'Input %d has length (%d) that exceeds max input length (%d), '
+                                'triggering internal splitting. Placing all target-side constraints '
+                                'with the first chunk, which is probably wrong.',
+                                trans_input.sentence_id, len(trans_input.tokens), self.max_input_length)
 
                         logger.debug(
                             "Input %d has length (%d) that exceeds max input length (%d). "
@@ -1132,7 +1142,7 @@ class Translator:
 
         bucket_key = data_io.get_bucket(max(len(inp.tokens) for inp in trans_inputs), self.buckets_source)
         source = mx.nd.zeros((len(trans_inputs), bucket_key, self.num_source_factors), ctx=self.context)
-        raw_constraints = [None for x in range(self.batch_size)]  # type: List[constrained.RawConstraintList]
+        raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
 
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)
@@ -1204,7 +1214,7 @@ class Translator:
 
         :param source: Source ids. Shape: (batch_size, bucket_key, num_factors).
         :param source_length: Bucket key.
-        :param constraint_list: A list of constraint sets (one or more constraints per sentence).
+        :param raw_constraints: A list of optional constraint lists.
 
         :return: Sequence of translations.
         """
@@ -1318,19 +1328,18 @@ class Translator:
     def _beam_search(self,
                      source: mx.nd.NDArray,
                      source_length: int,
-                     raw_constraint_list: List[Optional[constrained.RawConstraintList]] = None) -> Tuple[mx.nd.NDArray,
-                                                                                                         mx.nd.NDArray,
-                                                                                                         mx.nd.NDArray,
-                                                                                                         mx.nd.NDArray,
-                                                                                                         List[Optional[constrained.ConstrainedHypothesis]],
-                                                                                                         Optional[List[BeamHistory]]]:
+                     raw_constraint_list: List[Optional[constrained.RawConstraintList]]) -> Tuple[mx.nd.NDArray,
+                                                                                                  mx.nd.NDArray,
+                                                                                                  mx.nd.NDArray,
+                                                                                                  mx.nd.NDArray,
+                                                                                                  List[Optional[constrained.ConstrainedHypothesis]],
+                                                                                                  Optional[List[BeamHistory]]]:
         """
         Translates multiple sentences using beam search.
 
         :param source: Source ids. Shape: (batch_size, bucket_key).
         :param source_length: Max source length.
-        :param raw_constraint_list: A list (for each sentence in the batch) of lists (each phrase) of
-                list of IDs (words in each phrase) that must appear in the output.
+        :param raw_constraint_list: A list of optional lists containing phrases (as lists of target word IDs) that must appear in each output.
         :return List of lists of word ids, list of attentions, array of accumulated length-normalized
                 negative log-probs.
         """

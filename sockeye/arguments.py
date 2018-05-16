@@ -1070,6 +1070,7 @@ def add_inference_args(params):
                                action='store_true',
                                default=False,
                                help='Remove any <unk> symbols from outputs. Default: %(default)s.')
+
     decode_params.add_argument('--output-type',
                                default='translation',
                                choices=C.OUTPUT_HANDLERS,
