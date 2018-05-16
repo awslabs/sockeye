@@ -18,7 +18,7 @@ import matplotlib
 matplotlib.use('Agg')
 import argparse
 import os
-from PIL import Image
+from PIL import Image  # pylint: disable=import-error
 
 import pylab as plt
 

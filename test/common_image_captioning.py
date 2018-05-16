@@ -23,7 +23,7 @@ from typing import List, Optional, Tuple
 from unittest.mock import patch
 
 import numpy as np
-from PIL import Image
+from PIL import Image  # pylint: disable=import-error
 
 import sockeye.average
 import sockeye.constants as C
