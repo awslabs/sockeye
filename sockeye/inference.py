@@ -1074,7 +1074,10 @@ class Translator:
                         input_chunks.append(trans_input)
 
             if trans_input.constraints is not None:
-                logger.info("Input %d has %d constraints: %s", trans_input.sentence_id, len(trans_input.constraints), ", ".join(" ".join(x) for x in trans_input.constraints))
+                logger.info("Input %d has %d %s: %s", trans_input.sentence_id,
+                            len(trans_input.constraints),
+                            "constraint" if len(trans_input.constraints) == 1 else "constraints",
+                            ", ".join(" ".join(x) for x in trans_input.constraints))
 
         # Sort longest to shortest (to rather fill batches of shorter than longer sequences)
         input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.tokens), reverse=True)
