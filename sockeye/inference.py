@@ -1572,6 +1572,17 @@ class Translator:
         result = []
         for sent in range(self.batch_size):
             idx = sent * self.beam_size + desired_index
+            if constraints is not None and constraints[idx]:
+                best = idx
+                for best, hyp in enumerate(constraints[idx:idx+self.beam_size], idx):
+                    if hyp.finished():
+                        break
+
+                if best > idx:
+                    logger.info("Skipping incomplete hypotheses %d-%d", 1, best - idx + 1)
+
+                idx = best
+
             length = int(lengths[idx].asscalar())
             sequence = sequences[idx][:length].asnumpy().tolist()
             # attention_matrix: (target_seq_len, source_seq_len)
