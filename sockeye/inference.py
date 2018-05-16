@@ -603,6 +603,14 @@ class TranslatorInput:
         :param chunk_size: The maximum size of a chunk.
         :return: A generator of TranslatorInputs, one for each chunk created.
         """
+
+        if len(self.tokens) > chunk_size and self.constraints is not None:
+            logger.warning(
+                'Input %d has length (%d) that exceeds max input length (%d), '
+                'triggering internal splitting. Placing all target-side constraints '
+                'with the first chunk, which is probably wrong.',
+                self.sentence_id, len(self.tokens), chunk_size)
+
         for chunk_id, i in enumerate(range(0, len(self), chunk_size)):
             factors = [factor[i:i + chunk_size] for factor in self.factors] if self.factors is not None else None
             # Constrained decoding is not supported for chunked TranslatorInputs. As a fall-back, constraints are
@@ -1047,14 +1055,6 @@ class Translator:
                     max_input_length_without_eos = self.max_input_length - C.SPACE_FOR_XOS
                     # oversized input
                     if len(trans_input.tokens) > max_input_length_without_eos:
-                        if len(trans_input.tokens) > self.max_input_length:
-                            if trans_input.constraints is not None:
-                                logger.warning(
-                                    'Input %d has length (%d) that exceeds max input length (%d), '
-                                    'triggering internal splitting. Placing all target-side constraints '
-                                    'with the first chunk, which is probably wrong.',
-                                    trans_input.sentence_id, len(trans_input.tokens), self.max_input_length)
-
                         logger.debug(
                             "Input %d has length (%d) that exceeds max input length (%d). "
                             "Splitting into chunks of size %d.",
@@ -1069,13 +1069,6 @@ class Translator:
                 else:
                     # oversized input
                     if len(trans_input.tokens) > self.max_input_length:
-                        if trans_input.constraints is not None:
-                            logger.warning(
-                                'Input %d has length (%d) that exceeds max input length (%d), '
-                                'triggering internal splitting. Placing all target-side constraints '
-                                'with the first chunk, which is probably wrong.',
-                                trans_input.sentence_id, len(trans_input.tokens), self.max_input_length)
-
                         logger.debug(
                             "Input %d has length (%d) that exceeds max input length (%d). "
                             "Splitting into chunks of size %d.",
