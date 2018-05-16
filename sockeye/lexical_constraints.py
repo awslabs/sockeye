@@ -173,17 +173,19 @@ class ConstrainedHypothesis:
                     index -= 1
                 obj.last_met = -1
 
-        # next, check if we can meet a single-word constraint
+        # If not, check whether we're meeting a single-word constraint
         else:
+            # Build a list from all constraints of tuples of the
+            # form (constraint, whether it's a non-initial sequential, whether it's been met)
+            constraint_tuples = list(zip(obj.constraints, [False] + obj.is_sequence[:-1], obj.met))
+            # We are searching for an unmet constraint (word_id) that is not the middle of a phrase and is not met
+            query = (word_id, False, False)
             try:
-                # build a tuple of (constraint, whether it's non-initial sequential, whether it's met)
-                l = list(zip(obj.constraints, [0] + obj.is_sequence[:-1], obj.met))
-                q = (word_id, 0, 0)
-                pos = l.index(q)
+                pos = constraint_tuples.index(query)
                 obj.met[pos] = True
                 obj.last_met = pos
-
-            except:
+            except ValueError:
+                # query not found; identical but duplicated object will be returned
                 pass
 
         return obj
