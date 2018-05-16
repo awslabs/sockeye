@@ -525,6 +525,7 @@ class EarlyStoppingTrainer:
 
         next_data_batch = train_iter.next()
         while True:
+
             if not train_iter.iter_next():
                 self.state.epoch += 1
                 train_iter.reset()

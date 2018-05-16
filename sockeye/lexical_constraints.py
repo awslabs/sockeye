@@ -11,10 +11,11 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import logging
-import time
 import copy
+import logging
 import re
+import time
+
 from typing import Dict, List, NamedTuple, Tuple
 from operator import attrgetter
 
@@ -26,6 +27,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Represents a list of raw constraints for a sentence. Each constraint is a list of target-word IDs.
 RawConstraintList = List[List[int]]
 
 class ConstrainedHypothesis:
@@ -42,12 +44,12 @@ class ConstrainedHypothesis:
 
         # `constraints` records the words of the constraints, as a list (duplicates allowed).
         # `is_sequence` is a parallel array that records, for each corresponding constraint,
-        self.constraints = []
-        self.is_sequence = []
+        self.constraints = []  # type: List[int]
+        self.is_sequence = []  # type: List[bool]
         for phrase in constraint_list:
             self.constraints += phrase
-            self.is_sequence += [1] * len(phrase)
-            self.is_sequence[-1] = 0
+            self.is_sequence += [True] * len(phrase)
+            self.is_sequence[-1] = False
 
         self.eos_id = eos_id
 
@@ -63,9 +65,10 @@ class ConstrainedHypothesis:
 
     def __str__(self) -> str:
         s = []
-        for i, id in enumerate(self.constraints):
-            s.append(str(id) if self.met[i] is False else 'X')
-            if self.is_sequence[i]: s.append('->')
+        for i, word_id in enumerate(self.constraints):
+            s.append(str(word_id) if self.met[i] is False else 'X')
+            if self.is_sequence[i]:
+                s.append('->')
         return ' '.join(s)
 
     def size(self) -> int:
@@ -74,17 +77,17 @@ class ConstrainedHypothesis:
         """
         return len(self.constraints)
 
-    def numMet(self) -> int:
+    def num_met(self) -> int:
         """
         :return: the number of constraints that have been met.
         """
         return sum(self.met)
 
-    def numNeeded(self) -> int:
+    def num_needed(self) -> int:
         """
         :return: the number of un-met constraints.
         """
-        return self.size() - self.numMet()
+        return self.size() - self.num_met()
 
     def allowed(self) -> List[int]:
         """
@@ -99,15 +102,14 @@ class ConstrainedHypothesis:
         # Add extensions of a started-but-incomplete sequential constraint
         if self.lastMet != -1 and self.is_sequence[self.lastMet] == 1:
             word_id = self.constraints[self.lastMet + 1]
-            if word_id != self.eos_id or self.numNeeded() == 1:
+            if word_id != self.eos_id or self.num_needed() == 1:
                 items.append(word_id)
 
         # Add all constraints that aren't non-initial sequences
         else:
-            for i, id in enumerate(self.constraints):
+            for i, word_id in enumerate(self.constraints):
                 if self.met[i] is False and (i == 0 or not self.is_sequence[i - 1]):
-                    word_id = self.constraints[i]
-                    if word_id != self.eos_id or self.numNeeded() == 1:
+                    if word_id != self.eos_id or self.num_needed() == 1:
                         items.append(word_id)
 
         return items
@@ -118,16 +120,16 @@ class ConstrainedHypothesis:
 
         :return: True if all the constraints are met.
         """
-        return self.numNeeded() == 0
+        return self.num_needed() == 0
 
-    def isValid(self, wordid) -> bool:
+    def is_valid(self, wordid) -> bool:
         """
         Ensures </s> is only generated when the hypothesis is completed.
 
         :param wordid: The wordid to validate.
         :return: True if all constraints are already met or the word ID is not the EOS id.
         """
-        return self.finished() or wordid != self.eos_id or (self.numNeeded() == 1 and self.allowed() == [self.eos_id])
+        return self.finished() or wordid != self.eos_id or (self.num_needed() == 1 and self.allowed() == [self.eos_id])
 
     def advance(self, word_id: int) -> 'ConstrainedHypothesis':
         """
@@ -223,7 +225,7 @@ class ConstrainedCandidate(NamedTuple('Candidate', [
         return self.row == other.row and self.col == other.col
 
     def __str__(self):
-        return '({}, {}, {}, {})'.format(self.row, self.col, self.score, self.hypothesis.numMet())
+        return '({}, {}, {}, {})'.format(self.row, self.col, self.score, self.hypothesis.num_met())
 
 
 def topk(beam_size: int,
@@ -261,7 +263,7 @@ def topk(beam_size: int,
         row = int(row.asscalar())
         col = int(col.asscalar())
         seq_score = float(seq_score.asscalar())
-        if hypotheses[row].isValid(col):
+        if hypotheses[row].is_valid(col):
             new_item = hypotheses[row].advance(col)
             cand = ConstrainedCandidate(row, col, seq_score, new_item)
             candidates.add(cand)
@@ -280,7 +282,7 @@ def topk(beam_size: int,
 
         # (3) add the single-best item after this (if it's valid)
         col = int(best_next[row].asscalar())
-        if hyp.isValid(col):
+        if hyp.is_valid(col):
             nextones.append(col)
 
         # Now, create new candidates for each of these items
@@ -297,7 +299,7 @@ def topk(beam_size: int,
     # The number of hypotheses in each bank
     counts = [0 for x in range(num_constraints + 1)]
     for cand in sorted_candidates:
-        counts[cand.hypothesis.numMet()] += 1
+        counts[cand.hypothesis.num_met()] += 1
 
     # Adjust allocated bank sizes if there are too few candidates in any of them
     bank_sizes = get_bank_sizes(num_constraints, beam_size, counts)
@@ -305,7 +307,7 @@ def topk(beam_size: int,
     # Sort the candidates into the allocated banks
     pruned_candidates = []
     for i, cand in enumerate(sorted_candidates):
-        bank = cand.hypothesis.numMet()
+        bank = cand.hypothesis.num_met()
 
         if bank_sizes[bank] > 0:
             pruned_candidates.append(cand)

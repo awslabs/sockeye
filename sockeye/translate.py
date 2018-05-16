@@ -31,7 +31,6 @@ from . import arguments
 from . import constants as C
 from . import data_io
 from . import inference
-from . import lexical_constraints
 
 logger = setup_main_logger(__name__, file_logging=False)
 
@@ -102,12 +101,12 @@ def main():
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
-                           input=args.input,
+                           input_file=args.input,
                            input_factors=args.input_factors,
                            input_is_json=args.json_input)
 
 
-def make_inputs(input: Optional[str],
+def make_inputs(input_file: Optional[str],
                 translator: inference.Translator,
                 input_is_json: bool,
                 input_factors: Optional[List[str]] = None) -> Generator[inference.TranslatorInput, None, None]:
@@ -117,13 +116,13 @@ def make_inputs(input: Optional[str],
     If source is not None, reads from the source file. If num_source_factors > 1, num_source_factors source factor
     filenames are required.
 
-    :param input: The source file (possibly None).
+    :param input_file: The source file (possibly None).
     :param translator: Translator that will translate each line of input.
     :param input_is_json: Whether the input is in json format.
     :param input_factors: Source factor files.
     :return: TranslatorInput objects.
     """
-    if input is None:
+    if input_file is None:
         check_condition(input_factors is None, "Translating from STDIN, not expecting any factor files.")
         for sentence_id, line in enumerate(sys.stdin, 1):
             if input_is_json:
@@ -134,7 +133,7 @@ def make_inputs(input: Optional[str],
                                                                 translator=translator)
     else:
         input_factors = [] if input_factors is None else input_factors
-        inputs = [input] + input_factors
+        inputs = [input_file] + input_factors
         check_condition(translator.num_source_factors == len(inputs),
                         "Model(s) require %d factors, but %d given (through --input and --input-factors)." % (
                             translator.num_source_factors, len(inputs)))
@@ -150,7 +149,7 @@ def make_inputs(input: Optional[str],
 def read_and_translate(translator: inference.Translator,
                        output_handler: OutputHandler,
                        chunk_size: Optional[int],
-                       input: Optional[str] = None,
+                       input_file: Optional[str] = None,
                        input_factors: Optional[List[str]] = None,
                        input_is_json: bool = False) -> None:
     """
@@ -159,7 +158,7 @@ def read_and_translate(translator: inference.Translator,
     :param output_handler: Handler that will write output to a stream.
     :param translator: Translator that will translate each line of input.
     :param chunk_size: The size of the portion to read at a time from the input.
-    :param input: Optional path to file which will be translated line-by-line if included, if none use stdin.
+    :param input_file: Optional path to file which will be translated line-by-line if included, if none use stdin.
     :param input_factors: Optional list of paths to files that contain source factors.
     :param input_is_json: Whether the input is in json format.
     """
@@ -180,7 +179,7 @@ def read_and_translate(translator: inference.Translator,
     logger.info("Translating...")
 
     total_time, total_lines = 0.0, 0
-    for chunk in grouper(make_inputs(input, translator, input_is_json, input_factors), size=chunk_size):
+    for chunk in grouper(make_inputs(input_file, translator, input_is_json, input_factors), size=chunk_size):
         chunk_time = translate(output_handler, chunk, translator)
         total_lines += len(chunk)
         total_time += chunk_time
