@@ -603,16 +603,16 @@ class TranslatorInput:
         :param chunk_size: The maximum size of a chunk.
         :return: A generator of TranslatorInputs, one for each chunk created.
         """
-        constraints = self.constraints
         for chunk_id, i in enumerate(range(0, len(self), chunk_size)):
             factors = [factor[i:i + chunk_size] for factor in self.factors] if self.factors is not None else None
+            # Constrained decoding is not supported for chunked TranslatorInputs. As a fall-back, constraints are
+            # assigned to the first chunk
+            constraints = self.constraints if chunk_id == 0 else None
             yield TranslatorInput(sentence_id=self.sentence_id,
                                   tokens=self.tokens[i:i + chunk_size],
                                   factors=factors,
                                   constraints=constraints,
                                   chunk_id=chunk_id)
-
-            constraints = None
 
     def with_eos(self) -> 'TranslatorInput':
         """
