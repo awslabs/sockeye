@@ -1260,10 +1260,15 @@ def get_batch_indices(data: ParallelDataSet,
     return idxs
 
 
-class BaseParallelSampleIter(mx.io.DataIter, ABC):
+class MetaBaseParallelSampleIter(ABC):
+    pass
+
+
+class BaseParallelSampleIter(mx.io.DataIter):
     """
     Base parallel sample iterator.
     """
+    __metaclass__ = MetaBaseParallelSampleIter
 
     def __init__(self,
                  buckets,
