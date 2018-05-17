@@ -92,10 +92,14 @@ def main():
     """
     Commandline interface to extract parameters.
     """
-    log_sockeye_version(logger)
     params = argparse.ArgumentParser(description="Extract specific parameters.")
     arguments.add_extract_args(params)
     args = params.parse_args()
+    extract_parameters(args)
+
+
+def extract_parameters(args: argparse.Namespace):
+    log_sockeye_version(logger)
 
     if os.path.isdir(args.input):
         param_path = os.path.join(args.input, C.PARAMS_BEST_NAME)

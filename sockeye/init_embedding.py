@@ -123,7 +123,6 @@ def main():
     """
     Commandline interface to initialize Sockeye embedding weights with pretrained word representations.
     """
-    log_sockeye_version(logger)
     params = argparse.ArgumentParser(description='Quick usage: python3 -m sockeye.init_embedding '
                                                  '-w embed-in-src.npy embed-in-tgt.npy '
                                                  '-i vocab-in-src.json vocab-in-tgt.json '
@@ -132,6 +131,11 @@ def main():
                                                  '-f params.init')
     arguments.add_init_embedding_args(params)
     args = params.parse_args()
+    init_embeddings(args)
+
+
+def init_embeddings(args: argparse.Namespace):
+    log_sockeye_version(logger)
 
     if len(args.weight_files) != len(args.vocabularies_in) or \
             len(args.weight_files) != len(args.vocabularies_out) or \

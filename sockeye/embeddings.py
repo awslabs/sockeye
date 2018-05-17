@@ -94,7 +94,10 @@ def main():
     params.add_argument('-k', type=int, default=5, help='Number of neighbours to print')
     params.add_argument('--gamma', '-g', type=float, default=1.0, help='Softmax distribution steepness.')
     args = params.parse_args()
+    embeddings(args)
 
+
+def embeddings(args: argparse.Namespace):
     logger.info("Arguments: %s", args)
 
     config = model.SockeyeModel.load_config(os.path.join(args.model, C.CONFIG_NAME))
