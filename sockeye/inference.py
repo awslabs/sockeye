@@ -956,7 +956,7 @@ class Translator:
         self.zeros_array = mx.nd.zeros((self.beam_size,), ctx=self.context, dtype='int32')
         self.inf_array_long = mx.nd.full((self.batch_size * self.beam_size,), val=np.inf,
                                          ctx=self.context, dtype='float32')
-        self.inf_array = mx.nd.slice(self.inf_array_long, begin=(0), end=(self.beam_size))
+        self.inf_array = mx.nd.slice(self.inf_array_long, begin=(0,), end=(self.beam_size,))
 
         # offset for hypothesis indices in batch decoding
         self.offset = np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size)
