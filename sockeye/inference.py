@@ -733,10 +733,9 @@ class TranslatorOutput:
     :param attention_matrix: Attention matrix. Shape: (target_length, source_length).
     :param score: Negative log probability of generated translation.
     :param beam_histories: List of beam histories. The list will contain more than one
-    history if it was split due to exceeding max_length.
+           history if it was split due to exceeding max_length.
     """
-    __slots__ = ('id', 'translation', 'tokens', 'attention_matrix', 'score',
-                 'beam_histories')
+    __slots__ = ('id', 'translation', 'tokens', 'attention_matrix', 'score', 'beam_histories')
 
     def __init__(self,
                  id: int,

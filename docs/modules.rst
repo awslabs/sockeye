@@ -188,6 +188,7 @@ sockeye.transformer module
 
 .. automodule:: sockeye.transformer
     :members:
+    :exclude-members: TransformerConfig
     :show-inheritance:
 
 sockeye.translate module
