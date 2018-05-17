@@ -1560,7 +1560,7 @@ class Translator:
                               == seq_scores.shape[0] == lengths.shape[0], "Shape mismatch")
 
         # Initialize the best_ids to the first item in each batch
-        best_ids = mx.nd.array(np.arange(0, self.batch_size * self.beam_size, self.beam_size))
+        best_ids = mx.nd.arange(0, self.batch_size * self.beam_size, self.beam_size, ctx=self.context)
 
         if any(constraints):
             # For constrained decoding, select from items that have met all constraints (might not be finished)
