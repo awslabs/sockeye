@@ -967,10 +967,12 @@ class Translator:
                             offset=self.offset,
                             use_mxnet_topk=self.context != mx.cpu())  # MXNet implementation is faster on GPUs
 
-        logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s batch_size=%d "
-                    "buckets_source=%s)",
+        logger.info("Translator (%d model(s) beam_size=%d beam_prune=%s beam_search_stop=%s "
+                    "ensemble_mode=%s batch_size=%d buckets_source=%s)",
                     len(self.models),
                     self.beam_size,
+                    'off' if not self.beam_prune else "%.2f" % self.beam_prune,
+                    self.beam_search_stop,
                     "None" if len(self.models) == 1 else ensemble_mode,
                     self.batch_size,
                     self.buckets_source)
