@@ -1537,6 +1537,8 @@ class Translator:
         finished = mx.nd.take(finished, best_hyp_indices)
         constraints = [constraints[int(x.asscalar())] for x in best_hyp_indices]
 
+#        self._print_beam(sequences, scores_accumulated, finished, inactive, constraints, t)
+
         return sequences, attentions, scores_accumulated, lengths, finished, constraints, beam_histories
 
     def _get_item_from_beam(self,
@@ -1560,8 +1562,7 @@ class Translator:
         :param constraints: The constraints for all items in the beam. Shape: (batch * beam).
         :param beam_histories: The beam histories for each sentence in the batch.
         :param desired_index: The index of the desired beam item (0 being the best hypothesis).
-        :return: Top sequence, top attention matrix, top seq score (length-normalized
-                 negative log-probs) and length.
+        :return: List of Translation objects containing all relevant information.
         """
         utils.check_condition(sequences.shape[0] == attention_lists.shape[0] \
                               == seq_scores.shape[0] == lengths.shape[0], "Shape mismatch")
@@ -1570,14 +1571,11 @@ class Translator:
             # For constrained decoding, select from items that have met all constraints (might not be finished)
             unmet = mx.nd.array([c.num_needed() if c is not None else 0 for c in constraints], ctx=self.context)
             filtered = mx.nd.where(unmet == 0, seq_scores[:, 0], self.inf_array_long)
+            filtered = filtered.reshape((self.batch_size, self.beam_size))
+            # There's got to be a better way to do this (but mx.nd.argmin returns floats!)
+            best_ids = [int(x) for x in mx.nd.argmin(filtered, axis=1).asnumpy().tolist()]
         else:
-            # For the normal situation, select from among finished items
-            filtered = mx.nd.where(finished == 1, seq_scores[:, 0], self.inf_array_long)
-
-        filtered = filtered.reshape((self.batch_size, self.beam_size))
-        # There's got to be a better way to do this (but mx.nd.argmin returns floats!)
-        best_ids = [int(x) for x in mx.nd.argmin(filtered, axis=1).asnumpy().tolist()]
-        print(best_ids, file=sys.stderr)
+            best_ids = [0] * self.batch_size
 
         return [self._assemble_result(*item, sequences, lengths, attention_lists, seq_scores, beam_histories) for item in zip(range(self.batch_size), best_ids)]
 
@@ -1601,7 +1599,7 @@ class Translator:
                                 Shape: (batch_size * self.beam_size, max_output_length, encoded_source_length).
         :param seq_scores: Array of length-normalized negative log-probs.
         :param beam_histories: The beam histories for each sentence in the batch.
-        :return: A list of Translation objects.
+        :return: A Translation object.
         """
         idx = sentno * self.beam_size + best_id
 
