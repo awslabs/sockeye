@@ -1325,6 +1325,7 @@ class Translator:
                                                                                                   mx.nd.NDArray,
                                                                                                   mx.nd.NDArray,
                                                                                                   mx.nd.NDArray,
+                                                                                                  mx.nd.NDArray,
                                                                                                   List[Optional[constrained.ConstrainedHypothesis]],
                                                                                                   Optional[List[BeamHistory]]]:
         """
