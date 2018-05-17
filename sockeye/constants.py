@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -24,6 +24,8 @@ PAD_SYMBOL = "<pad>"
 PAD_ID = 0
 TOKEN_SEPARATOR = " "
 VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
+# reserve extra space for the EOS or BOS symbol that is added to both source and target
+SPACE_FOR_XOS = 1
 
 ARG_SEPARATOR = ":"
 
@@ -82,6 +84,11 @@ DEFAULT_INIT_PATTERN = ".*"
 INIT_XAVIER = 'xavier'
 INIT_UNIFORM = 'uniform'
 INIT_TYPES = [INIT_XAVIER, INIT_UNIFORM]
+
+INIT_XAVIER_FACTOR_TYPE_IN = "in"
+INIT_XAVIER_FACTOR_TYPE_OUT = "out"
+INIT_XAVIER_FACTOR_TYPE_AVG = "avg"
+INIT_XAVIER_FACTOR_TYPES = [INIT_XAVIER_FACTOR_TYPE_IN, INIT_XAVIER_FACTOR_TYPE_OUT, INIT_XAVIER_FACTOR_TYPE_AVG]
 
 RAND_TYPE_UNIFORM = 'uniform'
 RAND_TYPE_GAUSSIAN = 'gaussian'
@@ -338,9 +345,19 @@ LOSS_NORM_VALID = "valid"
 TARGET_MAX_LENGTH_FACTOR = 2
 DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH = 2
 
+DTYPE_FP16 = 'float16'
 DTYPE_FP32 = 'float32'
 LARGE_POSITIVE_VALUE = 99999999.
 LARGE_NEGATIVE_VALUE = -LARGE_POSITIVE_VALUE
+LARGE_VALUES = {
+    # Something at the middle of 32768<x<65519. Will be rounded to a multiple of 32.
+    # https://en.wikipedia.org/wiki/Half-precision_floating-point_format#Precision_limitations_on_integer_values
+    DTYPE_FP16: 49152.0,
+
+    # Will be rounded to 1.0e8.
+    # https://en.wikipedia.org/wiki/Single-precision_floating-point_format#Precision_limits_on_integer_values.
+    DTYPE_FP32: LARGE_POSITIVE_VALUE
+}
 
 LHUC_NAME = "lhuc"
 # lhuc application points

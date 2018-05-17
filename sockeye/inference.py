@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -342,6 +342,10 @@ class InferenceModel(model.SockeyeModel):
     def length_ratio_std(self) -> float:
         return self.config.config_data.data_statistics.length_ratio_std
 
+    @property
+    def source_with_eos(self) -> bool:
+        return self.config.config_data.source_with_eos
+
 
 def load_models(context: mx.context.Context,
                 max_input_len: Optional[int],
@@ -352,7 +356,8 @@ def load_models(context: mx.context.Context,
                 softmax_temperature: Optional[float] = None,
                 max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                 decoder_return_logit_inputs: bool = False,
-                cache_output_layer_w_b: bool = False) -> Tuple[List[InferenceModel],
+                cache_output_layer_w_b: bool = False,
+                override_dtype: Optional[str] = None) -> Tuple[List[InferenceModel],
                                                                List[vocab.Vocab],
                                                                vocab.Vocab]:
     """
@@ -371,6 +376,7 @@ def load_models(context: mx.context.Context,
                                         vocabulary.  Used when logits/softmax are handled separately.
     :param cache_output_layer_w_b: Models cache weights and biases for logit computation as NumPy arrays (used with
                                    restrict lexicon).
+    :param override_dtype: Overrides dtype of encoder and decoder defined at training time to a different one.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
@@ -392,6 +398,9 @@ def load_models(context: mx.context.Context,
         logger.info("Model version: %s", model_version)
         utils.check_version(model_version)
         model_config = model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
+        if override_dtype is not None:
+            model_config.config_encoder.dtype = override_dtype
+            model_config.config_decoder.dtype = override_dtype
 
         if checkpoint is None:
             params_fname = os.path.join(model_folder, C.PARAMS_BEST_NAME)
@@ -417,6 +426,11 @@ def load_models(context: mx.context.Context,
     for fi in range(len(first_model_vocabs)):
         utils.check_condition(vocab.are_identical(*[source_vocabs[i][fi] for i in range(len(source_vocabs))]),
                               "Source vocabulary ids do not match. Factor %d" % fi)
+
+    source_with_eos = models[0].source_with_eos
+    utils.check_condition(all(source_with_eos == m.source_with_eos for m in models),
+                          "All models must agree on using source-side EOS symbols or not. "
+                          "Did you try combining models trained with different versions?")
 
     # set a common max_output length for all models.
     max_input_len, get_max_output_length = models_max_input_output_length(models,
@@ -585,6 +599,16 @@ class TranslatorInput:
                                   tokens=self.tokens[i:i + chunk_size],
                                   factors=factors,
                                   chunk_id=chunk_id)
+
+    def with_eos(self) -> 'TranslatorInput':
+        """
+        :return: A new translator input with EOS appended to the tokens and factors.
+        """
+        return TranslatorInput(self.sentence_id,
+                               self.tokens + [C.EOS_SYMBOL],
+                               [factor + [C.EOS_SYMBOL] for factor in self.factors]
+                               if self.factors is not None else None,
+                               self.chunk_id)
 
 
 class BadTranslatorInput(TranslatorInput):
@@ -914,6 +938,9 @@ class Translator:
         if strip_unknown_words:
             self.strip_ids.add(self.vocab_target[C.UNK_SYMBOL])
         self.models = models
+        utils.check_condition(all(models[0].source_with_eos == m.source_with_eos for m in models),
+                              "The source_with_eos property must match across models.")
+        self.source_with_eos = models[0].source_with_eos
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
         self.batch_size = self.models[0].batch_size
@@ -996,17 +1023,37 @@ class Translator:
             # empty input
             elif len(trans_input.tokens) == 0:
                 translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
-
-            # oversized input
-            elif len(trans_input.tokens) > self.max_input_length:
-                logger.debug(
-                    "Input %d has length (%d) that exceeds max input length (%d). Splitting into chunks of size %d.",
-                    trans_input.sentence_id, len(trans_input.tokens), self.buckets_source[-1], self.max_input_length)
-                input_chunks.extend(list(trans_input.chunks(self.max_input_length)))
-
-            # regular input
             else:
-                input_chunks.append(trans_input)
+                # TODO(tdomhan): Remove branch without EOS with next major version bump, as future models with always be trained with source side EOS symbols
+                if self.source_with_eos:
+                    max_input_length_without_eos = self.max_input_length - C.SPACE_FOR_XOS
+                    # oversized input
+                    if len(trans_input.tokens) > max_input_length_without_eos:
+                        logger.debug(
+                            "Input %d has length (%d) that exceeds max input length (%d). "
+                            "Splitting into chunks of size %d.",
+                            trans_input.sentence_id, len(trans_input.tokens),
+                            self.buckets_source[-1], max_input_length_without_eos)
+                        input_chunks.extend([trans_input_chunk.with_eos()
+                                             for trans_input_chunk in
+                                             trans_input.chunks(max_input_length_without_eos)])
+                    # regular input
+                    else:
+                        input_chunks.append(trans_input.with_eos())
+                else:
+                    # oversized input
+                    if len(trans_input.tokens) > self.max_input_length:
+                        logger.debug(
+                            "Input %d has length (%d) that exceeds max input length (%d). "
+                            "Splitting into chunks of size %d.",
+                            trans_input.sentence_id, len(trans_input.tokens),
+                            self.buckets_source[-1], self.max_input_length)
+                        input_chunks.extend([trans_input_chunk
+                                             for trans_input_chunk in
+                                             trans_input.chunks(self.max_input_length)])
+                    # regular input
+                    else:
+                        input_chunks.append(trans_input)
 
         # Sort longest to shortest (to rather fill batches of shorter than longer sequences)
         input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.tokens), reverse=True)
@@ -1228,7 +1275,6 @@ class Translator:
 
                 # mark removed ones as finished so they won't block early exiting
                 finished[rows] = mx.nd.clip(finished[rows] + inactive[rows], 0, 1)
-
 
     def _beam_search(self,
                      source: mx.nd.NDArray,

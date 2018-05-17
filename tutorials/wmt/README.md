@@ -5,10 +5,10 @@ In this tutorial we will train a German to English Sockeye model on a dataset fr
 
 ## Setup
 
-Sockeye expects already tokenized data as the input.
+Sockeye expects tokenized data as the input.
 For this tutorial we use data that has already been tokenized for us.
 However, keep this in mind for any other data set you want to use with Sockeye.
-In addition to tokenization we will splits words into subwords using Byte Pair Encoding (BPE).
+In addition to tokenization we will split words into subwords using Byte Pair Encoding (BPE).
 In order to do so we use a tool called [subword-nmt](https://github.com/rsennrich/subword-nmt).
 Run the following commands to set up the tool:
 
@@ -28,8 +28,11 @@ We will visualize training progress using Tensorboard and its MXNet adaptor, `mx
 pip install tensorboard mxboard
 ```
 
+## GPU
+
 All of the commands below assume you're running on a CPU.
 If you have a GPU available you can simply remove `--use-cpu`.
+With multiple GPUs you can use them via the `--device-ids` command line argument.
 
 ## Data
 
@@ -41,7 +44,7 @@ wget http://data.statmt.org/wmt17/translation-task/preprocessed/de-en/corpus.tc.
 wget http://data.statmt.org/wmt17/translation-task/preprocessed/de-en/corpus.tc.en.gz
 gunzip corpus.tc.de.gz
 gunzip corpus.tc.en.gz
-curl http://data.statmt.org/wmt17/translation-task/preprocessed/de-en/dev.tgz | tar xvzf - 
+curl http://data.statmt.org/wmt17/translation-task/preprocessed/de-en/dev.tgz | tar xvzf -
 ```
 
 ## Preprocessing
@@ -78,16 +81,28 @@ Having preprocessed our data we can start training.
 Note that Sockeye will load all training data into memory in order to be able to easily reshuffle after every epoch.
 Depending on the amount of RAM you have available you might want to reduce size of the training corpus for this tutorial:
 ```bash
-# (Optional: run this if you have limited RAM on the training machine) 
+# (Optional: run this if you have limited RAM on the training machine)
 head -n 200000 corpus.tc.BPE.de > corpus.tc.BPE.de.tmp && mv corpus.tc.BPE.de.tmp corpus.tc.BPE.de
 head -n 200000 corpus.tc.BPE.en > corpus.tc.BPE.en.tmp && mv corpus.tc.BPE.en.tmp corpus.tc.BPE.en
 ```
-That said, we can now kick off the training process:
+
+Before we start training we will prepare the training data by splitting it into shards and serializing it in matrix format:
 ```bash
-python -m sockeye.train -s corpus.tc.BPE.de \
+python -m sockeye.prepare_data \
+                        -s corpus.tc.BPE.de \
                         -t corpus.tc.BPE.en \
+                        -o train_data
+```
+While this is an optional step it has the advantage of considerably lowering the time needed before training starts and also limiting the memory usage as only one shard is loaded into memory at a time.
+
+
+We can now kick off the training process:
+```bash
+python -m sockeye.train -d train_data \
                         -vs newstest2016.tc.BPE.de \
                         -vt newstest2016.tc.BPE.en \
+                        --encoder rnn \
+                        --decoder rnn \
                         --num-embed 256 \
                         --rnn-num-hidden 512 \
                         --rnn-attention-type dot \
@@ -101,6 +116,7 @@ This will train a 1-layer bi-LSTM encoder, 1-layer LSTM decoder with dot attenti
 Sockeye offers a whole variety of different options regarding the model architecture,
 such as stacked RNNs with residual connections (`--num-layers`, `--rnn-residual-connections`),
 [Transformer](https://arxiv.org/abs/1706.03762) encoder and decoder (`--encoder transformer`, `--decoder transformer`),
+[ConvS2S](https://arxiv.org/pdf/1705.03122) (`--encoder cnn`, `--decoder cnn`),
 various RNN (`--rnn-cell-type`) and attention (`--attention-type`) types and more.  
 
 There are also several parameters controlling training itself.
@@ -109,8 +125,10 @@ Additionally, you can control the batch size (`--batch-size`), the learning rate
 and other parameters relevant for training.
 
 Training will run until the validation perplexity stops improving.
-Alternatively, you can track BLEU on the validation set and stop early based on BLEU scores (`--optimized-metric bleu`).
-Sockeye will then at every checkpoint start a decoder in a separate process running on the same device as training.
+Sockeye starts a decoder in a separate process at every checkpoint running on the same device as training in order to evaluate metrics such as BLEU.
+Note that these scores are calculated on the tokens provided to Sockeye, e.g. in this tutorial BLEU will be calculated on the sub-words we created above.
+As an alternative to validation perplexity based early stopping you can stop early based on BLEU scores (`--optimized-metric bleu`).
+
 To make sure the decoder finishes before the next checkpoint one can subsample the validation set for
 BLEU score calculation.
 For example `--decode-and-evaluate 500` will decode and evaluate BLEU on a random subset of 500 sentences.
@@ -165,7 +183,7 @@ echo "er ist so ein toller Kerl und ein Familienvater ." | \
                                    --vocabulary-threshold 50 | \
   python -m sockeye.translate -m wmt_model 2>/dev/null | \
   sed -r 's/@@( |$)//g'
-  
+
 he is a great guy and a family father .
 ```
 
@@ -190,7 +208,7 @@ This will create a file `align_1.png` that looks similar to this:
 
 ![Alignment plot](align.png "Alignment plot")
 
-Note that the alignment plot shows the subword units instead of tokens, as this is the representation used by Sockeye 
+Note that the alignment plot shows the subword units instead of tokens, as this is the representation used by Sockeye
 during translation.
 Additionally you can see the special end-of-sentence symbol `</s>` being added to the target sentence.
 
@@ -226,7 +244,7 @@ echo "er ist so ein toller Kerl und ein Familienvater ." | \
                                    --vocabulary-threshold 50 | \
   python -m sockeye.translate -m wmt_model wmt_model_seed2 wmt_model_seed3 2>/dev/null | \
   sed -r 's/@@( |$)//g'
-  
+
 he is a great guy and a family father .
 ```
 
@@ -237,7 +255,7 @@ echo "er ist so ein toller Kerl und ein Familienvater ." | \
                                    --vocabulary-threshold 50 | \
   python -m sockeye.translate -m wmt_model wmt_model wmt_model 2>/dev/null | \
   sed -r 's/@@( |$)//g'
-  
+
 he is a great guy and a family father .
 ```
 
@@ -267,5 +285,3 @@ python -m sockeye.average -o wmt_model_avg/param.best wmt_model
 Congratulations! You have successfully trained your first real Sockeye translation model.
 On top of that you know how to track training progress, how to translate, how to combine models through checkpointing
 or ensembling and more.
-
-
