@@ -39,6 +39,10 @@ def main():
     params = argparse.ArgumentParser(description='Translate CLI')
     arguments.add_translate_cli_args(params)
     args = params.parse_args()
+    run_translate(args)
+
+
+def run_translate(args: argparse.Namespace):
 
     if args.output is not None:
         global logger
