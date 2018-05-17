@@ -1212,7 +1212,7 @@ class Translator:
         :return: Sequence of translations.
         """
 
-        return self._get_item_from_beam(*self._beam_search(source, source_length, raw_constraints))
+        return self._get_best_from_beam(*self._beam_search(source, source_length, raw_constraints))
 
     def _encode(self, sources: mx.nd.NDArray, source_length: int) -> List[ModelState]:
         """
@@ -1534,15 +1534,14 @@ class Translator:
 
         return sequences, attentions, scores_accumulated, lengths, finished, constraints, beam_histories
 
-    def _get_item_from_beam(self,
+    def _get_best_from_beam(self,
                             sequences: mx.nd.NDArray,
                             attention_lists: mx.nd.NDArray,
                             seq_scores: mx.nd.NDArray,
                             lengths: mx.nd.NDArray,
                             finished: mx.nd.NDArray,
                             constraints: List[Optional[constrained.ConstrainedHypothesis]],
-                            beam_histories: Optional[List[BeamHistory]],
-                            desired_index: int = 0) -> List[Translation]:
+                            beam_histories: Optional[List[BeamHistory]]) -> List[Translation]:
         """
         Return the best (aka top) entry from the n-best list.
 
@@ -1554,55 +1553,55 @@ class Translator:
         :param finished: Marks completed items in the beam. Shape: (batch * beam).
         :param constraints: The constraints for all items in the beam. Shape: (batch * beam).
         :param beam_histories: The beam histories for each sentence in the batch.
-        :param desired_index: The index of the desired beam item (0 being the best hypothesis).
         :return: List of Translation objects containing all relevant information.
         """
         utils.check_condition(sequences.shape[0] == attention_lists.shape[0] \
                               == seq_scores.shape[0] == lengths.shape[0], "Shape mismatch")
+
+        # Initialize the best_ids to the first item in each batch
+        best_ids = mx.nd.array(np.arange(0, self.batch_size * self.beam_size, self.beam_size))
 
         if any(constraints):
             # For constrained decoding, select from items that have met all constraints (might not be finished)
             unmet = mx.nd.array([c.num_needed() if c is not None else 0 for c in constraints], ctx=self.context)
             filtered = mx.nd.where(unmet == 0, seq_scores[:, 0], self.inf_array_long)
             filtered = filtered.reshape((self.batch_size, self.beam_size))
-            # There's got to be a better way to do this (but mx.nd.argmin returns floats!)
-            best_ids = [int(x) for x in mx.nd.argmin(filtered, axis=1).asnumpy().tolist()]
-        else:
-            best_ids = [0] * self.batch_size
+            best_ids += mx.nd.argmin(filtered, axis=1)
 
-        return [self._assemble_result(*item, sequences, lengths, attention_lists, seq_scores, beam_histories) for item in zip(range(self.batch_size), best_ids)]
+        histories = beam_histories if beam_histories is not None else [None] * self.batch_size
+        return [self._assemble_translation(*x) for x in zip(range(self.batch_size),
+                                                            sequences[best_ids],
+                                                            lengths[best_ids],
+                                                            attention_lists[best_ids],
+                                                            seq_scores[best_ids],
+                                                            histories)]
 
-    def _assemble_result(self,
-                         sentno: int,
-                         best_id: int,
-                         sequences: mx.nd.NDArray,
-                         lengths: mx.nd.NDArray,
-                         attention_lists: mx.nd.NDArray,
-                         seq_scores: mx.nd.NDArray,
-                         beam_histories: Optional[List[BeamHistory]]) -> Translation:
+    def _assemble_translation(self,
+                              sentno: int,
+                              sequence: mx.nd.NDArray,
+                              length: mx.nd.NDArray,
+                              attention_lists: mx.nd.NDArray,
+                              seq_score: mx.nd.NDArray,
+                              beam_history: List[Optional[BeamHistory]]) -> Translation:
         """
-        Takes a sentence number (in the batch) and an index into that sentence's beam, along with all the relevant information
-        from the beam, and assembles Translation objects.
+        Takes a set of data pertaining to a single translated item, performs slightly different
+        processing on each, and merges it into a Translation object.
 
         :param sentno: The sentence number in the batch.
-        :param best_id: The item in this sentence's beam that is best.
-        :param sequences: Array of word ids. Shape: (batch_size * beam_size, bucket_key).
-        :param lengths: The lengths of all items in the beam. Shape: (batch_size * beam_size).
+        :param sequence: Array of word ids. Shape: (batch_size, bucket_key).
+        :param length: The length of the translated segment.
         :param attention_lists: Array of attentions over source words.
                                 Shape: (batch_size * self.beam_size, max_output_length, encoded_source_length).
         :param seq_scores: Array of length-normalized negative log-probs.
         :param beam_histories: The beam histories for each sentence in the batch.
         :return: A Translation object.
         """
-        idx = sentno * self.beam_size + best_id
 
-        length = int(lengths[idx].asscalar())
-        sequence = sequences[idx][:length].asnumpy().tolist()
-        # attention_matrix: (target_seq_len, source_seq_len)
-        attention_matrix = np.stack(attention_lists[idx].asnumpy()[:length, :], axis=0)
-        score = seq_scores[idx].asscalar()
-        history = [beam_histories[sentno]] if beam_histories is not None else None
-        return Translation(sequence, attention_matrix, score, history)
+        length = int(length.asscalar())
+        sequence = sequence[:length].asnumpy().tolist()
+        attention_matrix = np.stack(attention_lists.asnumpy()[:length, :], axis=0)
+        score = seq_score.asscalar()
+        return Translation(sequence, attention_matrix, score, beam_history)
 
     def _print_beam(self,
                     sequences: mx.nd.NDArray,
