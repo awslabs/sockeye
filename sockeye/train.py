@@ -747,7 +747,10 @@ def main():
     params = argparse.ArgumentParser(description='Train Sockeye sequence-to-sequence models.')
     arguments.add_train_cli_args(params)
     args = params.parse_args()
+    train(args)
 
+
+def train(args: argparse.Namespace):
     if args.dry_run:
         # Modify arguments so that we write to a temporary directory and
         # perform 0 training iterations
