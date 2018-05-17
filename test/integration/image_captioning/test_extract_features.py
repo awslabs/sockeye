@@ -25,9 +25,6 @@ IMAGE_ENCODER_SETTINGS = [
     # SQUEEZE-NET
     ("--source-image-size 3 224 224 --batch-size 16 --image-encoder-layer conv10",
      "http://data.dmlc.ml/models/imagenet/squeezenet/squeezenet_v1.1", 0, "squeezenet_v1.1"),
-    # VGG16
-    ("--source-image-size 3 224 224 --batch-size 16 --image-encoder-layer fc6",
-     "http://data.dmlc.ml/models/imagenet/vgg/vgg16", 0, "vgg16"),
 ]
 
 
