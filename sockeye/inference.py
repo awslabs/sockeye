@@ -1440,21 +1440,16 @@ class Translator:
 
             # Constraints for constrained decoding are processed sentence by sentence
             if any(raw_constraint_list):
-                for sentno in range(self.batch_size):
-                    rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
-                    if raw_constraint_list[sentno] is not None:
-                        best_hyp_indices[rows], best_word_indices[rows], scores_accumulated[rows], \
-                            constraints[rows], inactive[rows] = constrained.topk(self.beam_size,
-                                                                                 inactive[rows],
-                                                                                 scores[rows],
-                                                                                 constraints[rows],
-                                                                                 best_hyp_indices[rows],
-                                                                                 best_word_indices[rows],
-                                                                                 scores_accumulated[rows],
-                                                                                 self.context)
-
-                        # offsetting since the returned smallest_k() indices were slice-relative
-                        best_hyp_indices[rows] += rows.start
+                best_hyp_indices, best_word_indices, scores_accumulated, \
+                    constraints, inactive = constrained.topk(self.batch_size,
+                                                             self.beam_size,
+                                                             inactive,
+                                                             scores,
+                                                             constraints,
+                                                             best_hyp_indices,
+                                                             best_word_indices,
+                                                             scores_accumulated,
+                                                             self.context)
 
             else:
                 # All rows are now active (after special treatment of start state at t=1)
@@ -1537,8 +1532,6 @@ class Translator:
         finished = mx.nd.take(finished, best_hyp_indices)
         constraints = [constraints[int(x.asscalar())] for x in best_hyp_indices]
 
-#        self._print_beam(sequences, scores_accumulated, finished, inactive, constraints, t)
-
         return sequences, attentions, scores_accumulated, lengths, finished, constraints, beam_histories
 
     def _get_item_from_beam(self,
@@ -1586,7 +1579,7 @@ class Translator:
                          lengths: mx.nd.NDArray,
                          attention_lists: mx.nd.NDArray,
                          seq_scores: mx.nd.NDArray,
-                         beam_histories: Optional[List[BeamHistory]]) -> List[Translation]:
+                         beam_histories: Optional[List[BeamHistory]]) -> Translation:
         """
         Takes a sentence number (in the batch) and an index into that sentence's beam, along with all the relevant information
         from the beam, and assembles Translation objects.
