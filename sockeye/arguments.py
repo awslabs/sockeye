@@ -24,9 +24,9 @@ from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
 from . import constants as C
 from . import data_io
 
-# Data structure to store argument specifications for various CLIs,
+# Data structure to store argument definitions for various CLIs,
 # populated when CLI args are defined via argparse in the function below.
-FLAGS = dict()  # type: Dict[Tuple[Any], Dict[str, Any]]
+ARGUMENT_DEFINITIONS = dict()  # type: Dict[Tuple[Any], Dict[str, Any]]
 
 
 def add_argument(params, *args, **kwargs):
@@ -36,7 +36,7 @@ def add_argument(params, *args, **kwargs):
     """
     assert hasattr(params, 'add_argument')
     params.add_argument(*args, **kwargs)
-    FLAGS[args] = kwargs
+    ARGUMENT_DEFINITIONS[args] = kwargs
 
 
 def regular_file() -> Callable:
