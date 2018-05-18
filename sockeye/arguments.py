@@ -15,14 +15,58 @@
 Defines commandline arguments for the main CLIs with reasonable defaults.
 """
 import argparse
+import json
 import os
 import sys
+import types
 from typing import Callable, Optional
 
 from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
 from . import constants as C
 from . import data_io
 
+# Adapted from https://stackoverflow.com/questions/28579661/getting-required-option-from-namespace-in-python
+class ConfigArgumentParser(argparse.ArgumentParser):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.argument_definitions = {}
+        self.argument_actions = []
+        self._overwrite_add_argument(self)
+        self.add_argument("--config", help="Config file in JSON format.", type=str)  # Not FileType so that we can get the path here
+
+    def register_argument(self, _action, *args, **kwargs):
+        self.argument_definitions[args] = kwargs
+        self.argument_actions.append(_action)
+
+    def _overwrite_add_argument(self, original_object):
+        def _new_add_argument(this_self, *args, **kwargs):
+            action = this_self.original_add_argument(*args, **kwargs)
+            this_self.config_container.register_argument(action, *args, **kwargs)
+        
+        original_object.original_add_argument = original_object.add_argument
+        original_object.config_container = self
+        original_object.add_argument = types.MethodType(_new_add_argument, original_object)
+
+        return original_object
+
+    def add_argument_group(self, *args, **kwargs):
+        group = super().add_argument_group(*args, **kwargs)
+        return self._overwrite_add_argument(group)
+
+    def parse_args(self):
+        # Mini argument parser to find the config file
+        config_parser = argparse.ArgumentParser(add_help=False)
+        config_parser.add_argument("--config", type=argparse.FileType("r"))
+        config_args, rest_command_line = config_parser.parse_known_args()
+        loaded_config = {}
+        if config_args.config:
+            loaded_config = json.load(config_args.config)
+            # Remove the 'required' flag from options loaded from config file
+            for action in self.argument_actions:
+                if action.dest in loaded_config:
+                    action.required = False
+        initial_args = argparse.Namespace(**loaded_config)
+        return super().parse_args(namespace=initial_args)
 
 def regular_file() -> Callable:
     """

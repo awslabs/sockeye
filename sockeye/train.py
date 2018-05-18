@@ -744,7 +744,7 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
 
 
 def main():
-    params = argparse.ArgumentParser(description='Train Sockeye sequence-to-sequence models.')
+    params = arguments.ConfigArgumentParser(description='Train Sockeye sequence-to-sequence models.')
     arguments.add_train_cli_args(params)
     args = params.parse_args()
     train(args)
@@ -770,7 +770,8 @@ def train(args: argparse.Namespace):
                                console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
     utils.log_basic_info(args)
     with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "w") as fp:
-        json.dump(vars(args), fp)
+        json.dump(vars(args), fp, indent=2)
+        fp.write("\n")
 
     max_seq_len_source, max_seq_len_target = args.max_seq_len
     # The maximum length is the length before we add the BOS/EOS symbols
