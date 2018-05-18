@@ -183,11 +183,14 @@ class StringWithAlignmentMatrixOutputHandler(StringOutputHandler):
         :param t_walltime: Total wall-clock time for translation.
         """
         line = "{sent_id:d} ||| {target} ||| {score:f} ||| {source} ||| {source_len:d} ||| {target_len:d}\n"
+
+        # FIXME this only outputs the first source for multisource input
+
         self.stream.write(line.format(sent_id=t_input.sentence_id,
-                                      target=" ".join(t_output.tokens),
+                                      target=" ".join(t_output.tokens[0]),
                                       score=t_output.score,
-                                      source=" ".join(t_input.tokens),
-                                      source_len=len(t_input.tokens),
+                                      source=" ".join(t_input.tokens[0]),
+                                      source_len=len(t_input.tokens[0]),
                                       target_len=len(t_output.tokens)))
         attention_matrix = t_output.attention_matrix.T
         for i in range(0, attention_matrix.shape[0]):
@@ -214,9 +217,9 @@ class BenchmarkOutputHandler(StringOutputHandler):
         :param t_walltime: Total walltime for translation.
         """
         self.stream.write("input=%s\toutput=%s\tinput_tokens=%d\toutput_tokens=%d\ttranslation_time=%0.4f\n" %
-                          (" ".join(t_input.tokens),
+                          (" ".join(t_input.tokens[0]),
                            t_output.translation,
-                           len(t_input.tokens),
+                           len(t_input.tokens[0]),
                            len(t_output.tokens),
                            t_walltime))
         self.stream.flush()
@@ -242,7 +245,7 @@ class AlignPlotHandler(OutputHandler):
         :param t_walltime: Total wall-clock time for translation.
         """
         plot_attention(t_output.attention_matrix,
-                       t_input.tokens,
+                       t_input.tokens[0],
                        t_output.tokens,
                        "%s_%d.png" % (self.plot_prefix, t_input.sentence_id))
 
@@ -267,7 +270,7 @@ class AlignTextHandler(OutputHandler):
         :param t_walltime: Total wall-clock time for translation.
         """
         print_attention_text(t_output.attention_matrix,
-                             t_input.tokens,
+                             t_input.tokens[0],
                              t_output.tokens,
                              self.threshold)
 

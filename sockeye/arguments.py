@@ -1084,6 +1084,10 @@ def add_inference_args(params):
                                nargs='+',
                                help='If not given, chooses best checkpoints for model(s). '
                                     'If specified, must have the same length as --models and be integer')
+    decode_params.add_argument('--multisource',
+                               action='store_true',
+                               default=False,
+                               help='Separate input sentences for each of the ensemble models.')
 
     decode_params.add_argument('--beam-size', '-b',
                                type=int_greater_or_equal(1),

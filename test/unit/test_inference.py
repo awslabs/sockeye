@@ -123,10 +123,10 @@ def test_length_penalty_int_input():
                           (1, "a test", [['h', 'h'], ['x', 'y']], 1)])
 def test_translator_input(sentence_id, sentence, factors, chunk_size):
     tokens = sentence.split()
-    trans_input = sockeye.inference.TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
+    trans_input = sockeye.inference.TranslatorInput(sentence_id=sentence_id, tokens=[tokens], factors=factors)
 
     assert trans_input.sentence_id == sentence_id
-    assert trans_input.tokens == tokens
+    assert trans_input.tokens == [tokens]
     assert len(trans_input) == len(tokens)
     assert trans_input.factors == factors
     if factors is not None:
@@ -139,13 +139,18 @@ def test_translator_input(sentence_id, sentence, factors, chunk_size):
     for chunk_id, chunk_input in enumerate(chunked_inputs):
         assert chunk_input.sentence_id == sentence_id
         assert chunk_input.chunk_id == chunk_id
-        assert chunk_input.tokens == trans_input.tokens[chunk_id * chunk_size: (chunk_id + 1) * chunk_size]
+        assert chunk_input.tokens == [trans_input.tokens[0][chunk_id * chunk_size: (chunk_id + 1) * chunk_size]]
         if factors:
             assert len(chunk_input.factors) == len(factors)
             for factor, expected_factor in zip(chunk_input.factors, factors):
-                assert len(factor) == len(chunk_input.tokens)
+                assert len(factor) == len(chunk_input.tokens[0])
                 assert factor == expected_factor[chunk_id * chunk_size: (chunk_id + 1) * chunk_size]
 
+def test_translator_input_multisource():
+    sent1 = 'test sentence in language one'.split()
+    sent2 = 'a longer test sentence in language two'.split()
+    trans_input = sockeye.inference.TranslatorInput(sentence_id=1, tokens=[sent1, sent2])
+    assert len(trans_input) == max(len(sent1), len(sent2))
 
 @pytest.mark.parametrize("supported_max_seq_len_source, supported_max_seq_len_target, training_max_seq_len_source, "
                          "forced_max_input_len, length_ratio_mean, length_ratio_std, "
@@ -195,18 +200,18 @@ def test_get_max_input_output_length(
 @pytest.mark.parametrize("sentence, num_expected_factors, delimiter, expected_tokens, expected_factors",
                          [
                              # sentence with single factor
-                             ("this is a test", 1, "|", ["this", "is", "a", "test"], None),
+                             ("this is a test", 1, "|", [["this", "is", "a", "test"]], None),
                              # sentence with additional factor-like tokens, but no additional factors expected
-                             ("this|X is| a|X test|", 1, "|", ["this|X", "is|", "a|X", "test|"], None),
+                             ("this|X is| a|X test|", 1, "|", [["this|X", "is|", "a|X", "test|"]], None),
                              # multiple spaces between token sequence
-                             ("space   space", 1, "|", ["space", "space"], None),
+                             ("space   space", 1, "|", [["space", "space"]], None),
                              # empty token sequence
-                             ("", 1, "|", [], None),
-                             ("", 2, "|", [], [[]]),
+                             ("", 1, "|", [[]], None),
+                             ("", 2, "|", [[]], [[]]),
                              # proper factored sequences
-                             ("a|l b|l C|u", 2, "|", ["a", "b", "C"], [["l", "l", "u"]]),
-                             ("a-X-Y b-Y-X", 3, "-", ["a", "b"], [["X", "Y"], ["Y", "X"]]),
-                             ("a-X-Y ", 3, "-", ["a"], [["X"], ["Y"]])
+                             ("a|l b|l C|u", 2, "|", [["a", "b", "C"]], [["l", "l", "u"]]),
+                             ("a-X-Y b-Y-X", 3, "-", [["a", "b"]], [["X", "Y"], ["Y", "X"]]),
+                             ("a-X-Y ", 3, "-", [["a"]], [["X"], ["Y"]])
                          ])
 def test_make_input_from_factored_string(sentence, num_expected_factors, delimiter,
                                          expected_tokens, expected_factors):
@@ -281,8 +286,9 @@ def test_make_input_from_valid_json_string(text, factors):
     expected_tokens = list(sockeye.data_io.get_tokens(text))
     inp = sockeye.inference.make_input_from_json_string(sentence_id, json.dumps({C.JSON_TEXT_KEY: text,
                                                                                  C.JSON_FACTORS_KEY: factors}))
+    assert len(inp.tokens) == 1
+    assert inp.tokens[0] == expected_tokens
     assert len(inp) == len(expected_tokens)
-    assert inp.tokens == expected_tokens
     if factors is not None:
         assert len(inp.factors) == len(factors)
     else:
@@ -307,7 +313,7 @@ def test_make_input_from_multiple_strings(strings):
     expected_tokens = list(sockeye.data_io.get_tokens(strings[0]))
     expected_factors = [list(sockeye.data_io.get_tokens(f)) for f in strings[1:]]
     assert len(inp) == len(expected_tokens)
-    assert inp.tokens == expected_tokens
+    assert inp.tokens[0] == expected_tokens
     assert inp.factors == expected_factors
 
 

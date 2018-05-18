@@ -102,7 +102,7 @@ class ImageCaptioner(Translator):
         :param sentence: Input image path.
         :return: Input for translate method.
         """
-        return TranslatorInput(sentence_id=sentence_id, tokens=[sentence], factors=None)
+        return TranslatorInput(sentence_id=sentence_id, tokens=[[sentence]], factors=None)
 
     def translate(self, trans_inputs: List[TranslatorInput]) -> List[TranslatorOutput]:
         """
@@ -124,7 +124,7 @@ class ImageCaptioner(Translator):
                 batch = batch + [batch[0]] * rest
             paths = []
             for b in batch:
-                path = b.tokens[0]
+                path = b.tokens[0][0]
                 if self.source_root is not None:
                     path = os.path.join(self.source_root, path)
                 paths.append(path)
@@ -151,7 +151,7 @@ class ImageCaptioner(Translator):
         ## TODO(bazzanil): support constraints
         raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
         images = self.data_loader(image_paths, self.source_image_size)
-        return mx.nd.array(images), 0, raw_constraints
+        return mx.nd.array([[image] for image in images]), 0, raw_constraints
 
 
 def load_models(context: mx.context.Context,
@@ -166,7 +166,7 @@ def load_models(context: mx.context.Context,
                 cache_output_layer_w_b: bool = False,
                 source_image_size: tuple = None,
                 forced_max_output_len: Optional[int] = None) -> Tuple[List[ImageInferenceModel],
-                                                               List[vocab.Vocab],
+                                                               List[List[vocab.Vocab]],
                                                                vocab.Vocab]:
     """
     Loads a list of models for inference.

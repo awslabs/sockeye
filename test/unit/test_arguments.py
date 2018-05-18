@@ -196,6 +196,7 @@ def test_training_arg(test_params, expected_params):
                       output=None,
                       checkpoints=None,
                       models=['model'],
+                      multisource=False,
                       beam_size=5,
                       beam_prune=0,
                       batch_size=1,

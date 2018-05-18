@@ -58,6 +58,9 @@ def run_translate(args: argparse.Namespace):
         check_condition(args.batch_size == 1,
                         "Early stopping (--beam-search-stop %s) not supported with batching" % (C.BEAM_SEARCH_STOP_FIRST))
 
+    if args.multisource and len(args.models) <= 1:
+        logger.warning('--multisource makes no sense without multiple models.')
+
     log_basic_info(args)
 
     output_handler = get_output_handler(args.output_type,
@@ -83,10 +86,12 @@ def run_translate(args: argparse.Namespace):
             max_output_length_num_stds=args.max_output_length_num_stds,
             decoder_return_logit_inputs=args.restrict_lexicon is not None,
             cache_output_layer_w_b=args.restrict_lexicon is not None,
+            multisource=args.multisource,
             override_dtype=args.override_dtype)
         restrict_lexicon = None  # type: Optional[TopKLexicon]
         if args.restrict_lexicon:
-            restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
+            assert not args.multisource, 'Multisource not yet supported with restricted lexicon.'
+            restrict_lexicon = TopKLexicon(source_vocabs[0][0], target_vocab)
             restrict_lexicon.load(args.restrict_lexicon, k=args.restrict_lexicon_topk)
         store_beam = args.output_type == C.OUTPUT_HANDLER_BEAM_STORE
         translator = inference.Translator(context=context,
@@ -130,7 +135,13 @@ def make_inputs(input_file: Optional[str],
         check_condition(input_factors is None, "Translating from STDIN, not expecting any factor files.")
         for sentence_id, line in enumerate(sys.stdin, 1):
             if input_is_json:
+                assert translator.num_source_languages == 1, 'Not yet implemented for multisource'
                 yield inference.make_input_from_json_string(sentence_id=sentence_id, json_string=line)
+            elif translator.num_source_languages > 1:
+                # factors not yet implemented for multisource
+                strings = line.split('|')
+                assert len(strings) == translator.num_source_languages, 'Wrong number of input strings'
+                yield inference.make_multisource_input_from_plain_strings(sentence_id=sentence_id, strings=strings)
             else:
                 yield inference.make_input_from_factored_string(sentence_id=sentence_id,
                                                                 factored_string=line,

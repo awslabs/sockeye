@@ -362,8 +362,9 @@ def load_models(context: mx.context.Context,
                 decoder_return_logit_inputs: bool = False,
                 cache_output_layer_w_b: bool = False,
                 forced_max_output_len: Optional[int] = None,
+                multisource: bool = False,
                 override_dtype: Optional[str] = None) -> Tuple[List[InferenceModel],
-                                                               List[vocab.Vocab],
+                                                               List[List[vocab.Vocab]],
                                                                vocab.Vocab]:
     """
     Loads a list of models for inference.
@@ -428,10 +429,12 @@ def load_models(context: mx.context.Context,
         models.append(inference_model)
 
     utils.check_condition(vocab.are_identical(*target_vocabs), "Target vocabulary ids do not match")
-    first_model_vocabs = source_vocabs[0]
-    for fi in range(len(first_model_vocabs)):
-        utils.check_condition(vocab.are_identical(*[source_vocabs[i][fi] for i in range(len(source_vocabs))]),
-                              "Source vocabulary ids do not match. Factor %d" % fi)
+
+    if not multisource:
+        first_model_vocabs = source_vocabs[0]
+        for fi in range(len(first_model_vocabs)):
+            utils.check_condition(vocab.are_identical(*[source_vocabs[i][fi] for i in range(len(source_vocabs))]),
+                                "Source vocabulary ids do not match. Factor %d" % fi)
 
     source_with_eos = models[0].source_with_eos
     utils.check_condition(all(source_with_eos == m.source_with_eos for m in models),
@@ -449,7 +452,13 @@ def load_models(context: mx.context.Context,
 
     load_time = time.time() - load_time_start
     logger.info("%d model(s) loaded in %.4fs", len(models), load_time)
-    return models, source_vocabs[0], target_vocabs[0]
+
+    if not multisource:
+        source_vocabs = [source_vocabs[0]]
+    else:
+        source_vocabs = [vocabs for vocabs in source_vocabs]
+
+    return models, source_vocabs, target_vocabs[0]
 
 
 def models_max_input_output_length(models: List[InferenceModel],
@@ -571,7 +580,7 @@ class TranslatorInput:
     Object required by Translator.translate().
 
     :param sentence_id: Sentence id.
-    :param tokens: List of input tokens.
+    :param tokens: Lists of input tokens.
     :param factors: Optional list of additional factor sequences.
     :param constraints: Optional list of target-side constraints.
     :param chunk_id: Chunk id. Defaults to -1.
@@ -581,7 +590,7 @@ class TranslatorInput:
 
     def __init__(self,
                  sentence_id: int,
-                 tokens: Tokens,
+                 tokens: List[Tokens],
                  factors: Optional[List[Tokens]] = None,
                  constraints: Optional[List[Tokens]] = None,
                  chunk_id: int = -1) -> None:
@@ -599,7 +608,7 @@ class TranslatorInput:
                                                                                      self.chunk_id)
 
     def __len__(self):
-        return len(self.tokens)
+        return max(len(tok) for tok in self.tokens)
 
     @property
     def num_factors(self) -> int:
@@ -616,6 +625,8 @@ class TranslatorInput:
         :return: A generator of TranslatorInputs, one for each chunk created.
         """
 
+        utils.check_condition(len(self.tokens) == 1, 'Chunking not currently supported for multisource inputs.')
+
         if len(self.tokens) > chunk_size and self.constraints is not None:
             logger.warning(
                 'Input %d has length (%d) that exceeds max input length (%d), '
@@ -629,7 +640,7 @@ class TranslatorInput:
             # assigned to the first chunk
             constraints = self.constraints if chunk_id == 0 else None
             yield TranslatorInput(sentence_id=self.sentence_id,
-                                  tokens=self.tokens[i:i + chunk_size],
+                                  tokens=[self.tokens[0][i:i + chunk_size]],
                                   factors=factors,
                                   constraints=constraints,
                                   chunk_id=chunk_id)
@@ -639,9 +650,8 @@ class TranslatorInput:
         :return: A new translator input with EOS appended to the tokens and factors.
         """
         return TranslatorInput(sentence_id=self.sentence_id,
-                               tokens=self.tokens + [C.EOS_SYMBOL],
-                               factors=[factor + [C.EOS_SYMBOL] for factor in
-                                        self.factors] if self.factors is not None else None,
+                               tokens=[toks + [C.EOS_SYMBOL] for toks in self.tokens],
+                               factors=[factor + [C.EOS_SYMBOL] for factor in self.factors] if self.factors is not None else None,
                                constraints=self.constraints,
                                chunk_id=self.chunk_id)
 
@@ -665,8 +675,18 @@ def make_input_from_plain_string(sentence_id: int, string: str) -> TranslatorInp
     :param string: An input string.
     :return: A TranslatorInput.
     """
-    return TranslatorInput(sentence_id, tokens=list(data_io.get_tokens(string)), factors=None)
+    return TranslatorInput(sentence_id, tokens=[list(data_io.get_tokens(string))], factors=None)
 
+
+def make_multisource_input_from_plain_strings(sentence_id: int, strings: List[str]) -> TranslatorInput:
+    """
+    Returns a TranslatorInput object from a list of plain strings.
+
+    :param sentence_id: An integer id.
+    :param strings: List of input strings.
+    :return: A TranslatorInput.
+    """
+    return TranslatorInput(sentence_id, tokens=[list(data_io.get_tokens(string)) for string in strings], factors=None)
 
 def make_input_from_json_string(sentence_id: int, json_string: str) -> TranslatorInput:
     """
@@ -696,7 +716,7 @@ def make_input_from_json_string(sentence_id: int, json_string: str) -> Translato
             constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
         else:
             constraints = None
-        return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors, constraints=constraints)
+        return TranslatorInput(sentence_id=sentence_id, tokens=[tokens], factors=factors, constraints=constraints)
 
     except Exception as e:
         logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
@@ -740,7 +760,7 @@ def make_input_from_factored_string(sentence_id: int,
         for i, factor in enumerate(factors):
             factors[i].append(pieces[i + 1])
 
-    return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
+    return TranslatorInput(sentence_id=sentence_id, tokens=[tokens], factors=factors)
 
 
 def make_input_from_multiple_strings(sentence_id: int, strings: List[str]) -> TranslatorInput:
@@ -760,7 +780,7 @@ def make_input_from_multiple_strings(sentence_id: int, strings: List[str]) -> Tr
     if not all(len(factor) == len(tokens) for factor in factors):
         logger.error("Length of string sequences do not match: '%s'", strings)
         return _bad_input(sentence_id, reason=str(strings))
-    return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
+    return TranslatorInput(sentence_id=sentence_id, tokens=[tokens], factors=factors)
 
 
 class TranslatorOutput:
@@ -956,7 +976,7 @@ class Translator:
                  beam_prune: float,
                  beam_search_stop: str,
                  models: List[InferenceModel],
-                 source_vocabs: List[vocab.Vocab],
+                 source_vocabs: List[List[vocab.Vocab]],
                  target_vocab: vocab.Vocab,
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
                  store_beam: bool = False,
@@ -1024,6 +1044,12 @@ class Translator:
     def num_source_factors(self) -> int:
         return self.models[0].num_source_factors
 
+    @property
+    def num_source_languages(self) -> int:
+        if self.source_vocabs is None:
+            return 1
+        return len(self.source_vocabs)
+
     @staticmethod
     def _get_interpolation_func(ensemble_mode):
         if ensemble_mode == 'linear':
@@ -1066,18 +1092,18 @@ class Translator:
                 translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
 
             # empty input
-            elif len(trans_input.tokens) == 0:
+            elif len(trans_input.tokens[0]) == 0 and self.num_source_languages == 1:
                 translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
             else:
                 # TODO(tdomhan): Remove branch without EOS with next major version bump, as future models will always be trained with source side EOS symbols
                 if self.source_with_eos:
                     max_input_length_without_eos = self.max_input_length - C.SPACE_FOR_XOS
                     # oversized input
-                    if len(trans_input.tokens) > max_input_length_without_eos:
+                    if len(trans_input) > max_input_length_without_eos:
                         logger.debug(
                             "Input %d has length (%d) that exceeds max input length (%d). "
                             "Splitting into chunks of size %d.",
-                            trans_input.sentence_id, len(trans_input.tokens),
+                            trans_input.sentence_id, len(trans_input),
                             self.buckets_source[-1], max_input_length_without_eos)
                         input_chunks.extend([trans_input_chunk.with_eos()
                                              for trans_input_chunk in
@@ -1087,11 +1113,11 @@ class Translator:
                         input_chunks.append(trans_input.with_eos())
                 else:
                     # oversized input
-                    if len(trans_input.tokens) > self.max_input_length:
+                    if len(trans_input) > self.max_input_length:
                         logger.debug(
                             "Input %d has length (%d) that exceeds max input length (%d). "
                             "Splitting into chunks of size %d.",
-                            trans_input.sentence_id, len(trans_input.tokens),
+                            trans_input.sentence_id, len(trans_input),
                             self.buckets_source[-1], self.max_input_length)
                         input_chunks.extend([trans_input_chunk
                                              for trans_input_chunk in
@@ -1107,7 +1133,7 @@ class Translator:
                             ", ".join(" ".join(x) for x in trans_input.constraints))
 
         # Sort longest to shortest (to rather fill batches of shorter than longer sequences)
-        input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.tokens), reverse=True)
+        input_chunks = sorted(input_chunks, key=len, reverse=True)
 
         # translate in batch-sized blocks over input chunks
         for batch_id, batch in enumerate(utils.grouper(input_chunks, self.batch_size)):
@@ -1147,32 +1173,34 @@ class Translator:
                                                                            List[Optional[constrained.RawConstraintList]]]:
         """
         Assembles the numerical data for the batch.
-        This comprises an NDArray for the source sentences, the bucket key (padded source length), and a list of
-        raw constraint lists, one for each sentence in the batch. Each raw constraint list contains phrases in
-        the form of lists of integers in the target language vocabulary.
+        This comprises an NDArray for the source sentences, source languages, the bucket key (padded source length),
+        and a list of raw constraint lists, one for each sentence in the batch. Each raw constraint list contains
+        phrases in the form of lists of integers in the target language vocabulary.
 
         :param trans_inputs: List of TranslatorInputs.
-        :return NDArray of source ids (shape=(batch_size, bucket_key, num_factors)),
+        :return NDArray of source ids (shape=(batch_size, num_input_langs, bucket_key, num_factors)),
                 bucket key, list of raw constraint lists.
         """
-
-        bucket_key = data_io.get_bucket(max(len(inp.tokens) for inp in trans_inputs), self.buckets_source)
-        source = mx.nd.zeros((len(trans_inputs), bucket_key, self.num_source_factors), ctx=self.context)
+        num_input_langs = len(trans_inputs[0].tokens)
+        if num_input_langs != len(self.source_vocabs):
+            logger.warning('Input %d languages, but models expect %d', num_input_langs, len(self.source_vocabs))
+        bucket_key = data_io.get_bucket(max(len(inp) for inp in trans_inputs), self.buckets_source)
+        source = mx.nd.zeros((len(trans_inputs), num_input_langs, bucket_key, self.num_source_factors), ctx=self.context)
         raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
 
         for j, trans_input in enumerate(trans_inputs):
-            num_tokens = len(trans_input)
-            source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
+            for lang in range(num_input_langs):
+                num_tokens = len(trans_input.tokens[lang])
+                source[j, lang, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens[lang], self.source_vocabs[lang][0])
 
-            factors = trans_input.factors if trans_input.factors is not None else []
-            num_factors = 1 + len(factors)
-            if num_factors != self.num_source_factors:
-                logger.warning("Input %d factors, but model(s) expect %d", num_factors,
-                               self.num_source_factors)
-            for i, factor in enumerate(factors[:self.num_source_factors - 1], start=1):
-                # fill in as many factors as there are tokens
-
-                source[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
+                factors = trans_input.factors if trans_input.factors is not None else []
+                num_factors = 1 + len(factors)
+                if num_factors != self.num_source_factors:
+                    logger.warning("Input %d factors, but model(s) expect %d", num_factors,
+                                self.num_source_factors)
+                for i, factor in enumerate(factors[:self.num_source_factors - 1], start=1):
+                    # fill in as many factors as there are tokens
+                    source[j, lang, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[lang][i])[:num_tokens]
 
             if trans_input.constraints is not None:
                 raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
@@ -1199,7 +1227,7 @@ class Translator:
 
         target_string = C.TOKEN_SEPARATOR.join(
             tok for target_id, tok in zip(target_ids, target_tokens) if target_id not in self.strip_ids)
-        attention_matrix = attention_matrix[:, :len(trans_input.tokens)]
+        attention_matrix = attention_matrix[:, :len(trans_input.tokens[0])]
 
         if isinstance(translation.beam_history, list):
             beam_histories = translation.beam_history
@@ -1229,7 +1257,7 @@ class Translator:
         """
         Translates source of source_length, given a bucket_key.
 
-        :param source: Source ids. Shape: (batch_size, bucket_key, num_factors).
+        :param source: Source ids. Shape: (batch_size, num_input_langs, bucket_key, num_factors).
         :param source_length: Bucket key.
         :param raw_constraints: A list of optional constraint lists.
 
@@ -1242,11 +1270,12 @@ class Translator:
         """
         Returns a ModelState for each model representing the state of the model after encoding the source.
 
-        :param sources: Source ids. Shape: (batch_size, bucket_key, num_factors).
+        :param sources: Source ids. Shape: (batch_size, num_input_langs, bucket_key, num_factors).
         :param source_length: Bucket key.
         :return: List of ModelStates.
         """
-        return [model.run_encoder(sources, source_length) for model in self.models]
+
+        return [model.run_encoder(sources[:, i], source_length) for i, model in enumerate(self.models)]
 
     def _decode_step(self,
                      sequences: mx.nd.NDArray,
@@ -1320,7 +1349,7 @@ class Translator:
         """
         Translates multiple sentences using beam search.
 
-        :param source: Source ids. Shape: (batch_size, bucket_key).
+        :param source: Source ids. Shape: (batch_size, num_input_langs, bucket_key, num_factors).
         :param source_length: Max source length.
         :param raw_constraint_list: A list of optional lists containing phrases (as lists of target word IDs)
                that must appear in each output.
@@ -1373,9 +1402,10 @@ class Translator:
         pad_dist = self.pad_dist
         vocab_slice_ids = None  # type: mx.nd.NDArray
         if self.restrict_lexicon:
+            utils.check_condition(source.shape[1] == 1, 'Restricted lexicon not yet supported with multi-source')
             # TODO: See note in method about migrating to pure MXNet when set operations are supported.
             #       We currently convert source to NumPy and target ids back to NDArray.
-            source_words = source.split(num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
+            source_words = source.split(num_outputs=self.num_source_factors, axis=3, squeeze_axis=True)[0]
             vocab_slice_ids = self.restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy())
             if any(raw_constraint_list):
                 # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space

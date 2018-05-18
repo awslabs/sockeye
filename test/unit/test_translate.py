@@ -27,7 +27,7 @@ TEST_DATA = "Test file line 1\n" \
 
 @pytest.fixture
 def mock_translator():
-    return unittest.mock.Mock(spec=sockeye.inference.Translator)
+    return unittest.mock.Mock(spec=sockeye.inference.Translator, source_vocabs=[0], num_source_languages=1)
 
 
 @pytest.fixture
