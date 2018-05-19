@@ -485,7 +485,7 @@ def test_config_file_required(config_command_line, config_contents):
     config_file_argparse.add_argument("-e", type=int)
 
     # The option '--config <file>' will be added automaticall to config_command_line
-    with pytest.raises(SystemExit): # argparse does not have finer regularity excpetions
+    with pytest.raises(SystemExit): # argparse does not have finer regularity exceptions
         with tempfile.NamedTemporaryFile("w") as fp:
             arguments.save_args(argparse.Namespace(**config_contents), fp.name)
             fp.flush()
