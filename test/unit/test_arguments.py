@@ -12,10 +12,10 @@
 # permissions and limitations under the License.
 
 import argparse
-import json
 import pytest
 import tempfile
 import os
+import yaml
 
 import sockeye.arguments as arguments
 import sockeye.constants as C
@@ -455,7 +455,7 @@ def test_config_file(plain_command_line, config_command_line, config_contents):
 
     # The option '--config <file>' will be added automaticall to config_command_line
     with tempfile.NamedTemporaryFile("w") as fp:
-        json.dump(config_contents, fp)
+        yaml.dump(config_contents, fp)
         fp.flush()
 
         # Parse args and cast to dicts directly
@@ -487,7 +487,7 @@ def test_config_file_required(config_command_line, config_contents):
     # The option '--config <file>' will be added automaticall to config_command_line
     with pytest.raises(SystemExit): # argparse does not have finer regularity excpetions
         with tempfile.NamedTemporaryFile("w") as fp:
-            json.dump(config_contents, fp)
+            yaml.dump(config_contents, fp)
             fp.flush()
 
             # Parse args and cast to dicts directly

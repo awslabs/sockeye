@@ -15,10 +15,10 @@
 Defines commandline arguments for the main CLIs with reasonable defaults.
 """
 import argparse
-import json
 import os
 import sys
 import types
+import yaml
 from typing import Callable, Optional
 
 from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
@@ -30,7 +30,7 @@ class ConfigArgumentParser(argparse.ArgumentParser):
     """
     Extension of argparse.ArgumentParser supporting config files.
 
-    The option --config is added automatically and expects a JSON serialized
+    The option --config is added automatically and expects a YAML serialized
     dictionary, similar to the return value of parse_args(). Command line
     parameters have precendence over config file values. Usage should be
     transparent, just substitute argparse.ArgumentParser with this class.
@@ -43,7 +43,7 @@ class ConfigArgumentParser(argparse.ArgumentParser):
         self.argument_definitions = {}
         self.argument_actions = []
         self._overwrite_add_argument(self)
-        self.add_argument("--config", help="Config file in JSON format.", type=str)
+        self.add_argument("--config", help="Config file in YAML format.", type=str)
         # Note: not FileType so that we can get the path here
 
     def _register_argument(self, _action, *args, **kwargs):
@@ -69,10 +69,10 @@ class ConfigArgumentParser(argparse.ArgumentParser):
         # Mini argument parser to find the config file
         config_parser = argparse.ArgumentParser(add_help=False)
         config_parser.add_argument("--config", type=argparse.FileType("r"))
-        config_args, rest_command_line = config_parser.parse_known_args(args=args)
+        config_args, _ = config_parser.parse_known_args(args=args)
         loaded_config = {}
         if config_args.config:
-            loaded_config = json.load(config_args.config)
+            loaded_config = yaml.load(config_args.config)
             # Remove the 'required' flag from options loaded from config file
             for action in self.argument_actions:
                 if action.dest in loaded_config:
