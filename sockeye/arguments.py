@@ -19,7 +19,7 @@ import os
 import sys
 import types
 import yaml
-from typing import Callable, Optional
+from typing import Any, Callable, Dict, List, Tuple, Optional
 
 from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
 from . import constants as C
@@ -40,8 +40,8 @@ class ConfigArgumentParser(argparse.ArgumentParser):
     """
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.argument_definitions = {}
-        self.argument_actions = []
+        self.argument_definitions = {}  # type: Dict[Tuple, Dict]
+        self.argument_actions = []  # type: List[Any]
         self._overwrite_add_argument(self)
         self.add_argument("--config", help="Config file in YAML format.", type=str)
         # Note: not FileType so that we can get the path here
@@ -65,7 +65,7 @@ class ConfigArgumentParser(argparse.ArgumentParser):
         group = super().add_argument_group(*args, **kwargs)
         return self._overwrite_add_argument(group)
 
-    def parse_args(self, args=None) -> argparse.Namespace:
+    def parse_args(self, args=None, namespace=None) -> argparse.Namespace:
         # Mini argument parser to find the config file
         config_parser = argparse.ArgumentParser(add_help=False)
         config_parser.add_argument("--config", type=regular_file())
