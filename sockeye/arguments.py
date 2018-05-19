@@ -15,15 +15,17 @@
 Defines commandline arguments for the main CLIs with reasonable defaults.
 """
 import argparse
-import json
 import os
 import sys
 import types
 from typing import Callable, Optional
 
+import yaml
+
 from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
 from . import constants as C
 from . import data_io
+
 
 # Adapted from https://stackoverflow.com/questions/28579661/getting-required-option-from-namespace-in-python
 class ConfigArgumentParser(argparse.ArgumentParser):
@@ -56,17 +58,27 @@ class ConfigArgumentParser(argparse.ArgumentParser):
     def parse_args(self):
         # Mini argument parser to find the config file
         config_parser = argparse.ArgumentParser(add_help=False)
-        config_parser.add_argument("--config", type=argparse.FileType("r"))
+        config_parser.add_argument("--config", type=regular_file())
         config_args, rest_command_line = config_parser.parse_known_args()
-        loaded_config = {}
+        initial_args = argparse.Namespace()
         if config_args.config:
-            loaded_config = json.load(config_args.config)
+            initial_args = load_args(config_args.config)
             # Remove the 'required' flag from options loaded from config file
             for action in self.argument_actions:
-                if action.dest in loaded_config:
+                if action.dest in initial_args:
                     action.required = False
-        initial_args = argparse.Namespace(**loaded_config)
         return super().parse_args(namespace=initial_args)
+
+
+def save_args(args: argparse.Namespace, fname: str):
+    with open(fname, 'w') as out:
+        yaml.safe_dump(args.__dict__, out, default_flow_style=False)
+
+
+def load_args(fname: str) -> argparse.Namespace:
+    with open(fname, 'r') as inp:
+        return argparse.Namespace(**yaml.safe_load(inp))
+
 
 def regular_file() -> Callable:
     """

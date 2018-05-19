@@ -124,8 +124,7 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
             shutil.rmtree(output_folder)
             os.makedirs(output_folder)
         elif os.path.exists(training_state_dir):
-            with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "r") as fp:
-                old_args = json.load(fp)
+            old_args = vars(arguments.load_args(os.path.join(output_folder, C.ARGS_STATE_NAME)))
             arg_diffs = _dict_difference(vars(args), old_args) | _dict_difference(old_args, vars(args))
             # Remove args that may differ without affecting the training.
             arg_diffs -= set(C.ARGS_MAY_DIFFER)
@@ -769,9 +768,7 @@ def train(args: argparse.Namespace):
                                file_logging=True,
                                console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
     utils.log_basic_info(args)
-    with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "w") as fp:
-        json.dump(vars(args), fp, indent=2)
-        fp.write("\n")
+    arguments.save_args(args, os.path.join(output_folder, C.ARGS_STATE_NAME))
 
     max_seq_len_source, max_seq_len_target = args.max_seq_len
     # The maximum length is the length before we add the BOS/EOS symbols
