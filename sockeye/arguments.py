@@ -53,11 +53,11 @@ class ConfigArgumentParser(argparse.ArgumentParser):
         group = super().add_argument_group(*args, **kwargs)
         return self._overwrite_add_argument(group)
 
-    def parse_args(self):
+    def parse_args(self, args=None):
         # Mini argument parser to find the config file
         config_parser = argparse.ArgumentParser(add_help=False)
         config_parser.add_argument("--config", type=argparse.FileType("r"))
-        config_args, rest_command_line = config_parser.parse_known_args()
+        config_args, rest_command_line = config_parser.parse_known_args(args=args)
         loaded_config = {}
         if config_args.config:
             loaded_config = json.load(config_args.config)
@@ -66,7 +66,7 @@ class ConfigArgumentParser(argparse.ArgumentParser):
                 if action.dest in loaded_config:
                     action.required = False
         initial_args = argparse.Namespace(**loaded_config)
-        return super().parse_args(namespace=initial_args)
+        return super().parse_args(args=args, namespace=initial_args)
 
 def regular_file() -> Callable:
     """
