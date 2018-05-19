@@ -12,8 +12,19 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.13]
 ### Added
-- Support for config file in train and translate. Config files are JSON serialized dictionaries (args.json produced by
-  train can be taken as a template). Load config files with the --config command line option.
+- Added support for config files. Command line parameters have precedence over the values read from the config file.
+  Minimal working example:
+  `python -m sockeye.train --config config.yaml` with contents of `config.yaml` as follows: 
+  ```yaml
+  source: source.txt
+  target: target.txt
+  output: out
+  validation_source: valid.source.txt
+  validation_target: valid.target.txt
+  ```
+
+### Changed
+  The full set of arguments is serialized to `out/args.yaml` at the beginning of training (before json was used).
 
 ## [1.18.12]
 ### Changed

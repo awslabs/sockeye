@@ -68,17 +68,27 @@ class ConfigArgumentParser(argparse.ArgumentParser):
     def parse_args(self, args=None) -> argparse.Namespace:
         # Mini argument parser to find the config file
         config_parser = argparse.ArgumentParser(add_help=False)
-        config_parser.add_argument("--config", type=argparse.FileType("r"))
+        config_parser.add_argument("--config", type=regular_file())
         config_args, _ = config_parser.parse_known_args(args=args)
-        loaded_config = {}
+        initial_args = argparse.Namespace()
         if config_args.config:
-            loaded_config = yaml.load(config_args.config)
+            initial_args = load_args(config_args.config)
             # Remove the 'required' flag from options loaded from config file
             for action in self.argument_actions:
-                if action.dest in loaded_config:
+                if action.dest in initial_args:
                     action.required = False
-        initial_args = argparse.Namespace(**loaded_config)
         return super().parse_args(args=args, namespace=initial_args)
+
+
+def save_args(args: argparse.Namespace, fname: str):
+    with open(fname, 'w') as out:
+        yaml.safe_dump(args.__dict__, out, default_flow_style=False)
+
+
+def load_args(fname: str) -> argparse.Namespace:
+    with open(fname, 'r') as inp:
+        return argparse.Namespace(**yaml.safe_load(inp))
+
 
 def regular_file() -> Callable:
     """
