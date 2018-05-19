@@ -25,23 +25,35 @@ from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
 from . import constants as C
 from . import data_io
 
-# Adapted from https://stackoverflow.com/questions/28579661/getting-required-option-from-namespace-in-python
+
 class ConfigArgumentParser(argparse.ArgumentParser):
-    def __init__(self, *args, **kwargs):
+    """
+    Extension of argparse.ArgumentParser supporting config files.
+
+    The option --config is added automatically and expects a JSON serialized
+    dictionary, similar to the return value of parse_args(). Command line
+    parameters have precendence over config file values. Usage should be
+    transparent, just substitute argparse.ArgumentParser with this class.
+
+    Extended from
+    https://stackoverflow.com/questions/28579661/getting-required-option-from-namespace-in-python
+    """
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.argument_definitions = {}
         self.argument_actions = []
         self._overwrite_add_argument(self)
-        self.add_argument("--config", help="Config file in JSON format.", type=str)  # Not FileType so that we can get the path here
+        self.add_argument("--config", help="Config file in JSON format.", type=str)
+        # Note: not FileType so that we can get the path here
 
-    def register_argument(self, _action, *args, **kwargs):
+    def _register_argument(self, _action, *args, **kwargs):
         self.argument_definitions[args] = kwargs
         self.argument_actions.append(_action)
 
     def _overwrite_add_argument(self, original_object):
         def _new_add_argument(this_self, *args, **kwargs):
             action = this_self.original_add_argument(*args, **kwargs)
-            this_self.config_container.register_argument(action, *args, **kwargs)
+            this_self.config_container._register_argument(action, *args, **kwargs)
         
         original_object.original_add_argument = original_object.add_argument
         original_object.config_container = self
@@ -53,7 +65,7 @@ class ConfigArgumentParser(argparse.ArgumentParser):
         group = super().add_argument_group(*args, **kwargs)
         return self._overwrite_add_argument(group)
 
-    def parse_args(self, args=None):
+    def parse_args(self, args=None) -> argparse.Namespace:
         # Mini argument parser to find the config file
         config_parser = argparse.ArgumentParser(add_help=False)
         config_parser.add_argument("--config", type=argparse.FileType("r"))

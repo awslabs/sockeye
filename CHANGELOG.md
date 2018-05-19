@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.13]
+### Added
+- Support for config file in train and translate. Config files are JSON serialized dictionaries (args.json produced by
+  train can be taken as a template). Load config files with the --config command line option.
+
 ## [1.18.12]
 ### Changed
 - All source side sequences now get appended an additional end-of-sentence (EOS) symbol. This change is backwards
