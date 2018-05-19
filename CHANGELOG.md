@@ -10,6 +10,22 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.13]
+### Added
+- Added support for config files. Command line parameters have precedence over the values read from the config file.
+  Minimal working example:
+  `python -m sockeye.train --config config.yaml` with contents of `config.yaml` as follows: 
+  ```yaml
+  source: source.txt
+  target: target.txt
+  output: out
+  validation_source: valid.source.txt
+  validation_target: valid.target.txt
+  ```
+
+### Changed
+  The full set of arguments is serialized to `out/args.yaml` at the beginning of training (before json was used).
+
 ## [1.18.12]
 ### Changed
 - All source side sequences now get appended an additional end-of-sentence (EOS) symbol. This change is backwards
