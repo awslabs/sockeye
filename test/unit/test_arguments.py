@@ -442,7 +442,8 @@ def _test_args_subset(test_params, expected_params, expected_params_present, arg
     ("-a 1 -b 2 -C 3 -D 4 -e 5", "-a 1 -b 2 -e 5", dict(C=3, D=4)),
     ("-C 3 -D 4", "-C 3 -D 4", {}),
     ("-C 3 -D 4", "-C 3", dict(D=4)),
-    ("-a 1 -C 3 -D 4", "", dict(a=1, C=3, D=4))
+    ("-a 1 -C 3 -D 4", "", dict(a=1, C=3, D=4)),
+    ("-a 1 -b 2 -C 3 -D 4 -e 5", "-a 1 -b 2 -C 3", dict(a=10, b=20, C=30, D=4, e=5))
 ])
 def test_config_file(plain_command_line, config_command_line, config_contents):
     config_file_argparse = arguments.ConfigArgumentParser()
