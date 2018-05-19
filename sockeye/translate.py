@@ -36,7 +36,7 @@ logger = setup_main_logger(__name__, file_logging=False)
 
 
 def main():
-    params = argparse.ArgumentParser(description='Translate CLI')
+    params = arguments.ConfigArgumentParser(description='Translate CLI')
     arguments.add_translate_cli_args(params)
     args = params.parse_args()
     run_translate(args)
