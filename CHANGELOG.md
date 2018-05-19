@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
 ## [1.18.12]
+### Fixed
+- Fixed two bugs with training resumption:
+  1. removed overly strict assertion in the data iterator for model states before the first checkpoint.
+  2. removed deletion of Tensorboard log directory.
+
+## [1.18.12]
 ### Changed
 - All source side sequences now get appended an additional end-of-sentence (EOS) symbol. This change is backwards
   compatible meaning that inference with older models will still work without the EOS symbol.

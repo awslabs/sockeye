@@ -1537,9 +1537,6 @@ class ParallelSampleIter(BaseParallelSampleIter):
             inverse_data_permutations = np.load(fp)
             data_permutations = np.load(fp)
 
-        # Because of how checkpointing is done (pre-fetching the next batch in
-        # each iteration), curr_idx should always be >= 1
-        assert self.curr_batch_index >= 1
         # Right after loading the iterator state, next() should be called
         self.curr_batch_index -= 1
 
