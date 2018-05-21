@@ -584,7 +584,7 @@ class TranslatorInput:
         self.constraints = constraints
 
     def __str__(self):
-        return 'TranslatorInput(%d, %s, %s, %d)' % (self.sentence_id, self.tokens, self.factors, self.chunk_id)
+        return 'TranslatorInput(%d, %s, factors=%s, constraints=%s, chunk_id=%d)' % (self.sentence_id, self.tokens, self.factors, self.constraints, self.chunk_id)
 
     def __len__(self):
         return len(self.tokens)
@@ -629,6 +629,7 @@ class TranslatorInput:
         return TranslatorInput(sentence_id=self.sentence_id,
                                tokens=self.tokens + [C.EOS_SYMBOL],
                                factors=[factor + [C.EOS_SYMBOL] for factor in self.factors] if self.factors is not None else None,
+                               constraints=self.constraints,
                                chunk_id=self.chunk_id)
 
 
@@ -1542,15 +1543,16 @@ class Translator:
                             lengths: mx.nd.NDArray,
                             finished: mx.nd.NDArray,
                             constraints: List[Optional[constrained.ConstrainedHypothesis]],
-                            beam_histories: Optional[List[BeamHistory]]) -> List[Translation]:
+                            beam_histories: Optional[List[BeamHistory]] = None) -> List[Translation]:
         """
         Return the best (aka top) entry from the n-best list.
 
-        :param sequences: Array of word ids. Shape: (batch_size * beam_size, bucket_key).
+        :param sequences: Array of word ids. Shape: (batch * beam, bucket_key).
         :param attention_lists: Array of attentions over source words.
-                                Shape: (batch_size * self.beam_size, max_output_length, encoded_source_length).
-        :param seq_scores: Array of length-normalized negative log-probs.
-        :param lengths: The lengths of all items in the beam. Shape: (batch_size * beam_size).
+                                Shape: (batch * beam, max_output_length, encoded_source_length).
+        :param seq_scores: Array of length-normalized negative log-probs..
+                           Shape: (batch * beam, 1)
+        :param lengths: The lengths of all items in the beam. Shape: (batch * beam).
         :param finished: Marks completed items in the beam. Shape: (batch * beam).
         :param constraints: The constraints for all items in the beam. Shape: (batch * beam).
         :param beam_histories: The beam histories for each sentence in the batch.
