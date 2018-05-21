@@ -91,16 +91,21 @@ def load_preprocess_images(image_paths: List[str], image_size: tuple) -> List:
 
 def load_preprocess_image(image_path: str, image_size: tuple):
     with Image.open(image_path) as image:
-        # Resize to fixed input
-        image_o = crop_resize_image(image, image_size)
-        # convert to numpy
-        image_o = np.asarray(image_o)
-        # Gray-level to 3 channels
-        if len(image_o.shape)==2:
-            image_o = np.tile(image_o[:,:,None], (1,1,3))
-        # (height, width, channel) -> (channel, height, width)
-        image_o = np.swapaxes(image_o, 0, 2)
-        image_o = np.swapaxes(image_o, 1, 2)
+        image_o = preprocess_image(image, image_size)
+    return image_o
+
+
+def preprocess_image(image: Image, image_size: tuple):
+    # Resize to fixed input
+    image_o = crop_resize_image(image, image_size)
+    # convert to numpy
+    image_o = np.asarray(image_o)
+    # Gray-level to 3 channels
+    if len(image_o.shape)==2:
+        image_o = np.tile(image_o[:,:,None], (1,1,3))
+    # (height, width, channel) -> (channel, height, width)
+    image_o = np.swapaxes(image_o, 0, 2)
+    image_o = np.swapaxes(image_o, 1, 2)
     return image_o
 
 

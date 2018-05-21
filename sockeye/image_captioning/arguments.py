@@ -64,7 +64,7 @@ def add_image_extract_features_cli_args(params):
                         help='Input file containing the list of images (paths relative to image-root) '
                              'to extract the features for.')
     params.add_argument('--output-root', '-or',
-                        required=True,
+                        required=False,
                         type=str,
                         help='Where the actual features are stored.')
     params.add_argument('--output', '-o',
@@ -128,6 +128,10 @@ def add_preextracted_features_args(model_params):
                               help="If we preextracted features, the files are loaded in batch from disk. "
                                    "Enable this option to load all the features to memory in the beginning "
                                    "only once. This speeds up, as long as the features fit to memory.")
+    model_params.add_argument('--extract-image-features',
+                              action="store_true",
+                              help="If True, it extracts features and caption directly from input images,"
+                                   "otherwise it will expect pre-extracted features")
 
 
 def add_image_train_cli_args(params):
@@ -144,4 +148,6 @@ def add_image_caption_cli_args(params):
     add_translate_cli_args(params)
     add_image_source_root_args(params, required=False)
     add_max_output_cli_args(params)
-    add_preextracted_features_args(params)
+    # Used only if images as input instead of features
+    add_image_model_parameters(params)
+    add_image_size_args(params)

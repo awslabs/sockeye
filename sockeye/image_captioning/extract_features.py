@@ -53,6 +53,8 @@ def get_pretrained_net(args: argparse.Namespace,
 
     image_cnn_encoder = encoder.ImageLoadedCnnEncoder(image_cnn_encoder_config)
     symbol = image_cnn_encoder.sym  # this is the net before further encoding
+    arg_shapes, out_shapes, aux_shapes = symbol.infer_shape(source=(1, ) + tuple(args.source_image_size))
+    last_layer_shape = out_shapes[-1][1:]
 
     # Create module
     module = mx.mod.Module(symbol=symbol,
@@ -67,7 +69,32 @@ def get_pretrained_net(args: argparse.Namespace,
     init = mx.initializer.Mixed(*zip(*initializers))
     module.init_params(init)
 
-    return module
+    return module, last_layer_shape
+
+
+def extract_features_forward(im, module, image_root, output_root, batch_size, source_image_size, context):
+    batch = mx.nd.zeros((batch_size,) + \
+                        tuple(source_image_size), context)
+    # Reading
+    out_names = []
+    for i, v in enumerate(im):
+        batch[i] = utils.load_preprocess_image(os.path.join(image_root, v), source_image_size[1:])
+        out_names.append(os.path.join(output_root, v.replace("/", "_")))
+    # Forward
+    module.forward(mx.io.DataBatch([batch]))
+    feats = module.get_outputs()[0].asnumpy()
+    # Chunk last batch which might be smaller
+    if len(im) < batch_size:
+        feats = feats[:len(im)]
+    return feats, out_names
+
+
+def read_list_file(input):
+    with open(input, "r") as fd:
+        data_list = []
+        for i in fd.readlines():
+            data_list.append(i.split("\n")[0])
+    return data_list
 
 
 def main():
@@ -86,38 +113,21 @@ def main():
         os.makedirs(output_root)
 
     # read image list file
-    with open(args.input, "r") as fd:
-        image_list = []
-        for i in fd.readlines():
-            image_list.append(i.split("\n")[0])
+    image_list = read_list_file(args.input)
 
     # Get pretrained net module (already bind)
     with ExitStack() as exit_stack:
         context = _setup_context(args, exit_stack)
-        module = get_pretrained_net(args, context)
+        module, _ = get_pretrained_net(args, context)
 
         # Extract features
         with open(output_file, "w") as fout:
             for i, im in enumerate(batching(image_list, args.batch_size)):
                 logger.info("Processing batch {}/{}".format(i+1,
                                 int(np.ceil(len(image_list)/args.batch_size))))
-                batch = mx.nd.zeros((args.batch_size, ) + \
-                                    tuple(args.source_image_size), context)
                 # TODO: enable caching to reuse features and resume computation
-                # Reading
-                out_names = []
-                for i,v in enumerate(im):
-                    batch[i] = utils.load_preprocess_image(
-                        os.path.join(image_root, v), args.source_image_size[1:]
-                    )
-                    out_names.append(os.path.join(output_root,
-                                                  v.replace("/", "_")))
-                # Forward
-                module.forward(mx.io.DataBatch([batch]))
-                feats = module.get_outputs()[0].asnumpy()
-                # Chunk last batch which might be smaller
-                if len(im)<args.batch_size:
-                    feats = feats[:len(im)]
+                feats, out_names = extract_features_forward(im, module, image_root, output_root,
+                                                            args.batch_size, args.source_image_size, context)
                 # Save to disk
                 out_file_names = utils.save_features(out_names, feats)
                 # Write to output file

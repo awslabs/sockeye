@@ -39,7 +39,8 @@ from test.unit.test_arguments import _test_args
           device_ids=[-1],
           disable_device_locking=False,
           lock_dir='/tmp',
-          use_cpu=False
+          use_cpu=False,
+          extract_image_features=False
      ))
 ])
 def test_image_extract_features_cli_args(test_params, expected_params):
@@ -68,7 +69,7 @@ def test_image_validation_data_params(test_params, expected_params):
 
 @pytest.mark.parametrize("test_params, expected_params", [
     ('--load-all-features-to-memory',
-     dict(load_all_features_to_memory=True))
+     dict(load_all_features_to_memory=True, extract_image_features=False))
 ])
 def test_preextracted_features_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_preextracted_features_args)
