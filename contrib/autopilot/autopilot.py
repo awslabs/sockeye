@@ -24,7 +24,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-from typing import Iterable, List, Tuple
+from typing import Any, IO, Iterable, List, Optional, Tuple
 import urllib.request
 import zipfile
 
@@ -104,7 +104,7 @@ def identify_raw_files(task: Task, test_mode: bool = False) -> List[str]:
     :return: List of raw file names.
     """
     raw_files = set()
-    all_sets = (task.test,) if test_mode else (task.train, task.dev, task.test)
+    all_sets = [task.test,] if test_mode else [task.train, task.dev, task.test]
     for file_sets in all_sets:
         for file_set in file_sets:
             for fname in file_set[:2]:
@@ -190,8 +190,8 @@ def populate_parallel_text(extract_dir: str,
                           its own file (used for test sets).
     :param head_n: If N>0, use only the first N lines (used in test mode).
     """
-    source_out = None
-    target_out = None
+    source_out = None  # type: IO[Any]
+    target_out = None  # type: IO[Any]
     lines_written = 0
     # Single output file for each side
     if not keep_separate:

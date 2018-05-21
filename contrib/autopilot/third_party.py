@@ -294,7 +294,7 @@ def merge_bpe(input_fname: str, output_fname: str):
             out.write(merged)
 
 
-def copy_out(source: Iterable[str], dest: io.TextIOWrapper, use_placeholders: bool = False):
+def copy_out(source: Iterable[bytes], dest: io.BytesIO, use_placeholders: bool = False):
     """
     Copy lines from source to destination.
 

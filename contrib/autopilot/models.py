@@ -59,7 +59,7 @@ MODELS = {
         "--decode-and-evaluate=500",
         "--keep-last-params=60",
     ],
-}
+}  # type: Dict[str, List[str]]
 
 # Decoding configurations
 DECODE_ARGS = {
