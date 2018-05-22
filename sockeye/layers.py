@@ -72,7 +72,7 @@ class LayerNormalization:
         self.shift = shift if shift is not None else mx.sym.Variable('%s_beta' % prefix,
                                                                      init=mx.init.Constant(value=shift_init))
 
-    def __call__(self, data: mx.sym.Symbol, eps: float = 1e-05) -> mx.sym.Symbol:
+    def __call__(self, data: mx.sym.Symbol, eps: float = 1e-06) -> mx.sym.Symbol:
         """
         Normalizes hidden units of data as follows:
 
