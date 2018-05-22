@@ -28,6 +28,10 @@ def main():
     params = argparse.ArgumentParser(description='Preprocesses and shards training data.')
     arguments.add_prepare_data_cli_args(params)
     args = params.parse_args()
+    prepare_data(args)
+
+
+def prepare_data(args: argparse.Namespace):
 
     output_folder = os.path.abspath(args.output)
     os.makedirs(output_folder, exist_ok=True)

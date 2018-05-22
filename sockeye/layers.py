@@ -29,11 +29,11 @@ def activation(data: mx.sym.Symbol, act_type: str) -> mx.sym.Symbol:
     Apply custom or standard activation.
 
     Custom activation types include:
-    - Swish-1, also called Sigmoid-Weighted Linear Unit (SiLU): Ramachandran et
-      al. (https://arxiv.org/pdf/1710.05941.pdf), Elfwing et al.
-      (https://arxiv.org/pdf/1702.03118.pdf)
-    - Gaussian Error Linear Unit (GELU): Hendrycks and Gimpel
-      (https://arxiv.org/pdf/1606.08415.pdf)
+     - Swish-1, also called Sigmoid-Weighted Linear Unit (SiLU): Ramachandran et
+       al. (https://arxiv.org/pdf/1710.05941.pdf), Elfwing et al.
+       (https://arxiv.org/pdf/1702.03118.pdf)
+     - Gaussian Error Linear Unit (GELU): Hendrycks and Gimpel
+       (https://arxiv.org/pdf/1606.08415.pdf)
 
     :param data: input Symbol of any shape.
     :param act_type: Type of activation.

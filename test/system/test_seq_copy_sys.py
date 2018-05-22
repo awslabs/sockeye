@@ -55,16 +55,6 @@ COMMON_TRAINING_PARAMS = " --checkpoint-frequency 1000 --optimizer adam --initia
      True,
      1.03,
      0.98),
-    ("Copy:lstm:pruning",
-     "--encoder rnn --decoder rnn "
-     " --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
-     " --rnn-attention-num-hidden 32 --batch-size 16"
-     " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --max-updates 4000 --weight-normalization"
-     " --gradient-clipping-type norm --gradient-clipping-threshold 10" + COMMON_TRAINING_PARAMS,
-     "--beam-size 5 --batch-size 2 --beam-prune 1",
-     True,
-     1.03,
-     0.98),
     ("Copy:chunking",
      "--encoder rnn --decoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
      " --rnn-attention-type mlp --rnn-attention-num-hidden 32"
@@ -75,13 +65,13 @@ COMMON_TRAINING_PARAMS = " --checkpoint-frequency 1000 --optimizer adam --initia
      False,
      1.01,
      0.99),
-    ("Copy:word-based-batching",
+    ("Copy:word-based-batching:pruning",
      "--encoder rnn --decoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 "
      " --rnn-attention-type mlp --rnn-attention-num-hidden 32 "
      " --batch-size 80 --batch-type word "
      " --max-updates 5000  "
      " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --layer-normalization" + COMMON_TRAINING_PARAMS,
-     "--beam-size 5",
+     "--beam-size 5 --batch-size 2 --beam-prune 1",
      True,
      1.01,
      0.99),
