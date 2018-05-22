@@ -226,6 +226,7 @@ def run_train_translate(train_params: str,
                         use_prepared_data: bool = False,
                         max_seq_len: int = 10,
                         restrict_lexicon: bool = False,
+                        decode_is_constrained: bool = False,
                         work_dir: Optional[str] = None,
                         seed: int = 13,
                         quiet: bool = False) -> Tuple[float, float, float, float]:
@@ -247,6 +248,7 @@ def run_train_translate(train_params: str,
     :param use_prepared_data: Whether to use the prepared data functionality.
     :param max_seq_len: The maximum sequence length.
     :param restrict_lexicon: Additional translation run with top-k lexicon-based vocabulary restriction.
+    :param decode_is_constrained: If constrained decoding may be encountered.
     :param work_dir: The directory to store the model and other outputs in.
     :param seed: The seed used for training.
     :param quiet: Suppress the console output of training and decoding.
