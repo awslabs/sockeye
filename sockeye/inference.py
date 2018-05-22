@@ -1389,8 +1389,15 @@ class Translator:
             # TODO: See note in method about migrating to pure MXNet when set operations are supported.
             #       We currently convert source to NumPy and target ids back to NDArray.
             source_words = source.split(num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
-            vocab_slice_ids = mx.nd.array(self.restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy()),
-                                          ctx=self.context)
+            vocab_slice_ids = self.restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy())
+            if any(raw_constraint_list):
+                # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space
+                constraint_ids = np.array([word_id for sent in raw_constraint_list for phr in sent for word_id in phr])
+                vocab_slice_ids = np.lib.arraysetops.union1d(vocab_slice_ids, constraint_ids)
+                full_to_reduced = dict([(val, i) for i, val in enumerate(vocab_slice_ids)])
+                raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in raw_constraint_list]
+
+            vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=self.context)
 
             if vocab_slice_ids.shape[0] < self.beam_size + 1:
                 # This fixes an edge case for toy models, where the number of vocab ids from the lexicon is
