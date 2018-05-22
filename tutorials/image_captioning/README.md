@@ -106,6 +106,22 @@ Assuming that features were pre-extracted, you can do image captioning as follow
 This will take the best set of parameters found during training and then load the image provided in the STDIN and
 write the caption to STDOUT, which is redirected to the file `validation_set.predictions`.
 
+You can also caption directly from image with the option `--extract-image-features` as follows:
+
+```bash
+> python -m sockeye.image_captioning.captioner \
+        --extract-image-features \
+        --source-image-size 3 224 224 \
+        --image-encoder-model-path /path/to/mxnet/model/filename_prefix \
+        --models models/ \
+        --input validation_set.images \
+        --source-root  /path/to/image/dataset/folder/ \
+        --max-output-length 60 \
+        --batch-size 512 \
+        --chunk-size 1024 \
+        --beam-size 3 >> validation_set.predictions
+```
+
 ### Visualization
 
 You can now visualize the results in a nice format as follows:
