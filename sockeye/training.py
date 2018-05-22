@@ -1017,9 +1017,6 @@ class TensorboardLogger:
         try:
             import mxboard
             logger.info("Logging training events for Tensorboard at '%s'", self.logdir)
-            if os.path.exists(self.logdir):
-                logger.info("Deleting existing Tensorboard log directory '%s'", self.logdir)
-                shutil.rmtree(self.logdir)
             self.sw = mxboard.SummaryWriter(logdir=self.logdir, flush_secs=60, verbose=False)
         except ImportError:
             logger.info("mxboard not found. Consider 'pip install mxboard' to log events to Tensorboard.")
