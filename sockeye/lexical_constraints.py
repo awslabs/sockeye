@@ -324,6 +324,10 @@ def topk(batch_size: int,
 
             # offsetting since the returned smallest_k() indices were slice-relative
             best_ids[rows] += rows.start
+        else:
+            # If there are no constraints for this sentence in the batch, everything stays
+            # the same, except we need to mark all hypotheses as active
+            inactive[rows] = 0
 
     return (best_ids, best_word_ids, seq_scores, hypotheses, inactive)
 
