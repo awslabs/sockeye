@@ -16,7 +16,7 @@ import logging
 import re
 import time
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Set
 from operator import attrgetter
 
 from . import constants as C
@@ -102,28 +102,28 @@ class ConstrainedHypothesis:
         """
         return self.size() - self.num_met()
 
-    def allowed(self) -> List[int]:
+    def allowed(self) -> Set[int]:
         """
         Returns the set of constrained words that could follow this one.
         For unfinished phrasal constraints, it is the next word in the phrase.
-        In other cases, it is a list of unmet constraints.
+        In other cases, it is the list of all unmet constraints.
         If all constraints are met, an empty set is returned.
 
         :return: The ID of the next required word, or -1 if any word can follow
         """
-        items = []  # type: List[int]
+        items = set()  # type: Set[int]
         # Add extensions of a started-but-incomplete sequential constraint
         if self.last_met != -1 and self.is_sequence[self.last_met] == 1:
             word_id = self.constraints[self.last_met + 1]
             if word_id != self.eos_id or self.num_needed() == 1:
-                items.append(word_id)
+                items.add(word_id)
 
         # Add all constraints that aren't non-initial sequences
         else:
             for i, word_id in enumerate(self.constraints):
                 if not self.met[i] and (i == 0 or not self.is_sequence[i - 1]):
                     if word_id != self.eos_id or self.num_needed() == 1:
-                        items.append(word_id)
+                        items.add(word_id)
 
         return items
 
@@ -142,7 +142,7 @@ class ConstrainedHypothesis:
         :param wordid: The wordid to validate.
         :return: True if all constraints are already met or the word ID is not the EOS id.
         """
-        return self.finished() or wordid != self.eos_id or (self.num_needed() == 1 and self.allowed() == [self.eos_id])
+        return self.finished() or wordid != self.eos_id or (self.num_needed() == 1 and self.eos_id in self.allowed())
 
     def advance(self, word_id: int) -> 'ConstrainedHypothesis':
         """
@@ -191,7 +191,7 @@ class ConstrainedHypothesis:
         return obj
 
 
-def init_batch(raw_constraints: List[RawConstraintList],
+def init_batch(raw_constraints: List[Optional[RawConstraintList]],
                beam_size: int,
                start_id: int,
                eos_id: int) -> List[Optional[ConstrainedHypothesis]]:
@@ -205,10 +205,10 @@ def init_batch(raw_constraints: List[RawConstraintList],
     constraints = [None] * (len(raw_constraints) * beam_size)
     if any(raw_constraints):
         for i, raw_list in enumerate(raw_constraints):
-            num_constraints = sum([len(phrase) for phrase in raw_list])
-            idx = i * beam_size
+            num_constraints = sum([len(phrase) for phrase in raw_list]) if raw_list is not None else 0
             if num_constraints > 0:
                 hyp = ConstrainedHypothesis(raw_list, eos_id)
+                idx = i * beam_size
                 constraints[idx:idx+beam_size] = [hyp.advance(start_id) for x in range(beam_size)]
 
     return constraints
@@ -311,7 +311,7 @@ def topk(batch_size: int,
 
     for sentno in range(batch_size):
         rows = slice(sentno * beam_size, (sentno + 1) * beam_size)
-        if hypotheses[rows.start].size() > 0:
+        if hypotheses[rows.start] is not None and hypotheses[rows.start].size() > 0:
             best_ids[rows], best_word_ids[rows], seq_scores[rows], \
                 hypotheses[rows], inactive[rows] = _topk(beam_size,
                                                          inactive[rows],
@@ -380,7 +380,7 @@ def _topk(beam_size: int,
         # (3) add the single-best item after this (if it's valid)
         col = int(best_next[row].asscalar())
         if hyp.is_valid(col):
-            nextones.append(col)
+            nextones.add(col)
 
         # Now, create new candidates for each of these items
         for col in nextones:

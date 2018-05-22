@@ -23,8 +23,9 @@ import sockeye.constants as C
 import sockeye.data_io
 import sockeye.inference
 from sockeye.utils import SockeyeError
-from sockeye.lexical_constraints import topk, get_bank_sizes, ConstrainedHypothesis
+from sockeye.lexical_constraints import init_batch, get_bank_sizes, topk, ConstrainedHypothesis
 
+BOS_ID = 2
 EOS_ID = 3
 
 def mock_translator(num_source_factors: int):
@@ -68,6 +69,7 @@ def test_constraints_bank_allocation(num_constraints, beam_size, counts, expecte
     assert sum(allocation) == beam_size
     assert allocation == expected_allocation
 
+
 """
 Make sure the internal representation is correct.
 For the internal representation, the list of phrasal constraints is concatenated, and then
@@ -84,19 +86,14 @@ a parallel array is used to mark which words are part of a phrasal constraint.
                              # Multiple constraints
                              ([[11, 12, 13], [14], [15]], [11, 12, 13, 14, 15], [True, True, False, False, False]),
                          ])
-def test_constraints_setup(raw_constraints, internal_constraints, internal_is_sequence):
+def test_constraints_repr(raw_constraints, internal_constraints, internal_is_sequence):
     hyp = ConstrainedHypothesis(raw_constraints, EOS_ID)
-    # record all the words that have been met
-    for phrase in raw_constraints:
-        for word_id in phrase:
-            hyp = hyp.advance(word_id)
-
     assert hyp.constraints == internal_constraints
     assert hyp.is_sequence == internal_is_sequence
 
 
 """
-Ensures that advance() works correctly. advance()
+Tests many of the ConstrainedHypothesis functions.
 """
 @pytest.mark.parametrize("raw_constraints, met, unmet",
                          [
@@ -107,41 +104,90 @@ Ensures that advance() works correctly. advance()
                              # Single simple met constraint
                              ([[17]], [17], []),
                              # Met first word of a phrasal constraint, return just next word of phrasal
-                             ([[11, 12], [13, 14]], [11], [12]),
-                             # Completed phrase, have only single-word ones
-                             ([[11, 12, 13], [14], [15]], [11, 12, 13], [14, 15]),
-                         ])
-def test_constraints_advance(raw_constraints, met, unmet):
-    hyp = ConstrainedHypothesis(raw_constraints, EOS_ID)
-    # record all the words that have been met
-    for word_id in met:
-        hyp = hyp.advance(word_id)
-
-    assert set(hyp.allowed()) == set(unmet)
-
-
-"""
-Returns the list of unmet constraints.
-"""
-@pytest.mark.parametrize("raw_constraints, met, unmet",
-                         [
-                             # No constraints
-                             ([], [], []),
-                             # Single simple unmet constraint
-                             ([[17]], [], [17]),
-                             # Single simple met constraint
-                             ([[17]], [17], []),
-                             # Met first word of a phrasal constraint, return just next word of phrasal
-                             ([[11, 12], [13, 14]], [11], [12]),
+                             ([[11, 12], [13, 14]], [11], [12, 13, 14]),
                              # Completed phrase, have only single-word ones
                              ([[11, 12, 13], [14], [15]], [11, 12, 13], [14, 15]),
                              # Same word twice
                              ([[11], [11]], [], [11, 11]),
-                         ])
-def test_constraints_extend(raw_constraints, met, unmet):
+                             ])
+def test_constraints_logic(raw_constraints, met, unmet):
     hyp = ConstrainedHypothesis(raw_constraints, EOS_ID)
     # record these ones as met
     for word_id in met:
         hyp = hyp.advance(word_id)
 
-    assert set(hyp.allowed()) == set(unmet)
+    assert hyp.num_needed() == len(unmet)
+    assert hyp.finished() == (len(unmet) == 0)
+    assert hyp.is_valid(EOS_ID) == (hyp.finished() or (len(unmet) == 1 and EOS_ID in unmet))
+
+
+"""
+Test the allowed() function, which returns the set of unmet constraints that can be generated.
+When inside a phrase, this is only the next word of the phrase. Otherwise, it is all unmet constraints.
+"""
+@pytest.mark.parametrize("raw_constraints, met, allowed",
+                         [
+                             # No constraints
+                             ([], [], []),
+                             # Single simple unmet constraint
+                             ([[17]], [], [17]),
+                             # Single simple met constraint
+                             ([[17]], [17], []),
+                             # Met first word of a phrasal constraint, return just next word of phrasal
+                             ([[11, 12], [13, 14]], [11], [12]),
+                             # Completed phrase, have only single-word ones
+                             ([[11, 12, 13], [14], [15]], [11, 12, 13], [14, 15]),
+                             # Same word twice, nothing met, return
+                             ([[11], [11]], [], [11]),
+                             # Same word twice, met, still returns once
+                             ([[11], [11]], [11], [11]),
+                             # Same word twice, met twice
+                             ([[11], [11]], [11, 11], []),
+                             # EOS, allowed
+                             ([[42, EOS_ID]], [42], [EOS_ID]),
+                             # EOS, not allowed
+                             ([[42, EOS_ID]], [], [42]),
+                         ])
+def test_constraints_allowed(raw_constraints, met, allowed):
+    hyp = ConstrainedHypothesis(raw_constraints, EOS_ID)
+    # record these ones as met
+    for word_id in met:
+        hyp = hyp.advance(word_id)
+
+    assert hyp.allowed() == set(allowed)
+    assert hyp.num_met() == len(met)
+    assert hyp.num_needed() == hyp.size() - hyp.num_met()
+
+
+
+
+
+"""
+Ensures that batches are initialized correctly.
+Each line here is a tuple containing a list (for each sentence in the batch) of RawConstraintLists,
+which are lists of list of integer IDs representing the constraints for the sentence.
+"""
+@pytest.mark.parametrize("raw_constraint_lists",
+                         [ ([None, None, None, None]),
+                           ([[[17]], None]),
+                           ([None, [[17]]]),
+                           ([[[17], [11, 12]], [[17]], None]),
+                           ([None, [[17], [11, 12]], [[17]], None]),
+                         ])
+def test_constraints_init_batch(raw_constraint_lists):
+    beam_size = 4  # arbitrary
+
+    constraints = init_batch(raw_constraint_lists, beam_size, BOS_ID, EOS_ID)
+    assert len(raw_constraint_lists) * beam_size == len(constraints)
+
+    # Iterate over sentences in the batch
+    for raw_constraint_list, constraint in zip(raw_constraint_lists, constraints[::beam_size]):
+        if raw_constraint_list is None:
+            assert constraint is None
+        else:
+            # The number of constraints is the sum of the length of the lists in the raw constraint list
+            assert constraint.size() == sum([len(phr) for phr in raw_constraint_list])
+
+            # No constraints are met unless the start_id happened to be at the start of a constraint
+            num_met = 1 if any([phr[0] == BOS_ID for phr in raw_constraint_list]) else 0
+            assert constraint.num_met() == num_met

@@ -679,7 +679,7 @@ def make_input_from_json_string(sentence_id: int, json_string: str) -> Translato
         else:
             factors = None
         constraints = jobj.get(C.JSON_CONSTRAINTS_KEY)
-        if isinstance(constraints, list):
+        if isinstance(constraints, list) and len(constraints) > 0:
             constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
         else:
             constraints = None
