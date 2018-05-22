@@ -746,10 +746,9 @@ class TranslatorOutput:
     :param attention_matrix: Attention matrix. Shape: (target_length, source_length).
     :param score: Negative log probability of generated translation.
     :param beam_histories: List of beam histories. The list will contain more than one
-    history if it was split due to exceeding max_length.
+           history if it was split due to exceeding max_length.
     """
-    __slots__ = ('id', 'translation', 'tokens', 'attention_matrix', 'score',
-                 'beam_histories')
+    __slots__ = ('id', 'translation', 'tokens', 'attention_matrix', 'score', 'beam_histories')
 
     def __init__(self,
                  id: int,
@@ -969,7 +968,7 @@ class Translator:
         self.zeros_array = mx.nd.zeros((self.beam_size,), ctx=self.context, dtype='int32')
         self.inf_array_long = mx.nd.full((self.batch_size * self.beam_size,), val=np.inf,
                                          ctx=self.context, dtype='float32')
-        self.inf_array = mx.nd.slice(self.inf_array_long, begin=(0), end=(self.beam_size))
+        self.inf_array = mx.nd.slice(self.inf_array_long, begin=(0,), end=(self.beam_size,))
 
         # offset for hypothesis indices in batch decoding
         self.offset = np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size)
@@ -980,10 +979,12 @@ class Translator:
                             offset=self.offset,
                             use_mxnet_topk=self.context != mx.cpu())  # MXNet implementation is faster on GPUs
 
-        logger.info("Translator (%d model(s) beam_size=%d ensemble_mode=%s batch_size=%d "
-                    "buckets_source=%s)",
+        logger.info("Translator (%d model(s) beam_size=%d beam_prune=%s beam_search_stop=%s "
+                    "ensemble_mode=%s batch_size=%d buckets_source=%s)",
                     len(self.models),
                     self.beam_size,
+                    'off' if not self.beam_prune else "%.2f" % self.beam_prune,
+                    self.beam_search_stop,
                     "None" if len(self.models) == 1 else ensemble_mode,
                     self.batch_size,
                     self.buckets_source)

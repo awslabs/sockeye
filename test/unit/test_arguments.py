@@ -13,7 +13,9 @@
 
 import argparse
 import pytest
+import tempfile
 import os
+import yaml
 
 import sockeye.arguments as arguments
 import sockeye.constants as C
@@ -433,3 +435,63 @@ def _test_args_subset(test_params, expected_params, expected_params_present, arg
     assert parsed_params_subset == expected_params
     for expected_param_present in expected_params_present:
         assert expected_param_present in parsed_params, "Expected param %s to be present." % expected_param_present
+
+
+# Test that config file and command line are equivalent
+@pytest.mark.parametrize("plain_command_line, config_command_line, config_contents", [
+    ("-a 1 -b 2 -C 3 -D 4 -e 5", "", dict(a=1, b=2, C=3, D=4, e=5)),
+    ("-a 1 -b 2 -C 3 -D 4 -e 5", "-a 1 -b 2 -e 5", dict(C=3, D=4)),
+    ("-C 3 -D 4", "-C 3 -D 4", {}),
+    ("-C 3 -D 4", "-C 3", dict(D=4)),
+    ("-a 1 -C 3 -D 4", "", dict(a=1, C=3, D=4)),
+    ("-a 1 -b 2 -C 3 -D 4 -e 5", "-a 1 -b 2 -C 3", dict(a=10, b=20, C=30, D=4, e=5))
+])
+def test_config_file(plain_command_line, config_command_line, config_contents):
+    config_file_argparse = arguments.ConfigArgumentParser()
+    # Capital letter arguments are required
+    config_file_argparse.add_argument("-a", type=int)
+    config_file_argparse.add_argument("-b", type=int)
+    config_file_argparse.add_argument("-C", type=int, required=True)
+    config_file_argparse.add_argument("-D", type=int, required=True)
+    config_file_argparse.add_argument("-e", type=int)
+
+    # The option '--config <file>' will be added automaticall to config_command_line
+    with tempfile.NamedTemporaryFile("w") as fp:
+        arguments.save_args(argparse.Namespace(**config_contents), fp.name)
+        fp.flush()
+
+        # Parse args and cast to dicts directly
+        args_command_line = vars(config_file_argparse.parse_args(args=plain_command_line.split()))
+        args_config = vars(config_file_argparse.parse_args(
+            args=(config_command_line + (" --config %s" % fp.name)).split()))
+
+        # Remove the config entry
+        del args_command_line["config"]
+        del args_config["config"]
+
+        assert args_command_line == args_config
+
+
+# Test that required options are still required if not specified in the config file
+@pytest.mark.parametrize("config_command_line, config_contents", [
+    ("", dict(a=1, b=2, C=3, e=5)),
+    ("-C 3", dict(a=1))
+])
+def test_config_file_required(config_command_line, config_contents):
+    config_file_argparse = arguments.ConfigArgumentParser()
+    # Capital letter arguments are required
+    config_file_argparse.add_argument("-a", type=int)
+    config_file_argparse.add_argument("-b", type=int)
+    config_file_argparse.add_argument("-C", type=int, required=True)
+    config_file_argparse.add_argument("-D", type=int, required=True)
+    config_file_argparse.add_argument("-e", type=int)
+
+    # The option '--config <file>' will be added automaticall to config_command_line
+    with pytest.raises(SystemExit): # argparse does not have finer regularity exceptions
+        with tempfile.NamedTemporaryFile("w") as fp:
+            arguments.save_args(argparse.Namespace(**config_contents), fp.name)
+            fp.flush()
+
+            # Parse args and cast to dicts directly
+            config_file_argparse.parse_args(
+                args=(config_command_line + (" --config %s" % fp.name)).split())

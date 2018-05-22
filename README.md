@@ -8,7 +8,7 @@
 
 This package contains the Sockeye project,
 a sequence-to-sequence framework for Neural Machine Translation based on Apache MXNet Incubating.
-It implements state-of-the-art encoder-decoder architectures, such as 
+It implements state-of-the-art encoder-decoder architectures, such as
 - Deep Recurrent Neural Networks with Attention [[Bahdanau, '14](https://arxiv.org/abs/1409.0473)]
 - Transformer Models with self-attention [[Vaswani et al, '17](https://arxiv.org/abs/1706.03762)]
 - Fully convolutional sequence-to-sequence models [[Gehring et al, '17](https://arxiv.org/abs/1705.03122)]
@@ -112,7 +112,7 @@ where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), `90` (9.0), or `91` (9.1)
 In order to write training statistics to a Tensorboard event file for visualization, you can optionally install mxboard
  (````pip install mxboard````). To visualize these, run the Tensorboard tool (`pip install tensorboard tensorflow`) with
  the logging directory pointed to the training output folder: `tensorboard --logdir <model>`
- 
+
 If you want to create alignment plots you will need to install matplotlib (````pip install matplotlib````).
 
 In general you can install all optional dependencies from the Sockeye source folder using:
@@ -130,6 +130,9 @@ For example *sockeye-train* can also be invoked as
 ```
 
 ## First Steps
+
+For easily training popular model types on known data sets, see the [Sockeye Autopilot documentation](https://github.com/awslabs/sockeye/tree/master/contrib/autopilot).
+For manually training and running translation models on your data, read on.
 
 ### Train
 

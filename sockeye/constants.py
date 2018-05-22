@@ -226,7 +226,7 @@ RNG_STATE_NAME = "rng.pkl"
 TRAINING_STATE_NAME = "training.pkl"
 SCHEDULER_STATE_NAME = "scheduler.pkl"
 TRAINING_STATE_PARAMS_NAME = "params"
-ARGS_STATE_NAME = "args.json"
+ARGS_STATE_NAME = "args.yaml"
 
 # Arguments that may differ and still resume training
 ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet",

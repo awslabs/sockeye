@@ -148,10 +148,14 @@ def main():
     """
     Commandline interface to average parameters.
     """
-    log_sockeye_version(logger)
     params = argparse.ArgumentParser(description="Averages parameters from multiple models.")
     arguments.add_average_args(params)
     args = params.parse_args()
+    average_parameters(args)
+
+
+def average_parameters(args: argparse.Namespace):
+    log_sockeye_version(logger)
 
     if len(args.inputs) > 1:
         avg_params = average(args.inputs)

@@ -17,11 +17,77 @@ Defines commandline arguments for the main CLIs with reasonable defaults.
 import argparse
 import os
 import sys
-from typing import Callable, Optional
+import types
+import yaml
+from typing import Any, Callable, Dict, List, Tuple, Optional
 
 from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
 from . import constants as C
 from . import data_io
+
+
+class ConfigArgumentParser(argparse.ArgumentParser):
+    """
+    Extension of argparse.ArgumentParser supporting config files.
+
+    The option --config is added automatically and expects a YAML serialized
+    dictionary, similar to the return value of parse_args(). Command line
+    parameters have precendence over config file values. Usage should be
+    transparent, just substitute argparse.ArgumentParser with this class.
+
+    Extended from
+    https://stackoverflow.com/questions/28579661/getting-required-option-from-namespace-in-python
+    """
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.argument_definitions = {}  # type: Dict[Tuple, Dict]
+        self.argument_actions = []  # type: List[Any]
+        self._overwrite_add_argument(self)
+        self.add_argument("--config", help="Config file in YAML format.", type=str)
+        # Note: not FileType so that we can get the path here
+
+    def _register_argument(self, _action, *args, **kwargs):
+        self.argument_definitions[args] = kwargs
+        self.argument_actions.append(_action)
+
+    def _overwrite_add_argument(self, original_object):
+        def _new_add_argument(this_self, *args, **kwargs):
+            action = this_self.original_add_argument(*args, **kwargs)
+            this_self.config_container._register_argument(action, *args, **kwargs)
+        
+        original_object.original_add_argument = original_object.add_argument
+        original_object.config_container = self
+        original_object.add_argument = types.MethodType(_new_add_argument, original_object)
+
+        return original_object
+
+    def add_argument_group(self, *args, **kwargs):
+        group = super().add_argument_group(*args, **kwargs)
+        return self._overwrite_add_argument(group)
+
+    def parse_args(self, args=None, namespace=None) -> argparse.Namespace:
+        # Mini argument parser to find the config file
+        config_parser = argparse.ArgumentParser(add_help=False)
+        config_parser.add_argument("--config", type=regular_file())
+        config_args, _ = config_parser.parse_known_args(args=args)
+        initial_args = argparse.Namespace()
+        if config_args.config:
+            initial_args = load_args(config_args.config)
+            # Remove the 'required' flag from options loaded from config file
+            for action in self.argument_actions:
+                if action.dest in initial_args:
+                    action.required = False
+        return super().parse_args(args=args, namespace=initial_args)
+
+
+def save_args(args: argparse.Namespace, fname: str):
+    with open(fname, 'w') as out:
+        yaml.safe_dump(args.__dict__, out, default_flow_style=False)
+
+
+def load_args(fname: str) -> argparse.Namespace:
+    with open(fname, 'r') as inp:
+        return argparse.Namespace(**yaml.safe_load(inp))
 
 
 def regular_file() -> Callable:

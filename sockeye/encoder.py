@@ -1051,8 +1051,9 @@ class ConvolutionalEmbeddingEncoder(Encoder):
     An encoder developed to map a sequence of character embeddings to a shorter sequence of segment
     embeddings using convolutional, pooling, and highway layers.  More generally, it maps a sequence
     of input embeddings to a sequence of span embeddings.
-        * "Fully Character-Level Neural Machine Translation without Explicit Segmentation"
-          Jason Lee; Kyunghyun Cho; Thomas Hofmann (https://arxiv.org/pdf/1610.03017.pdf)
+
+    * "Fully Character-Level Neural Machine Translation without Explicit Segmentation"
+      Jason Lee; Kyunghyun Cho; Thomas Hofmann (https://arxiv.org/pdf/1610.03017.pdf)
 
     :param config: Convolutional embedding config.
     :param prefix: Name prefix for symbols of this encoder.
