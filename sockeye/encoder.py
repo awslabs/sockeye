@@ -22,7 +22,6 @@ from typing import Callable, List, Optional, Tuple, Union, Dict
 
 import mxnet as mx
 
-from sockeye.convolution import ConvolutionBlock
 from . import config
 from . import constants as C
 from . import convolution
@@ -31,6 +30,9 @@ from . import transformer
 from . import utils
 
 logger = logging.getLogger(__name__)
+
+
+ImageEncoderConfig = None
 
 
 def get_encoder(config: 'EncoderConfig', prefix: str = '') -> 'Encoder':
@@ -43,6 +45,8 @@ def get_encoder(config: 'EncoderConfig', prefix: str = '') -> 'Encoder':
     else:
         from .image_captioning.encoder import ImageLoadedCnnEncoderConfig, \
             get_image_cnn_encoder
+        ImageEncoderConfig = ImageLoadedCnnEncoderConfig
+
         if isinstance(config, ImageLoadedCnnEncoderConfig):
             return get_image_cnn_encoder(config)
         else:
@@ -412,12 +416,14 @@ class PassThroughEmbeddingConfig(config.Config):
 
     def __init__(self) -> None:
         super().__init__()
+        self.vocab_size = 0
+        self.num_embed = 0
         self.num_factors = 1
 
 
 class PassThroughEmbedding(Encoder):
     """
-    This is a embedding which pass-through an input symbol without doing any operation.
+    This is an embedding which passes through an input symbol without doing any operation.
 
     :param config: PassThroughEmbeddingConfig config.
     """
@@ -1214,4 +1220,6 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         return int(ceil(seq_len / self.pool_stride))
 
 
-EncoderConfig = Union[RecurrentEncoderConfig, transformer.TransformerConfig, ConvolutionalEncoderConfig, 'ImageLoadedCnnEncoderConfig']  # type: ignore
+EncoderConfig = Union[RecurrentEncoderConfig, transformer.TransformerConfig, ConvolutionalEncoderConfig]
+if ImageEncoderConfig is not None:
+    EncoderConfig = Union[EncoderConfig, ImageEncoderConfig]  # type: ignore

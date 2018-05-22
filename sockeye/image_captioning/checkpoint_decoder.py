@@ -20,11 +20,12 @@ import os
 import time
 from typing import Dict, Optional
 
-import sockeye.output_handler
-from . import inference
+from .. import inference
+from . import inference as inference_image
 from .. import constants as C
 from .. import data_io
 from .. import evaluate
+from .. import output_handler
 from ..checkpoint_decoder import CheckpointDecoder
 
 logger = logging.getLogger(__name__)
@@ -66,22 +67,24 @@ class CheckpointDecoderImageModel(CheckpointDecoder):
         :return: Mapping of metric names to scores.
         """
 
-        models, vocab_source, vocab_target = inference.load_models(
-                                                context=self.context,
-                                                max_input_len=self.max_input_len,
-                                                beam_size=self.beam_size,
-                                                batch_size=self.batch_size,
-                                                model_folders=[self.model],
-                                                checkpoints=[checkpoint],
-                                                softmax_temperature=self.softmax_temperature,
-                                                max_output_length_num_stds=self.max_output_length_num_stds,
-                                                source_image_size=tuple(self.source_image_size),
-                                                forced_max_output_len=self.max_output_length
-                                            )
-        translator = inference.ImageCaptioner(context=self.context,
+        models, vocab_source, vocab_target = inference_image.load_models(
+            context=self.context,
+            max_input_len=self.max_input_len,
+            beam_size=self.beam_size,
+            batch_size=self.batch_size,
+            model_folders=[self.model],
+            checkpoints=[checkpoint],
+            softmax_temperature=self.softmax_temperature,
+            max_output_length_num_stds=self.max_output_length_num_stds,
+            source_image_size=tuple(self.source_image_size),
+            forced_max_output_len=self.max_output_length
+        )
+        translator = inference_image.ImageCaptioner(context=self.context,
                                               ensemble_mode=self.ensemble_mode,
                                               bucket_source_width=0,
-                                              length_penalty=inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
+                                              length_penalty=inference.LengthPenalty(
+                                                  self.length_penalty_alpha,
+                                                  self.length_penalty_beta),
                                               beam_prune=0.0,
                                               beam_search_stop='all',
                                               models=models,
@@ -89,18 +92,20 @@ class CheckpointDecoderImageModel(CheckpointDecoder):
                                               target_vocab=vocab_target,
                                               restrict_lexicon=None,
                                               store_beam=False,
-                                              source_image_size=tuple(self.source_image_size),
+                                              source_image_size=tuple(
+                                                  self.source_image_size),
                                               source_root=self.image_root,
                                               use_feature_loader=self.use_feature_loader)
 
         trans_wall_time = 0.0
         translations = []
         with data_io.smart_open(output_name, 'w') as output:
-            handler = sockeye.output_handler.StringOutputHandler(output)
+            handler = output_handler.StringOutputHandler(output)
             tic = time.time()
             trans_inputs = []  # type: List[inference.TranslatorInput]
             for i, inputs in enumerate(self.inputs_sentences):
-                trans_inputs.append(sockeye.inference.make_input_from_multiple_strings(i, inputs))
+                trans_inputs.append(
+                    inference.make_input_from_multiple_strings(i, inputs))
             trans_outputs = translator.translate(trans_inputs)
             trans_wall_time = time.time() - tic
             for trans_input, trans_output in zip(trans_inputs, trans_outputs):

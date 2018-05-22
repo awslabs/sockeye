@@ -15,7 +15,7 @@
 Defines commandline arguments for the main CLIs with reasonable defaults.
 """
 from .. import constants as C
-from sockeye.arguments import regular_file, regular_folder, add_training_data_args, \
+from ..arguments import regular_file, regular_folder, add_training_data_args, \
     add_validation_data_params, add_prepared_data_args, add_bucketing_args, \
     add_vocab_args, add_training_output_args,  add_monitoring_args, \
     add_device_args, int_greater_or_equal, add_model_parameters, \

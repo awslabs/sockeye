@@ -10,17 +10,26 @@
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
+
 """
 Visualize the checkpoints of the model: image, ground truth caption and
 predicted caption.
 """
-import matplotlib
-matplotlib.use('Agg')
 import argparse
+import logging
 import os
-from PIL import Image  # pylint: disable=import-error
 
-import pylab as plt
+try:  # Try to import pillow
+    from PIL import Image  # pylint: disable=import-error
+except ImportError as e:
+    logging.warn("Please install pillow to use the image_captioning module.")
+    raise e
+
+try:  # Try to import pillow
+    import matplotlib.pyplot as plt  # pylint: disable=import-error
+except ImportError as e:
+    logging.warn("Please install matplotlib to visualize images in the image_captioning module.")
+
 
 def format_text_for_visualization(c, n):
     c = c.split(" ")

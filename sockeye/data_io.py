@@ -103,7 +103,7 @@ def define_empty_source_parallel_buckets(max_seq_len_target: int,
     """
     target_step_size = max(1, bucket_width)
     target_buckets = define_buckets(max_seq_len_target, step=target_step_size)
-    # source buckets are always None since there is no text
+    # source buckets are always 0 since there is no text
     source_buckets = [0 for b in target_buckets]
     target_buckets = [max(2, b) for b in target_buckets]
     parallel_buckets = list(zip(source_buckets, target_buckets))
@@ -1166,6 +1166,7 @@ def get_parallel_bucket(buckets: List[Tuple[int, int]],
             return j, (source_bkt, target_bkt)
     return None, None
 
+
 def get_target_bucket(buckets: List[Tuple[int, int]],
                       length_target: int) -> Optional[Tuple[int, Tuple[int, int]]]:
     """
@@ -1182,6 +1183,7 @@ def get_target_bucket(buckets: List[Tuple[int, int]],
             bucket = j, (source_bkt, target_bkt)
             break
     return bucket
+
 
 class ParallelDataSet(Sized):
     """

@@ -16,19 +16,20 @@ Training CLI for image captioning.
 """
 import argparse
 import json
-import mxnet as mx
-import numpy as np
 import os
 import pickle
 from contextlib import ExitStack
 from typing import cast, Dict, List, Tuple, Optional
 
-from sockeye.config import Config
-from sockeye.log import setup_main_logger
-from sockeye.train import check_resume, check_arg_compatibility, \
+import mxnet as mx
+import numpy as np
+
+from ..config import Config
+from ..log import setup_main_logger
+from ..train import check_resume, check_arg_compatibility, \
     determine_context, create_decoder_config, \
     create_optimizer_config, create_training_model
-from sockeye.utils import check_condition
+from ..utils import check_condition
 # Sockeye captioner
 from . import arguments
 from . import checkpoint_decoder

@@ -201,11 +201,9 @@ class SockeyeModel:
         :param prefix: Prefix.
         :return: Tuple of source and target parameter symbols.
         """
-        w_embed_source = None
-        if not isinstance(self.config.config_embed_source, encoder.PassThroughEmbeddingConfig):
-            w_embed_source = mx.sym.Variable(prefix + C.SOURCE_EMBEDDING_PREFIX + "weight",
-                                             shape=(self.config.config_embed_source.vocab_size,
-                                                    self.config.config_embed_source.num_embed))
+        w_embed_source = mx.sym.Variable(prefix + C.SOURCE_EMBEDDING_PREFIX + "weight",
+                                         shape=(self.config.config_embed_source.vocab_size,
+                                                self.config.config_embed_source.num_embed))
         w_embed_target = mx.sym.Variable(prefix + C.TARGET_EMBEDDING_PREFIX + "weight",
                                          shape=(self.config.config_embed_target.vocab_size,
                                                 self.config.config_embed_target.num_embed))

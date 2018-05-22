@@ -15,17 +15,17 @@
 Code for inference/captioning.
 """
 import logging
-import mxnet as mx
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
+
+import mxnet as mx
 
 from . import utils as utils_image
 from .. import constants as C
-from .. import lexicon
 from .. import model
 from .. import utils
 from .. import vocab
-from ..inference import InferenceModel, LengthPenalty, Translator, \
+from ..inference import InferenceModel, Translator, \
     TranslatorInput, TranslatorOutput, models_max_input_output_length
 
 logger = logging.getLogger(__name__)

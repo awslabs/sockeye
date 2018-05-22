@@ -67,10 +67,9 @@ def get_initializer(default_init_type: str, default_init_scale: float, default_i
     else:
         raise ValueError('Unknown RNN initializer: %s' % rnn_init_type)
 
-    params_init_pairs = [] # type: List[Tuple[str, mx.initializer.Initializer]]
+    params_init_pairs = embed_init + rnn_init + default_init
     if extra_initializers is not None:
-        params_init_pairs = extra_initializers
-    params_init_pairs += embed_init + rnn_init + default_init
+        params_init_pairs = extra_initializers + params_init_pairs
     return mx.initializer.Mixed(*zip(*params_init_pairs))
 
 

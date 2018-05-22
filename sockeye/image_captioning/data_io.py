@@ -16,11 +16,11 @@ Implements data iterators and I/O related functions for image-to-sequence
 models.
 """
 import logging
-import matplotlib.pyplot as plt
-import mxnet as mx
-import numpy as np
 import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+import mxnet as mx
+import numpy as np
 
 from .utils import load_features, load_feature, load_preprocess_images
 from .. import constants as C
@@ -32,6 +32,11 @@ from ..data_io import get_target_bucket, get_data_statistics, \
     define_empty_source_parallel_buckets, define_bucket_batch_sizes
 
 logger = logging.getLogger(__name__)
+
+try:  # Try to import pillow
+    import matplotlib.pyplot as plt  # pylint: disable=import-error
+except ImportError as e:
+    logging.warn("Please install matplotlib to visualize images in the image_captioning module.")
 
 
 class RawListTextDatasetLoader:

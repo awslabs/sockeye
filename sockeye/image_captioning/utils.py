@@ -14,12 +14,13 @@
 """
 A set of utility methods for images.
 """
-import numpy as np
 import os
 from shutil import copyfile
 from typing import List, Optional
 
-from sockeye.log import setup_main_logger
+import numpy as np
+
+from ..log import setup_main_logger
 
 # Temporary logger, the real one (logging to a file probably, will be created
 # in the main function)
