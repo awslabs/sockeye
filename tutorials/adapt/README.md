@@ -7,11 +7,11 @@ translation over others or adapting the style of the text, among others. In
 this tutorial, we show two methods on how to perform domain adaptation of a
 general translation system using Sockeye.
 
-We assume you already have an already trained Sockeye model, for example the
-one trained in the [second tutorial](../wmt/README.md). We also assume that you
-have two training sets, one composed of general or out-of-domain data, and one
-composed of in-domain data on which you want to adapt your system. Note that
-both datasets need to be pre-processed in the same way.
+We assume you already have a trained Sockeye model, for example the one trained
+from the [second tutorial](../wmt/README.md). We also assume that you have two
+training sets, one composed of general or out-of-domain (OOD) data, and one
+composed of in-domain (ID) data on which you want to adapt your system. Note
+that both datasets need to be pre-processed in the same way.
 
 ## Preparing the data
 
@@ -31,11 +31,11 @@ corresponding arguments to the `sockeye.train` calls.
 
 ## Continuation of training
 
-This method consists in taking the parameters of an already trained system and
-use them as initialization of a new training run only on the in-domain data.
-Thus you "continue training" on the data you are more interested in. Freitag
-and Al-Onaizan (2016) showed that, while being quite a straightforward
-technique, this method can achieve good results.
+This method fine-tunes a trained model and starts a second training run on
+in-domain data, initialized with the parameters obtained from the out-domain
+data. Thus you "continue training" on the data you are more interested in.
+Freitag and Al-Onaizan (2016) showed that this straightforward technique can
+achieve good results.
 
 When training a model, you can load a set of parameters with the `--params`
 argument in Sockeye, specifying an already trained model. Assuming the trained
@@ -53,9 +53,9 @@ Depending on the size of your training data you may want to adjust the
 parameters of the learning algorithm (learning rate, decay, etc.) and perhaps
 the checkpoint frequency.
 
-## Leaning Hidden Unit Contribution
+## Learning Hidden Unit Contribution
 
-Leaning Hidden Unit Contribution (LHUC) is a method proposed by Vilar (2018),
+Learning Hidden Unit Contribution (LHUC) is a method proposed by Vilar (2018),
 where the output of the hidden units in a network are expanded with an
 additional multiplicative unit. This unit can the strengthen or dampen the
 output of the corresponding unit.
@@ -77,3 +77,11 @@ or you can specify `all` for adding it to all supported components:
 Again it may be beneficial to adjust the learning parameters for the adaptation run.
 
 **Note:** At the moment LHUC only supports RNN models.
+
+## References
+
+Markus Freitag and Yaser Al-Onaizan. 2016. "Fast domain adaptation for neural
+machine translation." In arXiv preprint arXiv:1612.06897.
+
+David Vilar. 2018 "Learning Hidden Unit Contribution for Adapting Neural
+Machine Translation Models". In NAACL 2018.
