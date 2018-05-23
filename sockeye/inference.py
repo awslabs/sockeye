@@ -978,6 +978,74 @@ class Translator:
         # pylint: disable=invalid-unary-operand-type
         return -mx.nd.log(mx.nd.softmax(log_probs))
 
+    def score(self, trans_inputs: List[TranslatorInput]) -> List[TranslatorOutput]:
+        """
+        Force-decodes a TranslatorInput to a target translation.
+
+        :param trans_inputs: List of TranslatorInputs as returned by make_input().
+        :return: List of translation results.
+        """
+        translated_chunks = []  # type: List[TranslatedChunk]
+
+        # split into chunks
+        input_chunks = []  # type: List[TranslatorInput]
+        for input_idx, trans_input in enumerate(trans_inputs, 1):
+
+            # bad input
+            if isinstance(trans_input, BadTranslatorInput):
+                translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
+
+            # empty input
+            elif len(trans_input.tokens) == 0:
+                translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
+
+            # oversized input
+            elif len(trans_input.tokens) > self.max_input_length:
+                logger.debug(
+                    "Input %d has length (%d) that exceeds max input length (%d). Splitting into chunks of size %d.",
+                    trans_input.sentence_id, len(trans_input.tokens), self.buckets_source[-1], self.max_input_length)
+                input_chunks.extend(list(trans_input.chunks(self.max_input_length)))
+
+            # regular input
+            else:
+                input_chunks.append(trans_input)
+
+        # Sort longest to shortest (to rather fill batches of shorter than longer sequences)
+        input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.tokens), reverse=True)
+
+        # translate in batch-sized blocks over input chunks
+        for batch_id, batch in enumerate(utils.grouper(input_chunks, self.batch_size)):
+            logger.debug("Translating batch %d", batch_id)
+            # underfilled batch will be filled to a full batch size with copies of the 1st input
+            rest = self.batch_size - len(batch)
+            if rest > 0:
+                logger.debug("Extending the last batch to the full batch size (%d)", self.batch_size)
+                batch = batch + [batch[0]] * rest
+            batch_translations = self._translate_nd(*self._get_inference_input(batch))
+            # truncate to remove filler translations
+            if rest > 0:
+                batch_translations = batch_translations[:-rest]
+            for chunk, translation in zip(batch, batch_translations):
+                translated_chunks.append(TranslatedChunk(chunk.sentence_id, chunk.chunk_id, translation))
+        # Sort by input idx and then chunk id
+        translated_chunks = sorted(translated_chunks)
+
+        # Concatenate results
+        results = []  # type: List[TranslatorOutput]
+        chunks_by_input_idx = itertools.groupby(translated_chunks, key=lambda translation: translation.id)
+        for trans_input, (input_idx, chunks) in zip(trans_inputs, chunks_by_input_idx):
+            chunks = list(chunks)  # type: ignore
+            if len(chunks) == 1:  # type: ignore
+                translation = chunks[0].translation  # type: ignore
+            else:
+                translations_to_concat = [translated_chunk.translation for translated_chunk in chunks]
+                translation = self._concat_translations(translations_to_concat)
+
+            results.append(self._make_result(trans_input, translation))
+
+        return results
+
+
     def translate(self, trans_inputs: List[TranslatorInput]) -> List[TranslatorOutput]:
         """
         Batch-translates a list of TranslatorInputs, returns a list of TranslatorOutputs.

@@ -960,6 +960,65 @@ def add_translate_cli_args(params):
     add_logging_args(params)
 
 
+def add_score_cli_args(params):
+    decode_params = params.add_argument_group("Scoring parameters")
+
+    decode_params.add_argument(C.INFERENCE_ARG_INPUT_LONG, C.INFERENCE_ARG_INPUT_SHORT,
+                               default=None,
+                               help='Input file to translate. One sentence per line. '
+                                    'If not given, will read from stdin.')
+    decode_params.add_argument(C.INFERENCE_ARG_INPUT_FACTORS_LONG, C.INFERENCE_ARG_INPUT_FACTORS_SHORT,
+                               required=False,
+                               nargs='+',
+                               type=regular_file(),
+                               default=None,
+                               help='List of input files containing additional source factors,'
+                                    'each token-parallel to the source. Default: %(default)s.')
+    decode_params.add_argument(C.INFERENCE_ARG_OUTPUT_LONG, C.INFERENCE_ARG_OUTPUT_SHORT,
+                               default=None,
+                               help='Output file to write translations to. '
+                                    'If not given, will write to stdout.')
+    decode_params.add_argument('--models', '-m',
+                               required=True,
+                               nargs='+',
+                               help='Model folder(s). Use multiple for ensemble decoding. '
+                                    'Model determines config, best parameters and vocab files.')
+    decode_params.add_argument('--checkpoints', '-c',
+                               default=None,
+                               type=int,
+                               nargs='+',
+                               help='If not given, chooses best checkpoints for model(s). '
+                                    'If specified, must have the same length as --models and be integer')
+    decode_params.add_argument('--batch-size',
+                               type=int_greater_or_equal(1),
+                               default=1,
+                               help='Batch size during decoding. Determines how many sentences are translated '
+                                    'simultaneously. Default: %(default)s.')
+    decode_params.add_argument('--ensemble-mode',
+                               type=str,
+                               default='linear',
+                               choices=['linear', 'log_linear'],
+                               help='Ensemble mode. Default: %(default)s.')
+    decode_params.add_argument('--output-type',
+                               default='translation',
+                               choices=C.OUTPUT_HANDLERS,
+                               help='Output type. Default: %(default)s.')
+    decode_params.add_argument('--length-penalty-alpha',
+                               default=1.0,
+                               type=float,
+                               help='Alpha factor for the length penalty used in beam search: '
+                                    '(beta + len(Y))**alpha/(beta + 1)**alpha. A value of 0.0 will therefore turn off '
+                                    'length normalization. Default: %(default)s')
+    decode_params.add_argument('--length-penalty-beta',
+                               default=0.0,
+                               type=float,
+                               help='Beta factor for the length penalty used in beam search: '
+                                    '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
+
+    add_device_args(params)
+    add_logging_args(params)
+
+
 def add_inference_args(params):
     decode_params = params.add_argument_group("Inference parameters")
 
