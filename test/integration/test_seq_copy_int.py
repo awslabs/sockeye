@@ -130,7 +130,8 @@ def test_seq_copy(train_params: str,
                             test_line_count=_TEST_LINE_COUNT,
                             test_line_count_empty=_TEST_LINE_COUNT_EMPTY,
                             test_max_length=_TEST_MAX_LENGTH,
-                            sort_target=False) as data:
+                            sort_target=False,
+                            with_source_factors=use_source_factors) as data:
 
         # Only one of these is supported at a time in the tests
         assert not (use_source_factors and constrained_decoding)
