@@ -10,11 +10,21 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [1.18.15]
+## [1.18.17]
 ### Added
 - Introducing the image captioning module. Type of models supported: ConvNet encoder - Sockeye NMT decoders. This includes also a feature extraction script,
 an image-text iterator that loads features, training and inference pipelines and a visualization script that loads images and captions.
 See [this tutorial](tutorials/image_captioning) for its usage.
+
+## [1.18.16]
+### Fixed
+- Removed summation of gradient arrays when logging gradients.
+  This clogged the memory on the primary GPU device over time when many checkpoints were done.
+  Gradient histograms are now logged to Tensorboard separated by device.
+
+## [1.18.15]
+### Added
+- Added decoding with target-side lexical constraints (documentation in `tutorials/constraints`).
 
 ## [1.18.14]
 ### Added

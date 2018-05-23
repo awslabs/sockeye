@@ -145,7 +145,7 @@ def main():
         read_and_translate(translator=translator,
                            output_handler=out_handler,
                            chunk_size=args.chunk_size,
-                           inp=args.input)
+                           input_file=args.input)
 
 
 if __name__ == '__main__':

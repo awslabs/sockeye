@@ -15,6 +15,7 @@ sockeye/inference.py
 sockeye/init_embedding.py
 sockeye/initializer.py
 sockeye/layers.py
+sockeye/lexical_constraints.py
 sockeye/lexicon.py
 sockeye/log.py
 sockeye/loss.py

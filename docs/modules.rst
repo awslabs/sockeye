@@ -106,6 +106,13 @@ sockeye.layers module
     :members:
     :show-inheritance:
 
+sockeye.lexical_constraints module
+----------------------------------
+
+.. automodule:: sockeye.lexical_constraints
+    :members:
+    :show-inheritance:
+
 sockeye.lexicon module
 ----------------------
 

@@ -193,7 +193,11 @@ BEAM_SEARCH_STOP_ALL = 'all'
 # Inference Input JSON constants
 JSON_TEXT_KEY = "text"
 JSON_FACTORS_KEY = "factors"
+JSON_CONSTRAINTS_KEY = "constraints"
 JSON_ENCODING = "utf-8"
+
+# Lexical constraints
+BANK_ADJUSTMENT = 'even'
 
 VERSION_NAME = "version"
 CONFIG_NAME = "config"
