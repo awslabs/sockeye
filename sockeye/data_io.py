@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -217,16 +217,12 @@ def analyze_sequence_lengths(sources: List[str],
                              vocab_target: vocab.Vocab,
                              max_seq_len_source: int,
                              max_seq_len_target: int) -> 'LengthStatistics':
-    train_sources_sentences = [SequenceReader(source, vocab, add_bos=False) for source, vocab in
-                               zip(sources, vocab_sources)]
-    # Length statistics are calculated on the raw sentences without special tokens, such as the BOS, as these can
-    # have a a large impact on the length ratios, especially with lots of short sequences.
-    train_target_sentences = SequenceReader(target, vocab_target, add_bos=False)
+    train_sources_sentences, train_target_sentences = create_sequence_readers(sources, target, vocab_sources,
+                                                                              vocab_target)
 
     length_statistics = calculate_length_statistics(train_sources_sentences, train_target_sentences,
                                                     max_seq_len_source,
-                                                    # Take into account the BOS symbol that is added later
-                                                    max_seq_len_target - 1)
+                                                    max_seq_len_target)
 
     logger.info("%d sequences of maximum length (%d, %d) in '%s' and '%s'.",
                 length_statistics.num_sents, max_seq_len_source, max_seq_len_target, sources[0], target)
@@ -358,9 +354,8 @@ def shard_data(source_fnames: List[str],
                           range(len(source_fnames))]
         target_shards = [exit_stack.enter_context(smart_open(f, mode="wt")) for f in target_shard_fnames]
 
-        source_readers = [SequenceReader(fname, vocab, add_bos=False) for fname, vocab in zip(source_fnames,
-                                                                                              source_vocabs)]
-        target_reader = SequenceReader(target_fname, target_vocab, add_bos=True)
+        source_readers, target_reader = create_sequence_readers(source_fnames, target_fname,
+                                                                source_vocabs, target_vocab)
 
         random_shard_iter = iter(lambda: random.randrange(num_shards), None)
 
@@ -535,8 +530,8 @@ def prepare_data(source_fnames: List[str],
 
     # 3. convert each shard to serialized ndarrays
     for shard_idx, (shard_sources, shard_target, shard_stats) in enumerate(shards):
-        sources_sentences = [SequenceReader(s, vocab=None) for s in shard_sources]
-        target_sentences = SequenceReader(shard_target, vocab=None)
+        sources_sentences = [SequenceReader(s) for s in shard_sources]
+        target_sentences = SequenceReader(shard_target)
         dataset = data_loader.load(sources_sentences, target_sentences, shard_stats.num_sents_per_bucket)
         shard_fname = os.path.join(output_prefix, C.SHARD_NAME % shard_idx)
         shard_stats.log()
@@ -561,7 +556,8 @@ def prepare_data(source_fnames: List[str],
     config_data = DataConfig(data_statistics=data_statistics,
                              max_seq_len_source=max_seq_len_source,
                              max_seq_len_target=max_seq_len_target,
-                             num_source_factors=len(source_fnames))
+                             num_source_factors=len(source_fnames),
+                             source_with_eos=True)
     config_data_fname = os.path.join(output_prefix, C.DATA_CONFIG)
     logger.info("Writing data config to '%s'", config_data_fname)
     config_data.save(config_data_fname)
@@ -609,10 +605,9 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
     validation_length_statistics = analyze_sequence_lengths(validation_sources, validation_target,
                                                             source_vocabs, target_vocab,
                                                             max_seq_len_source, max_seq_len_target)
-
-    validation_sources_sentences = [SequenceReader(source, vocab, add_bos=False) for source, vocab in
-                                    zip(validation_sources, source_vocabs)]
-    validation_target_sentences = SequenceReader(validation_target, target_vocab, add_bos=True, limit=None)
+    validation_sources_sentences, validation_target_sentences = create_sequence_readers(validation_sources,
+                                                                                        validation_target,
+                                                                                        source_vocabs, target_vocab)
 
     validation_data_statistics = get_data_statistics(validation_sources_sentences,
                                                      validation_target_sentences,
@@ -770,8 +765,7 @@ def get_training_data_iters(sources: List[str],
                                       length_statistics.length_ratio_mean) if bucketing else [
         (max_seq_len_source, max_seq_len_target)]
 
-    sources_sentences = [SequenceReader(source, vocab, add_bos=False) for source, vocab in zip(sources, source_vocabs)]
-    target_sentences = SequenceReader(target, target_vocab, add_bos=True)
+    sources_sentences, target_sentences = create_sequence_readers(sources, target, source_vocabs, target_vocab)
 
     # 2. pass: Get data statistics
     data_statistics = get_data_statistics(sources_sentences, target_sentences, buckets,
@@ -803,7 +797,8 @@ def get_training_data_iters(sources: List[str],
     config_data = DataConfig(data_statistics=data_statistics,
                              max_seq_len_source=max_seq_len_source,
                              max_seq_len_target=max_seq_len_target,
-                             num_source_factors=len(sources))
+                             num_source_factors=len(sources),
+                             source_with_eos=True)
 
     train_iter = ParallelSampleIter(data=training_data,
                                     buckets=buckets,
@@ -932,12 +927,14 @@ class DataConfig(config.Config):
                  data_statistics: DataStatistics,
                  max_seq_len_source: int,
                  max_seq_len_target: int,
-                 num_source_factors: int) -> None:
+                 num_source_factors: int,
+                 source_with_eos: bool = False) -> None:
         super().__init__()
         self.data_statistics = data_statistics
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
         self.num_source_factors = num_source_factors
+        self.source_with_eos = source_with_eos
 
 
 def read_content(path: str, limit: Optional[int] = None) -> Iterator[List[str]]:
@@ -1002,21 +999,25 @@ class SequenceReader(Iterable):
 
     def __init__(self,
                  path: str,
-                 vocab: Optional[vocab.Vocab],
+                 vocabulary: Optional[vocab.Vocab] = None,
                  add_bos: bool = False,
+                 add_eos: bool = False,
                  limit: Optional[int] = None) -> None:
         self.path = path
-        self.vocab = vocab
+        self.vocab = vocabulary
         self.bos_id = None
-        if vocab is not None:
-            assert C.UNK_SYMBOL in vocab
-            assert vocab[C.PAD_SYMBOL] == C.PAD_ID
-            assert C.BOS_SYMBOL in vocab
-            assert C.EOS_SYMBOL in vocab
-            self.bos_id = vocab[C.BOS_SYMBOL]
+        self.eos_id = None
+        if vocabulary is not None:
+            assert C.UNK_SYMBOL in vocabulary
+            assert vocabulary[C.PAD_SYMBOL] == C.PAD_ID
+            assert C.BOS_SYMBOL in vocabulary
+            assert C.EOS_SYMBOL in vocabulary
+            self.bos_id = vocabulary[C.BOS_SYMBOL]
+            self.eos_id = vocabulary[C.EOS_SYMBOL]
         else:
-            check_condition(not add_bos, "Adding a BOS symbol requires a vocabulary")
+            check_condition(not add_bos and not add_eos, "Adding a BOS or EOS symbol requires a vocabulary")
         self.add_bos = add_bos
+        self.add_eos = add_eos
         self.limit = limit
 
     def __iter__(self):
@@ -1028,9 +1029,29 @@ class SequenceReader(Iterable):
             if len(sequence) == 0:
                 yield None
                 continue
-            if vocab is not None and self.add_bos:
-                sequence.insert(0, self.vocab[C.BOS_SYMBOL])
+            if self.add_bos:
+                sequence.insert(0, self.bos_id)
+            if self.add_eos:
+                sequence.append(self.eos_id)
             yield sequence
+
+
+def create_sequence_readers(sources: List[str], target: str,
+                            vocab_sources: List[vocab.Vocab],
+                            vocab_target: vocab.Vocab) -> Tuple[List[SequenceReader], SequenceReader]:
+    """
+    Create source readers with EOS and target readers with BOS.
+
+    :param sources: The file names of source data and factors.
+    :param target: The file name of the target data.
+    :param vocab_sources: The source vocabularies.
+    :param vocab_target: The target vocabularies.
+    :return: The source sequence readers and the target reader.
+    """
+    source_sequence_readers = [SequenceReader(source, vocab, add_eos=True) for source, vocab in
+                               zip(sources, vocab_sources)]
+    target_sequence_reader = SequenceReader(target, vocab_target, add_bos=True)
+    return source_sequence_readers, target_sequence_reader
 
 
 def parallel_iter(source_iters: Sequence[Iterable[Optional[Any]]], target_iterable: Iterable[Optional[Any]]):
@@ -1239,10 +1260,15 @@ def get_batch_indices(data: ParallelDataSet,
     return idxs
 
 
-class BaseParallelSampleIter(mx.io.DataIter, ABC):
+class MetaBaseParallelSampleIter(ABC):
+    pass
+
+
+class BaseParallelSampleIter(mx.io.DataIter):
     """
     Base parallel sample iterator.
     """
+    __metaclass__ = MetaBaseParallelSampleIter
 
     def __init__(self,
                  buckets,
@@ -1511,9 +1537,6 @@ class ParallelSampleIter(BaseParallelSampleIter):
             inverse_data_permutations = np.load(fp)
             data_permutations = np.load(fp)
 
-        # Because of how checkpointing is done (pre-fetching the next batch in
-        # each iteration), curr_idx should always be >= 1
-        assert self.curr_batch_index >= 1
         # Right after loading the iterator state, next() should be called
         self.curr_batch_index -= 1
 

@@ -880,7 +880,6 @@ class EarlyStoppingTrainer:
         """
         Helper function that checks various configuration compatibilities.
         """
-        utils.check_condition(early_stopping_metric in metrics, "Early stopping metric must be tracked.")
         utils.check_condition(len(metrics) > 0, "At least one metric must be provided.")
         for metric in metrics:
             utils.check_condition(metric in C.METRICS, "Unknown metric to track during training: %s" % metric)
@@ -1018,9 +1017,6 @@ class TensorboardLogger:
         try:
             import mxboard
             logger.info("Logging training events for Tensorboard at '%s'", self.logdir)
-            if os.path.exists(self.logdir):
-                logger.info("Deleting existing Tensorboard log directory '%s'", self.logdir)
-                shutil.rmtree(self.logdir)
             self.sw = mxboard.SummaryWriter(logdir=self.logdir, flush_secs=60, verbose=False)
         except ImportError:
             logger.info("mxboard not found. Consider 'pip install mxboard' to log events to Tensorboard.")

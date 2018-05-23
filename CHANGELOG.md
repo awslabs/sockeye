@@ -10,6 +10,50 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.14]
+### Added
+- Introduced Sockeye Autopilot for single-command end-to-end system building.
+See the [Autopilot documentation]((https://github.com/awslabs/sockeye/tree/master/contrib/autopilot)) and run with: `sockeye-autopilot`.
+Autopilot is a `contrib` module with its own tests that are run periodically.
+It is not included in the comprehensive tests run for every commit.
+
+## [1.18.13]
+### Fixed
+- Fixed two bugs with training resumption:
+  1. removed overly strict assertion in the data iterator for model states before the first checkpoint.
+  2. removed deletion of Tensorboard log directory.
+
+### Added
+- Added support for config files. Command line parameters have precedence over the values read from the config file.
+  Minimal working example:
+  `python -m sockeye.train --config config.yaml` with contents of `config.yaml` as follows:
+  ```yaml
+  source: source.txt
+  target: target.txt
+  output: out
+  validation_source: valid.source.txt
+  validation_target: valid.target.txt
+  ```
+### Changed
+  The full set of arguments is serialized to `out/args.yaml` at the beginning of training (before json was used).
+
+## [1.18.12]
+### Changed
+- All source side sequences now get appended an additional end-of-sentence (EOS) symbol. This change is backwards
+  compatible meaning that inference with older models will still work without the EOS symbol.
+
+## [1.18.11]
+### Changed
+- Default training parameters have been changed to reflect the setup used in our arXiv paper. Specifically, the default
+  is now to train a 6 layer Transformer model with word based batching. The only difference to the paper is that weight
+  tying is still turned off by default, as there may be use cases in which tying the source and target vocabularies is
+  not appropriate. Turn it on using `--weight-tying --weight-tying-type=src_trg_softmax`. Additionally, BLEU scores from
+  a checkpoint decoder are now monitored by default.
+
+## [1.18.10]
+### Fixed
+- Re-allow early stopping w.r.t BLEU
+
 ## [1.18.9]
 ### Fixed
 - Fixed a problem with lhuc boolean flags passed as None.
@@ -54,7 +98,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Changed
 - Removed combined linear projection of keys & values in source attention transformer layers for
   performance improvements.
-- The topk operator is performed in a single operation during batch decoding instead of running in a loop over each 
+- The topk operator is performed in a single operation during batch decoding instead of running in a loop over each
 sentence, bringing speed benefits in batch decoding.
 
 ## [1.18.1]
@@ -129,7 +173,7 @@ For each metric the mean and standard deviation will be reported across files.
      and `--input-factors` a list of files containing token-parallel factors.
    At test time, an exception is raised if the number of expected factors does not
    match the factors passed along with the input.
-   
+
  - Removed bias parameters from multi-head attention layers of the transformer.
 
 ## [1.16.6]
@@ -187,7 +231,7 @@ features, benefitting the beam search implementation.
  - New CLI `sockeye.prepare_data` for preprocessing the training data only once before training,
  potentially splitting large datasets into shards. At training time only one shard is loaded into memory at a time,
  limiting the maximum memory usage.
- 
+
 ### Changed
  - Instead of using the ```--source``` and ```--target``` arguments ```sockeye.train``` now accepts a
  ```--prepared-data``` argument pointing to the folder containing the preprocessed and sharded data. Using the raw
