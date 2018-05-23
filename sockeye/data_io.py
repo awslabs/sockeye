@@ -636,9 +636,10 @@ def get_prepared_data_iters(prepared_data_dir: str,
                             batch_size: int,
                             batch_by_words: bool,
                             batch_num_devices: int,
-                            fill_up: str) -> Tuple['BaseParallelSampleIter',
-                                                   'BaseParallelSampleIter',
-                                                   'DataConfig', List[vocab.Vocab], vocab.Vocab]:
+                            fill_up: str,
+                            curriculum_training: bool) -> Tuple['BaseParallelSampleIter',
+                                                                'BaseParallelSampleIter',
+                                                                'DataConfig', List[vocab.Vocab], vocab.Vocab]:
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
@@ -687,12 +688,34 @@ def get_prepared_data_iters(prepared_data_dir: str,
 
     config_data.data_statistics.log(bucket_batch_sizes)
 
-    train_iter = ShardedParallelSampleIter(shard_fnames,
-                                           buckets,
-                                           batch_size,
-                                           bucket_batch_sizes,
-                                           fill_up,
-                                           num_factors=len(data_info.sources))
+    if curriculum_training:
+        check_condition(os.path.exists(os.join(prepared_data_dir, "shard_scores")),
+                        "Curriculum training was specified but no shard weights were found."
+                        "Run sockeye.prepare_data for curriculum training")
+
+        shards_complexity = []
+        with open(os.join(prepared_data_dir, "shard_scores")) as shard_scores_file:
+            for shard_score in shard_scores_file:
+                shards_complexity.append(int(shard_score))
+
+        check_condition(len(shards_complexity) == len(shard_fnames),
+                        "Did not find shard scores for all shards in %s"
+                        % os.join(prepared_data_dir, "shard_scores"))
+
+        train_iter = CurriculumParallelSampleIter(shard_fnames,
+                                                  shards_complexity,
+                                                  buckets,
+                                                  batch_size,
+                                                  bucket_batch_sizes,
+                                                  fill_up,
+                                                  num_factors=len(data_info.sources))
+    else:
+        train_iter = ShardedParallelSampleIter(shard_fnames,
+                                               buckets,
+                                               batch_size,
+                                               bucket_batch_sizes,
+                                               fill_up,
+                                               num_factors=len(data_info.sources))
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=target_vocab[C.EOS_SYMBOL],
@@ -784,6 +807,7 @@ def get_training_data_iters(sources: List[str],
                                            eos_id=target_vocab[C.EOS_SYMBOL],
                                            pad_id=C.PAD_ID)
 
+    # Returns bucketed data
     training_data = data_loader.load(sources_sentences, target_sentences,
                                      data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes, fill_up)
 
@@ -1424,6 +1448,85 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
             self.shard_index = pickle.load(fp)
         self._load_shard()
         self.shard_iter.load_state(fname + ".sharditer")
+
+
+class CurriculumParallelSampleIter(ShardedParallelSampleIter):
+    """
+    Goes through the data one shard at a time. The memory consumption is limited by the memory consumption of the
+    largest shard. The order in which shards are traversed is changed with each reset.
+    """
+
+    def __init__(self,
+                 shards_fnames: List[str],
+                 shards_complexity: List[int],
+                 buckets,
+                 batch_size,
+                 bucket_batch_sizes,
+                 fill_up: str,
+                 source_data_name=C.SOURCE_NAME,
+                 target_data_name=C.TARGET_NAME,
+                 label_name=C.TARGET_LABEL_NAME,
+                 num_factors: int = 1,
+                 dtype='float32') -> None:
+        super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
+                         source_data_name=source_data_name, target_data_name=target_data_name,
+                         label_name=label_name, num_factors=num_factors, dtype=dtype)
+        assert len(shards_fnames) > 0
+        self.max_shard_complexity = 1
+        self.shards_fnames = list(shards_fnames)
+        self.shards_complexity = list(shards_complexity)
+        self.visible_shards_fnames = []
+        self.shard_index = -1
+        self.fill_up = fill_up
+
+        self.reset()
+
+    def reset(self):
+        # At each reset, given the complexity we are allowed, only a certain number of shards are visible
+        self.visible_shards_fnames = [self.shards_fnames[idx] for idx in range(len(self.shards_fnames))
+                                      if self.shards_complexity[idx] <= self.max_shard_complexity]
+        logger.info("Shards visible based on complexity constraint are: ", self.visible_shards_fnames)
+        if len(self.visible_shards_fnames) > 1:
+            logger.info("Shuffling the visible shards.")
+            # Making sure to not repeat a shard:
+            # Explicitly, this makes sure that if we last saw shard 5, we will not see it again in the
+            # next epoch as the first shard. That is, the following case is avoided
+            # Epoch 1 : [3, 2, 1, 0]
+            # Epoch 2 : [0, 3, 2, 1]
+            if self.shard_index < 0:
+                current_shard_fname = ""
+            else:
+                current_shard_fname = self.visible_shards_fnames[self.shard_index]
+            remaining_shards = [shard for shard in self.visible_shards_fnames if shard != current_shard_fname]
+            next_shard_fname = random.choice(remaining_shards)
+            remaining_shards = [shard for shard in self.visible_shards_fnames if shard != next_shard_fname]
+            random.shuffle(remaining_shards)
+
+            self.shards_fnames = [next_shard_fname] + remaining_shards
+
+            self.shard_index = 0
+            super()._load_shard()
+        else:
+            if self.shard_index < 0:
+                self.shard_index = 0
+                super()._load_shard()
+            # We can just reset the shard_iter as we only have a single shard
+            self.shard_iter.reset()
+
+    def iter_next(self) -> bool:
+        next_shard_index = self.shard_index + 1
+        return self.shard_iter.iter_next() or next_shard_index < len(self.visible_shards_fnames)
+
+    def next(self) -> mx.io.DataBatch:
+        if not self.shard_iter.iter_next():
+            if self.shard_index < len(self.visible_shards_fnames) - 1:
+                self.shard_index += 1
+                super()._load_shard()
+            else:
+                # Increase complexity allowed (end of epoch)
+                self.max_shard_complexity += 1
+                raise StopIteration
+        return self.shard_iter.next()
 
 
 class ParallelSampleIter(BaseParallelSampleIter):

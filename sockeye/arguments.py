@@ -747,6 +747,11 @@ def add_training_args(params):
                               default='replicate',
                               help=argparse.SUPPRESS)
 
+    train_params.add_argument('--curriculum-training',
+                              action='store_true',
+                              help='Enable curriculum training; Requires prepared data and shard scores'
+                                   '(prepare_data.py)')
+
     train_params.add_argument('--loss',
                               default=C.CROSS_ENTROPY,
                               choices=[C.CROSS_ENTROPY],
