@@ -11,7 +11,6 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import json
 import pytest
 import random
 
@@ -112,14 +111,14 @@ ENCODER_DECODER_SETTINGS = [
      True, False, False, False)]
 
 
-@pytest.mark.parametrize("train_params, translate_params, restrict_lexicon, use_prepared_data, use_source_factors, constrained_decoding",
+@pytest.mark.parametrize("train_params, translate_params, restrict_lexicon, use_prepared_data, use_source_factors, use_constrained_decoding",
                          ENCODER_DECODER_SETTINGS)
 def test_seq_copy(train_params: str,
                   translate_params: str,
                   restrict_lexicon: bool,
                   use_prepared_data: bool,
                   use_source_factors: bool,
-                  constrained_decoding: bool):
+                  use_constrained_decoding: bool):
     """Task: copy short sequences of digits"""
 
     with tmp_digits_dataset(prefix="test_seq_copy",
@@ -131,10 +130,11 @@ def test_seq_copy(train_params: str,
                             test_line_count_empty=_TEST_LINE_COUNT_EMPTY,
                             test_max_length=_TEST_MAX_LENGTH,
                             sort_target=False,
-                            with_source_factors=use_source_factors) as data:
+                            with_source_factors=use_source_factors,
+                            with_target_constraints=use_constrained_decoding) as data:
 
         # Only one of these is supported at a time in the tests
-        assert not (use_source_factors and constrained_decoding)
+        assert not (use_source_factors and use_constrained_decoding)
 
         # When using source factors
         train_source_factor_paths, dev_source_factor_paths, test_source_factor_paths = None, None, None
@@ -143,32 +143,7 @@ def test_seq_copy(train_params: str,
             dev_source_factor_paths = [data['validation_source']]
             test_source_factor_paths = [data['test_source']]
 
-        # When using constrained decoding, rewrite the source file. Generating a mixture of
-        # sentences with and without constraints here is critical, since this can happen in production
-        # and also introduces sometimes some unanticipated interactions.
-        test_source_path = data['test_source']
-        test_target_path = data['test_target']
-        if constrained_decoding:
-            new_sources = []
-            for sentno, (source, target) in enumerate(zip(open(test_source_path), open(test_target_path))):
-                target_words = target.rstrip().split()
-                target_len = len(target_words)
-                source_len = len(source.rstrip().split())
-                new_source = { 'text': source.rstrip() }
-                # From the odd-numbered sentences that are not too long, create constraints. We do
-                # only odds to ensure we get batches with mixed constraints / lack of constraints.
-                if target_len > 0 and source_len < _TEST_MAX_LENGTH and sentno % 2 == 0:
-                    start_pos = 0
-                    end_pos = min(target_len, 3)
-                    constraint = ' '.join(target_words[start_pos:end_pos])
-                    new_source['constraints'] = [constraint]
-
-                new_sources.append(new_source)
-
-            with open(test_source_path, 'w') as fout:
-                for line in new_sources:
-                    print(json.dumps(line), file=fout)
-
+        if use_constrained_decoding:
             translate_params += " --json-input"
 
         # Test model configuration, including the output equivalence of batch and no-batch decoding
@@ -182,13 +157,12 @@ def test_seq_copy(train_params: str,
                             train_target_path=data['target'],
                             dev_source_path=data['validation_source'],
                             dev_target_path=data['validation_target'],
-                            test_source_path=test_source_path,
+                            test_source_path=data['test_target'],
                             test_target_path=data['test_target'],
                             train_source_factor_paths=train_source_factor_paths,
                             dev_source_factor_paths=dev_source_factor_paths,
                             test_source_factor_paths=test_source_factor_paths,
                             max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
                             restrict_lexicon=restrict_lexicon,
-                            decode_is_constrained=constrained_decoding,
                             work_dir=data['work_dir'],
                             use_prepared_data=use_prepared_data)
