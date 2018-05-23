@@ -11,29 +11,38 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import pytest
 import random
 import string
 
-from test.common_image_captioning import run_extract_features_captioning, tmp_img_captioning_dataset
+import pytest
 
+from test.common_image_captioning import run_extract_features_captioning, \
+    tmp_img_captioning_dataset
 
 IMAGE_ENCODER_SETTINGS = [
-    # RESNET 152
-    ("--source-image-size 3 224 224 --batch-size 16 --image-encoder-layer stage4_unit3_conv3",
-     "http://data.dmlc.ml/models/imagenet/resnet/152-layers/resnet-152", 0, "resnet-152"),
-    # SQUEEZE-NET
-    ("--source-image-size 3 224 224 --batch-size 16 --image-encoder-layer conv10",
-     "http://data.dmlc.ml/models/imagenet/squeezenet/squeezenet_v1.1", 0, "squeezenet_v1.1"),
+    ("2-conv-layer", "conv1"),
+    ("2-conv-layer", "conv2"),
 ]
 
 
-@pytest.mark.parametrize("extract_params, model_address, epoch, model_prefix",
+@pytest.mark.parametrize("model_name, layer",
                          IMAGE_ENCODER_SETTINGS)
-def test_caption_random_features(extract_params: str, model_address: str, epoch: int, model_prefix: str):
+def test_caption_random_features(model_name: str, layer: str):
+    model_path = "test/data"
+    epoch = 0
+    source_image_size = (3, 20, 20)
+    batch_size = 8
+    extract_params = "--source-image-size {s1} {s2} {s3} --batch-size {batch_size} " \
+                     "--image-encoder-layer {layer}".format(s1=source_image_size[0],
+                                                            s2=source_image_size[1],
+                                                            s3=source_image_size[2],
+                                                            batch_size=batch_size,
+                                                            layer=layer)
 
     # generate random names
-    source_list = [''.join(random.choice(string.ascii_uppercase) for _ in range(4)) for i in range(15)]
+    source_list = [
+        ''.join(random.choice(string.ascii_uppercase) for _ in range(4)) for i
+        in range(8)]
     prefix = "tmp_features"
     use_features = False
     with tmp_img_captioning_dataset(source_list,
@@ -42,11 +51,13 @@ def test_caption_random_features(extract_params: str, model_address: str, epoch:
                                     dev_max_length=1,
                                     test_max_length=1,
                                     use_features=use_features) as data:
-
-        source_files = [data["source"], data["validation_source"], data["test_source"]]
-        run_extract_features_captioning(extract_params=extract_params,
-                             model_address=model_address,
-                             epoch=epoch,
-                             model_prefix=model_prefix,
-                             source_files=source_files,
-                             work_dir=data['work_dir'])
+        source_files = [data["source"], data["validation_source"],
+                        data["test_source"]]
+        run_extract_features_captioning(model_path=model_path,
+                                        model_name=model_name,
+                                        epoch=epoch,
+                                        source_image_size=source_image_size,
+                                        batch_size=batch_size,
+                                        extract_params=extract_params,
+                                        source_files=source_files,
+                                        work_dir=data['work_dir'])

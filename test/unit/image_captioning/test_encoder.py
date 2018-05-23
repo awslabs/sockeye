@@ -12,33 +12,29 @@
 # permissions and limitations under the License.
 
 import os
-import urllib
 
 import mxnet as mx
 
 from sockeye import constants as C
 from sockeye.image_captioning.encoder import ImageLoadedCnnEncoderConfig, \
     ImageLoadedCnnEncoder
+from test.common_image_captioning import create_simple_and_save_to_disk
 
 
 def test_image_loaded_cnn_encoder():
-    prefixes = ["-0000.params", "-symbol.json"]
-    link_address = "http://data.dmlc.ml/models/imagenet/squeezenet/squeezenet_v1.1"
-    model_name = "squeezenet_v1.1"
+    model_name = "2-conv-layer"
     model_path = "test/data"
     model_path = os.path.join(model_path, model_name)
     epoch = 0
-    layer_name = "conv10"
-    encoded_seq_len = 170
-    num_embed = 1000
+    layer_name = "conv2"
+    encoded_seq_len = 16 + 1  # +1 for global descriptor
+    num_embed = 10
     no_global_descriptor = False
     preextracted_features = False
-    source_image_size = (3, 224, 224)
-    batch_size = 16
-    # Get model
-    for p in prefixes:
-        if not os.path.exists(model_path + p):
-            urllib.request.urlretrieve(link_address + p, model_path + p)
+    source_image_size = (3, 20, 20)
+    batch_size = 8
+    # Create net and save to disk
+    create_simple_and_save_to_disk(model_path, epoch, source_image_size, batch_size)
     # Setup encoder
     image_cnn_encoder_config = ImageLoadedCnnEncoderConfig(
                                     model_path=model_path,

@@ -22,6 +22,7 @@ from tempfile import TemporaryDirectory
 from typing import List, Optional, Tuple
 from unittest.mock import patch
 
+import mxnet as mx
 import numpy as np
 from PIL import Image  # pylint: disable=import-error
 
@@ -240,21 +241,19 @@ _EXTRACT_FEATURES_PARAMS_COMMON = \
     "--output {output_file} --image-encoder-model-path {image_encoder_model_path}"
 
 
-def run_extract_features_captioning(extract_params: str,
-                             model_address: str,
-                             epoch: int,
-                             model_prefix: str,
-                             source_files: List[str],
-                             work_dir: str) -> None:
-    # Download the model to test/data/ (if required)
-    image_root = work_dir
-    prefixes = ["-%04d.params"%epoch, "-symbol.json"]
-    model_path = "test/data"
-    image_encoder_model_path = os.path.join(model_path, model_prefix)
-    logger.info("Downloading model %s to %s.", model_prefix, model_path)
-    for p in prefixes:
-        if not os.path.exists(image_encoder_model_path + p):
-            urllib.request.urlretrieve(model_address + p, image_encoder_model_path + p)
+def run_extract_features_captioning(model_path: str,
+                                    model_name: str,
+                                    epoch: int,
+                                    source_image_size: tuple,
+                                    batch_size: int,
+                                    extract_params: str,
+                                    source_files: List[str],
+                                    work_dir: str) -> None:
+
+    model_path = os.path.join(model_path, model_name)
+
+    # Create net and save to disk
+    create_simple_and_save_to_disk(model_path, epoch, source_image_size, batch_size)
 
     # Extract features
     for s in source_files:
@@ -263,16 +262,45 @@ def run_extract_features_captioning(extract_params: str,
             output_file = "random.features"
             params = "{} {} {}".format(sockeye.image_captioning.extract_features.__file__,
                                        _EXTRACT_FEATURES_PARAMS_COMMON.format(
-                                           image_root=image_root,
+                                           image_root=work_dir,
                                            source_file=s,
                                            output_root=output_root,
                                            output_file=output_file,
-                                           image_encoder_model_path=image_encoder_model_path
+                                           image_encoder_model_path=model_path
                                        ),
                                        extract_params)
-            print(params)
 
             logger.info("Starting feature extractopm with parameters %s.", extract_params)
             with patch.object(sys, "argv", params.split()):
                 sockeye.image_captioning.extract_features.main()
 
+
+def create_simple_and_save_to_disk(prefix, iteration, source_image_size, batch_size):
+    if not os.path.exists(prefix + ".params"):
+        # init model
+        sym = get_2convnet_symbol()
+        mod = mx.mod.Module(sym)
+        mod.bind(data_shapes=[('data', (batch_size,) + source_image_size)],
+                 label_shapes=[('softmax_label', (batch_size, 1))])
+        mod.init_params()
+        # save
+        mod.save_checkpoint(prefix, iteration)
+
+
+def get_2convnet_symbol():
+    data = mx.symbol.Variable('data')
+    # first conv
+    conv1 = mx.symbol.Convolution(data=data, kernel=(5,5), num_filter=20, name='conv1')
+    tanh1 = mx.symbol.Activation(data=conv1, act_type="tanh")
+    pool1 = mx.symbol.Pooling(data=tanh1, pool_type="max",
+                              kernel=(2,2), stride=(2,2))
+    # second conv
+    conv2 = mx.symbol.Convolution(data=pool1, kernel=(5,5), num_filter=50, name='conv2')
+    tanh2 = mx.symbol.Activation(data=conv2, act_type="tanh")
+    pool2 = mx.symbol.Pooling(data=tanh2, pool_type="max",
+                              kernel=(2,2), stride=(2,2))
+    flatten = mx.symbol.Flatten(data=pool2)
+    fc2 = mx.symbol.FullyConnected(data=flatten, num_hidden=1)
+    # loss
+    outsym = mx.symbol.SoftmaxOutput(data=fc2, name='softmax')
+    return outsym
