@@ -202,7 +202,7 @@ def init_batch(raw_constraints: List[Optional[RawConstraintList]],
     :param eos_id: The target-language vocabulary ID of the EOS symbol.
     :return: A list of ConstrainedHypothesis objects (shape: (batch_size * beam_size,)).
     """
-    constraints = [None] * (len(raw_constraints) * beam_size)
+    constraints = [None] * (len(raw_constraints) * beam_size)  # type: List[Optional[ConstrainedHypothesis]]
     if any(raw_constraints):
         for i, raw_list in enumerate(raw_constraints):
             num_constraints = sum([len(phrase) for phrase in raw_list]) if raw_list is not None else 0
@@ -266,7 +266,7 @@ class ConstrainedCandidate:
                  row: int,
                  col: int,
                  score: float,
-                 hypothesis: ConstrainedHypothesis):
+                 hypothesis: ConstrainedHypothesis) -> None:
         self.row = row
         self.col = col
         self.score = score
