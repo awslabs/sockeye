@@ -1515,7 +1515,12 @@ class CurriculumParallelSampleIter(ShardedParallelSampleIter):
 
     def iter_next(self) -> bool:
         next_shard_index = self.shard_index + 1
-        return self.shard_iter.iter_next() or next_shard_index < len(self.visible_shards_fnames)
+        if self.shard_iter.iter_next() or next_shard_index < len(self.visible_shards_fnames):
+            return True
+
+        # Increase complexity allowed (end of epoch)
+        self.max_shard_complexity += 1
+        return False
 
     def next(self) -> mx.io.DataBatch:
         if not self.shard_iter.iter_next():
@@ -1523,8 +1528,6 @@ class CurriculumParallelSampleIter(ShardedParallelSampleIter):
                 self.shard_index += 1
                 super()._load_shard()
             else:
-                # Increase complexity allowed (end of epoch)
-                self.max_shard_complexity += 1
                 raise StopIteration
         return self.shard_iter.next()
 
