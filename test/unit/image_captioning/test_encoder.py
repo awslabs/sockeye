@@ -12,6 +12,7 @@
 # permissions and limitations under the License.
 
 import os
+from tempfile import TemporaryDirectory
 
 import mxnet as mx
 
@@ -22,10 +23,6 @@ from test.common_image_captioning import create_simple_and_save_to_disk
 
 
 def test_image_loaded_cnn_encoder():
-    model_name = "2-conv-layer"
-    model_path = "test/data"
-    model_path = os.path.join(model_path, model_name)
-    epoch = 0
     layer_name = "conv2"
     encoded_seq_len = 16 + 1  # +1 for global descriptor
     num_embed = 10
@@ -33,43 +30,47 @@ def test_image_loaded_cnn_encoder():
     preextracted_features = False
     source_image_size = (3, 20, 20)
     batch_size = 8
-    # Create net and save to disk
-    create_simple_and_save_to_disk(model_path, epoch, source_image_size, batch_size)
-    # Setup encoder
-    image_cnn_encoder_config = ImageLoadedCnnEncoderConfig(
-                                    model_path=model_path,
-                                    epoch=epoch,
-                                    layer_name=layer_name,
-                                    encoded_seq_len=encoded_seq_len,
-                                    num_embed=num_embed,
-                                    no_global_descriptor=no_global_descriptor,
-                                    preextracted_features=preextracted_features)
-    image_cnn_encoder = ImageLoadedCnnEncoder(image_cnn_encoder_config)
-    # Prepare for inference
-    data_nd = mx.nd.random_normal(shape=(batch_size,) + source_image_size)
-    source = mx.sym.Variable(C.SOURCE_NAME)
-    embedding, encoded_data_length, seq_len = image_cnn_encoder.encode(source,
-                                                                       None,
-                                                                       None)
-    data_names = ['source']
-    module = mx.mod.Module(symbol=embedding,
-                           data_names=data_names,
-                           label_names=None)
-    module.bind(for_training=False,
-                data_shapes=[(data_names[0], (batch_size,) + source_image_size)])
-    # Pretrained net
-    initializers = image_cnn_encoder.get_initializers()
-    init = mx.initializer.Mixed(*zip(*initializers))
-    module.init_params(init)
-    provide_data = [
-        mx.io.DataDesc(name=data_names[0],
-                       shape=(batch_size,) + source_image_size,  # "NCHW"
-                       layout=C.BATCH_MAJOR_IMAGE)
-    ]
-    batch = mx.io.DataBatch([data_nd], None,
-                            pad=0, index=None,
-                            provide_data=provide_data)
-    # Inference & tests
-    module.forward(batch)
-    feats = module.get_outputs()[0].asnumpy()
-    assert feats.shape == (batch_size, encoded_seq_len, num_embed)
+
+    with TemporaryDirectory() as work_dir:
+        model_path = os.path.join(work_dir, '2-conv-layer')
+        epoch = 0
+        # Create net and save to disk
+        create_simple_and_save_to_disk(model_path, epoch, source_image_size, batch_size)
+        # Setup encoder
+        image_cnn_encoder_config = ImageLoadedCnnEncoderConfig(
+                                        model_path=model_path,
+                                        epoch=epoch,
+                                        layer_name=layer_name,
+                                        encoded_seq_len=encoded_seq_len,
+                                        num_embed=num_embed,
+                                        no_global_descriptor=no_global_descriptor,
+                                        preextracted_features=preextracted_features)
+        image_cnn_encoder = ImageLoadedCnnEncoder(image_cnn_encoder_config)
+        # Prepare for inference
+        data_nd = mx.nd.random_normal(shape=(batch_size,) + source_image_size)
+        source = mx.sym.Variable(C.SOURCE_NAME)
+        embedding, encoded_data_length, seq_len = image_cnn_encoder.encode(source,
+                                                                           None,
+                                                                           None)
+        data_names = ['source']
+        module = mx.mod.Module(symbol=embedding,
+                               data_names=data_names,
+                               label_names=None)
+        module.bind(for_training=False,
+                    data_shapes=[(data_names[0], (batch_size,) + source_image_size)])
+        # Pretrained net
+        initializers = image_cnn_encoder.get_initializers()
+        init = mx.initializer.Mixed(*zip(*initializers))
+        module.init_params(init)
+        provide_data = [
+            mx.io.DataDesc(name=data_names[0],
+                           shape=(batch_size,) + source_image_size,  # "NCHW"
+                           layout=C.BATCH_MAJOR_IMAGE)
+        ]
+        batch = mx.io.DataBatch([data_nd], None,
+                                pad=0, index=None,
+                                provide_data=provide_data)
+        # Inference & tests
+        module.forward(batch)
+        feats = module.get_outputs()[0].asnumpy()
+        assert feats.shape == (batch_size, encoded_seq_len, num_embed)

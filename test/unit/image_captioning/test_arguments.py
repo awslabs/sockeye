@@ -21,12 +21,12 @@ from test.unit.test_arguments import _test_args
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('--image-root ./ --input test/data/empty.txt --output-root ./ --output test/data/empty.txt',
+    ('--image-root test_img_root --input input --output-root test_output_root --output output',
      dict(source_image_size=[3, 224, 224],
-          image_root="./",
-          input="test/data/empty.txt",
-          output_root="./",
-          output="test/data/empty.txt",
+          image_root="test_img_root",
+          input="input",
+          output_root="test_output_root",
+          output="output",
           batch_size=64,
           image_positional_embedding_type=C.NO_POSITIONAL_EMBEDDING,
           image_encoder_model_path="/path/to/mxnet/image/model/",
@@ -48,18 +48,18 @@ def test_image_extract_features_cli_args(test_params, expected_params):
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('--source-root test/data',
-     dict(source_root="test/data"))
+    ('--source-root test_src_root',
+     dict(source_root="test_src_root"))
 ])
 def test_image_source_root_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_image_source_root_args)
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('--validation-source-root ./ --validation-source test/data/empty.txt --validation-target test/data/empty.txt',
-     dict(validation_source_root="./",
-          validation_source="test/data/empty.txt",
-          validation_target="test/data/empty.txt",
+    ('--validation-source-root test_val_src_root --validation-source val_src --validation-target val_tgt',
+     dict(validation_source_root="test_val_src_root",
+          validation_source="val_src",
+          validation_target="val_tgt",
           validation_source_factors=[]
      ))
 ])

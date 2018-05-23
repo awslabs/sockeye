@@ -16,19 +16,19 @@ Visualize the checkpoints of the model: image, ground truth caption and
 predicted caption.
 """
 import argparse
-import logging
 import os
 
 try:  # Try to import pillow
     from PIL import Image  # pylint: disable=import-error
 except ImportError as e:
-    logging.warn("Please install pillow to use the image_captioning module.")
-    raise e
+    raise RuntimeError("Please install pillow.")
 
-try:  # Try to import pillow
-    import matplotlib.pyplot as plt  # pylint: disable=import-error
+try:  # Try to import matplotlib
+    import matplotlib  # pylint: disable=import-error
 except ImportError as e:
-    logging.warn("Please install matplotlib to visualize images in the image_captioning module.")
+    raise RuntimeError("Please install matplotlib.")
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 
 def format_text_for_visualization(c, n):

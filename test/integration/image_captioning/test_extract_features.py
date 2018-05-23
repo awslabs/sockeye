@@ -19,17 +19,16 @@ import pytest
 from test.common_image_captioning import run_extract_features_captioning, \
     tmp_img_captioning_dataset
 
+
 IMAGE_ENCODER_SETTINGS = [
-    ("2-conv-layer", "conv1"),
-    ("2-conv-layer", "conv2"),
+    ("conv1"),
+    ("conv2"),
 ]
 
 
-@pytest.mark.parametrize("model_name, layer",
+@pytest.mark.parametrize("layer",
                          IMAGE_ENCODER_SETTINGS)
-def test_caption_random_features(model_name: str, layer: str):
-    model_path = "test/data"
-    epoch = 0
+def test_caption_random_features(layer: str):
     source_image_size = (3, 20, 20)
     batch_size = 8
     extract_params = "--source-image-size {s1} {s2} {s3} --batch-size {batch_size} " \
@@ -53,11 +52,8 @@ def test_caption_random_features(model_name: str, layer: str):
                                     use_features=use_features) as data:
         source_files = [data["source"], data["validation_source"],
                         data["test_source"]]
-        run_extract_features_captioning(model_path=model_path,
-                                        model_name=model_name,
-                                        epoch=epoch,
-                                        source_image_size=source_image_size,
+        run_extract_features_captioning(source_image_size=source_image_size,
                                         batch_size=batch_size,
                                         extract_params=extract_params,
                                         source_files=source_files,
-                                        work_dir=data['work_dir'])
+                                        image_root=data['work_dir'])

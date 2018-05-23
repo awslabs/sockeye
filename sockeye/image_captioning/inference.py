@@ -71,9 +71,9 @@ class ImageCaptioner(Translator):
     :param models: List of models.
     :param vocab_target: Target vocabulary.
     :param restrict_lexicon: Top-k lexicon to use for target vocabulary restriction.
-    :param source_image_size: shape of the image, input of the net
-    :param source_root: root where the images are stored
-    :param use_feature_loader: use precomputed features
+    :param source_image_size: Shape of the image, input of the net
+    :param source_root: Root where the images are stored
+    :param use_feature_loader: Use precomputed features
     :param store_beam: If True, store the beam search history and return it in the TranslatorOutput.
     :param strip_unknown_words: If True, removes any <unk> symbols from outputs.
     """
@@ -181,7 +181,7 @@ def load_models(context: mx.context.Context,
                                         vocabulary.  Used when logits/softmax are handled separately.
     :param cache_output_layer_w_b: Models cache weights and biases for logit computation as NumPy arrays (used with
                                    restrict lexicon).
-    :param source_image_size: size of the image to resize to. Used only for the image-text models
+    :param source_image_size: Size of the image to resize to. Used only for the image-text models
     :param forced_max_output_len: An optional overwrite of the maximum out length.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """

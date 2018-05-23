@@ -26,21 +26,19 @@ from ..log import setup_main_logger
 # in the main function)
 logger = setup_main_logger(__name__, file_logging=False, console=True)
 
-# Try to load, raise if not installed
-try:
-    from PIL import Image
+try:  # Try to import pillow
+    from PIL import Image  # pylint: disable=import-error
 except ImportError as e:
-    logger.warn("Please install pillow to use the image_captioning module.")
-    raise e
+    raise RuntimeError("Please install pillow.")
 
 def copy_mx_model_to(model_path, model_epoch, output_folder):
     """
     Copy mxnet models to new path
 
-    :param model_path: model path without -symbol.json and -%04d.params
-    :param model_epoch: epoch of the pretrained model
-    :param output_folder: output folder
-    :return: new folder where the files are moved to
+    :param model_path: Model path without -symbol.json and -%04d.params
+    :param model_epoch: Epoch of the pretrained model
+    :param output_folder: Output folder
+    :return: New folder where the files are moved to
     """
     target_path = os.path.join(output_folder, os.path.basename(model_path))
     logger.info("Copying image model from {} to {}".format(model_path,
@@ -55,9 +53,9 @@ def crop_resize_image(image, size):
     """
     Resize the input image.
 
-    :param image: original image which is a  PIL object.
-    :param size: tuple of height and width to resize the image to.
-    :return: resized image which is a PIL object
+    :param image: Original image which is a  PIL object.
+    :param size: Tuple of height and width to resize the image to.
+    :return: Resized image which is a PIL object
     """
     width, height = image.size
     if width > height:
@@ -79,9 +77,9 @@ def load_preprocess_images(image_paths: List[str], image_size: tuple) -> List:
     """
     Load and pre-process the images specified with absolute paths.
 
-    :param image_paths: list of images specified with paths.
-    :param image_size: tuple to resize the image to (Channels, Height, Width)
-    :return: a list of loaded images (numpy arrays).
+    :param image_paths: List of images specified with paths.
+    :param image_size: Tuple to resize the image to (Channels, Height, Width)
+    :return: A list of loaded images (numpy arrays).
     """
     image_size = image_size[1:]  # we do not need the number of channels
     images = []
@@ -115,8 +113,8 @@ def load_features(paths: List[str],
     """
     Load features specified with absolute paths.
 
-    :param paths: list of files specified with paths.
-    :return: a list of loaded images (numpy arrays).
+    :param paths: List of files specified with paths.
+    :return: A list of loaded images (numpy arrays).
     """
     data = []
     for path in paths:
@@ -143,10 +141,10 @@ def save_features(paths: List[str], datas: List[np.ndarray],
     """
     Save features specified with absolute paths.
 
-    :param paths: list of files specified with paths.
-    :param datas: list of numpy ndarrays to save into the respective files
-    :param compressed: use numpy compression
-    :return: a list of file names.
+    :param paths: List of files specified with paths.
+    :param datas: List of numpy ndarrays to save into the respective files
+    :param compressed: Use numpy compression
+    :return: A list of file names.
     """
     fnames = []
     for path, data in zip(paths, datas):

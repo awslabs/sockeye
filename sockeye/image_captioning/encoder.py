@@ -31,18 +31,18 @@ class ImageLoadedCnnEncoderConfig(Config):
     Image cnn encoder configuration. The symbolic model is loaded from disk.
 
     :param model_path: Path where the json file is stored.
-    :param epoch: epoch of the pre-trained model.
-    :param layer_name: name of the layer of the loaded symbol to get the encoding from.
-    :param encoded_seq_len: size of the feature layer. If the layer is a conv layer.
+    :param epoch: Epoch of the pre-trained model.
+    :param layer_name: Name of the layer of the loaded symbol to get the encoding from.
+    :param encoded_seq_len: Size of the feature layer. If the layer is a conv layer.
         encoded_seq_len should be equal to the height*width of the convolutional map,
         the number of kernel is not considered.
-    :param num_embed: number of hiddens to project the local features to.
+    :param num_embed: Number of hiddens to project the local features to.
     :param no_global_descriptor: By default the global visual feature (spatial avg of conv map)
         is concatenated to the local visual features (conv map). This option disables the use of
         the global descriptor, such that only the local ones are used.
-    :param number_of_kernels: if using preextracted features, we need to know the number of dim of the features.
+    :param number_of_kernels: If using preextracted features, we need to know the number of dim of the features.
     :param positional_embedding_type: Which king of positional embeddingm if any.
-    :param preextracted_features: turn to bool if you preextracted featured from existing model.
+    :param preextracted_features: Turn to bool if you preextracted featured from existing model.
     """
 
     def __init__(self,
@@ -204,7 +204,7 @@ class ImageLoadedCnnEncoder(Encoder):
         """
         Get the initializers of the network, considering the pretrained models.
 
-        :return: list of tuples (string name, mxnet initializer)
+        :return: List of tuples (string name, mxnet initializer)
         """
         patterns_vals = []
         # Load from args/auxs
@@ -222,7 +222,7 @@ class ImageLoadedCnnEncoder(Encoder):
         """
         Get the fixed params of the network.
 
-        :return: list of strings, names of the layers
+        :return: List of strings, names of the layers
         """
         args = set(self.args.keys()) | set(self.auxs.keys())
 

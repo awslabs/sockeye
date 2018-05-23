@@ -39,7 +39,7 @@ class CheckpointDecoderImageModel(CheckpointDecoder):
     :param source_image_size: Size of the image feed into the net.
     :param image_root: Root where the images are stored.
     :param max_output_length: Max length of the generated sentence.
-    :param use_feature_loader: True if features are loaded instead of images.
+    :param use_feature_loader: If True, features are loaded instead of images.
     :param kwargs: Arguments passed to `sockeye.checkpoint_decoder.CheckpointDecoder`.
     """
 

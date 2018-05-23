@@ -256,7 +256,7 @@ def get_preinit_encoders(encoders: List[encoder.Encoder]) -> List[Tuple[str, mx.
     """
     Get initializers from encoders. Some encoders might be initialized from pretrained models.
 
-    :param encoders: list of encoders
+    :param encoders: List of encoders
     :return: The list of initializers
     """
     init = []

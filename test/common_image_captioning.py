@@ -16,7 +16,6 @@ import os
 import pickle
 import random
 import sys
-import urllib
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 from typing import List, Optional, Tuple
@@ -24,7 +23,6 @@ from unittest.mock import patch
 
 import mxnet as mx
 import numpy as np
-from PIL import Image  # pylint: disable=import-error
 
 import sockeye.average
 import sockeye.constants as C
@@ -32,6 +30,11 @@ import sockeye.image_captioning.captioner
 import sockeye.image_captioning.extract_features
 import sockeye.image_captioning.train
 from sockeye.evaluate import raw_corpus_bleu, raw_corpus_chrf
+
+try:  # Try to import pillow
+    from PIL import Image  # pylint: disable=import-error
+except ImportError as e:
+    raise RuntimeError("Please install pillow.")
 
 logger = logging.getLogger(__name__)
 
@@ -241,50 +244,47 @@ _EXTRACT_FEATURES_PARAMS_COMMON = \
     "--output {output_file} --image-encoder-model-path {image_encoder_model_path}"
 
 
-def run_extract_features_captioning(model_path: str,
-                                    model_name: str,
-                                    epoch: int,
-                                    source_image_size: tuple,
+def run_extract_features_captioning(source_image_size: tuple,
                                     batch_size: int,
                                     extract_params: str,
                                     source_files: List[str],
-                                    work_dir: str) -> None:
+                                    image_root: str) -> None:
 
-    model_path = os.path.join(model_path, model_name)
+    with TemporaryDirectory(dir=image_root, prefix="test_extract_feats") as work_dir:
+        model_path = os.path.join(work_dir, '2-conv-layer')
+        epoch = 0
+        # Create net and save to disk
+        create_simple_and_save_to_disk(model_path, epoch, source_image_size, batch_size)
 
-    # Create net and save to disk
-    create_simple_and_save_to_disk(model_path, epoch, source_image_size, batch_size)
+        # Extract features
+        for s in source_files:
+            with TemporaryDirectory(dir=work_dir, prefix="extracted_feats") as local_work_dir:
+                output_root = local_work_dir
+                output_file = os.path.join(local_work_dir, "random.features")
+                params = "{} {} {}".format(sockeye.image_captioning.extract_features.__file__,
+                                           _EXTRACT_FEATURES_PARAMS_COMMON.format(
+                                               image_root=image_root,
+                                               source_file=s,
+                                               output_root=output_root,
+                                               output_file=output_file,
+                                               image_encoder_model_path=model_path
+                                           ),
+                                           extract_params)
 
-    # Extract features
-    for s in source_files:
-        with TemporaryDirectory(dir=work_dir, prefix="test_extract_feats") as local_work_dir:
-            output_root = local_work_dir
-            output_file = "random.features"
-            params = "{} {} {}".format(sockeye.image_captioning.extract_features.__file__,
-                                       _EXTRACT_FEATURES_PARAMS_COMMON.format(
-                                           image_root=work_dir,
-                                           source_file=s,
-                                           output_root=output_root,
-                                           output_file=output_file,
-                                           image_encoder_model_path=model_path
-                                       ),
-                                       extract_params)
-
-            logger.info("Starting feature extractopm with parameters %s.", extract_params)
-            with patch.object(sys, "argv", params.split()):
-                sockeye.image_captioning.extract_features.main()
+                logger.info("Starting feature extractopm with parameters %s.", extract_params)
+                with patch.object(sys, "argv", params.split()):
+                    sockeye.image_captioning.extract_features.main()
 
 
 def create_simple_and_save_to_disk(prefix, iteration, source_image_size, batch_size):
-    if not os.path.exists(prefix + ".params"):
-        # init model
-        sym = get_2convnet_symbol()
-        mod = mx.mod.Module(sym)
-        mod.bind(data_shapes=[('data', (batch_size,) + source_image_size)],
-                 label_shapes=[('softmax_label', (batch_size, 1))])
-        mod.init_params()
-        # save
-        mod.save_checkpoint(prefix, iteration)
+    # init model
+    sym = get_2convnet_symbol()
+    mod = mx.mod.Module(sym)
+    mod.bind(data_shapes=[('data', (batch_size,) + source_image_size)],
+             label_shapes=[('softmax_label', (batch_size, 1))])
+    mod.init_params()
+    # save
+    mod.save_checkpoint(prefix, iteration)
 
 
 def get_2convnet_symbol():

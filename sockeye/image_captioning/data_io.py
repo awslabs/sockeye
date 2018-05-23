@@ -33,11 +33,6 @@ from ..data_io import get_target_bucket, get_data_statistics, \
 
 logger = logging.getLogger(__name__)
 
-try:  # Try to import pillow
-    import matplotlib.pyplot as plt  # pylint: disable=import-error
-except ImportError as e:
-    logging.warn("Please install matplotlib to visualize images in the image_captioning module.")
-
 
 class RawListTextDatasetLoader:
     """
@@ -71,10 +66,10 @@ class RawListTextDatasetLoader:
         Creates a parallel dataset base on source list of strings and target sentences.
         Returns a `sockeye.data_io.ParallelDataSet`.
 
-        :param source_list: source list of strings (e.g., filenames).
-        :param target_sentences: target sentences used to do bucketing.
-        :param num_samples_per_bucket: number of samples per bucket.
-        :return: returns a parallel dataset `sockeye.data_io.ParallelDataSet`.
+        :param source_list: Source list of strings (e.g., filenames).
+        :param target_sentences: Target sentences used to do bucketing.
+        :param num_samples_per_bucket: Number of samples per bucket.
+        :return: Returns a parallel dataset `sockeye.data_io.ParallelDataSet`.
         """
         assert len(num_samples_per_bucket) == len(self.buckets)
 
@@ -208,7 +203,8 @@ def get_training_image_text_data_iters(source_root: str,
     :param max_seq_len_target: Maximum target sequence length.
     :param bucketing: Whether to use bucketing.
     :param bucket_width: Size of buckets.
-    :param preload_features: If use_feature_loader, this enables load all the feature to memory
+    :param use_feature_loader: If True, features are loaded instead of images.
+    :param preload_features: If use_feature_loader si True, this enables load all the feature to memory
     :return: Tuple of (training data iterator, validation data iterator, data config).
     """
     logger.info("===============================")
@@ -387,6 +383,14 @@ class ImageTextSampleIter(ParallelSampleIter):
     def visualize_batch(batch: mx.io.DataBatch,
                         reverse_vocab: Dict[int, str],
                         source_only: bool =False) -> None:
+
+        try:  # Try to import matplotlib
+            import matplotlib  # pylint: disable=import-error
+        except ImportError as e:
+            raise RuntimeError("Please install matplotlib.")
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+
         N = M = 4
         fig, axs = plt.subplots(N, M, figsize=(20, 10))
         # Remove axes
