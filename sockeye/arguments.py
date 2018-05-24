@@ -750,6 +750,17 @@ def add_training_args(params):
                               default='replicate',
                               help=argparse.SUPPRESS)
 
+    train_params.add_argument('--curriculum-training',
+                              action='store_true',
+                              help='Enable curriculum training; Requires prepared data and shard scores'
+                                   '(prepare_data.py)')
+
+    train_params.add_argument('--curriculum-update-freq',
+                              type=int_greater_or_equal(1),
+                              default=4000,
+                              help='Update the curriculum to allow harder examples every x update/batches.'
+                                   'Default: %(default)s.')
+
     train_params.add_argument('--loss',
                               default=C.CROSS_ENTROPY,
                               choices=[C.CROSS_ENTROPY],
