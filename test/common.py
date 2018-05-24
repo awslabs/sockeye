@@ -11,6 +11,7 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import json
 import logging
 import os
 import random
@@ -151,7 +152,8 @@ def tmp_digits_dataset(prefix: str,
                        test_line_count: int, test_line_count_empty: int, test_max_length: int,
                        sort_target: bool = False,
                        seed_train: int = 13, seed_dev: int = 13,
-                       with_source_factors: bool = False):
+                       with_source_factors: bool = False,
+                       with_target_constraints: bool = False):
     with TemporaryDirectory(prefix=prefix) as work_dir:
         # Simple digits files for train/dev data
         train_source_path = os.path.join(work_dir, "train.src")
@@ -184,6 +186,29 @@ def tmp_digits_dataset(prefix: str,
             data['train_source_factors'] = [train_factor_path]
             data['dev_source_factors'] = [dev_factor_path]
             data['test_source_factors'] = [test_factor_path]
+
+        if with_target_constraints:
+            # When using constrained decoding, rewrite the source file. Generating a mixture of
+            # sentences with and without constraints here is critical, since this can happen in production
+            # and also introduces sometimes some unanticipated interactions.
+            new_sources = []
+            for sentno, (source, target) in enumerate(zip(open(data['test_source']), open(data['test_target']))):
+                target_words = target.rstrip().split()
+                target_len = len(target_words)
+                source_len = len(source.rstrip().split())
+                new_source = { 'text': source.rstrip() }
+                # From the odd-numbered sentences that are not too long, create constraints. We do
+                # only odds to ensure we get batches with mixed constraints / lack of constraints.
+                if target_len > 0 and sentno % 2 == 0:
+                    start_pos = 0
+                    end_pos = min(target_len, 3)
+                    constraint = ' '.join(target_words[start_pos:end_pos])
+                    new_source['constraints'] = [constraint]
+                    new_sources.append(json.dumps(new_source))
+
+            with open(data['test_source'], 'w') as out:
+                for json_line in new_sources:
+                    print(json_line, file=out)
 
         yield data
 

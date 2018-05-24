@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.15]
+### Added
+- Added decoding with target-side lexical constraints (documentation in `tutorials/constraints`).
+
 ## [1.18.14]
 ### Added
 - Introduced Sockeye Autopilot for single-command end-to-end system building.
