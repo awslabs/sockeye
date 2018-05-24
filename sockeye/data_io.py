@@ -386,15 +386,16 @@ def shard_data(source_fnames: List[str],
                         for index in sorted(score_index_dict[us]):
                             sentence_score[index] = shard_count
                             sample_count += 1
-                            if sample_count%samples_per_shard==0:
+                            if sample_count==samples_per_shard:
                                 shard_score_mapping[shard_count] = us
                                 shard_count += 1
+                                sample_count=0
                         if sample_count < samples_per_shard:
                             shard_score_mapping[shard_count] = us
                             shard_count += 1
                                 
 
-            with open(os.path.join(output_prefix, 'shard_scores'), 'a') as shard_scores:
+            with open(os.path.join(output_prefix, 'shard_scores'), 'w') as shard_scores:
                 for m in shard_score_mapping:
                     shard_scores.write(str(m)+'\n')
             random_shard_iter = iter(sentence_score)
