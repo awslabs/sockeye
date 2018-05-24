@@ -21,9 +21,10 @@ from contextlib import ExitStack
 
 import mxnet as mx
 
-from . import arguments
+from . import arguments as arguments_image
 from . import inference as inference_image
 from .train import read_feature_shape
+from .. import arguments
 from .. import constants as C
 from .. import inference
 from .. import output_handler
@@ -106,8 +107,8 @@ def _extract_features(args, context):
 
 
 def main():
-    params = argparse.ArgumentParser(description='Image Captioning CLI')
-    arguments.add_image_caption_cli_args(params)
+    params = arguments.ConfigArgumentParser(description='Image Captioning CLI')
+    arguments_image.add_image_caption_cli_args(params)
     args = params.parse_args()
     image_preextracted_features = not args.extract_image_features
 

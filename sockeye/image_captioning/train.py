@@ -31,12 +31,13 @@ from ..train import check_resume, check_arg_compatibility, \
     create_optimizer_config, create_training_model
 from ..utils import check_condition
 # Sockeye captioner
-from . import arguments
+from . import arguments as arguments_image
 from . import checkpoint_decoder
 from . import data_io as data_io_image
 from . import encoder as encoder_image
 from .. import constants as C
 # Sockeye
+from .. import arguments
 from .. import data_io
 from .. import encoder
 from .. import loss
@@ -267,8 +268,8 @@ def get_preinit_encoders(encoders: List[encoder.Encoder]) -> List[Tuple[str, mx.
 
 
 def main():
-    params = argparse.ArgumentParser(description='Train Sockeye images-to-text models.')
-    arguments.add_image_train_cli_args(params)
+    params = arguments.ConfigArgumentParser(description='Train Sockeye images-to-text models.')
+    arguments_image.add_image_train_cli_args(params)
     args = params.parse_args()
     # TODO: make training compatible with full net
     args.image_preextracted_features = True  # override this for now
