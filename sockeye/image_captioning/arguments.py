@@ -96,7 +96,7 @@ def add_image_model_parameters(params):
                               default="/path/to/mxnet/image/model/",
                               help="Path to the mxnet pre-trained model for image encoding. The model comes "
                                    "with two files: .json and .params. NOTE: use the prefix only, do not include "
-                                   "the sufix -symbol.json or -0000.params")
+                                   "the sufix -symbol.json or -0000.params.")
     model_params.add_argument('--image-encoder-model-epoch', type=int,
                               default=0,
                               help="Epoch of the model to load. Default: %(default)s.")
@@ -131,7 +131,7 @@ def add_preextracted_features_args(model_params):
     model_params.add_argument('--extract-image-features',
                               action="store_true",
                               help="If True, it extracts features and caption directly from input images,"
-                                   "otherwise it will expect pre-extracted features")
+                                   "otherwise it will expect pre-extracted features.")
 
 
 def add_image_train_cli_args(params):

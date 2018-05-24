@@ -829,7 +829,7 @@ def add_training_args(params):
                                    'LSTMs. Use "x:x" to specify separate values. Default: %(default)s.')
     train_params.add_argument('--rnn-enc-last-hidden-concat-to-embedding',
                               action="store_true",
-                              help='Concatenate the last hidden of the encoder to the input of the decoder, '
+                              help='Concatenate the last hidden layer of the encoder to the input of the decoder, '
                                    'instead of the previous state of the decoder. Default: %(default)s.')
 
     train_params.add_argument('--rnn-decoder-hidden-dropout',
@@ -1037,7 +1037,7 @@ def add_max_output_cli_args(params):
     params.add_argument('--max-output-length',
                         type=int,
                         default=None,
-                        help='Number of words to generate during translation. If None, it will be computed automatically. Default: %(default)s.')
+                        help='Maximum number of words to generate during translation. If None, it will be computed automatically. Default: %(default)s.')
 
 
 def add_inference_args(params):

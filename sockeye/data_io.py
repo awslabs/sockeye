@@ -1129,7 +1129,7 @@ class FileListReader(Iterator):
         self.count = 0
 
     def __next__(self):
-        fname = self.fd.readline().split("\n")[0]
+        fname = self.fd.readline().strip("\n")
 
         if fname is None:
             self.fd.close()

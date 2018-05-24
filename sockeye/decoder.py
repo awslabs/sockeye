@@ -454,8 +454,8 @@ class RecurrentDecoderConfig(Config):
     :param context_gating: Whether to use context gating.
     :param layer_normalization: Apply layer normalization.
     :param attention_in_upper_layers: Pass the attention value to all layers in the decoder.
-    :param enc_last_hidden_concat_to_embedding: concatenate the last hidden representation of the encoder to the
-                                                input of the decoder (e.g., context + current embedding)
+    :param enc_last_hidden_concat_to_embedding: Concatenate the last hidden representation of the encoder to the
+                                                input of the decoder (e.g., context + current embedding).
     :param dtype: Data type.
     """
 

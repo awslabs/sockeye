@@ -55,7 +55,7 @@ Then, we can extract features from them:
         --image-encoder-model-path /path/to/mxnet/model/filename_prefix \
         --image-encoder-layer stage4_unit3_conv3
 ```
-In the option `--image-encoder-model-path`, `filename_prefix` should be the prefix of the MXNet mode without `-symbol.json` or `-0000.params`.
+In the option `--image-encoder-model-path`, `filename_prefix` should be the prefix of the MXNet model without `-symbol.json` or `-0000.params`.
 
 The script above will generate the features stored in `/path/to/feature/cache/` and a file `training_set.features` which contains the path to the features relative to `/path/to/feature/cache/`.
 Note that finetuning of the image model is not supported yet.
@@ -100,11 +100,11 @@ Assuming that features were pre-extracted, you can do image captioning as follow
         --max-output-length 60 \
         --batch-size 1024 \
         --chunk-size 2048 \
-        --beam-size 3 >> validation_set.predictions
+        --beam-size 3 > validation_set.predictions
 ```
 
 This will take the best set of parameters found during training and then load the image provided in the STDIN and
-write the caption to STDOUT, which is redirected to the file `validation_set.predictions`.
+write the caption to STDOUT, which is redirected using `>` to the file `validation_set.predictions` overwriting its content if it exists already.
 
 You can also caption directly from image with the option `--extract-image-features` as follows:
 
@@ -119,7 +119,7 @@ You can also caption directly from image with the option `--extract-image-featur
         --max-output-length 60 \
         --batch-size 512 \
         --chunk-size 1024 \
-        --beam-size 3 >> validation_set.predictions
+        --beam-size 3 > validation_set.predictions
 ```
 
 ### Visualization

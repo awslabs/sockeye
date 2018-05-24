@@ -12,9 +12,9 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.17]
 ### Added
-- Introducing the image captioning module. Type of models supported: ConvNet encoder - Sockeye NMT decoders. This includes also a feature extraction script,
+- \[Experimental\] Introducing the image captioning module. Type of models supported: ConvNet encoder - Sockeye NMT decoders. This includes also a feature extraction script,
 an image-text iterator that loads features, training and inference pipelines and a visualization script that loads images and captions.
-See [this tutorial](tutorials/image_captioning) for its usage.
+See [this tutorial](tutorials/image_captioning) for its usage. This module is experimental therefore its maintenance is not fully guaranteed.
 
 ## [1.18.16]
 ### Fixed
