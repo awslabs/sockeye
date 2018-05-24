@@ -45,9 +45,6 @@ def main():
     arguments.add_score_cli_args(params)
     args = params.parse_args()
 
-    logger.info('Forcing beam_size = 1')
-    args.beam_size = 1
-
     if args.output is not None:
         global logger
         logger = setup_main_logger(__name__,
@@ -57,6 +54,10 @@ def main():
 
     if args.checkpoints is not None:
         check_condition(len(args.checkpoints) == len(args.models), "must provide checkpoints for each model")
+
+    logger.info('Forcing beam_size=1, beam_prune=0')
+    args.beam_size = 1
+    args.beam_prune = 0
 
     log_basic_info(args)
 
