@@ -169,35 +169,13 @@ This will take the best set of parameters found during training and then transla
 write translations to STDOUT.
 
 #### Multi-instance Translate
-Multi-instance can be used for speedup translate to get the best performance.
-For example, you can run mlt-trans.sh to translate 24 instances in [AWS EC2 C4.8xlarge](https://aws.amazon.com/ec2/instance-types/) (24 physical cores) or 
-36 instances in [AWS EC2 C5.18xlarge](https://aws.amazon.com/ec2/instance-types/c5/) (36 physical cores).
+Multi-instance can be used to greatly speedup translation in one multi-core processor computer.
+One python script example is in tutorial/cpu_benchmarking. 
+You can translate as follows:
 ```bash
-> sh mlt-trans.sh <model_name> <file_to_translate> <batch_size>[benchmark(true or false)]
+> python mlt_cpu_trans_benchmark.py -m model -i input_file_name -o output_file_name -bs batch_size -t true
 ```
-Here are some benchmark results for reference:
 
-AWS EC2 C4.8xlarge:
- 
-| Batch | 1 Instance (sent/sec)| 18 Instance (sent/sec)|
-| --- | --- | --- |
-|   1 |2.37 | 44.393 |           
-|   2 |4.34 | 59.32  |                        
-|   8 |7.46 | 80.21  |            
-|  16 |7.43 | 81.915 |            
-|  32 |7.60 | 82.039 |            
-|  64 |7.54 | 81.667 |            
-
-AWS EC2 C5.18xlarge:
-
-| Batch | 1 Instance (sent/sec)| 36 Instance (sent/sec)|
-| --- | --- | --- |
-|   1 |7.50  | 77.172  |           
-|   2 |11.30 | 78.46   |                        
-|   8 |16.30 | 183.93  |            
-|  16 |19.70 | 194.88  |            
-|  32 |21.40 | 200.30  |            
-|  64 |22.50 | 199.563 |
 
 For more detailed examples check out our user documentation.
 
