@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.17]
+### Changed
+- Updated to MXNet 1.2
+- Use of the new LayerNormalization operator to save GPU memory.
+
 ## [1.18.16]
 ### Fixed
 - Removed summation of gradient arrays when logging gradients.
