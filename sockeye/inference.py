@@ -566,23 +566,25 @@ class TranslatorInput:
     :param tokens: List of input tokens.
     :param factors: Optional list of additional factor sequences.
     :param constraints: Optional list of target-side constraints.
+    :param target_tokens: The target to decode to (for scoring).
     :param chunk_id: Chunk id. Defaults to -1.
     """
 
-    __slots__ = ('sentence_id', 'tokens', 'factors', 'constraints', 'chunk_id')
+    __slots__ = ('sentence_id', 'tokens', 'factors', 'constraints', 'target_tokens', 'chunk_id')
 
     def __init__(self,
                  sentence_id: int,
                  tokens: Tokens,
                  factors: Optional[List[Tokens]] = None,
                  constraints: Optional[List[Tokens]] = None,
+                 target_tokens: Optional[Tokens] = None,
                  chunk_id: int = -1) -> None:
         self.sentence_id = sentence_id
         self.chunk_id = chunk_id
         self.tokens = tokens
         self.factors = factors
         self.constraints = constraints
-        self.target_tokens = target
+        self.target_tokens = target_tokens
 
     def __str__(self):
         return 'TranslatorInput(%d, %s, factors=%s, constraints=%s, chunk_id=%d)' % (self.sentence_id, self.tokens, self.factors, self.constraints, self.chunk_id)
@@ -670,9 +672,8 @@ def make_input_from_json_string(sentence_id: int, json_string: str) -> Translato
         jobj = json.loads(json_string, encoding=C.JSON_ENCODING)
         tokens = jobj[C.JSON_TEXT_KEY]
         tokens = list(data_io.get_tokens(tokens))
-        target = jobj.get(C.JSON_TARGET_KEY, None)
         factors = jobj.get(C.JSON_FACTORS_KEY, None)
-        if isinstance(factors, list):
+        if factors is not None and isinstance(factors, list):
             factors = [list(data_io.get_tokens(factor)) for factor in factors]
             lengths = [len(f) for f in factors]
             if not all(l == len(tokens) for l in lengths):
@@ -681,13 +682,17 @@ def make_input_from_json_string(sentence_id: int, json_string: str) -> Translato
         else:
             factors = None
 
-        constraints = jobj.get(C.JSON_CONSTRAINTS_KEY)
-        if isinstance(constraints, list) and len(constraints) > 0:
+        constraints = jobj.get(C.JSON_CONSTRAINTS_KEY, None)
+        if constraints is not None and isinstance(constraints, list) and len(constraints) > 0:
             constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
         else:
             constraints = None
 
-        return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors, constraints=constraints, target=target)
+        target = jobj.get(C.JSON_TARGET_KEY, None)
+        if target is not None and isinstance(target, str):
+            target = list(data_io.get_tokens(target))
+
+        return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors, constraints=constraints, target_tokens=target)
 
     except Exception as e:
         logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
@@ -1055,18 +1060,12 @@ class Translator:
             elif len(trans_input.tokens) == 0:
                 translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
 
-            # oversized input
-            elif len(trans_input.tokens) > self.max_input_length:
-                logger.debug(
-                    "Input %d has length (%d) that exceeds max input length (%d). Splitting into chunks of size %d.",
-                    trans_input.sentence_id, len(trans_input.tokens), self.buckets_source[-1], self.max_input_length)
-                input_chunks.extend(list(trans_input.chunks(self.max_input_length)))
-
             # regular input
             else:
-                input_chunks.append(trans_input)
+                # TODO(mjpost): max length checking
+                input_chunks.append(trans_input.with_eos() if self.source_with_eos else trans_input)
 
-        # Sort longest to shortest (to rather fill batches of shorter than longer sequences)
+        # Sort longest to shortest (for batch efficiency)
         input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.tokens), reverse=True)
 
         # translate in batch-sized blocks over input chunks
@@ -1077,30 +1076,19 @@ class Translator:
             if rest > 0:
                 logger.debug("Extending the last batch to the full batch size (%d)", self.batch_size)
                 batch = batch + [batch[0]] * rest
-            batch_translations = self._translate_nd(*self._get_inference_input(batch))
+            batch_translations = self._force_decode(*self._get_inference_input(batch), self._get_forced_outputs(batch))
             # truncate to remove filler translations
             if rest > 0:
                 batch_translations = batch_translations[:-rest]
             for chunk, translation in zip(batch, batch_translations):
                 translated_chunks.append(TranslatedChunk(chunk.sentence_id, chunk.chunk_id, translation))
-        # Sort by input idx and then chunk id
-        translated_chunks = sorted(translated_chunks)
 
-        # Concatenate results
-        results = []  # type: List[TranslatorOutput]
-        chunks_by_input_idx = itertools.groupby(translated_chunks, key=lambda translation: translation.id)
-        for trans_input, (input_idx, chunks) in zip(trans_inputs, chunks_by_input_idx):
-            chunks = list(chunks)  # type: ignore
-            if len(chunks) == 1:  # type: ignore
-                translation = chunks[0].translation  # type: ignore
-            else:
-                translations_to_concat = [translated_chunk.translation for translated_chunk in chunks]
-                translation = self._concat_translations(translations_to_concat)
+        # Sort by input idx
+        translations = [chunk.translation for chunk in sorted(translated_chunks)]
 
-            results.append(self._make_result(trans_input, translation))
-
+        # Construct results
+        results = [self._make_result(x, y) for x, y in zip(trans_inputs, translations)]  # type: List[TranslatorOutput]
         return results
-
 
     def translate(self, trans_inputs: List[TranslatorInput]) -> List[TranslatorOutput]:
         """
@@ -1172,7 +1160,7 @@ class Translator:
             if rest > 0:
                 logger.debug("Extending the last batch to the full batch size (%d)", self.batch_size)
                 batch = batch + [batch[0]] * rest
-            batch_translations = self._translate_nd(*self._get_inference_input(batch))
+            batch_translations = self._translate_nd(*self._get_inference_input(batch), self._get_raw_constraints(batch))
             # truncate to remove filler translations
             if rest > 0:
                 batch_translations = batch_translations[:-rest]
@@ -1196,7 +1184,27 @@ class Translator:
 
         return results
 
-    def _get_inference_input(self, trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray, int, List[Optional[constrained.RawConstraintList]]]:
+    def _get_forced_outputs(self, trans_inputs: List[TranslatorInput]) -> mx.nd.NDArray:
+        """
+        TODO.
+        """
+        max_length = max([len(inp.target_tokens) for inp in trans_inputs]) + 2
+        target = mx.nd.zeros((len(trans_inputs), max_length), ctx=self.context, dtype='int32')
+        target[:,0] = self.vocab_target[C.BOS_SYMBOL]
+        for j, trans_input in enumerate(trans_inputs):
+            target[j,1:1+len(trans_input.target_tokens)+1] = data_io.tokens2ids(trans_input.target_tokens + [C.EOS_SYMBOL], self.vocab_target)
+
+        return target
+
+    def _get_raw_constraints(self, trans_inputs: List[TranslatorInput]) -> List[Optional[constrained.RawConstraintList]]:
+        raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
+        for j, trans_input in enumerate(trans_inputs):
+            if trans_input.constraints is not None:
+                raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in trans_input.constraints]
+
+        return raw_constraints
+
+    def _get_inference_input(self, trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray, int]:
         """
         Assembles the numerical data for the batch.
         This comprises an NDArray for the source sentences, the bucket key (padded source length), and a list of
@@ -1209,21 +1217,10 @@ class Translator:
 
         bucket_key = data_io.get_bucket(max(len(inp.tokens) for inp in trans_inputs), self.buckets_source)
         source = mx.nd.zeros((len(trans_inputs), bucket_key, self.num_source_factors), ctx=self.context)
-        raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
-
-        target = None
-        if any([x.target is not None for x in trans_inputs]):
-            max_output_length = self.models[0].get_max_output_length(self.max_input_length)
-            target = mx.nd.zeros((len(trans_inputs), max_output_length), ctx=self.context)
 
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)
             source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
-
-            if trans_input.target is not None:
-                target_tokens = data_io.tokens2ids([C.BOS_SYMBOL] + trans_input.target.split() + [C.EOS_SYMBOL], self.vocab_target)
-                target[j, :len(target_tokens)] = target_tokens
-
             factors = trans_input.factors if trans_input.factors is not None else []
             num_factors = 1 + len(factors)
             if num_factors != self.num_source_factors:
@@ -1234,10 +1231,7 @@ class Translator:
 
                 source[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
 
-            if trans_input.constraints is not None:
-                raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in trans_input.constraints]
-
-        return source, bucket_key, raw_constraints
+        return source, bucket_key
 
     def _make_result(self,
                      trans_input: TranslatorInput,
@@ -1627,13 +1621,16 @@ class Translator:
     def _force_decode(self,
                       source: mx.nd.NDArray,
                       source_length: int,
-                      target: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray,
-                                                      mx.nd.NDArray, mx.nd.NDArray, Optional[List[BeamHistory]]]:
+                      target: mx.nd.NDArray) -> List[Translation]:
         """
-        Translates multiple sentences using beam search.
+        Force decodes to specified targets.
+
+        There is a lot of overlap between this function and _beam_search(). We could choose
+        to merge the functions to reduce the redundancy.
 
         :param source: Source ids. Shape: (batch_size, bucket_key).
         :param source_length: Max source length.
+        :param target: List of target word IDs. Shape: (batch_size, longest target).
         :return List of lists of word ids, list of attentions, array of accumulated length-normalized
                 negative log-probs.
         """
@@ -1647,7 +1644,7 @@ class Translator:
                               "Forced decoding requires `--beam size 1`")
 
         # Maximum output length
-        max_output_length = self.models[0].get_max_output_length(source_length)
+        max_output_length = target.shape[1]
 
         # General data structure: each row has batch_size * beam blocks for the 1st sentence, with a full beam,
         # then the next block for the 2nd sentence and so on
@@ -1729,7 +1726,10 @@ class Translator:
             for ms in model_states:
                 ms.sort_state(best_hyp_indices)
 
-        return sequences, attentions, scores_accumulated, lengths, None
+#            self._print_beam(sequences, scores_accumulated, finished, inactive, constraints, t)
+
+        return self._get_best_from_beam(sequences, attentions, scores_accumulated, lengths, finished, [None])
+
 
     def _get_best_from_beam(self,
                             sequences: mx.nd.NDArray,
