@@ -1031,9 +1031,6 @@ def add_translate_cli_args(params):
 
 def add_score_cli_args(params):
     add_inference_args(params)
-
-#    decode_params = params.add_argument_group("Scoring parameters")
-
     add_device_args(params)
     add_logging_args(params)
 
