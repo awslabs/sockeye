@@ -746,18 +746,18 @@ def get_prepared_data_iters(prepared_data_dir: str,
     config_data.data_statistics.log(bucket_batch_sizes)
 
     if curriculum_training:
-        check_condition(os.path.exists(os.join(prepared_data_dir, "shard_scores")),
+        check_condition(os.path.exists(os.path.join(prepared_data_dir, "shard_scores")),
                         "Curriculum training was specified but no shard weights were found."
                         "Run sockeye.prepare_data for curriculum training")
 
         shards_complexity = []
-        with open(os.join(prepared_data_dir, "shard_scores")) as shard_scores_file:
+        with open(os.path.join(prepared_data_dir, "shard_scores")) as shard_scores_file:
             for shard_score in shard_scores_file:
                 shards_complexity.append(int(shard_score))
 
         check_condition(len(shards_complexity) == len(shard_fnames),
                         "Did not find shard scores for all shards in %s"
-                        % os.join(prepared_data_dir, "shard_scores"))
+                        % os.path.join(prepared_data_dir, "shard_scores"))
 
         train_iter = CurriculumParallelSampleIter(shard_fnames,
                                                   shards_complexity,
@@ -1508,7 +1508,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
         self.shard_iter.load_state(fname + ".sharditer")
 
 
-class CurriculumParallelSampleIter(ShardedParallelSampleIter):
+class CurriculumParallelSampleIter(BaseParallelSampleIter):
     """
     Goes through the data one shard at a time. The memory consumption is limited by the memory consumption of the
     largest shard. The order in which shards are traversed is changed with each reset.
@@ -1542,6 +1542,20 @@ class CurriculumParallelSampleIter(ShardedParallelSampleIter):
 
         self.reset()
 
+    def _load_shard(self):
+        shard_fname = self.shards_fnames[self.shard_index]
+        logger.info("Loading shard %s.", shard_fname)
+        dataset = ParallelDataSet.load(self.shards_fnames[self.shard_index]).fill_up(self.bucket_batch_sizes,
+                                                                                     self.fill_up,
+                                                                                     seed=self.shard_index)
+        self.shard_iter = ParallelSampleIter(data=dataset,
+                                             buckets=self.buckets,
+                                             batch_size=self.batch_size,
+                                             bucket_batch_sizes=self.bucket_batch_sizes,
+                                             source_data_name=self.source_data_name,
+                                             target_data_name=self.target_data_name,
+                                                 num_factors=self.num_factors)
+
     def reset(self):
         # At each reset, given the complexity we are allowed, only a certain number of shards are visible
         self.visible_shards_fnames = [self.shards_fnames[idx] for idx in range(len(self.shards_fnames))
@@ -1566,11 +1580,11 @@ class CurriculumParallelSampleIter(ShardedParallelSampleIter):
             self.shards_fnames = [next_shard_fname] + remaining_shards
 
             self.shard_index = 0
-            super()._load_shard()
+            self._load_shard()
         else:
             if self.shard_index < 0:
                 self.shard_index = 0
-                super()._load_shard()
+                self._load_shard()
             # We can just reset the shard_iter as we only have a single shard
             self.shard_iter.reset()
 
@@ -1589,11 +1603,24 @@ class CurriculumParallelSampleIter(ShardedParallelSampleIter):
         if not self.shard_iter.iter_next():
             if self.shard_index < len(self.visible_shards_fnames) - 1:
                 self.shard_index += 1
-                super()._load_shard()
+                self._load_shard()
             else:
                 raise StopIteration
         self.updates_processed += 1
         return self.shard_iter.next()
+
+    def save_state(self, fname: str):
+        with open(fname, "wb") as fp:
+            pickle.dump(self.shards_fnames, fp)
+            pickle.dump(self.shard_index, fp)
+        self.shard_iter.save_state(fname + ".sharditer")
+
+    def load_state(self, fname: str):
+        with open(fname, "rb") as fp:
+            self.shards_fnames = pickle.load(fp)
+            self.shard_index = pickle.load(fp)
+        self._load_shard()
+        self.shard_iter.load_state(fname + ".sharditer")
 
 
 class ParallelSampleIter(BaseParallelSampleIter):
