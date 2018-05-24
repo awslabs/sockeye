@@ -1526,7 +1526,8 @@ class CurriculumParallelSampleIter(ShardedParallelSampleIter):
                  label_name=C.TARGET_LABEL_NAME,
                  num_factors: int = 1,
                  dtype='float32') -> None:
-        super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
+        super().__init__(shards_fnames=shards_fnames, buckets=buckets, batch_size=batch_size,
+                         bucket_batch_sizes=bucket_batch_sizes, fill_up=fill_up,
                          source_data_name=source_data_name, target_data_name=target_data_name,
                          label_name=label_name, num_factors=num_factors, dtype=dtype)
         assert len(shards_fnames) > 0
