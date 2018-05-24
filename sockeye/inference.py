@@ -1701,17 +1701,10 @@ class Translator:
 
             # (4) Normalize the scores of newly finished hypotheses. Note that after this until the
             # next call to topk(), hypotheses may not be in sorted order.
-            finished = mx.nd.take(finished, best_hyp_indices)
-            lengths = mx.nd.take(lengths, best_hyp_indices)
             all_finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
             newly_finished = all_finished - finished
             scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
             finished = all_finished
-
-            # (6) Update the beam with the hypotheses and their properties for the beam_size winning hypotheses (ascending)
-            sequences = mx.nd.take(sequences, best_hyp_indices)
-            attention_scores = mx.nd.take(attention_scores, best_hyp_indices)
-            attentions = mx.nd.take(attentions, best_hyp_indices)
 
             # (7) update best hypotheses, their attention lists and lengths (only for non-finished hyps)
             # pylint: disable=unsupported-assignment-operation
@@ -1725,8 +1718,6 @@ class Translator:
             # (8) update models' state with winning hypotheses (ascending)
             for ms in model_states:
                 ms.sort_state(best_hyp_indices)
-
-#            self._print_beam(sequences, scores_accumulated, finished, inactive, constraints, t)
 
         return self._get_best_from_beam(sequences, attentions, scores_accumulated, lengths, finished, [None])
 
