@@ -1,4 +1,4 @@
 pyyaml
-mxnet==1.1.0
+mxnet==1.2.0
 numpy>=1.12
 typing

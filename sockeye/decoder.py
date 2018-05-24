@@ -536,9 +536,9 @@ class RecurrentDecoder(Decoder):
         # Hidden state parameters
         self.hidden_w = mx.sym.Variable("%shidden_weight" % prefix)
         self.hidden_b = mx.sym.Variable("%shidden_bias" % prefix)
-        self.hidden_norm = layers.LayerNormalization(self.num_hidden,
-                                                     prefix="%shidden_norm" % prefix) \
-            if self.config.layer_normalization else None
+        self.hidden_norm = None
+        if self.config.layer_normalization:
+            self.hidden_norm = layers.LayerNormalization(prefix="%shidden_norm" % prefix)
 
     def _create_state_init_parameters(self):
         """
@@ -553,9 +553,8 @@ class RecurrentDecoder(Decoder):
             self.init_ws.append(mx.sym.Variable("%senc2decinit_%d_weight" % (self.prefix, state_idx)))
             self.init_bs.append(mx.sym.Variable("%senc2decinit_%d_bias" % (self.prefix, state_idx)))
             if self.config.layer_normalization:
-                self.init_norms.append(layers.LayerNormalization(num_hidden=init_num_hidden,
-                                                                 prefix="%senc2decinit_%d_norm" % (
-                                                                     self.prefix, state_idx)))
+                self.init_norms.append(layers.LayerNormalization(prefix="%senc2decinit_%d_norm" % (self.prefix,
+                                                                                                   state_idx)))
 
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
@@ -796,7 +795,7 @@ class RecurrentDecoder(Decoder):
                                              bias=self.init_bs[state_idx],
                                              name="%senc2decinit_%d" % (self.prefix, state_idx))
                 if self.config.layer_normalization:
-                    init = self.init_norms[state_idx].normalize(init)
+                    init = self.init_norms[state_idx](data=init)
                 init = mx.sym.Activation(data=init, act_type="tanh",
                                          name="%senc2dec_inittanh_%d" % (self.prefix, state_idx))
                 if self.config.state_init_lhuc:
@@ -870,7 +869,7 @@ class RecurrentDecoder(Decoder):
                                        bias=self.hidden_b,
                                        name='%shidden_fc_t%d' % (self.prefix, seq_idx))
         if self.config.layer_normalization:
-            hidden = self.hidden_norm.normalize(hidden)
+            hidden = self.hidden_norm(data=hidden)
 
         # hidden: (batch_size, rnn_num_hidden)
         hidden = mx.sym.Activation(data=hidden, act_type="tanh",
@@ -904,7 +903,7 @@ class RecurrentDecoder(Decoder):
         hidden = gate * mapped_rnn_output + (1 - gate) * mapped_context
 
         if self.config.layer_normalization:
-            hidden = self.hidden_norm.normalize(hidden)
+            hidden = self.hidden_norm(data=hidden)
 
         # hidden: (batch_size, rnn_num_hidden)
         hidden = mx.sym.Activation(data=hidden, act_type="tanh",

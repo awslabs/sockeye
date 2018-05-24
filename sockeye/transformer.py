@@ -208,7 +208,7 @@ class TransformerProcessBlock:
         self.prefix = prefix
         self.layer_norm = None
         if "n" in sequence:
-            self.layer_norm = layers.LayerNormalization(num_hidden=self.num_hidden, prefix="%snorm" % self.prefix)
+            self.layer_norm = layers.LayerNormalization(prefix="%snorm" % self.prefix)
 
     def __call__(self,
                  data: mx.sym.Symbol,
@@ -232,7 +232,7 @@ class TransformerProcessBlock:
                 data = mx.sym._internal._plus(data, prev, name="%sresidual" % self.prefix)
 
             elif step == "n":
-                data = self.layer_norm.normalize(data)
+                data = self.layer_norm(data=data)
 
             elif step == "d":
                 if self.dropout > 0.0:
