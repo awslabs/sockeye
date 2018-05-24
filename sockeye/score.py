@@ -96,11 +96,14 @@ def main():
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
                            input_file=args.input,
-                           input_factors=args.input_factors)
-
+                           target_file=args.target_file,
+                           input_factors=args.input_factors,
+                           input_is_json=args.json_input)
 
 def make_inputs(input_file: Optional[str],
+                target_file: Optional[str],
                 translator: inference.Translator,
+                input_is_json: bool,
                 input_factors: Optional[List[str]] = None) -> Generator[inference.TranslatorInput, None, None]:
     """
     Generates TranslatorInput instances from input. If input is None, reads from stdin. If num_input_factors > 1,
@@ -115,26 +118,53 @@ def make_inputs(input_file: Optional[str],
     :param input_factors: Source factor files.
     :return: TranslatorInput objects.
     """
-    if input_file is not None:
-        logger.warn('Scoring only supports input on STDIN')
 
-    check_condition(input_factors is None, "Translating from STDIN, not expecting any factor files.")
-    for sentence_id, line in enumerate(sys.stdin, 1):
-        input_str, target_str = line.split('\t')
-        if not target_str:
-            logger.warn('Sentence %d has no target', sentence_id)
-        item = inference.make_input_from_factored_string(sentence_id=sentence_id,
-                                                         factored_string=input_str,
-                                                         translator=translator)
-        item.target_tokens = list(data_io.get_tokens(target_str))
-        yield item
+    check_condition((input_factors is None and target_file is None) or not input_is_json, "JSON input enabled, not expecting extra input files via --source-factor-files or --target-file.")
+
+    if input_file is None:
+        check_condition(input_factors is None and target_file is None, "Translating from STDIN, not expecting any factor files (--source-factor-files) or target file (--target-file).")
+        for sentence_id, line in enumerate(sys.stdin, 1):
+            if input_is_json:
+                item = inference.make_input_from_json_string(sentence_id=sentence_id, json_string=line)
+            else:
+                input_str, target_str = line.split('\t')
+                item = inference.make_input_from_factored_string(sentence_id=sentence_id,
+                                                                 factored_string=input_str,
+                                                                 translator=translator)
+                item.target_tokens = list(data_io.get_tokens(target_str))
+
+            if not item.target_tokens:
+                logger.warn('Sentence %d has no target', sentence_id)
+
+            yield item
+
+    else:
+        input_factors = input_factors if input_factors is not None else []
+        inputs = [target_file, input_file] + input_factors
+
+        check_condition(target_file is not None,
+                        "You need to specify a target file")
+        check_condition(translator.num_source_factors == len(inputs) - 1,
+                        "Model(s) require %d factors, but %d given (through --input and --input-factors)." % (
+                            translator.num_source_factors, len(inputs) - 1))
+        with ExitStack() as exit_stack:
+            streams = [exit_stack.enter_context(data_io.smart_open(i)) for i in inputs]
+            for sentence_id, inputs in enumerate(zip(*streams), 1):
+                item = inference.make_input_from_multiple_strings(sentence_id=sentence_id, strings=list(inputs[1:]))
+                item.target_tokens = list(data_io.get_tokens(inputs[0]))
+                if not item.target_tokens:
+                    logger.warn('Sentence %d has no target', sentence_id)
+
+                yield item
 
 
 def read_and_translate(translator: inference.Translator,
                        output_handler: OutputHandler,
                        chunk_size: Optional[int],
                        input_file: Optional[str] = None,
-                       input_factors: Optional[List[str]] = None) -> None:
+                       target_file: Optional[str] = None,
+                       input_factors: Optional[List[str]] = None,
+                       input_is_json: bool = False) -> None:
     """
     Reads from either a file or stdin and translates each line, calling the output_handler with the result.
 
@@ -161,7 +191,7 @@ def read_and_translate(translator: inference.Translator,
     logger.info("Scoring...")
 
     total_time, total_lines = 0.0, 0
-    for inputs in grouper(make_inputs(input_file, translator, input_factors), size=chunk_size):
+    for inputs in grouper(make_inputs(input_file, target_file, translator, input_is_json, input_factors), size=chunk_size):
         score_time = score(output_handler, inputs, translator)
         total_lines += len(inputs)
         total_time += score_time

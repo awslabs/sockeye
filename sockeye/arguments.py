@@ -1030,6 +1030,12 @@ def add_translate_cli_args(params):
 
 
 def add_score_cli_args(params):
+    score_params = params.add_argument_group("Scoring parameters")
+
+    score_params.add_argument('--target-file', '-tf',
+                               default=None,
+                               help='Target file containing sentences to force decode to. '
+                                    'If not given, will read from second tab-delimited field of stdin, or a JSON structure.')
     add_inference_args(params)
     add_device_args(params)
     add_logging_args(params)
