@@ -1532,6 +1532,7 @@ class CurriculumParallelSampleIter(BaseParallelSampleIter):
                          label_name=label_name, num_factors=num_factors, dtype=dtype)
         assert len(shards_fnames) > 0
         self.max_shard_complexity = 0
+        self.update_max_shard_complexity = False
         self.shards_fnames = list(shards_fnames)
         self.shards_complexity = list(shards_complexity)
         self.visible_shards_fnames = []
@@ -1558,6 +1559,12 @@ class CurriculumParallelSampleIter(BaseParallelSampleIter):
 
     def reset(self):
         # At each reset, given the complexity we are allowed, only a certain number of shards are visible
+        if self.update_max_shard_complexity:
+            logger.info("** Updating complexity constraint (increased by 1)")
+            logger.info("**** Old max complexity " + str(self.max_shard_complexity))
+            self.max_shard_complexity += 1
+            logger.info("**** New max complexity " + str(self.max_shard_complexity))
+            self.update_max_shard_complexity = False
         self.visible_shards_fnames = [self.shards_fnames[idx] for idx in range(len(self.shards_fnames))
                                       if self.shards_complexity[idx] <= self.max_shard_complexity]
         logger.info("Shards visible based on complexity constraint are: " + ','.join(self.visible_shards_fnames))
@@ -1605,10 +1612,7 @@ class CurriculumParallelSampleIter(BaseParallelSampleIter):
         # Increase complexity allowed (based on update freq)
         # Defaults to checkpoint freq
         if self.updates_processed > 0 and self.updates_processed % self.curriculum_update_freq == 0:
-            logger.info("** Updating complexity constraint (increased by 1)")
-            logger.info("**** Old max complexity " + str(self.max_shard_complexity))
-            self.max_shard_complexity += 1
-            logger.info("**** New max complexity " + str(self.max_shard_complexity))
+            self.update_max_shard_complexity = True
         return self.shard_iter.next()
 
     def save_state(self, fname: str):
