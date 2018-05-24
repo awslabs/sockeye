@@ -70,6 +70,14 @@ def prepare_data(args: argparse.Namespace):
         num_words_target=num_words_target,
         word_min_count_target=word_min_count_target)
 
+    sentence_score = []
+    curriculum_learning = False
+    if args.sentence_score_file:
+        curriculum_learning = True
+    if curriculum_learning:
+        with open(args.sentence_score_file) as sentence_score_file:
+            sentence_score = [int(line.strip()) for line in sentence_score_file.readlines() if line.strip()]
+
     data_io.prepare_data(source_fnames=source_paths,
                          target_fname=args.target,
                          source_vocabs=source_vocabs,
@@ -83,7 +91,9 @@ def prepare_data(args: argparse.Namespace):
                          bucket_width=bucket_width,
                          samples_per_shard=samples_per_shard,
                          min_num_shards=minimum_num_shards,
-                         output_prefix=output_folder)
+                         output_prefix=output_folder,
+                         curriculum_learning=curriculum_learning,
+                         sentence_score=sentence_score)
 
 
 if __name__ == "__main__":

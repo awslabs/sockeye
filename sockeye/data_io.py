@@ -22,6 +22,7 @@ import pickle
 import random
 from abc import ABC, abstractmethod
 from collections import OrderedDict
+from collections import Counter
 from contextlib import ExitStack
 from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sequence, Sized, Tuple
 
@@ -322,7 +323,10 @@ def shard_data(source_fnames: List[str],
                buckets: List[Tuple[int, int]],
                length_ratio_mean: float,
                length_ratio_std: float,
-               output_prefix: str) -> Tuple[List[Tuple[List[str], str, 'DataStatistics']], 'DataStatistics']:
+               output_prefix: str,
+               samples_per_shard: int,
+               curriculum_learning: bool,
+               sentence_score: List[int]) -> Tuple[List[Tuple[List[str], str, 'DataStatistics']], 'DataStatistics']:
     """
     Assign int-coded source/target sentence pairs to shards at random.
 
@@ -356,8 +360,43 @@ def shard_data(source_fnames: List[str],
 
         source_readers, target_reader = create_sequence_readers(source_fnames, target_fname,
                                                                 source_vocabs, target_vocab)
+        if curriculum_learning:
+            shard_score_mapping = [None for _ in range(num_shards)]
+            unique_scores = sorted(set(sentence_score))
+            score_index_dict = {}
+            shard_count = 0
+            for i in range(len(sentence_score)):
+                if sentence_score[i] in score_index_dict:
+                    score_index_dict[sentence_score[i]].append(i)
+                else:
+                    score_index_dict[sentence_score[i]] = []
 
-        random_shard_iter = iter(lambda: random.randrange(num_shards), None)
+            if num_shards > len(unique_scores):
+                if num_shards%len(unique_scores) == 0:
+                    num_shards_per_score = int(num_shards/len(unique_scores))         
+                    for us in unique_scores:
+                        for sentence_index_sublist in np.array_split(np.array(score_index_dict[us]),num_shards_per_score):
+                            for index in sentence_index_sublist:
+                                sentence_score[index] = shard_count 
+                            shard_score_mapping[shard_count] = us
+                            shard_count += 1
+                else:
+                    for us in unique_scores:
+                        sample_count = 0
+                        for index in sorted(score_index_dict[us]):
+                            sentence_score[index] = shard_count
+                            sample_count += 1
+                            if sample_count%samples_per_shard==0:
+                                shard_score_mapping[shard_count] = us
+                                shard_count += 1
+                                
+
+            with open(os.path.join(output_prefix, 'shard_scores'), 'a') as shard_scores:
+                for m in shard_score_mapping:
+                    shard_scores.write(str(shard_score_mapping[m])+'\n')
+            random_shard_iter = iter(sentence_score)
+        else:
+            random_shard_iter = iter(lambda: random.randrange(num_shards), None)
 
         for (sources, target), random_shard_index in zip(parallel_iter(source_readers, target_reader),
                                                          random_shard_iter):
@@ -466,7 +505,7 @@ class RawParallelDatasetLoader:
         return ParallelDataSet(data_source, data_target, data_label)
 
 
-def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int) -> int:
+def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int, curriculum_learning: bool, sentence_score: List[int]) -> int:
     """
     Returns the number of shards.
 
@@ -475,6 +514,14 @@ def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int
     :param min_num_shards: Minimum number of shards.
     :return: Number of shards.
     """
+    if curriculum_learning:
+        num_shards = 0
+        count_dict = Counter(sentence_score)
+        for score in count_dict:
+            num_shards += int(math.ceil(count_dict[score]/samples_per_shard))
+        min_num_shards = int(math.ceil(min_num_shards/len(count_dict.keys())))*len(count_dict.keys())
+        return max(num_shards, min_num_shards, len(count_dict.keys()))
+
     return max(int(math.ceil(num_samples / samples_per_shard)), min_num_shards)
 
 
@@ -492,6 +539,8 @@ def prepare_data(source_fnames: List[str],
                  samples_per_shard: int,
                  min_num_shards: int,
                  output_prefix: str,
+                 sentence_score: List[int],
+                 curriculum_learning: bool = False,
                  keep_tmp_shard_files: bool = False):
     logger.info("Preparing data.")
     # write vocabularies to data folder
@@ -510,7 +559,7 @@ def prepare_data(source_fnames: List[str],
 
     # Pass 2: Randomly assign data to data shards
     # no pre-processing yet, just write the sentences to different files
-    num_shards = get_num_shards(length_statistics.num_sents, samples_per_shard, min_num_shards)
+    num_shards = get_num_shards(length_statistics.num_sents, samples_per_shard, min_num_shards, curriculum_learning, sentence_score)
     logger.info("%d samples will be split into %d shard(s) (requested samples/shard=%d, min_num_shards=%d)."
                 % (length_statistics.num_sents, num_shards, samples_per_shard, min_num_shards))
     shards, data_statistics = shard_data(source_fnames=source_fnames,
@@ -521,7 +570,10 @@ def prepare_data(source_fnames: List[str],
                                          buckets=buckets,
                                          length_ratio_mean=length_statistics.length_ratio_mean,
                                          length_ratio_std=length_statistics.length_ratio_std,
-                                         output_prefix=output_prefix)
+                                         output_prefix=output_prefix,
+                                         samples_per_shard=samples_per_shard,
+                                         curriculum_learning=curriculum_learning,
+                                         sentence_score=sentence_score)
     data_statistics.log()
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,

@@ -431,6 +431,9 @@ def add_prepare_data_cli_args(params):
                         required=True,
                         help='Folder where the prepared and possibly sharded data is written to.')
 
+    params.add_argument('--sentence-score-file',type=str,
+                        help='If curriculum learning is expected, then specify the file containg hardness score of each training sentence.')
+
 
 def add_device_args(params):
     device_params = params.add_argument_group("Device parameters")
@@ -1210,3 +1213,4 @@ def add_init_embedding_args(params):
                         help='File to write initialized parameters to.')
     params.add_argument('--encoding', '-c', type=str, default=C.VOCAB_ENCODING,
                         help='Open input vocabularies with specified encoding. Default: %(default)s.')
+    
