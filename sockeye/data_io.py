@@ -745,18 +745,18 @@ def get_prepared_data_iters(prepared_data_dir: str,
     config_data.data_statistics.log(bucket_batch_sizes)
 
     if curriculum_training:
-        check_condition(os.path.exists(os.join(prepared_data_dir, "shard_scores")),
+        check_condition(os.path.exists(os.path.join(prepared_data_dir, "shard_scores")),
                         "Curriculum training was specified but no shard weights were found."
                         "Run sockeye.prepare_data for curriculum training")
 
         shards_complexity = []
-        with open(os.join(prepared_data_dir, "shard_scores")) as shard_scores_file:
+        with open(os.path.join(prepared_data_dir, "shard_scores")) as shard_scores_file:
             for shard_score in shard_scores_file:
                 shards_complexity.append(int(shard_score))
 
         check_condition(len(shards_complexity) == len(shard_fnames),
                         "Did not find shard scores for all shards in %s"
-                        % os.join(prepared_data_dir, "shard_scores"))
+                        % os.path.join(prepared_data_dir, "shard_scores"))
 
         train_iter = CurriculumParallelSampleIter(shard_fnames,
                                                   shards_complexity,
