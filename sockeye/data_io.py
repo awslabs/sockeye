@@ -1530,7 +1530,7 @@ class CurriculumParallelSampleIter(BaseParallelSampleIter):
                          source_data_name=source_data_name, target_data_name=target_data_name,
                          label_name=label_name, num_factors=num_factors, dtype=dtype)
         assert len(shards_fnames) > 0
-        self.max_shard_complexity = 1
+        self.max_shard_complexity = 0
         self.shards_fnames = list(shards_fnames)
         self.shards_complexity = list(shards_complexity)
         self.visible_shards_fnames = []
@@ -1559,7 +1559,7 @@ class CurriculumParallelSampleIter(BaseParallelSampleIter):
         # At each reset, given the complexity we are allowed, only a certain number of shards are visible
         self.visible_shards_fnames = [self.shards_fnames[idx] for idx in range(len(self.shards_fnames))
                                       if self.shards_complexity[idx] <= self.max_shard_complexity]
-        logger.info("Shards visible based on complexity constraint are: ", self.visible_shards_fnames)
+        logger.info("Shards visible based on complexity constraint are: " + ','.join(self.visible_shards_fnames))
         if len(self.visible_shards_fnames) > 1:
             logger.info("Shuffling the visible shards.")
             # Making sure to not repeat a shard:
@@ -1591,11 +1591,6 @@ class CurriculumParallelSampleIter(BaseParallelSampleIter):
         next_shard_index = self.shard_index + 1
         if self.shard_iter.iter_next() or next_shard_index < len(self.visible_shards_fnames):
             return True
-
-        # Increase complexity allowed (based on update freq)
-        # Defaults to checkpoint freq
-        if self.updates_processed > 0 and self.updates_processed % self.curriculum_update_freq == 0:
-            self.max_shard_complexity += 1
         return False
 
     def next(self) -> mx.io.DataBatch:
@@ -1606,6 +1601,13 @@ class CurriculumParallelSampleIter(BaseParallelSampleIter):
             else:
                 raise StopIteration
         self.updates_processed += 1
+        # Increase complexity allowed (based on update freq)
+        # Defaults to checkpoint freq
+        if self.updates_processed > 0 and self.updates_processed % self.curriculum_update_freq == 0:
+            logger.info("** Updating complexity constraint (increased by 1)")
+            logger.info("**** Old max complexity " + str(self.max_shard_complexity))
+            self.max_shard_complexity += 1
+            logger.info("**** New max complexity " + str(self.max_shard_complexity))
         return self.shard_iter.next()
 
     def save_state(self, fname: str):
