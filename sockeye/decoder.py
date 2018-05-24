@@ -800,7 +800,7 @@ class RecurrentDecoder(Decoder):
                                          name="%senc2dec_inittanh_%d" % (self.prefix, state_idx))
                 if self.config.state_init_lhuc:
                     lhuc = layers.LHUC(init_num_hidden, prefix="%senc2decinit_%d_" % (self.prefix, state_idx))
-                    init = lhuc.apply(init)
+                    init = lhuc(init)
             layer_states.append(init)
 
         return RecurrentDecoderState(hidden, layer_states)

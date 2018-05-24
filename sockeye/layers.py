@@ -113,7 +113,7 @@ class LHUC:
         else:
             self.params = weight
 
-    def apply(self,
+    def __call__(self,
               inputs: mx.sym.Symbol,
               name: Optional[str] = None) -> mx.sym.Symbol:
 

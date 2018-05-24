@@ -102,8 +102,11 @@ def check_arg_compatibility(args: argparse.Namespace):
                         % (args.transformer_model_size, args.num_embed[1]))
 
     if args.lhuc is not None:
-        check_condition(args.encoder == C.RNN_NAME or args.decoder == C.RNN_NAME,
+        # Actually this check is a bit too strict
+        check_condition(args.encoder != C.CONVOLUTION_TYPE or args.decoder != C.CONVOLUTION_TYPE,
                         "LHUC is only supported for RNN models for now.")
+        check_condition(args.decoder != C.TRANSFORMER_TYPE or C.LHUC_STATE_INIT not in args.lhuc,
+                        "The %s options only applies to RNN models" % C.LHUC_STATE_INIT)
 
 
 
