@@ -637,9 +637,10 @@ def get_prepared_data_iters(prepared_data_dir: str,
                             batch_by_words: bool,
                             batch_num_devices: int,
                             fill_up: str,
-                            curriculum_training: bool) -> Tuple['BaseParallelSampleIter',
-                                                                'BaseParallelSampleIter',
-                                                                'DataConfig', List[vocab.Vocab], vocab.Vocab]:
+                            curriculum_training: bool,
+                            curriculum_update_freq: int) -> Tuple['BaseParallelSampleIter',
+                                                                  'BaseParallelSampleIter',
+                                                                  'DataConfig', List[vocab.Vocab], vocab.Vocab]:
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
@@ -704,6 +705,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
 
         train_iter = CurriculumParallelSampleIter(shard_fnames,
                                                   shards_complexity,
+                                                  curriculum_update_freq,
                                                   buckets,
                                                   batch_size,
                                                   bucket_batch_sizes,
@@ -1459,6 +1461,7 @@ class CurriculumParallelSampleIter(ShardedParallelSampleIter):
     def __init__(self,
                  shards_fnames: List[str],
                  shards_complexity: List[int],
+                 curriculum_update_freq: int,
                  buckets,
                  batch_size,
                  bucket_batch_sizes,
@@ -1477,6 +1480,8 @@ class CurriculumParallelSampleIter(ShardedParallelSampleIter):
         self.shards_complexity = list(shards_complexity)
         self.visible_shards_fnames = []
         self.shard_index = -1
+        self.updates_processed = 0
+        self.curriculum_update_freq = curriculum_update_freq
         self.fill_up = fill_up
 
         self.reset()
@@ -1518,8 +1523,10 @@ class CurriculumParallelSampleIter(ShardedParallelSampleIter):
         if self.shard_iter.iter_next() or next_shard_index < len(self.visible_shards_fnames):
             return True
 
-        # Increase complexity allowed (end of epoch)
-        self.max_shard_complexity += 1
+        # Increase complexity allowed (based on update freq)
+        # Defaults to checkpoint freq
+        if self.updates_processed > 0 and self.updates_processed % self.curriculum_update_freq == 0:
+            self.max_shard_complexity += 1
         return False
 
     def next(self) -> mx.io.DataBatch:
@@ -1529,6 +1536,7 @@ class CurriculumParallelSampleIter(ShardedParallelSampleIter):
                 super()._load_shard()
             else:
                 raise StopIteration
+        self.updates_processed += 1
         return self.shard_iter.next()
 
 
