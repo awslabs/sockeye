@@ -1584,7 +1584,7 @@ class CurriculumParallelSampleIter(BaseParallelSampleIter):
             remaining_shards = [shard for shard in self.visible_shards_fnames if shard != next_shard_fname]
             random.shuffle(remaining_shards)
 
-            self.shards_fnames = [next_shard_fname] + remaining_shards
+            self.visible_shards_fnames = [next_shard_fname] + remaining_shards
 
             self.shard_index = 0
             self._load_shard()
