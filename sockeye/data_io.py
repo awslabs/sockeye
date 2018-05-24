@@ -361,7 +361,7 @@ def shard_data(source_fnames: List[str],
         source_readers, target_reader = create_sequence_readers(source_fnames, target_fname,
                                                                 source_vocabs, target_vocab)
         if curriculum_learning:
-            shard_score_mapping = [None for _ in range(num_shards)]
+            shard_score_mapping = [i for i in range(num_shards)]
             unique_scores = sorted(set(sentence_score))
             score_index_dict = {}
             shard_count = 0
@@ -389,11 +389,14 @@ def shard_data(source_fnames: List[str],
                             if sample_count%samples_per_shard==0:
                                 shard_score_mapping[shard_count] = us
                                 shard_count += 1
+                        if sample_count < samples_per_shard:
+                            shard_score_mapping[shard_count] = us
+                            shard_count += 1
                                 
 
             with open(os.path.join(output_prefix, 'shard_scores'), 'a') as shard_scores:
                 for m in shard_score_mapping:
-                    shard_scores.write(str(shard_score_mapping[m])+'\n')
+                    shard_scores.write(str(m)+'\n')
             random_shard_iter = iter(sentence_score)
         else:
             random_shard_iter = iter(lambda: random.randrange(num_shards), None)
