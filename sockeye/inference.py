@@ -1365,10 +1365,9 @@ class Translator:
         sequences[:, 0] = self.start_id
 
         # Beam history
+        beam_histories = None  # type: Optional[List[BeamHistory]]
         if self.store_beam:
-            beam_histories = [defaultdict(list) for _ in range(self.batch_size)]  # type: Optional[List[BeamHistory]]
-        else:
-            beam_histories = None
+            beam_histories = [defaultdict(list) for _ in range(self.batch_size)]
 
         lengths = mx.nd.ones((self.batch_size * self.beam_size, 1), ctx=self.context)
         finished = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
@@ -1558,7 +1557,6 @@ class Translator:
         lengths = mx.nd.take(lengths, best_hyp_indices)
         attentions = mx.nd.take(attentions, best_hyp_indices)
         scores_accumulated[:] = mx.nd.take(scores_accumulated, best_hyp_indices)
-        finished = mx.nd.take(finished, best_hyp_indices)
         constraints = [constraints[int(x.asscalar())] for x in best_hyp_indices]
 
         return sequences, attentions, scores_accumulated, lengths, constraints, beam_histories
@@ -1584,8 +1582,8 @@ class Translator:
         :param beam_histories: The beam histories for each sentence in the batch.
         :return: List of Translation objects containing all relevant information.
         """
-        utils.check_condition(sequences.shape[0] == attention_lists.shape[0] \
-                              == seq_scores.shape[0] == lengths.shape[0], "Shape mismatch")
+        utils.check_condition(sequences.shape[0] == attention_lists.shape[0] == seq_scores.shape[0] == lengths.shape[0],
+                              "Shape mismatch")
 
         # Initialize the best_ids to the first item in each batch
         best_ids = mx.nd.arange(0, self.batch_size * self.beam_size, self.beam_size, ctx=self.context)
@@ -1597,7 +1595,7 @@ class Translator:
             filtered = filtered.reshape((self.batch_size, self.beam_size))
             best_ids += mx.nd.argmin(filtered, axis=1)
 
-        histories = beam_histories if beam_histories is not None else [None] * self.batch_size
+        histories = beam_histories if beam_histories is not None else [None] * self.batch_size  # type: List
         return [self._assemble_translation(*x) for x in zip(sequences[best_ids],
                                                             lengths[best_ids],
                                                             attention_lists[best_ids],
@@ -1619,7 +1617,7 @@ class Translator:
         :param attention_lists: Array of attentions over source words.
                                 Shape: (batch_size * self.beam_size, max_output_length, encoded_source_length).
         :param seq_score: Array of length-normalized negative log-probs.
-        :param beam_history: The beam histories for each sentence in the batch.
+        :param beam_history: The optional beam histories for each sentence in the batch.
         :return: A Translation object.
         """
 
