@@ -23,3 +23,4 @@ recursive-include docs Makefile
 recursive-include tutorials *.md
 recursive-include tutorials *.png
 recursive-include tutorials *.py
+recursive-include test *.txt
