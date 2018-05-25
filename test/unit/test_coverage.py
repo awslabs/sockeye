@@ -81,11 +81,10 @@ def _test_activation_coverage(act_type):
     executor.arg_dict["prev_coverage"][:] = prev_coverage_data
     executor.arg_dict["attention_scores"][:] = attention_scores_data
     result = executor.forward()
-    # this is needed to modulate the 0 input. The output changes according to the activation type used.
-    activation = mx.sym.Activation(name="activation", act_type=act_type)
-    modulated = activation.eval(ctx=mx.cpu(), activation_data=mx.nd.zeros((1, 1)))[0].asnumpy()
     new_coverage = result[0].asnumpy()
     assert new_coverage.shape == prev_coverage_shape
+    # this is needed to modulate the 0 input. The output changes according to the activation type used.
+    modulated = mx.nd.Activation(mx.nd.zeros((1, 1)), act_type=act_type).asnumpy()
     assert (np.sum(np.sum(new_coverage == modulated, axis=2) != 0, axis=1) == source_length_data).all()
 
 
@@ -143,5 +142,4 @@ def _patch_sequence_mask(test):
     with patch.object(mx, 'sym', wraps=mx.sym) as mxnet_mock:
         #  Patch Sequence Mask to use ones for padding.
         mxnet_mock.SequenceMask = _mask_with_one
-
         test()

@@ -182,6 +182,7 @@ def test_model_parameters(test_params, expected_params):
               decode_and_evaluate_device_id=None,
               seed=13,
               keep_last_params=-1,
+              rnn_enc_last_hidden_concat_to_embedding=False,
               dry_run=False)),
 ])
 def test_training_arg(test_params, expected_params):
@@ -381,8 +382,10 @@ def _create_argument_values_that_must_be_files_or_dirs(params):
 
     params = params.split()
     regular_files_params = {'-vs', '-vt', '-t', '-s', '--source', '--target',
-                            '--validation-source', '--validation-target'}
-    folder_params = {'--prepared-data', '-d'}
+                            '--validation-source', '--validation-target',
+                            '--input', '-i'}
+    folder_params = {'--prepared-data', '-d', '--image-root', '-ir',
+                     '--validation-source-root', '-vsr', '--source-root', '-sr'}
     to_unlink = set()
     for arg, val in grouper(params, 2):
         if arg in regular_files_params and not os.path.isfile(val):

@@ -13,3 +13,9 @@ introduce different concepts and parameters used for training and translation.
 
 1. [Sequence copy task](seqcopy)
 1. [WMT German to English news translation](wmt)
+<<<<<<< HEAD
+1. [Image captioning](image_captioning)
+=======
+1. [Domain adaptation of NMT models](adapt)
+1. [Decoding with lexical constraints](constraints)
+>>>>>>> sockeye/master

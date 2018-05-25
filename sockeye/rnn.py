@@ -195,25 +195,15 @@ class LayerNormLSTMCell(mx.rnn.LSTMCell):
                  norm_scale: float = 1.0,
                  norm_shift: float = 0.0) -> None:
         super(LayerNormLSTMCell, self).__init__(num_hidden, prefix, params, forget_bias)
-        self._iN = LayerNormalization(num_hidden=num_hidden * 4,
-                                      prefix="%si2h" % self._prefix,
-                                      scale=self.params.get('i2h_scale', shape=(num_hidden * 4,),
-                                                            init=mx.init.Constant(value=norm_scale)),
-                                      shift=self.params.get('i2h_shift', shape=(num_hidden * 4,),
-                                                            init=mx.init.Constant(value=norm_shift)))
-        self._hN = LayerNormalization(num_hidden=num_hidden * 4,
-                                      prefix="%sh2h" % self._prefix,
-                                      scale=self.params.get('h2h_scale', shape=(num_hidden * 4,),
-                                                            init=mx.init.Constant(value=norm_scale)),
-                                      shift=self.params.get('h2h_shift', shape=(num_hidden * 4,),
-                                                            init=mx.init.Constant(value=norm_shift)))
-        self._cN = LayerNormalization(num_hidden=num_hidden,
-                                      prefix="%sc" % self._prefix,
-                                      scale=self.params.get('c_scale', shape=(num_hidden,),
-                                                            init=mx.init.Constant(value=norm_scale)),
-                                      shift=self.params.get('c_shift', shape=(num_hidden,),
-                                                            init=mx.init.Constant(value=norm_shift)))
-        self._shape_fix = None
+        self._iN = LayerNormalization(prefix="%si2h" % self._prefix,
+                                      scale=self.params.get('i2h_scale', shape=(num_hidden * 4,), init=mx.init.Constant(value=norm_scale)),
+                                      shift=self.params.get('i2h_shift', shape=(num_hidden * 4,), init=mx.init.Constant(value=norm_shift)))
+        self._hN = LayerNormalization(prefix="%sh2h" % self._prefix,
+                                      scale=self.params.get('h2h_scale', shape=(num_hidden * 4,), init=mx.init.Constant(value=norm_scale)),
+                                      shift=self.params.get('h2h_shift', shape=(num_hidden * 4,), init=mx.init.Constant(value=norm_shift)))
+        self._cN = LayerNormalization(prefix="%sc" % self._prefix,
+                                      scale=self.params.get('c_scale', shape=(num_hidden,), init=mx.init.Constant(value=norm_scale)),
+                                      shift=self.params.get('c_shift', shape=(num_hidden,), init=mx.init.Constant(value=norm_shift)))
 
     def __call__(self, inputs, states):
         self._counter += 1
@@ -221,14 +211,10 @@ class LayerNormLSTMCell(mx.rnn.LSTMCell):
         i2h = mx.sym.FullyConnected(data=inputs, weight=self._iW, bias=self._iB,
                                     num_hidden=self._num_hidden * 4,
                                     name='%si2h' % name)
-        if self._counter == 0:
-            self._shape_fix = mx.sym.zeros_like(i2h)
-        else:
-            assert self._shape_fix is not None
         h2h = mx.sym.FullyConnected(data=states[0], weight=self._hW, bias=self._hB,
                                     num_hidden=self._num_hidden * 4,
                                     name='%sh2h' % name)
-        gates = self._iN.normalize(i2h) + self._hN.normalize(self._shape_fix + h2h)
+        gates = self._iN(data=i2h) + self._hN(data=h2h + mx.sym.zeros_like(i2h))
         # pylint: disable=unbalanced-tuple-unpacking
         in_gate, forget_gate, in_transform, out_gate = mx.sym.split(gates,
                                                                     num_outputs=4,
@@ -245,8 +231,7 @@ class LayerNormLSTMCell(mx.rnn.LSTMCell):
         next_c = mx.sym._internal._plus(forget_gate * states[1], in_gate * in_transform,
                                         name='%sstate' % name)
         next_h = mx.sym._internal._mul(out_gate,
-                                       mx.sym.Activation(self._cN.normalize(next_c),
-                                                         act_type="tanh"),
+                                       mx.sym.Activation(self._cN(data=next_c), act_type="tanh"),
                                        name='%sout' % name)
         return next_h, [next_h, next_c]
 
@@ -274,12 +259,12 @@ class LayerNormPerGateLSTMCell(mx.rnn.LSTMCell):
         super(LayerNormPerGateLSTMCell, self).__init__(num_hidden, prefix, params, forget_bias)
         self._norm_layers = list()  # type: List[LayerNormalization]
         for name in ['i', 'f', 'c', 'o', 's']:
-            scale = self.params.get('%s_shift' % name, shape=(num_hidden,),
+            scale = self.params.get('%s_shift' % name,
                                     init=mx.init.Constant(value=norm_shift))
-            shift = self.params.get('%s_scale' % name, shape=(num_hidden,),
+            shift = self.params.get('%s_scale' % name,
                                     init=mx.init.Constant(value=norm_scale if name != "f" else forget_bias))
             self._norm_layers.append(
-                LayerNormalization(num_hidden, prefix="%s%s" % (self._prefix, name), scale=scale, shift=shift))
+                LayerNormalization(prefix="%s%s" % (self._prefix, name), scale=scale, shift=shift))
 
     def __call__(self, inputs, states):
         self._counter += 1
@@ -295,10 +280,10 @@ class LayerNormPerGateLSTMCell(mx.rnn.LSTMCell):
         in_gate, forget_gate, in_transform, out_gate = mx.sym.split(
             gates, num_outputs=4, name="%sslice" % name)
 
-        in_gate = self._norm_layers[0].normalize(in_gate)
-        forget_gate = self._norm_layers[1].normalize(forget_gate)
-        in_transform = self._norm_layers[2].normalize(in_transform)
-        out_gate = self._norm_layers[3].normalize(out_gate)
+        in_gate = self._norm_layers[0](data=in_gate)
+        forget_gate = self._norm_layers[1](data=forget_gate)
+        in_transform = self._norm_layers[2](data=in_transform)
+        out_gate = self._norm_layers[3](data=out_gate)
 
         in_gate = mx.sym.Activation(in_gate, act_type="sigmoid",
                                     name='%si' % name)
@@ -311,7 +296,7 @@ class LayerNormPerGateLSTMCell(mx.rnn.LSTMCell):
         next_c = mx.sym._internal._plus(forget_gate * states[1], in_gate * in_transform,
                                         name='%sstate' % name)
         next_h = mx.sym._internal._mul(out_gate,
-                                       mx.sym.Activation(self._norm_layers[4].normalize(next_c), act_type="tanh"),
+                                       mx.sym.Activation(self._norm_layers[4].__call__(next_c), act_type="tanh"),
                                        name='%sout' % name)
         return next_h, [next_h, next_c]
 
@@ -392,19 +377,12 @@ class LayerNormGRUCell(mx.rnn.GRUCell):
                  norm_scale: float = 1.0,
                  norm_shift: float = 0.0) -> None:
         super(LayerNormGRUCell, self).__init__(num_hidden, prefix, params)
-        self._iN = LayerNormalization(num_hidden=num_hidden * 3,
-                                      prefix="%si2h" % self._prefix,
-                                      scale=self.params.get('i2h_scale', shape=(num_hidden * 3,),
-                                                            init=mx.init.Constant(value=norm_scale)),
-                                      shift=self.params.get('i2h_shift', shape=(num_hidden * 3,),
-                                                            init=mx.init.Constant(value=norm_shift)))
-        self._hN = LayerNormalization(num_hidden=num_hidden * 3,
-                                      prefix="%sh2h" % self._prefix,
-                                      scale=self.params.get('h2h_scale', shape=(num_hidden * 3,),
-                                                            init=mx.init.Constant(value=norm_scale)),
-                                      shift=self.params.get('h2h_shift', shape=(num_hidden * 3,),
-                                                            init=mx.init.Constant(value=norm_shift)))
-        self._shape_fix = None
+        self._iN = LayerNormalization(prefix="%si2h" % self._prefix,
+                                      scale=self.params.get('i2h_scale', init=mx.init.Constant(value=norm_scale)),
+                                      shift=self.params.get('i2h_shift', init=mx.init.Constant(value=norm_shift)))
+        self._hN = LayerNormalization(prefix="%sh2h" % self._prefix,
+                                      scale=self.params.get('h2h_scale', init=mx.init.Constant(value=norm_scale)),
+                                      shift=self.params.get('h2h_shift', init=mx.init.Constant(value=norm_shift)))
 
     def __call__(self, inputs, states):
         self._counter += 1
@@ -423,13 +401,9 @@ class LayerNormGRUCell(mx.rnn.GRUCell):
                                     bias=self._hB,
                                     num_hidden=self._num_hidden * 3,
                                     name="%s_h2h" % name)
-        if self._counter == 0:
-            self._shape_fix = mx.sym.zeros_like(i2h)
-        else:
-            assert self._shape_fix is not None
 
-        i2h = self._iN.normalize(i2h)
-        h2h = self._hN.normalize(self._shape_fix + h2h)
+        i2h = self._iN(data=i2h)
+        h2h = self._hN(data=h2h)
 
         # pylint: disable=unbalanced-tuple-unpacking
         i2h_r, i2h_z, i2h = mx.sym.split(i2h, num_outputs=3, name="%s_i2h_slice" % name)
@@ -470,10 +444,9 @@ class LayerNormPerGateGRUCell(mx.rnn.GRUCell):
         super(LayerNormPerGateGRUCell, self).__init__(num_hidden, prefix, params)
         self._norm_layers = list()  # type: List[LayerNormalization]
         for name in ['r', 'z', 'o']:
-            scale = self.params.get('%s_shift' % name, shape=(num_hidden,), init=mx.init.Constant(value=norm_shift))
-            shift = self.params.get('%s_scale' % name, shape=(num_hidden,), init=mx.init.Constant(value=norm_scale))
-            self._norm_layers.append(
-                LayerNormalization(num_hidden, prefix="%s%s" % (self._prefix, name), scale=scale, shift=shift))
+            scale = self.params.get('%s_shift' % name, init=mx.init.Constant(value=norm_shift))
+            shift = self.params.get('%s_scale' % name, init=mx.init.Constant(value=norm_scale))
+            self._norm_layers.append(LayerNormalization(prefix="%s%s" % (self._prefix, name), scale=scale, shift=shift))
 
     def __call__(self, inputs, states):
         self._counter += 1
@@ -497,12 +470,12 @@ class LayerNormPerGateGRUCell(mx.rnn.GRUCell):
         i2h_r, i2h_z, i2h = mx.sym.split(i2h, num_outputs=3, name="%s_i2h_slice" % name)
         h2h_r, h2h_z, h2h = mx.sym.split(h2h, num_outputs=3, name="%s_h2h_slice" % name)
 
-        reset_gate = mx.sym.Activation(self._norm_layers[0].normalize(i2h_r + h2h_r),
+        reset_gate = mx.sym.Activation(self._norm_layers[0](data=i2h_r + h2h_r),
                                        act_type="sigmoid", name="%s_r_act" % name)
-        update_gate = mx.sym.Activation(self._norm_layers[1].normalize(i2h_z + h2h_z),
+        update_gate = mx.sym.Activation(self._norm_layers[1](data=i2h_z + h2h_z),
                                         act_type="sigmoid", name="%s_z_act" % name)
 
-        next_h_tmp = mx.sym.Activation(self._norm_layers[2].normalize(i2h + reset_gate * h2h),
+        next_h_tmp = mx.sym.Activation(self._norm_layers[2](data=i2h + reset_gate * h2h),
                                        act_type="tanh", name="%s_h_act" % name)
 
         next_h = mx.sym._internal._plus((1. - update_gate) * next_h_tmp, update_gate * prev_state_h,

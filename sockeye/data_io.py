@@ -91,6 +91,28 @@ def define_parallel_buckets(max_seq_len_source: int,
     return buckets
 
 
+def define_empty_source_parallel_buckets(max_seq_len_target: int,
+                                         bucket_width: int = 10) -> List[Tuple[int, int]]:
+    """
+    Returns (source, target) buckets up to (None, max_seq_len_target). The source
+    is empty since it is supposed to not contain data that can be bucketized.
+    The target is used as reference to create the buckets.
+
+    :param max_seq_len_target: Maximum target bucket size.
+    :param bucket_width: Width of buckets on longer side.
+    """
+    target_step_size = max(1, bucket_width)
+    target_buckets = define_buckets(max_seq_len_target, step=target_step_size)
+    # source buckets are always 0 since there is no text
+    source_buckets = [0 for b in target_buckets]
+    target_buckets = [max(2, b) for b in target_buckets]
+    parallel_buckets = list(zip(source_buckets, target_buckets))
+    # deduplicate for return
+    buckets = list(OrderedDict.fromkeys(parallel_buckets))
+    buckets.sort()
+    return buckets
+
+
 def get_bucket(seq_len: int, buckets: List[int]) -> Optional[int]:
     """
     Given sequence length and a list of buckets, return corresponding bucket.
@@ -245,7 +267,7 @@ class DataStatisticsAccumulator:
 
     def __init__(self,
                  buckets: List[Tuple[int, int]],
-                 vocab_source: Dict[str, int],
+                 vocab_source: Optional[Dict[str, int]],
                  vocab_target: Dict[str, int],
                  length_ratio_mean: float,
                  length_ratio_std: float) -> None:
@@ -253,9 +275,13 @@ class DataStatisticsAccumulator:
         num_buckets = len(buckets)
         self.length_ratio_mean = length_ratio_mean
         self.length_ratio_std = length_ratio_std
-        self.unk_id_source = vocab_source[C.UNK_SYMBOL]
+        if vocab_source is not None:
+            self.unk_id_source = vocab_source[C.UNK_SYMBOL]
+            self.size_vocab_source = len(vocab_source)
+        else:
+            self.unk_id_source = None
+            self.size_vocab_source = 0
         self.unk_id_target = vocab_target[C.UNK_SYMBOL]
-        self.size_vocab_source = len(vocab_source)
         self.size_vocab_target = len(vocab_target)
         self.num_sents = 0
         self.num_discarded = 0
@@ -286,7 +312,8 @@ class DataStatisticsAccumulator:
         self.max_observed_len_source = max(source_len, self.max_observed_len_source)
         self.max_observed_len_target = max(target_len, self.max_observed_len_target)
 
-        self.num_unks_source += source.count(self.unk_id_source)
+        if self.unk_id_source is not None:
+            self.num_unks_source += source.count(self.unk_id_source)
         self.num_unks_target += target.count(self.unk_id_target)
 
     @property
@@ -578,9 +605,14 @@ def get_data_statistics(source_readers: Sequence[Iterable],
     data_stats_accumulator = DataStatisticsAccumulator(buckets, source_vocabs[0], target_vocab,
                                                        length_ratio_mean, length_ratio_std)
 
-    for sources, target in parallel_iter(source_readers, target_reader):
-        buck_idx, buck = get_parallel_bucket(buckets, len(sources[0]), len(target))
-        data_stats_accumulator.sequence_pair(sources[0], target, buck_idx)
+    if source_readers is not None and target_reader is not None:
+        for sources, target in parallel_iter(source_readers, target_reader):
+            buck_idx, buck = get_parallel_bucket(buckets, len(sources[0]), len(target))
+            data_stats_accumulator.sequence_pair(sources[0], target, buck_idx)
+    else:  # Allow stats for target only data
+        for target in target_reader:
+            buck_idx, buck = get_target_bucket(buckets, len(target))
+            data_stats_accumulator.sequence_pair([], target, buck_idx)
 
     return data_stats_accumulator.statistics
 
@@ -1080,6 +1112,33 @@ def parallel_iter(source_iters: Sequence[Iterable[Optional[Any]]], target_iterab
         "Different number of lines in source(s) and target iterables.")
 
 
+class FileListReader(Iterator):
+    """
+    Reads sequence samples from path provided in a file.
+
+    :param fname: File name containing a list of relative paths.
+    :param path: Path to read data from, which is prefixed to the relative paths of fname.
+    """
+
+    def __init__(self,
+                 fname: str,
+                 path: str) -> None:
+        self.fname = fname
+        self.path = path
+        self.fd = smart_open(fname)
+        self.count = 0
+
+    def __next__(self):
+        fname = self.fd.readline().strip("\n")
+
+        if fname is None:
+            self.fd.close()
+            raise StopIteration
+
+        self.count += 1
+        return os.path.join(self.path, fname)
+
+
 def get_default_bucket_key(buckets: List[Tuple[int, int]]) -> Tuple[int, int]:
     """
     Returns the default bucket from a list of buckets, i.e. the largest bucket.
@@ -1106,6 +1165,24 @@ def get_parallel_bucket(buckets: List[Tuple[int, int]],
         if source_bkt >= length_source and target_bkt >= length_target:
             return j, (source_bkt, target_bkt)
     return None, None
+
+
+def get_target_bucket(buckets: List[Tuple[int, int]],
+                      length_target: int) -> Optional[Tuple[int, Tuple[int, int]]]:
+    """
+    Returns bucket index and bucket from a list of buckets, given source and target length.
+    Returns (None, None) if no bucket fits.
+
+    :param buckets: List of buckets.
+    :param length_target: Length of target sequence.
+    :return: Tuple of (bucket index, bucket), or (None, None) if not fitting.
+    """
+    bucket = None, None  # type: Tuple[int, Tuple[int, int]]
+    for j, (source_bkt, target_bkt) in enumerate(buckets):
+        if target_bkt >= length_target:
+            bucket = j, (source_bkt, target_bkt)
+            break
+    return bucket
 
 
 class ParallelDataSet(Sized):
@@ -1182,8 +1259,12 @@ class ParallelDataSet(Sized):
                     logger.info("Replicating %d random samples from %d samples in bucket %s "
                                 "to size it to multiple of %d",
                                 rest, num_samples, bucket, bucket_batch_size)
-                    random_indices = mx.nd.array(rs.randint(num_samples, size=rest))
-                    source[bucket_idx] = mx.nd.concat(bucket_source, bucket_source.take(random_indices), dim=0)
+                    random_indices_np = rs.randint(num_samples, size=rest)
+                    random_indices = mx.nd.array(random_indices_np)
+                    if isinstance(source[bucket_idx], np.ndarray):
+                        source[bucket_idx] = np.concatenate((bucket_source, bucket_source.take(random_indices_np)), axis=0)
+                    else:
+                        source[bucket_idx] = mx.nd.concat(bucket_source, bucket_source.take(random_indices), dim=0)
                     target[bucket_idx] = mx.nd.concat(bucket_target, bucket_target.take(random_indices), dim=0)
                     label[bucket_idx] = mx.nd.concat(bucket_label, bucket_label.take(random_indices), dim=0)
                 else:
@@ -1200,7 +1281,10 @@ class ParallelDataSet(Sized):
             num_samples = self.source[buck_idx].shape[0]
             if num_samples:  # not empty bucket
                 permutation = permutations[buck_idx]
-                source.append(self.source[buck_idx].take(permutation))
+                if isinstance(self.source[buck_idx], np.ndarray):
+                    source.append(self.source[buck_idx].take(np.int64(permutation.asnumpy())))
+                else:
+                    source.append(self.source[buck_idx].take(permutation))
                 target.append(self.target[buck_idx].take(permutation))
                 label.append(self.label[buck_idx].take(permutation))
             else:
