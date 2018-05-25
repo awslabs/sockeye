@@ -114,8 +114,8 @@ class LHUC:
             self.params = weight
 
     def __call__(self,
-              inputs: mx.sym.Symbol,
-              name: Optional[str] = None) -> mx.sym.Symbol:
+                 inputs: mx.sym.Symbol,
+                 name: Optional[str] = None) -> mx.sym.Symbol:
 
         # We use a sigmoid with amplitude 2 for weighting the hidden units. The
         # activation is dampened when the value of the sigmoid is close to 0, and

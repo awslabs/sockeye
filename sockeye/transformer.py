@@ -100,7 +100,7 @@ class TransformerEncoderBlock:
                                                prefix="%sff_post_" % prefix)
         self.lhuc = None
         if config.use_lhuc:
-            self.lhuc = layers.LHUC(config.model_size)
+            self.lhuc = layers.LHUC(config.model_size, prefix="%s_" % prefix)
 
     def __call__(self, data: mx.sym.Symbol, bias: mx.sym.Symbol) -> mx.sym.Symbol:
         # self-attention
@@ -173,7 +173,7 @@ class TransformerDecoderBlock:
 
         self.lhuc = None
         if config.use_lhuc:
-            self.lhuc = layers.LHUC(config.model_size)
+            self.lhuc = layers.LHUC(config.model_size, prefix="%s_" % prefix)
 
     def __call__(self,
                  target: mx.sym.Symbol,

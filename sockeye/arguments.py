@@ -644,8 +644,8 @@ def add_model_parameters(params):
                               choices=C.LHUC_CHOICES,
                               metavar="COMPONENT",
                               help="Use LHUC (Vilar 2018). Include an amplitude parameter to hidden units for"
-                              " domain adaptation. Needs a pre-trained model. Valid values: {values}. Currently only"
-                              " supported for RNN models. Default: %(default)s.".format(
+                              " domain adaptation. Needs a pre-trained model. Valid values: {values}. Currently not"
+                              " supported for convolutional models. Default: %(default)s.".format(
                                   values=", ".join(C.LHUC_CHOICES)))
 
     # embedding arguments

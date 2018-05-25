@@ -103,7 +103,7 @@ def check_arg_compatibility(args: argparse.Namespace):
     if args.lhuc is not None:
         # Actually this check is a bit too strict
         check_condition(args.encoder != C.CONVOLUTION_TYPE or args.decoder != C.CONVOLUTION_TYPE,
-                        "LHUC is only supported for RNN models for now.")
+                        "LHUC is not supported for convolutional models yet.")
         check_condition(args.decoder != C.TRANSFORMER_TYPE or C.LHUC_STATE_INIT not in args.lhuc,
                         "The %s options only applies to RNN models" % C.LHUC_STATE_INIT)
 
@@ -420,7 +420,8 @@ def create_encoder_config(args: argparse.Namespace,
             postprocess_sequence=encoder_transformer_postprocess,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
-            conv_config=config_conv)
+            conv_config=config_conv,
+            lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc))
         encoder_num_hidden = encoder_transformer_model_size
     elif args.encoder == C.CONVOLUTION_TYPE:
         cnn_kernel_width_encoder, _ = args.cnn_kernel_width
@@ -491,7 +492,8 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
             postprocess_sequence=decoder_transformer_postprocess,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
-            conv_config=None)
+            conv_config=None,
+            lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc))
 
     elif args.decoder == C.CONVOLUTION_TYPE:
         _, cnn_kernel_width_decoder = args.cnn_kernel_width
