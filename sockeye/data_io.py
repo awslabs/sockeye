@@ -1544,11 +1544,11 @@ class CurriculumParallelSampleIter(BaseParallelSampleIter):
         self.reset()
 
     def _load_shard(self):
-        shard_fname = self.shards_fnames[self.shard_index]
+        shard_fname = self.visible_shards_fnames[self.shard_index]
         logger.info("Loading shard %s.", shard_fname)
-        dataset = ParallelDataSet.load(self.shards_fnames[self.shard_index]).fill_up(self.bucket_batch_sizes,
-                                                                                     self.fill_up,
-                                                                                     seed=self.shard_index)
+        dataset = ParallelDataSet.load(self.visible_shards_fnames[self.shard_index]).fill_up(self.bucket_batch_sizes,
+                                                                                             self.fill_up,
+                                                                                             seed=self.shard_index)
         self.shard_iter = ParallelSampleIter(data=dataset,
                                              buckets=self.buckets,
                                              batch_size=self.batch_size,
