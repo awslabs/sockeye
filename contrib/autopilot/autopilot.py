@@ -94,6 +94,9 @@ AVERAGE_STRATEGY = "best"
 PARAMS_BEST_SINGLE = "params.best.single"
 PARAMS_AVERAGE = "params.average"
 
+# Scaled down settings for test mode
+TEST_BPE_OPS = 1024
+
 
 def identify_raw_files(task: Task, test_mode: bool = False) -> List[str]:
     """
@@ -356,8 +359,11 @@ def call_sockeye_train(args: List[str],
         command.append("--use-cpu")
     # Test mode stops after a small number of updates
     if test_mode:
-        command.append("--max-updates=10")
-        command.append("--checkpoint-frequency=5")
+        command.append("--num-words=64:64")
+        command.append("--batch-type=sentence")
+        command.append("--batch-size=1")
+        command.append("--max-updates=4")
+        command.append("--checkpoint-frequency=2")
     command_fname = os.path.join(model_dir, FILE_COMMAND.format("sockeye.train"))
     # Run unless training already finished
     if not os.path.exists(command_fname):
@@ -670,6 +676,8 @@ def run_steps(args: argparse.Namespace):
             target_fname = os.path.join(step_dir_tok, PREFIX_TRAIN + SUFFIX_TRG_GZ)
             codes_fname = os.path.join(step_dir_bpe_model, FILE_BPE_CODES)
             num_ops = task.bpe_op if args.task else args.custom_bpe_op
+            if args.test:
+                num_ops = TEST_BPE_OPS
             logging.info("BPE Learn (%s): %s + %s -> %s", num_ops, source_fname, target_fname, codes_fname)
             third_party.call_learn_bpe(workspace_dir=args.workspace,
                                        source_fname=source_fname,
