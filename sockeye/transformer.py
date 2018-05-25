@@ -41,6 +41,7 @@ class TransformerConfig(config.Config):
                  max_seq_len_source: int,
                  max_seq_len_target: int,
                  conv_config: Optional['encoder.ConvolutionalEmbeddingConfig'] = None,
+                 lhuc: bool = False,
                  dtype: str = C.DTYPE_FP32) -> None:  # type: ignore
         super().__init__()
         self.model_size = model_size
@@ -57,6 +58,7 @@ class TransformerConfig(config.Config):
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
         self.conv_config = conv_config
+        self.use_lhuc = lhuc
         self.dtype = dtype
 
 
@@ -96,6 +98,9 @@ class TransformerEncoderBlock:
                                                num_hidden=config.model_size,
                                                dropout=config.dropout_prepost,
                                                prefix="%sff_post_" % prefix)
+        self.lhuc = None
+        if config.use_lhuc:
+            self.lhuc = layers.LHUC(config.model_size, prefix=prefix)
 
     def __call__(self, data: mx.sym.Symbol, bias: mx.sym.Symbol) -> mx.sym.Symbol:
         # self-attention
@@ -107,6 +112,9 @@ class TransformerEncoderBlock:
         # feed-forward
         data_ff = self.ff(self.pre_ff(data, None))
         data = self.post_ff(data_ff, data)
+
+        if self.lhuc:
+            data = self.lhuc(data)
 
         return data
 
@@ -163,6 +171,10 @@ class TransformerDecoderBlock:
                                                dropout=config.dropout_prepost,
                                                prefix="%sff_post_" % prefix)
 
+        self.lhuc = None
+        if config.use_lhuc:
+            self.lhuc = layers.LHUC(config.model_size, prefix=prefix)
+
     def __call__(self,
                  target: mx.sym.Symbol,
                  target_bias: mx.sym.Symbol,
@@ -184,6 +196,9 @@ class TransformerDecoderBlock:
         # feed-forward
         target_ff = self.ff(self.pre_ff(target, None))
         target = self.post_ff(target_ff, target)
+
+        if self.lhuc:
+            target = self.lhuc(target)
 
         return target
 

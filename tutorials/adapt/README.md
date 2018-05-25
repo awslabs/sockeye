@@ -76,7 +76,7 @@ or you can specify `all` for adding it to all supported components:
 
 Again it may be beneficial to adjust the learning parameters for the adaptation run.
 
-**Note:** At the moment LHUC only supports RNN models.
+**Note:** At the moment LHUC is not supported for convolutional models.
 
 ## References
 

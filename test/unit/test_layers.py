@@ -46,7 +46,7 @@ def test_lhuc():
     inp = mx.sym.Variable("inp")
     params = mx.sym.Variable("params")
     lhuc = sockeye.layers.LHUC(num_hidden=num_hidden, weight=params)
-    with_lhuc = lhuc.apply(inputs=inp)
+    with_lhuc = lhuc(inputs=inp)
 
     inp_nd = mx.nd.random_uniform(shape=(batch_size, num_hidden))
     params_same_nd = mx.nd.zeros(shape=(num_hidden,))

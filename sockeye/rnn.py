@@ -313,7 +313,7 @@ class LHUCCell(mx.rnn.ModifierCell):
 
     def __call__(self, inputs, states):
         output, states = self.base_cell(inputs, states)
-        output = self.lhuc.apply(inputs=output)
+        output = self.lhuc(inputs=output)
         return output, states
 
 
