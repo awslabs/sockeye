@@ -111,13 +111,13 @@ ENCODER_DECODER_SETTINGS = [
      True, False, False, False),
     # Full transformer with LHUC
     ("--encoder transformer --decoder transformer"
-     " --num-layers 3 --transformer-attention-heads 2 --transformer-model-size 16 --num-embed 16"
-     " --transformer-feed-forward-num-hidden 32"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying --weight-tying-type src_trg_softmax"
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
-     " --batch-size 8 --max-updates 10 --batch-type sentence  --decode-and-evaluate 0"
-     " --checkpoint-frequency 10 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
+     " --batch-size 2 --max-updates 5 --batch-type sentence  --decode-and-evaluate 0"
+     " --checkpoint-frequency 5 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
      "--beam-size 2",
      True, False, False, False)]
 
