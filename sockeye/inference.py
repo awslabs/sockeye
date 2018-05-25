@@ -14,15 +14,11 @@
 """
 Code for inference/translation
 """
-import copy
 import itertools
 import json
 import logging
-import math
 import os
-import sys
 import time
-
 from collections import defaultdict
 from functools import lru_cache, partial
 from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set
@@ -32,13 +28,12 @@ import numpy as np
 
 from . import constants as C
 from . import data_io
+from . import lexical_constraints as constrained
 from . import lexicon
 from . import model
 from . import utils
 from . import vocab
 from .log import is_python34
-
-from . import lexical_constraints as constrained
 
 logger = logging.getLogger(__name__)
 
@@ -584,7 +579,11 @@ class TranslatorInput:
         self.constraints = constraints
 
     def __str__(self):
-        return 'TranslatorInput(%d, %s, factors=%s, constraints=%s, chunk_id=%d)' % (self.sentence_id, self.tokens, self.factors, self.constraints, self.chunk_id)
+        return 'TranslatorInput(%d, %s, factors=%s, constraints=%s, chunk_id=%d)' % (self.sentence_id,
+                                                                                     self.tokens,
+                                                                                     self.factors,
+                                                                                     self.constraints,
+                                                                                     self.chunk_id)
 
     def __len__(self):
         return len(self.tokens)
@@ -628,7 +627,8 @@ class TranslatorInput:
         """
         return TranslatorInput(sentence_id=self.sentence_id,
                                tokens=self.tokens + [C.EOS_SYMBOL],
-                               factors=[factor + [C.EOS_SYMBOL] for factor in self.factors] if self.factors is not None else None,
+                               factors=[factor + [C.EOS_SYMBOL] for factor in
+                                        self.factors] if self.factors is not None else None,
                                constraints=self.constraints,
                                chunk_id=self.chunk_id)
 
@@ -1124,7 +1124,10 @@ class Translator:
 
         return results
 
-    def _get_inference_input(self, trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray, int, List[Optional[constrained.RawConstraintList]]]:
+    def _get_inference_input(self,
+                             trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray,
+                                                                           int,
+                                                                           List[Optional[constrained.RawConstraintList]]]:
         """
         Assembles the numerical data for the batch.
         This comprises an NDArray for the source sentences, the bucket key (padded source length), and a list of
@@ -1132,7 +1135,8 @@ class Translator:
         the form of lists of integers in the target language vocabulary.
 
         :param trans_inputs: List of TranslatorInputs.
-        :return NDArray of source ids (shape=(batch_size, bucket_key, num_factors)), bucket key, a list of raw constraint lists.
+        :return NDArray of source ids (shape=(batch_size, bucket_key, num_factors)),
+                bucket key, list of raw constraint lists.
         """
 
         bucket_key = data_io.get_bucket(max(len(inp.tokens) for inp in trans_inputs), self.buckets_source)
@@ -1154,7 +1158,8 @@ class Translator:
                 source[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
 
             if trans_input.constraints is not None:
-                raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in trans_input.constraints]
+                raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
+                                      trans_input.constraints]
 
         return source, bucket_key, raw_constraints
 
@@ -1309,11 +1314,14 @@ class Translator:
         for sentno in range(self.batch_size):
             rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
             if mx.nd.sum(finished[rows]) > 0:
-                best_finished_score = mx.nd.min(mx.nd.where(finished[rows], accumulated_scores[rows, 0], self.inf_array))
+                best_finished_score = mx.nd.min(mx.nd.where(finished[rows],
+                                                            accumulated_scores[rows, 0],
+                                                            self.inf_array))
 
                 # Find, mark (by setting the score to inf), and remove all hypotheses
                 # whose score is not within self.beam_prune of the best score
-                inactive[rows] = mx.nd.cast(accumulated_scores[rows, 0] - best_finished_score > self.beam_prune, dtype='int32')
+                inactive[rows] = mx.nd.cast(accumulated_scores[rows, 0] - best_finished_score > self.beam_prune,
+                                            dtype='int32')
                 accumulated_scores[rows, 0] = mx.nd.where(inactive[rows], self.inf_array, accumulated_scores[rows, 0])
                 best_word_indices[rows] = mx.nd.where(inactive[rows], self.zeros_array, best_word_indices[rows])
 
@@ -1327,7 +1335,6 @@ class Translator:
                                                                                                   mx.nd.NDArray,
                                                                                                   mx.nd.NDArray,
                                                                                                   mx.nd.NDArray,
-                                                                                                  mx.nd.NDArray,
                                                                                                   List[Optional[constrained.ConstrainedHypothesis]],
                                                                                                   Optional[List[BeamHistory]]]:
         """
@@ -1335,7 +1342,8 @@ class Translator:
 
         :param source: Source ids. Shape: (batch_size, bucket_key).
         :param source_length: Max source length.
-        :param raw_constraint_list: A list of optional lists containing phrases (as lists of target word IDs) that must appear in each output.
+        :param raw_constraint_list: A list of optional lists containing phrases (as lists of target word IDs)
+               that must appear in each output.
         :return List of lists of word ids, list of attentions, array of accumulated length-normalized
                 negative log-probs.
         """
@@ -1395,7 +1403,8 @@ class Translator:
                 constraint_ids = np.array([word_id for sent in raw_constraint_list for phr in sent for word_id in phr])
                 vocab_slice_ids = np.lib.arraysetops.union1d(vocab_slice_ids, constraint_ids)
                 full_to_reduced = dict((val, i) for i, val in enumerate(vocab_slice_ids))
-                raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in raw_constraint_list]
+                raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in
+                                       raw_constraint_list]
 
             vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=self.context)
 
@@ -1419,12 +1428,14 @@ class Translator:
         model_states = self._encode(source, source_length)
 
         # Initialize the beam to track constraint sets, where target-side lexical constraints are present
-        constraints = constrained.init_batch(raw_constraint_list, self.beam_size, self.start_id, self.vocab_target[C.EOS_SYMBOL])
+        constraints = constrained.init_batch(raw_constraint_list, self.beam_size, self.start_id,
+                                             self.vocab_target[C.EOS_SYMBOL])
 
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
         # item on the beam for each sentence
         inactive = mx.nd.ones((self.batch_size * self.beam_size), dtype='int32', ctx=self.context)
         inactive[::self.beam_size] = 0
+        t = 1
         for t in range(1, max_output_length):
             # (1) obtain next predictions and advance models' state
             # scores: (batch_size * beam_size, target_vocab_size)
@@ -1439,8 +1450,11 @@ class Translator:
             # (2) Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
             scores += scores_accumulated
-            # Items that are finished (but not inactive) get the accumulated score in col 0, otherwise infinity for the whole row
-            pad_dist[:, C.PAD_ID] = mx.nd.where(mx.nd.clip(finished - inactive, 0, 1), scores_accumulated[:, 0], self.inf_array_long)
+            # Items that are finished (but not inactive) get the accumulated score in col 0,
+            # otherwise infinity for the whole row
+            pad_dist[:, C.PAD_ID] = mx.nd.where(mx.nd.clip(finished - inactive, 0, 1),
+                                                scores_accumulated[:, 0],
+                                                self.inf_array_long)
             scores = mx.nd.where(finished + inactive, pad_dist, scores)
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
@@ -1450,15 +1464,15 @@ class Translator:
             # Constraints for constrained decoding are processed sentence by sentence
             if any(raw_constraint_list):
                 best_hyp_indices, best_word_indices, scores_accumulated, \
-                    constraints, inactive = constrained.topk(self.batch_size,
-                                                             self.beam_size,
-                                                             inactive,
-                                                             scores,
-                                                             constraints,
-                                                             best_hyp_indices,
-                                                             best_word_indices,
-                                                             scores_accumulated,
-                                                             self.context)
+                constraints, inactive = constrained.topk(self.batch_size,
+                                                         self.beam_size,
+                                                         inactive,
+                                                         scores,
+                                                         constraints,
+                                                         best_hyp_indices,
+                                                         best_word_indices,
+                                                         scores_accumulated,
+                                                         self.context)
 
             else:
                 # All rows are now active (after special treatment of start state at t=1)
@@ -1474,7 +1488,8 @@ class Translator:
             lengths = mx.nd.take(lengths, best_hyp_indices)
             all_finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
             newly_finished = all_finished - finished
-            scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths), scores_accumulated)
+            scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths),
+                                             scores_accumulated)
             finished = all_finished
 
             # (5) Prune out low-probability hypotheses. Pruning works by setting entries `inactive`.
@@ -1494,8 +1509,10 @@ class Translator:
 
             # (6) optionally save beam history
             if self.store_beam:
-                unnormalized_scores = mx.nd.where(finished, scores_accumulated * self.length_penalty(lengths - 1), scores_accumulated)
-                normalized_scores = mx.nd.where(finished, scores_accumulated, scores_accumulated / self.length_penalty(lengths - 1))
+                unnormalized_scores = mx.nd.where(finished, scores_accumulated * self.length_penalty(lengths - 1),
+                                                  scores_accumulated)
+                normalized_scores = mx.nd.where(finished, scores_accumulated,
+                                                scores_accumulated / self.length_penalty(lengths - 1))
                 for sent in range(self.batch_size):
                     rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
 
@@ -1504,13 +1521,14 @@ class Translator:
                     if any(x for x in best_word_indices_sent if x != C.PAD_ID):
                         beam_histories[sent]["predicted_ids"].append(best_word_indices_sent)
                         beam_histories[sent]["predicted_tokens"].append([self.vocab_target_inv[x] for x in
-                                                                    best_word_indices_sent])
+                                                                         best_word_indices_sent])
                         # for later sentences in the matrix, shift from e.g. [5, 6, 7, 8, 6] to [0, 1, 3, 4, 1]
                         shifted_parents = best_hyp_indices[rows] - (sent * self.beam_size)
                         beam_histories[sent]["parent_ids"].append(shifted_parents.asnumpy().tolist())
 
                         beam_histories[sent]["scores"].append(unnormalized_scores[rows].asnumpy().flatten().tolist())
-                        beam_histories[sent]["normalized_scores"].append(normalized_scores[rows].asnumpy().flatten().tolist())
+                        beam_histories[sent]["normalized_scores"].append(
+                            normalized_scores[rows].asnumpy().flatten().tolist())
 
             # (7) determine which hypotheses in the beam are now finished
             finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
@@ -1530,9 +1548,11 @@ class Translator:
         logger.debug("Finished after %d / %d steps.", t + 1, max_output_length)
 
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
-        folded_accumulated_scores = scores_accumulated.reshape((self.batch_size, self.beam_size * scores_accumulated.shape[-1]))
+        folded_accumulated_scores = scores_accumulated.reshape(
+            (self.batch_size, self.beam_size * scores_accumulated.shape[-1]))
         indices = mx.nd.argsort(folded_accumulated_scores, axis=1)
-        best_hyp_indices[:], _ = np.unravel_index(indices.astype(np.int32).asnumpy().ravel(), scores_accumulated.shape) + self.offset
+        best_hyp_indices[:], _ = np.unravel_index(indices.astype(np.int32).asnumpy().ravel(),
+                                                  scores_accumulated.shape) + self.offset
         # Now reorder the arrays
         sequences = mx.nd.take(sequences, best_hyp_indices)
         lengths = mx.nd.take(lengths, best_hyp_indices)
@@ -1541,14 +1561,13 @@ class Translator:
         finished = mx.nd.take(finished, best_hyp_indices)
         constraints = [constraints[int(x.asscalar())] for x in best_hyp_indices]
 
-        return sequences, attentions, scores_accumulated, lengths, finished, constraints, beam_histories
+        return sequences, attentions, scores_accumulated, lengths, constraints, beam_histories
 
     def _get_best_from_beam(self,
                             sequences: mx.nd.NDArray,
                             attention_lists: mx.nd.NDArray,
                             seq_scores: mx.nd.NDArray,
                             lengths: mx.nd.NDArray,
-                            finished: mx.nd.NDArray,
                             constraints: List[Optional[constrained.ConstrainedHypothesis]],
                             beam_histories: Optional[List[BeamHistory]] = None) -> List[Translation]:
         """
@@ -1579,16 +1598,14 @@ class Translator:
             best_ids += mx.nd.argmin(filtered, axis=1)
 
         histories = beam_histories if beam_histories is not None else [None] * self.batch_size
-        return [self._assemble_translation(*x) for x in zip(range(self.batch_size),
-                                                            sequences[best_ids],
+        return [self._assemble_translation(*x) for x in zip(sequences[best_ids],
                                                             lengths[best_ids],
                                                             attention_lists[best_ids],
                                                             seq_scores[best_ids],
                                                             histories)]
 
-    def _assemble_translation(self,
-                              sentno: int,
-                              sequence: mx.nd.NDArray,
+    @staticmethod
+    def _assemble_translation(sequence: mx.nd.NDArray,
                               length: mx.nd.NDArray,
                               attention_lists: mx.nd.NDArray,
                               seq_score: mx.nd.NDArray,
@@ -1597,13 +1614,12 @@ class Translator:
         Takes a set of data pertaining to a single translated item, performs slightly different
         processing on each, and merges it into a Translation object.
 
-        :param sentno: The sentence number in the batch.
         :param sequence: Array of word ids. Shape: (batch_size, bucket_key).
         :param length: The length of the translated segment.
         :param attention_lists: Array of attentions over source words.
                                 Shape: (batch_size * self.beam_size, max_output_length, encoded_source_length).
-        :param seq_scores: Array of length-normalized negative log-probs.
-        :param beam_histories: The beam histories for each sentence in the batch.
+        :param seq_score: Array of length-normalized negative log-probs.
+        :param beam_history: The beam histories for each sentence in the batch.
         :return: A Translation object.
         """
 
@@ -1624,7 +1640,8 @@ class Translator:
         Prints the beam for debugging purposes.
 
         :param sequences: The beam histories (shape: batch_size * beam_size, max_output_len).
-        :param accumulated_scores: The accumulated scores for each item in the beam (shape: batch_size * beam_size, target_vocab_size).
+        :param accumulated_scores: The accumulated scores for each item in the beam.
+               Shape: (batch_size * beam_size, target_vocab_size).
         :param finished: Indicates which items are finished (shape: batch_size * beam_size).
         :param inactive: Indicates any inactive items (shape: batch_size * beam_size).
         :param timestep: The current timestep.
@@ -1635,5 +1652,7 @@ class Translator:
             score = accumulated_scores[i].asscalar()
             word_ids = [int(x.asscalar()) for x in sequences[i]]
             unmet = constraints[i].num_needed() if constraints[i] is not None else -1
-            hypothesis = '----------' if inactive[i] else ' '.join([self.vocab_target_inv[x] for x in word_ids if x != 0])
-            logger.info('%d %d %d %d %.2f %s', i+1, finished[i].asscalar(), inactive[i].asscalar(), unmet, score, hypothesis)
+            hypothesis = '----------' if inactive[i] else ' '.join(
+                [self.vocab_target_inv[x] for x in word_ids if x != 0])
+            logger.info('%d %d %d %d %.2f %s', i + 1, finished[i].asscalar(), inactive[i].asscalar(), unmet, score,
+                        hypothesis)
