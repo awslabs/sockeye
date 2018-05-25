@@ -13,14 +13,8 @@
 
 import copy
 import logging
-import re
-import time
-
-from typing import Dict, List, Optional, Tuple, Set
 from operator import attrgetter
-
-from . import constants as C
-from . import utils
+from typing import List, Optional, Tuple, Set
 
 import mxnet as mx
 import numpy as np
@@ -30,11 +24,13 @@ logger = logging.getLogger(__name__)
 # Represents a list of raw constraints for a sentence. Each constraint is a list of target-word IDs.
 RawConstraintList = List[List[int]]
 
+
 class ConstrainedHypothesis:
     """
     Represents a set of words and phrases that must appear in the output.
     A constraint is of two types: sequence or non-sequence.
-    A non-sequence constraint is a single word and can therefore be followed by anything, whereas a sequence constraint must be followed by a particular word (the next word in the sequence).
+    A non-sequence constraint is a single word and can therefore be followed by anything,
+    whereas a sequence constraint must be followed by a particular word (the next word in the sequence).
     This class also records which constraints have been met.
 
     A list of raw constraints is maintained internally as two parallel arrays. The following raw constraint
@@ -50,6 +46,7 @@ class ConstrainedHypothesis:
     :param constraint_list: A list of zero or raw constraints (each represented as a list of integers).
     :param eos_id: The end-of-sentence ID.
     """
+
     def __init__(self,
                  constraint_list: RawConstraintList,
                  eos_id: int) -> None:
@@ -209,7 +206,7 @@ def init_batch(raw_constraints: List[Optional[RawConstraintList]],
             if num_constraints > 0:
                 hyp = ConstrainedHypothesis(raw_list, eos_id)
                 idx = i * beam_size
-                constraints[idx:idx+beam_size] = [hyp.advance(start_id) for x in range(beam_size)]
+                constraints[idx:idx + beam_size] = [hyp.advance(start_id) for x in range(beam_size)]
 
     return constraints
 
@@ -313,14 +310,14 @@ def topk(batch_size: int,
         rows = slice(sentno * beam_size, (sentno + 1) * beam_size)
         if hypotheses[rows.start] is not None and hypotheses[rows.start].size() > 0:
             best_ids[rows], best_word_ids[rows], seq_scores[rows], \
-                hypotheses[rows], inactive[rows] = _topk(beam_size,
-                                                         inactive[rows],
-                                                         scores[rows],
-                                                         hypotheses[rows],
-                                                         best_ids[rows] - rows.start,
-                                                         best_word_ids[rows],
-                                                         seq_scores[rows],
-                                                         context)
+            hypotheses[rows], inactive[rows] = _topk(beam_size,
+                                                     inactive[rows],
+                                                     scores[rows],
+                                                     hypotheses[rows],
+                                                     best_ids[rows] - rows.start,
+                                                     best_word_ids[rows],
+                                                     seq_scores[rows],
+                                                     context)
 
             # offsetting since the returned smallest_k() indices were slice-relative
             best_ids[rows] += rows.start
@@ -330,6 +327,7 @@ def topk(batch_size: int,
             inactive[rows] = 0
 
     return (best_ids, best_word_ids, seq_scores, hypotheses, inactive)
+
 
 def _topk(beam_size: int,
           inactive: mx.ndarray,
@@ -419,7 +417,7 @@ def _topk(beam_size: int,
     # Pad the beam so array assignment still works
     if len(pruned_candidates) < beam_size:
         inactive[len(pruned_candidates):] = 1
-        pruned_candidates += [pruned_candidates[len(pruned_candidates)-1]] * (beam_size - len(pruned_candidates))
+        pruned_candidates += [pruned_candidates[len(pruned_candidates) - 1]] * (beam_size - len(pruned_candidates))
 
     return (np.array([x.row for x in pruned_candidates]),
             np.array([x.col for x in pruned_candidates]),
@@ -432,8 +430,8 @@ def main():
     """
     Usage: python3 -m sockeye.lexical_constraints [--bpe BPE_MODEL]
 
-    Reads sentences and constraints on STDIN (tab-delimited) and generates the JSON format that can be used when passing `--json-input`
-    to sockeye.translate.
+    Reads sentences and constraints on STDIN (tab-delimited) and generates the JSON format
+    that can be used when passing `--json-input` to sockeye.translate.
 
     e.g.,
 
@@ -450,13 +448,8 @@ def main():
 
     (Note the recommended Sockeye parameters).
     """
-
-    import argparse
     import sys
     import json
-
-    parser = argparse.ArgumentParser(description='Generate lexical constraint JSON format for Sockeye')
-    args = parser.parse_args()
 
     for line in sys.stdin:
         line = line.rstrip()
@@ -464,11 +457,12 @@ def main():
         # Constraints are in fields 2+
         source, *constraints = line.split('\t')
 
-        obj = { 'text': source }
+        obj = {'text': source}
         if len(constraints) > 0:
             obj['constraints'] = constraints
 
         print(json.dumps(obj, ensure_ascii=False), flush=True)
+
 
 if __name__ == '__main__':
     main()
