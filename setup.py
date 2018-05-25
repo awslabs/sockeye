@@ -109,7 +109,7 @@ args = dict(
     packages=find_packages(exclude=("test",)),
 
     setup_requires=['pytest-runner'],
-    tests_require=['pytest', 'pytest-cov'],
+    tests_require=['pytest', 'pytest-cov', 'pillow'],
 
     extras_require={
         'optional': ['mxboard', 'matplotlib'],

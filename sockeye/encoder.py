@@ -32,6 +32,9 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
+ImageEncoderConfig = None
+
+
 def get_encoder(config: 'EncoderConfig', prefix: str = '') -> 'Encoder':
     if isinstance(config, RecurrentEncoderConfig):
         return get_recurrent_encoder(config, prefix)
@@ -40,7 +43,14 @@ def get_encoder(config: 'EncoderConfig', prefix: str = '') -> 'Encoder':
     elif isinstance(config, ConvolutionalEncoderConfig):
         return get_convolutional_encoder(config, prefix)
     else:
-        raise ValueError("Unsupported encoder configuration")
+        from .image_captioning.encoder import ImageLoadedCnnEncoderConfig, \
+            get_image_cnn_encoder
+        ImageEncoderConfig = ImageLoadedCnnEncoderConfig
+
+        if isinstance(config, ImageLoadedCnnEncoderConfig):
+            return get_image_cnn_encoder(config)
+        else:
+            raise ValueError("Unsupported encoder configuration")
 
 
 class RecurrentEncoderConfig(config.Config):
@@ -400,6 +410,46 @@ class Embedding(Encoder):
         Return the representation size of this encoder.
         """
         return self.config.num_embed
+
+
+class PassThroughEmbeddingConfig(config.Config):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.vocab_size = 0
+        self.num_embed = 0
+        self.num_factors = 1
+
+
+class PassThroughEmbedding(Encoder):
+    """
+    This is an embedding which passes through an input symbol without doing any operation.
+
+    :param config: PassThroughEmbeddingConfig config.
+    """
+
+    def __init__(self,
+                 config: PassThroughEmbeddingConfig) -> None:
+        self.config = config
+
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: Optional[mx.sym.Symbol],
+               seq_len: int = 0) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+        """
+        Encodes data given sequence lengths of individual examples and maximum sequence length.
+
+        :param data: Input data.
+        :param data_length: Vector with sequence lengths.
+        :return: Encoded versions of input data (data, data_length, seq_len).
+        """
+        return data, data_length, seq_len
+
+    def get_num_hidden(self) -> int:
+        """
+        Return the representation size of this encoder.
+        """
+        return 0
 
 
 class PositionalEncoder(Encoder):
@@ -1172,3 +1222,5 @@ class ConvolutionalEmbeddingEncoder(Encoder):
 
 
 EncoderConfig = Union[RecurrentEncoderConfig, transformer.TransformerConfig, ConvolutionalEncoderConfig]
+if ImageEncoderConfig is not None:
+    EncoderConfig = Union[EncoderConfig, ImageEncoderConfig]  # type: ignore

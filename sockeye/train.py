@@ -19,7 +19,6 @@ import os
 import shutil
 import sys
 import tempfile
-import yaml
 from contextlib import ExitStack
 from typing import Any, cast, Optional, Dict, List, Tuple
 
@@ -548,7 +547,8 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
             context_gating=args.rnn_context_gating,
             layer_normalization=args.layer_normalization,
             attention_in_upper_layers=args.rnn_attention_in_upper_layers,
-            state_init_lhuc=args.lhuc is not None and (C.LHUC_STATE_INIT in args.lhuc or C.LHUC_ALL in args.lhuc))
+            state_init_lhuc=args.lhuc is not None and (C.LHUC_STATE_INIT in args.lhuc or C.LHUC_ALL in args.lhuc),
+            enc_last_hidden_concat_to_embedding=args.rnn_enc_last_hidden_concat_to_embedding)
 
     return config_decoder
 
@@ -683,12 +683,14 @@ def gradient_compression_params(args: argparse.Namespace) -> Optional[Dict[str, 
         return {'type': args.gradient_compression_type, 'threshold': args.gradient_compression_threshold}
 
 
-def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[int]) -> OptimizerConfig:
+def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[int],
+                            extra_initializers: List[Tuple[str, mx.initializer.Initializer]] = None) -> OptimizerConfig:
     """
     Returns an OptimizerConfig.
 
     :param args: Arguments as returned by argparse.
     :param source_vocab_sizes: Source vocabulary sizes.
+    :param extra_initializers: extra initializer to pass to `get_initializer`.
     :return: The optimizer type and its parameters as well as the kvstore.
     """
     optimizer_params = {'wd': args.weight_decay,
@@ -723,7 +725,8 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
                                               default_init_xavier_factor_type=args.weight_init_xavier_factor_type,
                                               embed_init_type=args.embed_weight_init,
                                               embed_init_sigma=source_vocab_sizes[0] ** -0.5,
-                                              rnn_init_type=args.rnn_h2h_init)
+                                              rnn_init_type=args.rnn_h2h_init,
+                                              extra_initializers=extra_initializers)
 
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
                                              args.checkpoint_frequency,

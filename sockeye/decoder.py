@@ -454,6 +454,8 @@ class RecurrentDecoderConfig(Config):
     :param context_gating: Whether to use context gating.
     :param layer_normalization: Apply layer normalization.
     :param attention_in_upper_layers: Pass the attention value to all layers in the decoder.
+    :param enc_last_hidden_concat_to_embedding: Concatenate the last hidden representation of the encoder to the
+                                                input of the decoder (e.g., context + current embedding).
     :param dtype: Data type.
     """
 
@@ -467,7 +469,9 @@ class RecurrentDecoderConfig(Config):
                  context_gating: bool = False,
                  layer_normalization: bool = False,
                  attention_in_upper_layers: bool = False,
-                 dtype: str = C.DTYPE_FP32) -> None:
+                 dtype: str = C.DTYPE_FP32,
+                 enc_last_hidden_concat_to_embedding: bool = False) -> None:
+
         super().__init__()
         self.max_seq_len_source = max_seq_len_source
         self.rnn_config = rnn_config
@@ -478,6 +482,7 @@ class RecurrentDecoderConfig(Config):
         self.context_gating = context_gating
         self.layer_normalization = layer_normalization
         self.attention_in_upper_layers = attention_in_upper_layers
+        self.enc_last_hidden_concat_to_embedding = enc_last_hidden_concat_to_embedding
         self.dtype = dtype
 
 
@@ -579,6 +584,14 @@ class RecurrentDecoder(Decoder):
         # target_embed: target_seq_len * (batch_size, num_target_embed)
         target_embed = mx.sym.split(data=target_embed, num_outputs=target_embed_max_length, axis=1, squeeze_axis=True)
 
+        # Get last state from source (batch_size, num_target_embed)
+        enc_last_hidden = None
+        if self.config.enc_last_hidden_concat_to_embedding:
+            enc_last_hidden = mx.sym.SequenceLast(data=source_encoded,
+                                     sequence_length=source_encoded_lengths,
+                                     axis=1,
+                                     use_sequence_length=True)
+
         # get recurrent attention function conditioned on source
         attention_func = self.attention.on(source_encoded, source_encoded_lengths,
                                            source_encoded_max_length)
@@ -599,7 +612,8 @@ class RecurrentDecoder(Decoder):
                                                 state,
                                                 attention_func,
                                                 attention_state,
-                                                seq_idx)
+                                                seq_idx,
+                                                enc_last_hidden=enc_last_hidden)
             hidden_states.append(state.hidden)
 
         # concatenate along time axis: (batch_size, target_embed_max_length, rnn_num_hidden)
@@ -624,6 +638,14 @@ class RecurrentDecoder(Decoder):
         """
         source_encoded, prev_dynamic_source, source_encoded_length, prev_hidden, *layer_states = states
 
+        # Get last state from source (batch_size, num_target_embed)
+        enc_last_hidden = None
+        if self.config.enc_last_hidden_concat_to_embedding:
+            enc_last_hidden = mx.sym.SequenceLast(data=source_encoded,
+                                                  sequence_length=source_encoded_length,
+                                                  axis=1,
+                                                  use_sequence_length=True)
+
         attention_func = self.attention.on(source_encoded, source_encoded_length, source_encoded_max_length)
 
         prev_state = RecurrentDecoderState(prev_hidden, list(layer_states))
@@ -636,7 +658,8 @@ class RecurrentDecoder(Decoder):
         state, attention_state = self._step(target_embed_prev,
                                             prev_state,
                                             attention_func,
-                                            prev_attention_state)
+                                            prev_attention_state,
+                                            enc_last_hidden=enc_last_hidden)
 
         new_states = [source_encoded,
                       attention_state.dynamic_source,
@@ -809,7 +832,8 @@ class RecurrentDecoder(Decoder):
               state: RecurrentDecoderState,
               attention_func: Callable,
               attention_state: rnn_attention.AttentionState,
-              seq_idx: int = 0) -> Tuple[RecurrentDecoderState, rnn_attention.AttentionState]:
+              seq_idx: int = 0,
+              enc_last_hidden: Optional[mx.sym.Symbol] = None) -> Tuple[RecurrentDecoderState, rnn_attention.AttentionState]:
 
         """
         Performs single-time step in the RNN, given previous word vector, previous hidden state, attention function,
@@ -824,6 +848,9 @@ class RecurrentDecoder(Decoder):
         """
         # (1) RNN step
         # concat previous word embedding and previous hidden state
+        if enc_last_hidden is not None:
+            word_vec_prev = mx.sym.concat(word_vec_prev, enc_last_hidden, dim=1,
+                                            name="%sconcat_target_encoder_t%d" % (self.prefix, seq_idx))
         rnn_input = mx.sym.concat(word_vec_prev, state.hidden, dim=1,
                                   name="%sconcat_target_context_t%d" % (self.prefix, seq_idx))
         # rnn_pre_attention_output: (batch_size, rnn_num_hidden)
