@@ -1418,7 +1418,7 @@ class Translator:
                 raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in
                                        raw_constraint_list]
 
-            vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=self.context)
+            vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=self.context, dtype='int32')
 
             if vocab_slice_ids.shape[0] < self.beam_size + 1:
                 # This fixes an edge case for toy models, where the number of vocab ids from the lexicon is
@@ -1427,7 +1427,8 @@ class Translator:
                                vocab_slice_ids.shape[0], self.beam_size)
                 n = self.beam_size - vocab_slice_ids.shape[0] + 1
                 vocab_slice_ids = mx.nd.concat(vocab_slice_ids,
-                                               mx.nd.full((n,), val=self.vocab_target[C.EOS_SYMBOL], ctx=self.context),
+                                               mx.nd.full((n,), val=self.vocab_target[C.EOS_SYMBOL],
+                                                          ctx=self.context, dtype='int32'),
                                                dim=0)
 
             pad_dist = mx.nd.full((self.batch_size * self.beam_size, vocab_slice_ids.shape[0]),
@@ -1492,26 +1493,28 @@ class Translator:
 
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
-                best_word_indices[:] = vocab_slice_ids.take(best_word_indices)
+                best_word_indices = vocab_slice_ids.take(best_word_indices)
 
-            # (4) Normalize the scores of newly finished hypotheses. Note that after this until the
-            # next call to topk(), hypotheses may not be in sorted order.
+            # (4) Reorder beam data according to best hypotheses indices (ascending)
             finished = mx.nd.take(finished, best_hyp_indices)
             lengths = mx.nd.take(lengths, best_hyp_indices)
-            all_finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
-            newly_finished = all_finished - finished
-            scores_accumulated = mx.nd.where(newly_finished, scores_accumulated / self.length_penalty(lengths),
-                                             scores_accumulated)
-            finished = all_finished
-
-            # (5) Prune out low-probability hypotheses. Pruning works by setting entries `inactive`.
-            if self.beam_prune > 0.0:
-                self._prune(scores_accumulated, best_word_indices, inactive, finished)
-
-            # (6) Update the beam with the hypotheses and their properties for the beam_size winning hypotheses (ascending)
             sequences = mx.nd.take(sequences, best_hyp_indices)
             attention_scores = mx.nd.take(attention_scores, best_hyp_indices)
             attentions = mx.nd.take(attentions, best_hyp_indices)
+
+            # (5) Normalize the scores of newly finished hypotheses. Note that after this until the
+            # next call to topk(), hypotheses may not be in sorted order.
+
+            all_finished = ((best_word_indices == C.PAD_ID) + (best_word_indices == self.vocab_target[C.EOS_SYMBOL]))
+            newly_finished = all_finished - finished
+            scores_accumulated = mx.nd.where(newly_finished,
+                                             scores_accumulated / self.length_penalty(lengths),
+                                             scores_accumulated)
+            finished = all_finished
+
+            # (6) Prune out low-probability hypotheses. Pruning works by setting entries `inactive`.
+            if self.beam_prune > 0.0:
+                self._prune(scores_accumulated, best_word_indices, inactive, finished)
 
             # (7) update best hypotheses, their attention lists and lengths (only for non-finished hyps)
             # pylint: disable=unsupported-assignment-operation
@@ -1566,11 +1569,11 @@ class Translator:
         best_hyp_indices[:], _ = np.unravel_index(indices.astype(np.int32).asnumpy().ravel(),
                                                   scores_accumulated.shape) + self.offset
         # Now reorder the arrays
-        sequences = mx.nd.take(sequences, best_hyp_indices)
-        lengths = mx.nd.take(lengths, best_hyp_indices)
-        attentions = mx.nd.take(attentions, best_hyp_indices)
-        scores_accumulated[:] = mx.nd.take(scores_accumulated, best_hyp_indices)
-        constraints = [constraints[int(x.asscalar())] for x in best_hyp_indices]
+        sequences = sequences.take(best_hyp_indices)
+        lengths = lengths.take(best_hyp_indices)
+        attentions = attentions.take(best_hyp_indices)
+        scores_accumulated = scores_accumulated.take(best_hyp_indices)
+        constraints = [constraints[x] for x in best_hyp_indices.asnumpy()]
 
         return sequences, attentions, scores_accumulated, lengths, constraints, beam_histories
 
@@ -1599,7 +1602,7 @@ class Translator:
                               "Shape mismatch")
 
         # Initialize the best_ids to the first item in each batch
-        best_ids = mx.nd.arange(0, self.batch_size * self.beam_size, self.beam_size, ctx=self.context)
+        best_ids = mx.nd.arange(0, self.batch_size * self.beam_size, self.beam_size, ctx=self.context, dtype='int32')
 
         if any(constraints):
             # For constrained decoding, select from items that have met all constraints (might not be finished)
