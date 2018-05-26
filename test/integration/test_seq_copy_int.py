@@ -17,9 +17,9 @@ import random
 import sockeye.constants as C
 from test.common import run_train_translate, tmp_digits_dataset
 
-_TRAIN_LINE_COUNT = 100
-_DEV_LINE_COUNT = 10
-_TEST_LINE_COUNT = 10
+_TRAIN_LINE_COUNT = 20
+_DEV_LINE_COUNT = 5
+_TEST_LINE_COUNT = 5
 _TEST_LINE_COUNT_EMPTY = 2
 _LINE_MAX_LENGTH = 9
 _TEST_MAX_LENGTH = 20
