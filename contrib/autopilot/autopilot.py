@@ -43,7 +43,7 @@ from contrib.autopilot.tasks import TEXT_UTF8_RAW_BITEXT_REVERSE, TEXT_REQUIRES_
 from contrib.autopilot.tasks import TEXT_UTF8_TOKENIZED
 from contrib.autopilot.tasks import RAW_FILES
 from contrib.autopilot.tasks import Task, TASKS
-from contrib.autopilot.models import MODELS, MODEL_NONE
+from contrib.autopilot.models import MODELS, MODEL_NONE, MODEL_TEST_ARGS
 from contrib.autopilot.models import DECODE_ARGS, DECODE_STANDARD
 from contrib.autopilot import third_party
 
@@ -357,13 +357,9 @@ def call_sockeye_train(args: List[str],
         command.append("--device-ids=-{}".format(num_gpus))
     else:
         command.append("--use-cpu")
-    # Test mode stops after a small number of updates
+    # Test mode trains a smaller model for a small number of steps
     if test_mode:
-        command.append("--num-words=64:64")
-        command.append("--batch-type=sentence")
-        command.append("--batch-size=1")
-        command.append("--max-updates=4")
-        command.append("--checkpoint-frequency=2")
+        command += MODEL_TEST_ARGS
     command_fname = os.path.join(model_dir, FILE_COMMAND.format("sockeye.train"))
     # Run unless training already finished
     if not os.path.exists(command_fname):

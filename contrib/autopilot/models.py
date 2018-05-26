@@ -61,6 +61,21 @@ MODELS = {
     ],
 }  # type: Dict[str, List[str]]
 
+# Arguments added to the end of any model in test mode to train a smaller
+# version quickly for system tests.  When multiple versions of the same argument
+# exist, the last version to appear (this list) takes precedence.
+MODEL_TEST_ARGS = [
+    "--num-layers=1:1",
+    "--transformer-model-size=16",
+    "--transformer-feed-forward-num-hidden=16",
+    "--num-embed=16:16",
+    "--num-words=16:16",
+    "--batch-type=sentence",
+    "--batch-size=1",
+    "--max-updates=4",
+    "--checkpoint-frequency=2",
+]
+
 # Decoding configurations
 DECODE_ARGS = {
     DECODE_STANDARD: [
