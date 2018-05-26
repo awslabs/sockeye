@@ -19,7 +19,6 @@ import pytest
 from test.common_image_captioning import run_extract_features_captioning, \
     tmp_img_captioning_dataset
 
-
 IMAGE_ENCODER_SETTINGS = [
     ("conv1"),
     ("conv2"),
