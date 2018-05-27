@@ -594,19 +594,20 @@ def add_model_parameters(params):
 
     # transformer arguments
     model_params.add_argument('--transformer-model-size',
-                              type=int_greater_or_equal(1),
-                              default=512,
-                              help='Size of all layers and embeddings when using transformer. Default: %(default)s.')
+                              type=multiple_values(num_values=2, greater_or_equal=1),
+                              default=(512, 512),
+                              help='Number of hidden units in transformer layers. '
+                                   'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
     model_params.add_argument('--transformer-attention-heads',
-                              type=int_greater_or_equal(1),
-                              default=8,
+                              type=multiple_values(num_values=2, greater_or_equal=1),
+                              default=(8, 8),
                               help='Number of heads for all self-attention when using transformer layers. '
-                                   'Default: %(default)s.')
+                                   'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
     model_params.add_argument('--transformer-feed-forward-num-hidden',
-                              type=int_greater_or_equal(1),
-                              default=2048,
-                              help='Number of hidden units in feed forward layers when using transformer. '
-                                   'Default: %(default)s.')
+                              type=multiple_values(num_values=2, greater_or_equal=1),
+                              default=(2048, 2048),
+                              help='Number of hidden units in transformers feed forward layers. '
+                                   'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
     model_params.add_argument('--transformer-activation-type',
                               choices=C.TRANSFORMER_ACTIVATION_TYPES,
                               default=C.RELU,
