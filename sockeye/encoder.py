@@ -966,7 +966,6 @@ class TransformerEncoder(Encoder):
         self.layers = [transformer.TransformerEncoderBlock(
             config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                                 num_hidden=config.model_size,
                                                                  dropout=config.dropout_prepost,
                                                                  prefix="%sfinal_process_" % prefix)
 
