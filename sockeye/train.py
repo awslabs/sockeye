@@ -82,7 +82,7 @@ def check_arg_compatibility(args: argparse.Namespace):
                     "Must optimize either BLEU or one of tracked metrics (--metrics)")
 
     if args.encoder == C.TRANSFORMER_TYPE:
-        check_condition(args.transformer_model_size == args.num_embed[0],
+        check_condition(args.transformer_model_size[0] == args.num_embed[0],
                         "Source embedding size must match transformer model size: %s vs. %s"
                         % (args.transformer_model_size, args.num_embed[0]))
 
@@ -90,13 +90,13 @@ def check_arg_compatibility(args: argparse.Namespace):
         if total_source_factor_size > 0:
             adjusted_transformer_encoder_model_size = args.num_embed[0] + total_source_factor_size
             check_condition(adjusted_transformer_encoder_model_size % 2 == 0 and
-                            adjusted_transformer_encoder_model_size % args.transformer_attention_heads == 0,
+                            adjusted_transformer_encoder_model_size % args.transformer_attention_heads[0] == 0,
                             "Sum of source factor sizes, i.e. num-embed plus source-factors-num-embed, (%d) "
-                            "has to be even and a multiple of attention heads (%d)" % (
-                                adjusted_transformer_encoder_model_size, args.transformer_attention_heads))
+                            "has to be even and a multiple of encoder attention heads (%d)" % (
+                                adjusted_transformer_encoder_model_size, args.transformer_attention_heads[0]))
 
     if args.decoder == C.TRANSFORMER_TYPE:
-        check_condition(args.transformer_model_size == args.num_embed[1],
+        check_condition(args.transformer_model_size[1] == args.num_embed[1],
                         "Target embedding size must match transformer model size: %s vs. %s"
                         % (args.transformer_model_size, args.num_embed[1]))
 
@@ -106,7 +106,6 @@ def check_arg_compatibility(args: argparse.Namespace):
                         "LHUC is not supported for convolutional models yet.")
         check_condition(args.decoder != C.TRANSFORMER_TYPE or C.LHUC_STATE_INIT not in args.lhuc,
                         "The %s options only applies to RNN models" % C.LHUC_STATE_INIT)
-
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
@@ -399,7 +398,7 @@ def create_encoder_config(args: argparse.Namespace,
     if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
         encoder_transformer_preprocess, _ = args.transformer_preprocess
         encoder_transformer_postprocess, _ = args.transformer_postprocess
-        encoder_transformer_model_size = args.transformer_model_size
+        encoder_transformer_model_size = args.transformer_model_size[0]
 
         total_source_factor_size = sum(args.source_factors_num_embed)
         if total_source_factor_size > 0:
@@ -408,8 +407,8 @@ def create_encoder_config(args: argparse.Namespace,
             encoder_transformer_model_size = num_embed_source + total_source_factor_size
         config_encoder = transformer.TransformerConfig(
             model_size=encoder_transformer_model_size,
-            attention_heads=args.transformer_attention_heads,
-            feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
+            attention_heads=args.transformer_attention_heads[0],
+            feed_forward_num_hidden=args.transformer_feed_forward_num_hidden[0],
             act_type=args.transformer_activation_type,
             num_layers=encoder_num_layers,
             dropout_attention=args.transformer_dropout_attention,
@@ -479,9 +478,9 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
         _, decoder_transformer_preprocess = args.transformer_preprocess
         _, decoder_transformer_postprocess = args.transformer_postprocess
         config_decoder = transformer.TransformerConfig(
-            model_size=args.transformer_model_size,
-            attention_heads=args.transformer_attention_heads,
-            feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
+            model_size=args.transformer_model_size[1],
+            attention_heads=args.transformer_attention_heads[1],
+            feed_forward_num_hidden=args.transformer_feed_forward_num_hidden[1],
             act_type=args.transformer_activation_type,
             num_layers=decoder_num_layers,
             dropout_attention=args.transformer_dropout_attention,
