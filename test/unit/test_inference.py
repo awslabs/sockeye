@@ -72,15 +72,14 @@ def test_concat_translations():
     expected_target_ids = [0, 1, 2, 8, 9, 3, 4, 5, -1]
     num_src = 7
 
-    def length_penalty(length):
-        return 1. / length
+    length_penalty = sockeye.inference.LengthPenalty()
 
-    expected_score = (1 + 2 + 3) / length_penalty(len(expected_target_ids))
+    expected_score = (1 + 2 + 3) / length_penalty.get(len(expected_target_ids))
 
-    translations = [sockeye.inference.Translation([0, 1, 2, -1], np.zeros((4, num_src)), 1.0 / length_penalty(4)),
+    translations = [sockeye.inference.Translation([0, 1, 2, -1], np.zeros((4, num_src)), 1.0 / length_penalty.get(4)),
                     # Translation without EOS
-                    sockeye.inference.Translation([0, 8, 9], np.zeros((3, num_src)), 2.0 / length_penalty(3)),
-                    sockeye.inference.Translation([0, 3, 4, 5, -1], np.zeros((5, num_src)), 3.0 / length_penalty(5))]
+                    sockeye.inference.Translation([0, 8, 9], np.zeros((3, num_src)), 2.0 / length_penalty.get(3)),
+                    sockeye.inference.Translation([0, 3, 4, 5, -1], np.zeros((5, num_src)), 3.0 / length_penalty.get(5))]
     combined = sockeye.inference._concat_translations(translations, start_id=_BOS, stop_ids={_EOS},
                                                       length_penalty=length_penalty)
 
@@ -94,6 +93,9 @@ def test_length_penalty_default():
     length_penalty = sockeye.inference.LengthPenalty(1.0, 0.0)
     expected_lp = np.array([[1.0], [2.], [3.]])
 
+    assert np.isclose(length_penalty.get(lengths).asnumpy(), expected_lp).all()
+    assert np.isclose(length_penalty(lengths).asnumpy(), expected_lp).all()
+    length_penalty.hybridize()
     assert np.isclose(length_penalty(lengths).asnumpy(), expected_lp).all()
 
 
@@ -102,6 +104,9 @@ def test_length_penalty():
     length_penalty = sockeye.inference.LengthPenalty(.2, 5.0)
     expected_lp = np.array([[6 ** 0.2 / 6 ** 0.2], [7 ** 0.2 / 6 ** 0.2], [8 ** 0.2 / 6 ** 0.2]])
 
+    assert np.isclose(length_penalty.get(lengths).asnumpy(), expected_lp).all()
+    assert np.isclose(length_penalty(lengths).asnumpy(), expected_lp).all()
+    length_penalty.hybridize()
     assert np.isclose(length_penalty(lengths).asnumpy(), expected_lp).all()
 
 
@@ -110,8 +115,7 @@ def test_length_penalty_int_input():
     length_penalty = sockeye.inference.LengthPenalty(.2, 5.0)
     expected_lp = [6 ** 0.2 / 6 ** 0.2]
 
-    assert np.isclose(np.asarray([length_penalty(length)]),
-                      np.asarray(expected_lp)).all()
+    assert np.isclose(np.asarray([length_penalty.get(length)]), np.asarray(expected_lp)).all()
 
 
 @pytest.mark.parametrize("sentence_id, sentence, factors, chunk_size",
@@ -334,5 +338,72 @@ def test_beam_prune(batch, beam, prune, scores, finished, expected_inactive):
     finished = mx.nd.array(finished, dtype='int32')
     inf_array = mx.nd.full((batch * beam,), val=np.inf)
 
-    inactive = sockeye.utils.prune(scores, finished, inf_array, beam, prune)
+    prune_hyps = sockeye.inference.PruneHypotheses(prune, beam)
+    prune_hyps.initialize()
+    inactive = prune_hyps(scores, finished, inf_array)
     assert inactive.asnumpy().tolist() == expected_inactive
+
+    prune_hyps.hybridize()
+    inactive = prune_hyps(scores, finished, inf_array)
+    assert inactive.asnumpy().tolist() == expected_inactive
+
+
+def test_sort_by_index():
+    data = [mx.nd.random.uniform(0, 1, (3, i)) for i in range(1, 5)]
+    indices = mx.nd.array([2, 0, 1], dtype='int32')
+    expected = [d.asnumpy()[indices.asnumpy()] for d in data]
+
+    sort_by_index = sockeye.inference.SortByIndex()
+    sort_by_index.initialize()
+
+    out = sort_by_index(indices, *data)
+    assert len(out) == len(data) == len(expected)
+    for o, e in zip(out, expected):
+        assert (o.asnumpy() == e).all()
+
+    sort_by_index.hybridize()
+    out = sort_by_index(indices, *data)
+    assert len(out) == len(data) == len(expected)
+    for o, e in zip(out, expected):
+        assert (o.asnumpy() == e).all()
+
+
+@pytest.mark.parametrize("batch_size, beam_size, target_vocab_size",
+                        [(1, 5, 200),
+                         (5, 5, 200),
+                         (1, 1, 200),
+                         (5, 1, 200),
+                         (10, 10, 100)])
+def test_topk_func(batch_size, beam_size, target_vocab_size):
+    # Random model scores. Shape: (batch_size * beam_size, target_vocab_size)
+    scores = mx.nd.random.uniform(0, 1, (batch_size * beam_size, target_vocab_size))
+    # offset for batch sizes > 1
+    offset = mx.nd.array(np.repeat(np.arange(0, batch_size * beam_size, beam_size), beam_size), dtype='int32')
+
+    np_hyp, np_word, np_values = sockeye.utils.topk(scores, k=beam_size, batch_size=batch_size,
+                                                    offset=offset, use_mxnet_topk=False)
+    np_hyp, np_word, np_values = np_hyp.asnumpy(), np_word.asnumpy(), np_values.asnumpy()
+
+    mx_hyp, mx_word, mx_values = sockeye.utils.topk(scores, k=beam_size, batch_size=batch_size,
+                                                    offset=offset, use_mxnet_topk=True)
+    mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
+    assert all(mx_hyp == np_hyp)
+    assert all(mx_word == np_word)
+    assert all(mx_values == np_values)
+
+    topk = sockeye.inference.TopK(k=beam_size, batch_size=batch_size, vocab_size=target_vocab_size)
+    topk.initialize()
+    assert all(topk.offset.data() == offset)
+
+    mx_hyp, mx_word, mx_values = topk(scores)
+    mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
+    assert all(mx_hyp == np_hyp)
+    assert all(mx_word == np_word)
+    assert all(mx_values == np_values)
+
+    topk.hybridize()
+    mx_hyp, mx_word, mx_values = topk(scores)
+    mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
+    assert all(mx_hyp == np_hyp)
+    assert all(mx_word == np_word)
+    assert all(mx_values == np_values)
