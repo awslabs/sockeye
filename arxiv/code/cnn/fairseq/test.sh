@@ -10,11 +10,10 @@ test=${2:-$DATDIR/$PAIR/test.bpe.$SOURCE}
 c=`cat early_stop.txt`
 
 export CUDA_VISIBLE_DEVICES=0
-cat $test \
-    | python $FAIRSEQ/generate.py \
+    python $FAIRSEQ/generate.py \
              $pytorch_data_dir \
              --path model/checkpoint$c.pt \
-             --batch-size 16 -i --beam 5 \
+             --batch-size 16 -i --beam 5 --gen-subset test \
     | sed -u 's/\@\@ //g' | tee test/out \
     | $MOSES/scripts/tokenizer/detokenizer.perl -q -l $TARGET > out.detok
 

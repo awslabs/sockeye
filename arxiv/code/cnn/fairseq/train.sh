@@ -10,7 +10,7 @@ python $FAIRSEQ/preprocess.py \
        --target-lang $TARGET \
        --trainpref $DATADIR/$PAIR/train.tok.bpe \
        --validpref $DATADIR/$PAIR/dev.bpe \
-       --testpref $DATADIR/$PAIR/dev.bpe \
+       --testpref $DATADIR/$PAIR/test.bpe \
        --thresholdsrc 3 --thresholdtgt 3 \
        --destdir $pytorch_data_dir
 
