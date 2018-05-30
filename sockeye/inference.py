@@ -1308,7 +1308,7 @@ class Translator:
                accumulated_scores: mx.nd.NDArray,
                best_word_indices: mx.nd.NDArray,
                inactive: mx.nd.NDArray,
-               finished: mx.nd.NDArray) -> None:
+               finished: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
         """
         Prunes the beam. For each sentence, we find the best-scoring completed hypothesis (if any),
         and then remove all hypotheses for that sentence that are outside the beam relative to that
@@ -1340,6 +1340,7 @@ class Translator:
 
                 # mark removed ones as finished so they won't block early exiting
                 finished[rows] = mx.nd.clip(finished[rows] + inactive[rows], 0, 1)
+        return accumulated_scores, best_word_indices, inactive, finished
 
     def _beam_search(self,
                      source: mx.nd.NDArray,
@@ -1514,7 +1515,10 @@ class Translator:
 
             # (6) Prune out low-probability hypotheses. Pruning works by setting entries `inactive`.
             if self.beam_prune > 0.0:
-                self._prune(scores_accumulated, best_word_indices, inactive, finished)
+                scores_accumulated, best_word_indices, inactive, finished = self._prune(scores_accumulated,
+                                                                                        best_word_indices,
+                                                                                        inactive,
+                                                                                        finished)
 
             # (7) update best hypotheses, their attention lists and lengths (only for non-finished hyps)
             # pylint: disable=unsupported-assignment-operation
