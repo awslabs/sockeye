@@ -12,17 +12,17 @@
 # permissions and limitations under the License.
 
 import json
+from math import ceil
 from unittest.mock import patch, Mock
 
 import mxnet as mx
 import numpy as np
 import pytest
-from math import ceil
 
 import sockeye.constants as C
 import sockeye.data_io
 import sockeye.inference
-from sockeye.utils import SockeyeError
+import sockeye.utils
 
 _BOS = 0
 _EOS = -1
@@ -56,14 +56,15 @@ def mock_translator(batch_size: int = 1,
             t_mock = Mock(sockeye.inference.InferenceModel)
             t_mock.num_source_factors = num_source_factors
             return t_mock
-        translator.models = [ mock_model() ]
+
+        translator.models = [mock_model()]
 
         translator.batch_size = batch_size
         translator.beam_size = beam_size
         translator.beam_prune = beam_prune
         translator.zeros_array = mx.nd.zeros((beam_size,), dtype='int32')
-        translator.inf_array_long = mx.nd.full((batch_size * beam_size,), val=np.inf, dtype='float32')
-        translator.inf_array = mx.nd.slice(translator.inf_array_long, begin=(0), end=(beam_size))
+        translator.inf_array = mx.nd.full((batch_size * beam_size,), val=np.inf, dtype='float32')
+        translator.inf_array = mx.nd.slice(translator.inf_array, begin=(0), end=(beam_size))
         return translator
 
 
@@ -262,7 +263,7 @@ def test_make_input_whitespace_delimiter(delimiter):
     sentence_id = 1
     translator = mock_translator(num_source_factors=2)
     sentence = "foo"
-    with pytest.raises(SockeyeError) as e:
+    with pytest.raises(sockeye.utils.SockeyeError) as e:
         sockeye.inference.make_input_from_factored_string(sentence_id=sentence_id,
                                                           factored_string=sentence,
                                                           translator=translator, delimiter=delimiter)
@@ -309,19 +310,7 @@ def test_make_input_from_multiple_strings(strings):
     assert inp.tokens == expected_tokens
     assert inp.factors == expected_factors
 
-"""
-Test pruning via inference.Translator._beam_prune(). The best score is computed from the best
-finished item; all other items whose scores are outside (best_item - threshold) are pruned, which
-means their spot in `inactive` is set to 1.
 
-Tests: take in
-- accumulated_scores and finished
-- a dummy inactive (not read from)
-- best_word_indices (maybe dummy?)
-and check
-- values of finished and invalid
-- maybe values of best_word_indices
-"""
 # batch size, beam size, prune thresh, accumulated scores, finished, expected_inactive
 prune_tests = [
     # no pruning because nothing is finished
@@ -341,24 +330,9 @@ prune_tests = [
 
 @pytest.mark.parametrize("batch, beam, prune, scores, finished, expected_inactive", prune_tests)
 def test_beam_prune(batch, beam, prune, scores, finished, expected_inactive):
-    translator = mock_translator(batch, beam, prune)
-
-    orig_finished = [x for x in finished]
-
-    # these are passed by reference and changed, so create them here
     scores = mx.nd.array(scores).expand_dims(axis=1)
-    inactive = mx.nd.array([0] * (batch * beam), dtype='int32')
-    best_words = mx.nd.array([10] * (batch * beam), dtype='int32')
     finished = mx.nd.array(finished, dtype='int32')
+    inf_array = mx.nd.full((batch * beam,), val=np.inf)
 
-    translator._prune(scores, best_words, inactive, finished)
-
-    # Make sure inactive is set as expected
+    inactive = sockeye.utils.prune(scores, finished, inf_array, beam, prune)
     assert inactive.asnumpy().tolist() == expected_inactive
-
-    # Ensure that scores for inactive items are set to 'inf'
-    zeros = mx.nd.zeros((beam * batch,), dtype='float32')
-    assert mx.nd.where(inactive, scores[:, 0], zeros).asnumpy().tolist() == [np.inf if x == 1 else 0 for x in expected_inactive]
-
-    # Inactive items should also be marked as finished
-    assert finished.asnumpy().tolist() == np.clip(np.array(orig_finished) + np.array(expected_inactive), 0, 1).tolist()

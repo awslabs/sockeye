@@ -289,6 +289,33 @@ def topk(scores: mx.nd.NDArray,
     return best_hyp_indices, best_word_indices, values
 
 
+def prune(scores: mx.nd.NDArray,
+          finished: mx.nd.NDArray,
+          inf_array: mx.nd.NDArray,
+          beam_size: int,
+          prune_threshold: float) -> mx.nd.NDArray:
+    """
+    Returns a 0-1 array indicating which hypotheses are inactive based on pruning.
+    Finished hypotheses that have a score worse than prune_threshold from the best scoring hypotheses
+    are marked as inactive.
+
+    :param scores: Hypotheses scores. Shape: (batch * beam, 1).
+    :param finished: 0-1 array indicating which hypotheses are finished. Shape: (batch * beam,).
+    :param inf_array: Auxiliary array filled with infinity. Shape: (batch * beam,).
+    :param beam_size: Beam size.
+    :param prune_threshold: Pruning threshold.
+    :return NDArray of inactive items. Shape(batch * beam,).
+    """
+    scores = scores.reshape((-1, beam_size))
+    finished = finished.reshape((-1, beam_size))
+    inf_array = inf_array.reshape((-1, beam_size))
+
+    # best finished scores. Shape: (batch, 1)
+    best_finished_scores = mx.nd.where(finished, scores, inf_array).min(axis=1, keepdims=True)
+    inactive = mx.nd.cast((scores - best_finished_scores) > prune_threshold, dtype='int32').reshape((-1))
+    return inactive
+
+
 def chunks(some_list: List, n: int) -> Iterable[List]:
     """Yield successive n-sized chunks from l."""
     for i in range(0, len(some_list), n):
