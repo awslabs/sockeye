@@ -1430,7 +1430,6 @@ class Translator:
             # (2) Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
             scores += scores_accumulated
-            scores_accumulated = mx.nd.where(inactive, self.inf_array, scores_accumulated)
             # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
             # infinity otherwise.
             # pylint: disable=invalid-sequence-index
@@ -1486,6 +1485,7 @@ class Translator:
             if self.beam_prune > 0.0:
                 inactive = self.prune(scores_accumulated, finished)
                 best_word_indices = mx.nd.where(inactive, self.zeros_array, best_word_indices)
+                scores_accumulated = mx.nd.where(inactive, self.inf_array, scores_accumulated)
             finished_or_inactive = (finished + inactive).clip(0, 1)
 
             # (7) update best hypotheses, their attention lists and lengths (only for non-finished hyps)
@@ -1537,7 +1537,6 @@ class Translator:
         logger.debug("Finished after %d / %d steps.", t + 1, max_output_length)
 
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
-        scores_accumulated = mx.nd.where(inactive, self.inf_array, scores_accumulated)
         folded_accumulated_scores = scores_accumulated.reshape(
             (self.batch_size, self.beam_size * scores_accumulated.shape[-1]))
         indices = mx.nd.argsort(folded_accumulated_scores, axis=1)
