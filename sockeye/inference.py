@@ -992,10 +992,9 @@ class Translator:
         self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target)), val=np.inf,
                                    ctx=self.context)
         # These are constants used for manipulation of the beam and scores (particularly for pruning)
-        self.zeros_array = mx.nd.zeros((self.beam_size,), ctx=self.context, dtype='int32')
-        self.inf_array_long = mx.nd.full((self.batch_size * self.beam_size,), val=np.inf,
-                                         ctx=self.context, dtype='float32')
-        self.inf_array = mx.nd.slice(self.inf_array_long, begin=(0,), end=(self.beam_size,))
+        self.zeros_array = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
+        self.inf_array = mx.nd.full((self.batch_size * self.beam_size, 1), val=np.inf,
+                                    ctx=self.context, dtype='float32')
 
         # offset for hypothesis indices in batch decoding
         self.offset = np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size)
@@ -1005,6 +1004,11 @@ class Translator:
                             batch_size=self.batch_size,
                             offset=self.offset,
                             use_mxnet_topk=self.context != mx.cpu())  # MXNet implementation is faster on GPUs
+
+        self.prune = partial(utils.prune,
+                             inf_array=self.inf_array[:, 0],
+                             beam_size=self.beam_size,
+                             prune_threshold=self.beam_prune)
 
         logger.info("Translator (%d model(s) beam_size=%d beam_prune=%s beam_search_stop=%s "
                     "ensemble_mode=%s batch_size=%d buckets_source=%s)",
@@ -1304,44 +1308,6 @@ class Translator:
             neg_logprobs = self.interpolation_func(probs)
         return neg_logprobs, attention_prob_score
 
-    def _prune(self,
-               accumulated_scores: mx.nd.NDArray,
-               best_word_indices: mx.nd.NDArray,
-               inactive: mx.nd.NDArray,
-               finished: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
-        """
-        Prunes the beam. For each sentence, we find the best-scoring completed hypothesis (if any),
-        and then remove all hypotheses for that sentence that are outside the beam relative to that
-        item. Pruned items are marked by setting their entry in `inactive` to 1 and marking them as finished.
-        The four arguments are updated in place.
-
-        Note that after pruning, hypotheses are no longer necessarily sorted until the next call to topk().
-
-        TODO: this could be rewritten with batch-level operations.
-
-        :param accumulated_scores: The accumulated scores. Shape: (batch * beam, 1).
-        :param best_word_indices: The row indices indicating the best hypotheses. Shape: (batch * beam).
-        :param inactive: Marks inactive items in the beam. Shape: (batch * beam).
-        :param finished: Marks completed items in the beam. Shape: (batch * beam).
-        """
-        for sentno in range(self.batch_size):
-            rows = slice(sentno * self.beam_size, (sentno + 1) * self.beam_size)
-            if mx.nd.sum(finished[rows]) > 0:
-                best_finished_score = mx.nd.min(mx.nd.where(finished[rows],
-                                                            accumulated_scores[rows, 0],
-                                                            self.inf_array))
-
-                # Find, mark (by setting the score to inf), and remove all hypotheses
-                # whose score is not within self.beam_prune of the best score
-                inactive[rows] = mx.nd.cast(accumulated_scores[rows, 0] - best_finished_score > self.beam_prune,
-                                            dtype='int32')
-                accumulated_scores[rows, 0] = mx.nd.where(inactive[rows], self.inf_array, accumulated_scores[rows, 0])
-                best_word_indices[rows] = mx.nd.where(inactive[rows], self.zeros_array, best_word_indices[rows])
-
-                # mark removed ones as finished so they won't block early exiting
-                finished[rows] = mx.nd.clip(finished[rows] + inactive[rows], 0, 1)
-        return accumulated_scores, best_word_indices, inactive, finished
-
     def _beam_search(self,
                      source: mx.nd.NDArray,
                      source_length: int,
@@ -1464,15 +1430,17 @@ class Translator:
             # (2) Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
             scores += scores_accumulated
-            # Items that are finished (but not inactive) get the accumulated score in col 0,
-            # otherwise infinity for the whole row
+            # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
+            # infinity otherwise.
+            # pylint: disable=invalid-sequence-index
             pad_dist[:, C.PAD_ID] = mx.nd.where(mx.nd.clip(finished - inactive, 0, 1),
                                                 scores_accumulated[:, 0],
-                                                self.inf_array_long)
+                                                self.inf_array[:, 0])
             scores = mx.nd.where(finished + inactive, pad_dist, scores)
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
+            # pylint: disable=unsupported-assignment-operation
             best_hyp_indices[:], best_word_indices[:], scores_accumulated[:, 0] = self.topk(scores)
 
             # Constraints for constrained decoding are processed sentence by sentence
@@ -1515,22 +1483,24 @@ class Translator:
 
             # (6) Prune out low-probability hypotheses. Pruning works by setting entries `inactive`.
             if self.beam_prune > 0.0:
-                scores_accumulated, best_word_indices, inactive, finished = self._prune(scores_accumulated,
-                                                                                        best_word_indices,
-                                                                                        inactive,
-                                                                                        finished)
+                inactive = self.prune(scores_accumulated, finished)
+                best_word_indices = mx.nd.where(inactive, self.zeros_array, best_word_indices)
+                scores_accumulated = mx.nd.where(inactive, self.inf_array, scores_accumulated)
+            finished_or_inactive = (finished + inactive).clip(0, 1)
 
             # (7) update best hypotheses, their attention lists and lengths (only for non-finished hyps)
             # pylint: disable=unsupported-assignment-operation
             sequences[:, t] = best_word_indices
             attentions[:, t, :] = attention_scores
-            lengths += mx.nd.cast(1 - mx.nd.expand_dims(finished, axis=1), dtype='float32')
+            lengths += mx.nd.cast(1 - mx.nd.expand_dims(finished_or_inactive, axis=1), dtype='float32')
 
             # (6) optionally save beam history
             if self.store_beam:
-                unnormalized_scores = mx.nd.where(finished, scores_accumulated * self.length_penalty(lengths - 1),
+                unnormalized_scores = mx.nd.where(finished_or_inactive,
+                                                  scores_accumulated * self.length_penalty(lengths - 1),
                                                   scores_accumulated)
-                normalized_scores = mx.nd.where(finished, scores_accumulated,
+                normalized_scores = mx.nd.where(finished_or_inactive,
+                                                scores_accumulated,
                                                 scores_accumulated / self.length_penalty(lengths - 1))
                 for sent in range(self.batch_size):
                     rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
@@ -1611,7 +1581,7 @@ class Translator:
         if any(constraints):
             # For constrained decoding, select from items that have met all constraints (might not be finished)
             unmet = mx.nd.array([c.num_needed() if c is not None else 0 for c in constraints], ctx=self.context)
-            filtered = mx.nd.where(unmet == 0, seq_scores[:, 0], self.inf_array_long)
+            filtered = mx.nd.where(unmet == 0, seq_scores, self.inf_array)
             filtered = filtered.reshape((self.batch_size, self.beam_size))
             best_ids += mx.nd.argmin(filtered, axis=1)
 
