@@ -1433,6 +1433,7 @@ class Translator:
             scores_accumulated = mx.nd.where(inactive, self.inf_array, scores_accumulated)
             # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
             # infinity otherwise.
+            # pylint: disable=invalid-sequence-index
             pad_dist[:, C.PAD_ID] = mx.nd.where(mx.nd.clip(finished - inactive, 0, 1),
                                                 scores_accumulated[:, 0],
                                                 self.inf_array[:, 0])
@@ -1440,6 +1441,7 @@ class Translator:
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
+            # pylint: disable=unsupported-assignment-operation
             best_hyp_indices[:], best_word_indices[:], scores_accumulated[:, 0] = self.topk(scores)
 
             # Constraints for constrained decoding are processed sentence by sentence
