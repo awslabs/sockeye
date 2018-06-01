@@ -436,7 +436,8 @@ def add_prepare_data_cli_args(params):
                         default=None,
                         help='If curriculum learning is expected, '
                              'then specify the file containing complexity score of each training sample.'
-                             'This file should only contains continuous integers starting from 0. '
+                             'This file should only contains continuous integers starting from 0.'
+                             '0 means the sample is easiest.'
                              '(Please first split complexity scores into buckets by range.)'
                              'Each line of the file should only contain one number which is the complexity score of the sample, '
                              'whose index in the training set is the same as the line index.')
