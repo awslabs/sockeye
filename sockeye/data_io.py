@@ -363,7 +363,7 @@ def shard_data(source_fnames: List[str],
 
         # if curriculum learning is turned on,
         # then put sentence to the shard with corresponding complexity score.
-        if curriculum_score_file and check_score_file(curriculum_score_file):
+        if curriculum_score_file:
             with open(curriculum_score_file, 'r') as curriculum_score_file:
                 sample_scores = [int(line.strip()) for line in curriculum_score_file.readlines() if line.strip()]
 
@@ -575,7 +575,7 @@ def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int
     :param min_num_shards: Minimum number of shards.
     :return: Number of shards.
     """
-    if curriculum_score_file and check_score_file(curriculum_score_file):
+    if curriculum_score_file and check_score_file(num_samples, curriculum_score_file):
         with open(curriculum_score_file, 'r') as curriculum_score_file:
             sample_scores = [int(line.strip()) for line in curriculum_score_file.readlines() if line.strip()]
 
