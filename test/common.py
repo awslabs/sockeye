@@ -204,7 +204,7 @@ def tmp_digits_dataset(prefix: str,
                     end_pos = min(target_len, 3)
                     constraint = ' '.join(target_words[start_pos:end_pos])
                     new_source['constraints'] = [constraint]
-                    new_sources.append(json.dumps(new_source))
+                new_sources.append(json.dumps(new_source))
 
             with open(data['test_source'], 'w') as out:
                 for json_line in new_sources:

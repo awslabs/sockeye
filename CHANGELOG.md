@@ -10,11 +10,16 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.21]
+### Fixed
+- Constrained decoding was missed a crucial cast
+- Fixed test cases that should have caught this
+
 ## [1.18.20]
 ### Changed
 - Transformer parametrization flags (model size, # of attention heads, feed-forward layer size) can now optionally
   defined separately for encoder & decoder. For example, to use a different transformer model size for the encoder,
-  pass `--transformer-model-size 1024:512`. 
+  pass `--transformer-model-size 1024:512`.
 
 ## [1.18.19]
 ### Added

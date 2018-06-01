@@ -1583,7 +1583,7 @@ class Translator:
             unmet = mx.nd.array([c.num_needed() if c is not None else 0 for c in constraints], ctx=self.context)
             filtered = mx.nd.where(unmet == 0, seq_scores, self.inf_array)
             filtered = filtered.reshape((self.batch_size, self.beam_size))
-            best_ids += mx.nd.argmin(filtered, axis=1)
+            best_ids += mx.nd.cast(mx.nd.argmin(filtered, axis=1), dtype='int32')
 
         histories = beam_histories if beam_histories is not None else [None] * self.batch_size  # type: List
         return [self._assemble_translation(*x) for x in zip(sequences[best_ids],
