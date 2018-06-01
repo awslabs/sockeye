@@ -431,8 +431,15 @@ def add_prepare_data_cli_args(params):
                         required=True,
                         help='Folder where the prepared and possibly sharded data is written to.')
 
-    params.add_argument('--sentence-score-file',type=str,
-                        help='If curriculum learning is expected, then specify the file containg hardness score of each training sentence.')
+    params.add_argument('--curriculum-score-file',
+                        type=regular_file(),
+                        default=None,
+                        help='If curriculum learning is expected, '
+                             'then specify the file containing complexity score of each training sample.'
+                             'This file should only contains continuous integers starting from 0. '
+                             '(Please first split complexity scores into buckets by range.)'
+                             'Each line of the file should only contain one number which is the complexity score of the sample, '
+                             'whose index in the training set is the same as the line index.')
 
 
 def add_device_args(params):
