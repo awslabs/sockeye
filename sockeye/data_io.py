@@ -23,6 +23,7 @@ import random
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from collections import Counter
+from collections import defaultdict
 from contextlib import ExitStack
 from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sequence, Sized, Tuple
 
@@ -325,8 +326,7 @@ def shard_data(source_fnames: List[str],
                length_ratio_std: float,
                output_prefix: str,
                samples_per_shard: int,
-               curriculum_learning: bool,
-               sentence_score: List[int]) -> Tuple[List[Tuple[List[str], str, 'DataStatistics']], 'DataStatistics']:
+               curriculum_score_file: str) -> Tuple[List[Tuple[List[str], str, 'DataStatistics']], 'DataStatistics']:
     """
     Assign int-coded source/target sentence pairs to shards at random.
 
@@ -360,45 +360,66 @@ def shard_data(source_fnames: List[str],
 
         source_readers, target_reader = create_sequence_readers(source_fnames, target_fname,
                                                                 source_vocabs, target_vocab)
-        if curriculum_learning:
-            shard_score_mapping = [i for i in range(num_shards)]
-            unique_scores = sorted(set(sentence_score))
-            score_index_dict = {}
-            shard_count = 0
-            for i in range(len(sentence_score)):
-                if sentence_score[i] in score_index_dict:
-                    score_index_dict[sentence_score[i]].append(i)
-                else:
-                    score_index_dict[sentence_score[i]] = []
+
+        # if curriculum learning is turned on,
+        # then put sentence to the shard with corresponding complexity score.
+        if curriculum_score_file and check_score_file(curriculum_score_file):
+            with open(curriculum_score_file, 'r') as curriculum_score_file:
+                sample_scores = [int(line.strip()) for line in curriculum_score_file.readlines() if line.strip()]
+
+            # sample_shard_mapping: a list stores the mapping relation between sample and shard
+            # index is the index of sample
+            # each element is the shard the sentence will be put into
+            sample_shard_mapping = list(sample_scores)
+
+            # shard_score_mapping: a list stores the mapping relation between shards and complexity scores
+            # index is the index of shard
+            # each element is the complexity score of the shard
+            shard_score_mapping = list(range(num_shards))
+
+            # unique_scores: a sorted list stores unique complexity scores
+            unique_scores = sorted(set(sample_scores))
+
+            # score_index_dict: {score 0: [sample_index...], score 1: [sample_index..]...}
+            score_sample_dict = defaultdict(list)
+            for i in range(len(sample_scores)):
+                score_sample_dict[sample_scores[i]].append(i) 
+
 
             if num_shards > len(unique_scores):
+                shard_count = 0
+                # if num_shards is multiple of number of unique scores,
+                # samples with different complexity scores should be put into shards of equal numbers
                 if num_shards%len(unique_scores) == 0:
                     num_shards_per_score = int(num_shards/len(unique_scores))         
                     for us in unique_scores:
-                        for sentence_index_sublist in np.array_split(np.array(score_index_dict[us]),num_shards_per_score):
-                            for index in sentence_index_sublist:
-                                sentence_score[index] = shard_count 
+                        for sublist in np.array_split(np.array(score_sample_dict[us]),num_shards_per_score):
+                            for index in sublist:
+                                sample_shard_mapping[index] = shard_count 
                             shard_score_mapping[shard_count] = us
                             shard_count += 1
+
+                # if num_shards is not multiple of number of unique scores,
+                # samples will be allocated according to samples_per_shard
                 else:
                     for us in unique_scores:
                         sample_count = 0
-                        for index in sorted(score_index_dict[us]):
-                            sentence_score[index] = shard_count
+                        for index in sorted(score_sample_dict[us]):
+                            sample_shard_mapping[index] = shard_count
                             sample_count += 1
                             if sample_count==samples_per_shard:
                                 shard_score_mapping[shard_count] = us
                                 shard_count += 1
-                                sample_count=0
+                                sample_count = 0
                         if sample_count < samples_per_shard:
                             shard_score_mapping[shard_count] = us
                             shard_count += 1
                                 
 
-            with open(os.path.join(output_prefix, 'shard_scores'), 'w') as shard_scores:
+            with open(os.path.join(output_prefix, 'shard_scores'), 'w') as shard_scores_file:
                 for m in shard_score_mapping:
-                    shard_scores.write(str(m)+'\n')
-            random_shard_iter = iter(sentence_score)
+                    shard_scores_file.write(str(m)+'\n')
+            random_shard_iter = iter(sample_shard_mapping)
         else:
             random_shard_iter = iter(lambda: random.randrange(num_shards), None)
 
@@ -509,7 +530,43 @@ class RawParallelDatasetLoader:
         return ParallelDataSet(data_source, data_target, data_label)
 
 
-def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int, curriculum_learning: bool, sentence_score: List[int]) -> int:
+def check_score_file(num_samples: int, curriculum_score_file: str):
+    """
+    Checks the sanity of the curriculum score file. 
+
+    :param num_samples: Number of training data samples.
+    :param curriculum_score_file: Path to curriculum score file.
+    :return: True if the file is legal otherwise raise an error.
+    """
+    # check the existence of curriculum score file
+    if not os.path.exists(curriculum_score_file):
+        raise IOError('Curriculum score file not found.')
+
+    # if the curriculum score file exists, read the file
+    with open(curriculum_score_file, 'r') as curriculum_score_file:
+        sample_scores = [line.strip() for line in curriculum_score_file.readlines() if line.strip()]
+
+    # check whether the number of samples is the same as the number of scores in the curriculum score file
+    if len(sample_scores) != num_samples:
+        raise ValueError('Number of sample scores in curriculum score file does not match number of samples')
+
+    # check whether the curriculum score file only contains integers
+    if not all([s.isdigit() for s in sample_scores]):
+        raise TypeError('Curriculum score file contains non-integer')
+
+    sample_scores = sorted(set([int(s) for s in sample_scores]))
+    # check whether scores in the curriculum score file starts from 0
+    if sample_scores[0] != 0:
+        raise ValueError('Scores in curriculum score file does not start from 0')
+
+    # check whether scores in the curriculum score file are continuous integers
+    if not all([(sample_scores[i+1]-sample_scores[i])==1 for i in range(len(sample_scores)-1)]):
+        raise ValueError('Scores in curriculum score file are not continuous integers')
+
+    return True
+
+
+def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int, curriculum_score_file: str) -> int:
     """
     Returns the number of shards.
 
@@ -518,12 +575,19 @@ def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int
     :param min_num_shards: Minimum number of shards.
     :return: Number of shards.
     """
-    if curriculum_learning:
+    if curriculum_score_file and check_score_file(curriculum_score_file):
+        with open(curriculum_score_file, 'r') as curriculum_score_file:
+            sample_scores = [int(line.strip()) for line in curriculum_score_file.readlines() if line.strip()]
+
+        # calculate the number of shards needed according to samples_per_shard
         num_shards = 0
-        count_dict = Counter(sentence_score)
+        count_dict = Counter(sample_scores)
         for score in count_dict:
             num_shards += int(math.ceil(count_dict[score]/samples_per_shard))
+
+        # change min_num_shards to the minimal multiple of number of unique curriculum scores
         min_num_shards = int(math.ceil(min_num_shards/len(count_dict.keys())))*len(count_dict.keys())
+
         return max(num_shards, min_num_shards, len(count_dict.keys()))
 
     return max(int(math.ceil(num_samples / samples_per_shard)), min_num_shards)
@@ -543,8 +607,7 @@ def prepare_data(source_fnames: List[str],
                  samples_per_shard: int,
                  min_num_shards: int,
                  output_prefix: str,
-                 sentence_score: List[int],
-                 curriculum_learning: bool = False,
+                 curriculum_score_file: str,
                  keep_tmp_shard_files: bool = False):
     logger.info("Preparing data.")
     # write vocabularies to data folder
@@ -563,7 +626,7 @@ def prepare_data(source_fnames: List[str],
 
     # Pass 2: Randomly assign data to data shards
     # no pre-processing yet, just write the sentences to different files
-    num_shards = get_num_shards(length_statistics.num_sents, samples_per_shard, min_num_shards, curriculum_learning, sentence_score)
+    num_shards = get_num_shards(length_statistics.num_sents, samples_per_shard, min_num_shards, curriculum_score_file)
     logger.info("%d samples will be split into %d shard(s) (requested samples/shard=%d, min_num_shards=%d)."
                 % (length_statistics.num_sents, num_shards, samples_per_shard, min_num_shards))
     shards, data_statistics = shard_data(source_fnames=source_fnames,
@@ -576,8 +639,7 @@ def prepare_data(source_fnames: List[str],
                                          length_ratio_std=length_statistics.length_ratio_std,
                                          output_prefix=output_prefix,
                                          samples_per_shard=samples_per_shard,
-                                         curriculum_learning=curriculum_learning,
-                                         sentence_score=sentence_score)
+                                         curriculum_score_file=curriculum_score_file)
     data_statistics.log()
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
