@@ -158,27 +158,7 @@ class InferenceModel(model.SockeyeModel):
 
         def sym_gen(source_seq_len: int):
             source = mx.sym.Variable(C.SOURCE_NAME)
-            source_words = source.split(num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
-            source_length = utils.compute_lengths(source_words)
-
-            # source embedding
-            (source_embed,
-             source_embed_length,
-             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
-
-            # encoder
-            # source_encoded: (source_encoded_length, batch_size, encoder_depth)
-            (source_encoded,
-             source_encoded_length,
-             source_encoded_seq_len) = self.encoder.encode(source_embed,
-                                                           source_embed_length,
-                                                           source_embed_seq_len)
-
-            # initial decoder states
-            decoder_init_states = self.decoder.init_states(source_encoded,
-                                                           source_encoded_length,
-                                                           source_encoded_seq_len)
-
+            decoder_init_states = self.encoder_sym(source, source_seq_len)
             data_names = [C.SOURCE_NAME]
             label_names = []  # type: List[str]
             return mx.sym.Group(decoder_init_states), data_names, label_names
@@ -188,6 +168,30 @@ class InferenceModel(model.SockeyeModel):
                                         default_bucket_key=default_bucket_key,
                                         context=self.context)
         return module, default_bucket_key
+
+    def encoder_sym(self, source: mx.sym.Symbol, source_seq_len: int):
+        source_words = source.split(num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
+        source_length = utils.compute_lengths(source_words)
+
+        # source embedding
+        (source_embed,
+         source_embed_length,
+         source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
+
+        # encoder
+        # source_encoded: (source_encoded_length, batch_size, encoder_depth)
+        (source_encoded,
+         source_encoded_length,
+         source_encoded_seq_len) = self.encoder.encode(source_embed,
+                                                       source_embed_length,
+                                                       source_embed_seq_len)
+
+        # initial decoder states
+        decoder_states = self.decoder.init_states(source_encoded,
+                                                  source_encoded_length,
+                                                  source_encoded_seq_len)
+
+        return decoder_states
 
     def _get_decoder_module(self) -> Tuple[mx.mod.BucketingModule, Tuple[int, int]]:
         """
@@ -215,28 +219,7 @@ class InferenceModel(model.SockeyeModel):
             states = self.decoder.state_variables(decode_step)
             state_names = [state.name for state in states]
 
-            # embedding for previous word
-            # (batch_size, num_embed)
-            target_embed_prev, _, _ = self.embedding_target.encode(data=target_prev, data_length=None, seq_len=1)
-
-            # decoder
-            # target_decoded: (batch_size, decoder_depth)
-            (target_decoded,
-             attention_probs,
-             states) = self.decoder.decode_step(decode_step,
-                                                target_embed_prev,
-                                                source_encoded_seq_len,
-                                                *states)
-
-            if self.decoder_return_logit_inputs:
-                # skip output layer in graph
-                outputs = mx.sym.identity(target_decoded, name=C.LOGIT_INPUTS_NAME)
-            else:
-                # logits: (batch_size, target_vocab_size)
-                logits = self.output_layer(target_decoded)
-                if self.softmax_temperature is not None:
-                    logits /= self.softmax_temperature
-                outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
+            outputs, attention_probs, states = self.decoder_sym(target_prev, states, decode_step, source_encoded_seq_len)
 
             data_names = [C.TARGET_NAME] + state_names
             label_names = []  # type: List[str]
@@ -248,6 +231,32 @@ class InferenceModel(model.SockeyeModel):
                                         default_bucket_key=default_bucket_key,
                                         context=self.context)
         return module, default_bucket_key
+
+    def decoder_sym(self, target_prev: mx.sym.Symbol, states: List[mx.sym.Symbol], decode_step, source_encoded_seq_len):
+        # embedding for previous word
+        # (batch_size, num_embed)
+        target_embed_prev, _, _ = self.embedding_target.encode(data=target_prev, data_length=None, seq_len=1)
+
+        # decoder
+        # target_decoded: (batch_size, decoder_depth)
+        (target_decoded,
+         attention_probs,
+         states) = self.decoder.decode_step(decode_step,
+                                            target_embed_prev,
+                                            source_encoded_seq_len,
+                                            *states)
+
+        if self.decoder_return_logit_inputs:
+            # skip output layer in graph
+            outputs = mx.sym.identity(target_decoded, name=C.LOGIT_INPUTS_NAME)
+        else:
+            # logits: (batch_size, target_vocab_size)
+            logits = self.output_layer(target_decoded)
+            if self.softmax_temperature is not None:
+                logits /= self.softmax_temperature
+            outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME + "_%d" % decode_step)
+
+        return outputs, attention_probs, states
 
     def _get_encoder_data_shapes(self, bucket_key: int) -> List[mx.io.DataDesc]:
         """
@@ -960,7 +969,8 @@ class Translator:
                  target_vocab: vocab.Vocab,
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
                  store_beam: bool = False,
-                 strip_unknown_words: bool = False) -> None:
+                 strip_unknown_words: bool = False,
+                 symbolic_beam_search: bool = False) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
@@ -1033,6 +1043,14 @@ class Translator:
                                                                      eos_id=self.vocab_target[C.EOS_SYMBOL])
         self._update_lengths_and_finished.initialize(ctx=self.context)
         self._update_lengths_and_finished.hybridize(static_alloc=True, static_shape=True)
+
+        if symbolic_beam_search:
+            self.beam_search_module = self._get_beam_search_module()
+        else:
+            self.beam_search_module = None
+
+        self.time_sum = 0.0
+        self.step_sum = 0.0
 
         logger.info("Translator (%d model(s) beam_size=%d beam_prune=%s beam_search_stop=%s "
                     "ensemble_mode=%s batch_size=%d buckets_source=%s)",
@@ -1254,8 +1272,10 @@ class Translator:
 
         :return: Sequence of translations.
         """
-
-        return self._get_best_from_beam(*self._beam_search(source, source_length, raw_constraints))
+        if self.beam_search_module is not None:
+            return self._get_best_from_beam(*self._beam_search_symbolic(source, source_length, raw_constraints))
+        else:
+            return self._get_best_from_beam(*self._beam_search(source, source_length, raw_constraints))
 
     def _encode(self, sources: mx.nd.NDArray, source_length: int) -> List[ModelState]:
         """
@@ -1345,7 +1365,7 @@ class Translator:
         :return List of lists of word ids, list of attentions, array of accumulated length-normalized
                 negative log-probs.
         """
-
+        start = time.time()
         # Length of encoded sequence (may differ from initial input length)
         encoded_source_length = self.models[0].encoder.get_encoded_seq_len(source_length)
         utils.check_condition(all(encoded_source_length ==
@@ -1427,7 +1447,7 @@ class Translator:
 
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
         # item on the beam for each sentence
-        inactive = mx.nd.ones((self.batch_size * self.beam_size), dtype='int32', ctx=self.context)
+        inactive = mx.nd.ones((self.batch_size * self.beam_size,), dtype='int32', ctx=self.context)
         inactive[::self.beam_size] = 0
         t = 1
         for t in range(1, max_output_length):
@@ -1447,7 +1467,7 @@ class Translator:
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
-            best_hyp_indices, best_word_indices, scores_accumulated = self._topk(scores)
+            best_hyp_indices, best_word_indices, scores_accumulated = self._topk(scores, self.offset)
 
             # Constraints for constrained decoding are processed sentence by sentence
             if any(raw_constraint_list):
@@ -1543,6 +1563,8 @@ class Translator:
                 ms.sort_state(best_hyp_indices)
 
         logger.debug("Finished after %d / %d steps.", t + 1, max_output_length)
+        self.step_sum += t + 1
+
 
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
         folded_accumulated_scores = scores_accumulated.reshape((self.batch_size,
@@ -1554,8 +1576,160 @@ class Translator:
         attentions = attentions.take(best_hyp_indices)
         scores_accumulated = scores_accumulated.take(best_hyp_indices)
         constraints = [constraints[x] for x in best_hyp_indices.asnumpy()]
+        mx.nd.waitall()
+        end = time.time()
+        self.time_sum += end - start
 
         return sequences, attentions, scores_accumulated, lengths, constraints, beam_histories
+
+    def _get_beam_search_module(self):
+
+        def sym_gen(source_length: int):
+            model = self.models[0]
+
+            # Maximum output length
+            max_output_length = model.get_max_output_length(source_length)
+            source_embed_seq_len = model.embedding_source.get_encoded_seq_len(source_length)
+            source_encoded_seq_len = model.encoder.get_encoded_seq_len(source_embed_seq_len)
+
+            source = mx.sym.Variable(C.SOURCE_NAME)
+            states = model.encoder_sym(source, source_length)
+            states = [mx.sym.repeat(s, repeats=self.beam_size, axis=0) for s in states]
+
+            best_word_indices = mx.sym.full((self.batch_size * self.beam_size,), val=self.start_id, dtype='int32')
+
+            lengths = mx.sym.ones((self.batch_size * self.beam_size, 1), dtype='float32')
+            finished = mx.sym.zeros((self.batch_size * self.beam_size,), dtype='int32')
+
+            # TODO
+            inactive = get_inactive(self.beam_size, self.batch_size)
+
+            # attentions: (batch_size * beam_size, 1, source_encoded_seq_len)
+            attentions = mx.sym.zeros((self.batch_size * self.beam_size, 1, source_encoded_seq_len))
+
+            # scores_accumulated: chosen smallest scores in scores (ascending).
+            scores_accumulated = mx.sym.zeros((self.batch_size * self.beam_size, 1))
+
+            inf_array = mx.sym.full((self.batch_size * self.beam_size, 1), val=np.inf)
+
+            pad_dist = mx.sym.full((self.batch_size * self.beam_size, len(self.vocab_target) - 1), val=np.inf)
+
+            # growing sequences: (batch_size * beam_size, 1), pre-filled with <s> symbols on index 0
+            sequences = mx.sym.full((self.batch_size * self.beam_size, 1), val=self.start_id, dtype='int32')
+
+            offset = get_offset(self.beam_size, self.batch_size)
+
+            for decode_step in range(1, max_output_length):
+                # (1) obtain next predictions and advance models' state
+                # scores: (batch_size * beam_size, target_vocab_size)
+                # attention_scores: (batch_size * beam_size, bucket_key)
+                model.decoder.reset()
+                outputs, attention_scores, states = model.decoder_sym(target_prev=best_word_indices,
+                                                                      states=states,
+                                                                      decode_step=decode_step,
+                                                                      source_encoded_seq_len=source_encoded_seq_len)
+                # TODO (ensembling etc)
+                scores = -mx.sym.log(outputs)
+
+                # (2) Update scores. Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
+                # finished rows are inf everywhere except column zero, which holds the accumulated model score
+                scores = self._update_scores(scores, finished, inactive, scores_accumulated, inf_array, pad_dist)
+
+                # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
+                # far as the active beam size for each sentence.
+                best_hyp_indices, best_word_indices, scores_accumulated = self._topk(scores, offset)
+
+                # All rows are now active (after special treatment of start state at t=1)
+                inactive = mx.sym.zeros_like(inactive)
+
+                # (4) Reorder fixed-size beam data according to best_hyp_indices (ascending)
+                finished, lengths, attention_scores = self._sort_by_index(best_hyp_indices,
+                                                                          finished,
+                                                                          lengths,
+                                                                          attention_scores)
+
+                # (5) Normalize the scores of newly finished hypotheses. Note that after this until the
+                # next call to topk(), hypotheses may not be in sorted order.
+                finished, scores_accumulated = self._normalize_finished(best_word_indices,
+                                                                        finished,
+                                                                        scores_accumulated,
+                                                                        lengths)
+
+                # Update hypotheses lengths (unless finished or inactive) and compute finished hypotheses
+                finished, finished_or_inactive, lengths = self._update_lengths_and_finished(finished,
+                                                                                            inactive,
+                                                                                            lengths,
+                                                                                            best_word_indices)
+
+                # (7) Reorder sequences and attentions according to best_hyp_indices
+                # and extend sequences with best_word_indices.
+                # pylint: disable=unsupported-assignment-operation
+                sequences = mx.sym.take(sequences, best_hyp_indices)
+                attentions = mx.sym.take(attentions, best_hyp_indices)
+                sequences = mx.sym.concat(sequences, best_word_indices.reshape((-1, 1)), dim=1)
+                attentions = mx.sym.concat(attentions, attention_scores.reshape((-1, 1, source_encoded_seq_len)), dim=1)
+
+                # (8) update models' state with winning hypotheses (ascending)
+                states = [mx.sym.take(s, best_hyp_indices) for s in states]
+
+            data_names = [C.SOURCE_NAME]
+            label_names = []
+            # TODO UNSORTED RETURN
+            return mx.sym.Group([sequences, attentions, scores_accumulated, lengths]), data_names, label_names
+
+        default_bucket_key = self.max_input_length
+        module = mx.mod.BucketingModule(sym_gen=sym_gen,
+                                        default_bucket_key=default_bucket_key,
+                                        context=self.context)
+
+        max_encoder_data_shapes = self.models[0]._get_encoder_data_shapes(default_bucket_key)
+        module.bind(data_shapes=max_encoder_data_shapes, for_training=False, grad_req="null")
+        module.init_params(arg_params=self.models[0].params, aux_params=self.models[0].aux_params, allow_missing=False)
+        return module
+
+    def _beam_search_symbolic(self,
+                     source: mx.nd.NDArray,
+                     source_length: int,
+                     raw_constraint_list: List[Optional[constrained.RawConstraintList]]) -> Tuple[mx.nd.NDArray,
+                                                                                                  mx.nd.NDArray,
+                                                                                                  mx.nd.NDArray,
+                                                                                                  mx.nd.NDArray,
+                                                                                                  List[Optional[constrained.ConstrainedHypothesis]],
+                                                                                                  Optional[List[BeamHistory]]]:
+        """
+        Translates multiple sentences using beam search.
+
+        :param source: Source ids. Shape: (batch_size, bucket_key).
+        :param source_length: Max source length.
+        :param raw_constraint_list: A list of optional lists containing phrases (as lists of target word IDs)
+               that must appear in each output.
+        :return List of lists of word ids, list of attentions, array of accumulated length-normalized
+                negative log-probs.
+        """
+
+        max_output_length = self.models[0].get_max_output_length(source_length)
+        self.step_sum += max_output_length
+        start = time.time()
+        batch = mx.io.DataBatch(data=[source], label=None,
+                                bucket_key=source_length,
+                                provide_data=self.models[0]._get_encoder_data_shapes(source_length))
+        self.beam_search_module.forward(batch, is_train=False)
+        sequences, attentions, scores_accumulated, lengths = self.beam_search_module.get_outputs()
+
+        # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
+        folded_accumulated_scores = scores_accumulated.reshape((self.batch_size,
+                                                                self.beam_size * scores_accumulated.shape[-1]))
+        indices = mx.nd.cast(mx.nd.argsort(folded_accumulated_scores, axis=1), dtype='int32').reshape((-1,))
+        best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated.shape) + self.offset
+        sequences = sequences.take(best_hyp_indices)
+        lengths = lengths.take(best_hyp_indices)
+        attentions = attentions.take(best_hyp_indices)
+        scores_accumulated = scores_accumulated.take(best_hyp_indices)
+        constraints = [None for x in best_hyp_indices.asnumpy()]
+        mx.nd.waitall()
+        end = time.time()
+        self.time_sum += end - start
+        return sequences, attentions, scores_accumulated, lengths, constraints, None
 
     def _get_best_from_beam(self,
                             sequences: mx.nd.NDArray,
@@ -1700,10 +1874,6 @@ class TopK(mx.gluon.HybridBlock):
         self.k = k
         self.batch_size = batch_size
         self.vocab_size = vocab_size
-        with self.name_scope():
-            offset = mx.nd.repeat(mx.nd.arange(0, batch_size * k, k, dtype='int32'), k)
-            self.offset = self.params.get_constant(name='offset',
-                                                   value=offset)
 
     def hybrid_forward(self, F, scores, offset):
         folded_scores = F.reshape(scores, shape=(self.batch_size, -1))
@@ -1782,3 +1952,90 @@ class UpdateScores(mx.gluon.HybridBlock):
         pad_dist = F.concat(pad_id_scores, pad_dist)
         scores = F.where(F.broadcast_logical_or(finished, inactive), pad_dist, scores)
         return scores
+
+
+class InactiveOp(mx.operator.CustomOp):
+
+    def __init__(self, batch: int, beam: int, ctx: mx.Context) -> None:
+        super().__init__()
+        self.batch = batch
+        self.beam = beam
+        self.inactive = mx.nd.ones((self.batch * self.beam,), dtype='int32', ctx=ctx)
+        self.inactive[::self.beam] = 0
+
+    def forward(self, is_train, req, in_data, out_data, aux):
+        self.assign(out_data[0], req[0], self.inactive)
+
+    def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
+        pass
+
+
+@mx.operator.register("inactive")
+class InactiveOpProp(mx.operator.CustomOpProp):
+
+    def __init__(self, batch: str, beam: str) -> None:
+        super().__init__()
+        self.batch = int(batch)
+        self.beam = int(beam)
+
+    def list_arguments(self):
+        return []
+
+    def list_outputs(self):
+        return ['output']
+
+    def infer_shape(self, in_shape):
+        return [], [(self.batch * self.beam,)], []
+
+    def infer_type(self, in_type):
+        return [], [np.dtype('int32').type], []
+
+    def create_operator(self, ctx, shapes, dtypes):
+        return InactiveOp(batch=self.batch, beam=self.beam, ctx=ctx)
+
+
+def get_inactive(beam, batch):
+    return mx.sym.Custom(batch=batch, beam=beam, name='inactive', op_type='inactive')
+
+
+class OffsetOp(mx.operator.CustomOp):
+
+    def __init__(self, batch: int, beam: int, ctx: mx.Context) -> None:
+        super().__init__()
+        self.batch = batch
+        self.beam = beam
+        self.offset = mx.nd.repeat(mx.nd.arange(0, batch * beam, beam, dtype='int32', ctx=ctx), beam)
+
+    def forward(self, is_train, req, in_data, out_data, aux):
+        self.assign(out_data[0], req[0], self.offset)
+
+    def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
+        pass
+
+
+@mx.operator.register("offset")
+class OffsetOpProp(mx.operator.CustomOpProp):
+
+    def __init__(self, batch: str, beam: str) -> None:
+        super().__init__()
+        self.batch = int(batch)
+        self.beam = int(beam)
+
+    def list_arguments(self):
+        return []
+
+    def list_outputs(self):
+        return ['output']
+
+    def infer_shape(self, in_shape):
+        return [], [(self.batch * self.beam,)], []
+
+    def infer_type(self, in_type):
+        return [], [np.dtype('int32').type], []
+
+    def create_operator(self, ctx, shapes, dtypes):
+        return OffsetOp(batch=self.batch, beam=self.beam, ctx=ctx)
+
+
+def get_offset(beam, batch):
+    return mx.sym.Custom(batch=batch, beam=beam, name='topk_offset', op_type='offset')

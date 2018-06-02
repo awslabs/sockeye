@@ -1152,6 +1152,10 @@ def add_inference_args(params):
                                action='store_true',
                                default=False,
                                help='Remove any <unk> symbols from outputs. Default: %(default)s.')
+    decode_params.add_argument('--symbolic-beam-search',
+                               action='store_true',
+                               default=False,
+                               help='Use symbolic beam search, unrolled to maximum length.')
 
     decode_params.add_argument('--output-type',
                                default='translation',

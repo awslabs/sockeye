@@ -101,7 +101,8 @@ def run_translate(args: argparse.Namespace):
                                           target_vocab=target_vocab,
                                           restrict_lexicon=restrict_lexicon,
                                           store_beam=store_beam,
-                                          strip_unknown_words=args.strip_unknown_words)
+                                          strip_unknown_words=args.strip_unknown_words,
+                                          symbolic_beam_search=args.symbolic_beam_search)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
@@ -192,8 +193,10 @@ def read_and_translate(translator: inference.Translator,
         logger.info("Processed %d lines in %d batches. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",
                     total_lines, ceil(total_lines / batch_size), total_time,
                     total_time / total_lines, total_lines / total_time)
+        logger.info("%.6f sec/steps (total steps: %d)", translator.time_sum / translator.step_sum, translator.step_sum)
     else:
         logger.info("Processed 0 lines.")
+
 
 
 def translate(output_handler: OutputHandler,
