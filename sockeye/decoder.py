@@ -250,17 +250,20 @@ class TransformerDecoder(Decoder):
         :return: Decoder data. Shape: (batch_size, target_embed_max_length, decoder_depth).
         """
 
-        # (batch_size * heads, max_length)
+        # (batch_size, max_length)
         source_bias = transformer.get_variable_length_bias(lengths=source_encoded_lengths,
                                                            max_length=source_encoded_max_length,
-                                                           num_heads=self.config.attention_heads,
-                                                           fold_heads=True,
                                                            name="%ssource_bias" % self.prefix)
-        # (batch_size * heads, 1, max_length)
-        source_bias = mx.sym.expand_dims(source_bias, axis=1)
+        # Reshape to broadcast over query length and heads dimension in self-attention:
+        # (batch_size, 1, 1, max_length)
+        source_bias = mx.sym.reshape(source_bias, shape=(0, 1, 1, source_encoded_max_length),
+                                     name="%ssource_bias_reshape" % self.prefix)
 
-        # (1, target_max_length, target_max_length)
+        # (target_max_length, target_max_length)
         target_bias = transformer.get_autoregressive_bias(target_embed_max_length, name="%starget_bias" % self.prefix)
+        # reshape to broadcast over batch and heads dimension
+        target_bias = mx.sym.reshape(target_bias, shape=(1, target_embed_max_length, 1, target_embed_max_length),
+                                     name="%starget_bias_reshape" % self.prefix)
 
         # target: (batch_size, target_max_length, model_size)
         target, _, target_max_length = self.pos_embedding.encode(target_embed, None, target_embed_max_length)
@@ -304,19 +307,22 @@ class TransformerDecoder(Decoder):
         # (batch_size, 1, num_embed)
         target = mx.sym.expand_dims(target_embed_prev, axis=1)
 
-        # (batch_size * heads, max_length)
+        # (batch_size, max_length)
         source_bias = transformer.get_variable_length_bias(lengths=source_encoded_lengths,
                                                            max_length=source_encoded_max_length,
-                                                           num_heads=self.config.attention_heads,
-                                                           fold_heads=True,
                                                            name="%ssource_bias" % self.prefix)
-        # (batch_size * heads, 1, max_length)
-        source_bias = mx.sym.expand_dims(source_bias, axis=1)
+        # Reshape to broadcast over query length and heads dimension in self-attention:
+        # (batch_size, 1, 1, max_length)
+        source_bias = mx.sym.reshape(source_bias, shape=(0, 1, 1, source_encoded_max_length),
+                                     name="%ssource_bias_reshape" % self.prefix)
 
         # auto-regressive bias for last position in sequence
-        # (1, target_max_length, target_max_length)
+        # (target_max_length, target_max_length)
         target_bias = transformer.get_autoregressive_bias(step, name="%sbias" % self.prefix)
-        target_bias = mx.sym.slice_axis(target_bias, axis=1, begin=-1, end=step)
+        # (1, target_max_length)
+        target_bias = mx.sym.slice_axis(target_bias, axis=0, begin=-1, end=step)
+        # reshape to broadcast over batch and heads dimension
+        target_bias = mx.sym.reshape(target_bias, shape=(1, 1, 1, step), name="%starget_bias_reshape" % self.prefix)
 
         new_states = [source_encoded, source_encoded_lengths]
         layer_caches = self._get_cache_per_layer(cast(List[mx.sym.Symbol], cache))

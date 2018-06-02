@@ -23,7 +23,7 @@ def test_auto_regressive_bias_op():
 
     assert bias.dtype == np.float32
 
-    expected = np.array([[0.0, -1.0e8], [0.0, 0.0]]).reshape((1, 2, 2))
+    expected = np.array([[0.0, -1.0e8], [0.0, 0.0]])
     np.testing.assert_array_equal(bias.asnumpy(), expected)
 
 
@@ -32,7 +32,7 @@ def test_auto_regressive_bias_op_float16():
 
     assert bias.dtype == np.float16
 
-    expected = np.array([[0.0, -49152.0], [0.0, 0.0]]).reshape((1, 2, 2))
+    expected = np.array([[0.0, -49152.0], [0.0, 0.0]])
     np.testing.assert_array_equal(bias.asnumpy(), expected)
 
 
@@ -46,7 +46,7 @@ def test_auto_regressive_bias_sym():
 
     assert out.dtype == np.float32
 
-    expected = np.array([[0.0, -1.0e8], [0.0, 0.0]]).reshape((1, 2, 2))
+    expected = np.array([[0.0, -1.0e8], [0.0, 0.0]])
     np.testing.assert_array_equal(out.asnumpy(), expected)
 
 
@@ -60,5 +60,5 @@ def test_auto_regressive_bias_sym_float16():
 
     assert out.dtype == np.float16
 
-    expected = np.array([[0.0, -49152.0], [0.0, 0.0]]).reshape((1, 2, 2))
+    expected = np.array([[0.0, -49152.0], [0.0, 0.0]])
     np.testing.assert_array_equal(out.asnumpy(), expected)

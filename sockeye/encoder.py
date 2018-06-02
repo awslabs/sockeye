@@ -1037,13 +1037,15 @@ class TransformerEncoder(Encoder):
         if self.config.dropout_prepost > 0.0:
             data = mx.sym.Dropout(data=data, p=self.config.dropout_prepost)
 
-        # (batch_size * heads, 1, max_length)
-        bias = mx.sym.expand_dims(transformer.get_variable_length_bias(lengths=data_length,
-                                                                       max_length=seq_len,
-                                                                       num_heads=self.config.attention_heads,
-                                                                       fold_heads=True,
-                                                                       name="%sbias" % self.prefix), axis=1)
+        # (batch_size, max_length)
+        bias = transformer.get_variable_length_bias(lengths=data_length,
+                                                    max_length=seq_len,
+                                                    name="%sbias" % self.prefix)
+        # Reshape to broadcast over query length and heads dimension in self-attention:
+        # (batch_size, 1, 1, max_length)
+        bias = mx.sym.reshape(bias, shape=(0, 1, 1, seq_len), name="%sbias_reshape" % self.prefix)
         bias = utils.cast_conditionally(bias, self.dtype)
+
         for i, layer in enumerate(self.layers):
             # (batch_size, seq_len, config.model_size)
             data = layer(data, bias)

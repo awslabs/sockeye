@@ -71,3 +71,62 @@ def test_weight_normalization():
                                                           [3., 4.]]),
                                       wn_scale=scale_factor)
     assert np.isclose(np.linalg.norm(nd_norm_weight[0].asnumpy(), axis=1), expected_norm).all()
+
+
+def test_compare_dot_atts():
+    batch = 3
+    lq = 4
+    lk = 5
+    depth = 32
+    heads = 8
+    depth_per_head = depth // heads
+
+    def sym_old():
+        q = mx.sym.Variable('q')
+        k = mx.sym.Variable('k')
+        v = mx.sym.Variable('v')
+
+        q = sockeye.layers.split_heads(q, depth_per_head, heads, fold_heads=True)
+        k = sockeye.layers.split_heads(k, depth_per_head, heads, fold_heads=True)
+        v = sockeye.layers.split_heads(v, depth_per_head, heads, fold_heads=True)
+
+        contexts = sockeye.layers.dot_attention(q, k, v)
+        # (batch, query_max_length, depth)
+        contexts = sockeye.layers.combine_heads(contexts, depth_per_head, heads, folded_heads=True)
+        return contexts
+
+    def sym_new():
+        q = mx.sym.Variable('q')
+        k = mx.sym.Variable('k')
+        v = mx.sym.Variable('v')
+
+        q = sockeye.layers.split_heads(q, depth_per_head, heads, fold_heads=False)
+        k = sockeye.layers.split_heads(k, depth_per_head, heads, fold_heads=False)
+        v = sockeye.layers.split_heads(v, depth_per_head, heads, fold_heads=False)
+
+        contexts = sockeye.layers.multi_head_dot_attention(q, k, v)
+        # (batch, query_max_length, depth)
+        contexts = sockeye.layers.combine_heads(contexts, depth_per_head, heads, folded_heads=False)
+        return contexts
+
+    data_q = mx.nd.random.uniform(0, 1, (batch, lq, depth))
+    data_k = mx.nd.random.uniform(0, 1, (batch, lk, depth))
+    data_v = data_k.copy()
+    data_lk = mx.nd.array(np.random.randint(1, lk, (batch,)))
+    print(data_lk)
+
+    # att
+    # batch, lk
+    new = sym_new().eval(q=data_q, k=data_k, v=data_v, l=data_lk)[0].asnumpy()
+    old = sym_old().eval(q=data_q, k=data_k, v=data_v, l=data_lk)[0].asnumpy()
+    assert np.allclose(new, old)
+
+    # self-att autoregressive
+    new = sym_new().eval(q=data_q, k=data_q, v=data_q)[0].asnumpy()
+    old = sym_old().eval(q=data_q, k=data_q, v=data_q)[0].asnumpy()
+    assert np.allclose(new, old)
+
+    # self-att variable length
+    new = sym_new().eval(q=data_k, k=data_k, v=data_k)[0].asnumpy()
+    old = sym_old().eval(q=data_k, k=data_k, v=data_k)[0].asnumpy()
+    assert np.allclose(new, old)

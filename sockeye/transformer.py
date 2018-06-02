@@ -336,24 +336,17 @@ class VariableLengthBiasProp(mx.operator.CustomOpProp):
 
 def get_variable_length_bias(lengths: mx.sym.Symbol,
                              max_length: int,
-                             num_heads: Optional[int] = None,
-                             fold_heads: bool = True,
                              name: str = '') -> mx.sym.Symbol:
     """
     Returns bias/mask for variable sequence lengths.
 
     :param lengths: Sequence lengths. Shape: (batch,).
     :param max_length: Maximum sequence length.
-    :param num_heads: Number of attention heads.
-    :param fold_heads: Whether to fold heads dimension into batch dimension.
     :param name: Name of symbol.
-    :return: Bias symbol.
+    :return: Bias symbol. Shape: (batch, max_length).
     """
     # (batch_size, max_length)
     x = mx.symbol.Custom(data=lengths, max_length=max_length, op_type='variable_length_bias')
-    if num_heads is not None:
-        # (batch_size, heads, max_length) if fold_heads == False else (batch_size * heads, max_length)
-        x = layers.broadcast_to_heads(x, num_heads, ndim=2, fold_heads=fold_heads)
     return mx.sym.BlockGrad(x, name='%sbias' % name)
 
 
@@ -363,7 +356,7 @@ def get_autoregressive_bias(max_length: int, name: str) -> mx.sym.Symbol:
 
     :param max_length: Sequence length.
     :param name: Name of symbol.
-    :return: Bias symbol of shape (1, max_length, max_length).
+    :return: Bias symbol of shape (max_length, max_length).
     """
     return mx.sym.BlockGrad(mx.symbol.Custom(length=max_length,
                                              name=name,
@@ -372,7 +365,7 @@ def get_autoregressive_bias(max_length: int, name: str) -> mx.sym.Symbol:
 
 class AutoRegressiveBias(mx.operator.CustomOp):
     """
-    Returns a symbol of shape (1, length, length) with cells above the main diagonal
+    Returns a symbol of shape (length, length) with cells above the main diagonal
     set to a large negative value, e.g.
     length=4
 
@@ -390,8 +383,7 @@ class AutoRegressiveBias(mx.operator.CustomOp):
     def get_bias(length: int, dtype: str, ctx: mx.Context):
         # matrix with lower triangle and main diagonal set to 0, upper triangle set to 1
         upper_triangle = np.triu(np.ones((length, length), dtype=dtype), k=1)
-        # (1, length, length)
-        bias = -C.LARGE_VALUES[dtype] * np.reshape(upper_triangle, (1, length, length))
+        bias = -C.LARGE_VALUES[dtype] * upper_triangle
         return mx.nd.array(bias, ctx=ctx)
 
     def forward(self, is_train, req, in_data, out_data, aux):
@@ -416,7 +408,7 @@ class AutoRegressiveBiasProp(mx.operator.CustomOpProp):
         return ['output']
 
     def infer_shape(self, in_shape):
-        return [], [(1, self.length, self.length)], []
+        return [], [(self.length, self.length)], []
 
     def infer_type(self, in_type):
         return [], [np.dtype(self.dtype).type], []
