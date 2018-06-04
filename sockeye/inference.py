@@ -1005,11 +1005,15 @@ class Translator:
         self._update_scores.hybridize()
 
         # topk function used in beam search
-        self._topk = partial(utils.topk,
-                             k=self.beam_size,
-                             batch_size=self.batch_size,
-                             offset=self.offset,
-                             use_mxnet_topk=self.context != mx.cpu())  # MXNet implementation is faster on GPUs
+        # self.topk = partial(utils.topk,
+        #                     k=self.beam_size,
+        #                     batch_size=self.batch_size,
+        #                     offset=self.offset,
+        #                     use_mxnet_topk=True)  # MXNet implementation is faster on GPUs
+
+        self._topk = TopK(k=self.beam_size, batch_size=self.batch_size, vocab_size=len(self.vocab_target))
+        self._topk.initialize(ctx=self.context)
+        self._topk.hybridize()
 
         self._sort_by_index = SortByIndex()
         self._sort_by_index.initialize(ctx=self.context)
@@ -1543,11 +1547,8 @@ class Translator:
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
         folded_accumulated_scores = scores_accumulated.reshape((self.batch_size,
                                                                 self.beam_size * scores_accumulated.shape[-1]))
-        indices = mx.nd.argsort(folded_accumulated_scores, axis=1)
-        best_hyp_indices = mx.nd.array(np.unravel_index(indices.astype(np.int32).asnumpy().ravel(),
-                                                        scores_accumulated.shape),
-                                       dtype='int32',
-                                       ctx=self.offset.context)[0] + self.offset
+        indices = mx.nd.cast(mx.nd.argsort(folded_accumulated_scores, axis=1), dtype='int32').reshape((-1,))
+        best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated.shape) + self.offset
         sequences = sequences.take(best_hyp_indices)
         lengths = lengths.take(best_hyp_indices)
         attentions = attentions.take(best_hyp_indices)
@@ -1687,6 +1688,32 @@ class SortByIndex(mx.gluon.HybridBlock):
 
     def hybrid_forward(self, F, indices, *args):
         return [F.take(arg, indices) for arg in args]
+
+
+class TopK(mx.gluon.HybridBlock):
+    """
+    A HybridBlock for the batch-wise topk operation.
+    """
+
+    def __init__(self, k: int, batch_size: int, vocab_size: int) -> None:
+        super().__init__()
+        self.k = k
+        self.batch_size = batch_size
+        self.vocab_size = vocab_size
+        with self.name_scope():
+            offset = mx.nd.repeat(mx.nd.arange(0, batch_size * k, k, dtype='int32'), k)
+            self.offset = self.params.get_constant(name='offset',
+                                                   value=offset)
+
+    def hybrid_forward(self, F, scores, offset):
+        folded_scores = F.reshape(scores, shape=(self.batch_size, -1))
+        values, indices = F.topk(folded_scores, axis=1, k=self.k, ret_typ='both', is_ascend=True)
+        indices = F.reshape(F.cast(indices, 'int32'), shape=(-1,))
+        unraveled = F.unravel_index(indices, shape=(self.batch_size * self.k, self.vocab_size))
+        best_hyp_indices, best_word_indices = F.split(unraveled, axis=0, num_outputs=2, squeeze_axis=True)
+        best_hyp_indices = best_hyp_indices + offset
+        values = F.reshape(values, shape=(-1, 1))
+        return best_hyp_indices, best_word_indices, values
 
 
 class NormalizeFinishedHypotheses(mx.gluon.HybridBlock):

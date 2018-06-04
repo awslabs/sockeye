@@ -400,3 +400,20 @@ def test_topk_func(batch_size, beam_size, target_vocab_size):
     assert all(mx_hyp == np_hyp)
     assert all(mx_word == np_word)
     assert all(mx_values == np_values)
+
+    topk = sockeye.inference.TopK(k=beam_size, batch_size=batch_size, vocab_size=target_vocab_size)
+    topk.initialize()
+    assert all(topk.offset.data() == offset)
+
+    mx_hyp, mx_word, mx_values = topk(scores)
+    mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
+    assert all(mx_hyp == np_hyp)
+    assert all(mx_word == np_word)
+    assert all(mx_values == np_values)
+
+    topk.hybridize()
+    mx_hyp, mx_word, mx_values = topk(scores)
+    mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
+    assert all(mx_hyp == np_hyp)
+    assert all(mx_word == np_word)
+    assert all(mx_values == np_values)
