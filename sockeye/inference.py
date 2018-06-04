@@ -1360,7 +1360,7 @@ class Translator:
         # sequences: (batch_size * beam_size, output_length), pre-filled with <s> symbols on index 0
         sequences = mx.nd.full((self.batch_size * self.beam_size, max_output_length), val=C.PAD_ID, ctx=self.context,
                                dtype='int32')
-        sequences[:, 0] = best_word_indices
+        sequences[:, 0] = self.start_id
 
         # Beam history
         beam_histories = None  # type: Optional[List[BeamHistory]]
