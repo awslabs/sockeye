@@ -862,7 +862,10 @@ class LengthPenalty(mx.gluon.HybridBlock):
 
     def hybrid_forward(self, F, lengths):
         if self.alpha == 0.0:
-            return F.ones_like(lengths)
+            if F is None:
+                return 1.0
+            else:
+                return F.ones_like(lengths)
         else:
             numerator = self.beta + lengths if self.beta != 0.0 else lengths
             numerator = numerator ** self.alpha if self.alpha != 1.0 else numerator
@@ -875,17 +878,7 @@ class LengthPenalty(mx.gluon.HybridBlock):
         :param lengths: A scalar or a matrix of sentence lengths of dimensionality (batch_size, 1).
         :return: The length penalty. A scalar or a matrix (batch_size, 1) depending on the input.
         """
-        if self.alpha == 0.0:
-            if isinstance(lengths, mx.nd.NDArray):
-                # no length penalty:
-                return mx.nd.ones_like(lengths)
-            else:
-                return 1.0
-        else:
-            # note: we avoid unnecessary addition or pow operations
-            numerator = self.beta + lengths if self.beta != 0.0 else lengths
-            numerator = numerator ** self.alpha if self.alpha != 1.0 else numerator
-            return numerator / self.denominator
+        return self.hybrid_forward(None, lengths)
 
 
 def _concat_translations(translations: List[Translation], start_id: int, stop_ids: Set[int],
