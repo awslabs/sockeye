@@ -334,17 +334,19 @@ prune_tests = [
 
 @pytest.mark.parametrize("batch, beam, prune, scores, finished, expected_inactive", prune_tests)
 def test_beam_prune(batch, beam, prune, scores, finished, expected_inactive):
-    scores = mx.nd.array(scores).expand_dims(axis=1)
+    scores = mx.nd.array(scores)
     finished = mx.nd.array(finished, dtype='int32')
     inf_array = mx.nd.full((batch * beam,), val=np.inf)
+    zeros_array = mx.nd.zeros((batch * beam,), dtype='int32')
+    best_word_indices = mx.nd.zeros((batch * beam,), dtype='int32')
 
     prune_hyps = sockeye.inference.PruneHypotheses(prune, beam)
     prune_hyps.initialize()
-    inactive = prune_hyps(scores, finished, inf_array)
+    inactive, _, _ = prune_hyps(best_word_indices, scores, finished, inf_array, zeros_array)
     assert inactive.asnumpy().tolist() == expected_inactive
 
     prune_hyps.hybridize()
-    inactive = prune_hyps(scores, finished, inf_array)
+    inactive, _, _ = prune_hyps(best_word_indices, scores, finished, inf_array, zeros_array)
     assert inactive.asnumpy().tolist() == expected_inactive
 
 

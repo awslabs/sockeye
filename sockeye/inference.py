@@ -1492,9 +1492,11 @@ class Translator:
 
             # (6) Prune out low-probability hypotheses. Pruning works by setting entries `inactive`.
             if self.beam_prune > 0.0:
-                inactive = self._prune_hyps.forward(scores_accumulated, finished, self.inf_array)
-                best_word_indices = mx.nd.where(inactive, self.zeros_array, best_word_indices)
-                scores_accumulated = mx.nd.where(inactive, self.inf_array, scores_accumulated)
+                inactive, best_word_indices, scores_accumulated = self._prune_hyps.forward(best_word_indices,
+                                                                                           scores_accumulated,
+                                                                                           finished,
+                                                                                           self.inf_array,
+                                                                                           self.zeros_array)
 
             # Update hypotheses lengths (unless finished or inactive) and compute finished hypotheses
             finished, finished_or_inactive, lengths = self._update_lengths_and_finished.forward(finished,
@@ -1671,17 +1673,21 @@ class PruneHypotheses(mx.gluon.HybridBlock):
         self.threshold = threshold
         self.beam_size = beam_size
 
-    def hybrid_forward(self, F, scores, finished, inf_array):
-        scores = F.reshape(scores, shape=(-1, self.beam_size))
-        finished = F.reshape(finished, shape=(-1, self.beam_size))
-        inf_array = F.reshape(inf_array, shape=(-1, self.beam_size))
+    def hybrid_forward(self, F, best_word_indices, scores, finished, inf_array, zeros_array):
+        scores_2d = F.reshape(scores, shape=(-1, self.beam_size))
+        finished_2d = F.reshape(finished, shape=(-1, self.beam_size))
+        inf_array_2d = F.reshape(inf_array, shape=(-1, self.beam_size))
 
         # best finished scores. Shape: (batch, 1)
-        best_finished_scores = F.min(F.where(finished, scores, inf_array), axis=1, keepdims=True)
-        difference = F.broadcast_minus(scores, best_finished_scores)
+        best_finished_scores = F.min(F.where(finished_2d, scores_2d, inf_array_2d), axis=1, keepdims=True)
+        difference = F.broadcast_minus(scores_2d, best_finished_scores)
         inactive = F.cast(difference > self.threshold, dtype='int32')
         inactive = F.reshape(inactive, shape=(-1))
-        return inactive
+
+        best_word_indices = F.where(inactive, zeros_array, best_word_indices)
+        scores = F.where(inactive, inf_array, scores)
+
+        return inactive, best_word_indices, scores
 
 
 class SortByIndex(mx.gluon.HybridBlock):
