@@ -190,7 +190,8 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
         # Track largest number of source or target word samples in a batch
         largest_total_num_words = max(largest_total_num_words, batch_size_seq * max(*bucket))
 
-    # Final step: guarantee that largest bucket by sequence length also has largest total batch size.
+    # Final step: guarantee that largest bucket by sequence length also has a batch size so that it covers any
+    # (batch_size, len_source) and (batch_size, len_target) matrix from the data iterator to allow for memory sharing.
     # When batching by sentences, this will already be the case.
     if batch_by_words:
         padded_seq_len = max(*buckets[-1])
