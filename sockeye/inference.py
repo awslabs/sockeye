@@ -796,17 +796,17 @@ TokenIds = List[int]
 
 
 class Translation:
-    __slots__ = ('target_ids', 'attention_matrix', 'score', 'beam_history')
+    __slots__ = ('target_ids', 'attention_matrix', 'score', 'beam_histories')
 
     def __init__(self,
                  target_ids: TokenIds,
                  attention_matrix: np.ndarray,
                  score: float,
-                 beam_history: List[Optional[BeamHistory]] = None) -> None:
+                 beam_history: List[BeamHistory] = None) -> None:
         self.target_ids = target_ids
         self.attention_matrix = attention_matrix
         self.score = score
-        self.beam_history = beam_history
+        self.beam_histories = beam_history if beam_history is not None else []
 
 
 def empty_translation() -> Translation:
@@ -907,9 +907,7 @@ def _concat_translations(translations: List[Translation], start_id: int, stop_id
             else:
                 target_ids.extend(translation.target_ids[1:])
                 attention_matrices.append(translation.attention_matrix[1:, :])
-        if translation.beam_history:
-            # Make a list of the individual beam histories
-            beam_histories.append(translation.beam_history[0])
+        beam_histories.extend(translation.beam_histories)
 
     # Combine attention matrices:
     attention_shapes = [attention_matrix.shape for attention_matrix in attention_matrices]
@@ -1218,17 +1216,12 @@ class Translator:
             tok for target_id, tok in zip(target_ids, target_tokens) if target_id not in self.strip_ids)
         attention_matrix = attention_matrix[:, :len(trans_input.tokens)]
 
-        if isinstance(translation.beam_history, list):
-            beam_histories = translation.beam_history
-        else:
-            beam_histories = [translation.beam_history]
-
         return TranslatorOutput(id=trans_input.sentence_id,
                                 translation=target_string,
                                 tokens=target_tokens,
                                 attention_matrix=attention_matrix,
                                 score=translation.score,
-                                beam_histories=beam_histories)
+                                beam_histories=translation.beam_histories)
 
     def _concat_translations(self, translations: List[Translation]) -> Translation:
         """
@@ -1611,7 +1604,7 @@ class Translator:
                               length: mx.nd.NDArray,
                               attention_lists: mx.nd.NDArray,
                               seq_score: mx.nd.NDArray,
-                              beam_history: List[Optional[BeamHistory]]) -> Translation:
+                              beam_history: Optional[BeamHistory]) -> Translation:
         """
         Takes a set of data pertaining to a single translated item, performs slightly different
         processing on each, and merges it into a Translation object.
@@ -1629,7 +1622,8 @@ class Translator:
         sequence = sequence[:length].asnumpy().tolist()
         attention_matrix = np.stack(attention_lists.asnumpy()[:length, :], axis=0)
         score = seq_score.asscalar()
-        return Translation(sequence, attention_matrix, score, beam_history)
+        beam_history_list = [beam_history] if beam_history is not None else []
+        return Translation(sequence, attention_matrix, score, beam_history_list)
 
     def _print_beam(self,
                     sequences: mx.nd.NDArray,

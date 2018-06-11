@@ -69,6 +69,10 @@ def mock_translator(batch_size: int = 1,
 
 
 def test_concat_translations():
+    beam_history1 = {"id": [1]}
+    beam_history2 = {"id": [2]}
+    beam_history3 = {"id": [3]}
+    expected_beam_histories = [beam_history1, beam_history2, beam_history3]
     expected_target_ids = [0, 1, 2, 8, 9, 3, 4, 5, -1]
     num_src = 7
 
@@ -76,16 +80,20 @@ def test_concat_translations():
 
     expected_score = (1 + 2 + 3) / length_penalty.get(len(expected_target_ids))
 
-    translations = [sockeye.inference.Translation([0, 1, 2, -1], np.zeros((4, num_src)), 1.0 / length_penalty.get(4)),
+    translations = [sockeye.inference.Translation([0, 1, 2, -1], np.zeros((4, num_src)), 1.0 / length_penalty.get(4),
+                                                  [beam_history1]),
                     # Translation without EOS
-                    sockeye.inference.Translation([0, 8, 9], np.zeros((3, num_src)), 2.0 / length_penalty.get(3)),
-                    sockeye.inference.Translation([0, 3, 4, 5, -1], np.zeros((5, num_src)), 3.0 / length_penalty.get(5))]
+                    sockeye.inference.Translation([0, 8, 9], np.zeros((3, num_src)), 2.0 / length_penalty.get(3),
+                                                  [beam_history2]),
+                    sockeye.inference.Translation([0, 3, 4, 5, -1], np.zeros((5, num_src)), 3.0 / length_penalty.get(5),
+                                                  [beam_history3])]
     combined = sockeye.inference._concat_translations(translations, start_id=_BOS, stop_ids={_EOS},
                                                       length_penalty=length_penalty)
 
     assert combined.target_ids == expected_target_ids
     assert combined.attention_matrix.shape == (len(expected_target_ids), len(translations) * num_src)
     assert np.isclose(combined.score, expected_score)
+    assert combined.beam_histories == expected_beam_histories
 
 
 def test_length_penalty_default():
