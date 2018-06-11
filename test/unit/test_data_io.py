@@ -223,23 +223,33 @@ def test_sample_based_define_bucket_batch_sizes():
         assert bbs.average_words_per_batch == bbs.bucket[1] * batch_size
 
 
-def test_word_based_define_bucket_batch_sizes():
+@pytest.mark.parametrize("length_ratio", [0.5, 1.5])
+def test_word_based_define_bucket_batch_sizes(length_ratio):
     batch_by_words = True
     batch_num_devices = 1
     batch_size = 200
     max_seq_len = 100
-    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, 1.5)
+    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, length_ratio)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets=buckets,
                                                            batch_size=batch_size,
                                                            batch_by_words=batch_by_words,
                                                            batch_num_devices=batch_num_devices,
                                                            data_target_average_len=[None] * len(buckets))
+    max_num_words = 0
     # last bucket batch size is different
     for bbs in bucket_batch_sizes[:-1]:
-        expected_batch_size = round((batch_size / bbs.bucket[1]) / batch_num_devices)
+        target_padded_seq_len = bbs.bucket[1]
+        expected_batch_size = round((batch_size / target_padded_seq_len) / batch_num_devices)
         assert bbs.batch_size == expected_batch_size
         expected_average_words_per_batch = expected_batch_size * bbs.bucket[1]
         assert bbs.average_words_per_batch == expected_average_words_per_batch
+        max_num_words = max(max_num_words, bbs.batch_size * max(*bbs.bucket))
+
+    last_bbs = bucket_batch_sizes[-1]
+    min_expected_batch_size = round((batch_size / last_bbs.bucket[1]) / batch_num_devices)
+    assert last_bbs.batch_size >= min_expected_batch_size
+    last_bbs_num_words = last_bbs.batch_size * max(*last_bbs.bucket)
+    assert last_bbs_num_words >= max_num_words
 
 
 def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
