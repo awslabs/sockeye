@@ -108,7 +108,7 @@ RAW_FILES = {
                               "http://opus.nlpl.eu/download.php?f=SETIMES2/en-tr.txt.zip",
                               "544cec8a631f7820afab6a05451c13a7",
                               ARCHIVE_ZIP),
-    "paracrawl_release1_en_de": RawFile("Paracrawl",
+    "paracrawl_release1_en_de": RawFile("Paracrawl Filtered v1.0",
                                         "https://s3.amazonaws.com/web-language-models/paracrawl/release1/paracrawl-release1.en-de.zipporah0-dedup-clean.tgz",
                                         "30e67e94d111ea675c0567e1c1aa338c",
                                         ARCHIVE_TAR),
@@ -534,7 +534,7 @@ TASKS = {
                              TEXT_UTF8_RAW_SGML),
                         ]),
     # WMT18 translation tasks
-    "wmt18_de_en": Task(description="WMT18 English--German",
+    "wmt18_de_en": Task(description="WMT18 German-English news",
                         url="http://statmt.org/wmt18/translation-task.html",
                         src_lang="de",
                         trg_lang="en",
@@ -598,7 +598,7 @@ TASKS = {
                              "wmt18_test/test/newstest2018-ende-ref.de.sgm",
                              TEXT_UTF8_RAW_SGML),
                         ]),
-    # NMT18 workshop shared task
+    # WNMT18 shared task
     "wnmt18_en_de": Task(description="WNMT18 English-German (WMT14 news pre-processed)",
                          url="https://sites.google.com/site/wnmt18/shared-task",
                          src_lang="en",
