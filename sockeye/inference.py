@@ -562,7 +562,7 @@ def get_max_input_output_length(supported_max_seq_len_source: Optional[int],
     return max_input_len, get_max_output_length
 
 
-BeamHistory = Dict[str, Union[int, List]]
+BeamHistory = Dict[str, List]
 Tokens = List[str]
 
 
@@ -1622,8 +1622,8 @@ class Translator:
         sequence = sequence[:length].asnumpy().tolist()
         attention_matrix = np.stack(attention_lists.asnumpy()[:length, :], axis=0)
         score = seq_score.asscalar()
-        beam_history = [beam_history] if beam_history is not None else []
-        return Translation(sequence, attention_matrix, score, beam_history)
+        beam_history_list = [beam_history] if beam_history is not None else []
+        return Translation(sequence, attention_matrix, score, beam_history_list)
 
     def _print_beam(self,
                     sequences: mx.nd.NDArray,
