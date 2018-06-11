@@ -141,7 +141,10 @@ class ImageCaptioner(Translator):
 
         return results
 
-    def _get_inference_input(self, image_paths: List[str]) -> Tuple[mx.nd.NDArray, int, List[Optional[constrained.RawConstraintList]]]:
+    def _get_inference_input(self, image_paths: List[str]) -> Tuple[mx.nd.NDArray,
+                                                                    int,
+                                                                    List[Optional[constrained.RawConstraintList]],
+                                                                    List[Optional[constrained.RawConstraintList]]]:
         """
         Returns NDArray of images and corresponding bucket_key.
 
@@ -150,8 +153,9 @@ class ImageCaptioner(Translator):
         """
         ## TODO(bazzanil): support constraints
         raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
+        raw_avoid_list = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
         images = self.data_loader(image_paths, self.source_image_size)
-        return mx.nd.array(images), 0, raw_constraints
+        return mx.nd.array(images), 0, raw_constraints, raw_avoid_list
 
 
 def load_models(context: mx.context.Context,

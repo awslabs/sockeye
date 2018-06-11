@@ -25,6 +25,104 @@ logger = logging.getLogger(__name__)
 RawConstraintList = List[List[int]]
 
 
+class AvoidPhrase:
+    """
+    Represents a negative phrasal constraint. Tracks progress through a phrase
+    and returns a word ID if that word ID would complete the phrase.
+
+    :param avoid_list: A sequence of integers in the target language vocabulary.
+    :param last_consumed: The last consumed word in the current hypothesis.
+    """
+    def __init__(self,
+                 avoid_list: List[int],
+                 last_consumed: int = -1) -> None:
+        self.phrase = avoid_list
+        self.last_consumed = last_consumed
+
+    def __str__(self):
+        return ' '.join(['*{}*'.format(x) if i == self.last_consumed else str(x) for i, x in enumerate(self.phrase)])
+
+    def consume(self, word_id: int) -> None:
+        """
+        Consumes a word, and updates the tracking based on it. If the word is the next words in the phrase,
+        update last_consumed, otherwise, reset.
+
+        :param word_id: The word that was just generated.
+        """
+        if self.phrase[self.last_consumed + 1] == word_id:
+            return AvoidPhrase(self.phrase, self.last_consumed + 1)
+        else:
+            self.last_consumed = -1
+            return self
+
+    def avoid(self) -> int:
+        """
+        Returns an integer ID that should be avoided.
+
+        :return: An integer representing a word that must not be generated next by this hypothesis.
+        """
+        if self.last_consumed == len(self.phrase) - 2:
+            return self.phrase[-1]
+        else:
+            return 0
+
+
+class AvoidBatch:
+    """
+    Represents a set of phrasal constraints for all items in the batch.
+    For each hypotheses, there is a list of AvoidPhrase objects.
+
+    The offset is used to return actual positions in the one-dimensionally-resized array that
+    get set to infinity.
+
+    :param avoid_list: The list of lists (one for each item in the batch).
+    :param beam_size: The beam size.
+    :param max_id: The maximum ID in the target vocabulary.
+    """
+    def __init__(self,
+                 avoid_list: List[RawConstraintList],
+                 beam_size: int,
+                 max_id: int) -> None:
+        self.avoid_list = []  # List[List[AvoidPhrase]]
+        for raw_phrases in avoid_list:
+            self.avoid_list += [[AvoidPhrase(phrase) for phrase in raw_phrases] * beam_size]
+        self.offset = max_id
+
+    def reorder(self, indices: mx.nd.array) -> None:
+        """
+        Reorders the avoid list according to the selected row indices.
+        This can produce duplicates, but this is fixed in consume().
+
+        :param indices: An mx.nd.array containing indices of hypotheses to select.
+        """
+        self.avoid_list = [self.avoid_list[x] for x in indices.asnumpy()]
+
+    def consume(self, word_ids: mx.nd.array) -> None:
+        """
+        Takes an array representing the set of target word indices chosen for each hypothesis in the batch,
+        and updates each of the negative constraints.
+
+        :param word_ids: The set of word IDs.
+        """
+        word_ids = word_ids.asnumpy().tolist()
+        for i, word_id in enumerate(word_ids):
+            self.avoid_list[i] = [item.consume(word_ids[i]) for item in self.avoid_list[i]]
+
+    def avoid(self) -> List[int]:
+        """
+        Returns a list of indices in a 1-dimensional reshaping of the scores array that should be set to null.
+
+        :return: A list of indices.
+        """
+        to_avoid = []
+        for i, items in enumerate(self.avoid_list):
+            for phrase in items:
+                word_id = phrase.avoid()
+                if word_id:
+                    to_avoid.append((self.offset * i) + word_id)
+
+        return to_avoid
+
 class ConstrainedHypothesis:
     """
     Represents a set of words and phrases that must appear in the output.
@@ -41,9 +139,10 @@ class ConstrainedHypothesis:
     This is represented internally as:
 
         constraints: [14 19 35 14]
-        is_sequence: [ 1  1  0  0
+        is_sequence: [ 1  1  0  0]
 
     :param constraint_list: A list of zero or raw constraints (each represented as a list of integers).
+    :param avoid_list: A list of zero or raw constraints that must *not* appear in the output.
     :param eos_id: The end-of-sentence ID.
     """
 
@@ -431,7 +530,9 @@ def main():
     Usage: python3 -m sockeye.lexical_constraints [--bpe BPE_MODEL]
 
     Reads sentences and constraints on STDIN (tab-delimited) and generates the JSON format
-    that can be used when passing `--json-input` to sockeye.translate.
+    that can be used when passing `--json-input` to sockeye.translate. It supports both positive
+    constraints (phrases that must appear in the output) and negative constraints (phrases that
+    must *not* appear in the output).
 
     e.g.,
 
@@ -441,12 +542,20 @@ def main():
 
         { "text": "Dies ist ein Test .", "constraints": ["This is", "test"] }
 
+    If you pass `--negative` (`-n`) to the script, the constraints will be generated as negative constraints, instead:
+
+        echo -e "Dies ist ein Test .\tThis is\ttest" | python3 -m sockeye.lexical_constraints --negative
+
+    will produce the following JSON object (note the new keyword):
+
+        { "text": "Dies ist ein Test .", "avoid": ["This is", "test"] }
+
     Make sure you apply all preprocessing (tokenization, BPE, etc.) to both the source and the target-side constraints.
     You can then translate this object by passing it to Sockeye on STDIN as follows:
 
         python3 -m sockeye.translate -m /path/to/model --json-input --beam-size 20 --beam-prune 20
 
-    (Note the recommended Sockeye parameters).
+    Note the recommended Sockeye parameters. Beam pruning isn't needed for negative constraints.
     """
     import sys
     import json
@@ -455,11 +564,21 @@ def main():
         line = line.rstrip()
 
         # Constraints are in fields 2+
-        source, *constraints = line.split('\t')
+        source, *restrictions = line.split('\t')
 
         obj = {'text': source}
-        if len(constraints) > 0:
+        constraints = []
+        avoid_list = []
+        for item in restrictions:
+            if item.startswith('-') and item.endswith('-') and len(item) > 2:
+                avoid_list.append(item)
+            else:
+                constraints.append(item)
+
+        if len(constraints):
             obj['constraints'] = constraints
+        if len(avoid_list):
+            obj['avoid'] = avoid_list
 
         print(json.dumps(obj, ensure_ascii=False), flush=True)
 

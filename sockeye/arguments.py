@@ -54,7 +54,7 @@ class ConfigArgumentParser(argparse.ArgumentParser):
         def _new_add_argument(this_self, *args, **kwargs):
             action = this_self.original_add_argument(*args, **kwargs)
             this_self.config_container._register_argument(action, *args, **kwargs)
-        
+
         original_object.original_add_argument = original_object.add_argument
         original_object.config_container = self
         original_object.add_argument = types.MethodType(_new_add_argument, original_object)
