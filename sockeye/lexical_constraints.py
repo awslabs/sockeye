@@ -52,8 +52,9 @@ class AvoidPhrase:
         """
         if self.phrase[self.last_consumed + 1] == word_id:
             return AvoidPhrase(self.phrase, self.last_consumed + 1)
+        elif self.last_consumed != -1:
+            return AvoidPhrase(self.phrase, self.last_consumed)
         else:
-            self.last_consumed = -1
             return self
 
     def avoid(self) -> int:
