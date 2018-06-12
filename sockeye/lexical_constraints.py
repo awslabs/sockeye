@@ -42,7 +42,7 @@ class AvoidPhrase:
     def __str__(self):
         return ' '.join(['*{}*'.format(x) if i == self.last_consumed else str(x) for i, x in enumerate(self.phrase)])
 
-    def consume(self, word_id: int) -> None:
+    def consume(self, word_id: int) -> AvoidPhrase:
         """
         Consumes a word, and updates the tracking based on it. If the word is the next words in the phrase,
         update last_consumed, otherwise, reset.
@@ -83,7 +83,7 @@ class AvoidBatch:
                  avoid_list: List[RawConstraintList],
                  beam_size: int,
                  max_id: int) -> None:
-        self.avoid_list = []  # List[List[AvoidPhrase]]
+        self.avoid_list = []  # type: List[List[AvoidPhrase]]
         for raw_phrases in avoid_list:
             self.avoid_list += [[AvoidPhrase(phrase) for phrase in raw_phrases] * beam_size]
         self.offset = max_id
