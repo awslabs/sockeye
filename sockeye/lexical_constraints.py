@@ -28,7 +28,8 @@ RawConstraintList = List[List[int]]
 class AvoidPhrase:
     """
     Represents a negative phrasal constraint. Tracks progress through a phrase
-    and returns a word ID if that word ID would complete the phrase.
+    returns the word ID that would complete the phrase in the avoid() method, allowing
+    it to be avoided.
 
     :param avoid_list: A sequence of integers in the target language vocabulary.
     :param last_consumed: The last consumed word in the current hypothesis.
@@ -57,7 +58,7 @@ class AvoidPhrase:
 
     def avoid(self) -> int:
         """
-        Returns an integer ID that should be avoided.
+        Returns a word ID that should be avoided.
 
         :return: An integer representing a word that must not be generated next by this hypothesis.
         """
@@ -118,7 +119,7 @@ class AvoidBatch:
         for i, items in enumerate(self.avoid_list):
             for phrase in items:
                 word_id = phrase.avoid()
-                if word_id:
+                if word_id > 0:
                     to_avoid.append((self.offset * i) + word_id)
 
         return to_avoid
@@ -536,19 +537,19 @@ def main(args):
 
     e.g.,
 
-        echo -e "Dies ist ein Test .\tThis is\ttest" | python3 -m sockeye.lexical_constraints
+        echo -e "Das ist ein Test .\tThis is\ttest" | python3 -m sockeye.lexical_constraints
 
     will produce the following JSON object:
 
-        { "text": "Dies ist ein Test .", "constraints": ["This is", "test"] }
+        { "text": "Das ist ein Test .", "constraints": ["This is", "test"] }
 
     If you pass `--avoid` to the script, the constraints will be generated as negative constraints, instead:
 
-        echo -e "Dies ist ein Test .\tThis is\ttest" | python3 -m sockeye.lexical_constraints --avoid
+        echo -e "Das ist ein Test .\tThis is\ttest" | python3 -m sockeye.lexical_constraints --avoid
 
     will produce the following JSON object (note the new keyword):
 
-        { "text": "Dies ist ein Test .", "avoid": ["This is", "test"] }
+        { "text": "Das ist ein Test .", "avoid": ["This is", "test"] }
 
     Make sure you apply all preprocessing (tokenization, BPE, etc.) to both the source and the target-side constraints.
     You can then translate this object by passing it to Sockeye on STDIN as follows:
@@ -575,9 +576,9 @@ def main(args):
             else:
                 constraints.append(item)
 
-        if len(constraints):
+        if constraints:
             obj['constraints'] = constraints
-        if len(avoid_list):
+        if avoid_list:
             obj['avoid'] = avoid_list
 
         print(json.dumps(obj, ensure_ascii=False), flush=True)

@@ -694,14 +694,14 @@ def make_input_from_json_string(sentence_id: int, json_string: str) -> Translato
 
         # List of phrases that must appear in the output
         constraints = jobj.get(C.JSON_CONSTRAINTS_KEY)
-        if isinstance(constraints, list) and len(constraints) > 0:
+        if constraints:
             constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
         else:
             constraints = None
 
         # List of phrases to prevent from occuring in the output
         avoid_list = jobj.get(C.JSON_AVOID_KEY)
-        if isinstance(avoid_list, list) and len(avoid_list) > 0:
+        if avoid_list:
             avoid_list = [list(data_io.get_tokens(phrase)) for phrase in avoid_list]
         else:
             avoid_list = None
