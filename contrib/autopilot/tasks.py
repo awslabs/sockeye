@@ -566,7 +566,7 @@ TASKS = {
                              "wmt18_test/test/newstest2018-deen-ref.en.sgm",
                              TEXT_UTF8_RAW_SGML),
                         ]),
-    "wmt18_en_de": Task(description="WMT18 English--German",
+    "wmt18_en_de": Task(description="WMT18 English-German news",
                         url="http://statmt.org/wmt18/translation-task.html",
                         src_lang="en",
                         trg_lang="de",
