@@ -525,7 +525,7 @@ def _topk(beam_size: int,
             inactive)
 
 
-def main():
+def main(args):
     """
     Usage: python3 -m sockeye.lexical_constraints [--bpe BPE_MODEL]
 
@@ -542,9 +542,9 @@ def main():
 
         { "text": "Dies ist ein Test .", "constraints": ["This is", "test"] }
 
-    If you pass `--negative` (`-n`) to the script, the constraints will be generated as negative constraints, instead:
+    If you pass `--avoid` to the script, the constraints will be generated as negative constraints, instead:
 
-        echo -e "Dies ist ein Test .\tThis is\ttest" | python3 -m sockeye.lexical_constraints --negative
+        echo -e "Dies ist ein Test .\tThis is\ttest" | python3 -m sockeye.lexical_constraints --avoid
 
     will produce the following JSON object (note the new keyword):
 
@@ -570,7 +570,7 @@ def main():
         constraints = []
         avoid_list = []
         for item in restrictions:
-            if item.startswith('-') and item.endswith('-') and len(item) > 2:
+            if args.avoid:
                 avoid_list.append(item)
             else:
                 constraints.append(item)
@@ -584,4 +584,10 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--avoid', action='store_true', help='Constraints are negative constraints')
+    args = parser.parse_args()
+
+    main(args)
