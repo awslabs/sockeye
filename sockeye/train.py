@@ -606,6 +606,14 @@ def create_model_config(args: argparse.Namespace,
                                                            pool_stride=args.conv_embed_pool_stride,
                                                            num_highway_layers=args.conv_embed_num_highway_layers,
                                                            dropout=args.conv_embed_dropout)
+    if args.encoder == C.TRANSFORMER_WITH_CONV_EMBED_TYPE:
+        config_conv = encoder.ConvolutionalEmbeddingConfig(num_embed=num_embed_source,
+                                                           output_dim=num_embed_source,
+                                                           max_filter_width=args.conv_embed_max_filter_width,
+                                                           num_filters=args.conv_embed_num_filters,
+                                                           pool_stride=args.conv_embed_pool_stride,
+                                                           num_highway_layers=args.conv_embed_num_highway_layers,
+                                                           dropout=args.conv_embed_dropout)
 
     config_encoder, encoder_num_hidden = create_encoder_config(args, max_seq_len_source, max_seq_len_target,
                                                                config_conv)
