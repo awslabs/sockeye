@@ -1574,6 +1574,8 @@ class Translator:
             for ms in model_states:
                 ms.sort_state(best_hyp_indices)
 
+#            self._print_beam(sequences, scores_accumulated, finished, inactive, constraints, t)
+
         logger.debug("Finished after %d / %d steps.", t + 1, max_output_length)
 
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).

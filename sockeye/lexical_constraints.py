@@ -24,60 +24,82 @@ logger = logging.getLogger(__name__)
 # Represents a list of raw constraints for a sentence. Each constraint is a list of target-word IDs.
 RawConstraintList = List[List[int]]
 
-
-class AvoidPhrase:
+class AvoidTrie:
     """
-    Represents a negative phrasal constraint. Tracks progress through a phrase
-    returns the word ID that would complete the phrase in the avoid() method, allowing
-    it to be avoided.
+    Represents a set of phrasal constraints for an input sentence.
+    These are organized into a trie.
+    """
+    def __init__(self, raw_phrases: Optional[RawConstraintList] = None):
+        self.final_ids = set()
+        self.children = {}
 
-    :param avoid_list: A sequence of integers in the target language vocabulary.
-    :param last_consumed: The last consumed word in the current hypothesis.
+        if raw_phrases:
+            for phrase in raw_phrases:
+                self.add_phrase(phrase)
+
+    def add_phrase(self,
+                   phrase: List[int]) -> None:
+        if len(phrase) == 1:
+            self.final_ids.add(phrase[0])
+        else:
+            if not phrase[0] in self.children:
+                self.children[phrase[0]] = AvoidTrie()
+            self.children[phrase[0]].add_phrase(phrase[1:])
+
+    def step(self, word_id: int) -> 'AvoidTrie':
+        return self.children.get(word_id, None)
+
+    def final(self) -> Set[int]:
+        return self.final_ids
+
+
+class AvoidState:
+    """
+    Represents the state of a hypothesis in the AvoidTrie.
+    The offset is used to return actual positions in the one-dimensionally-resized array that
+    get set to infinity.
+
+    :param avoid_trie: The trie containing the phrases to avoid.
+    :param state: The current state (defaults to root).
     """
     def __init__(self,
-                 avoid_list: List[int],
-                 last_consumed: int = -1) -> None:
-        self.phrase = avoid_list
-        self.last_consumed = last_consumed
+                 avoid_trie: AvoidTrie,
+                 state: AvoidTrie = None) -> None:
 
-    def __str__(self):
-        return ' '.join(['*{}*'.format(x) if i == self.last_consumed else str(x) for i, x in enumerate(self.phrase)])
+        self.root = avoid_trie
+        self.state = state if state else self.root
 
-    def consume(self, word_id: int) -> 'AvoidPhrase':
+    def consume(self, word_id: int) -> None:
         """
-        Consumes a word, and updates the tracking based on it. If the word is the next words in the phrase,
-        update last_consumed, otherwise, reset.
+        Consumes a word, and updates the state based on it. Returns new objects on a state change.
 
         :param word_id: The word that was just generated.
         """
-        if self.phrase[self.last_consumed + 1] == word_id:
-            return AvoidPhrase(self.phrase, self.last_consumed + 1)
-        elif self.last_consumed != -1:
-            return AvoidPhrase(self.phrase, -1)
+        if word_id in self.state.children:
+            return AvoidState(self.root, self.state.step(word_id))
+        elif not self.state == self.root:
+            return AvoidState(self.root, self.root)
         else:
             return self
 
-    def avoid(self) -> int:
+    def avoid(self) -> Set[int]:
         """
-        Returns a word ID that should be avoided.
+        Returns a set of word IDs that should be avoided.
 
-        :return: An integer representing a word that must not be generated next by this hypothesis.
+        :return: A set of integers representing words that must not be generated next by this hypothesis.
         """
-        if self.last_consumed == len(self.phrase) - 2:
-            return self.phrase[-1]
-        else:
-            return 0
+        return self.state.final()
 
 
 class AvoidBatch:
     """
     Represents a set of phrasal constraints for all items in the batch.
-    For each hypotheses, there is a list of AvoidPhrase objects.
+    For each hypotheses, there is an AvoidTrie tracking its state.
 
     The offset is used to return actual positions in the one-dimensionally-resized array that
     get set to infinity.
 
-    :param avoid_list: The list of lists (one for each item in the batch).
+    :param avoid_list: The list of lists (raw phrasal constraints as IDs, one for each item in the batch).
     :param beam_size: The beam size.
     :param max_id: The maximum ID in the target vocabulary.
     """
@@ -85,30 +107,29 @@ class AvoidBatch:
                  avoid_list: List[RawConstraintList],
                  beam_size: int,
                  max_id: int) -> None:
-        self.avoid_list = []  # type: List[List[AvoidPhrase]]
+        self.avoid_states = []
         for raw_phrases in avoid_list:
-            self.avoid_list += [[AvoidPhrase(phrase) for phrase in raw_phrases] * beam_size]
+            self.avoid_states += [AvoidState(AvoidTrie(raw_phrases))] * beam_size
         self.offset = max_id
 
     def reorder(self, indices: mx.nd.array) -> None:
         """
         Reorders the avoid list according to the selected row indices.
-        This can produce duplicates, but this is fixed in consume().
+        This can produce duplicates, but this is fixed if state changes occur in consume().
 
         :param indices: An mx.nd.array containing indices of hypotheses to select.
         """
-        self.avoid_list = [self.avoid_list[x] for x in indices.asnumpy()]
+        self.avoid_states = [self.avoid_states[x] for x in indices.asnumpy()]
 
     def consume(self, word_ids: mx.nd.array) -> None:
         """
-        Takes an array representing the set of target word indices chosen for each hypothesis in the batch,
-        and updates each of the negative constraints.
+        Consumes a word for each trie, updating respective states.
 
         :param word_ids: The set of word IDs.
         """
         word_ids = word_ids.asnumpy().tolist()
         for i, word_id in enumerate(word_ids):
-            self.avoid_list[i] = [item.consume(word_ids[i]) for item in self.avoid_list[i]]
+            self.avoid_states[i] = self.avoid_states[i].consume(word_id)
 
     def avoid(self) -> List[int]:
         """
@@ -116,14 +137,14 @@ class AvoidBatch:
 
         :return: A list of indices.
         """
-        to_avoid = []
-        for i, items in enumerate(self.avoid_list):
-            for phrase in items:
-                word_id = phrase.avoid()
+        to_avoid = set()
+        for i, state in enumerate(self.avoid_states):
+            for word_id in state.avoid():
                 if word_id > 0:
-                    to_avoid.append((self.offset * i) + word_id)
+                    to_avoid.add((self.offset * i) + word_id)
 
-        return to_avoid
+        return list(to_avoid)
+
 
 class ConstrainedHypothesis:
     """
