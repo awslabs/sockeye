@@ -18,105 +18,202 @@ import argparse
 import sys
 import time
 from contextlib import ExitStack
-from typing import Optional, Iterable, Tuple
+from typing import Generator, Optional, List
 
 import mxnet as mx
+from math import ceil
 
-import sockeye
-import sockeye.arguments as arguments
-import sockeye.constants as C
-import sockeye.data_io
-import sockeye.inference
-import sockeye.output_handler
-from sockeye.log import setup_main_logger, log_sockeye_version
-from sockeye.utils import acquire_gpus, get_num_gpus
-from sockeye.utils import check_condition
+from sockeye.lexicon import TopKLexicon
+from sockeye.log import setup_main_logger
+from sockeye.output_handler import get_output_handler, OutputHandler
+from sockeye.utils import acquire_gpus, get_num_gpus, log_basic_info, check_condition, grouper
+from . import arguments
+from . import constants as C
+from . import data_io
+from . import inference
 
 logger = setup_main_logger(__name__, file_logging=False)
 
 
 def main():
-    params = argparse.ArgumentParser(description='Translate CLI')
-    arguments.add_inference_args(params)
-    arguments.add_device_args(params)
+    params = arguments.ConfigArgumentParser(description='Translate CLI')
+    arguments.add_translate_cli_args(params)
     args = params.parse_args()
+    run_translate(args)
+
+
+def run_translate(args: argparse.Namespace):
 
     if args.output is not None:
         global logger
-        logger = setup_main_logger(__name__, file_logging=True, path="%s.%s" % (args.output, C.LOG_NAME))
+        logger = setup_main_logger(__name__,
+                                   console=not args.quiet,
+                                   file_logging=True,
+                                   path="%s.%s" % (args.output, C.LOG_NAME))
 
     if args.checkpoints is not None:
         check_condition(len(args.checkpoints) == len(args.models), "must provide checkpoints for each model")
 
-    log_sockeye_version(logger)
-    logger.info("Command: %s", " ".join(sys.argv))
-    logger.info("Arguments: %s", args)
+    if args.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
+        check_condition(args.batch_size == 1,
+                        "Early stopping (--beam-search-stop %s) not supported with batching" % (C.BEAM_SEARCH_STOP_FIRST))
 
-    output_handler = sockeye.output_handler.get_output_handler(args.output_type,
-                                                               args.output,
-                                                               args.sure_align_threshold)
+    log_basic_info(args)
+
+    output_handler = get_output_handler(args.output_type,
+                                        args.output,
+                                        args.sure_align_threshold)
 
     with ExitStack() as exit_stack:
         context = _setup_context(args, exit_stack)
 
-        translator = sockeye.inference.Translator(context,
-                                                  args.ensemble_mode,
-                                                  *sockeye.inference.load_models(context,
-                                                                                 args.max_input_len,
-                                                                                 args.beam_size,
-                                                                                 args.models,
-                                                                                 args.checkpoints,
-                                                                                 args.softmax_temperature))
-        read_and_translate(translator, output_handler, args.input)
+        if args.override_dtype == C.DTYPE_FP16:
+            logger.warning('Experimental feature \'--override-dtype float16\' has been used. '
+                           'This feature may be removed or change its behaviour in future. '
+                           'DO NOT USE IT IN PRODUCTION!')
+
+        models, source_vocabs, target_vocab = inference.load_models(
+            context=context,
+            max_input_len=args.max_input_len,
+            beam_size=args.beam_size,
+            batch_size=args.batch_size,
+            model_folders=args.models,
+            checkpoints=args.checkpoints,
+            softmax_temperature=args.softmax_temperature,
+            max_output_length_num_stds=args.max_output_length_num_stds,
+            decoder_return_logit_inputs=args.restrict_lexicon is not None,
+            cache_output_layer_w_b=args.restrict_lexicon is not None,
+            override_dtype=args.override_dtype)
+        restrict_lexicon = None  # type: Optional[TopKLexicon]
+        if args.restrict_lexicon:
+            restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
+            restrict_lexicon.load(args.restrict_lexicon, k=args.restrict_lexicon_topk)
+        store_beam = args.output_type == C.OUTPUT_HANDLER_BEAM_STORE
+        translator = inference.Translator(context=context,
+                                          ensemble_mode=args.ensemble_mode,
+                                          bucket_source_width=args.bucket_width,
+                                          length_penalty=inference.LengthPenalty(args.length_penalty_alpha,
+                                                                                 args.length_penalty_beta),
+                                          beam_prune=args.beam_prune,
+                                          beam_search_stop=args.beam_search_stop,
+                                          models=models,
+                                          source_vocabs=source_vocabs,
+                                          target_vocab=target_vocab,
+                                          restrict_lexicon=restrict_lexicon,
+                                          store_beam=store_beam,
+                                          strip_unknown_words=args.strip_unknown_words)
+        read_and_translate(translator=translator,
+                           output_handler=output_handler,
+                           chunk_size=args.chunk_size,
+                           input_file=args.input,
+                           input_factors=args.input_factors,
+                           input_is_json=args.json_input)
 
 
-def read_and_translate(translator: sockeye.inference.Translator, output_handler: sockeye.output_handler.OutputHandler,
-                       source: Optional[str] = None) -> None:
+def make_inputs(input_file: Optional[str],
+                translator: inference.Translator,
+                input_is_json: bool,
+                input_factors: Optional[List[str]] = None) -> Generator[inference.TranslatorInput, None, None]:
+    """
+    Generates TranslatorInput instances from input. If input is None, reads from stdin. If num_input_factors > 1,
+    the function will look for factors attached to each token, separated by '|'.
+    If source is not None, reads from the source file. If num_source_factors > 1, num_source_factors source factor
+    filenames are required.
+
+    :param input_file: The source file (possibly None).
+    :param translator: Translator that will translate each line of input.
+    :param input_is_json: Whether the input is in json format.
+    :param input_factors: Source factor files.
+    :return: TranslatorInput objects.
+    """
+    if input_file is None:
+        check_condition(input_factors is None, "Translating from STDIN, not expecting any factor files.")
+        for sentence_id, line in enumerate(sys.stdin, 1):
+            if input_is_json:
+                yield inference.make_input_from_json_string(sentence_id=sentence_id, json_string=line)
+            else:
+                yield inference.make_input_from_factored_string(sentence_id=sentence_id,
+                                                                factored_string=line,
+                                                                translator=translator)
+    else:
+        input_factors = [] if input_factors is None else input_factors
+        inputs = [input_file] + input_factors
+        check_condition(translator.num_source_factors == len(inputs),
+                        "Model(s) require %d factors, but %d given (through --input and --input-factors)." % (
+                            translator.num_source_factors, len(inputs)))
+        with ExitStack() as exit_stack:
+            streams = [exit_stack.enter_context(data_io.smart_open(i)) for i in inputs]
+            for sentence_id, inputs in enumerate(zip(*streams), 1):
+                if input_is_json:
+                    yield inference.make_input_from_json_string(sentence_id=sentence_id, json_string=inputs[0])
+                else:
+                    yield inference.make_input_from_multiple_strings(sentence_id=sentence_id, strings=list(inputs))
+
+
+def read_and_translate(translator: inference.Translator,
+                       output_handler: OutputHandler,
+                       chunk_size: Optional[int],
+                       input_file: Optional[str] = None,
+                       input_factors: Optional[List[str]] = None,
+                       input_is_json: bool = False) -> None:
     """
     Reads from either a file or stdin and translates each line, calling the output_handler with the result.
 
     :param output_handler: Handler that will write output to a stream.
     :param translator: Translator that will translate each line of input.
-    :param source: Path to file which will be translated line-by-line if included, if none use stdin.
+    :param chunk_size: The size of the portion to read at a time from the input.
+    :param input_file: Optional path to file which will be translated line-by-line if included, if none use stdin.
+    :param input_factors: Optional list of paths to files that contain source factors.
+    :param input_is_json: Whether the input is in json format.
     """
-
-    source_data = sys.stdin if source is None else sockeye.data_io.smart_open(source)
+    batch_size = translator.batch_size
+    if chunk_size is None:
+        if translator.batch_size == 1:
+            # No batching, therefore there is not need to read segments in chunks.
+            chunk_size = C.CHUNK_SIZE_NO_BATCHING
+        else:
+            # Get a constant number of batches per call to Translator.translate.
+            chunk_size = C.CHUNK_SIZE_PER_BATCH_SEGMENT * translator.batch_size
+    else:
+        if chunk_size < translator.batch_size:
+            logger.warning("You specified a chunk size (%d) smaller than the batch size (%d). This will lead to "
+                           "a reduction in translation speed. Consider choosing a larger chunk size." % (chunk_size,
+                                                                                                         batch_size))
 
     logger.info("Translating...")
 
-    i, total_time = translate_lines(output_handler, source_data, translator)
+    total_time, total_lines = 0.0, 0
+    for chunk in grouper(make_inputs(input_file, translator, input_is_json, input_factors), size=chunk_size):
+        chunk_time = translate(output_handler, chunk, translator)
+        total_lines += len(chunk)
+        total_time += chunk_time
 
-    if i != 0:
-        logger.info("Processed %d lines. Total time: %.4f sec/sent: %.4f sent/sec: %.4f", i, total_time,
-                    total_time / i, i / total_time)
+    if total_lines != 0:
+        logger.info("Processed %d lines in %d batches. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",
+                    total_lines, ceil(total_lines / batch_size), total_time,
+                    total_time / total_lines, total_lines / total_time)
     else:
         logger.info("Processed 0 lines.")
 
 
-def translate_lines(output_handler: sockeye.output_handler.OutputHandler, source_data: Iterable[str],
-                    translator: sockeye.inference.Translator) -> Tuple[int, float]:
+def translate(output_handler: OutputHandler,
+              trans_inputs: List[inference.TranslatorInput],
+              translator: inference.Translator) -> float:
     """
-    Translates each line from source_data, calling output handler for each result.
+    Translates each line from source_data, calling output handler after translating a batch.
 
     :param output_handler: A handler that will be called once with the output of each translation.
-    :param source_data: A enumerable list of source sentences that will be translated.
+    :param trans_inputs: A enumerable list of translator inputs.
     :param translator: The translator that will be used for each line of input.
-    :return: The number of lines translated, and the total time taken.
+    :return: Total time taken.
     """
-
-    i = 0
-    total_time = 0.0
-    for i, line in enumerate(source_data, 1):
-        trans_input = translator.make_input(i, line)
-        logger.debug(" IN: %s", trans_input)
-        tic = time.time()
-        trans_output = translator.translate(trans_input)
-        trans_wall_time = time.time() - tic
-        total_time += trans_wall_time
-        logger.debug("OUT: %s", trans_output)
-        logger.debug("OUT: time=%.2f", trans_wall_time)
-        output_handler.handle(trans_input, trans_output)
-    return i, total_time
+    tic = time.time()
+    trans_outputs = translator.translate(trans_inputs)
+    total_time = time.time() - tic
+    batch_time = total_time / len(trans_inputs)
+    for trans_input, trans_output in zip(trans_inputs, trans_outputs):
+        output_handler.handle(trans_input, trans_output, batch_time)
+    return total_time
 
 
 def _setup_context(args, exit_stack):
@@ -131,13 +228,13 @@ def _setup_context(args, exit_stack):
         check_condition(len(args.device_ids) == 1, "cannot run on multiple devices for now")
         gpu_id = args.device_ids[0]
         if args.disable_device_locking:
-            # without locking and a negative device id we just take the first device
-            gpu_id = 0
-        else:
             if gpu_id < 0:
-                # get a single (!) gpu id automatically:
-                gpu_ids = exit_stack.enter_context(acquire_gpus([-1], lock_dir=args.lock_dir))
-                gpu_id = gpu_ids[0]
+                # without locking and a negative device id we just take the first device
+                gpu_id = 0
+        else:
+            gpu_ids = exit_stack.enter_context(acquire_gpus([gpu_id], lock_dir=args.lock_dir))
+            gpu_id = gpu_ids[0]
+
         context = mx.gpu(gpu_id)
     return context
 

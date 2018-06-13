@@ -39,7 +39,8 @@ class MockModule(MagicMock):
     def __getattr__(cls, name):
         return MockClass(name)
 
-MOCK_MODULES = ['mxnet', 'numpy']
+
+MOCK_MODULES = ['mxnet', 'mxnet.metric', 'numpy', 'sockeye.optimizers']
 sys.modules.update((mod_name, MockModule()) for mod_name in MOCK_MODULES)
 
 
@@ -56,7 +57,7 @@ def get_version():
 
 # If your documentation needs a minimal Sphinx version, state it here.
 #
-# needs_sphinx = '1.0'
+needs_sphinx = '1.7.4'
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom

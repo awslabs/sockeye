@@ -1,4 +1,5 @@
 include README.md
+include CHANGELOG.md
 include requirements*.txt
 include LICENSE
 include NOTICE
@@ -6,7 +7,11 @@ include pylintrc
 include typechecked-files
 include test/data/config_with_missing_attributes.yaml
 include sockeye/git_version.py
+recursive-include .github *
+include CONTRIBUTING.md
 exclude *.sh
+exclude contrib
+recursive-exclude contrib *
 include pytest.ini
 recursive-include test *.py
 recursive-include test *.ini
@@ -15,4 +20,7 @@ recursive-include docs *.md
 recursive-include docs *.py
 recursive-include docs *.rst
 recursive-include docs Makefile
-
+recursive-include tutorials *.md
+recursive-include tutorials *.png
+recursive-include tutorials *.py
+recursive-include test *.txt

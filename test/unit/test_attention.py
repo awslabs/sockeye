@@ -5,7 +5,7 @@
 # is located at
 #
 #     http://aws.amazon.com/apache2.0/
-# 
+#
 # or in the "license" file accompanying this file. This file is distributed on
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
@@ -15,12 +15,160 @@ import mxnet as mx
 import numpy as np
 import pytest
 
-import sockeye.attention
 import sockeye.constants as C
 import sockeye.coverage
+import sockeye.rnn_attention
 from test.common import gaussian_vector, integer_vector
 
-attention_types = [C.ATT_BILINEAR, C.ATT_DOT, C.ATT_DOT_SCALED, C.ATT_LOC, C.ATT_MLP]
+attention_types = [C.ATT_BILINEAR, C.ATT_DOT, C.ATT_LOC, C.ATT_MLP]
+
+
+def test_att_bilinear():
+    config_attention = sockeye.rnn_attention.AttentionConfig(type=C.ATT_BILINEAR,
+                                                             num_hidden=None,
+                                                             input_previous_word=True,
+                                                             source_num_hidden=None,
+                                                             query_num_hidden=6,
+                                                             layer_normalization=False,
+                                                             config_coverage=None)
+
+    attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=None)
+
+    assert type(attention) == sockeye.rnn_attention.BilinearAttention
+    assert not attention._input_previous_word
+    assert attention.num_hidden == 6
+
+
+def test_att_dot():
+    config_attention = sockeye.rnn_attention.AttentionConfig(type=C.ATT_DOT,
+                                                             num_hidden=2,
+                                                             input_previous_word=True,
+                                                             source_num_hidden=4,
+                                                             query_num_hidden=6,
+                                                             layer_normalization=False,
+                                                             config_coverage=None,
+                                                             is_scaled=False)
+
+    attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=None)
+
+    assert type(attention) == sockeye.rnn_attention.DotAttention
+    assert attention._input_previous_word
+    assert attention.project_source
+    assert attention.project_query
+    assert attention.num_hidden == 2
+    assert attention.is_scaled is False
+    assert not attention.scale
+
+
+def test_att_dot_scaled():
+    config_attention = sockeye.rnn_attention.AttentionConfig(type=C.ATT_DOT,
+                                                             num_hidden=16,
+                                                             input_previous_word=True,
+                                                             source_num_hidden=None,
+                                                             query_num_hidden=None,
+                                                             layer_normalization=False,
+                                                             config_coverage=None,
+                                                             is_scaled=True)
+
+    attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=None)
+
+    assert type(attention) == sockeye.rnn_attention.DotAttention
+    assert attention._input_previous_word
+    assert attention.project_source
+    assert attention.project_query
+    assert attention.num_hidden == 16
+    assert attention.is_scaled is True
+    assert attention.scale == 0.25
+
+
+def test_att_mh_dot():
+    config_attention = sockeye.rnn_attention.AttentionConfig(type=C.ATT_MH_DOT,
+                                                             num_hidden=None,
+                                                             input_previous_word=True,
+                                                             source_num_hidden=8,
+                                                             query_num_hidden=None,
+                                                             layer_normalization=False,
+                                                             config_coverage=None,
+                                                             num_heads=2)
+
+    attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=None)
+
+    assert type(attention) == sockeye.rnn_attention.MultiHeadDotAttention
+    assert attention._input_previous_word
+    assert attention.num_hidden == 8
+    assert attention.heads == 2
+    assert attention.num_hidden_per_head == 4
+
+
+def test_att_fixed():
+    config_attention = sockeye.rnn_attention.AttentionConfig(type=C.ATT_FIXED,
+                                                             num_hidden=None,
+                                                             input_previous_word=True,
+                                                             source_num_hidden=None,
+                                                             query_num_hidden=None,
+                                                             layer_normalization=False,
+                                                             config_coverage=None)
+
+    attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=None)
+
+    assert type(attention) == sockeye.rnn_attention.EncoderLastStateAttention
+    assert attention._input_previous_word
+
+
+def test_att_loc():
+    config_attention = sockeye.rnn_attention.AttentionConfig(type=C.ATT_LOC,
+                                                             num_hidden=None,
+                                                             input_previous_word=True,
+                                                             source_num_hidden=None,
+                                                             query_num_hidden=None,
+                                                             layer_normalization=False,
+                                                             config_coverage=None)
+
+    attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=10)
+
+    assert type(attention) == sockeye.rnn_attention.LocationAttention
+    assert attention._input_previous_word
+    assert attention.max_source_seq_len == 10
+
+
+def test_att_mlp():
+    config_attention = sockeye.rnn_attention.AttentionConfig(type=C.ATT_MLP,
+                                                             num_hidden=16,
+                                                             input_previous_word=True,
+                                                             source_num_hidden=None,
+                                                             query_num_hidden=None,
+                                                             layer_normalization=True,
+                                                             config_coverage=None)
+
+    attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=10)
+
+    assert type(attention) == sockeye.rnn_attention.MlpAttention
+    assert attention._input_previous_word
+    assert attention.attention_num_hidden == 16
+    assert attention.dynamic_source_num_hidden == 1
+    assert attention._ln
+    assert not attention.coverage
+
+
+def test_att_cov():
+    config_coverage = sockeye.coverage.CoverageConfig(type='tanh', num_hidden=5, layer_normalization=True)
+
+    config_attention = sockeye.rnn_attention.AttentionConfig(type=C.ATT_COV,
+                                                             num_hidden=16,
+                                                             input_previous_word=True,
+                                                             source_num_hidden=None,
+                                                             query_num_hidden=None,
+                                                             layer_normalization=True,
+                                                             config_coverage=config_coverage)
+
+    attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=10)
+
+    assert type(attention) == sockeye.rnn_attention.MlpCovAttention
+    assert attention._input_previous_word
+    assert attention.attention_num_hidden == 16
+    assert attention.dynamic_source_num_hidden == 5
+    assert attention._ln
+    assert type(attention.coverage) == sockeye.coverage.ActivationCoverage
 
 
 @pytest.mark.parametrize("attention_type", attention_types)
@@ -34,13 +182,14 @@ def test_attention(attention_type,
     source_length = mx.sym.Variable("source_length")
     source_seq_len = 3
 
-    config_attention = sockeye.attention.AttentionConfig(type=attention_type,
-                                                         num_hidden=2,
-                                                         input_previous_word=False,
-                                                         rnn_num_hidden=2,
-                                                         layer_normalization=False,
-                                                         config_coverage=None)
-    attention = sockeye.attention.get_attention(config_attention, max_seq_len=source_seq_len)
+    config_attention = sockeye.rnn_attention.AttentionConfig(type=attention_type,
+                                                             num_hidden=2,
+                                                             input_previous_word=False,
+                                                             source_num_hidden=2,
+                                                             query_num_hidden=2,
+                                                             layer_normalization=False,
+                                                             config_coverage=None)
+    attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=source_seq_len)
 
     attention_state = attention.get_initial_state(source_length, source_seq_len)
     attention_func = attention.on(source, source_length, source_seq_len)
@@ -85,13 +234,14 @@ def test_coverage_attention(attention_coverage_type,
     config_coverage = sockeye.coverage.CoverageConfig(type=attention_coverage_type,
                                                       num_hidden=attention_coverage_num_hidden,
                                                       layer_normalization=False)
-    config_attention = sockeye.attention.AttentionConfig(type="coverage",
-                                                         num_hidden=5,
-                                                         input_previous_word=False,
-                                                         rnn_num_hidden=0,
-                                                         layer_normalization=False,
-                                                         config_coverage=config_coverage)
-    attention = sockeye.attention.get_attention(config_attention, max_seq_len=source_seq_len)
+    config_attention = sockeye.rnn_attention.AttentionConfig(type="coverage",
+                                                             num_hidden=5,
+                                                             input_previous_word=False,
+                                                             source_num_hidden=encoder_num_hidden,
+                                                             query_num_hidden=decoder_num_hidden,
+                                                             layer_normalization=False,
+                                                             config_coverage=config_coverage)
+    attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=source_seq_len)
 
     attention_state = attention.get_initial_state(source_length, source_seq_len)
     attention_func = attention.on(source, source_length, source_seq_len)
@@ -117,7 +267,7 @@ def test_coverage_attention(attention_coverage_type,
     attention_prob_result = exec_output[1].asnumpy()
     dynamic_source_result = exec_output[2].asnumpy()
 
-    expected_probs = (1 / source_length_vector).reshape((batch_size, 1))
+    expected_probs = (1. / source_length_vector).reshape((batch_size, 1))
 
     assert context_result.shape == (batch_size, encoder_num_hidden)
     assert attention_prob_result.shape == (batch_size, source_seq_len)
@@ -137,13 +287,14 @@ def test_last_state_attention(batch_size=1,
     source_length = mx.sym.Variable("source_length")
     source_seq_len = 3
 
-    config_attention = sockeye.attention.AttentionConfig(type="fixed",
-                                                         num_hidden=0,
-                                                         input_previous_word=False,
-                                                         rnn_num_hidden=0,
-                                                         layer_normalization=False,
-                                                         config_coverage=None)
-    attention = sockeye.attention.get_attention(config_attention, max_seq_len=source_seq_len)
+    config_attention = sockeye.rnn_attention.AttentionConfig(type="fixed",
+                                                             num_hidden=0,
+                                                             input_previous_word=False,
+                                                             source_num_hidden=2,
+                                                             query_num_hidden=2,
+                                                             layer_normalization=False,
+                                                             config_coverage=None)
+    attention = sockeye.rnn_attention.get_attention(config_attention, max_seq_len=source_seq_len)
 
     attention_state = attention.get_initial_state(source_length, source_seq_len)
     attention_func = attention.on(source, source_length, source_seq_len)
@@ -171,7 +322,11 @@ def test_get_context_and_attention_probs():
     source = mx.sym.Variable('source')
     source_length = mx.sym.Variable('source_length')
     attention_scores = mx.sym.Variable('scores')
-    context, att_probs = sockeye.attention.get_context_and_attention_probs(source, source_length, attention_scores)
+    context, att_probs = sockeye.rnn_attention.get_context_and_attention_probs(
+        source,
+        source_length,
+        attention_scores,
+        C.DTYPE_FP32)
     sym = mx.sym.Group([context, att_probs])
     assert len(sym.list_arguments()) == 3
 

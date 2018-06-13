@@ -29,9 +29,6 @@ class LearningRateScheduler:
         self.log_warmup_every_t = self.warmup // 10
         self.last_warmup_log = -1
 
-    def new_evaluation_result(self, has_improved: bool):
-        pass
-
     def __call__(self, num_updates):
         pass
 
@@ -45,15 +42,32 @@ class LearningRateScheduler:
         fraction = (num_updates + 1) * self.base_lr / (self.warmup + 1)
         if num_updates > self.last_warmup_log and num_updates % self.log_warmup_every_t == 0:
             self.last_warmup_log = num_updates
-            logger.info("Learning rate %.0f%% warmed up", fraction * 100)
+            logger.info("Learning rate warmup: %3.0f%%", fraction/self.base_lr * 100.0)
         return fraction
 
 
-class LearningRateSchedulerFixedStep(LearningRateScheduler):
+class AdaptiveLearningRateScheduler(LearningRateScheduler):
+    """
+    Learning rate scheduler that implements `new_evaluation_result` and accordingly adaptively adjust the  learning
+    rate.
+    """
+
+    def new_evaluation_result(self, has_improved: bool) -> bool:
+        """
+        Returns true if the parameters should be reset to the ones with the best validation score.
+
+        :param has_improved: Whether the model improved on held-out validation data.
+        :return: True if parameters should be reset to the ones with best validation score.
+        """
+        return False
+
+
+class LearningRateSchedulerFixedStep(AdaptiveLearningRateScheduler):
     """
     Use a fixed schedule of learning rate steps: lr_1 for N steps, lr_2 for M steps, etc.
 
-    :param steps: List of learning rate step tuples in the form (rate, num_updates).
+    :param schedule: List of learning rate step tuples in the form (rate, num_updates).
+    :param updates_per_checkpoint: Updates per checkpoint.
     """
 
     def __init__(self, schedule: List[Tuple[float, int]], updates_per_checkpoint: int) -> None:
@@ -71,7 +85,13 @@ class LearningRateSchedulerFixedStep(LearningRateScheduler):
         self.latest_t = 0
         self._update_rate(self.current_step)
 
-    def new_evaluation_result(self, has_improved: bool):
+    def new_evaluation_result(self, has_improved: bool) -> bool:
+        """
+        Returns true if the parameters should be reset to the ones with the best validation score.
+
+        :param has_improved: Whether the model improved on held-out validation data.
+        :return: True if parameters should be reset to the ones with best validation score.
+        """
         logger.info("Checkpoint learning rate: %1.2e (%d/%d updates)",
                     self.current_rate,
                     self.latest_t - self.current_step_started_at,
@@ -79,6 +99,7 @@ class LearningRateSchedulerFixedStep(LearningRateScheduler):
         if self.latest_t >= self.next_step_at:
             self.current_step += 1
             self._update_rate(self.current_step)
+        return False
 
     def _update_rate(self, step: int):
         if self.current_step < len(self.schedule):
@@ -129,7 +150,8 @@ class LearningRateSchedulerInvSqrtT(LearningRateScheduler):
         self.log_every_t = int(half_life * updates_per_checkpoint)
 
     def __call__(self, num_updates: int):
-        lr = min(self.base_lr / sqrt(1 + num_updates * self.factor), self._warmup(num_updates) if self.warmup > 0 else 99999)
+        lr = min(self.base_lr / sqrt(1 + num_updates * self.factor),
+                 self._warmup(num_updates) if self.warmup > 0 else C.LARGE_POSITIVE_VALUE)
         # Note: this method is called once per parameter for the same t. Making sure to just log once.
         if num_updates > self.t_last_log and num_updates % self.log_every_t == 0:
             logger.info("Learning rate currently at %1.2e", lr)
@@ -159,7 +181,8 @@ class LearningRateSchedulerInvT(LearningRateScheduler):
         self.log_every_t = int(half_life * updates_per_checkpoint)
 
     def __call__(self, num_updates: int):
-        lr = min(self.base_lr / (1 + num_updates * self.factor), self._warmup(num_updates) if self.warmup > 0 else 99999)
+        lr = min(self.base_lr / (1 + num_updates * self.factor),
+                 self._warmup(num_updates) if self.warmup > 0 else C.LARGE_POSITIVE_VALUE)
         # Note: this method is called once per parameter for the same t. Making sure to just log once.
         if num_updates > self.t_last_log and num_updates % self.log_every_t == 0:
             logger.info("Learning rate currently at %1.2e", lr)
@@ -168,7 +191,7 @@ class LearningRateSchedulerInvT(LearningRateScheduler):
         return lr
 
 
-class LearningRateSchedulerPlateauReduce(LearningRateScheduler):
+class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
     """
     Lower the learning rate as soon as the validation score plateaus.
 
@@ -190,7 +213,13 @@ class LearningRateSchedulerPlateauReduce(LearningRateScheduler):
                     " the validation score doesn't improve %d times.",
                     reduce_factor, reduce_num_not_improved)
 
-    def new_evaluation_result(self, has_improved: bool):
+    def new_evaluation_result(self, has_improved: bool) -> bool:
+        """
+        Returns true if the parameters should be reset to the ones with the best validation score.
+
+        :param has_improved: Whether the model improved on held-out validation data.
+        :return: True if parameters should be reset to the ones with best validation score.
+        """
         if self.lr is None:
             assert self.base_lr is not None
             self.lr = self.base_lr
@@ -204,6 +233,8 @@ class LearningRateSchedulerPlateauReduce(LearningRateScheduler):
                 logger.info("%d checkpoints since improvement or rate scaling, "
                             "lowering learning rate: %1.2e -> %1.2e", self.num_not_improved, old_lr, self.lr)
                 self.num_not_improved = 0
+                return True
+        return False
 
     def __call__(self, t):
         if self.lr is None:
@@ -235,6 +266,7 @@ def get_lr_scheduler(scheduler_type: str,
     :param learning_rate_reduce_factor: Factor to reduce learning rate with.
     :param learning_rate_reduce_num_not_improved: Number of checkpoints with no improvement after which learning rate is
            reduced.
+    :param learning_rate_schedule: Optional fixed learning rate schedule.
     :param learning_rate_warmup: Number of batches that the learning rate is linearly increased.
     :raises: ValueError if unknown scheduler_type
     :return: Learning rate scheduler.

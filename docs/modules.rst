@@ -1,10 +1,10 @@
 Python Modules
 ==============
 
-sockeye.attention module
+sockeye.arguments module
 ------------------------
 
-.. automodule:: sockeye.attention
+.. automodule:: sockeye.arguments
     :members:
     :show-inheritance:
 
@@ -15,24 +15,17 @@ sockeye.average module
     :members:
     :show-inheritance:
 
-sockeye.bleu module
--------------------
-
-.. automodule:: sockeye.bleu
-    :members: corpus_bleu
-    :show-inheritance:
-
-sockeye.callback module
------------------------
-
-.. automodule:: sockeye.callback
-    :members:
-    :show-inheritance:
-
 sockeye.checkpoint_decoder module
 ---------------------------------
 
 .. automodule:: sockeye.checkpoint_decoder
+    :members:
+    :show-inheritance:
+
+sockeye.convolution module
+--------------------------
+
+.. automodule:: sockeye.convolution
     :members:
     :show-inheritance:
 
@@ -71,10 +64,31 @@ sockeye.encoder module
     :members:
     :show-inheritance:
 
+sockeye.evaluate module
+-----------------------
+
+.. automodule:: sockeye.evaluate
+    :members:
+    :show-inheritance:
+
+sockeye.extract_parameters module
+---------------------------------
+
+.. automodule:: sockeye.extract_parameters
+    :members:
+    :show-inheritance:
+
 sockeye.inference module
 ------------------------
 
 .. automodule:: sockeye.inference
+    :members:
+    :show-inheritance:
+
+sockeye.init_embedding module
+-----------------------------
+
+.. automodule:: sockeye.init_embedding
     :members:
     :show-inheritance:
 
@@ -92,10 +106,24 @@ sockeye.layers module
     :members:
     :show-inheritance:
 
+sockeye.lexical_constraints module
+----------------------------------
+
+.. automodule:: sockeye.lexical_constraints
+    :members:
+    :show-inheritance:
+
 sockeye.lexicon module
 ----------------------
 
 .. automodule:: sockeye.lexicon
+    :members:
+    :show-inheritance:
+
+sockeye.log module
+-------------------
+
+.. automodule:: sockeye.log
     :members:
     :show-inheritance:
 
@@ -127,10 +155,31 @@ sockeye.output_handler module
     :members:
     :show-inheritance:
 
+sockeye.prepare_data module
+---------------------------
+
+.. automodule:: sockeye.prepare_data
+    :members:
+    :show-inheritance:
+
 sockeye.rnn module
 ------------------
 
 .. automodule:: sockeye.rnn
+    :members:
+    :show-inheritance:
+
+sockeye.rnn_attention module
+----------------------------
+
+.. automodule:: sockeye.rnn_attention
+    :members:
+    :show-inheritance:
+
+sockeye.train module
+--------------------
+
+.. automodule:: sockeye.train
     :members:
     :show-inheritance:
 
@@ -145,6 +194,14 @@ sockeye.transformer module
 --------------------------
 
 .. automodule:: sockeye.transformer
+    :members:
+    :exclude-members: TransformerConfig
+    :show-inheritance:
+
+sockeye.translate module
+------------------------
+
+.. automodule:: sockeye.translate
     :members:
     :show-inheritance:
 

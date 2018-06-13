@@ -18,6 +18,7 @@ import tempfile
 
 import sockeye.training
 import sockeye.constants as C
+import sockeye.utils
 
 
 def test_cleanup_param_files():
@@ -25,7 +26,7 @@ def test_cleanup_param_files():
         for n in itertools.chain(range(1, 20, 2), range(21, 41)):
             # Create empty files
             open(os.path.join(tmpDir, C.PARAMS_NAME % n), "w").close()
-        sockeye.training.cleanup_params_files(tmpDir, 5, 40, 17)
+        sockeye.utils.cleanup_params_files(tmpDir, 5, 40, 17)
 
         expectedSurviving = set([os.path.join(tmpDir, C.PARAMS_NAME % n)
                                  for n in [17, 36, 37, 38, 39, 40]])

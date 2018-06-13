@@ -12,54 +12,64 @@
 # permissions and limitations under the License.
 
 import logging
-from typing import Optional
 
 import mxnet as mx
 import numpy as np
+from typing import Optional, List, Tuple
 
 import sockeye.constants as C
-from sockeye.lexicon import LexiconInitializer
 
 logger = logging.getLogger(__name__)
 
 
-def get_initializer(init_type: str, init_scale: float, rnn_init_type: str,
-                    lexicon: Optional[mx.nd.NDArray] = None) -> mx.initializer.Initializer:
+def get_initializer(default_init_type: str, default_init_scale: float, default_init_xavier_rand_type: str,
+                    default_init_xavier_factor_type: str, embed_init_type: str, embed_init_sigma: float,
+                    rnn_init_type: str, extra_initializers: Optional[List[Tuple[str, mx.initializer.Initializer]]] = None) -> mx.initializer.Initializer:
     """
-    Returns a mixed MXNet initializer given rnn_init_type and optional lexicon.
+    Returns a mixed MXNet initializer.
 
-    :param init_type: The weight initializer type.
-    :param init_scale: The scale used for weight initialization (only used with uniform initialization).
-    :param rnn_init_type: Initialization type.
-    :param lexicon: Optional lexicon.
+    :param default_init_type: The default weight initializer type.
+    :param default_init_scale: The scale used for default weight initialization (only used with uniform initialization).
+    :param default_init_xavier_rand_type: Xavier random number generator type.
+    :param default_init_xavier_factor_type: Xavier factor type.
+    :param embed_init_type: Embedding matrix initialization type.
+    :param embed_init_sigma: Sigma for normal initialization of embedding matrix.
+    :param rnn_init_type: Initialization type for RNN h2h matrices.
+    :param extra_initializers: Optional initializers provided from other sources.
     :return: Mixed initializer.
     """
+    # default initializer
+    if default_init_type == C.INIT_XAVIER:
+        default_init = [(C.DEFAULT_INIT_PATTERN,
+                         mx.init.Xavier(rnd_type=default_init_xavier_rand_type,
+                                        factor_type=default_init_xavier_factor_type,
+                                        magnitude=default_init_scale))]
+    elif default_init_type == C.INIT_UNIFORM:
+        default_init = [(C.DEFAULT_INIT_PATTERN, mx.init.Uniform(scale=default_init_scale))]
+    else:
+        raise ValueError("Unknown default initializer %s." % default_init_type)
 
+    # embedding initializer
+    if embed_init_type == C.EMBED_INIT_NORMAL:
+        embed_init = [(C.EMBED_INIT_PATTERN, mx.init.Normal(sigma=embed_init_sigma))]
+    elif embed_init_type == C.EMBED_INIT_DEFAULT:
+        embed_init = []
+    else:
+        raise ValueError('Unknown embedding initializer: %s' % embed_init_type)
+
+    # rnn initializer
     if rnn_init_type == C.RNN_INIT_ORTHOGONAL:
-        logger.info("Orthogonal RNN initializer")
-        h2h_init = [(".*h2h.*", mx.initializer.Orthogonal())]
+        rnn_init = [(C.RNN_INIT_PATTERN, mx.initializer.Orthogonal())]
     elif rnn_init_type == C.RNN_INIT_ORTHOGONAL_STACKED:
-        logger.info("Stacked orthogonal RNN initializer")
-        h2h_init = [(".*h2h.*", StackedOrthogonalInit(scale=1.0, rand_type="eye"))]
+        rnn_init = [(C.RNN_INIT_PATTERN, StackedOrthogonalInit(scale=1.0, rand_type="eye"))]
     elif rnn_init_type == C.RNN_INIT_DEFAULT:
-        # do not use a special initializer for RNN weights (but rather just use the default)
-        h2h_init = []
+        rnn_init = []
     else:
-        raise ValueError('unknown rnn initialization type: %s' % rnn_init_type)
+        raise ValueError('Unknown RNN initializer: %s' % rnn_init_type)
 
-    lexicon_init = LexiconInitializer(lexicon) if lexicon is not None else None
-
-    if init_type == C.INIT_XAVIER:
-        default_init = mx.init.Xavier(factor_type="in", magnitude=2.34)
-    elif init_type == C.INIT_UNIFORM:
-        default_init = mx.init.Uniform(scale=init_scale)
-    else:
-        raise ValueError("Unknown initializer type %s." % init_type)
-
-    params_init_pairs = h2h_init + [
-        (C.LEXICON_NAME, lexicon_init),
-        (".*", default_init)
-    ]
+    params_init_pairs = embed_init + rnn_init + default_init
+    if extra_initializers is not None:
+        params_init_pairs = extra_initializers + params_init_pairs
     return mx.initializer.Mixed(*zip(*params_init_pairs))
 
 

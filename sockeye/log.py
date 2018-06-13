@@ -13,8 +13,8 @@
 
 import logging
 import logging.config
+import sys
 from typing import Optional
-
 
 FORMATTERS = {
     'verbose': {
@@ -97,6 +97,11 @@ LOGGING_CONFIGS = {
 }
 
 
+def is_python34() -> bool:
+    version = sys.version_info
+    return version[0] == 3 and version[1] == 4
+
+
 def setup_main_logger(name: str, file_logging=True, console=True, path: Optional[str] = None) -> logging.Logger:
     """
     Return a logger that configures logging for the main application.
@@ -114,10 +119,23 @@ def setup_main_logger(name: str, file_logging=True, console=True, path: Optional
         log_config = LOGGING_CONFIGS["console_only"]
 
     if path:
-        log_config["handlers"]["rotating"]["filename"] = path
+        log_config["handlers"]["rotating"]["filename"] = path  # type: ignore
 
     logging.config.dictConfig(log_config)
-    return logging.getLogger(name)
+    logger = logging.getLogger(name)
+
+    def exception_hook(exc_type, exc_value, exc_traceback):
+        if is_python34():
+            # Python3.4 does not seem to handle logger.exception() well
+            import traceback
+            traceback = "".join(traceback.format_tb(exc_traceback)) + exc_type.name
+            logger.error("Uncaught exception\n%s", traceback)
+        else:
+            logger.exception("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+    sys.excepthook = exception_hook
+
+    return logger
 
 
 def log_sockeye_version(logger):
@@ -127,3 +145,8 @@ def log_sockeye_version(logger):
     except ImportError:
         git_hash = "unknown"
     logger.info("Sockeye version %s commit %s", __version__, git_hash)
+
+
+def log_mxnet_version(logger):
+    from mxnet import __version__
+    logger.info("MXNet version %s", __version__)

@@ -21,7 +21,7 @@ works well in practice.
 import argparse
 import itertools
 import os
-from typing import Dict, Iterable
+from typing import Dict, Iterable, List
 
 import mxnet as mx
 
@@ -67,15 +67,14 @@ def average(param_paths: Iterable[str]) -> Dict[str, mx.nd.NDArray]:
     return avg_params
 
 
-def find_checkpoints(model_path: str, size=4, strategy="best", metric: str = C.PERPLEXITY) -> Iterable[str]:
+def find_checkpoints(model_path: str, size=4, strategy="best", metric: str = C.PERPLEXITY) -> List[str]:
     """
     Finds N best points from .metrics file according to strategy.
 
-    :param metric: Metric according to which checkpoints are selected.  Corresponds to columns in model/metrics file.
     :param model_path: Path to model.
     :param size: Number of checkpoints to combine.
     :param strategy: Combination strategy.
-    :param maximize: Whether the value of the metric should be maximized.
+    :param metric: Metric according to which checkpoints are selected.  Corresponds to columns in model/metrics file.
     :return: List of paths corresponding to chosen checkpoints.
     """
     maximize = C.METRIC_MAXIMIZE[metric]
@@ -149,10 +148,14 @@ def main():
     """
     Commandline interface to average parameters.
     """
-    log_sockeye_version(logger)
     params = argparse.ArgumentParser(description="Averages parameters from multiple models.")
     arguments.add_average_args(params)
     args = params.parse_args()
+    average_parameters(args)
+
+
+def average_parameters(args: argparse.Namespace):
+    log_sockeye_version(logger)
 
     if len(args.inputs) > 1:
         avg_params = average(args.inputs)
