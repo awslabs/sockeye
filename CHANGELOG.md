@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.23]
+### Fixed
+- Correctly create the convolutional embedding layers when the encoder is set to `transformer-with-conv-embed`. Previously
+no convolutional layers were added so that a standard Transformer model was trained instead.
+
 ## [1.18.22]
 ### Fixed
 - Make sure the default bucket is large enough with word based batching when the source is longer than the target (Previously
