@@ -29,9 +29,9 @@ class AvoidTrie:
     Represents a set of phrasal constraints for an input sentence.
     These are organized into a trie.
     """
-    def __init__(self, raw_phrases: Optional[RawConstraintList] = None):
-        self.final_ids = set()
-        self.children = {}
+    def __init__(self, raw_phrases: Optional[RawConstraintList] = None) -> None:
+        self.final_ids = set()  # type: Set[int]
+        self.children = {}      # type: Dict[int,'AvoidTrie']
 
         if raw_phrases:
             for phrase in raw_phrases:
@@ -76,7 +76,7 @@ class AvoidState:
         self.root = avoid_trie
         self.state = state if state else self.root
 
-    def consume(self, word_id: int) -> None:
+    def consume(self, word_id: int) -> 'AvoidState':
         """
         Consumes a word, and updates the state based on it. Returns new objects on a state change.
 
@@ -117,7 +117,7 @@ class AvoidBatch:
                  avoid_list: List[RawConstraintList],
                  beam_size: int,
                  max_id: int) -> None:
-        self.avoid_states = []
+        self.avoid_states = []  # type: List[AvoidState]
         for raw_phrases in avoid_list:
             self.avoid_states += [AvoidState(AvoidTrie(raw_phrases))] * beam_size
         self.offset = max_id
