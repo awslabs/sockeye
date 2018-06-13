@@ -644,8 +644,9 @@ class MlpAttention(Attention):
         # input (coverage) to hidden
         self.att_c2h_weight = None
         # layer normalization
-        self._ln = layers.LayerNormalization(num_hidden=num_hidden,
-                                             prefix="%snorm" % self.prefix) if layer_normalization else None
+        self._ln = None
+        if layer_normalization:
+            self._ln = layers.LayerNormalization(prefix="%snorm" % self.prefix)
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """
@@ -709,7 +710,7 @@ class MlpAttention(Attention):
                                                     name="%squery_plus_input" % self.prefix)
 
             if self._ln is not None:
-                attention_hidden = self._ln.normalize(attention_hidden)
+                attention_hidden = self._ln(data=attention_hidden)
 
             # (batch_size, seq_len, attention_num_hidden)
             attention_hidden = mx.sym.Activation(attention_hidden, act_type="tanh",
@@ -792,7 +793,7 @@ def get_context_and_attention_probs(values: mx.sym.Symbol,
                                  axis=1,
                                  use_sequence_length=True,
                                  sequence_length=length,
-                                 value=np.finfo(dtype).min)
+                                 value=-C.LARGE_VALUES[dtype])
 
     # (batch_size, seq_len, 1)
     probs = mx.sym.softmax(logits, axis=1, name='attention_softmax')

@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -13,7 +13,9 @@
 
 import argparse
 import pytest
+import tempfile
 import os
+import yaml
 
 import sockeye.arguments as arguments
 import sockeye.constants as C
@@ -34,7 +36,8 @@ from itertools import zip_longest
           validation_source_factors=[],
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1, 1),
-          no_bucketing=False, bucket_width=10, max_seq_len=(100, 100), use_pointer_nets=False,
+          no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
+          use_pointer_nets=False,
           monitor_pattern=None, monitor_stat_func='mx_default')),
 
     # short parameters
@@ -48,7 +51,7 @@ from itertools import zip_longest
           validation_source_factors=[],
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1, 1),
-          no_bucketing=False, bucket_width=10, max_seq_len=(100, 100), use_pointer_nets=False,
+          no_bucketing=False, bucket_width=10, max_seq_len=(99, 99), use_pointer_nets=False,
           monitor_pattern=None, monitor_stat_func='mx_default'))
 ])
 def test_io_args(test_params, expected_params):
@@ -74,7 +77,7 @@ def test_device_args(test_params, expected_params):
 @pytest.mark.parametrize("test_params, expected_params", [
     ('', dict(params=None,
               allow_missing_params=False,
-              num_layers=(1, 1),
+              num_layers=(6, 6),
               num_embed=(512, 512),
               source_factors_num_embed=[],
               rnn_attention_type='mlp',
@@ -85,13 +88,13 @@ def test_device_args(test_params, expected_params):
               weight_tying=False,
               weight_tying_type="trg_softmax",
               rnn_attention_mhdot_heads=None,
-              transformer_attention_heads=8,
-              transformer_feed_forward_num_hidden=2048,
+              transformer_attention_heads=(8, 8),
+              transformer_feed_forward_num_hidden=(2048, 2048),
               transformer_activation_type=C.RELU,
-              transformer_model_size=512,
+              transformer_model_size=(512, 512),
               transformer_positional_embedding_type="fixed",
-              transformer_preprocess=('', ''),
-              transformer_postprocess=('drn', 'drn'),
+              transformer_preprocess=('n', 'n'),
+              transformer_postprocess=('dr', 'dr'),
               rnn_attention_use_prev_word=False,
               rnn_decoder_state_init="last",
               rnn_encoder_reverse_input=False,
@@ -101,16 +104,16 @@ def test_device_args(test_params, expected_params):
               rnn_residual_connections=False,
               rnn_first_residual_layer=2,
               cnn_activation_type='glu',
-              cnn_kernel_width=(3, 5),
+              cnn_kernel_width=(3, 3),
               cnn_num_hidden=512,
               cnn_positional_embedding_type="learned",
               cnn_project_qkv=False,
               layer_normalization=False,
               weight_normalization=False,
               lhuc=None,
-              encoder=C.RNN_NAME,
+              encoder=C.TRANSFORMER_TYPE,
               conv_embed_max_filter_width=8,
-              decoder=C.RNN_NAME,
+              decoder=C.TRANSFORMER_TYPE,
               conv_embed_output_dim=None,
               conv_embed_num_filters=(200, 200, 250, 250, 300, 300, 300, 300),
               conv_embed_num_highway_layers=4,
@@ -123,20 +126,20 @@ def test_model_parameters(test_params, expected_params):
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('', dict(batch_size=64,
-              batch_type="sentence",
+    ('', dict(batch_size=4096,
+              batch_type="word",
               fill_up='replicate',
               loss=C.CROSS_ENTROPY,
-              label_smoothing=0.0,
+              label_smoothing=0.1,
               loss_normalization_type='valid',
               metrics=[C.PERPLEXITY],
               optimized_metric=C.PERPLEXITY,
-              checkpoint_frequency=1000,
-              max_num_checkpoint_not_improved=8,
+              checkpoint_frequency=4000,
+              max_num_checkpoint_not_improved=32,
               embed_dropout=(.0, .0),
-              transformer_dropout_attention=0.0,
-              transformer_dropout_act=0.0,
-              transformer_dropout_prepost=0.0,
+              transformer_dropout_attention=0.1,
+              transformer_dropout_act=0.1,
+              transformer_dropout_prepost=0.1,
               conv_embed_dropout=0.0,
               optimizer='adam',
               optimizer_params=None,
@@ -149,37 +152,38 @@ def test_model_parameters(test_params, expected_params):
               max_updates=None,
               min_num_epochs=None,
               max_num_epochs=None,
-              initial_learning_rate=0.0003,
+              initial_learning_rate=0.0002,
               weight_decay=0.0,
               momentum=None,
               gradient_clipping_threshold=1.0,
-              gradient_clipping_type='abs',
+              gradient_clipping_type='none',
               learning_rate_scheduler_type='plateau-reduce',
-              learning_rate_reduce_factor=0.5,
-              learning_rate_reduce_num_not_improved=3,
+              learning_rate_reduce_factor=0.7,
+              learning_rate_reduce_num_not_improved=8,
               learning_rate_half_life=10,
               learning_rate_warmup=0,
               learning_rate_schedule=None,
               learning_rate_decay_param_reset=False,
               learning_rate_decay_optimizer_states_reset='off',
               weight_init='xavier',
-              weight_init_scale=2.34,
+              weight_init_scale=3.0,
               weight_init_xavier_rand_type='uniform',
-              weight_init_xavier_factor_type='in',
+              weight_init_xavier_factor_type='avg',
               embed_weight_init='default',
               rnn_dropout_inputs=(.0, .0),
               rnn_dropout_states=(.0, .0),
               rnn_dropout_recurrent=(.0, .0),
-              rnn_decoder_hidden_dropout=.0,
-              cnn_hidden_dropout=0.0,
+              rnn_decoder_hidden_dropout=.2,
+              cnn_hidden_dropout=0.2,
               rnn_forget_bias=0.0,
               fixed_param_names=[],
               rnn_h2h_init=C.RNN_INIT_ORTHOGONAL,
-              decode_and_evaluate=0,
+              decode_and_evaluate=500,
               decode_and_evaluate_use_cpu=False,
               decode_and_evaluate_device_id=None,
               seed=13,
               keep_last_params=-1,
+              rnn_enc_last_hidden_concat_to_embedding=False,
               dry_run=False)),
 ])
 def test_training_arg(test_params, expected_params):
@@ -209,7 +213,8 @@ def test_training_arg(test_params, expected_params):
                       beam_search_stop='all',
                       length_penalty_alpha=1.0,
                       length_penalty_beta=0.0,
-                      strip_unknown_words=False)),
+                      strip_unknown_words=False,
+                      override_dtype=None)),
 ])
 def test_inference_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_inference_args)
@@ -241,15 +246,16 @@ def test_inference_args(test_params, expected_params):
           max_num_checkpoint_not_improved=3,
           output="seqcopy_model",
           # The tutorial text mentions that we train a RNN model:
-          encoder="rnn",
-          decoder="rnn"),
+          encoder=C.TRANSFORMER_TYPE,
+          decoder=C.TRANSFORMER_TYPE),
      # Additionally we mention the checkpoint_frequency
      ['checkpoint_frequency']),
     # WMT tutorial
-    ('-s corpus.tc.BPE.de '
-     '-t corpus.tc.BPE.en '
+    ('-d train_data '
      '-vs newstest2016.tc.BPE.de '
      '-vt newstest2016.tc.BPE.en '
+     '--encoder rnn '
+     '--decoder rnn '
      '--num-embed 256 '
      '--rnn-num-hidden 512 '
      '--rnn-attention-type dot '
@@ -258,8 +264,9 @@ def test_inference_args(test_params, expected_params):
      '--use-cpu '
      '-o wmt_mode',
      dict(
-         source="corpus.tc.BPE.de",
-         target="corpus.tc.BPE.en",
+         source=None,
+         target=None,
+         prepared_data="train_data",
          validation_source="newstest2016.tc.BPE.de",
          validation_target="newstest2016.tc.BPE.en",
          num_embed=(256, 256),
@@ -270,8 +277,8 @@ def test_inference_args(test_params, expected_params):
          use_cpu=True,
          # Arguments mentioned in the text, should be renamed in the tutorial if they change:
          rnn_cell_type="lstm",
-         encoder="rnn",
-         decoder="rnn",
+         encoder=C.RNN_NAME,
+         decoder=C.RNN_NAME,
          optimizer="adam"),
      ["num_layers",
       "rnn_residual_connections",
@@ -320,6 +327,30 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
+    # WMT tutorial
+    ('--source corpus.tc.BPE.de --target corpus.tc.BPE.en --output train_data ',
+     dict(source='corpus.tc.BPE.de', target='corpus.tc.BPE.en',
+          source_vocab=None,
+          target_vocab=None,
+          source_factors=[],
+          shared_vocab=False,
+          num_words=(50000, 50000),
+          word_min_count=(1, 1),
+          no_bucketing=False,
+          bucket_width=10,
+          max_seq_len=(99, 99),
+          min_num_shards=1,
+          num_samples_per_shard=1000000,
+          seed=13,
+          output='train_data',
+          use_pointer_nets=False
+          ))
+])
+def test_tutorial_prepare_data_cli_args(test_params, expected_params):
+    _test_args(test_params, expected_params, arguments.add_prepare_data_cli_args)
+
+
+@pytest.mark.parametrize("test_params, expected_params", [
     ('--source test_src --target test_tgt --output prepared_data ',
      dict(source='test_src', target='test_tgt',
           source_vocab=None,
@@ -330,7 +361,7 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           word_min_count=(1, 1),
           no_bucketing=False,
           bucket_width=10,
-          max_seq_len=(100, 100),
+          max_seq_len=(99, 99),
           min_num_shards=1,
           num_samples_per_shard=1000000,
           seed=13,
@@ -354,8 +385,10 @@ def _create_argument_values_that_must_be_files_or_dirs(params):
 
     params = params.split()
     regular_files_params = {'-vs', '-vt', '-t', '-s', '--source', '--target',
-                            '--validation-source', '--validation-target'}
-    folder_params = {'--prepared-data', '-d'}
+                            '--validation-source', '--validation-target',
+                            '--input', '-i'}
+    folder_params = {'--prepared-data', '-d', '--image-root', '-ir',
+                     '--validation-source-root', '-vsr', '--source-root', '-sr'}
     to_unlink = set()
     for arg, val in grouper(params, 2):
         if arg in regular_files_params and not os.path.isfile(val):
@@ -407,3 +440,63 @@ def _test_args_subset(test_params, expected_params, expected_params_present, arg
     assert parsed_params_subset == expected_params
     for expected_param_present in expected_params_present:
         assert expected_param_present in parsed_params, "Expected param %s to be present." % expected_param_present
+
+
+# Test that config file and command line are equivalent
+@pytest.mark.parametrize("plain_command_line, config_command_line, config_contents", [
+    ("-a 1 -b 2 -C 3 -D 4 -e 5", "", dict(a=1, b=2, C=3, D=4, e=5)),
+    ("-a 1 -b 2 -C 3 -D 4 -e 5", "-a 1 -b 2 -e 5", dict(C=3, D=4)),
+    ("-C 3 -D 4", "-C 3 -D 4", {}),
+    ("-C 3 -D 4", "-C 3", dict(D=4)),
+    ("-a 1 -C 3 -D 4", "", dict(a=1, C=3, D=4)),
+    ("-a 1 -b 2 -C 3 -D 4 -e 5", "-a 1 -b 2 -C 3", dict(a=10, b=20, C=30, D=4, e=5))
+])
+def test_config_file(plain_command_line, config_command_line, config_contents):
+    config_file_argparse = arguments.ConfigArgumentParser()
+    # Capital letter arguments are required
+    config_file_argparse.add_argument("-a", type=int)
+    config_file_argparse.add_argument("-b", type=int)
+    config_file_argparse.add_argument("-C", type=int, required=True)
+    config_file_argparse.add_argument("-D", type=int, required=True)
+    config_file_argparse.add_argument("-e", type=int)
+
+    # The option '--config <file>' will be added automaticall to config_command_line
+    with tempfile.NamedTemporaryFile("w") as fp:
+        arguments.save_args(argparse.Namespace(**config_contents), fp.name)
+        fp.flush()
+
+        # Parse args and cast to dicts directly
+        args_command_line = vars(config_file_argparse.parse_args(args=plain_command_line.split()))
+        args_config = vars(config_file_argparse.parse_args(
+            args=(config_command_line + (" --config %s" % fp.name)).split()))
+
+        # Remove the config entry
+        del args_command_line["config"]
+        del args_config["config"]
+
+        assert args_command_line == args_config
+
+
+# Test that required options are still required if not specified in the config file
+@pytest.mark.parametrize("config_command_line, config_contents", [
+    ("", dict(a=1, b=2, C=3, e=5)),
+    ("-C 3", dict(a=1))
+])
+def test_config_file_required(config_command_line, config_contents):
+    config_file_argparse = arguments.ConfigArgumentParser()
+    # Capital letter arguments are required
+    config_file_argparse.add_argument("-a", type=int)
+    config_file_argparse.add_argument("-b", type=int)
+    config_file_argparse.add_argument("-C", type=int, required=True)
+    config_file_argparse.add_argument("-D", type=int, required=True)
+    config_file_argparse.add_argument("-e", type=int)
+
+    # The option '--config <file>' will be added automaticall to config_command_line
+    with pytest.raises(SystemExit): # argparse does not have finer regularity exceptions
+        with tempfile.NamedTemporaryFile("w") as fp:
+            arguments.save_args(argparse.Namespace(**config_contents), fp.name)
+            fp.flush()
+
+            # Parse args and cast to dicts directly
+            config_file_argparse.parse_args(
+                args=(config_command_line + (" --config %s" % fp.name)).split())

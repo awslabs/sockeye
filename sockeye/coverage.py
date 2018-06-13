@@ -227,8 +227,7 @@ class ActivationCoverage(Coverage):
         # optional layer normalization
         self.layer_norm = None
         if layer_normalization and not self.num_hidden != 1:
-            self.layer_norm = layers.LayerNormalization(self.num_hidden,
-                                                        prefix="%snorm" % self.prefix) if layer_normalization else None
+            self.layer_norm = layers.LayerNormalization(prefix="%snorm" % self.prefix)
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """
@@ -293,7 +292,7 @@ class ActivationCoverage(Coverage):
             updated_coverage = intermediate + attention_hidden + coverage_hidden
 
             if self.layer_norm is not None:
-                updated_coverage = self.layer_norm.normalize(updated_coverage)
+                updated_coverage = self.layer_norm(data=updated_coverage)
 
             # (batch_size, seq_len, coverage_num_hidden)
             coverage = mx.sym.Activation(data=updated_coverage,
