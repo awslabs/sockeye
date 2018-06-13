@@ -37,6 +37,13 @@ class AvoidTrie:
             for phrase in raw_phrases:
                 self.add_phrase(phrase)
 
+    def __str__(self):
+        s = '({}'.format(list(self.final_ids))
+        for child_id in self.children.keys():
+            s += ' -> {} {}'.format(child_id, self.children[child_id])
+        s += ')'
+        return s
+
     def add_phrase(self,
                    phrase: List[int]) -> None:
         if len(phrase) == 1:
@@ -89,6 +96,9 @@ class AvoidState:
         :return: A set of integers representing words that must not be generated next by this hypothesis.
         """
         return self.state.final()
+
+    def __str__(self):
+        return str(self.state)
 
 
 class AvoidBatch:
