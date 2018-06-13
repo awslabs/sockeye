@@ -14,7 +14,7 @@
 import copy
 import logging
 from operator import attrgetter
-from typing import List, Optional, Tuple, Set
+from typing import List, Optional, Tuple, Set, Dict
 
 import mxnet as mx
 import numpy as np
@@ -49,9 +49,10 @@ class AvoidTrie:
         if len(phrase) == 1:
             self.final_ids.add(phrase[0])
         else:
-            if not phrase[0] in self.children:
-                self.children[phrase[0]] = AvoidTrie()
-            self.children[phrase[0]].add_phrase(phrase[1:])
+            next_word = phrase[0]
+            if not next_word in self.children:
+                self.children[next_word] = AvoidTrie()
+            self.children[next_word].add_phrase(phrase[1:])
 
     def step(self, word_id: int) -> 'AvoidTrie':
         return self.children.get(word_id, None)
@@ -91,11 +92,12 @@ class AvoidState:
 
     def avoid(self) -> Set[int]:
         """
-        Returns a set of word IDs that should be avoided.
+        Returns a set of word IDs that should be avoided. This includes the set of final states from the
+        root node, which are single tokens that must never be generated.
 
         :return: A set of integers representing words that must not be generated next by this hypothesis.
         """
-        return self.state.final()
+        return self.root.final() | self.state.final()
 
     def __str__(self):
         return str(self.state)
