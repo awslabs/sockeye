@@ -999,6 +999,7 @@ class Translator:
         # offset for hypothesis indices in batch decoding
         self.offset = mx.nd.array(np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size),
                                   dtype='int32', ctx=self.context)
+
         # topk function used in beam search
         self._topk = partial(utils.topk,
                              k=self.beam_size,
@@ -1132,7 +1133,10 @@ class Translator:
             if rest > 0:
                 logger.debug("Extending the last batch to the full batch size (%d)", self.batch_size)
                 batch = batch + [batch[0]] * rest
-            batch_translations = self._translate_nd(*self._get_inference_input(batch))
+            max_output_lengths = []
+            for i in range(len(batch)):
+                max_output_lengths.append(self.models[0].get_max_output_length(len(batch[i])))
+            batch_translations = self._translate_nd(*self._get_inference_input(batch), max_output_lengths)
             # truncate to remove filler translations
             if rest > 0:
                 batch_translations = batch_translations[:-rest]
@@ -1235,7 +1239,8 @@ class Translator:
     def _translate_nd(self,
                       source: mx.nd.NDArray,
                       source_length: int,
-                      raw_constraints: List[Optional[constrained.RawConstraintList]]) -> List[Translation]:
+                      raw_constraints: List[Optional[constrained.RawConstraintList]],
+                      max_output_lengths: List[int]) -> List[Translation]:
         """
         Translates source of source_length, given a bucket_key.
 
@@ -1246,7 +1251,7 @@ class Translator:
         :return: Sequence of translations.
         """
 
-        return self._get_best_from_beam(*self._beam_search(source, source_length, raw_constraints))
+        return self._get_best_from_beam(*self._beam_search(source, source_length, raw_constraints, max_output_lengths))
 
     def _encode(self, sources: mx.nd.NDArray, source_length: int) -> List[ModelState]:
         """
@@ -1320,12 +1325,13 @@ class Translator:
     def _beam_search(self,
                      source: mx.nd.NDArray,
                      source_length: int,
-                     raw_constraint_list: List[Optional[constrained.RawConstraintList]]) -> Tuple[mx.nd.NDArray,
-                                                                                                  mx.nd.NDArray,
-                                                                                                  mx.nd.NDArray,
-                                                                                                  mx.nd.NDArray,
-                                                                                                  List[Optional[constrained.ConstrainedHypothesis]],
-                                                                                                  Optional[List[BeamHistory]]]:
+                     raw_constraint_list: List[Optional[constrained.RawConstraintList]],
+                     max_output_lengths: List[int]) -> Tuple[mx.nd.NDArray,
+                                                      mx.nd.NDArray,
+                                                      mx.nd.NDArray,
+                                                      mx.nd.NDArray,
+                                                      List[Optional[constrained.ConstrainedHypothesis]],
+                                                      Optional[List[BeamHistory]]]:
         """
         Translates multiple sentences using beam search.
 
@@ -1362,6 +1368,8 @@ class Translator:
 
         lengths = mx.nd.ones((self.batch_size * self.beam_size, 1), ctx=self.context)
         finished = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
+        # max output lengths extended to shape (batch_size * beam_size,)
+        max_out_lengths_extended = mx.nd.repeat(mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32'), self.beam_size)
 
         # attentions: (batch_size * beam_size, output_length, encoded_source_length)
         attentions = mx.nd.zeros((self.batch_size * self.beam_size, max_output_length, encoded_source_length),
@@ -1535,6 +1543,7 @@ class Translator:
                 if mx.nd.sum(finished).asscalar() > 0:
                     break
             else:
+                finished = mx.nd.sign(finished + (mx.nd.cast(lengths.reshape(-1), 'int32') > max_out_lengths_extended))
                 if mx.nd.sum(finished).asscalar() == self.batch_size * self.beam_size:  # all finished
                     break
 
