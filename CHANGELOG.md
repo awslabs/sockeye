@@ -12,7 +12,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.24]
 ### Fixed
-- Preserving max output length for each sentence to avoid non-deterministic behavior using batching.
+- Preserving max output length for each sentence to allow having identical translations for both with and without batching. 
 
 ## [1.18.23]
 ### Fixed

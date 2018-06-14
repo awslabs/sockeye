@@ -1164,19 +1164,20 @@ class Translator:
         """
         Assembles the numerical data for the batch.
         This comprises an NDArray for the source sentences, the bucket key (padded source length), and a list of
-        raw constraint lists, one for each sentence in the batch. Each raw constraint list contains phrases in
-        the form of lists of integers in the target language vocabulary.
+        raw constraint lists, one for each sentence in the batch, an NDArray of maximum output lengths for each sentence in the batch.
+        Each raw constraint list contains phrases in the form of lists of integers in the target language vocabulary.
 
         :param trans_inputs: List of TranslatorInputs.
         :return NDArray of source ids (shape=(batch_size, bucket_key, num_factors)),
-                bucket key, list of raw constraint lists.
+                bucket key, list of raw constraint lists,
+                NDArray of maximum output lengths.
         """
 
         bucket_key = data_io.get_bucket(max(len(inp.tokens) for inp in trans_inputs), self.buckets_source)
         source = mx.nd.zeros((len(trans_inputs), bucket_key, self.num_source_factors), ctx=self.context)
         raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
 
-        max_output_lengths = []
+        max_output_lengths = [] # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)
             max_output_lengths.append(self.models[0].get_max_output_length(num_tokens))
@@ -1196,10 +1197,7 @@ class Translator:
                 raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
                                       trans_input.constraints]
 
-        # max output lengths extended to shape (batch_size * beam_size,)
-        max_out_lengths_extended = mx.nd.repeat(mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32'), self.beam_size)
-
-        return source, bucket_key, raw_constraints, max_out_lengths_extended
+        return source, bucket_key, raw_constraints, mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
 
     def _make_result(self,
                      trans_input: TranslatorInput,
@@ -1370,6 +1368,9 @@ class Translator:
 
         lengths = mx.nd.ones((self.batch_size * self.beam_size, 1), ctx=self.context)
         finished = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
+
+        # Extending max_output_lengths to shape (batch_size * beam_size,)
+        max_output_lengths = mx.nd.repeat(max_output_lengths, self.beam_size)
 
         # attentions: (batch_size * beam_size, output_length, encoded_source_length)
         attentions = mx.nd.zeros((self.batch_size * self.beam_size, max_output_length, encoded_source_length),
