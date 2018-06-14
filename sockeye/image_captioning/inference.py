@@ -128,11 +128,8 @@ class ImageCaptioner(Translator):
                 if self.source_root is not None:
                     path = os.path.join(self.source_root, path)
                 paths.append(path)
-            max_output_lengths = []
-            for i in range(len(batch)):
-                max_output_lengths.append(self.models[0].get_max_output_length(len(batch[i])))
-            batch_translations = self._translate_nd(*self._get_inference_input(paths), max_output_lengths)
             # truncate to remove filler translations
+            batch_translations = self._translate_nd(*self._get_inference_input(paths))
             if rest > 0:
                 batch_translations = batch_translations[:-rest]
             translations.extend(batch_translations)
@@ -144,7 +141,7 @@ class ImageCaptioner(Translator):
 
         return results
 
-    def _get_inference_input(self, image_paths: List[str]) -> Tuple[mx.nd.NDArray, int, List[Optional[constrained.RawConstraintList]]]:
+    def _get_inference_input(self, image_paths: List[str]) -> Tuple[mx.nd.NDArray, int, List[Optional[constrained.RawConstraintList]], mx.nd.NDArray]:
         """
         Returns NDArray of images and corresponding bucket_key.
 
@@ -153,8 +150,13 @@ class ImageCaptioner(Translator):
         """
         ## TODO(bazzanil): support constraints
         raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
+        max_output_lengths = []
+        for i in range(len(image_paths)):
+            max_output_lengths.append(self.models[0].get_max_output_length(len(image_paths[i])))
+        # max output lengths extended to shape (batch_size * beam_size,)
+        max_out_lengths_extended = mx.nd.repeat(mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32'), self.beam_size)
         images = self.data_loader(image_paths, self.source_image_size)
-        return mx.nd.array(images), 0, raw_constraints
+        return mx.nd.array(images), 0, raw_constraints, max_out_lengths_extended
 
 
 def load_models(context: mx.context.Context,

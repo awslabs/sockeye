@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.24]
+### Fixed
+- Preserving max output length for each sentence to avoid non-deterministic behavior using batching.
+
 ## [1.18.23]
 ### Fixed
 - Correctly create the convolutional embedding layers when the encoder is set to `transformer-with-conv-embed`. Previously
