@@ -1250,14 +1250,10 @@ class ParallelDataSet(Sized):
         """
         data = mx.nd.load(fname)
 
-        num_components_loaded = 3
-        if use_pointer_nets:
-            num_components_loaded = 4
-
-        n = len(data) // num_components_loaded
+        n = len(data) // 3
         source = data[:n]
         target = data[n:2 * n]
-        label = data[2 * n: 3 * n]
+        label = data[2 * n:]
         assert len(source) == len(target) == len(label)
 
         return ParallelDataSet(source, target, label)
