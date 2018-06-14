@@ -954,6 +954,7 @@ class Translator:
     :param source_vocabs: Source vocabularies.
     :param target_vocab: Target vocabulary.
     :param restrict_lexicon: Top-k lexicon to use for target vocabulary restriction.
+    :param avoid_list: Global list of phrases to exclude from the output.
     :param store_beam: If True, store the beam search history and return it in the TranslatorOutput.
     :param strip_unknown_words: If True, removes any <unk> symbols from outputs.
     """
@@ -969,6 +970,7 @@ class Translator:
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
+                 avoid_list: Optional[str] = None,
                  store_beam: bool = False,
                  strip_unknown_words: bool = False) -> None:
         self.context = context
@@ -1035,15 +1037,22 @@ class Translator:
         self._update_lengths_and_finished.initialize(ctx=self.context)
         self._update_lengths_and_finished.hybridize()
 
+        self.global_avoid_trie = None
+        if avoid_list is not None:
+            self.global_avoid_trie = constrained.AvoidTrie()
+            for phrase in data_io.read_content(avoid_list):
+                self.global_avoid_trie.add_phrase(data_io.tokens2ids(phrase, self.vocab_target))
+
         logger.info("Translator (%d model(s) beam_size=%d beam_prune=%s beam_search_stop=%s "
-                    "ensemble_mode=%s batch_size=%d buckets_source=%s)",
+                    "ensemble_mode=%s batch_size=%d buckets_source=%s avoiding=%d)",
                     len(self.models),
                     self.beam_size,
                     'off' if not self.beam_prune else "%.2f" % self.beam_prune,
                     self.beam_search_stop,
                     "None" if len(self.models) == 1 else ensemble_mode,
                     self.batch_size,
-                    self.buckets_source)
+                    self.buckets_source,
+                    0 if self.global_avoid_trie is None else len(self.global_avoid_trie))
 
     @property
     def num_source_factors(self) -> int:
@@ -1437,8 +1446,9 @@ class Translator:
         constraints = constrained.init_batch(raw_constraint_list, self.beam_size, self.start_id,
                                              self.vocab_target[C.EOS_SYMBOL])
 
-        if any(raw_avoid_list):
-            avoid_states = constrained.AvoidBatch(raw_avoid_list, self.beam_size, pad_dist.shape[-1])
+        if self.global_avoid_trie or any(raw_avoid_list):
+            avoid_states = constrained.AvoidBatch(self.batch_size, self.beam_size, max_id=pad_dist.shape[-1],
+                                                  avoid_list=raw_avoid_list, global_avoid_trie=self.global_avoid_trie)
 
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
         # item on the beam for each sentence
@@ -1467,7 +1477,7 @@ class Translator:
                                                 scores_accumulated[:, 0],
                                                 self.inf_array[:, 0])
             scores = mx.nd.where(finished + inactive, pad_dist, scores)
-            if any(raw_avoid_list):
+            if self.global_avoid_trie or any(raw_avoid_list):
                 indices = mx.nd.array(avoid_states.avoid(), ctx=self.context)
                 if any(indices):
                     scores.reshape((self.batch_size * self.beam_size * scores.shape[-1]))[indices] = np.inf
@@ -1533,7 +1543,7 @@ class Translator:
             attentions[:, t, :] = attention_scores
 
             # (7a) update negative constraints
-            if any(raw_avoid_list):
+            if self.global_avoid_trie or any(raw_avoid_list):
                 avoid_states.reorder(best_hyp_indices)
                 avoid_states.consume(best_word_indices)
 

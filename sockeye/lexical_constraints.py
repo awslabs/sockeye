@@ -29,7 +29,8 @@ class AvoidTrie:
     Represents a set of phrasal constraints for an input sentence.
     These are organized into a trie.
     """
-    def __init__(self, raw_phrases: Optional[RawConstraintList] = None) -> None:
+    def __init__(self,
+                 raw_phrases: Optional[RawConstraintList] = None) -> None:
         self.final_ids = set()  # type: Set[int]
         self.children = {}      # type: Dict[int,'AvoidTrie']
 
@@ -44,20 +45,54 @@ class AvoidTrie:
         s += ')'
         return s
 
+    def __len__(self) -> int:
+        """
+        Returns the number of avoid phrases represented in the trie.
+        """
+        phrase_count = len(self.final_ids)
+        for child in self.children.values():
+            phrase_count += len(child)
+        return phrase_count
+
+    def add_trie(self,
+                 trie: 'AvoidTrie',
+                 phrase: Optional[List[int]] = None) -> None:
+        self.final_ids |= trie.final()
+        for child_id, child in trie.children.items():
+            if child_id not in self.children:
+                self.children[child_id] = AvoidTrie()
+            self.children[child_id].add_trie(child)
+
     def add_phrase(self,
                    phrase: List[int]) -> None:
+        """
+        Recursively adds a phrase to this trie node.
+
+        :param phrase: A list of word IDs to add to this trie node.
+        """
         if len(phrase) == 1:
             self.final_ids.add(phrase[0])
         else:
             next_word = phrase[0]
             if not next_word in self.children:
                 self.children[next_word] = AvoidTrie()
-            self.children[next_word].add_phrase(phrase[1:])
+            self.step(next_word).add_phrase(phrase[1:])
 
     def step(self, word_id: int) -> 'AvoidTrie':
+        """
+        Returns the child node along the requested arc.
+
+        :param phrase: A list of word IDs to add to this trie node.
+        :return: The child node along the requested arc, or None if no such arc exists.
+        """
         return self.children.get(word_id, None)
 
     def final(self) -> Set[int]:
+        """
+        Recursively adds a phrase to this trie node.
+
+        :param phrase: A list of word IDs to add to this trie node.
+        """
         return self.final_ids
 
 
@@ -111,17 +146,30 @@ class AvoidBatch:
     The offset is used to return actual positions in the one-dimensionally-resized array that
     get set to infinity.
 
-    :param avoid_list: The list of lists (raw phrasal constraints as IDs, one for each item in the batch).
     :param beam_size: The beam size.
     :param max_id: The maximum ID in the target vocabulary.
+    :param avoid_list: The list of lists (raw phrasal constraints as IDs, one for each item in the batch).
+    :param global_avoid_trie: A translator-level vocabulary of items to avoid.
     """
     def __init__(self,
-                 avoid_list: List[RawConstraintList],
+                 batch_size: int,
                  beam_size: int,
-                 max_id: int) -> None:
-        self.avoid_states = []  # type: List[AvoidState]
-        for raw_phrases in avoid_list:
-            self.avoid_states += [AvoidState(AvoidTrie(raw_phrases))] * beam_size
+                 max_id: int,
+                 avoid_list: Optional[List[RawConstraintList]] = None,
+                 global_avoid_trie: Optional[AvoidTrie] = None) -> None:
+
+        self.global_avoid_states = []  # type: List[AvoidState]
+        self.local_avoid_states = []  # type: List[AvoidState]
+
+        # Store the global trie for each hypothesis
+        if global_avoid_trie:
+            self.global_avoid_states = [AvoidState(global_avoid_trie)] * batch_size * beam_size
+
+        # Store the sentence-level tries for each item in their portions of the beam
+        if avoid_list:
+            for raw_phrases in avoid_list:
+                self.local_avoid_states += [AvoidState(AvoidTrie(raw_phrases))] * beam_size
+
         self.offset = max_id
 
     def reorder(self, indices: mx.nd.array) -> None:
@@ -131,7 +179,11 @@ class AvoidBatch:
 
         :param indices: An mx.nd.array containing indices of hypotheses to select.
         """
-        self.avoid_states = [self.avoid_states[x] for x in indices.asnumpy()]
+        if self.global_avoid_states:
+            self.global_avoid_states = [self.global_avoid_states[x] for x in indices.asnumpy()]
+
+        if self.local_avoid_states:
+            self.local_avoid_states = [self.local_avoid_states[x] for x in indices.asnumpy()]
 
     def consume(self, word_ids: mx.nd.array) -> None:
         """
@@ -141,16 +193,24 @@ class AvoidBatch:
         """
         word_ids = word_ids.asnumpy().tolist()
         for i, word_id in enumerate(word_ids):
-            self.avoid_states[i] = self.avoid_states[i].consume(word_id)
+            if self.global_avoid_states:
+                self.global_avoid_states[i] = self.global_avoid_states[i].consume(word_id)
+            if self.local_avoid_states:
+                self.local_avoid_states[i] = self.local_avoid_states[i].consume(word_id)
 
     def avoid(self) -> List[int]:
         """
         Returns a list of indices in a 1-dimensional reshaping of the scores array that should be set to null.
+        Does this by consulting both the global trie of phrases to avoid and the sentence-specific one.
 
         :return: A list of indices.
         """
         to_avoid = set()
-        for i, state in enumerate(self.avoid_states):
+        for i, state in enumerate(self.global_avoid_states):
+            for word_id in state.avoid():
+                if word_id > 0:
+                    to_avoid.add((self.offset * i) + word_id)
+        for i, state in enumerate(self.local_avoid_states):
             for word_id in state.avoid():
                 if word_id > 0:
                     to_avoid.add((self.offset * i) + word_id)

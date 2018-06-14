@@ -100,6 +100,7 @@ def run_translate(args: argparse.Namespace):
                                           source_vocabs=source_vocabs,
                                           target_vocab=target_vocab,
                                           restrict_lexicon=restrict_lexicon,
+                                          avoid_list=args.avoid_list,
                                           store_beam=store_beam,
                                           strip_unknown_words=args.strip_unknown_words)
         read_and_translate(translator=translator,

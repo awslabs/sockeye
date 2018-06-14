@@ -1146,6 +1146,10 @@ def add_inference_args(params):
                                default=None,
                                help="Specify the number of translations to load for each source word from the lexicon "
                                     "given with --restrict-lexicon. Default: Load all entries from the lexicon.")
+    decode_params.add_argument('--avoid-list',
+                               type=str,
+                               default=None,
+                               help="Specify list of phrases to block from the output. Default: %(default)s.")
     decode_params.add_argument('--strip-unknown-words',
                                action='store_true',
                                default=False,
