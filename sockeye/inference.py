@@ -1544,7 +1544,7 @@ class Translator:
                 if mx.nd.sum(finished).asscalar() > 0:
                     break
             else:
-                finished = mx.nd.sign(finished + (mx.nd.cast(lengths.reshape(-1), 'int32') > max_output_lengths))
+                finished = mx.nd.sign(finished + (mx.nd.cast(lengths.reshape(-1), 'int32') >= max_output_lengths))
                 if mx.nd.sum(finished).asscalar() == self.batch_size * self.beam_size:  # all finished
                     break
 

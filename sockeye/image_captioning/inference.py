@@ -150,12 +150,10 @@ class ImageCaptioner(Translator):
         """
         ## TODO(bazzanil): support constraints
         raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
-        max_output_lengths = [] # type: List[int]
-        for i in range(len(image_paths)):
-            max_output_lengths.append(self.models[0].get_max_output_length(len(image_paths[i])))
         images = self.data_loader(image_paths, self.source_image_size)
-        return mx.nd.array(images), 0, raw_constraints, mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
-
+        max_input_length = 0
+        max_output_lengths = [self.models[0].get_max_output_length(max_input_length)] * len(image_paths)
+        return mx.nd.array(images), max_input_length, raw_constraints, mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
 
 def load_models(context: mx.context.Context,
                 max_input_len: Optional[int],
