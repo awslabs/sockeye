@@ -15,6 +15,9 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 - Make sure the default bucket is large enough with word based batching when the source is longer than the target (Previously
 there was an edge case where the memory usage was sub-optimal with word based batching and longer source than target sentences).
 
+### Added
+- ROUGE score evaluation. It can be used as the stopping criterion for tasks such as summarization.
+
 ## [1.18.21]
 ### Fixed
 - Constrained decoding was missed a crucial cast
@@ -472,4 +475,5 @@ sockeye.evaluate now accepts `bleu` and `chrf` as values for `--metrics`
 ### Changed
  - `--attention-*` CLI params renamed to `--rnn-attention-*`.
  - `--transformer-no-positional-encodings` generalized to `--transformer-positional-embedding-type`.
+
 

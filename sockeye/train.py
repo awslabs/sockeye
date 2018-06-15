@@ -78,7 +78,7 @@ def check_arg_compatibility(args: argparse.Namespace):
 
     :param args: Arguments as returned by argparse.
     """
-    check_condition(args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics,
+    check_condition(args.optimized_metric == C.BLEU or args.optimized_metric == C.ROUGE1 or args.optimized_metric in args.metrics,
                     "Must optimize either BLEU or one of tracked metrics (--metrics)")
 
     if args.encoder == C.TRANSFORMER_TYPE:
