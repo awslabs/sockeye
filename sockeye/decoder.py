@@ -87,7 +87,6 @@ class Decoder(ABC):
 
     @abstractmethod
     def __init__(self, dtype):
-        logger.info('{}.{} dtype: {}'.format(self.__module__, self.__class__.__name__, dtype))
         self.dtype = dtype
 
     @abstractmethod

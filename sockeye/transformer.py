@@ -291,16 +291,14 @@ class VariableLengthBias(mx.operator.CustomOp):
     def forward(self, is_train, req, in_data, out_data, aux):
         # lengths: (batch_size,)
         lengths = in_data[0]
-        dtype = lengths.dtype
-        dtype_str = np.dtype(dtype).name
 
         # (batch_size, max_length)
-        data = mx.nd.zeros((lengths.shape[0], self.max_length), dtype=dtype, ctx=lengths.context)
+        data = mx.nd.zeros((lengths.shape[0], self.max_length), ctx=lengths.context)
         data = mx.nd.SequenceMask(data=data,
                                   use_sequence_length=True,
                                   sequence_length=lengths,
                                   axis=1,
-                                  value=-C.LARGE_VALUES[dtype_str])
+                                  value=C.LARGE_NEGATIVE_VALUE)
         self.assign(out_data[0], req[0], data)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
@@ -325,7 +323,7 @@ class VariableLengthBiasProp(mx.operator.CustomOpProp):
         return in_shape, [(batch_size, self.max_length)], []
 
     def infer_type(self, in_type):
-        return in_type, in_type, []
+        return in_type, [np.float32], []
 
     def create_operator(self, ctx, shapes, dtypes):
         return VariableLengthBias(max_length=self.max_length)
@@ -379,16 +377,16 @@ class AutoRegressiveBias(mx.operator.CustomOp):
     0 0 0 0
     """
 
-    def __init__(self, length: int, dtype:str, ctx: mx.Context) -> None:
+    def __init__(self, length: int, ctx: mx.Context) -> None:
         super().__init__()
-        self.bias = self.get_bias(length, dtype, ctx)
+        self.bias = self.get_bias(length, ctx)
 
     @staticmethod
-    def get_bias(length: int, dtype: str, ctx: mx.Context):
+    def get_bias(length: int, ctx: mx.Context):
         # matrix with lower triangle and main diagonal set to 0, upper triangle set to 1
-        upper_triangle = np.triu(np.ones((length, length), dtype=dtype), k=1)
+        upper_triangle = np.triu(np.ones((length, length)), k=1)
         # (1, length, length)
-        bias = -C.LARGE_VALUES[dtype] * np.reshape(upper_triangle, (1, length, length))
+        bias = C.LARGE_NEGATIVE_VALUE * np.reshape(upper_triangle, (1, length, length))
         return mx.nd.array(bias, ctx=ctx)
 
     def forward(self, is_train, req, in_data, out_data, aux):
@@ -401,10 +399,9 @@ class AutoRegressiveBias(mx.operator.CustomOp):
 @mx.operator.register("auto_regressive_bias")
 class AutoRegressiveBiasProp(mx.operator.CustomOpProp):
 
-    def __init__(self, length: str, dtype: str = C.DTYPE_FP32) -> None:
+    def __init__(self, length: str) -> None:
         super().__init__()
         self.length = int(length)
-        self.dtype = dtype
 
     def list_arguments(self):
         return []
@@ -416,7 +413,7 @@ class AutoRegressiveBiasProp(mx.operator.CustomOpProp):
         return [], [(1, self.length, self.length)], []
 
     def infer_type(self, in_type):
-        return [], [np.dtype(self.dtype).type], []
+        return [], [np.float32], []
 
     def create_operator(self, ctx, shapes, dtypes):
-        return AutoRegressiveBias(length=self.length, dtype=self.dtype, ctx=ctx)
+        return AutoRegressiveBias(length=self.length, ctx=ctx)

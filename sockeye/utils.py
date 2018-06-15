@@ -826,31 +826,3 @@ def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, 
             param_fname_n = params_name_with_dir % n
             if param_fname_n in existing_files:
                 os.remove(param_fname_n)
-
-
-def cast_conditionally(data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
-    """
-    Workaround until no-op cast will be fixed in MXNet codebase.
-    Creates cast symbol only if dtype is different from default one, i.e. float32.
-
-    :param data: Input symbol.
-    :param dtype: Target dtype.
-    :return: Cast symbol or just data symbol.
-    """
-    if dtype != C.DTYPE_FP32:
-        return mx.sym.cast(data=data, dtype=dtype)
-    return data
-
-
-def uncast_conditionally(data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
-    """
-    Workaround until no-op cast will be fixed in MXNet codebase.
-    Creates cast to float32 symbol only if dtype is different from default one, i.e. float32.
-
-    :param data: Input symbol.
-    :param dtype: Input symbol dtype.
-    :return: Cast symbol or just data symbol.
-    """
-    if dtype != C.DTYPE_FP32:
-        return mx.sym.cast(data=data, dtype=C.DTYPE_FP32)
-    return data

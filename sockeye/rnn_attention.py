@@ -791,7 +791,7 @@ def get_context_and_attention_probs(values: mx.sym.Symbol,
                                  axis=1,
                                  use_sequence_length=True,
                                  sequence_length=length,
-                                 value=-C.LARGE_VALUES[dtype])
+                                 value=np.finfo(dtype).min)
 
     # (batch_size, seq_len, 1)
     probs = mx.sym.softmax(logits, axis=1, name='attention_softmax')
