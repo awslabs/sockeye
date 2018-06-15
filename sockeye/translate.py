@@ -36,9 +36,13 @@ logger = setup_main_logger(__name__, file_logging=False)
 
 
 def main():
-    params = argparse.ArgumentParser(description='Translate CLI')
+    params = arguments.ConfigArgumentParser(description='Translate CLI')
     arguments.add_translate_cli_args(params)
     args = params.parse_args()
+    run_translate(args)
+
+
+def run_translate(args: argparse.Namespace):
 
     if args.output is not None:
         global logger
@@ -95,63 +99,66 @@ def main():
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
-                           inp=args.input,
-                           inp_factors=args.input_factors,
-                           json_input=args.json_input)
+                           input_file=args.input,
+                           input_factors=args.input_factors,
+                           input_is_json=args.json_input)
 
 
-def make_inputs(inp: Optional[str],
+def make_inputs(input_file: Optional[str],
                 translator: inference.Translator,
-                json_input: bool,
-                inp_factors: Optional[List[str]] = None) -> Generator[inference.TranslatorInput, None, None]:
+                input_is_json: bool,
+                input_factors: Optional[List[str]] = None) -> Generator[inference.TranslatorInput, None, None]:
     """
     Generates TranslatorInput instances from input. If input is None, reads from stdin. If num_input_factors > 1,
     the function will look for factors attached to each token, separated by '|'.
     If source is not None, reads from the source file. If num_source_factors > 1, num_source_factors source factor
     filenames are required.
 
-    :param inp: The source file (possibly None).
+    :param input_file: The source file (possibly None).
     :param translator: Translator that will translate each line of input.
-    :param json_input: Whether the input is in json format.
-    :param inp_factors: Source factor files.
+    :param input_is_json: Whether the input is in json format.
+    :param input_factors: Source factor files.
     :return: TranslatorInput objects.
     """
-    if inp is None:
-        check_condition(inp_factors is None, "Translating from STDIN, not expecting any factor files.")
+    if input_file is None:
+        check_condition(input_factors is None, "Translating from STDIN, not expecting any factor files.")
         for sentence_id, line in enumerate(sys.stdin, 1):
-            if json_input:
+            if input_is_json:
                 yield inference.make_input_from_json_string(sentence_id=sentence_id, json_string=line)
             else:
                 yield inference.make_input_from_factored_string(sentence_id=sentence_id,
                                                                 factored_string=line,
                                                                 translator=translator)
     else:
-        inp_factors = [] if inp_factors is None else inp_factors
-        inputs = [inp] + inp_factors
+        input_factors = [] if input_factors is None else input_factors
+        inputs = [input_file] + input_factors
         check_condition(translator.num_source_factors == len(inputs),
                         "Model(s) require %d factors, but %d given (through --input and --input-factors)." % (
                             translator.num_source_factors, len(inputs)))
         with ExitStack() as exit_stack:
             streams = [exit_stack.enter_context(data_io.smart_open(i)) for i in inputs]
             for sentence_id, inputs in enumerate(zip(*streams), 1):
-                yield inference.make_input_from_multiple_strings(sentence_id=sentence_id, strings=list(inputs))
+                if input_is_json:
+                    yield inference.make_input_from_json_string(sentence_id=sentence_id, json_string=inputs[0])
+                else:
+                    yield inference.make_input_from_multiple_strings(sentence_id=sentence_id, strings=list(inputs))
 
 
 def read_and_translate(translator: inference.Translator,
                        output_handler: OutputHandler,
                        chunk_size: Optional[int],
-                       inp: Optional[str] = None,
-                       inp_factors: Optional[List[str]] = None,
-                       json_input: bool = False) -> None:
+                       input_file: Optional[str] = None,
+                       input_factors: Optional[List[str]] = None,
+                       input_is_json: bool = False) -> None:
     """
     Reads from either a file or stdin and translates each line, calling the output_handler with the result.
 
     :param output_handler: Handler that will write output to a stream.
     :param translator: Translator that will translate each line of input.
     :param chunk_size: The size of the portion to read at a time from the input.
-    :param inp: Optional path to file which will be translated line-by-line if included, if none use stdin.
-    :param inp_factors: Optional list of paths to files that contain source factors.
-    :param json_input: Whether the input is in json format.
+    :param input_file: Optional path to file which will be translated line-by-line if included, if none use stdin.
+    :param input_factors: Optional list of paths to files that contain source factors.
+    :param input_is_json: Whether the input is in json format.
     """
     batch_size = translator.batch_size
     if chunk_size is None:
@@ -170,7 +177,7 @@ def read_and_translate(translator: inference.Translator,
     logger.info("Translating...")
 
     total_time, total_lines = 0.0, 0
-    for chunk in grouper(make_inputs(inp, translator, json_input, inp_factors), size=chunk_size):
+    for chunk in grouper(make_inputs(input_file, translator, input_is_json, input_factors), size=chunk_size):
         chunk_time = translate(output_handler, chunk, translator)
         total_lines += len(chunk)
         total_time += chunk_time
@@ -183,7 +190,8 @@ def read_and_translate(translator: inference.Translator,
         logger.info("Processed 0 lines.")
 
 
-def translate(output_handler: OutputHandler, trans_inputs: List[inference.TranslatorInput],
+def translate(output_handler: OutputHandler,
+              trans_inputs: List[inference.TranslatorInput],
               translator: inference.Translator) -> float:
     """
     Translates each line from source_data, calling output handler after translating a batch.

@@ -254,8 +254,8 @@ class OnlineMeanAndVariance:
 def topk(scores: mx.nd.NDArray,
          k: int,
          batch_size: int,
-         offset: np.ndarray,
-         use_mxnet_topk: bool) -> Tuple[np.ndarray, np.ndarray, Union[np.ndarray, mx.nd.NDArray]]:
+         offset: mx.nd.NDArray,
+         use_mxnet_topk: bool) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
     """
     Get the lowest k elements per sentence from a `scores` matrix.
 
@@ -272,20 +272,26 @@ def topk(scores: mx.nd.NDArray,
     if use_mxnet_topk:
         # pylint: disable=unbalanced-tuple-unpacking
         values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
-        best_hyp_indices, best_word_indices = np.unravel_index(indices.astype(np.int32).asnumpy().ravel(), scores.shape)
-        values = values.reshape((-1,))
+        best_hyp_indices, best_word_indices = mx.nd.array(np.unravel_index(indices.astype(np.int32).asnumpy().ravel(),
+                                                                           scores.shape),
+                                                          dtype='int32',
+                                                          ctx=scores.context)
+
     else:
         folded_scores = folded_scores.asnumpy()
         # Get the scores
         # Indexes into folded_scores: (batch_size, beam_size)
         flat_idxs = np.argpartition(folded_scores, range(k))[:, :k]
         # Score values: (batch_size, beam_size)
-        values = folded_scores[np.arange(folded_scores.shape[0])[:, None], flat_idxs].ravel()
-        best_hyp_indices, best_word_indices = np.unravel_index(flat_idxs.ravel(), scores.shape)
+        values = mx.nd.array(folded_scores[np.arange(folded_scores.shape[0])[:, None], flat_idxs], ctx=scores.context)
+        best_hyp_indices, best_word_indices = mx.nd.array(np.unravel_index(flat_idxs.ravel(), scores.shape),
+                                                          dtype='int32', ctx=scores.context)
 
     if batch_size > 1:
         # Offsetting the indices to match the shape of the scores matrix
         best_hyp_indices += offset
+
+    values = values.reshape((-1, 1))
     return best_hyp_indices, best_word_indices, values
 
 

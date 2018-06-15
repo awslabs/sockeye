@@ -15,7 +15,6 @@
 Simple Training CLI.
 """
 import argparse
-import json
 import os
 import shutil
 import sys
@@ -83,7 +82,7 @@ def check_arg_compatibility(args: argparse.Namespace):
                     "Must optimize either BLEU or one of tracked metrics (--metrics)")
 
     if args.encoder == C.TRANSFORMER_TYPE:
-        check_condition(args.transformer_model_size == args.num_embed[0],
+        check_condition(args.transformer_model_size[0] == args.num_embed[0],
                         "Source embedding size must match transformer model size: %s vs. %s"
                         % (args.transformer_model_size, args.num_embed[0]))
 
@@ -91,20 +90,22 @@ def check_arg_compatibility(args: argparse.Namespace):
         if total_source_factor_size > 0:
             adjusted_transformer_encoder_model_size = args.num_embed[0] + total_source_factor_size
             check_condition(adjusted_transformer_encoder_model_size % 2 == 0 and
-                            adjusted_transformer_encoder_model_size % args.transformer_attention_heads == 0,
+                            adjusted_transformer_encoder_model_size % args.transformer_attention_heads[0] == 0,
                             "Sum of source factor sizes, i.e. num-embed plus source-factors-num-embed, (%d) "
-                            "has to be even and a multiple of attention heads (%d)" % (
-                                adjusted_transformer_encoder_model_size, args.transformer_attention_heads))
+                            "has to be even and a multiple of encoder attention heads (%d)" % (
+                                adjusted_transformer_encoder_model_size, args.transformer_attention_heads[0]))
 
     if args.decoder == C.TRANSFORMER_TYPE:
-        check_condition(args.transformer_model_size == args.num_embed[1],
+        check_condition(args.transformer_model_size[1] == args.num_embed[1],
                         "Target embedding size must match transformer model size: %s vs. %s"
                         % (args.transformer_model_size, args.num_embed[1]))
 
     if args.lhuc is not None:
-        check_condition(args.encoder == C.RNN_NAME or args.decoder == C.RNN_NAME,
-                        "LHUC is only supported for RNN models for now.")
-
+        # Actually this check is a bit too strict
+        check_condition(args.encoder != C.CONVOLUTION_TYPE or args.decoder != C.CONVOLUTION_TYPE,
+                        "LHUC is not supported for convolutional models yet.")
+        check_condition(args.decoder != C.TRANSFORMER_TYPE or C.LHUC_STATE_INIT not in args.lhuc,
+                        "The %s options only applies to RNN models" % C.LHUC_STATE_INIT)
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
@@ -124,8 +125,7 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
             shutil.rmtree(output_folder)
             os.makedirs(output_folder)
         elif os.path.exists(training_state_dir):
-            with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "r") as fp:
-                old_args = json.load(fp)
+            old_args = vars(arguments.load_args(os.path.join(output_folder, C.ARGS_STATE_NAME)))
             arg_diffs = _dict_difference(vars(args), old_args) | _dict_difference(old_args, vars(args))
             # Remove args that may differ without affecting the training.
             arg_diffs -= set(C.ARGS_MAY_DIFFER)
@@ -248,6 +248,8 @@ def use_shared_vocab(args: argparse.Namespace) -> bool:
 
 
 def create_data_iters_and_vocabs(args: argparse.Namespace,
+                                 max_seq_len_source: int,
+                                 max_seq_len_target: int,
                                  shared_vocab: bool,
                                  resume_training: bool,
                                  output_folder: str) -> Tuple['data_io.BaseParallelSampleIter',
@@ -258,12 +260,13 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     Create the data iterators and the vocabularies.
 
     :param args: Arguments as returned by argparse.
+    :param max_seq_len_source: Source maximum sequence length.
+    :param max_seq_len_target: Target maximum sequence length.
     :param shared_vocab: Whether to create a shared vocabulary.
     :param resume_training: Whether to resume training.
     :param output_folder: Output folder.
     :return: The data iterators (train, validation, config_data) as well as the source and target vocabularies.
     """
-    max_seq_len_source, max_seq_len_target = args.max_seq_len
     num_words_source, num_words_target = args.num_words
     word_min_count_source, word_min_count_target = args.word_min_count
     batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
@@ -375,24 +378,27 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 
 
 def create_encoder_config(args: argparse.Namespace,
+                          max_seq_len_source: int,
+                          max_seq_len_target: int,
                           config_conv: Optional[encoder.ConvolutionalEmbeddingConfig]) -> Tuple[encoder.EncoderConfig,
                                                                                                 int]:
     """
     Create the encoder config.
 
     :param args: Arguments as returned by argparse.
+    :param max_seq_len_source: Maximum source sequence length.
+    :param max_seq_len_target: Maximum target sequence length.
     :param config_conv: The config for the convolutional encoder (optional).
     :return: The encoder config and the number of hidden units of the encoder.
     """
     encoder_num_layers, _ = args.num_layers
-    max_seq_len_source, max_seq_len_target = args.max_seq_len
     num_embed_source, _ = args.num_embed
     config_encoder = None  # type: Optional[Config]
 
     if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
         encoder_transformer_preprocess, _ = args.transformer_preprocess
         encoder_transformer_postprocess, _ = args.transformer_postprocess
-        encoder_transformer_model_size = args.transformer_model_size
+        encoder_transformer_model_size = args.transformer_model_size[0]
 
         total_source_factor_size = sum(args.source_factors_num_embed)
         if total_source_factor_size > 0:
@@ -401,8 +407,8 @@ def create_encoder_config(args: argparse.Namespace,
             encoder_transformer_model_size = num_embed_source + total_source_factor_size
         config_encoder = transformer.TransformerConfig(
             model_size=encoder_transformer_model_size,
-            attention_heads=args.transformer_attention_heads,
-            feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
+            attention_heads=args.transformer_attention_heads[0],
+            feed_forward_num_hidden=args.transformer_feed_forward_num_hidden[0],
             act_type=args.transformer_activation_type,
             num_layers=encoder_num_layers,
             dropout_attention=args.transformer_dropout_attention,
@@ -413,7 +419,8 @@ def create_encoder_config(args: argparse.Namespace,
             postprocess_sequence=encoder_transformer_postprocess,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
-            conv_config=config_conv)
+            conv_config=config_conv,
+            lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc))
         encoder_num_hidden = encoder_transformer_model_size
     elif args.encoder == C.CONVOLUTION_TYPE:
         cnn_kernel_width_encoder, _ = args.cnn_kernel_width
@@ -451,16 +458,18 @@ def create_encoder_config(args: argparse.Namespace,
     return config_encoder, encoder_num_hidden
 
 
-def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int) -> decoder.DecoderConfig:
+def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
+                          max_seq_len_source: int, max_seq_len_target: int) -> decoder.DecoderConfig:
     """
     Create the config for the decoder.
 
     :param args: Arguments as returned by argparse.
     :param encoder_num_hidden: Number of hidden units of the Encoder.
+    :param max_seq_len_source: Maximum source sequence length.
+    :param max_seq_len_target: Maximum target sequence length.
     :return: The config for the decoder.
     """
     _, decoder_num_layers = args.num_layers
-    max_seq_len_source, max_seq_len_target = args.max_seq_len
     _, num_embed_target = args.num_embed
 
     config_decoder = None  # type: Optional[Config]
@@ -469,9 +478,9 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int) -> 
         _, decoder_transformer_preprocess = args.transformer_preprocess
         _, decoder_transformer_postprocess = args.transformer_postprocess
         config_decoder = transformer.TransformerConfig(
-            model_size=args.transformer_model_size,
-            attention_heads=args.transformer_attention_heads,
-            feed_forward_num_hidden=args.transformer_feed_forward_num_hidden,
+            model_size=args.transformer_model_size[1],
+            attention_heads=args.transformer_attention_heads[1],
+            feed_forward_num_hidden=args.transformer_feed_forward_num_hidden[1],
             act_type=args.transformer_activation_type,
             num_layers=decoder_num_layers,
             dropout_attention=args.transformer_dropout_attention,
@@ -482,7 +491,8 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int) -> 
             postprocess_sequence=decoder_transformer_postprocess,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
-            conv_config=None)
+            conv_config=None,
+            lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc))
 
     elif args.decoder == C.CONVOLUTION_TYPE:
         _, cnn_kernel_width_decoder = args.cnn_kernel_width
@@ -538,7 +548,8 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int) -> 
             context_gating=args.rnn_context_gating,
             layer_normalization=args.layer_normalization,
             attention_in_upper_layers=args.rnn_attention_in_upper_layers,
-            state_init_lhuc=args.lhuc is not None and (C.LHUC_STATE_INIT in args.lhuc or C.LHUC_ALL in args.lhuc))
+            state_init_lhuc=args.lhuc is not None and (C.LHUC_STATE_INIT in args.lhuc or C.LHUC_ALL in args.lhuc),
+            enc_last_hidden_concat_to_embedding=args.rnn_enc_last_hidden_concat_to_embedding)
 
     return config_decoder
 
@@ -567,6 +578,8 @@ def check_encoder_decoder_args(args) -> None:
 def create_model_config(args: argparse.Namespace,
                         source_vocab_sizes: List[int],
                         target_vocab_size: int,
+                        max_seq_len_source: int,
+                        max_seq_len_target: int,
                         config_data: data_io.DataConfig) -> model.ModelConfig:
     """
     Create a ModelConfig from the argument given in the command line.
@@ -574,6 +587,8 @@ def create_model_config(args: argparse.Namespace,
     :param args: Arguments as returned by argparse.
     :param source_vocab_sizes: The size of the source vocabulary (and source factors).
     :param target_vocab_size: The size of the target vocabulary.
+    :param max_seq_len_source: Maximum source sequence length.
+    :param max_seq_len_target: Maximum target sequence length.
     :param config_data: Data config.
     :return: The model configuration.
     """
@@ -591,9 +606,18 @@ def create_model_config(args: argparse.Namespace,
                                                            pool_stride=args.conv_embed_pool_stride,
                                                            num_highway_layers=args.conv_embed_num_highway_layers,
                                                            dropout=args.conv_embed_dropout)
+    if args.encoder == C.TRANSFORMER_WITH_CONV_EMBED_TYPE:
+        config_conv = encoder.ConvolutionalEmbeddingConfig(num_embed=num_embed_source,
+                                                           output_dim=num_embed_source,
+                                                           max_filter_width=args.conv_embed_max_filter_width,
+                                                           num_filters=args.conv_embed_num_filters,
+                                                           pool_stride=args.conv_embed_pool_stride,
+                                                           num_highway_layers=args.conv_embed_num_highway_layers,
+                                                           dropout=args.conv_embed_dropout)
 
-    config_encoder, encoder_num_hidden = create_encoder_config(args, config_conv)
-    config_decoder = create_decoder_config(args, encoder_num_hidden)
+    config_encoder, encoder_num_hidden = create_encoder_config(args, max_seq_len_source, max_seq_len_target,
+                                                               config_conv)
+    config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target)
 
     source_factor_configs = None
     if len(source_vocab_sizes) > 1:
@@ -668,12 +692,14 @@ def gradient_compression_params(args: argparse.Namespace) -> Optional[Dict[str, 
         return {'type': args.gradient_compression_type, 'threshold': args.gradient_compression_threshold}
 
 
-def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[int]) -> OptimizerConfig:
+def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[int],
+                            extra_initializers: List[Tuple[str, mx.initializer.Initializer]] = None) -> OptimizerConfig:
     """
     Returns an OptimizerConfig.
 
     :param args: Arguments as returned by argparse.
     :param source_vocab_sizes: Source vocabulary sizes.
+    :param extra_initializers: extra initializer to pass to `get_initializer`.
     :return: The optimizer type and its parameters as well as the kvstore.
     """
     optimizer_params = {'wd': args.weight_decay,
@@ -708,7 +734,8 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
                                               default_init_xavier_factor_type=args.weight_init_xavier_factor_type,
                                               embed_init_type=args.embed_weight_init,
                                               embed_init_sigma=source_vocab_sizes[0] ** -0.5,
-                                              rnn_init_type=args.rnn_h2h_init)
+                                              rnn_init_type=args.rnn_h2h_init,
+                                              extra_initializers=extra_initializers)
 
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
                                              args.checkpoint_frequency,
@@ -731,10 +758,13 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
 
 
 def main():
-    params = argparse.ArgumentParser(description='Train Sockeye sequence-to-sequence models.')
+    params = arguments.ConfigArgumentParser(description='Train Sockeye sequence-to-sequence models.')
     arguments.add_train_cli_args(params)
     args = params.parse_args()
+    train(args)
 
+
+def train(args: argparse.Namespace):
     if args.dry_run:
         # Modify arguments so that we write to a temporary directory and
         # perform 0 training iterations
@@ -753,17 +783,27 @@ def main():
                                file_logging=True,
                                console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
     utils.log_basic_info(args)
-    with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "w") as fp:
-        json.dump(vars(args), fp)
+    arguments.save_args(args, os.path.join(output_folder, C.ARGS_STATE_NAME))
+
+    max_seq_len_source, max_seq_len_target = args.max_seq_len
+    # The maximum length is the length before we add the BOS/EOS symbols
+    max_seq_len_source = max_seq_len_source + C.SPACE_FOR_XOS
+    max_seq_len_target = max_seq_len_target + C.SPACE_FOR_XOS
+    logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
+                max_seq_len_source, max_seq_len_target)
 
     with ExitStack() as exit_stack:
         context = determine_context(args, exit_stack)
 
         train_iter, eval_iter, config_data, source_vocabs, target_vocab = create_data_iters_and_vocabs(
             args=args,
+            max_seq_len_source=max_seq_len_source,
+            max_seq_len_target=max_seq_len_target,
             shared_vocab=use_shared_vocab(args),
             resume_training=resume_training,
             output_folder=output_folder)
+        max_seq_len_source = config_data.max_seq_len_source
+        max_seq_len_target = config_data.max_seq_len_target
 
         # Dump the vocabularies if we're just starting up
         if not resume_training:
@@ -776,7 +816,10 @@ def main():
                     '|'.join([str(size) for size in source_vocab_sizes]),
                     target_vocab_size)
 
-        model_config = create_model_config(args, source_vocab_sizes, target_vocab_size, config_data)
+        model_config = create_model_config(args=args,
+                                           source_vocab_sizes=source_vocab_sizes, target_vocab_size=target_vocab_size,
+                                           max_seq_len_source=max_seq_len_source, max_seq_len_target=max_seq_len_target,
+                                           config_data=config_data)
         model_config.freeze()
 
         training_model = create_training_model(config=model_config,

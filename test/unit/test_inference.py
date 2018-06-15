@@ -12,17 +12,17 @@
 # permissions and limitations under the License.
 
 import json
+from math import ceil
 from unittest.mock import patch, Mock
 
 import mxnet as mx
 import numpy as np
 import pytest
-from math import ceil
 
 import sockeye.constants as C
 import sockeye.data_io
 import sockeye.inference
-from sockeye.utils import SockeyeError
+import sockeye.utils
 
 _BOS = 0
 _EOS = -1
@@ -56,36 +56,44 @@ def mock_translator(batch_size: int = 1,
             t_mock = Mock(sockeye.inference.InferenceModel)
             t_mock.num_source_factors = num_source_factors
             return t_mock
-        translator.models = [ mock_model() ]
+
+        translator.models = [mock_model()]
 
         translator.batch_size = batch_size
         translator.beam_size = beam_size
         translator.beam_prune = beam_prune
         translator.zeros_array = mx.nd.zeros((beam_size,), dtype='int32')
-        translator.inf_array_long = mx.nd.full((batch_size * beam_size,), val=np.inf, dtype='float32')
-        translator.inf_array = mx.nd.slice(translator.inf_array_long, begin=(0), end=(beam_size))
+        translator.inf_array = mx.nd.full((batch_size * beam_size,), val=np.inf, dtype='float32')
+        translator.inf_array = mx.nd.slice(translator.inf_array, begin=(0), end=(beam_size))
         return translator
 
 
 def test_concat_translations():
+    beam_history1 = {"id": [1]}
+    beam_history2 = {"id": [2]}
+    beam_history3 = {"id": [3]}
+    expected_beam_histories = [beam_history1, beam_history2, beam_history3]
     expected_target_ids = [0, 1, 2, 8, 9, 3, 4, 5, -1]
     num_src = 7
 
-    def length_penalty(length):
-        return 1. / length
+    length_penalty = sockeye.inference.LengthPenalty()
 
-    expected_score = (1 + 2 + 3) / length_penalty(len(expected_target_ids))
+    expected_score = (1 + 2 + 3) / length_penalty.get(len(expected_target_ids))
 
-    translations = [sockeye.inference.Translation([0, 1, 2, -1], np.zeros((4, num_src)), 1.0 / length_penalty(4)),
+    translations = [sockeye.inference.Translation([0, 1, 2, -1], np.zeros((4, num_src)), 1.0 / length_penalty.get(4),
+                                                  [beam_history1]),
                     # Translation without EOS
-                    sockeye.inference.Translation([0, 8, 9], np.zeros((3, num_src)), 2.0 / length_penalty(3)),
-                    sockeye.inference.Translation([0, 3, 4, 5, -1], np.zeros((5, num_src)), 3.0 / length_penalty(5))]
+                    sockeye.inference.Translation([0, 8, 9], np.zeros((3, num_src)), 2.0 / length_penalty.get(3),
+                                                  [beam_history2]),
+                    sockeye.inference.Translation([0, 3, 4, 5, -1], np.zeros((5, num_src)), 3.0 / length_penalty.get(5),
+                                                  [beam_history3])]
     combined = sockeye.inference._concat_translations(translations, start_id=_BOS, stop_ids={_EOS},
                                                       length_penalty=length_penalty)
 
     assert combined.target_ids == expected_target_ids
     assert combined.attention_matrix.shape == (len(expected_target_ids), len(translations) * num_src)
     assert np.isclose(combined.score, expected_score)
+    assert combined.beam_histories == expected_beam_histories
 
 
 def test_length_penalty_default():
@@ -93,6 +101,9 @@ def test_length_penalty_default():
     length_penalty = sockeye.inference.LengthPenalty(1.0, 0.0)
     expected_lp = np.array([[1.0], [2.], [3.]])
 
+    assert np.isclose(length_penalty.get(lengths).asnumpy(), expected_lp).all()
+    assert np.isclose(length_penalty(lengths).asnumpy(), expected_lp).all()
+    length_penalty.hybridize()
     assert np.isclose(length_penalty(lengths).asnumpy(), expected_lp).all()
 
 
@@ -101,6 +112,9 @@ def test_length_penalty():
     length_penalty = sockeye.inference.LengthPenalty(.2, 5.0)
     expected_lp = np.array([[6 ** 0.2 / 6 ** 0.2], [7 ** 0.2 / 6 ** 0.2], [8 ** 0.2 / 6 ** 0.2]])
 
+    assert np.isclose(length_penalty.get(lengths).asnumpy(), expected_lp).all()
+    assert np.isclose(length_penalty(lengths).asnumpy(), expected_lp).all()
+    length_penalty.hybridize()
     assert np.isclose(length_penalty(lengths).asnumpy(), expected_lp).all()
 
 
@@ -109,8 +123,7 @@ def test_length_penalty_int_input():
     length_penalty = sockeye.inference.LengthPenalty(.2, 5.0)
     expected_lp = [6 ** 0.2 / 6 ** 0.2]
 
-    assert np.isclose(np.asarray([length_penalty(length)]),
-                      np.asarray(expected_lp)).all()
+    assert np.isclose(np.asarray([length_penalty.get(length)]), np.asarray(expected_lp)).all()
 
 
 @pytest.mark.parametrize("sentence_id, sentence, factors, chunk_size",
@@ -262,7 +275,7 @@ def test_make_input_whitespace_delimiter(delimiter):
     sentence_id = 1
     translator = mock_translator(num_source_factors=2)
     sentence = "foo"
-    with pytest.raises(SockeyeError) as e:
+    with pytest.raises(sockeye.utils.SockeyeError) as e:
         sockeye.inference.make_input_from_factored_string(sentence_id=sentence_id,
                                                           factored_string=sentence,
                                                           translator=translator, delimiter=delimiter)
@@ -309,19 +322,7 @@ def test_make_input_from_multiple_strings(strings):
     assert inp.tokens == expected_tokens
     assert inp.factors == expected_factors
 
-"""
-Test pruning via inference.Translator._beam_prune(). The best score is computed from the best
-finished item; all other items whose scores are outside (best_item - threshold) are pruned, which
-means their spot in `inactive` is set to 1.
 
-Tests: take in
-- accumulated_scores and finished
-- a dummy inactive (not read from)
-- best_word_indices (maybe dummy?)
-and check
-- values of finished and invalid
-- maybe values of best_word_indices
-"""
 # batch size, beam size, prune thresh, accumulated scores, finished, expected_inactive
 prune_tests = [
     # no pruning because nothing is finished
@@ -341,24 +342,61 @@ prune_tests = [
 
 @pytest.mark.parametrize("batch, beam, prune, scores, finished, expected_inactive", prune_tests)
 def test_beam_prune(batch, beam, prune, scores, finished, expected_inactive):
-    translator = mock_translator(batch, beam, prune)
-
-    orig_finished = [x for x in finished]
-
-    # these are passed by reference and changed, so create them here
-    scores = mx.nd.array(scores).expand_dims(axis=1)
-    inactive = mx.nd.array([0] * (batch * beam), dtype='int32')
-    best_words = mx.nd.array([10] * (batch * beam), dtype='int32')
+    scores = mx.nd.array(scores)
     finished = mx.nd.array(finished, dtype='int32')
+    inf_array = mx.nd.full((batch * beam,), val=np.inf)
+    zeros_array = mx.nd.zeros((batch * beam,), dtype='int32')
+    best_word_indices = mx.nd.zeros((batch * beam,), dtype='int32')
 
-    translator._prune(scores, best_words, inactive, finished)
-
-    # Make sure inactive is set as expected
+    prune_hyps = sockeye.inference.PruneHypotheses(prune, beam)
+    prune_hyps.initialize()
+    inactive, _, _ = prune_hyps(best_word_indices, scores, finished, inf_array, zeros_array)
     assert inactive.asnumpy().tolist() == expected_inactive
 
-    # Ensure that scores for inactive items are set to 'inf'
-    zeros = mx.nd.zeros((beam * batch,), dtype='float32')
-    assert mx.nd.where(inactive, scores[:, 0], zeros).asnumpy().tolist() == [np.inf if x == 1 else 0 for x in expected_inactive]
+    prune_hyps.hybridize()
+    inactive, _, _ = prune_hyps(best_word_indices, scores, finished, inf_array, zeros_array)
+    assert inactive.asnumpy().tolist() == expected_inactive
 
-    # Inactive items should also be marked as finished
-    assert finished.asnumpy().tolist() == np.clip(np.array(orig_finished) + np.array(expected_inactive), 0, 1).tolist()
+
+def test_sort_by_index():
+    data = [mx.nd.random.uniform(0, 1, (3, i)) for i in range(1, 5)]
+    indices = mx.nd.array([2, 0, 1], dtype='int32')
+    expected = [d.asnumpy()[indices.asnumpy()] for d in data]
+
+    sort_by_index = sockeye.inference.SortByIndex()
+    sort_by_index.initialize()
+
+    out = sort_by_index(indices, *data)
+    assert len(out) == len(data) == len(expected)
+    for o, e in zip(out, expected):
+        assert (o.asnumpy() == e).all()
+
+    sort_by_index.hybridize()
+    out = sort_by_index(indices, *data)
+    assert len(out) == len(data) == len(expected)
+    for o, e in zip(out, expected):
+        assert (o.asnumpy() == e).all()
+
+
+@pytest.mark.parametrize("batch_size, beam_size, target_vocab_size",
+                        [(1, 5, 200),
+                         (5, 5, 200),
+                         (1, 1, 200),
+                         (5, 1, 200),
+                         (10, 10, 100)])
+def test_topk_func(batch_size, beam_size, target_vocab_size):
+    # Random model scores. Shape: (batch_size * beam_size, target_vocab_size)
+    scores = mx.nd.random.uniform(0, 1, (batch_size * beam_size, target_vocab_size))
+    # offset for batch sizes > 1
+    offset = mx.nd.array(np.repeat(np.arange(0, batch_size * beam_size, beam_size), beam_size), dtype='int32')
+
+    np_hyp, np_word, np_values = sockeye.utils.topk(scores, k=beam_size, batch_size=batch_size,
+                                                    offset=offset, use_mxnet_topk=False)
+    np_hyp, np_word, np_values = np_hyp.asnumpy(), np_word.asnumpy(), np_values.asnumpy()
+
+    mx_hyp, mx_word, mx_values = sockeye.utils.topk(scores, k=beam_size, batch_size=batch_size,
+                                                    offset=offset, use_mxnet_topk=True)
+    mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
+    assert all(mx_hyp == np_hyp)
+    assert all(mx_word == np_word)
+    assert all(mx_values == np_values)

@@ -73,6 +73,7 @@ else:
 
 entry_points={
     'console_scripts': [
+        'sockeye-autopilot = contrib.autopilot.autopilot:main',
         'sockeye-average = sockeye.average:main',
         'sockeye-embeddings = sockeye.embeddings:main',
         'sockeye-evaluate = sockeye.evaluate:main',
@@ -102,13 +103,13 @@ args = dict(
     maintainer_email='sockeye-dev@amazon.com',
 
     license='Apache License 2.0',
-    
+
     python_requires='>=3',
 
     packages=find_packages(exclude=("test",)),
 
     setup_requires=['pytest-runner'],
-    tests_require=['pytest', 'pytest-cov'],
+    tests_require=['pytest', 'pytest-cov', 'pillow'],
 
     extras_require={
         'optional': ['mxboard', 'matplotlib'],

@@ -41,6 +41,7 @@ class TransformerConfig(config.Config):
                  max_seq_len_source: int,
                  max_seq_len_target: int,
                  conv_config: Optional['encoder.ConvolutionalEmbeddingConfig'] = None,
+                 lhuc: bool = False,
                  dtype: str = C.DTYPE_FP32) -> None:  # type: ignore
         super().__init__()
         self.model_size = model_size
@@ -57,6 +58,7 @@ class TransformerConfig(config.Config):
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
         self.conv_config = conv_config
+        self.use_lhuc = lhuc
         self.dtype = dtype
 
 
@@ -70,7 +72,6 @@ class TransformerEncoderBlock:
                  config: TransformerConfig,
                  prefix: str) -> None:
         self.pre_self_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                          num_hidden=config.model_size,
                                                           dropout=config.dropout_prepost,
                                                           prefix="%satt_self_pre_" % prefix)
         self.self_attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
@@ -79,12 +80,10 @@ class TransformerEncoderBlock:
                                                             dropout=config.dropout_attention,
                                                             prefix="%satt_self_" % prefix)
         self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                           num_hidden=config.model_size,
                                                            dropout=config.dropout_prepost,
                                                            prefix="%satt_self_post_" % prefix)
 
         self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                              num_hidden=config.model_size,
                                               dropout=config.dropout_prepost,
                                               prefix="%sff_pre_" % prefix)
         self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
@@ -93,9 +92,11 @@ class TransformerEncoderBlock:
                                          dropout=config.dropout_act,
                                          prefix="%sff_" % prefix)
         self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                               num_hidden=config.model_size,
                                                dropout=config.dropout_prepost,
                                                prefix="%sff_post_" % prefix)
+        self.lhuc = None
+        if config.use_lhuc:
+            self.lhuc = layers.LHUC(config.model_size, prefix=prefix)
 
     def __call__(self, data: mx.sym.Symbol, bias: mx.sym.Symbol) -> mx.sym.Symbol:
         # self-attention
@@ -107,6 +108,9 @@ class TransformerEncoderBlock:
         # feed-forward
         data_ff = self.ff(self.pre_ff(data, None))
         data = self.post_ff(data_ff, data)
+
+        if self.lhuc:
+            data = self.lhuc(data)
 
         return data
 
@@ -122,7 +126,6 @@ class TransformerDecoderBlock:
                  prefix: str) -> None:
         self.prefix = prefix
         self.pre_self_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                          num_hidden=config.model_size,
                                                           dropout=config.dropout_prepost,
                                                           prefix="%satt_self_pre_" % prefix)
         self.self_attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
@@ -131,12 +134,10 @@ class TransformerDecoderBlock:
                                                             dropout=config.dropout_attention,
                                                             prefix="%satt_self_" % prefix)
         self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                           num_hidden=config.model_size,
                                                            dropout=config.dropout_prepost,
                                                            prefix="%satt_self_post_" % prefix)
 
         self.pre_enc_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                         num_hidden=config.model_size,
                                                          dropout=config.dropout_prepost,
                                                          prefix="%satt_enc_pre_" % prefix)
         self.enc_attention = layers.MultiHeadAttention(depth_att=config.model_size,
@@ -145,12 +146,10 @@ class TransformerDecoderBlock:
                                                        dropout=config.dropout_attention,
                                                        prefix="%satt_enc_" % prefix)
         self.post_enc_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                          num_hidden=config.model_size,
                                                           dropout=config.dropout_prepost,
                                                           prefix="%satt_enc_post_" % prefix)
 
         self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                              num_hidden=config.model_size,
                                               dropout=config.dropout_prepost,
                                               prefix="%sff_pre_" % prefix)
         self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
@@ -159,9 +158,12 @@ class TransformerDecoderBlock:
                                          dropout=config.dropout_act,
                                          prefix="%sff_" % prefix)
         self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                               num_hidden=config.model_size,
                                                dropout=config.dropout_prepost,
                                                prefix="%sff_post_" % prefix)
+
+        self.lhuc = None
+        if config.use_lhuc:
+            self.lhuc = layers.LHUC(config.model_size, prefix=prefix)
 
     def __call__(self,
                  target: mx.sym.Symbol,
@@ -185,6 +187,9 @@ class TransformerDecoderBlock:
         target_ff = self.ff(self.pre_ff(target, None))
         target = self.post_ff(target_ff, target)
 
+        if self.lhuc:
+            target = self.lhuc(target)
+
         return target
 
 
@@ -199,16 +204,14 @@ class TransformerProcessBlock:
 
     def __init__(self,
                  sequence: str,
-                 num_hidden: int,
                  dropout: float,
                  prefix: str) -> None:
         self.sequence = sequence
-        self.num_hidden = num_hidden
         self.dropout = dropout
         self.prefix = prefix
         self.layer_norm = None
         if "n" in sequence:
-            self.layer_norm = layers.LayerNormalization(num_hidden=self.num_hidden, prefix="%snorm" % self.prefix)
+            self.layer_norm = layers.LayerNormalization(prefix="%snorm" % self.prefix)
 
     def __call__(self,
                  data: mx.sym.Symbol,
@@ -232,7 +235,7 @@ class TransformerProcessBlock:
                 data = mx.sym._internal._plus(data, prev, name="%sresidual" % self.prefix)
 
             elif step == "n":
-                data = self.layer_norm.normalize(data)
+                data = self.layer_norm(data=data)
 
             elif step == "d":
                 if self.dropout > 0.0:

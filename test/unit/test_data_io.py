@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -105,14 +105,14 @@ def test_ids2strids(ids, expected_string):
     assert string == expected_string
 
 
-sequence_reader_tests = [(["1 2 3", "2", "", "2 2 2"], False, False),
-                         (["a b c", "c"], True, False),
-                         (["a b c", ""], True, False),
-                         (["a b c", "c"], True, True)]
+sequence_reader_tests = [(["1 2 3", "2", "", "2 2 2"], False, False, False),
+                         (["a b c", "c"], True, False, False),
+                         (["a b c", ""], True, False, False),
+                         (["a b c", "c"], True, True, True)]
 
 
-@pytest.mark.parametrize("sequences, use_vocab, add_bos", sequence_reader_tests)
-def test_sequence_reader(sequences, use_vocab, add_bos):
+@pytest.mark.parametrize("sequences, use_vocab, add_bos, add_eos", sequence_reader_tests)
+def test_sequence_reader(sequences, use_vocab, add_bos, add_eos):
     with TemporaryDirectory() as work_dir:
         path = os.path.join(work_dir, 'input')
         with open(path, 'w') as f:
@@ -121,15 +121,15 @@ def test_sequence_reader(sequences, use_vocab, add_bos):
 
         vocabulary = vocab.build_vocab(sequences) if use_vocab else None
 
-        reader = data_io.SequenceReader(path, vocab=vocabulary, add_bos=add_bos)
+        reader = data_io.SequenceReader(path, vocabulary=vocabulary, add_bos=add_bos, add_eos=add_eos)
 
         read_sequences = [s for s in reader]
         assert len(read_sequences) == len(sequences)
 
         if vocabulary is None:
             with pytest.raises(SockeyeError) as e:
-                _ = data_io.SequenceReader(path, vocab=vocabulary, add_bos=True)
-            assert str(e.value) == "Adding a BOS symbol requires a vocabulary"
+                _ = data_io.SequenceReader(path, vocabulary=vocabulary, add_bos=True)
+            assert str(e.value) == "Adding a BOS or EOS symbol requires a vocabulary"
 
             expected_sequences = [data_io.strids2ids(get_tokens(s)) if s else None for s in sequences]
             assert read_sequences == expected_sequences
@@ -137,6 +137,8 @@ def test_sequence_reader(sequences, use_vocab, add_bos):
             expected_sequences = [data_io.tokens2ids(get_tokens(s), vocabulary) if s else None for s in sequences]
             if add_bos:
                 expected_sequences = [[vocabulary[C.BOS_SYMBOL]] + s if s else None for s in expected_sequences]
+            if add_eos:
+                expected_sequences = [s + [vocabulary[C.EOS_SYMBOL]]  if s else None for s in expected_sequences]
             assert read_sequences == expected_sequences
 
 
@@ -221,23 +223,33 @@ def test_sample_based_define_bucket_batch_sizes():
         assert bbs.average_words_per_batch == bbs.bucket[1] * batch_size
 
 
-def test_word_based_define_bucket_batch_sizes():
+@pytest.mark.parametrize("length_ratio", [0.5, 1.5])
+def test_word_based_define_bucket_batch_sizes(length_ratio):
     batch_by_words = True
     batch_num_devices = 1
     batch_size = 200
     max_seq_len = 100
-    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, 1.5)
+    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, length_ratio)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets=buckets,
                                                            batch_size=batch_size,
                                                            batch_by_words=batch_by_words,
                                                            batch_num_devices=batch_num_devices,
                                                            data_target_average_len=[None] * len(buckets))
+    max_num_words = 0
     # last bucket batch size is different
     for bbs in bucket_batch_sizes[:-1]:
-        expected_batch_size = round((batch_size / bbs.bucket[1]) / batch_num_devices)
+        target_padded_seq_len = bbs.bucket[1]
+        expected_batch_size = round((batch_size / target_padded_seq_len) / batch_num_devices)
         assert bbs.batch_size == expected_batch_size
         expected_average_words_per_batch = expected_batch_size * bbs.bucket[1]
         assert bbs.average_words_per_batch == expected_average_words_per_batch
+        max_num_words = max(max_num_words, bbs.batch_size * max(*bbs.bucket))
+
+    last_bbs = bucket_batch_sizes[-1]
+    min_expected_batch_size = round((batch_size / last_bbs.bucket[1]) / batch_num_devices)
+    assert last_bbs.batch_size >= min_expected_batch_size
+    last_bbs_num_words = last_bbs.batch_size * max(*last_bbs.bucket)
+    assert last_bbs_num_words >= max_num_words
 
 
 def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
@@ -448,30 +460,33 @@ def test_get_training_data_iters():
     test_max_length = 30
     batch_size = 5
     with tmp_digits_dataset("tmp_corpus",
-                            train_line_count, train_max_length, dev_line_count, dev_max_length,
-                            test_line_count, test_line_count_empty, test_max_length) as data:
+                            train_line_count, train_max_length - C.SPACE_FOR_XOS,
+                            dev_line_count, dev_max_length - C.SPACE_FOR_XOS,
+                            test_line_count, test_line_count_empty,
+                            test_max_length - C.SPACE_FOR_XOS) as data:
         # tmp common vocab
         vcb = vocab.build_from_paths([data['source'], data['target']])
 
-        train_iter, val_iter, config_data, data_info = data_io.get_training_data_iters(sources=[data['source']],
-                                                                                       target=data['target'],
-                                                                                       validation_sources=[
-                                                                                           data['validation_source']],
-                                                                                       validation_target=data[
-                                                                                           'validation_target'],
-                                                                                       source_vocabs=[vcb],
-                                                                                       target_vocab=vcb,
-                                                                                       source_vocab_paths=[None],
-                                                                                       target_vocab_path=None,
-                                                                                       shared_vocab=True,
-                                                                                       batch_size=batch_size,
-                                                                                       batch_by_words=False,
-                                                                                       batch_num_devices=1,
-                                                                                       fill_up="replicate",
-                                                                                       max_seq_len_source=train_max_length,
-                                                                                       max_seq_len_target=train_max_length,
-                                                                                       bucketing=True,
-                                                                                       bucket_width=10)
+        train_iter, val_iter, config_data, data_info = data_io.get_training_data_iters(
+            sources=[data['source']],
+            target=data['target'],
+            validation_sources=[
+                data['validation_source']],
+            validation_target=data[
+                'validation_target'],
+            source_vocabs=[vcb],
+            target_vocab=vcb,
+            source_vocab_paths=[None],
+            target_vocab_path=None,
+            shared_vocab=True,
+            batch_size=batch_size,
+            batch_by_words=False,
+            batch_num_devices=1,
+            fill_up="replicate",
+            max_seq_len_source=train_max_length,
+            max_seq_len_target=train_max_length,
+            bucketing=True,
+            bucket_width=10)
         assert isinstance(train_iter, data_io.ParallelSampleIter)
         assert isinstance(val_iter, data_io.ParallelSampleIter)
         assert isinstance(config_data, data_io.DataConfig)
@@ -479,7 +494,7 @@ def test_get_training_data_iters():
         assert data_info.target == data['target']
         assert data_info.source_vocabs == [None]
         assert data_info.target_vocab is None
-        assert config_data.data_statistics.max_observed_len_source == train_max_length - 1
+        assert config_data.data_statistics.max_observed_len_source == train_max_length
         assert config_data.data_statistics.max_observed_len_target == train_max_length
         assert np.isclose(config_data.data_statistics.length_ratio_mean, expected_mean)
         assert np.isclose(config_data.data_statistics.length_ratio_std, expected_std)
@@ -492,6 +507,7 @@ def test_get_training_data_iters():
 
         # test some batches
         bos_id = vcb[C.BOS_SYMBOL]
+        eos_id = vcb[C.EOS_SYMBOL]
         expected_first_target_symbols = np.full((batch_size,), bos_id, dtype='float32')
         for epoch in range(2):
             while train_iter.iter_next():
@@ -504,11 +520,13 @@ def test_get_training_data_iters():
                 label = batch.label[0].asnumpy()
                 assert source.shape[0] == target.shape[0] == label.shape[0] == batch_size
                 # target first symbol should be BOS
+                # each source sequence contains one EOS symbol
+                assert np.sum(source == eos_id) == batch_size
                 assert np.array_equal(target[:, 0], expected_first_target_symbols)
                 # label first symbol should be 2nd target symbol
                 assert np.array_equal(label[:, 0], target[:, 1])
                 # each label sequence contains one EOS symbol
-                assert np.sum(label == vcb[C.EOS_SYMBOL]) == batch_size
+                assert np.sum(label == eos_id) == batch_size
             train_iter.reset()
 
 

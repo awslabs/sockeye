@@ -30,10 +30,12 @@ from . import transformer
 from . import utils
 
 logger = logging.getLogger(__name__)
-EncoderConfig = Union['RecurrentEncoderConfig', transformer.TransformerConfig, 'ConvolutionalEncoderConfig']
 
 
-def get_encoder(config: EncoderConfig, prefix: str = '') -> 'Encoder':
+ImageEncoderConfig = None
+
+
+def get_encoder(config: 'EncoderConfig', prefix: str = '') -> 'Encoder':
     if isinstance(config, RecurrentEncoderConfig):
         return get_recurrent_encoder(config, prefix)
     elif isinstance(config, transformer.TransformerConfig):
@@ -41,7 +43,14 @@ def get_encoder(config: EncoderConfig, prefix: str = '') -> 'Encoder':
     elif isinstance(config, ConvolutionalEncoderConfig):
         return get_convolutional_encoder(config, prefix)
     else:
-        raise ValueError("Unsupported encoder configuration")
+        from .image_captioning.encoder import ImageLoadedCnnEncoderConfig, \
+            get_image_cnn_encoder
+        ImageEncoderConfig = ImageLoadedCnnEncoderConfig
+
+        if isinstance(config, ImageLoadedCnnEncoderConfig):
+            return get_image_cnn_encoder(config)
+        else:
+            raise ValueError("Unsupported encoder configuration")
 
 
 class RecurrentEncoderConfig(config.Config):
@@ -400,6 +409,46 @@ class Embedding(Encoder):
         Return the representation size of this encoder.
         """
         return self.config.num_embed
+
+
+class PassThroughEmbeddingConfig(config.Config):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.vocab_size = 0
+        self.num_embed = 0
+        self.num_factors = 1
+
+
+class PassThroughEmbedding(Encoder):
+    """
+    This is an embedding which passes through an input symbol without doing any operation.
+
+    :param config: PassThroughEmbeddingConfig config.
+    """
+
+    def __init__(self,
+                 config: PassThroughEmbeddingConfig) -> None:
+        self.config = config
+
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: Optional[mx.sym.Symbol],
+               seq_len: int = 0) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+        """
+        Encodes data given sequence lengths of individual examples and maximum sequence length.
+
+        :param data: Input data.
+        :param data_length: Vector with sequence lengths.
+        :return: Encoded versions of input data (data, data_length, seq_len).
+        """
+        return data, data_length, seq_len
+
+    def get_num_hidden(self) -> int:
+        """
+        Return the representation size of this encoder.
+        """
+        return 0
 
 
 class PositionalEncoder(Encoder):
@@ -916,7 +965,6 @@ class TransformerEncoder(Encoder):
         self.layers = [transformer.TransformerEncoderBlock(
             config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                                 num_hidden=config.model_size,
                                                                  dropout=config.dropout_prepost,
                                                                  prefix="%sfinal_process_" % prefix)
 
@@ -999,8 +1047,9 @@ class ConvolutionalEmbeddingEncoder(Encoder):
     An encoder developed to map a sequence of character embeddings to a shorter sequence of segment
     embeddings using convolutional, pooling, and highway layers.  More generally, it maps a sequence
     of input embeddings to a sequence of span embeddings.
-        * "Fully Character-Level Neural Machine Translation without Explicit Segmentation"
-          Jason Lee; Kyunghyun Cho; Thomas Hofmann (https://arxiv.org/pdf/1610.03017.pdf)
+
+    * "Fully Character-Level Neural Machine Translation without Explicit Segmentation"
+      Jason Lee; Kyunghyun Cho; Thomas Hofmann (https://arxiv.org/pdf/1610.03017.pdf)
 
     :param config: Convolutional embedding config.
     :param prefix: Name prefix for symbols of this encoder.
@@ -1166,3 +1215,8 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         Returns the size of the encoded sequence.
         """
         return int(ceil(seq_len / self.pool_stride))
+
+
+EncoderConfig = Union[RecurrentEncoderConfig, transformer.TransformerConfig, ConvolutionalEncoderConfig]
+if ImageEncoderConfig is not None:
+    EncoderConfig = Union[EncoderConfig, ImageEncoderConfig]  # type: ignore

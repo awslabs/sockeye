@@ -68,14 +68,26 @@ Full documentation, including a code reference, can be generated using Sphinx wi
 The results are written to ```docs/_build/html/index.html```.
 
 
-## Unit tests
-Unit tests are written using py.test.
-They can be run like this:
+## Unit & Integration Tests
+Unit & integration tests are written using py.test.
+They can be run with:
 ```bash
 > python setup.py test
 ```
+or:
+```bash
+> pytest
+```
+Integration tests run Sockeye CLI tools on small, synthetic data to test for functional correctness.
 
-## Submitting a new version to PyPI
+## System Tests
+System tests test Sockeye CLI tools on synthetic tasks (digit sequence copying & sorting) for functional correctness and successful learning. They assert on validation metrics (perplexity) and BLEU scores from decoding.
+A subset of the system tests are run on Travis for every commit. The full set of system tests is run as a nightly Travis Cron job. You can manually run the system tests with:
+```bash
+> pytest test/system
+```
+
+## Submitting a New Version to PyPI
 
 Before starting make sure you have the [TestPyPI](https://wiki.python.org/moin/TestPyPI) and PyPI accounts and the 
 corresponding `~/.pypirc` set up.
@@ -96,7 +108,7 @@ corresponding `~/.pypirc` set up.
    ```bash
    > twine upload dist/sockeye-${VERSION}.tar.gz dist/sockeye-${VERSION}-py3-none-any.whl
    ```
-
+When pushing a new git tag to the repository, it is automatically built and deployed to PyPI as a new version via Travis.
  
 ## Code of Conduct
 This project has adopted the [Amazon Open Source Code of Conduct](https://aws.github.io/code-of-conduct).
