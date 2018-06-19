@@ -1,6 +1,6 @@
 # fast_align
 
-[[Dyer et al., 2013](http://www.aclweb.org/anthology/N13-1073)] [[GitHub Page](https://github.com/clab/fast_align)]
+[[Dyer et al., 2013](http://www.aclweb.org/anthology/N13-1073)] [[GitHub Page](https://github.com/clab/fast_align)] [[Apache-2.0](https://github.com/clab/fast_align/blob/master/LICENSE.txt)]
 
 `fast_align` is a fast and reliable word aligner that can be used to generate probabilistic lexicons.
 These lexicons can then be used with Sockeye to speed up decoding by limiting each step's output layer to the most likely word-level translations of the source.
