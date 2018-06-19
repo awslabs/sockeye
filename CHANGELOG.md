@@ -10,13 +10,14 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.23]
+### Added
+- ROUGE score evaluation. It can be used as the stopping criterion for tasks such as summarization.
+
 ## [1.18.22]
 ### Fixed
 - Make sure the default bucket is large enough with word based batching when the source is longer than the target (Previously
 there was an edge case where the memory usage was sub-optimal with word based batching and longer source than target sentences).
-
-### Added
-- ROUGE score evaluation. It can be used as the stopping criterion for tasks such as summarization.
 
 ## [1.18.21]
 ### Fixed
