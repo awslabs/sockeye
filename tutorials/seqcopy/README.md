@@ -6,10 +6,8 @@ This task is on the one hand difficult enough to be interesting and on the other
 
 ## Setup
 For this tutorial we assume that you have successfully [installed](../../README.md#installation) Sockeye.
-We will be using scripts from the Sockeye repository, so you should either clone the repository or manually download 
-the scripts.
-Just as a reminder: Everything is run using Python 3, so depending on your setup you may have to replace `python` with
-`python3` below.
+We will be using scripts from the Sockeye repository, so you should either clone the repository or manually download the scripts.
+Just as a reminder: Everything is run using Python 3, so depending on your setup you may have to replace `python` with `python3` below.
 All of the commands below assume you are running on a CPU.
 If you have a GPU available you can simply remove `--use-cpu`.
 
@@ -22,8 +20,8 @@ Run the following command to create the data set:
 python genseqcopy.py
 ```
 
-After running this script you have (under 'data/') a training (`train.source`, `train.target`) and a development data sets
-(`dev.source`, `dev.target`). The generated sequences will look like this:
+After running this script you have (under 'data/') a training (`train.source`, `train.target`) and a development data set (`dev.source`, `dev.target`).
+The generated sequences will look like this:
 
 ```
 2 3 5 5 4 6 7 0 3 8 10 9 3 6
@@ -36,7 +34,7 @@ After running this script you have (under 'data/') a training (`train.source`, `
 
 ## 2. Training
 
-Now that we have some training data to play with we can train our model. 
+Now that we have some training data to play with we can train our model.
 Start training by running the following command:
 
 ```bash
