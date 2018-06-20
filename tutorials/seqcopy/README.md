@@ -43,6 +43,7 @@ python3 -m sockeye.train -s data/train.source \
                          -vs data/dev.source \
                          -vt data/dev.target \
                          --encoder rnn --decoder rnn \
+                         --num-layers 1:1 \
                          --num-embed 32 \
                          --rnn-num-hidden 64 \
                          --rnn-attention-type dot \
