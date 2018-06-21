@@ -1014,7 +1014,7 @@ class Translator:
 
         self._update_scores = UpdateScores()
         self._update_scores.initialize(ctx=self.context)
-        self._update_scores.hybridize()
+        self._update_scores.hybridize(static_alloc=True, static_shape=True)
 
         # topk function used in beam search
         # self.topk = partial(utils.topk,
@@ -1025,21 +1025,22 @@ class Translator:
 
         self._topk = TopK(k=self.beam_size, batch_size=self.batch_size, vocab_size=len(self.vocab_target))
         self._topk.initialize(ctx=self.context)
-        self._topk.hybridize()
+        self._topk.hybridize(static_alloc=True, static_shape=True)
 
         self._sort_by_index = SortByIndex()
         self._sort_by_index.initialize(ctx=self.context)
-        self._sort_by_index.hybridize()
+        self._sort_by_index.hybridize(static_alloc=True, static_shape=True)
 
         self._update_finished = NormalizeAndUpdateFinished(pad_id=C.PAD_ID,
                                                            eos_id=self.vocab_target[C.EOS_SYMBOL],
                                                            length_penalty_alpha=self.length_penalty.alpha,
                                                            length_penalty_beta=self.length_penalty.beta)
         self._update_finished.initialize(ctx=self.context)
-        self._update_finished.hybridize()
+        self._update_finished.hybridize(static_alloc=True, static_shape=True)
+
         self._prune_hyps = PruneHypotheses(threshold=self.beam_prune, beam_size=self.beam_size)
         self._prune_hyps.initialize(ctx=self.context)
-        self._prune_hyps.hybridize()
+        self._prune_hyps.hybridize(static_alloc=True, static_shape=True)
 
         self.global_avoid_trie = None
         if avoid_list is not None:
