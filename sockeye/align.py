@@ -25,7 +25,7 @@ class Aligner:
 
         # TODO: we need to make these configurable eventually
         PROXIMITY = 10
-        MIN_WORD_LENGHT = 2
+        MIN_WORD_LENGTH = 2
         BANNED_WORDS = [C.EOS_SYMBOL, C.BOS_SYMBOL]
         default_index = -1
         copied_pos_list = np.ones(len(trg)) * -1
