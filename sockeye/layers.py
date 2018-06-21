@@ -259,6 +259,7 @@ class PointerOutputLayer(OutputLayer):
 
     def __call__(self,
                  hidden: Union[mx.sym.Symbol, mx.nd.NDArray],
+                 attention: Union[mx.sym.Symbol, mx.nd.NDArray],
                  context: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
                  weight: Optional[mx.nd.NDArray] = None,
                  bias: Optional[mx.nd.NDArray] = None):
@@ -266,6 +267,7 @@ class PointerOutputLayer(OutputLayer):
         Transformation to vocab size + source sentece size, weighted softmax using pointer nets. Returns probabilities.
 
         :param hidden: Decoder representation for n elements. Shape: (batch_size, trg_max_length, rnn_num_hidden ).
+        :param attention: Attention distributions over. Shape: (batch_size, trg_max_length, encoder_num_hidden)
         :param context: Context on the source sentence. Shape: (batch_size, trg_max_length, encoder_num_hidden)
 
         :return: Logits. Shape(batch_size, self.vocab_size+src_len).
@@ -304,7 +306,7 @@ class PointerOutputLayer(OutputLayer):
             #switch_prob = mx.sym.random.uniform(0.1, 0.11, 1)
 
             probs_trg = mx.sym.softmax(data=logits_trg, axis=1)
-            probs_src = mx.sym.softmax(data=context, axis=1)
+            probs_src = mx.sym.softmax(data=attention, axis=1)
 
             weighted_probs_src = mx.sym.broadcast_mul(probs_src, 1.0 - switch_target_prob)
             weighted_probs_trg = mx.sym.broadcast_mul(probs_trg, switch_target_prob)

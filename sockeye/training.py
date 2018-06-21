@@ -136,22 +136,17 @@ class TrainingModel(model.SockeyeModel):
                                                            source_embed_seq_len)
 
             # decoder
-            # TODO: (zappella@) currently we are getting context which is source*att_probs not the two separate vectors
-            target_decoded_and_context = self.decoder.decode_sequence(source_encoded, source_encoded_length,
-                                                                      source_encoded_seq_len,
-                                                                      target_embed, target_embed_length,
-                                                                      target_embed_seq_len)
+            target_decoded_and_attention = self.decoder.decode_sequence(source_encoded,
+                                                                        source_encoded_length,
+                                                                        source_encoded_seq_len,
+                                                                        target_embed,
+                                                                        target_embed_length,
+                                                                        target_embed_seq_len)
             # target_decoded: (batch-size, target_len, decoder_depth)
-            target_decoded = target_decoded_and_context[0]
+            target_decoded = target_decoded_and_attention[0]
 
             # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
             target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
-
-            # TODO: context is returned only by recurrent decoder at the moment
-            if len(target_decoded_and_context.list_outputs()) > 1:
-                context = target_decoded_and_context[1]
-                # context: (batch_size * trg_seq_len, encoder_num_hidden)
-                context = mx.sym.reshape(data=context, shape=(-3, 0))
 
             # output layer
             if not self.config.use_pointer_nets:
@@ -159,8 +154,14 @@ class TrainingModel(model.SockeyeModel):
                 logits = self.output_layer(target_decoded)
                 loss_output = self.model_loss.get_loss(logits, labels)
             else:
+                if len(target_decoded_and_attention.list_outputs()) > 1:
+                    context, attention = target_decoded_and_attention[1:]
+                    # context: (batch_size * trg_seq_len, encoder_num_hidden)
+                    context = mx.sym.reshape(data=context, shape=(-3, 0))
+                    attention = mx.sym.reshape(data=attention, shape=(-3, 0))
+
                 # softmax_probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
-                softmax_probs = self.output_layer(target_decoded, context=context)
+                softmax_probs = self.output_layer(target_decoded, attention, context=context)
                 loss_output = self.model_loss.get_loss(softmax_probs, labels)
 
             return mx.sym.Group(loss_output), data_names, label_names
