@@ -1,4 +1,6 @@
-# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+#!/usr/bin/env bash
+
+# Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -11,4 +13,7 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-__version__ = '1.18.26'
+# Make sure we are running from the fast_align directory
+cd $(dirname $0)
+
+docker build -t fast_align -f Dockerfile .
