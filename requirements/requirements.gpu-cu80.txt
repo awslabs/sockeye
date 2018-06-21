@@ -1,4 +1,4 @@
- pyyaml==3.12
-mxnet-cu80mkl>=1.3.0b20180531
+pyyaml==3.12
+mxnet-cu80mkl>=1.3.0b20180621
 numpy>=1.12
 typing
