@@ -62,8 +62,6 @@ def raw_corpus_rouge1(hypotheses: Iterable[str], references: Iterable[str]) -> f
      :param references: Reference stream.
      :return: ROUGE-1 score as float between 0 and 1.
      """
-     print('hypotheses', hypotheses)
-     print('references', references)
      return rouge.rouge_1(hypotheses, references)
 
 def raw_corpus_rouge2(hypotheses: Iterable[str], references: Iterable[str]) -> float:

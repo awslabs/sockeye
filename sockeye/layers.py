@@ -299,9 +299,6 @@ class PointerOutputLayer(OutputLayer):
             #combined_prob = mx.sym.concat(weighted_prob_source, weighted_prob_vocab, dim=1, name=C.SOFTMAX_OUTPUT_NAME)
             return weighted_prob_vocab, weighted_prob_source
 
-        else:
-            print(type(hidden), type(context))
-
 
         # Equivalent NDArray implementation (requires passed weights/biases)
         if isinstance(hidden, mx.nd.NDArray) and (context, mx.nd.NDArray) and isinstance(target_embed, mx.sym.Symbol):

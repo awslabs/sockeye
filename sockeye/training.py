@@ -48,9 +48,9 @@ class Print(mx.operator.CustomOp):
 
     def forward(self, is_train, req, in_data, out_data, aux):
         for data in in_data:
-            logger.info(data.asnumpy())
+            #logger.info(data.asnumpy())
             #logger.info(np.max(data.asnumpy()))
-            #logger.info(data.asnumpy().shape)
+            logger.info(data.asnumpy().shape)
         self.assign(out_data[0], req[0], in_data[0])
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
@@ -801,8 +801,6 @@ class EarlyStoppingTrainer:
         if gpu_memory_usage is not None:
             checkpoint_metrics['used-gpu-memory'] = sum(v[0] for v in gpu_memory_usage.values())
 
-        print(metric_train.get_name_value())
-        print(metric_val.get_name_value())
         for name, value in metric_train.get_name_value():
             checkpoint_metrics["%s-train" % name] = value
         for name, value in metric_val.get_name_value():
@@ -812,7 +810,6 @@ class EarlyStoppingTrainer:
             result = process_manager.collect_results()
             if result is not None:
                 decoded_checkpoint, decoder_metrics = result
-                print(decoder_metrics)
                 self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
                 self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
             process_manager.start_decoder(self.state.checkpoint)
