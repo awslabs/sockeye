@@ -54,7 +54,7 @@ class ConfigArgumentParser(argparse.ArgumentParser):
         def _new_add_argument(this_self, *args, **kwargs):
             action = this_self.original_add_argument(*args, **kwargs)
             this_self.config_container._register_argument(action, *args, **kwargs)
-        
+
         original_object.original_add_argument = original_object.add_argument
         original_object.config_container = self
         original_object.add_argument = types.MethodType(_new_add_argument, original_object)
@@ -386,6 +386,12 @@ def add_training_io_args(params):
     add_vocab_args(params)
     add_training_output_args(params)
     add_monitoring_args(params)
+    add_pointer_net_args(params)
+
+def add_pointer_net_args(params):
+    params.add_argument('--use-pointer-nets',
+                        action='store_true',
+                        help='Enable the usage of pointer networks. Default: %(default)s.')
 
 
 def add_bucketing_args(params):
@@ -410,6 +416,7 @@ def add_prepare_data_cli_args(params):
     add_training_data_args(params, required=True)
     add_vocab_args(params)
     add_bucketing_args(params)
+    add_pointer_net_args(params)
 
     params.add_argument('--num-samples-per-shard',
                         type=int_greater_or_equal(1),

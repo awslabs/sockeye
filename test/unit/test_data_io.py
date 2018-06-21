@@ -83,13 +83,13 @@ def test_get_bucket(buckets, length, expected_bucket):
     assert bucket == expected_bucket
 
 
-tokens2ids_tests = [(["a", "b", "c"], {"a": 1, "b": 0, "c": 300, C.UNK_SYMBOL: 12}, [1, 0, 300]),
-                    (["a", "x", "c"], {"a": 1, "b": 0, "c": 300, C.UNK_SYMBOL: 12}, [1, 12, 300])]
+tokens2ids_tests = [(["a", "b", "c"], {"a": 1, "b": 0, "c": 300, C.UNK_SYMBOL: 12}, [1, 0, 300], False),
+                    (["a", "x", "c"], {"a": 1, "b": 0, "c": 300, C.UNK_SYMBOL: 12}, [1, 12, 300], False)]
 
 
-@pytest.mark.parametrize("tokens, vocab, expected_ids", tokens2ids_tests)
-def test_tokens2ids(tokens, vocab, expected_ids):
-    ids = data_io.tokens2ids(tokens, vocab)
+@pytest.mark.parametrize("tokens, vocab, expected_ids, use_pointer_nets", tokens2ids_tests)
+def test_tokens2ids(tokens, vocab, expected_ids, use_pointer_nets):
+    ids = data_io.tokens2ids(tokens, vocab, use_pointer_nets)
     assert ids == expected_ids
 
 
@@ -134,7 +134,7 @@ def test_sequence_reader(sequences, use_vocab, add_bos, add_eos):
             expected_sequences = [data_io.strids2ids(get_tokens(s)) if s else None for s in sequences]
             assert read_sequences == expected_sequences
         else:
-            expected_sequences = [data_io.tokens2ids(get_tokens(s), vocabulary) if s else None for s in sequences]
+            expected_sequences = [data_io.tokens2ids(get_tokens(s), vocabulary, use_pointer_nets=False) if s else None for s in sequences]
             if add_bos:
                 expected_sequences = [[vocabulary[C.BOS_SYMBOL]] + s if s else None for s in expected_sequences]
             if add_eos:
@@ -459,6 +459,7 @@ def test_get_training_data_iters():
     test_line_count_empty = 0
     test_max_length = 30
     batch_size = 5
+    use_pointer_nets = False
     with tmp_digits_dataset("tmp_corpus",
                             train_line_count, train_max_length - C.SPACE_FOR_XOS,
                             dev_line_count, dev_max_length - C.SPACE_FOR_XOS,
@@ -486,7 +487,8 @@ def test_get_training_data_iters():
             max_seq_len_source=train_max_length,
             max_seq_len_target=train_max_length,
             bucketing=True,
-            bucket_width=10)
+            bucket_width=10,
+            use_pointer_nets=use_pointer_nets)
         assert isinstance(train_iter, data_io.ParallelSampleIter)
         assert isinstance(val_iter, data_io.ParallelSampleIter)
         assert isinstance(config_data, data_io.DataConfig)

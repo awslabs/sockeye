@@ -78,7 +78,7 @@ def check_arg_compatibility(args: argparse.Namespace):
 
     :param args: Arguments as returned by argparse.
     """
-    check_condition(args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics,
+    check_condition(args.optimized_metric == C.BLEU or args.optimized_metric == C.ROUGE1 or args.optimized_metric in args.metrics,
                     "Must optimize either BLEU or one of tracked metrics (--metrics)")
 
     if args.encoder == C.TRANSFORMER_TYPE:
@@ -252,7 +252,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                  max_seq_len_target: int,
                                  shared_vocab: bool,
                                  resume_training: bool,
-                                 output_folder: str) -> Tuple['data_io.BaseParallelSampleIter',
+                                 output_folder: str,
+                                 use_pointer_nets: bool) -> Tuple['data_io.BaseParallelSampleIter',
                                                               'data_io.BaseParallelSampleIter',
                                                               'data_io.DataConfig',
                                                               List[vocab.Vocab], vocab.Vocab]:
@@ -293,7 +294,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
             batch_num_devices=batch_num_devices,
-            fill_up=args.fill_up)
+            fill_up=args.fill_up,
+            use_pointer_nets=use_pointer_nets)
 
         check_condition(len(source_vocabs) == len(args.source_factors_num_embed) + 1,
                         "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
@@ -368,7 +370,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
-            bucket_width=args.bucket_width)
+            bucket_width=args.bucket_width,
+            use_pointer_nets=args.use_pointer_nets)
 
         data_info_fname = os.path.join(output_folder, C.DATA_INFO)
         logger.info("Writing data config to '%s'", data_info_fname)
@@ -450,7 +453,8 @@ def create_encoder_config(args: argparse.Namespace,
                                      residual=args.rnn_residual_connections,
                                      first_residual_layer=args.rnn_first_residual_layer,
                                      forget_bias=args.rnn_forget_bias,
-                                     lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc)),
+                                     lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc),
+                                     use_pointer_nets=False),
             conv_config=config_conv,
             reverse_input=args.rnn_encoder_reverse_input)
         encoder_num_hidden = args.rnn_num_hidden
@@ -541,7 +545,8 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
                                      residual=args.rnn_residual_connections,
                                      first_residual_layer=args.rnn_first_residual_layer,
                                      forget_bias=args.rnn_forget_bias,
-                                     lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc)),
+                                     lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc),
+                                     use_pointer_nets=args.use_pointer_nets if 'use_pointer_nets' in args else False),
             attention_config=config_attention,
             hidden_dropout=args.rnn_decoder_hidden_dropout,
             state_init=args.rnn_decoder_state_init,
@@ -625,7 +630,9 @@ def create_model_config(args: argparse.Namespace,
                                                   num_embed=num_embed_target,
                                                   dropout=embed_dropout_target)
 
-    config_loss = loss.LossConfig(name=args.loss,
+    loss_name = C.POINTER_NET_CROSS_ENTROPY if args.use_pointer_nets else args.loss
+
+    config_loss = loss.LossConfig(name=loss_name,
                                   vocab_size=target_vocab_size,
                                   normalization_type=args.loss_normalization_type,
                                   label_smoothing=args.label_smoothing)
@@ -641,6 +648,7 @@ def create_model_config(args: argparse.Namespace,
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
                                      weight_normalization=args.weight_normalization,
+                                     use_pointer_nets=args.use_pointer_nets,
                                      lhuc=args.lhuc is not None)
     return model_config
 
@@ -793,7 +801,8 @@ def train(args: argparse.Namespace):
             max_seq_len_target=max_seq_len_target,
             shared_vocab=use_shared_vocab(args),
             resume_training=resume_training,
-            output_folder=output_folder)
+            output_folder=output_folder,
+            use_pointer_nets=args.use_pointer_nets)
         max_seq_len_source = config_data.max_seq_len_source
         max_seq_len_target = config_data.max_seq_len_target
 

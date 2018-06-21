@@ -158,6 +158,8 @@ class InferenceModel(model.SockeyeModel):
 
         def sym_gen(source_seq_len: int):
             source = mx.sym.Variable(C.SOURCE_NAME)
+            #if self.config_loss.use_pointer_nets:
+            #    source = mx.sym.clip(source, a_min=0, a_max=self.vocab_target_size-1)
             source_words = source.split(num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
             source_length = utils.compute_lengths(source_words)
 
@@ -212,6 +214,8 @@ class InferenceModel(model.SockeyeModel):
 
             self.decoder.reset()
             target_prev = mx.sym.Variable(C.TARGET_NAME)
+            #if self.config_loss.use_pointer_nets:
+            #    target_prev = mx.sym.clip(target_prev, a_min=0, a_max=self.target_vocab_size-1)
             states = self.decoder.state_variables(decode_step)
             state_names = [state.name for state in states]
 
@@ -220,23 +224,61 @@ class InferenceModel(model.SockeyeModel):
             target_embed_prev, _, _ = self.embedding_target.encode(data=target_prev, data_length=None, seq_len=1)
 
             # decoder
+            if self.config.use_pointer_nets:
             # target_decoded: (batch_size, decoder_depth)
-            (target_decoded,
-             attention_probs,
-             states) = self.decoder.decode_step(decode_step,
+                (target_decoded,
+                context,
+                attention_probs,
+                target_embed) = self.decoder.decode_step(decode_step,
                                                 target_embed_prev,
                                                 source_encoded_seq_len,
                                                 *states)
-
-            if self.decoder_return_logit_inputs:
-                # skip output layer in graph
-                outputs = mx.sym.identity(target_decoded, name=C.LOGIT_INPUTS_NAME)
             else:
-                # logits: (batch_size, target_vocab_size)
-                logits = self.output_layer(target_decoded)
-                if self.softmax_temperature is not None:
-                    logits /= self.softmax_temperature
-                outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
+                (target_decoded,
+                attention_probs,
+                target_embed) = self.decoder.decode_step(decode_step,
+                                                        target_embed_prev,
+                                                        source_encoded_seq_len,
+                                                        *states)
+
+            if self.config.use_pointer_nets:
+                target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
+                context = mx.sym.reshape(data=context, shape=(-3, 0))
+                attention_probs = mx.sym.reshape(data=attention_probs, shape=(-3, 0))
+                #target_embed = mx.sym.reshape(data=target_embed, shape=(-3, -1))
+
+                prob_vocab, prob_source = self.output_layer(target_decoded, context=context, attention=attention_probs, target_embed=target_embed)
+                '''
+                batch_size = 50 * self.config.config_data.max_seq_len_target
+                max_seq_len = self.config.config_data.max_seq_len_source
+
+                dim_range = mx.sym.tile(mx.sym.reshape(mx.sym.arange(start=0, stop=batch_size), shape=(-1, 1)), reps=(1, max_seq_len))
+                dim_val = mx.sym.slice_like(data=dim_range, shape_like=prob_source)
+
+                #indices = mx.sym.stack(dim_val, mx.sym.slice_like(data=mx.sym.tile(mx.sym.squeeze(source), reps=(self.config.config_data.max_seq_len_target,1)), shape_like=prob_source), axis=0)
+
+                #ext_prob_source = mx.sym.scatter_nd(data=prob_source, indices=indices, shape=(batch_size, self.config.config_embed_source.vocab_size + C.MAX_OOV_WORDS))
+                ext_prob_vocab = mx.sym.concat(prob_vocab, mx.sym.slice_axis(mx.sym.zeros_like(prob_vocab), axis=1, begin=0, end=C.MAX_OOV_WORDS))
+                #ext_prob_source = mx.sym.slice_like(data=ext_prob_source, shape_like=ext_prob_vocab)
+
+                #softmax_prob = mx.sym.broadcasto_add(ext_prob_vocab, ext_prob_source)
+                outputs = ext_prob_vocab
+                #loss_output = self.model_loss.get_loss(softmax_probs, labels)
+                '''
+                outputs = mx.sym.identity(prob_vocab, name=C.SOFTMAX_NAME)
+
+            else:
+                states = target_embed
+
+                if self.decoder_return_logit_inputs:
+                    # skip output layer in graph
+                    outputs = mx.sym.identity(target_decoded, name=C.LOGIT_INPUTS_NAME)
+                else:
+                    # logits: (batch_size, target_vocab_size)
+                    logits = self.output_layer(target_decoded)
+                    if self.softmax_temperature is not None:
+                        logits /= self.softmax_temperature
+                    outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
 
             data_names = [C.TARGET_NAME] + state_names
             label_names = []  # type: List[str]
@@ -960,7 +1002,8 @@ class Translator:
                  target_vocab: vocab.Vocab,
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
                  store_beam: bool = False,
-                 strip_unknown_words: bool = False) -> None:
+                 strip_unknown_words: bool = False,
+                 use_pointer_nets: bool = False) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
@@ -1024,6 +1067,7 @@ class Translator:
                                                                      eos_id=self.vocab_target[C.EOS_SYMBOL])
         self._update_lengths_and_finished.initialize(ctx=self.context)
         self._update_lengths_and_finished.hybridize()
+        self.use_pointer_nets = use_pointer_nets
 
         logger.info("Translator (%d model(s) beam_size=%d beam_prune=%s beam_search_stop=%s "
                     "ensemble_mode=%s batch_size=%d buckets_source=%s)",
@@ -1177,7 +1221,7 @@ class Translator:
 
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)
-            source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
+            source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0], use_pointer_nets=self.use_pointer_nets)
 
             factors = trans_input.factors if trans_input.factors is not None else []
             num_factors = 1 + len(factors)
@@ -1187,10 +1231,10 @@ class Translator:
             for i, factor in enumerate(factors[:self.num_source_factors - 1], start=1):
                 # fill in as many factors as there are tokens
 
-                source[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
+                source[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i], use_pointer_nets=self.use_pointer_nets)[:num_tokens]
 
             if trans_input.constraints is not None:
-                raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
+                raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target, use_pointer_nets=self.use_pointer_nets) for phrase in
                                       trans_input.constraints]
 
         return source, bucket_key, raw_constraints
@@ -1210,7 +1254,19 @@ class Translator:
         target_ids = translation.target_ids[1:]
         attention_matrix = translation.attention_matrix[1:, :]
 
-        target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
+        if self.use_pointer_nets:
+            num_new_tokens = 0
+            vocab_size = len(vocab_target)
+            vocab_target_copy = dict(vocab_target)
+            for source_id in trans_input.tokens:
+                if source_id not in vocab_target_copy and num_new_tokens < C.MAX_OOV_WORDS:
+                    vocab_target_copy[vocab_size] = target_id
+                    vocab_size = len(vocab_target)
+                    num_new_tokens += 1
+            vocab_target_copy_inv = vocab.reverse_vocab(vocab_target_copy)
+            target_tokens = [vocab_target_copy_inv[target_id] for target_id in target_ids]
+        else:
+            target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
 
         target_string = C.TOKEN_SEPARATOR.join(
             tok for target_id, tok in zip(target_ids, target_tokens) if target_id not in self.strip_ids)

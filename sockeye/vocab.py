@@ -19,6 +19,7 @@ from collections import Counter
 from contextlib import ExitStack
 from itertools import chain, islice
 from typing import Dict, Iterable, List, Optional, Tuple
+import copy
 
 from . import utils
 from . import constants as C
@@ -60,6 +61,8 @@ def build_vocab(data: Iterable[str], num_words: int = 50000, min_count: int = 1)
     :return: Word-to-id mapping.
     """
     vocab_symbols_set = set(C.VOCAB_SYMBOLS)
+    vocab_symbols_list = copy.deepcopy(C.VOCAB_SYMBOLS)
+
     raw_vocab = Counter(token for line in data for token in utils.get_tokens(line)
                         if token not in vocab_symbols_set)
     # For words with the same count, they will be ordered reverse alphabetically.
@@ -68,13 +71,16 @@ def build_vocab(data: Iterable[str], num_words: int = 50000, min_count: int = 1)
 
     vocab = islice((w for c, w in pruned_vocab), num_words)
 
-    word_to_id = {word: idx for idx, word in enumerate(chain(C.VOCAB_SYMBOLS, vocab))}
+    vocab_symbols_list.remove(C.UNK_SYMBOL)
+    word_to_id = {word: idx for idx, word in enumerate(chain(vocab_symbols_list, vocab))}
+    word_to_id[C.UNK_SYMBOL] = len(word_to_id)
     logger.info("Vocabulary: types: %d/%d/%d/%d (initial/min_pruned/max_pruned/+special) " +
                 "[min_frequency=%d, max_num_types=%d]",
                 len(raw_vocab), len(pruned_vocab), len(word_to_id) - len(C.VOCAB_SYMBOLS),
                 len(word_to_id), min_count, num_words)
 
     # Important: pad symbol becomes index 0
+    print('Padding ID:', word_to_id[C.PAD_SYMBOL], 'UNK ID', word_to_id[C.UNK_SYMBOL])
     assert word_to_id[C.PAD_SYMBOL] == C.PAD_ID
     return word_to_id
 

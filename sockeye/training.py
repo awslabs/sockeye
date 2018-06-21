@@ -41,6 +41,41 @@ from .optimizers import BatchState, CheckpointState, SockeyeOptimizer, Optimizer
 logger = logging.getLogger(__name__)
 
 
+class Print(mx.operator.CustomOp):
+    """
+    debugging operator to print input values.
+    """
+
+    def forward(self, is_train, req, in_data, out_data, aux):
+        for data in in_data:
+            logger.info(data.asnumpy())
+            #logger.info(np.max(data.asnumpy()))
+            #logger.info(data.asnumpy().shape)
+        self.assign(out_data[0], req[0], in_data[0])
+
+    def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
+        self.assign(in_grad[0], req[0], out_grad[0])
+
+
+@mx.operator.register("print")
+class PrintProp(mx.operator.CustomOpProp):
+    def __init__(self):
+        super(PrintProp, self).__init__(need_top_grad=True)
+
+    def list_arguments(self):
+        return ['data']
+
+    def list_outputs(self):
+        return ['output']
+
+    def infer_shape(self, in_shape):
+        data_shape = in_shape[0]
+        output_shape = in_shape[0]
+        return [data_shape], [output_shape], []
+
+    def create_operator(self, ctx, shapes, dtypes):
+        return Print()
+
 class TrainingModel(model.SockeyeModel):
     """
     TrainingModel is a SockeyeModel that fully unrolls over source and target sequences.
@@ -83,11 +118,14 @@ class TrainingModel(model.SockeyeModel):
         """
         Initializes model components, creates training symbol and module, and binds it.
         """
-        source = mx.sym.Variable(C.SOURCE_NAME)
+        source_oov = mx.sym.Variable(C.SOURCE_NAME)
+        source = mx.sym.clip(source_oov, a_min=0, a_max=self.config.config_embed_source.vocab_size-1)
+
         source_words = source.split(num_outputs=self.config.config_embed_source.num_factors,
                                     axis=2, squeeze_axis=True)[0]
         source_length = utils.compute_lengths(source_words)
         target = mx.sym.Variable(C.TARGET_NAME)
+        target = mx.sym.clip(target, a_min=0, a_max=self.config.config_embed_source.vocab_size-1)
         target_length = utils.compute_lengths(target)
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
 
@@ -129,19 +167,57 @@ class TrainingModel(model.SockeyeModel):
                                                            source_embed_length,
                                                            source_embed_seq_len)
 
-            # decoder
-            # target_decoded: (batch-size, target_len, decoder_depth)
-            target_decoded = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
-                                                          target_embed, target_embed_length, target_embed_seq_len)
+	    # decoder
+            # TODO: (zappella@) currently we are getting context which is source*att_probs not the two separate vectors
+            target_decoded_and_context = self.decoder.decode_sequence(source_encoded, source_encoded_length,
+                                                                      source_encoded_seq_len,
+                                                                      target_embed, target_embed_length,
+                                                                      target_embed_seq_len)
 
-            # target_decoded: (batch_size * target_seq_len, decoder_depth)
-            target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
+            # TODO: context is returned only by recurrent decoder at the moment
+            if len(target_decoded_and_context.list_outputs()) > 1:
+		# target_decoded: (batch-size, target_len, decoder_depth)
+                target_decoded = target_decoded_and_context[0]
+                context = target_decoded_and_context[1]
+                attention = target_decoded_and_context[2]
+                target_embed = target_decoded_and_context[3]
+
+                # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
+                target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
+                # context: (batch_size * trg_seq_len, encoder_num_hidden)
+                context = mx.sym.reshape(data=context, shape=(-3, 0))
+                attention = mx.sym.reshape(data=attention, shape=(-3, 0))
+                target_embed = mx.sym.reshape(data=target_embed, shape=(-3, -1))
+
+            else:
+                # target_decoded: (batch-size, target_len, decoder_depth)
+                target_decoded = target_decoded_and_context
+		# target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
+                target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
 
             # output layer
-            # logits: (batch_size * target_seq_len, target_vocab_size)
-            logits = self.output_layer(target_decoded)
+            if not self.config.use_pointer_nets:
+                # logits: (batch_size * target_seq_len, target_vocab_size)
+                logits = self.output_layer(target_decoded)
+                loss_output = self.model_loss.get_loss(logits, labels)
+            else:
+                # softmax_probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
+                prob_vocab, prob_source = self.output_layer(target_decoded, context=context, attention=attention, target_embed=target_embed)
 
-            loss_output = self.model_loss.get_loss(logits, labels)
+                batch_size = 50 * self.config.config_data.max_seq_len_target
+                max_seq_len = self.config.config_data.max_seq_len_source
+
+                dim_range = mx.sym.tile(mx.sym.reshape(mx.sym.arange(start=0, stop=batch_size), shape=(-1, 1)), reps=(1, max_seq_len))
+                dim_val = mx.sym.slice_like(data=dim_range, shape_like=prob_source)
+
+                indices = mx.sym.stack(dim_val, mx.sym.slice_like(data=mx.sym.tile(mx.sym.squeeze(source_oov), reps=(self.config.config_data.max_seq_len_target,1)), shape_like=prob_source), axis=0)
+
+                ext_prob_source = mx.sym.scatter_nd(data=prob_source, indices=indices, shape=(batch_size, self.config.config_embed_source.vocab_size + C.MAX_OOV_WORDS))
+                ext_prob_vocab = mx.sym.concat(prob_vocab, mx.sym.slice_axis(mx.sym.zeros_like(prob_vocab), axis=1, begin=0, end=C.MAX_OOV_WORDS))
+                ext_prob_source = mx.sym.slice_like(data=ext_prob_source, shape_like=ext_prob_vocab)
+
+                softmax_probs = mx.sym.broadcast_add(ext_prob_vocab, ext_prob_source)
+                loss_output = self.model_loss.get_loss(softmax_probs, labels)
 
             return mx.sym.Group(loss_output), data_names, label_names
 
@@ -725,6 +801,8 @@ class EarlyStoppingTrainer:
         if gpu_memory_usage is not None:
             checkpoint_metrics['used-gpu-memory'] = sum(v[0] for v in gpu_memory_usage.values())
 
+        print(metric_train.get_name_value())
+        print(metric_val.get_name_value())
         for name, value in metric_train.get_name_value():
             checkpoint_metrics["%s-train" % name] = value
         for name, value in metric_val.get_name_value():
@@ -734,6 +812,7 @@ class EarlyStoppingTrainer:
             result = process_manager.collect_results()
             if result is not None:
                 decoded_checkpoint, decoder_metrics = result
+                print(decoder_metrics)
                 self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
                 self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
             process_manager.start_decoder(self.state.checkpoint)

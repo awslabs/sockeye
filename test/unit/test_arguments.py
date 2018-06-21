@@ -37,7 +37,7 @@ from itertools import zip_longest
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1, 1),
           no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
-          monitor_pattern=None, monitor_stat_func='mx_default')),
+          monitor_pattern=None, monitor_stat_func='mx_default', use_pointer_nets=False)),
 
     # short parameters
     ('-s test_src -t test_tgt -d prep_data '
@@ -51,7 +51,7 @@ from itertools import zip_longest
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1, 1),
           no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
-          monitor_pattern=None, monitor_stat_func='mx_default'))
+          monitor_pattern=None, monitor_stat_func='mx_default', use_pointer_nets=False))
 ])
 def test_io_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_training_io_args)
@@ -341,7 +341,8 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           min_num_shards=1,
           num_samples_per_shard=1000000,
           seed=13,
-          output='train_data'
+          output='train_data',
+          use_pointer_nets=False
           ))
 ])
 def test_tutorial_prepare_data_cli_args(test_params, expected_params):
@@ -363,7 +364,8 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           min_num_shards=1,
           num_samples_per_shard=1000000,
           seed=13,
-          output='prepared_data'
+          output='prepared_data',
+          use_pointer_nets=False
           ))
 ])
 def test_prepare_data_cli_args(test_params, expected_params):

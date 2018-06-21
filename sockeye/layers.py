@@ -226,6 +226,118 @@ class OutputLayer:
                                     flatten=False)
 
 
+class PointerOutputLayer(OutputLayer):
+    """
+    Defines the output layer of Sockeye decoders. Supports weight tying and weight normalization.
+
+    :param hidden_size: Decoder hidden size.
+    :param encoder_hidden_size: Encoder hidden size.
+    :param vocab_size: Target vocabulary size.
+    :param weight_normalization: Whether to apply weight normalization.
+    :param prefix: Prefix used for naming.
+    """
+
+    def __init__(self,
+                 hidden_size: int,
+                 target_embed_size: int,
+                 encoder_hidden_size: int,
+                 vocab_size: int,
+                 weight: Optional[mx.sym.Symbol],
+                 weight_normalization: bool,
+                 prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX) -> None:
+
+        super().__init__(hidden_size, vocab_size, weight, weight_normalization, prefix)
+
+        self.num_hidden_fc1 = 1 #hidden_size
+
+        self.pn_w1 = mx.sym.Variable("%spn_weight1" % self.prefix, init=mx.init.One(),
+                                         shape=(self.num_hidden_fc1, encoder_hidden_size + hidden_size + target_embed_size))
+        self.b_fc1 = mx.sym.Variable("%sbias_pnfc1" % self.prefix, init=mx.init.One())
+
+    def __call__(self,
+                 hidden: Union[mx.sym.Symbol, mx.nd.NDArray],
+                 context: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
+                 attention: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
+                 target_embed: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
+                 weight: Optional[mx.nd.NDArray] = None,
+                 bias: Optional[mx.nd.NDArray] = None):
+        """
+        Transformation to vocab size + source sentece size, weighted softmax using pointer nets. Returns probabilities.
+
+        :param hidden: Decoder representation for n elements. Shape: (batch_size, trg_max_length, rnn_num_hidden ).
+        :param context: Context on the source sentence. Shape: (batch_size, trg_max_length, encoder_num_hidden)
+
+        :return: Logits. Shape(batch_size, self.vocab_size+src_len).
+        """
+
+        if isinstance(hidden, mx.sym.Symbol) and isinstance(context, mx.sym.Symbol) and isinstance(target_embed, mx.sym.Symbol):
+            # TODO dropout?
+            # TODO num_hidden fc1 needs to be passed as well as other nets options
+
+            logits_trg = super().__call__(hidden, weight=weight, bias=bias)
+
+            # shape (batch_size * trg_max_len, encoder_rnn_hid+dec_rnn_hidden+target_embed_size)
+            switch_input = mx.sym.concat(context, hidden, target_embed, dim=1)
+
+            switch_fc1 = mx.sym.FullyConnected(data=switch_input,
+                                               num_hidden=self.num_hidden_fc1,
+                                               weight=self.pn_w1,
+                                               bias=self.b_fc1,
+                                               flatten=False,
+                                               name=C.SWITCH_PROB_NAME + '_fc1')
+
+            # TODO add noisy tanh activation function
+            switch_prob = mx.sym.Activation(switch_fc1, act_type='sigmoid', name=C.SWITCH_PROB_NAME+'_a1')
+
+            p_gen = switch_prob
+            p_vocab = mx.sym.softmax(data=logits_trg, axis=1)
+            p_source = mx.sym.softmax(data=attention, axis=1)
+
+            weighted_prob_vocab = mx.sym.broadcast_mul(p_vocab, p_gen)
+            weighted_prob_source = mx.sym.broadcast_mul(p_source, (1.0 - p_gen))
+
+            #combined_prob = mx.sym.concat(weighted_prob_source, weighted_prob_vocab, dim=1, name=C.SOFTMAX_OUTPUT_NAME)
+            return weighted_prob_vocab, weighted_prob_source
+
+        else:
+            print(type(hidden), type(context))
+
+
+        # Equivalent NDArray implementation (requires passed weights/biases)
+        if isinstance(hidden, mx.nd.NDArray) and (context, mx.nd.NDArray) and isinstance(target_embed, mx.sym.Symbol):
+            utils.check_condition(weight is not None and bias is not None,
+                                  "OutputLayer NDArray implementation requires passing weight and bias NDArrays.")
+
+            logits_trg = super().__call__(hidden, weight=weight, bias=bias)
+
+            # shape (batch_size * trg_max_len, encoder_rnn_hid+dec_rnn_hidden)
+            switch_input = mx.nd.concat(context, hidden, target_embed, dim=1)
+
+            switch_fc1 = mx.nd.FullyConnected(data=switch_input,
+                                               num_hidden=self.num_hidden_fc1,
+                                               weight=self.pn_w1,
+                                               bias=self.b_fc1,
+                                               flatten=False,
+                                               name=C.SWITCH_PROB_NAME + '_fc1')
+
+            # TODO add noisy tanh activation function
+            switch_prob = mx.nd.Activation(switch_fc1, act_type='sigmoid', name=C.SWITCH_PROB_NAME + '_a1')
+
+            p_gen = switch_prob
+            p_vocab = mx.nd.softmax(data=logits_trg, axis=1)
+            p_source = mx.nd.softmax(data=attention, axis=1)
+
+            weighted_probs_vocab = mx.nd.broadcast_mul(p_vocab, p_gen)
+            weighted_probs_source = mx.nd.broadcast_mul(p_source, (1.0 - p_gen))
+
+            return weighted_prob_vocab, weighted_prob_source
+
+
+        utils.check_condition((isinstance(hidden, mx.nd.NDArray) and isinstance(context, mx.sym.Symbol) and isinstance(target_embed, mx.sym.Symbol)) or
+                              (isinstance(context, mx.nd.NDArray) and isinstance(hidden, mx.sym.Symbol) and isinstance(target_embed, mx.sym.Symbol)),
+                              "PointerOutputLayer supports only hidden, context and target embedding to be of the same kind (Symbol or NDArray).")
+
+
 def split_heads(x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:
     """
     Returns a symbol with head dimension folded into batch and depth divided by the number of heads.

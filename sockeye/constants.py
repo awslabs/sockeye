@@ -26,6 +26,7 @@ TOKEN_SEPARATOR = " "
 VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
 # reserve extra space for the EOS or BOS symbol that is added to both source and target
 SPACE_FOR_XOS = 1
+MAX_OOV_WORDS = 100
 
 ARG_SEPARATOR = ":"
 
@@ -171,6 +172,7 @@ LOGIT_INPUTS_NAME = "logit_inputs"
 LOGITS_NAME = "logits"
 SOFTMAX_NAME = "softmax"
 SOFTMAX_OUTPUT_NAME = SOFTMAX_NAME + "_output"
+SWITCH_PROB_NAME = "switch_prob"
 
 MEASURE_SPEED_EVERY = 50  # measure speed and metrics every X batches
 
@@ -334,16 +336,25 @@ ACCURACY = 'accuracy'
 PERPLEXITY = 'perplexity'
 BLEU = 'bleu'
 CHRF = 'chrf'
+ROUGE = 'rouge'
+ROUGE1 = 'rouge1'
+ROUGE2 = 'rouge2'
+ROUGEL = 'rougel'
 BLEU_VAL = BLEU + "-val"
 CHRF_VAL = CHRF + "-val"
+ROUGE_VAL = ROUGE + "-val"
+ROUGE_1_VAL = ROUGE1 + "-val"
+ROUGE_2_VAL = ROUGE2 + "-val"
+ROUGE_L_VAL = ROUGEL + "-val"
 AVG_TIME = "avg-sec-per-sent-val"
 DECODING_TIME = "decode-walltime-val"
-METRICS = [PERPLEXITY, ACCURACY, BLEU]
-METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, PERPLEXITY: False}
-METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, PERPLEXITY: np.inf}
+METRICS = [PERPLEXITY, ACCURACY, BLEU, ROUGE1]
+METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, ROUGE1: True, PERPLEXITY: False}
+METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, ROUGE1: 0.0, PERPLEXITY: np.inf}
 
 # loss
 CROSS_ENTROPY = 'cross-entropy'
+POINTER_NET_CROSS_ENTROPY = 'pointer-net-cross-entropy'
 
 LOSS_NORM_BATCH = 'batch'
 LOSS_NORM_VALID = "valid"
