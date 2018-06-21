@@ -309,7 +309,7 @@ class PointerOutputLayer(OutputLayer):
             weighted_probs_src = mx.sym.broadcast_mul(probs_src, switch_prob)
             weighted_probs_trg = mx.sym.broadcast_mul(probs_trg, (1.0 - switch_prob))
 
-            return mx.sym.concat(weighted_probs_src, weighted_probs_trg, dim=1, name=C.SOFTMAX_OUTPUT_NAME)
+            return mx.sym.concat(weighted_probs_trg, weighted_probs_src, dim=1, name=C.SOFTMAX_OUTPUT_NAME)
 
 
         # Equivalent NDArray implementation (requires passed weights/biases)
