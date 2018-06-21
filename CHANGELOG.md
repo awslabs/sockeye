@@ -10,6 +10,28 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.25]
+### Changed
+- Update requirements to use MKL versions of MXNet for fast CPU operation.
+
+## [1.18.24]
+### Added
+- Dockerfiles and convenience scripts for running `fast_align` to generate lexical tables.
+These tables can be used to create top-K lexicons for faster decoding via vocabulary selection ([documentation](https://github.com/awslabs/sockeye/tree/master/contrib/fast_align)).
+
+### Changed
+- Updated default top-K lexicon size from 20 to 200.
+
+## [1.18.23]
+### Fixed
+- Correctly create the convolutional embedding layers when the encoder is set to `transformer-with-conv-embed`. Previously
+no convolutional layers were added so that a standard Transformer model was trained instead.
+
+## [1.18.22]
+### Fixed
+- Make sure the default bucket is large enough with word based batching when the source is longer than the target (Previously
+there was an edge case where the memory usage was sub-optimal with word based batching and longer source than target sentences).
+
 ## [1.18.21]
 ### Fixed
 - Constrained decoding was missed a crucial cast

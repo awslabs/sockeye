@@ -67,7 +67,7 @@ args, unparsed_args = parser.parse_known_args()
 sys.argv[1:] = unparsed_args
 
 if args.requirement is None:
-    install_requires = get_requirements('requirements.txt')
+    install_requires = get_requirements(os.path.join('requirements', 'requirements.txt'))
 else:
     install_requires = get_requirements(args.requirement)
 
@@ -113,7 +113,7 @@ args = dict(
 
     extras_require={
         'optional': ['mxboard', 'matplotlib'],
-        'dev': get_requirements('requirements.dev.txt')
+        'dev': get_requirements(os.path.join('requirements', 'requirements.dev.txt'))
     },
 
     install_requires=install_requires,

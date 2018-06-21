@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+
+import os
 import random
 
 random.seed(12)
@@ -18,13 +21,14 @@ samples = list(samples)
 train_samples = samples[:num_samples-num_dev]
 dev_samples = samples[num_samples-num_dev:]
 
-
-with open("train.source", "w") as source, open("train.target", "w") as target:
+if not os.path.exists('data'):
+    os.mkdir('data')
+with open("data/train.source", "w") as source, open("data/train.target", "w") as target:
     for sample in train_samples:
         source.write(sample + "\n")
         target.write(sample + "\n")
 
-with open("dev.source", "w") as source, open("dev.target", "w") as target:
+with open("data/dev.source", "w") as source, open("data/dev.target", "w") as target:
     for sample in dev_samples:
         source.write(sample + "\n")
         target.write(sample + "\n")

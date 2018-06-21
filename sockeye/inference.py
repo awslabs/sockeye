@@ -796,17 +796,17 @@ TokenIds = List[int]
 
 
 class Translation:
-    __slots__ = ('target_ids', 'attention_matrix', 'score', 'beam_history')
+    __slots__ = ('target_ids', 'attention_matrix', 'score', 'beam_histories')
 
     def __init__(self,
                  target_ids: TokenIds,
                  attention_matrix: np.ndarray,
                  score: float,
-                 beam_history: List[Optional[BeamHistory]] = None) -> None:
+                 beam_history: List[BeamHistory] = None) -> None:
         self.target_ids = target_ids
         self.attention_matrix = attention_matrix
         self.score = score
-        self.beam_history = beam_history
+        self.beam_histories = beam_history if beam_history is not None else []
 
 
 def empty_translation() -> Translation:
@@ -907,9 +907,7 @@ def _concat_translations(translations: List[Translation], start_id: int, stop_id
             else:
                 target_ids.extend(translation.target_ids[1:])
                 attention_matrices.append(translation.attention_matrix[1:, :])
-        if translation.beam_history:
-            # Make a list of the individual beam histories
-            beam_histories.append(translation.beam_history[0])
+        beam_histories.extend(translation.beam_histories)
 
     # Combine attention matrices:
     attention_shapes = [attention_matrix.shape for attention_matrix in attention_matrices]
@@ -991,7 +989,7 @@ class Translator:
             self.buckets_source = data_io.define_buckets(self.max_input_length, step=bucket_source_width)
         else:
             self.buckets_source = [self.max_input_length]
-        self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target)), val=np.inf,
+        self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target) - 1), val=np.inf,
                                    ctx=self.context)
         # These are constants used for manipulation of the beam and scores (particularly for pruning)
         self.zeros_array = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
@@ -1001,6 +999,11 @@ class Translator:
         # offset for hypothesis indices in batch decoding
         self.offset = mx.nd.array(np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size),
                                   dtype='int32', ctx=self.context)
+
+        self._update_scores = UpdateScores()
+        self._update_scores.initialize(ctx=self.context)
+        self._update_scores.hybridize()
+
         # topk function used in beam search
         self._topk = partial(utils.topk,
                              k=self.beam_size,
@@ -1218,17 +1221,12 @@ class Translator:
             tok for target_id, tok in zip(target_ids, target_tokens) if target_id not in self.strip_ids)
         attention_matrix = attention_matrix[:, :len(trans_input.tokens)]
 
-        if isinstance(translation.beam_history, list):
-            beam_histories = translation.beam_history
-        else:
-            beam_histories = [translation.beam_history]
-
         return TranslatorOutput(id=trans_input.sentence_id,
                                 translation=target_string,
                                 tokens=target_tokens,
                                 attention_matrix=attention_matrix,
                                 score=translation.score,
-                                beam_histories=beam_histories)
+                                beam_histories=translation.beam_histories)
 
     def _concat_translations(self, translations: List[Translation]) -> Translation:
         """
@@ -1357,10 +1355,9 @@ class Translator:
 
         best_word_indices = mx.nd.full((self.batch_size * self.beam_size,), val=self.start_id, ctx=self.context,
                                        dtype='int32')
-        # sequences: (batch_size * beam_size, output_length), pre-filled with <s> symbols on index 0
-        sequences = mx.nd.full((self.batch_size * self.beam_size, max_output_length), val=C.PAD_ID, ctx=self.context,
+        # growing sequences: (batch_size * beam_size, 1), pre-filled with <s> symbols on index 0
+        sequences = mx.nd.full((self.batch_size * self.beam_size, 1), val=self.start_id, ctx=self.context,
                                dtype='int32')
-        sequences[:, 0] = self.start_id
 
         # Beam history
         beam_histories = None  # type: Optional[List[BeamHistory]]
@@ -1370,9 +1367,8 @@ class Translator:
         lengths = mx.nd.ones((self.batch_size * self.beam_size, 1), ctx=self.context)
         finished = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
 
-        # attentions: (batch_size * beam_size, output_length, encoded_source_length)
-        attentions = mx.nd.zeros((self.batch_size * self.beam_size, max_output_length, encoded_source_length),
-                                 ctx=self.context)
+        # attentions: (batch_size * beam_size, 1, encoded_source_length)
+        attentions = mx.nd.zeros((self.batch_size * self.beam_size, 1, encoded_source_length), ctx=self.context)
 
         # scores_accumulated: chosen smallest scores in scores (ascending).
         scores_accumulated = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context)
@@ -1412,7 +1408,7 @@ class Translator:
                                                           ctx=self.context, dtype='int32'),
                                                dim=0)
 
-            pad_dist = mx.nd.full((self.batch_size * self.beam_size, vocab_slice_ids.shape[0]),
+            pad_dist = mx.nd.full((self.batch_size * self.beam_size, vocab_slice_ids.shape[0] - 1),
                                   val=np.inf, ctx=self.context)
             for m in self.models:
                 models_output_layer_w.append(m.output_layer_w.take(vocab_slice_ids))
@@ -1441,16 +1437,9 @@ class Translator:
                                                                        models_output_layer_w=models_output_layer_w,
                                                                        models_output_layer_b=models_output_layer_b)
 
-            # (2) Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
+            # (2) Update scores. Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
-            scores += scores_accumulated
-            # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
-            # infinity otherwise.
-            # pylint: disable=invalid-sequence-index
-            pad_dist[:, C.PAD_ID] = mx.nd.where(mx.nd.clip(finished - inactive, 0, 1),
-                                                scores_accumulated[:, 0],
-                                                self.inf_array[:, 0])
-            scores = mx.nd.where(finished + inactive, pad_dist, scores)
+            scores = self._update_scores.forward(scores, finished, inactive, scores_accumulated, self.inf_array, pad_dist)
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
@@ -1509,8 +1498,8 @@ class Translator:
             # pylint: disable=unsupported-assignment-operation
             sequences = mx.nd.take(sequences, best_hyp_indices)
             attentions = mx.nd.take(attentions, best_hyp_indices)
-            sequences[:, t] = best_word_indices
-            attentions[:, t, :] = attention_scores
+            sequences = mx.nd.concat(sequences, best_word_indices.reshape((-1, 1)), dim=1)
+            attentions = mx.nd.concat(attentions, attention_scores.reshape((-1, 1, encoded_source_length)), dim=1)
 
             # (6) optionally save beam history
             if self.store_beam:
@@ -1611,7 +1600,7 @@ class Translator:
                               length: mx.nd.NDArray,
                               attention_lists: mx.nd.NDArray,
                               seq_score: mx.nd.NDArray,
-                              beam_history: List[Optional[BeamHistory]]) -> Translation:
+                              beam_history: Optional[BeamHistory]) -> Translation:
         """
         Takes a set of data pertaining to a single translated item, performs slightly different
         processing on each, and merges it into a Translation object.
@@ -1629,7 +1618,8 @@ class Translator:
         sequence = sequence[:length].asnumpy().tolist()
         attention_matrix = np.stack(attention_lists.asnumpy()[:length, :], axis=0)
         score = seq_score.asscalar()
-        return Translation(sequence, attention_matrix, score, beam_history)
+        beam_history_list = [beam_history] if beam_history is not None else []
+        return Translation(sequence, attention_matrix, score, beam_history_list)
 
     def _print_beam(self,
                     sequences: mx.nd.NDArray,
@@ -1740,3 +1730,30 @@ class UpdateLengthsAndFinished(mx.gluon.HybridBlock):
         lengths = lengths + F.cast(1 - F.expand_dims(finished_or_inactive, axis=1), dtype='float32')
         finished = ((best_word_indices == self.pad_id) + (best_word_indices == self.eos_id))
         return finished, finished_or_inactive, lengths
+
+
+class UpdateScores(mx.gluon.HybridBlock):
+    """
+    A HybridBlock that updates the scores from the decoder step with acumulated scores.
+    Inactive hypotheses receive score inf. Finished hypotheses receive their accumulated score for C.PAD_ID.
+    All other options are set to infinity.
+    """
+
+    def __init__(self):
+        super().__init__()
+        assert C.PAD_ID == 0, "This blocks only works with PAD_ID == 0"
+
+    def hybrid_forward(self, F, scores, finished, inactive, scores_accumulated, inf_array, pad_dist):
+        # Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
+        # finished rows are inf everywhere except column zero (pad_id), which holds the accumulated model score.
+        # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
+        # infinity otherwise.
+        scores = F.broadcast_add(scores, scores_accumulated)
+        # pylint: disable=invalid-sequence-index
+        pad_id_scores = F.where(F.clip(finished - inactive, 0, 1),
+                                scores_accumulated,
+                                inf_array)
+        # pad_dist. Shape: (batch*beam, vocab_size)
+        pad_dist = F.concat(pad_id_scores, pad_dist)
+        scores = F.where(finished + inactive, pad_dist, scores)
+        return scores

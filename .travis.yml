@@ -14,9 +14,9 @@ python:
 
 install:
   - sudo apt-get -y update && sudo apt-get install -y libgfortran3
-  - pip install -r requirements.txt
-  - pip install -r requirements.dev.txt
-  - pip install -r requirements.docs.txt
+  - pip install -r requirements/requirements.txt
+  - pip install -r requirements/requirements.dev.txt
+  - pip install -r requirements/requirements.docs.txt
 
 script:
   - python3 setup.py test
