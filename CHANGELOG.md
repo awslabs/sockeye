@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.26]
+### Added
+- ROUGE score evaluation. It can be used as the stopping criterion for tasks such as summarization.
+
 ## [1.18.25]
 ### Changed
 - Update requirements to use MKL versions of MXNet for fast CPU operation.
@@ -489,4 +493,5 @@ sockeye.evaluate now accepts `bleu` and `chrf` as values for `--metrics`
 ### Changed
  - `--attention-*` CLI params renamed to `--rnn-attention-*`.
  - `--transformer-no-positional-encodings` generalized to `--transformer-positional-embedding-type`.
+
 

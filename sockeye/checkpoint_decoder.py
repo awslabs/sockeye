@@ -165,6 +165,12 @@ class CheckpointDecoder:
                                                      offset=0.01),
                 C.CHRF_VAL: evaluate.raw_corpus_chrf(hypotheses=translations,
                                                      references=self.target_sentences),
+                C.ROUGE_1_VAL: evaluate.raw_corpus_rouge1(hypotheses=translations,
+                                                          references=self.target_sentences),
+                C.ROUGE_2_VAL: evaluate.raw_corpus_rouge2(hypotheses=translations,
+                                                          references=self.target_sentences),
+                C.ROUGE_L_VAL: evaluate.raw_corpus_rougel(hypotheses=translations,
+                                                          references=self.target_sentences),
                 C.AVG_TIME: avg_time,
                 C.DECODING_TIME: trans_wall_time}
 
