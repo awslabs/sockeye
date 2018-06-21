@@ -475,7 +475,7 @@ def add_vocab_args(params):
                         required=False,
                         default=None,
                         help='Existing target vocabulary (JSON).')
-    params.add_argument(C.VOCAB_ARG_SHARED_VOCAB,
+    params.add_argument("--shared-vocab",
                         action='store_true',
                         default=False,
                         help='Share source and target vocabulary. '
