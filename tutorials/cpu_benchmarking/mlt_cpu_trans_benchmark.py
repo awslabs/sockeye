@@ -1,10 +1,13 @@
 # Describtion: This script is used for CPU Multi-instance Translate,
-# which can greatly translate perefomance.
-# FileName: mlt-trans.py
-# usage: python mlt-trans.py -m model-name -i file_to_translate -o result_to_save --batch-size 32
+# which can greatly speedup translate perefomance.
+# FileName: mlt_cpu_trans_benchmark.py
+# usage: mlt_cpu_trans_benchmark.py -m model-name -i file_to_translate -o result_to_save --batch-size 32
 # Version: 2.0
 
 import argparse
+import subprocess
+import threading
+import tempfile
 import logging
 import string
 import os
@@ -18,49 +21,66 @@ def add_args(parser):
     parser.add_argument("--batch_size", '-bs', help='the batch size of process', default=32)
     parser.add_argument("--data_type", '-t', help='if uses run benchmark or not', default="benchmark")
 
+def task(args):
+    os.system(args)
 
-# benchmark: multi-instances translate using same input file
+# benchmark: multi-instances translating, each instance trans the same input file separately
 def benchmark(cores, args):
     model = args.module
     fileInput = args.input_file
     fileOutput = args.output_file
     batchsize = args.batch_size
-
+   
+    thread = []
     for i in range(cores): 
-        command = ("taskset -c %s-%s python3 -m sockeye.translate -m %s -i %s -o %s --batch-size %s --output-type benchmark --use-cpu > /dev/null 2>&1 " % (str(i), str(i), model, fileInput, fileOutput, str(batchsize)))
-        if i != cores - 1:
-            command += "&"
-        os.system(command)
+        command = "taskset -c %d-%d python3 -m sockeye.translate -m %s -i %s -o %s --batch-size %d --output-type benchmark --use-cpu > /dev/null 2>&1 " % (i, i, model, fileInput, fileOutput, batchsize)
+        t = threading.Thread(target = task, args=(command,))
+        thread.append(t)
+        t.start()
+    
+    for t in thread:
+        t.join()
 
 # split file to small files
-def split_file(cores, fileInput):
-    lines = len(open(fileInput).readlines())
+def split_file(cores, fileInput, lines):
     quot = lines // cores
     rema = lines % cores
-    if rema != 0:
-        quot += 1
-        os.system("cp %s mlt-nmt-temp.log && head -n%s %s >> mlt-nmt-temp.log " % (fileInput, str(quot * cores - lines), fileInput))
+    files = []
+    current_line = 0
+    for i in range(cores):
+        if i < rema:
+            read_line = quot + 1
+        else:
+            read_line = quot
+        temp = tempfile.NamedTemporaryFile()
+        os.system("head -n%d %s| tail -n%d > %s" % (current_line + read_line, fileInput, read_line, temp.name))
+        current_line += read_line
+        files.append(temp)
 
-    os.system("split -l %s mlt-nmt-temp.log -d -a 2 mlt-nmt.log." % str(quot))
+    return files
 
-# merge_translate: multi-instances translation, each instance trans  whole_lines/instance_num lines of file, and merge into one complete output file
-def merge_translate(cores, args):
+# translate: multi-instances translation, each instance trans whole_lines/instance_num lines of file, and merge into one complete output file
+def translate(cores, files, args):
     model = args.module
     batchsize = args.batch_size
 
     # split inputfile to a series of small files which number is equal cores
-    split_file(cores, fileInput)
+    file = []
+    thread = []
     for i in range(cores):
-        ifile = ''
-        if i < 10:
-            ifile = "mlt-nmt.log.0" + str(i) 
-        else:
-            ifile = "mlt-nmt.log." + str(i)
+        files[i].seek(0)
+        temp = tempfile.NamedTemporaryFile()
+        command = "taskset -c %d-%d python3 -m sockeye.translate -m %s -i %s -o %s --batch-size %d --output-type benchmark --use-cpu > /dev/null 2>&1 " % (i, i, model, files[i].name, temp.name, batchsize)
+        file.append(temp)
 
-        command = ("taskset -c %s-%s python3 -m sockeye.translate -m %s -i %s -o %s --batch-size %s --output-type benchmark --use-cpu > /dev/null 2>&1 " % (str(i), str(i), model, ifile, ifile+".result.en", str(batchsize)))
-        if i != cores - 1:
-            command += "&"
-        os.system(command)
+        t = threading.Thread(target = task, args=(command,))
+        thread.append(t) 
+        t.start()
+    
+    for t in thread:
+        t.join()
+    
+    return file
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='MXnet Sockeye Multi-instances Benchmark')
@@ -69,40 +89,36 @@ if __name__ == '__main__':
     fileInput = args.input_file
     fileOutput = args.output_file
 
-    socket = int(os.popen("grep -w 'physical id' /proc/cpuinfo | sort -u | wc -l").read().split('\n')[0])
-    cores = int(os.popen("grep -w 'core id' /proc/cpuinfo | sort -u | wc -l").read().split('\n')[0])
+    socket = int(os.popen("grep -w 'physical id' /proc/cpuinfo | sort -u | wc -l").read().strip())
+    cores = int(os.popen("grep -w 'core id' /proc/cpuinfo | sort -u | wc -l").read().strip())
     total_cores = socket * cores
+    print(total_cores)
 
     os.system("export KMP_AFFINITY=granularity=fine,noduplicates,compact,1,0")
     ompStr = "export OMP_NUM_THREADS=" + str(total_cores)
     os.system(ompStr)
 
     # the total lines of input file will be translated
-    lines = len(open(args.input_file).readlines())
+    lines = 0
+    for line in open(args.input_file): lines += 1
     print('Translating...')
-    start = .0
-    end = .0
+    # clear file for output
+    os.system("rm %s -f"%fileOutput)
     if args.data_type == "benchmark":
         lines = lines * total_cores
         start = time.time()
-        benchmark(total_cores, args)
+        order = benchmark(total_cores, args)
         end = time.time()
     else:
+        splited_files = split_file(total_cores, fileInput, lines)
         start = time.time()
-        merge_translate(total_cores, args)
-        #wait all process complete
-        process_cnt = cores
-        stop_cnt = 0   
-        #force stop 100s after the fisrt instance complete to jump out of the loop
-        while (process_cnt > 0 and stop_cnt < 1000):
-            process_cnt = int(os.popen("ps -ef | grep 'sockeye.translate' | grep -v grep | wc -l").read().split('\n')[0])
-            time.sleep(0.1)
-            stop_cnt += 1
+        translated_files = translate(total_cores, splited_files, args)
         end = time.time()
-        #merge each part into one complete output file
-        os.system("find . -name '*.result.en' | sort | xargs cat | head -n %s > %s" % (str(lines), fileOutput))
-        #rm temp file
-        os.system("rm mlt-nmt* -rf")
+        for i in range(total_cores):
+            os.system("wc -l %s"%translated_files[i].name)
+            os.system("cat %s >> %s" % (translated_files[i].name, fileOutput))
+            splited_files[i].close()
+            translated_files[i].close()
 
     total_time = end - start
 
