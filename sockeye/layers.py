@@ -247,15 +247,16 @@ class PointerOutputLayer(OutputLayer):
 
         super().__init__(hidden_size, vocab_size, weight, weight_normalization, prefix)
 
-        self.num_hidden_fc1 = 512
+        self.hidden_layer_dim = 128
 
-        self.pn_w1 = mx.sym.Variable("%spn_weight1" % self.prefix, init=mx.init.One(),
-                                     shape=(self.num_hidden_fc1, encoder_hidden_size + hidden_size))
-        #TODO: this is only for debugging
-        #self.pn_w2 = mx.sym.Variable("%spn_weight2" % self.prefix, init=mx.init.One(), shape=(1, self.num_hidden_fc1))
-        self.pn_w2 = mx.sym.Variable("%spn_weight2" % self.prefix, init=mx.init.One(), shape=(1, encoder_hidden_size + hidden_size))
-        self.b_fc1 = mx.sym.Variable("%sbias_pnfc1" % self.prefix, init=mx.init.One())
-        self.b_fc2 = mx.sym.Variable("%sbias_pnfc2" % self.prefix, init=mx.init.One())
+        # Switching network weights, input -> internal
+        self.weights_layer1 = mx.sym.Variable("%spn_weight1" % self.prefix, init=mx.init.One(),
+                                              shape=(self.hidden_layer_dim, encoder_hidden_size + hidden_size))
+        self.bias_layer1 = mx.sym.Variable("%sbias_pnfc1" % self.prefix, init=mx.init.One())
+
+        # Switching network weights, internal -> output
+        self.weights_layer2 = mx.sym.Variable("%spn_weight2" % self.prefix, init=mx.init.One(), shape=(1, self.hidden_layer_dim))
+        self.bias_layer2 = mx.sym.Variable("%sbias_pnfc2" % self.prefix, init=mx.init.One())
 
     def __call__(self,
                  hidden: Union[mx.sym.Symbol, mx.nd.NDArray],
@@ -282,37 +283,38 @@ class PointerOutputLayer(OutputLayer):
             # shape (batch_size * trg_max_len, encoder_rnn_hid+dec_rnn_hidden)
             switch_input = mx.sym.concat(context, hidden, dim=1)
 
-            switch_fc1 = mx.sym.FullyConnected(data=switch_input,
-                                               num_hidden=self.num_hidden_fc1,
-                                               weight=self.pn_w1,
-                                               bias=self.b_fc1,
-                                               flatten=False,
-                                               name=C.SWITCH_PROB_NAME + '_fc1')
+            switch_layer1 = mx.sym.FullyConnected(data=switch_input,
+                                                  num_hidden=self.hidden_layer_dim,
+                                                  weight=self.weights_layer1,
+                                                  bias=self.bias_layer1,
+                                                  flatten=False,
+                                                  name=C.SWITCH_PROB_NAME + '_layer1')
 
             # TODO add noisy tanh activation function
-            switch_a1 = mx.sym.Activation(switch_fc1, act_type='sigmoid', name=C.SWITCH_PROB_NAME+'_a1')
+            switch_output1 = mx.sym.Activation(switch_layer1, act_type='tanh', name=C.SWITCH_PROB_NAME+'_layer1')
 
-            switch_fc2 = mx.sym.FullyConnected(data=switch_input,
-                num_hidden = 1,
-                weight = self.pn_w2,
-                bias = self.b_fc2,
-                flatten = False,
-                name = C.SWITCH_PROB_NAME + '_fc2')
+            switch_layer2 = mx.sym.FullyConnected(data=switch_layer1,
+                                                  num_hidden = 1,
+                                                  weight = self.weights_layer2,
+                                                  bias = self.bias_layer2,
+                                                  flatten = False,
+                                                  name = C.SWITCH_PROB_NAME + '_layer2')
 
-            switch_target_prob = mx.sym.Activation(switch_fc2, act_type='tanh', name=C.SWITCH_PROB_NAME+'_a-out')
-            #TODO: currently the code is running but the results are not positive
-            #Below we provide a line to replace the probability provided by the network with an almost constant one
-            #by using the constant probability the perplexity decreases over time
-            #switch_prob = mx.sym.random.uniform(0.1, 0.11, 1)
+            switch_target_prob = mx.sym.Activation(switch_layer2, act_type='sigmoid', name=C.SWITCH_PROB_NAME+'_out')
+            # switch_target_prob = mx.sym.random.uniform(0.99, 0.99, shape=1)
+            # switch_target_prob = mx.sym.Custom(op_type="PrintValue", data=switch_target_prob, print_name="SWITCH")
 
             probs_trg = mx.sym.softmax(data=logits_trg, axis=1)
             probs_src = mx.sym.softmax(data=attention, axis=1)
 
-            weighted_probs_src = mx.sym.broadcast_mul(probs_src, 1.0 - switch_target_prob)
             weighted_probs_trg = mx.sym.broadcast_mul(probs_trg, switch_target_prob)
+            # weighted_probs_trg = mx.sym.Custom(op_type="PrintValue", data=weighted_probs_trg, print_name="WEIGHTED TRG")
+            weighted_probs_src = mx.sym.broadcast_mul(probs_src, 1.0 - switch_target_prob)
+            # weighted_probs_src = mx.sym.Custom(op_type="PrintValue", data=weighted_probs_src, print_name="WEIGHTED SRC")
 
-            return mx.sym.concat(weighted_probs_trg, weighted_probs_src, dim=1, name=C.SOFTMAX_OUTPUT_NAME)
-
+            result = mx.sym.concat(weighted_probs_trg, weighted_probs_src, dim=1, name=C.SOFTMAX_OUTPUT_NAME)
+            # result = mx.sym.Custom(op_type="PrintValue", data=result, print_name="RESULT")
+            return result
 
         # Equivalent NDArray implementation (requires passed weights/biases)
         if isinstance(hidden, mx.nd.NDArray) and (context, mx.nd.NDArray):
