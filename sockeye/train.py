@@ -81,6 +81,9 @@ def check_arg_compatibility(args: argparse.Namespace):
 
     # TODO: check args compatibility with pointer nets if necessary
 
+    check_condition(not args.use_pointer_nets or args.shared_vocab,
+                    "Pointer networks required a shared vocabulary.")
+
     check_condition(args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics,
                     "Must optimize either BLEU or one of tracked metrics (--metrics)")
 
