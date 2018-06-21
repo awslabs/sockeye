@@ -297,7 +297,7 @@ class PointerOutputLayer(OutputLayer):
                 flatten = False,
                 name = C.SWITCH_PROB_NAME + '_fc2')
 
-            switch_prob = mx.sym.Activation(switch_fc2, act_type='tanh', name=C.SWITCH_PROB_NAME+'_a-out')
+            switch_target_prob = mx.sym.Activation(switch_fc2, act_type='tanh', name=C.SWITCH_PROB_NAME+'_a-out')
             #TODO: currently the code is running but the results are not positive
             #Below we provide a line to replace the probability provided by the network with an almost constant one
             #by using the constant probability the perplexity decreases over time
@@ -306,8 +306,8 @@ class PointerOutputLayer(OutputLayer):
             probs_trg = mx.sym.softmax(data=logits_trg, axis=1)
             probs_src = mx.sym.softmax(data=context, axis=1)
 
-            weighted_probs_src = mx.sym.broadcast_mul(probs_src, switch_prob)
-            weighted_probs_trg = mx.sym.broadcast_mul(probs_trg, (1.0 - switch_prob))
+            weighted_probs_src = mx.sym.broadcast_mul(probs_src, 1.0 - switch_target_prob)
+            weighted_probs_trg = mx.sym.broadcast_mul(probs_trg, switch_target_prob)
 
             return mx.sym.concat(weighted_probs_trg, weighted_probs_src, dim=1, name=C.SOFTMAX_OUTPUT_NAME)
 
