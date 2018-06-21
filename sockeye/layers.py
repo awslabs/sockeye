@@ -288,7 +288,7 @@ class PointerOutputLayer(OutputLayer):
                                                name=C.SWITCH_PROB_NAME + '_fc1')
 
             # TODO add noisy tanh activation function
-            switch_a1 = mx.sym.Activation(switch_fc1, act_type='tanh', name=C.SWITCH_PROB_NAME+'_a1')
+            switch_a1 = mx.sym.Activation(switch_fc1, act_type='sigmoid', name=C.SWITCH_PROB_NAME+'_a1')
 
             switch_fc2 = mx.sym.FullyConnected(data=switch_input,
                 num_hidden = 1,
