@@ -927,8 +927,10 @@ class EarlyStoppingTrainer:
 
         # (1) Parameters: link current file
         params_base_fname = C.PARAMS_NAME % self.state.checkpoint
-        os.symlink(os.path.join("..", params_base_fname),
-                   os.path.join(training_state_dirname, C.TRAINING_STATE_PARAMS_NAME))
+        params_file = os.path.join(training_state_dirname, C.TRAINING_STATE_PARAMS_NAME)
+        if os.path.exists(params_file):
+            os.unlink(params_file)
+        os.symlink(os.path.join("..", params_base_fname), params_file)
 
         # (2) Optimizer states
         opt_state_fname = os.path.join(training_state_dirname, C.OPT_STATES_LAST)
