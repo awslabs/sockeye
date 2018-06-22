@@ -302,7 +302,7 @@ class PointerOutputLayer(OutputLayer):
                                                   name = C.SWITCH_PROB_NAME + '_layer2')
 
             switch_target_prob = mx.sym.Activation(switch_layer2, act_type='sigmoid', name=C.SWITCH_PROB_NAME+'_out')
-            switch_target_prob = mx.sym.random.uniform(0.9999, 0.9999, shape=1)
+            # switch_target_prob = mx.sym.random.uniform(0.9999, 0.9999, shape=1)
             # switch_target_prob = mx.sym.Custom(op_type="PrintValue", data=switch_target_prob, print_name="SWITCH")
 
             # attention = mx.sym.Custom(op_type="PrintValue", data=attention, print_name="ATTENTION")
