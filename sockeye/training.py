@@ -98,10 +98,6 @@ class TrainingModel(model.SockeyeModel):
         data_names = [C.SOURCE_NAME, C.TARGET_NAME]
         label_names = [C.TARGET_LABEL_NAME]
 
-        #if self.config.use_pointer_nets:
-            #pointer_labels = mx.sym.reshape(data=mx.sym.Variable(C.POINTER_LABEL_NAME), shape=(-1,))
-            #label_names.append(C.POINTER_LABEL_NAME)
-
         # check provide_{data,label} names
         provide_data_names = [d[0] for d in provide_data]
         utils.check_condition(provide_data_names == data_names,
@@ -162,6 +158,7 @@ class TrainingModel(model.SockeyeModel):
 
                 # softmax_probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
                 softmax_probs = self.output_layer(target_decoded, attention, context=context)
+                # softmax_probs = mx.sym.Custom(op_type="PrintValue", data=softmax_probs, print_name="SOFTMAX")
                 loss_output = self.model_loss.get_loss(softmax_probs, labels)
 
             return mx.sym.Group(loss_output), data_names, label_names
