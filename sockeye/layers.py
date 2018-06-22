@@ -308,7 +308,7 @@ class PointerOutputLayer(OutputLayer):
             # attention = mx.sym.Custom(op_type="PrintValue", data=attention, print_name="ATTENTION")
 
             probs_trg = mx.sym.softmax(data=logits_trg, axis=1)
-            probs_src = mx.sym.softmax(data=attention, axis=1)
+            probs_src = attention
 
             weighted_probs_trg = mx.sym.broadcast_mul(probs_trg, switch_target_prob)
             # weighted_probs_trg = mx.sym.Custom(op_type="PrintValue", data=weighted_probs_trg, print_name="WEIGHTED TRG")
