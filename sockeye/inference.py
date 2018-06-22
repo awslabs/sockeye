@@ -158,7 +158,7 @@ class InferenceModel(model.SockeyeModel):
 
         def sym_gen(source_seq_len: int):
             source = mx.sym.Variable(C.SOURCE_NAME)
-            source_words = source.split(num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
+            source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
             source_length = utils.compute_lengths(source_words)
 
             # source embedding
@@ -1334,7 +1334,7 @@ class Translator:
         """
         Translates multiple sentences using beam search.
 
-        :param source: Source ids. Shape: (batch_size, bucket_key).
+        :param source: Source ids. Shape: (batch_size, bucket_key, num_factors).
         :param source_length: Max source length.
         :param raw_constraint_list: A list of optional lists containing phrases (as lists of target word IDs)
                that must appear in each output.
@@ -1383,9 +1383,9 @@ class Translator:
         pad_dist = self.pad_dist
         vocab_slice_ids = None  # type: mx.nd.NDArray
         if self.restrict_lexicon:
+            source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
             # TODO: See note in method about migrating to pure MXNet when set operations are supported.
             #       We currently convert source to NumPy and target ids back to NDArray.
-            source_words = source.split(num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
             vocab_slice_ids = self.restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy())
             if any(raw_constraint_list):
                 # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space
