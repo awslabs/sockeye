@@ -250,9 +250,9 @@ class PointerOutputLayer(OutputLayer):
         self.hidden_layer_dim = 128
 
         # Switching network weights, input -> internal
-        self.weights_layer1 = mx.sym.Variable("%spn_weight1" % self.prefix, init=mx.init.One(),
-                                              shape=(self.hidden_layer_dim, encoder_hidden_size + hidden_size))
-        self.bias_layer1 = mx.sym.Variable("%sbias_pnfc1" % self.prefix, init=mx.init.One())
+        self.pointer_weights = mx.sym.Variable("%spn_weight1" % self.prefix, init=mx.init.One(),
+                                              shape=(1, encoder_hidden_size + hidden_size))
+        self.pointer_bias = mx.sym.Variable("%sbias_pnfc1" % self.prefix, init=mx.init.One())
 
         # Switching network weights, internal -> output
         self.weights_layer2 = mx.sym.Variable("%spn_weight2" % self.prefix, init=mx.init.One(), shape=(1, self.hidden_layer_dim))
@@ -283,25 +283,24 @@ class PointerOutputLayer(OutputLayer):
             # shape (batch_size * trg_max_len, encoder_rnn_hid+dec_rnn_hidden)
             switch_input = mx.sym.concat(context, hidden, dim=1)
 
-            switch_layer1 = mx.sym.FullyConnected(data=switch_input,
-                                                  num_hidden=self.hidden_layer_dim,
-                                                  weight=self.weights_layer1,
-                                                  bias=self.bias_layer1,
-                                                  flatten=False,
-                                                  name=C.SWITCH_PROB_NAME + '_layer1')
+            # switch_layer1 = mx.sym.FullyConnected(data=switch_input,
+            #                                       num_hidden=self.hidden_layer_dim,
+            #                                       weight=self.weights_layer1,
+            #                                       bias=self.bias_layer1,
+            #                                       flatten=False,
+            #                                       name=C.SWITCH_PROB_NAME + '_layer1')
 
-            # TODO add noisy tanh activation function
-            switch_output1 = mx.sym.Activation(switch_layer1, act_type='tanh', name=C.SWITCH_PROB_NAME+'_layer1')
+            # # TODO add noisy tanh activation function
+            # switch_output1 = mx.sym.Activation(switch_layer1, act_type='tanh', name=C.SWITCH_PROB_NAME+'_layer1')
 
-            switch_layer2 = mx.sym.FullyConnected(data=switch_layer1,
-                                                  num_hidden = 1,
-                                                  weight = self.weights_layer2,
-                                                  bias = self.bias_layer2,
-                                                  flatten = False,
-                                                  name = C.SWITCH_PROB_NAME + '_layer2')
+            switch_layer = mx.sym.FullyConnected(data=switch_input,
+                                                 num_hidden = 1,
+                                                 weight = self.pointer_weights,
+                                                 bias = self.pointer_bias,
+                                                 flatten = False,
+                                                 name = C.SWITCH_PROB_NAME + '_layer')
 
-            switch_target_prob = mx.sym.Activation(switch_layer2, act_type='sigmoid', name=C.SWITCH_PROB_NAME+'_out')
-            # switch_target_prob = mx.sym.random.uniform(0.99, 0.99, shape=1)
+            switch_target_prob = mx.sym.Activation(switch_layer, act_type='sigmoid', name=C.SWITCH_PROB_NAME+'_out')
             # switch_target_prob = mx.sym.Custom(op_type="PrintValue", data=switch_target_prob, print_name="SWITCH")
 
             probs_trg = mx.sym.softmax(data=logits_trg, axis=1)
