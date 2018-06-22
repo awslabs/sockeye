@@ -275,95 +275,48 @@ class PointerOutputLayer(OutputLayer):
         :return: Logits. Shape(batch_size, self.vocab_size+src_len).
         """
 
-        if isinstance(hidden, mx.sym.Symbol) and isinstance(context, mx.sym.Symbol):
-            # TODO dropout?
-            # TODO num_hidden fc1 needs to be passed as well as other nets options
+        # TODO dropout?
+        # TODO num_hidden fc1 needs to be passed as well as other nets options
 
-            logits_trg = super().__call__(hidden, weight=weight, bias=bias)
+        logits_trg = super().__call__(hidden, weight=weight, bias=bias)
 
-            # shape (batch_size * trg_max_len, encoder_rnn_hid+dec_rnn_hidden)
-            switch_input = mx.sym.concat(context, hidden, dim=1)
+        # shape (batch_size * trg_max_len, encoder_rnn_hid+dec_rnn_hidden)
+        switch_input = mx.sym.concat(context, hidden, dim=1)
 
-            switch_layer1 = mx.sym.FullyConnected(data=switch_input,
-                                                  num_hidden=self.hidden_layer_dim,
-                                                  weight=self.weights_layer1,
-                                                  bias=self.bias_layer1,
-                                                  flatten=False,
-                                                  name=C.SWITCH_PROB_NAME + '_layer1')
+        switch_layer1 = mx.sym.FullyConnected(data=switch_input,
+                                              num_hidden=self.hidden_layer_dim,
+                                              weight=self.weights_layer1,
+                                              bias=self.bias_layer1,
+                                              flatten=False,
+                                              name=C.SWITCH_PROB_NAME + '_layer1')
 
-            # TODO add noisy tanh activation function
-            switch_output1 = mx.sym.Activation(switch_layer1, act_type='tanh', name=C.SWITCH_PROB_NAME+'_layer1')
+        # TODO add noisy tanh activation function
+        switch_output1 = mx.sym.Activation(switch_layer1, act_type='tanh', name=C.SWITCH_PROB_NAME+'_layer1')
 
-            switch_layer2 = mx.sym.FullyConnected(data=switch_layer1,
-                                                  num_hidden = 1,
-                                                  weight = self.weights_layer2,
-                                                  bias = self.bias_layer2,
-                                                  flatten = False,
-                                                  name = C.SWITCH_PROB_NAME + '_layer2')
+        switch_layer2 = mx.sym.FullyConnected(data=switch_layer1,
+                                              num_hidden = 1,
+                                              weight = self.weights_layer2,
+                                              bias = self.bias_layer2,
+                                              flatten = False,
+                                              name = C.SWITCH_PROB_NAME + '_layer2')
 
-            switch_target_prob = mx.sym.Activation(switch_layer2, act_type='sigmoid', name=C.SWITCH_PROB_NAME+'_out')
-            # switch_target_prob = mx.sym.random.uniform(0.9999, 0.9999, shape=1)
-            # switch_target_prob = mx.sym.Custom(op_type="PrintValue", data=switch_target_prob, print_name="SWITCH")
+        switch_target_prob = mx.sym.Activation(switch_layer2, act_type='sigmoid', name=C.SWITCH_PROB_NAME+'_out')
+        # switch_target_prob = mx.sym.random.uniform(0.9999, 0.9999, shape=1)
+        # switch_target_prob = mx.sym.Custom(op_type="PrintValue", data=switch_target_prob, print_name="SWITCH")
 
-            # attention = mx.sym.Custom(op_type="PrintValue", data=attention, print_name="ATTENTION")
+        # attention = mx.sym.Custom(op_type="PrintValue", data=attention, print_name="ATTENTION")
 
-            probs_trg = mx.sym.softmax(data=logits_trg, axis=1)
-            probs_src = attention
+        probs_trg = mx.sym.softmax(data=logits_trg, axis=1)
+        probs_src = attention
 
-            weighted_probs_trg = mx.sym.broadcast_mul(probs_trg, switch_target_prob)
-            # weighted_probs_trg = mx.sym.Custom(op_type="PrintValue", data=weighted_probs_trg, print_name="WEIGHTED TRG")
-            weighted_probs_src = mx.sym.broadcast_mul(probs_src, 1.0 - switch_target_prob)
-            # weighted_probs_src = mx.sym.Custom(op_type="PrintValue", data=weighted_probs_src, print_name="WEIGHTED SRC")
+        weighted_probs_trg = mx.sym.broadcast_mul(probs_trg, switch_target_prob)
+        # weighted_probs_trg = mx.sym.Custom(op_type="PrintValue", data=weighted_probs_trg, print_name="WEIGHTED TRG")
+        weighted_probs_src = mx.sym.broadcast_mul(probs_src, 1.0 - switch_target_prob)
+        # weighted_probs_src = mx.sym.Custom(op_type="PrintValue", data=weighted_probs_src, print_name="WEIGHTED SRC")
 
-            result = mx.sym.concat(weighted_probs_trg, weighted_probs_src, dim=1, name=C.SOFTMAX_OUTPUT_NAME)
-            # result = mx.sym.Custom(op_type="PrintValue", data=result, print_name="RESULT")
-            return result
-
-        # Equivalent NDArray implementation (requires passed weights/biases)
-        if isinstance(hidden, mx.nd.NDArray) and (context, mx.nd.NDArray):
-            utils.check_condition(weight is not None and bias is not None,
-                                  "OutputLayer NDArray implementation requires passing weight and bias NDArrays.")
-
-            logits_trg = super().__call__(hidden, weight=weight, bias=bias)
-
-            # shape (batch_size * trg_max_len, encoder_rnn_hid+dec_rnn_hidden)
-            switch_input = mx.nd.concat(context, hidden, dim=1)
-
-            switch_fc1 = mx.nd.FullyConnected(data=switch_input,
-                                               num_hidden=self.num_hidden_fc1,
-                                               weight=self.pn_w1,
-                                               bias=self.b_fc1,
-                                               flatten=False,
-                                               name=C.SWITCH_PROB_NAME + '_fc1')
-
-            # TODO add noisy tanh activation function
-            switch_a1 = mx.nd.Activation(switch_fc1, act_type='tanh', name=C.SWITCH_PROB_NAME + '_a1')
-
-            switch_fc2 = mx.nd.FullyConnected(data=switch_input,
-                                               num_hidden=1,
-                                               weight=self.pn_w2,
-                                               bias=self.b_fc2,
-                                               flatten=False,
-                                               name=C.SWITCH_PROB_NAME + '_fc2')
-
-            switch_prob = mx.nd.Activation(switch_fc2, act_type='tanh', name=C.SWITCH_PROB_NAME + '_a-out')
-            # TODO: currently the code is running but the results are not positive
-            # Below we provide a line to replace the probability provided by the network with an almost constant one
-            # by using the constant probability the perplexity decreases over time
-            # switch_prob = mx.sym.random.uniform(0.1, 0.11, 1)
-
-            probs_trg = mx.nd.softmax(data=logits_trg, axis=1)
-            probs_src = mx.nd.softmax(data=context, axis=1)
-
-            weighted_probs_src = mx.nd.broadcast_mul(probs_src, switch_prob)
-            weighted_probs_trg = mx.nd.broadcast_mul(probs_trg, (1.0 - switch_prob))
-
-            return mx.nd.concat(weighted_probs_src, weighted_probs_trg, dim=1, name="PN_concat_softmax")
-
-        utils.check_condition((isinstance(hidden, mx.nd.NDArray) and (context, mx.sym.Symbol)) or
-                              (isinstance(context, mx.nd.NDArray) and (hidden, mx.sym.Symbol)),
-                              "PointerOutputLayer supports only hidden and context to be of the same kind (Symbol or NDArray).")
-
+        result = mx.sym.concat(weighted_probs_trg, weighted_probs_src, dim=1, name=C.SOFTMAX_OUTPUT_NAME)
+        # result = mx.sym.Custom(op_type="PrintValue", data=result, print_name="RESULT")
+        return result
 
 def split_heads(x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:
     """
