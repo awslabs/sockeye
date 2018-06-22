@@ -156,8 +156,8 @@ class PointerNetsCrossEntropyLoss(Loss):
         else:
             raise ValueError("Unknown loss normalization type: %s" % self.loss_config.normalization_type)
 
-        prob = mx.sym.pick(softmax_probs, labels)
-        loss = -mx.sym.log(prob + 1e-8)  # pylint: disable=invalid-unary-operand-type
+        probs = mx.sym.pick(data=softmax_probs, index=labels)
+        loss = -mx.sym.log(probs + 1e-8)  # pylint: disable=invalid-unary-operand-type
         return [mx.sym.make_loss(loss, normalization=normalization, name="PN_CE_Loss"), mx.sym.BlockGrad(softmax_probs, name=C.SOFTMAX_NAME)]
 
     def create_metric(self) -> "CrossEntropyMetric":
