@@ -158,7 +158,7 @@ class InferenceModel(model.SockeyeModel):
 
         def sym_gen(source_seq_len: int):
             source = mx.sym.Variable(C.SOURCE_NAME)
-            source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
+            source_words = source.split(num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
             source_length = utils.compute_lengths(source_words)
 
             # source embedding
