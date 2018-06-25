@@ -22,12 +22,13 @@ from math import ceil
 from sockeye.data_io import get_tokens, tokens2ids, strids2ids
 from sockeye.vocab import build_vocab, reverse_vocab
 from sockeye.lexical_constraints import init_batch, get_bank_sizes, topk, ConstrainedHypothesis, AvoidBatch, AvoidState, AvoidTrie
+from sockeye.inference import Translator
 
 BOS_ID = 2
 EOS_ID = 3
 
 def mock_translator(num_source_factors: int):
-    t_mock = Mock(sockeye.inference.Translator)
+    t_mock = Mock(Translator)
     t_mock.num_source_factors = num_source_factors
     return t_mock
 
