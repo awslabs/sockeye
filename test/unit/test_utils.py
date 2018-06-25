@@ -338,4 +338,12 @@ def test_metric_value_is_better(new, old, metric, result):
     assert utils.metric_value_is_better(new, old, metric) == result
 
 
-
+@pytest.mark.parametrize("num_factors", [1, 2, 3])
+def test_split(num_factors):
+    batch_size = 4
+    bucket_key = 10
+    # Simulates splitting factored input
+    data = mx.nd.random.normal(shape=(batch_size, bucket_key, num_factors))
+    result = utils.split(data, num_outputs=num_factors, axis=2, squeeze_axis=True)
+    assert isinstance(result, list)
+    assert result[0].shape == (batch_size, bucket_key)
