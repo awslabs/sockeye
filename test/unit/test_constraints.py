@@ -198,10 +198,6 @@ test_avoid_list_data = [ (["this", "that", "this bad phrase", "this bad phrase t
 
 """
 Ensures that the avoid trie is built correctly.
-
-- read in a list, test its size
-- make sure avoid_batch.avoid() is correct (with and without offsets, try varying max ID)
-- add an integration test that looks at the output and avoids the first number in it
 """
 @pytest.mark.parametrize("raw_phrase_list", test_avoid_list_data)
 def test_avoid_list_trie(raw_phrase_list):
