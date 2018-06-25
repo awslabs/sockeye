@@ -168,15 +168,6 @@ You can translate as follows:
 This will take the best set of parameters found during training and then translate strings from STDIN and
 write translations to STDOUT.
 
-#### Multi-instance Translate
-Multi-instance can be used to greatly speedup translation in one multi-core processor computer.
-One python script example is in tutorial/cpu_benchmarking. 
-You can translate as follows:
-```bash
-> python mlt_cpu_trans_benchmark.py -m model -i input_file_name -o output_file_name -bs batch_size -t true
-```
-
-
 For more detailed examples check out our user documentation.
 
 
