@@ -78,8 +78,8 @@ def check_arg_compatibility(args: argparse.Namespace):
 
     :param args: Arguments as returned by argparse.
     """
-    check_condition(args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics,
-                    "Must optimize either BLEU or one of tracked metrics (--metrics)")
+    check_condition(args.optimized_metric == C.BLEU or args.optimized_metric == C.ROUGE1 or args.optimized_metric in args.metrics,
+                    "Must optimize either BLEU, ROUGE or one of tracked metrics (--metrics)")
 
     if args.encoder == C.TRANSFORMER_TYPE:
         check_condition(args.transformer_model_size[0] == args.num_embed[0],
@@ -601,6 +601,14 @@ def create_model_config(args: argparse.Namespace,
     config_conv = None
     if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
         config_conv = encoder.ConvolutionalEmbeddingConfig(num_embed=num_embed_source,
+                                                           max_filter_width=args.conv_embed_max_filter_width,
+                                                           num_filters=args.conv_embed_num_filters,
+                                                           pool_stride=args.conv_embed_pool_stride,
+                                                           num_highway_layers=args.conv_embed_num_highway_layers,
+                                                           dropout=args.conv_embed_dropout)
+    if args.encoder == C.TRANSFORMER_WITH_CONV_EMBED_TYPE:
+        config_conv = encoder.ConvolutionalEmbeddingConfig(num_embed=num_embed_source,
+                                                           output_dim=num_embed_source,
                                                            max_filter_width=args.conv_embed_max_filter_width,
                                                            num_filters=args.conv_embed_num_filters,
                                                            pool_stride=args.conv_embed_pool_stride,

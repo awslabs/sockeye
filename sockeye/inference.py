@@ -1001,7 +1001,7 @@ class Translator:
             self.buckets_source = data_io.define_buckets(self.max_input_length, step=bucket_source_width)
         else:
             self.buckets_source = [self.max_input_length]
-        self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target)), val=np.inf,
+        self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target) - 1), val=np.inf,
                                    ctx=self.context)
         # These are constants used for manipulation of the beam and scores (particularly for pruning)
         self.zeros_array = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
@@ -1011,6 +1011,11 @@ class Translator:
         # offset for hypothesis indices in batch decoding
         self.offset = mx.nd.array(np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size),
                                   dtype='int32', ctx=self.context)
+
+        self._update_scores = UpdateScores()
+        self._update_scores.initialize(ctx=self.context)
+        self._update_scores.hybridize()
+
         # topk function used in beam search
         self._topk = partial(utils.topk,
                              k=self.beam_size,
@@ -1378,10 +1383,9 @@ class Translator:
 
         best_word_indices = mx.nd.full((self.batch_size * self.beam_size,), val=self.start_id, ctx=self.context,
                                        dtype='int32')
-        # sequences: (batch_size * beam_size, output_length), pre-filled with <s> symbols on index 0
-        sequences = mx.nd.full((self.batch_size * self.beam_size, max_output_length), val=C.PAD_ID, ctx=self.context,
+        # growing sequences: (batch_size * beam_size, 1), pre-filled with <s> symbols on index 0
+        sequences = mx.nd.full((self.batch_size * self.beam_size, 1), val=self.start_id, ctx=self.context,
                                dtype='int32')
-        sequences[:, 0] = self.start_id
 
         # Beam history
         beam_histories = None  # type: Optional[List[BeamHistory]]
@@ -1391,9 +1395,8 @@ class Translator:
         lengths = mx.nd.ones((self.batch_size * self.beam_size, 1), ctx=self.context)
         finished = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
 
-        # attentions: (batch_size * beam_size, output_length, encoded_source_length)
-        attentions = mx.nd.zeros((self.batch_size * self.beam_size, max_output_length, encoded_source_length),
-                                 ctx=self.context)
+        # attentions: (batch_size * beam_size, 1, encoded_source_length)
+        attentions = mx.nd.zeros((self.batch_size * self.beam_size, 1, encoded_source_length), ctx=self.context)
 
         # scores_accumulated: chosen smallest scores in scores (ascending).
         scores_accumulated = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context)
@@ -1433,7 +1436,7 @@ class Translator:
                                                           ctx=self.context, dtype='int32'),
                                                dim=0)
 
-            pad_dist = mx.nd.full((self.batch_size * self.beam_size, vocab_slice_ids.shape[0]),
+            pad_dist = mx.nd.full((self.batch_size * self.beam_size, vocab_slice_ids.shape[0] - 1),
                                   val=np.inf, ctx=self.context)
             for m in self.models:
                 models_output_layer_w.append(m.output_layer_w.take(vocab_slice_ids))
@@ -1447,7 +1450,7 @@ class Translator:
                                              self.vocab_target[C.EOS_SYMBOL])
 
         if self.global_avoid_trie or any(raw_avoid_list):
-            avoid_states = constrained.AvoidBatch(self.batch_size, self.beam_size, max_id=pad_dist.shape[-1],
+            avoid_states = constrained.AvoidBatch(self.batch_size, self.beam_size, max_id=len(self.vocab_target),
                                                   avoid_list=raw_avoid_list, global_avoid_trie=self.global_avoid_trie)
 
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
@@ -1466,17 +1469,11 @@ class Translator:
                                                                        models_output_layer_w=models_output_layer_w,
                                                                        models_output_layer_b=models_output_layer_b)
 
-            # (2) Meddling with the scores array. We apply special treatment to finished rows, inactive rows, and
-            # negative constraints that could finish on this time step:
-            # - inactive rows are set to infinity everywhere
-            # - finished rows are set to infinity everywhere except column 0, where we store the accumulated score.
-            # - negative constraints that are about to finish have their individual word ID set to infinity
-            # pylint: disable=invalid-sequence-index
-            scores += scores_accumulated
-            pad_dist[:, C.PAD_ID] = mx.nd.where(mx.nd.clip(finished - inactive, 0, 1),
-                                                scores_accumulated[:, 0],
-                                                self.inf_array[:, 0])
-            scores = mx.nd.where(finished + inactive, pad_dist, scores)
+            # (2) Update scores. Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
+            # finished rows are inf everywhere except column zero, which holds the accumulated model score
+            scores = self._update_scores.forward(scores, finished, inactive, scores_accumulated, self.inf_array, pad_dist)
+
+            # Mark entries that should be blocked as having a score of np.inf
             if self.global_avoid_trie or any(raw_avoid_list):
                 indices = mx.nd.array(avoid_states.avoid(), ctx=self.context)
                 if any(indices):
@@ -1539,8 +1536,8 @@ class Translator:
             # pylint: disable=unsupported-assignment-operation
             sequences = mx.nd.take(sequences, best_hyp_indices)
             attentions = mx.nd.take(attentions, best_hyp_indices)
-            sequences[:, t] = best_word_indices
-            attentions[:, t, :] = attention_scores
+            sequences = mx.nd.concat(sequences, best_word_indices.reshape((-1, 1)), dim=1)
+            attentions = mx.nd.concat(attentions, attention_scores.reshape((-1, 1, encoded_source_length)), dim=1)
 
             # (7a) update negative constraints
             if self.global_avoid_trie or any(raw_avoid_list):
@@ -1778,3 +1775,30 @@ class UpdateLengthsAndFinished(mx.gluon.HybridBlock):
         lengths = lengths + F.cast(1 - F.expand_dims(finished_or_inactive, axis=1), dtype='float32')
         finished = ((best_word_indices == self.pad_id) + (best_word_indices == self.eos_id))
         return finished, finished_or_inactive, lengths
+
+
+class UpdateScores(mx.gluon.HybridBlock):
+    """
+    A HybridBlock that updates the scores from the decoder step with acumulated scores.
+    Inactive hypotheses receive score inf. Finished hypotheses receive their accumulated score for C.PAD_ID.
+    All other options are set to infinity.
+    """
+
+    def __init__(self):
+        super().__init__()
+        assert C.PAD_ID == 0, "This blocks only works with PAD_ID == 0"
+
+    def hybrid_forward(self, F, scores, finished, inactive, scores_accumulated, inf_array, pad_dist):
+        # Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
+        # finished rows are inf everywhere except column zero (pad_id), which holds the accumulated model score.
+        # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
+        # infinity otherwise.
+        scores = F.broadcast_add(scores, scores_accumulated)
+        # pylint: disable=invalid-sequence-index
+        pad_id_scores = F.where(F.clip(finished - inactive, 0, 1),
+                                scores_accumulated,
+                                inf_array)
+        # pad_dist. Shape: (batch*beam, vocab_size)
+        pad_dist = F.concat(pad_id_scores, pad_dist)
+        scores = F.where(finished + inactive, pad_dist, scores)
+        return scores

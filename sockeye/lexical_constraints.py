@@ -200,8 +200,13 @@ class AvoidBatch:
 
     def avoid(self) -> List[int]:
         """
-        Returns a list of indices in a 1-dimensional reshaping of the scores array that should be set to null.
-        Does this by consulting both the global trie of phrases to avoid and the sentence-specific one.
+        Assembles a list of per-hypothesis words to avoid. The indices of these hypotheses are absolute
+        indices into a 1-dimentional reshaping of the scores array. These values are then used by the caller
+        to set appropriate items to np.inf so they won't be selected. Words to be avoided are selected by
+        consulting both the global trie of phrases and the sentence-specific one.
+
+        As an example, if word ID 271 is always to be avoided, it will appear (batch_size * beam_size) times
+        in the list returned by this function, but each time incremented by (offset * i).
 
         :return: A list of indices.
         """

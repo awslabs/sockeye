@@ -5,12 +5,12 @@
 
 
 There are three types of dependencies: core dependencies, development dependencies and dependencies for generating the documentation.
- 
+
 Install them via
 ```bash
-> pip install -r requirements.txt
-> pip install -r requirements.dev.txt
-> pip install -r requirements.docs.txt
+> pip install -r requirements/requirements.txt
+> pip install -r requirements/requirements.dev.txt
+> pip install -r requirements/requirements.docs.txt
 ```
 
 
@@ -21,15 +21,15 @@ If you want to develop sockeye, please adhere to the following development guide
 
 
  * Write Python 3.5, PEP8 compatible code.
- 
+
  * Functions should be documented with Sphinx-style docstrings and
    should include type hints for static code analyzers.
- 
+
     ```python
     def foo(bar: <type of bar>) -> <returnType>:
         """
         <Docstring for foo method, followed by a period>.
-        
+
         :param bar: <Description of bar argument followed by a period>.
         :return: <Description of the return value followed by a period>.
         """
@@ -45,20 +45,20 @@ If you want to develop sockeye, please adhere to the following development guide
     ```
 
  * The desired line length of Python modules should not exceed 120 characters.
- 
- * When writing symbol-generating classes (such as encoders/decoders), initialize variables in the constructor of the 
+
+ * When writing symbol-generating classes (such as encoders/decoders), initialize variables in the constructor of the
    class and re-use them in the class methods.
-   
+
  * Make sure to pass unit tests before submitting a pull request.
- 
+
  * Whenever reasonable, write py.test unit tests covering your contribution.
- 
+
  * When importing other sockeye modules import the entire module instead of individual functions and classes using
    relative imports:
     ```python
     from . import attention
-    ```  
-   
+    ```
+
 
 ## Building the Documentation
 Full documentation, including a code reference, can be generated using Sphinx with the following command:
@@ -89,14 +89,14 @@ A subset of the system tests are run on Travis for every commit. The full set of
 
 ## Submitting a New Version to PyPI
 
-Before starting make sure you have the [TestPyPI](https://wiki.python.org/moin/TestPyPI) and PyPI accounts and the 
+Before starting make sure you have the [TestPyPI](https://wiki.python.org/moin/TestPyPI) and PyPI accounts and the
 corresponding `~/.pypirc` set up.
 
 1. Build source distribution:
    ``` bash
    > python setup.py sdist bdist_wheel
    ```
-1. Upload to PyPITest: 
+1. Upload to PyPITest:
    ```bash
    > twine upload dist/sockeye-${VERSION}.tar.gz dist/sockeye-${VERSION}-py3-none-any.whl -r pypitest
    ```
@@ -109,7 +109,7 @@ corresponding `~/.pypirc` set up.
    > twine upload dist/sockeye-${VERSION}.tar.gz dist/sockeye-${VERSION}-py3-none-any.whl
    ```
 When pushing a new git tag to the repository, it is automatically built and deployed to PyPI as a new version via Travis.
- 
+
 ## Code of Conduct
 This project has adopted the [Amazon Open Source Code of Conduct](https://aws.github.io/code-of-conduct).
 For more information see the [Code of Conduct FAQ](https://aws.github.io/code-of-conduct-faq) or contact

@@ -10,10 +10,32 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [1.18.23]
+## [1.18.27]
 ### Added
 - Now supports negative constraints, which are phrases that must *not* appear in the output.
-  This is achieved with a 'avoid' keyword in the JSON object, with a list of strings as its field value.
+- Global constraints can be listed in a (pre-processed) file, one per line: `--avoid-list FILE`
+- Per-sentence constraints are passed using the `avoid` keyword in the JSON object, with a list of strings as its field value.
+
+## [1.18.26]
+### Added
+- ROUGE score evaluation. It can be used as the stopping criterion for tasks such as summarization.
+
+## [1.18.25]
+### Changed
+- Update requirements to use MKL versions of MXNet for fast CPU operation.
+
+## [1.18.24]
+### Added
+- Dockerfiles and convenience scripts for running `fast_align` to generate lexical tables.
+These tables can be used to create top-K lexicons for faster decoding via vocabulary selection ([documentation](https://github.com/awslabs/sockeye/tree/master/contrib/fast_align)).
+
+### Changed
+- Updated default top-K lexicon size from 20 to 200.
+
+## [1.18.23]
+### Fixed
+- Correctly create the convolutional embedding layers when the encoder is set to `transformer-with-conv-embed`. Previously
+no convolutional layers were added so that a standard Transformer model was trained instead.
 
 ## [1.18.22]
 ### Fixed
@@ -477,4 +499,5 @@ sockeye.evaluate now accepts `bleu` and `chrf` as values for `--metrics`
 ### Changed
  - `--attention-*` CLI params renamed to `--rnn-attention-*`.
  - `--transformer-no-positional-encodings` generalized to `--transformer-positional-embedding-type`.
+
 
