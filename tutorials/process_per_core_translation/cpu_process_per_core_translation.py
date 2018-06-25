@@ -1,7 +1,7 @@
-# Describtion: This script is used for CPU Multi-instance Translate,
-# which can greatly speedup translate perefomance.
-# FileName: mlt_cpu_trans_benchmark.py
-# usage: mlt_cpu_trans_benchmark.py -m model-name -i file_to_translate -o result_to_save --batch-size 32
+# Describtion: This script is used for CPU Multi-instance Translate, which process per core translation.
+# It can greatly speedup translate perefomance.
+# FileName: cpu_process_per_core_translation.py
+# usage: cpu_process_per_core_translation.py -m model-name -i file_to_translate -o result_to_save --batch-size 32
 # Version: 2.0
 
 import argparse
