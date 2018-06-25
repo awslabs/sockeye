@@ -16,6 +16,10 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 - Global constraints can be listed in a (pre-processed) file, one per line: `--avoid-list FILE`
 - Per-sentence constraints are passed using the `avoid` keyword in the JSON object, with a list of strings as its field value.
 
+## [1.18.27]
+### Fixed
+- Fix silent failing of NDArray splits during inference by using a version that always returns a list. This was causing incorrect behavior when using lexicon restriction and batch inference with a single source factor.
+
 ## [1.18.26]
 ### Added
 - ROUGE score evaluation. It can be used as the stopping criterion for tasks such as summarization.
