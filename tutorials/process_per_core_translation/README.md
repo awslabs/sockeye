@@ -1,4 +1,4 @@
-#CPU process per core translation
+# CPU process per core translation
 On multi-core processor computer, translation per core separately can speedup translation performance, due to some operation can't be handled parallel in one process.
 Using this methord, translation on each core can be parallel.
 
@@ -8,5 +8,6 @@ One python script example is givne and you can run it as follows:
 ```
 
 -t true: each core translate the whole input file.
+
 -t false: each core translate (input file line/core number) lines , then merge the translated file into one complete output file.
 
