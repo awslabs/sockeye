@@ -120,7 +120,7 @@ class AvoidState:
         """
         if word_id in self.state.children:
             return AvoidState(self.root, self.state.step(word_id))
-        elif not self.state == self.root:
+        elif self.state != self.root:
             return AvoidState(self.root, self.root)
         else:
             return self
