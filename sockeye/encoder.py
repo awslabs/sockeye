@@ -42,6 +42,8 @@ def get_encoder(config: 'EncoderConfig', prefix: str = '') -> 'Encoder':
         return get_transformer_encoder(config, prefix)
     elif isinstance(config, ConvolutionalEncoderConfig):
         return get_convolutional_encoder(config, prefix)
+    elif isinstance(config, EmptyEncoderConfig):
+        return EncoderSequence([EmptyEncoder(config)], config.dtype)
     else:
         from .image_captioning.encoder import ImageLoadedCnnEncoderConfig, \
             get_image_cnn_encoder
@@ -99,6 +101,25 @@ class ConvolutionalEncoderConfig(config.Config):
         self.max_seq_len_source = max_seq_len_source
         self.positional_embedding_type = positional_embedding_type
         self.dtype = dtype
+
+
+class EmptyEncoderConfig(config.Config):
+    """
+    Empty encoder configuration.
+    :param num_embed: source embedding size.
+    :param num_hidden: the representation size of this encoder.
+    :param dtype: Data type.
+    """
+
+    def __init__(self,
+                 num_embed: int,
+                 num_hidden: int,
+                 dtype: str = C.DTYPE_FP32) -> None:
+        super().__init__()
+        self.num_embed = num_embed
+        self.num_hidden = num_hidden
+        self.dtype = dtype
+        self.allow_missing = True
 
 
 def get_recurrent_encoder(config: RecurrentEncoderConfig, prefix: str) -> 'Encoder':
@@ -760,6 +781,40 @@ class EncoderSequence(Encoder):
         return encoder
 
 
+class EmptyEncoder(Encoder):
+    """
+    This encoder doing nothing.
+    :param config: configuration.
+    """
+
+    def __init__(self,
+                 config: EmptyEncoderConfig) -> None:
+        super().__init__(config.dtype)
+        self.num_embed = config.num_embed
+        self.num_hidden = config.num_hidden
+
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: Optional[mx.sym.Symbol],
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+        """
+        Encodes data given sequence lengths of individual examples and maximum sequence length.
+        :param data: Input data.
+        :param data_length: Vector with sequence lengths.
+        :param seq_len: Maximum sequence length.
+        :return: Encoded versions of input data (data, data_length, seq_len).
+        """
+        # outputs: (batch_size, seq_len, num_hidden)
+        outputs = mx.sym.dot(data, mx.sym.zeros((self.num_embed, self.num_hidden)))
+        return outputs, data_length, seq_len
+
+    def get_num_hidden(self):
+        """
+        Return the representation size of this encoder.
+        """
+        return self.num_hidden
+
+
 class RecurrentEncoder(Encoder):
     """
     Uni-directional (multi-layered) recurrent encoder.
@@ -1217,6 +1272,7 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         return int(ceil(seq_len / self.pool_stride))
 
 
-EncoderConfig = Union[RecurrentEncoderConfig, transformer.TransformerConfig, ConvolutionalEncoderConfig]
+EncoderConfig = Union[RecurrentEncoderConfig, transformer.TransformerConfig, ConvolutionalEncoderConfig,
+                      EmptyEncoderConfig]
 if ImageEncoderConfig is not None:
     EncoderConfig = Union[EncoderConfig, ImageEncoderConfig]  # type: ignore
