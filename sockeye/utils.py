@@ -832,3 +832,56 @@ def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, 
             param_fname_n = params_name_with_dir % n
             if param_fname_n in existing_files:
                 os.remove(param_fname_n)
+
+
+def cast_conditionally(data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
+    """
+    Workaround until no-op cast will be fixed in MXNet codebase.
+    Creates cast symbol only if dtype is different from default one, i.e. float32.
+
+    :param data: Input symbol.
+    :param dtype: Target dtype.
+    :return: Cast symbol or just data symbol.
+    """
+    if dtype != C.DTYPE_FP32:
+        return mx.sym.cast(data=data, dtype=dtype)
+    return data
+
+
+def uncast_conditionally(data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
+    """
+    Workaround until no-op cast will be fixed in MXNet codebase.
+    Creates cast to float32 symbol only if dtype is different from default one, i.e. float32.
+
+    :param data: Input symbol.
+    :param dtype: Input symbol dtype.
+    :return: Cast symbol or just data symbol.
+    """
+    if dtype != C.DTYPE_FP32:
+        return mx.sym.cast(data=data, dtype=C.DTYPE_FP32)
+    return data
+
+
+def split(data: mx.nd.NDArray,
+          num_outputs: int,
+          axis: int = 1,
+          squeeze_axis: bool = False) -> List[mx.nd.NDArray]:
+    """
+    Version of mxnet.ndarray.split that always returns a list.  The original
+    implementation only returns a list if num_outputs > 1:
+    https://mxnet.incubator.apache.org/api/python/ndarray/ndarray.html#mxnet.ndarray.split
+
+    Splits an array along a particular axis into multiple sub-arrays.
+
+    :param data: The input.
+    :param num_outputs: Number of splits. Note that this should evenly divide
+                        the length of the axis.
+    :param axis: Axis along which to split.
+    :param squeeze_axis: If true, Removes the axis with length 1 from the shapes
+                         of the output arrays.
+    :return: List of NDArrays resulting from the split.
+    """
+    ndarray_or_list = data.split(num_outputs=num_outputs, axis=axis, squeeze_axis=squeeze_axis)
+    if num_outputs == 1:
+        return [ndarray_or_list]
+    return ndarray_or_list

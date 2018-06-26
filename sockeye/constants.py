@@ -334,13 +334,21 @@ ACCURACY = 'accuracy'
 PERPLEXITY = 'perplexity'
 BLEU = 'bleu'
 CHRF = 'chrf'
+ROUGE = 'rouge'
+ROUGE1 = 'rouge1'
+ROUGE2 = 'rouge2'
+ROUGEL = 'rougel'
 BLEU_VAL = BLEU + "-val"
 CHRF_VAL = CHRF + "-val"
+ROUGE_VAL = ROUGE + "-val"
+ROUGE_1_VAL = ROUGE1 + "-val"
+ROUGE_2_VAL = ROUGE2 + "-val"
+ROUGE_L_VAL = ROUGEL + "-val"
 AVG_TIME = "avg-sec-per-sent-val"
 DECODING_TIME = "decode-walltime-val"
-METRICS = [PERPLEXITY, ACCURACY, BLEU]
-METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, PERPLEXITY: False}
-METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, PERPLEXITY: np.inf}
+METRICS = [PERPLEXITY, ACCURACY, BLEU, ROUGE1]
+METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, ROUGE1: True, PERPLEXITY: False}
+METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, ROUGE1: 0.0, PERPLEXITY: np.inf}
 
 # loss
 CROSS_ENTROPY = 'cross-entropy'
