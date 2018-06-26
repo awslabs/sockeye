@@ -1174,6 +1174,11 @@ def add_inference_args(params):
                                type=float,
                                help='Beta factor for the length penalty used in beam search: '
                                     '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
+    decode_params.add_argument('--override-dtype',
+                               default=None,
+                               type=str,
+                               help='EXPERIMENTAL: may be changed or removed in future. Overrides training dtype of '
+                                    'encoders and decoders during inference. Default: %(default)s')
 
 def add_evaluate_args(params):
     eval_params = params.add_argument_group("Evaluate parameters")

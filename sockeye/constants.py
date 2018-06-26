@@ -359,9 +359,19 @@ LOSS_NORM_VALID = "valid"
 TARGET_MAX_LENGTH_FACTOR = 2
 DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH = 2
 
+DTYPE_FP16 = 'float16'
 DTYPE_FP32 = 'float32'
 LARGE_POSITIVE_VALUE = 99999999.
 LARGE_NEGATIVE_VALUE = -LARGE_POSITIVE_VALUE
+LARGE_VALUES = {
+    # Something at the middle of 32768<x<65519. Will be rounded to a multiple of 32.
+    # https://en.wikipedia.org/wiki/Half-precision_floating-point_format#Precision_limitations_on_integer_values
+    DTYPE_FP16: 49152.0,
+
+    # Will be rounded to 1.0e8.
+    # https://en.wikipedia.org/wiki/Single-precision_floating-point_format#Precision_limits_on_integer_values.
+    DTYPE_FP32: LARGE_POSITIVE_VALUE
+}
 
 LHUC_NAME = "lhuc"
 # lhuc application points
