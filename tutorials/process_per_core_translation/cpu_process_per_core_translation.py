@@ -1,8 +1,4 @@
-# Describtion: This script is used for CPU Multi-instance Translate, which process per core translation.
-# It can greatly speedup translate perefomance.
-# FileName: cpu_process_per_core_translation.py
-# usage: cpu_process_per_core_translation.py -m model-name -i file_to_translate -o result_to_save --batch-size 32
-# Version: 2.0
+# Describtion: This script is used to process per core translation, which can greatly speedup translate perefomance.
 
 import argparse
 import subprocess
@@ -24,8 +20,14 @@ def add_args(parser):
 def task(args):
     os.system(args)
 
-# benchmark: multi-instances translating, each instance trans the same input file separately
 def benchmark(cores, args):
+    """
+    benchmark is used for Processing per core translation. Each core translates the whole input file.
+    Return after all translations done.
+
+    :param cores: the number of cores used for translation, each core will launch a thread to translate
+    :param args: input parameters
+    """
     model = args.module
     fileInput = args.input_file
     fileOutput = args.output_file
@@ -41,13 +43,20 @@ def benchmark(cores, args):
     for t in thread:
         t.join()
 
-# split file to small files
-def split_file(cores, fileInput, lines):
-    quot = lines // cores
-    rema = lines % cores
+def split_file(splitNum, fileInput, lines):
+    """
+    split_file is used to split fileInput into splitNum small pieces file.
+    For example, when splitNum is 56, a 112 lines file will be split into 56 files and each file has 2 lines.
+
+    :param splitNum: split into splitNum files
+    :param fileInput: file to be split
+    :param lines: lines of fileInput
+    """
+    quot = lines // splitNum
+    rema = lines % splitNum
     files = []
     current_line = 0
-    for i in range(cores):
+    for i in range(splitNum):
         if i < rema:
             read_line = quot + 1
         else:
@@ -59,8 +68,15 @@ def split_file(cores, fileInput, lines):
 
     return files
 
-# translate: multi-instances translation, each instance trans whole_lines/instance_num lines of file, and merge into one complete output file
 def translate(cores, files, args):
+    """
+    translate is used for Processing per core translation. cores[i] will translate files[i]
+
+    :param cores: the number of cores used for translation, each core will launch a thread to translate
+    :param files: file list to be translated
+    :param args: input parameters
+    :return: list of translated file
+    """
     model = args.module
     batchsize = args.batch_size
 
@@ -76,14 +92,14 @@ def translate(cores, files, args):
         t = threading.Thread(target = task, args=(command,))
         thread.append(t) 
         t.start()
-    
+    #wait for all translation done
     for t in thread:
         t.join()
     
     return file
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='MXnet Sockeye Multi-instances Benchmark')
+    parser = argparse.ArgumentParser(description='MXnet Sockeye  cpu_process_per_core_translation.py -m model-name -i file_to_translate -o result_to_save --batch-size 32')
     add_args(parser)
     args = parser.parse_args()
     fileInput = args.input_file
@@ -115,7 +131,6 @@ if __name__ == '__main__':
         translated_files = translate(total_cores, splited_files, args)
         end = time.time()
         for i in range(total_cores):
-            os.system("wc -l %s"%translated_files[i].name)
             os.system("cat %s >> %s" % (translated_files[i].name, fileOutput))
             splited_files[i].close()
             translated_files[i].close()
