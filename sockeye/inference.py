@@ -986,8 +986,9 @@ class Translator:
         assert C.PAD_ID == 0, "pad id should be 0"
         self.stop_ids = {self.vocab_target[C.EOS_SYMBOL], C.PAD_ID}  # type: Set[int]
         self.strip_ids = self.stop_ids.copy()  # ids to strip from the output
+        UNK_ID = self.vocab_target[C.UNK_SYMBOL]
         if strip_unknown_words:
-            self.strip_ids.add(self.vocab_target[C.UNK_SYMBOL])
+            self.strip_ids.add(UNK_ID)
         self.models = models
         utils.check_condition(all(models[0].source_with_eos == m.source_with_eos for m in models),
                               "The source_with_eos property must match across models.")
@@ -1046,7 +1047,10 @@ class Translator:
         if avoid_list is not None:
             self.global_avoid_trie = constrained.AvoidTrie()
             for phrase in data_io.read_content(avoid_list):
-                self.global_avoid_trie.add_phrase(data_io.tokens2ids(phrase, self.vocab_target))
+                phrase_ids = data_io.tokens2ids(phrase, self.vocab_target)
+                if UNK_ID in phrase_ids:
+                    logger.warning("Global avoid phrase '%s' contains an %s; this may indicate improper preprocessing.", ' '.join(phrase), C.UNK_SYMBOL)
+                self.global_avoid_trie.add_phrase(phrase_ids)
 
         logger.info("Translator (%d model(s) beam_size=%d beam_prune=%s beam_search_stop=%s "
                     "ensemble_mode=%s batch_size=%d buckets_source=%s avoiding=%d)",
@@ -1221,6 +1225,9 @@ class Translator:
             if trans_input.avoid_list is not None:
                 raw_avoid_list[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
                                      trans_input.avoid_list]
+                UNK_ID = self.vocab_target[C.UNK_SYMBOL]
+                if any([UNK_ID in phrase for phrase in raw_avoid_list[j]]):
+                    logger.warning("Sentence %d: %s was found in the list of phrases to avoid; this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
 
         return source, bucket_key, raw_constraints, raw_avoid_list
 
