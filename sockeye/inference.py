@@ -643,6 +643,7 @@ class TranslatorInput:
                                factors=[factor + [C.EOS_SYMBOL] for factor in
                                         self.factors] if self.factors is not None else None,
                                constraints=self.constraints,
+                               avoid_list=self.avoid_list,
                                chunk_id=self.chunk_id)
 
 
