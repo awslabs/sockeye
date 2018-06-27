@@ -106,7 +106,7 @@ def define_empty_source_parallel_buckets(max_seq_len_target: int,
     # source buckets are always 0 since there is no text
     source_buckets = [0 for b in target_buckets]
     target_buckets = [max(2, b) for b in target_buckets]
-    parallel_buckets = list(zip(source_buckets, target_buckets))
+    parallel_buckets = [(s, t) for s, t in zip(source_buckets, target_buckets)]
     # deduplicate for return
     buckets = list(OrderedDict.fromkeys(parallel_buckets))
     buckets.sort()
