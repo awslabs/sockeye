@@ -1458,8 +1458,9 @@ class Translator:
                                              self.vocab_target[C.EOS_SYMBOL])
 
         if self.global_avoid_trie or any(raw_avoid_list):
-            avoid_states = constrained.AvoidBatch(self.batch_size, self.beam_size, max_id=len(self.vocab_target),
-                                                  avoid_list=raw_avoid_list, global_avoid_trie=self.global_avoid_trie)
+            avoid_states = constrained.AvoidBatch(self.batch_size, self.beam_size,
+                                                  avoid_list=raw_avoid_list,
+                                                  global_avoid_trie=self.global_avoid_trie)
 
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
         # item on the beam for each sentence
@@ -1483,9 +1484,9 @@ class Translator:
 
             # Mark entries that should be blocked as having a score of np.inf
             if self.global_avoid_trie or any(raw_avoid_list):
-                indices = mx.nd.array(avoid_states.avoid(), ctx=self.context)
+                indices = avoid_states.avoid()
                 if any(indices):
-                    scores.reshape((self.batch_size * self.beam_size * scores.shape[-1]))[indices] = np.inf
+                    scores[indices] = np.inf
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.

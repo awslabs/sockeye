@@ -143,18 +143,14 @@ class AvoidBatch:
     Represents a set of phrasal constraints for all items in the batch.
     For each hypotheses, there is an AvoidTrie tracking its state.
 
-    The offset is used to return actual positions in the one-dimensionally-resized array that
-    get set to infinity.
-
+    :param batch_size: The batch size.
     :param beam_size: The beam size.
-    :param max_id: The maximum ID in the target vocabulary.
     :param avoid_list: The list of lists (raw phrasal constraints as IDs, one for each item in the batch).
     :param global_avoid_trie: A translator-level vocabulary of items to avoid.
     """
     def __init__(self,
                  batch_size: int,
                  beam_size: int,
-                 max_id: int,
                  avoid_list: Optional[List[RawConstraintList]] = None,
                  global_avoid_trie: Optional[AvoidTrie] = None) -> None:
 
@@ -169,8 +165,6 @@ class AvoidBatch:
         if avoid_list:
             for raw_phrases in avoid_list:
                 self.local_avoid_states += [AvoidState(AvoidTrie(raw_phrases))] * beam_size
-
-        self.offset = max_id
 
     def reorder(self, indices: mx.nd.array) -> None:
         """
@@ -198,29 +192,31 @@ class AvoidBatch:
             if self.local_avoid_states:
                 self.local_avoid_states[i] = self.local_avoid_states[i].consume(word_id)
 
-    def avoid(self) -> List[int]:
+    def avoid(self) -> Tuple[List[int], List[int]]:
         """
-        Assembles a list of per-hypothesis words to avoid. The indices of these hypotheses are absolute
-        indices into a 1-dimentional reshaping of the scores array. These values are then used by the caller
-        to set appropriate items to np.inf so they won't be selected. Words to be avoided are selected by
+        Assembles a list of per-hypothesis words to avoid. The indices are (x, y) pairs into the scores
+        array, which has dimensions (beam_size, target_vocab_size). These values are then used by the caller
+        to set these items to np.inf so they won't be selected. Words to be avoided are selected by
         consulting both the global trie of phrases and the sentence-specific one.
 
-        As an example, if word ID 271 is always to be avoided, it will appear (batch_size * beam_size) times
-        in the list returned by this function, but each time incremented by (offset * i).
-
-        :return: A list of indices.
+        :return: Two lists of indices: the x coordinates and y coordinates.
         """
         to_avoid = set()
         for i, state in enumerate(self.global_avoid_states):
             for word_id in state.avoid():
                 if word_id > 0:
-                    to_avoid.add((self.offset * i) + word_id)
+                    to_avoid.add((i, word_id))
         for i, state in enumerate(self.local_avoid_states):
             for word_id in state.avoid():
                 if word_id > 0:
-                    to_avoid.add((self.offset * i) + word_id)
+                    to_avoid.add((i, word_id))
 
-        return list(to_avoid)
+        x_list = []
+        y_list = []
+        for item in to_avoid:
+            x_list.append(item[0])
+            y_list.append(item[1])
+        return x_list, y_list
 
 
 class ConstrainedHypothesis:

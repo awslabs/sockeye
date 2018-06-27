@@ -261,33 +261,27 @@ Here we pass a list of global phrases to avoid, followed by a sentence-level lis
 sizes. Finally, the prefix that the decoder is presumed to have seen, and the list of vocab-transformed IDs we should
 expect (a function of the vocab size) that should be blocked.
 """
-@pytest.mark.parametrize("global_raw_phrase_list, raw_phrase_list, batch_size, beam_size, vocab_size, prefix, avoid", [
-    (["5 6 7 8"], None, 1, 3, 100, '17', ''),
-    (["5 6 7 12"], None, 1, 4, 100, '5 6 7', '12 112 212 312'),
-    (["5 6 7 8", "9"], None, 1, 2, 100, '5 6 7', '8 9 108 109'),
-    (["5 6 7 8", "13"], [[[10]]], 1, 2, 100, '5 6 7', '8 10 13 108 110 113'),
+@pytest.mark.parametrize("global_raw_phrase_list, raw_phrase_list, batch_size, beam_size, prefix, expected_avoid", [
+    (["5 6 7 8"], None, 1, 3, '17', []),
+    (["5 6 7 12"], None, 1, 4, '5 6 7', [(0,12), (1,12), (2,12), (3,12)]),
+    (["5 6 7 8", "9"], None, 1, 2, '5 6 7', [(0,8), (0,9), (1,8), (1,9)]),
+    (["5 6 7 8", "13"], [[[10]]], 1, 2, '5 6 7', [(0,8), (0,10), (0,13), (1,8), (1,10), (1,13)]),
     # first two hypotheses blocked on 19 (= 19 and 119), next two on 20 (= 220 and 320)
-    (None, [[[19]], [[20]]], 2, 2, 100, '', '19 119 220 320'),
+    (None, [[[19]], [[20]]], 2, 2, '', [(0,19), (1,19), (2,20), (3,20)]),
     # same, but also add global block list to each row
-    (['74'], [[[19]], [[20]]], 2, 2, 100, '', '19 74 119 174 220 274 320 374'),
-    # same, but different max vocab id
-    (['74'], [[[19]], [[20]]], 2, 2, 1000, '', '19 74 1019 1074 2020 2074 3020 3074'),
+    (['74'], [[[19]], [[20]]], 2, 2, '', [(0,19), (0,74), (1,19), (1,74), (2,20), (2,74), (3,20), (3,74)]),
 ])
-def test_avoid_list_batch(global_raw_phrase_list, raw_phrase_list, batch_size, beam_size, vocab_size, prefix, avoid):
-    avoid = strids2ids(get_tokens(avoid))
+def test_avoid_list_batch(global_raw_phrase_list, raw_phrase_list, batch_size, beam_size, prefix, expected_avoid):
 
     global_avoid_trie = None
     if global_raw_phrase_list:
         global_raw_phrase_list = [list(strids2ids(get_tokens(phrase))) for phrase in global_raw_phrase_list]
         global_avoid_trie = AvoidTrie(global_raw_phrase_list)
 
-    print('RAW', raw_phrase_list)
-
-    avoid_batch = AvoidBatch(batch_size, beam_size, vocab_size, avoid_list=raw_phrase_list, global_avoid_trie=global_avoid_trie)
+    avoid_batch = AvoidBatch(batch_size, beam_size, avoid_list=raw_phrase_list, global_avoid_trie=global_avoid_trie)
 
     for word_id in strids2ids(get_tokens(prefix)):
         avoid_batch.consume(mx.nd.array([word_id] * (batch_size * beam_size)))
 
-    assert set(avoid_batch.avoid()) == set(avoid)
-
-    # Test reorder
+    avoid = [(x, y) for x, y in zip(*avoid_batch.avoid())]
+    assert set(avoid) == set(expected_avoid)
