@@ -86,7 +86,7 @@ def define_parallel_buckets(max_seq_len_source: int,
     target_buckets = [max(2, b) for b in target_buckets]
     parallel_buckets = [(s, t) for s, t in zip(source_buckets, target_buckets)]
     # deduplicate for return
-    buckets = list(OrderedDict.fromkeys(parallel_buckets))
+    buckets = list(set(parallel_buckets))
     buckets.sort()
     return buckets
 
@@ -108,7 +108,7 @@ def define_empty_source_parallel_buckets(max_seq_len_target: int,
     target_buckets = [max(2, b) for b in target_buckets]
     parallel_buckets = [(s, t) for s, t in zip(source_buckets, target_buckets)]
     # deduplicate for return
-    buckets = list(OrderedDict.fromkeys(parallel_buckets))
+    buckets = list(set(parallel_buckets))
     buckets.sort()
     return buckets
 
