@@ -10,11 +10,15 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [1.18.28]
+## [1.18.29]
 ### Added
 - Now supports negative constraints, which are phrases that must *not* appear in the output.
    - Global constraints can be listed in a (pre-processed) file, one per line: `--avoid-list FILE`
    - Per-sentence constraints are passed using the `avoid` keyword in the JSON object, with a list of strings as its field value.
+
+## [1.18.28]
+### Changed
+- Temporarily fixing the pyyaml version to 3.12 as version 4.1 introduced some backwards incompatible changes.
 
 ## [1.18.27]
 ### Fixed
