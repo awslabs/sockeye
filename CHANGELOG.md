@@ -10,9 +10,33 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [1.18.24]
+## [1.18.29]
 ### Fixed
 - Preserving max output length for each sentence to allow having identical translations for both with and without batching. 
+
+## [1.18.28]
+### Changed
+- Temporarily fixing the pyyaml version to 3.12 as version 4.1 introduced some backwards incompatible changes.
+
+## [1.18.27]
+### Fixed
+- Fix silent failing of NDArray splits during inference by using a version that always returns a list. This was causing incorrect behavior when using lexicon restriction and batch inference with a single source factor.
+
+## [1.18.26]
+### Added
+- ROUGE score evaluation. It can be used as the stopping criterion for tasks such as summarization.
+
+## [1.18.25]
+### Changed
+- Update requirements to use MKL versions of MXNet for fast CPU operation.
+
+## [1.18.24]
+### Added
+- Dockerfiles and convenience scripts for running `fast_align` to generate lexical tables.
+These tables can be used to create top-K lexicons for faster decoding via vocabulary selection ([documentation](https://github.com/awslabs/sockeye/tree/master/contrib/fast_align)).
+
+### Changed
+- Updated default top-K lexicon size from 20 to 200.
 
 ## [1.18.23]
 ### Fixed
@@ -481,4 +505,5 @@ sockeye.evaluate now accepts `bleu` and `chrf` as values for `--metrics`
 ### Changed
  - `--attention-*` CLI params renamed to `--rnn-attention-*`.
  - `--transformer-no-positional-encodings` generalized to `--transformer-positional-embedding-type`.
+
 

@@ -79,7 +79,7 @@ If you want to run sockeye on a GPU you need to make sure your version of Apache
 bindings.
 Depending on your version of CUDA, you can do this by running the following:
 ```bash
-> wget https://raw.githubusercontent.com/awslabs/sockeye/master/requirements.gpu-cu${CUDA_VERSION}.txt
+> wget https://raw.githubusercontent.com/awslabs/sockeye/master/requirements/requirements.gpu-cu${CUDA_VERSION}.txt
 > pip install sockeye --no-deps -r requirements.gpu-cu${CUDA_VERSION}.txt
 > rm requirements.gpu-cu${CUDA_VERSION}.txt
 ```
@@ -91,7 +91,7 @@ where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), `90` (9.0), or `91` (9.1)
 
 If you want to just use sockeye without extending it, simply install it via
 ```bash
-> pip install -r requirements.txt
+> pip install -r requirements/requirements.txt
 > pip install .
 ```
 after cloning the repository from git.
@@ -103,7 +103,7 @@ Incubating contains the GPU bindings. Depending on your version of CUDA you can 
 running the following:
 
 ```bash
-> pip install -r requirements.gpu-cu${CUDA_VERSION}.txt
+> pip install -r requirements/requirements.gpu-cu${CUDA_VERSION}.txt
 > pip install .
 ```
 where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), `90` (9.0), or `91` (9.1).

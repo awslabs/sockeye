@@ -6,10 +6,8 @@ This task is on the one hand difficult enough to be interesting and on the other
 
 ## Setup
 For this tutorial we assume that you have successfully [installed](../../README.md#installation) Sockeye.
-We will be using scripts from the Sockeye repository, so you should either clone the repository or manually download 
-the scripts.
-Just as a reminder: Everything is run using Python 3, so depending on your setup you may have to replace `python` with
-`python3` below.
+We will be using scripts from the Sockeye repository, so you should either clone the repository or manually download the scripts.
+Just as a reminder: Everything is run using Python 3, so depending on your setup you may have to replace `python` with `python3` below.
 All of the commands below assume you are running on a CPU.
 If you have a GPU available you can simply remove `--use-cpu`.
 
@@ -22,8 +20,8 @@ Run the following command to create the data set:
 python genseqcopy.py
 ```
 
-After running this script you have a training (`train.source`, `train.target`) and a development data set
-(`dev.source`, `dev.target`). The generated sequences will look like this:
+After running this script you have (under 'data/') a training (`train.source`, `train.target`) and a development data set (`dev.source`, `dev.target`).
+The generated sequences will look like this:
 
 ```
 2 3 5 5 4 6 7 0 3 8 10 9 3 6
@@ -36,14 +34,16 @@ After running this script you have a training (`train.source`, `train.target`) a
 
 ## 2. Training
 
-Now that we have some training data to play with we can train our model. Start training by running
-the following command:
+Now that we have some training data to play with we can train our model.
+Start training by running the following command:
 
 ```bash
-python3 -m sockeye.train -s train.source \
-                         -t train.target \
-                         -vs dev.source \
-                         -vt dev.target \
+python3 -m sockeye.train -s data/train.source \
+                         -t data/train.target \
+                         -vs data/dev.source \
+                         -vt data/dev.target \
+                         --encoder rnn --decoder rnn \
+                         --num-layers 1:1 \
                          --num-embed 32 \
                          --rnn-num-hidden 64 \
                          --rnn-attention-type dot \
@@ -53,20 +53,17 @@ python3 -m sockeye.train -s train.source \
                          -o seqcopy_model
 ```
 
-This will train a 1-layer RNN model with a bidirectional LSTM as the encoder and a uni-directional LSTM
-as the decoder.
+This will train a 1-layer RNN model with a bidirectional LSTM as the encoder and a uni-directional LSTM as the decoder.
 The RNNs have 64 hidden units and we learn embeddings of size 32.
-Looking at the log we can see that our training data was assigned to buckets according to their
-lengths. Additionally, Sockeye will take care of correctly padding sequences and masking relevant parts of the network,
-in order to deal with sequences of variable length.
+Looking at the log we can see that our training data was assigned to buckets according to their lengths.
+Additionally, Sockeye will take care of correctly padding sequences and masking relevant parts of the network, in order to deal with sequences of variable length.
 
 
 ### Metrics and checkpointing
 During training Sockeye will print relevant metrics on both the training and the validation data.
 The metrics can be chosen using the `--metrics` parameter.
 Validation metrics are evaluated every time we create a checkpoint.
-During checkpointing the current model parameters are saved into the model directory and current validation scores
-are evaluated.
+During checkpointing the current model parameters are saved into the model directory and current validation scores are evaluated.
 By default Sockeye will create a checkpoint every 1000 updates.
 This can be adjusted through the `--checkpoint-frequency` parameter.
 
@@ -91,18 +88,15 @@ The trained model can be found in the folder `seqcopy_model`.
 The folder contains everything necessary to run the model after training.
 Most importantly `params.best` contains the parameters with the best validation score.
 During training `param.best` will continously be updated to point to the currently best parameters.
-This means that even while the model is still training you can use the model folder for translation, as described in
-the [next section](#3-translation).
+This means that even while the model is still training you can use the model folder for translation, as described in the [next section](#3-translation).
 
 All other parameters can be found in files named `param.$NUM_CHECKPOINT`.
 The `config` contains all model parameters as well as a reference to the data sets used during training.
-`version` references the version of Sockeye used for training in order to check potential compatibility issues with the
-version used for decoding.
+`version` references the version of Sockeye used for training in order to check potential compatibility issues with the version used for decoding.
 
 Additionally, we keep a copy of the `log` that you also saw printed on stdout.
 The source and target vocabularies are stored in `vocab.src.json` and `vocab.trg.json`.
-If you open the file you can see that in addition to the digits Sockeye also added special symbols indicating
-sentence boundaries, unknown words and padding symbols.
+If you open the file you can see that in addition to the digits Sockeye also added special symbols indicating sentence boundaries, unknown words and padding symbols.
 
 
 ## 3. Translation
@@ -110,7 +104,7 @@ sentence boundaries, unknown words and padding symbols.
 ```bash
 > echo "7 6 7 7 10 2 0 8 0 5 7 3 5 6 4 0 0 2 10 0" | \
   python -m sockeye.translate -m seqcopy_model --use-cpu
-  
+
         7 6 7 7 10 2 0 8 0 5 7 3 5 6 4 0 0 2 10 0
 
 ```
@@ -119,15 +113,13 @@ Note that the model was trained on sequences consisting of between 10 and 30 cha
 Therefore, the model will most likely have some difficulties with sequences shorter than 10 characters.
 By default Sockeye will read sentence from stdin and print the translations on stdout.
 
-Internally Sockeye will run a beam search in order to (approximately) find the translation with the highest
-probability.
+Internally Sockeye will run a beam search in order to (approximately) find the translation with the highest probability.
 
-Instead of using the parameters with the best validation score we can also use other checkpoints using the `-c`
-parameter to use a checkpoint earlier in the training before the model converged:
+Instead of using the parameters with the best validation score we can also use other checkpoints using the `-c` parameter to use a checkpoint earlier in the training before the model converged:
 ```bash
 > echo "7 6 7 7 10 2 0 8 0 5 7 3 5 6 4 0 0 2 10 0" | \
   python -m sockeye.translate -m seqcopy_model --use-cpu -c 3
-  
+
         7 6 7 7 10 2 0 8 0 5 7 0 7 3 5 6 0 0 2 0 10
 ```
 As the model has not converged yet it is still making a few mistakes when copying the sequence.
@@ -135,5 +127,4 @@ As the model has not converged yet it is still making a few mistakes when copyin
 
 ## Summary
 
-In the [next tutorial](../wmt) you will learn how to build a translation model, how to track training progress, how to create
-ensemble models and more.
+In the [next tutorial](../wmt) you will learn how to build a translation model, how to track training progress, how to create ensemble models and more.

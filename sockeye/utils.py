@@ -860,3 +860,28 @@ def uncast_conditionally(data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
     if dtype != C.DTYPE_FP32:
         return mx.sym.cast(data=data, dtype=C.DTYPE_FP32)
     return data
+
+
+def split(data: mx.nd.NDArray,
+          num_outputs: int,
+          axis: int = 1,
+          squeeze_axis: bool = False) -> List[mx.nd.NDArray]:
+    """
+    Version of mxnet.ndarray.split that always returns a list.  The original
+    implementation only returns a list if num_outputs > 1:
+    https://mxnet.incubator.apache.org/api/python/ndarray/ndarray.html#mxnet.ndarray.split
+
+    Splits an array along a particular axis into multiple sub-arrays.
+
+    :param data: The input.
+    :param num_outputs: Number of splits. Note that this should evenly divide
+                        the length of the axis.
+    :param axis: Axis along which to split.
+    :param squeeze_axis: If true, Removes the axis with length 1 from the shapes
+                         of the output arrays.
+    :return: List of NDArrays resulting from the split.
+    """
+    ndarray_or_list = data.split(num_outputs=num_outputs, axis=axis, squeeze_axis=squeeze_axis)
+    if num_outputs == 1:
+        return [ndarray_or_list]
+    return ndarray_or_list
