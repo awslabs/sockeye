@@ -262,14 +262,14 @@ sizes. Finally, the prefix that the decoder is presumed to have seen, and the li
 expect (a function of the vocab size) that should be blocked.
 """
 @pytest.mark.parametrize("global_raw_phrase_list, raw_phrase_list, batch_size, beam_size, prefix, expected_avoid", [
-    (["5 6 7 8"], None, 1, 3, '17', []),
-    (["5 6 7 12"], None, 1, 4, '5 6 7', [(0,12), (1,12), (2,12), (3,12)]),
-    (["5 6 7 8", "9"], None, 1, 2, '5 6 7', [(0,8), (0,9), (1,8), (1,9)]),
-    (["5 6 7 8", "13"], [[[10]]], 1, 2, '5 6 7', [(0,8), (0,10), (0,13), (1,8), (1,10), (1,13)]),
+    (['5 6 7 8'], None, 1, 3, '17', []),
+    (['5 6 7 12'], None, 1, 4, '5 6 7', [(0, 12), (1, 12), (2, 12), (3, 12)]),
+    (['5 6 7 8', '9'], None, 1, 2, '5 6 7', [(0, 8), (0, 9), (1, 8), (1, 9)]),
+    (['5 6 7 8', '13'], [[[10]]], 1, 2, '5 6 7', [(0, 8), (0, 10), (0, 13), (1, 8), (1, 10), (1, 13)]),
     # first two hypotheses blocked on 19 (= 19 and 119), next two on 20 (= 220 and 320)
-    (None, [[[19]], [[20]]], 2, 2, '', [(0,19), (1,19), (2,20), (3,20)]),
+    (None, [[[19]], [[20]]], 2, 2, '', [(0, 19), (1, 19), (2, 20), (3, 20)]),
     # same, but also add global block list to each row
-    (['74'], [[[19]], [[20]]], 2, 2, '', [(0,19), (0,74), (1,19), (1,74), (2,20), (2,74), (3,20), (3,74)]),
+    (['74'], [[[19]], [[20]]], 2, 2, '', [(0, 19), (0, 74), (1, 19), (1, 74), (2, 20), (2, 74), (3, 20), (3, 74)]),
 ])
 def test_avoid_list_batch(global_raw_phrase_list, raw_phrase_list, batch_size, beam_size, prefix, expected_avoid):
 

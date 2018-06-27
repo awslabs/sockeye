@@ -987,9 +987,9 @@ class Translator:
         assert C.PAD_ID == 0, "pad id should be 0"
         self.stop_ids = {self.vocab_target[C.EOS_SYMBOL], C.PAD_ID}  # type: Set[int]
         self.strip_ids = self.stop_ids.copy()  # ids to strip from the output
-        UNK_ID = self.vocab_target[C.UNK_SYMBOL]
+        self.unk_id = self.vocab_target[C.UNK_SYMBOL]
         if strip_unknown_words:
-            self.strip_ids.add(UNK_ID)
+            self.strip_ids.add(self.unk_id)
         self.models = models
         utils.check_condition(all(models[0].source_with_eos == m.source_with_eos for m in models),
                               "The source_with_eos property must match across models.")
@@ -1049,7 +1049,7 @@ class Translator:
             self.global_avoid_trie = constrained.AvoidTrie()
             for phrase in data_io.read_content(avoid_list):
                 phrase_ids = data_io.tokens2ids(phrase, self.vocab_target)
-                if UNK_ID in phrase_ids:
+                if self.unk_id in phrase_ids:
                     logger.warning("Global avoid phrase '%s' contains an %s; this may indicate improper preprocessing.", ' '.join(phrase), C.UNK_SYMBOL)
                 self.global_avoid_trie.add_phrase(phrase_ids)
 
@@ -1226,8 +1226,8 @@ class Translator:
             if trans_input.avoid_list is not None:
                 raw_avoid_list[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
                                      trans_input.avoid_list]
-                UNK_ID = self.vocab_target[C.UNK_SYMBOL]
-                if any([UNK_ID in phrase for phrase in raw_avoid_list[j]]):
+                unk_id = self.vocab_target[C.UNK_SYMBOL]
+                if any([unk_id in phrase for phrase in raw_avoid_list[j]]):
                     logger.warning("Sentence %d: %s was found in the list of phrases to avoid; this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
 
         return source, bucket_key, raw_constraints, raw_avoid_list
@@ -1589,8 +1589,6 @@ class Translator:
             # (8) update models' state with winning hypotheses (ascending)
             for ms in model_states:
                 ms.sort_state(best_hyp_indices)
-
-#            self._print_beam(sequences, scores_accumulated, finished, inactive, constraints, t)
 
         logger.debug("Finished after %d / %d steps.", t + 1, max_output_length)
 

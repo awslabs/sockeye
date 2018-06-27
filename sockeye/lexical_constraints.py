@@ -14,7 +14,7 @@
 import copy
 import logging
 from operator import attrgetter
-from typing import List, Optional, Tuple, Set, Dict
+from typing import Dict, List, Optional, Set, Tuple, Set
 
 import mxnet as mx
 import numpy as np
@@ -32,7 +32,7 @@ class AvoidTrie:
     def __init__(self,
                  raw_phrases: Optional[RawConstraintList] = None) -> None:
         self.final_ids = set()  # type: Set[int]
-        self.children = {}      # type: Dict[int,'AvoidTrie']
+        self.children = {}  # type: Dict[int,'AvoidTrie']
 
         if raw_phrases:
             for phrase in raw_phrases:
@@ -78,7 +78,7 @@ class AvoidTrie:
                 self.children[next_word] = AvoidTrie()
             self.step(next_word).add_phrase(phrase[1:])
 
-    def step(self, word_id: int) -> 'AvoidTrie':
+    def step(self, word_id: int) -> Optional['AvoidTrie']:
         """
         Returns the child node along the requested arc.
 
@@ -134,7 +134,7 @@ class AvoidState:
         """
         return self.root.final() | self.state.final()
 
-    def __str__(self):
+    def __str__(self) -> str:
         return str(self.state)
 
 
@@ -158,11 +158,11 @@ class AvoidBatch:
         self.local_avoid_states = []  # type: List[AvoidState]
 
         # Store the global trie for each hypothesis
-        if global_avoid_trie:
+        if global_avoid_trie is not None:
             self.global_avoid_states = [AvoidState(global_avoid_trie)] * batch_size * beam_size
 
         # Store the sentence-level tries for each item in their portions of the beam
-        if avoid_list:
+        if avoid_list is not None:
             for raw_phrases in avoid_list:
                 self.local_avoid_states += [AvoidState(AvoidTrie(raw_phrases))] * beam_size
 
@@ -201,7 +201,7 @@ class AvoidBatch:
 
         :return: Two lists of indices: the x coordinates and y coordinates.
         """
-        to_avoid = set()
+        to_avoid = set()  # type: Set[Tuple[int, int]]
         for i, state in enumerate(self.global_avoid_states):
             for word_id in state.avoid():
                 if word_id > 0:
@@ -211,8 +211,8 @@ class AvoidBatch:
                 if word_id > 0:
                     to_avoid.add((i, word_id))
 
-        x_list = []
-        y_list = []
+        x_list = []  # type: List[int]
+        y_list = []  # type: List[int]
         for item in to_avoid:
             x_list.append(item[0])
             y_list.append(item[1])
