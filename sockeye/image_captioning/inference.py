@@ -128,8 +128,8 @@ class ImageCaptioner(Translator):
                 if self.source_root is not None:
                     path = os.path.join(self.source_root, path)
                 paths.append(path)
-            # truncate to remove filler translations
             batch_translations = self._translate_nd(*self._get_inference_input(paths))
+            # truncate to remove filler translations
             if rest > 0:
                 batch_translations = batch_translations[:-rest]
             translations.extend(batch_translations)
