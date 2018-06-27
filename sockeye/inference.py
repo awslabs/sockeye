@@ -1483,9 +1483,9 @@ class Translator:
 
             # Mark entries that should be blocked as having a score of np.inf
             if self.global_avoid_trie or any(raw_avoid_list):
-                indices = avoid_states.avoid()
-                if any(indices):
-                    scores[indices] = np.inf
+                block_indices = avoid_states.avoid()
+                if any(block_indices):
+                    scores[block_indices] = np.inf
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
