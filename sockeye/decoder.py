@@ -604,7 +604,7 @@ class RecurrentDecoder(Decoder):
         # hidden_all: target_embed_max_length * (batch_size, rnn_num_hidden)
         hidden_states = []  # type: List[mx.sym.Symbol]
         context_vectors = []  # type: List[mx.sym.Symbol]
-        attention_vectors = []  # type: List[mx.sym.Symbol]
+        attention_probs = []  # type: List[mx.sym.Symbol]
         # TODO: possible alternative: feed back the context vector instead of the hidden (see lamtram)
         self.reset()
         for seq_idx in range(target_embed_max_length):
@@ -617,13 +617,13 @@ class RecurrentDecoder(Decoder):
                                                 enc_last_hidden=enc_last_hidden)
             hidden_states.append(state.hidden)
             context_vectors.append(attention_state.context)
-            attention_vectors.append(attention_state.probs)
+            attention_probs.append(attention_state.probs)
 
         # concatenate along time axis: (batch_size, target_embed_max_length, rnn_num_hidden)
         return mx.sym.Group([mx.sym.stack(*hidden_states, axis=1, name='%shidden_stack' % self.prefix), \
                             #expected size: (batch_size, trg_max_length, encoder_num_hidden)
                              mx.sym.stack(*context_vectors, axis=1, name='%scontext_stack' % self.prefix),
-                             mx.sym.stack(*attention_vectors, axis=1, name='%sattention_stack' % self.prefix)])
+                             mx.sym.stack(*attention_probs, axis=1, name='%sattention_stack' % self.prefix)])
 
     def decode_step(self,
                     step: int,
