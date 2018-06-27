@@ -84,7 +84,7 @@ def define_parallel_buckets(max_seq_len_source: int,
     # minimum bucket size is 2 (as we add BOS symbol to target side)
     source_buckets = [max(2, b) for b in source_buckets]
     target_buckets = [max(2, b) for b in target_buckets]
-    parallel_buckets = list(zip(source_buckets, target_buckets))
+    parallel_buckets = [(s, t) for s, t in zip(source_buckets, target_buckets)]
     # deduplicate for return
     buckets = list(OrderedDict.fromkeys(parallel_buckets))
     buckets.sort()
