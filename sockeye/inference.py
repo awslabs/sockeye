@@ -1226,8 +1226,7 @@ class Translator:
             if trans_input.avoid_list is not None:
                 raw_avoid_list[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
                                      trans_input.avoid_list]
-                unk_id = self.vocab_target[C.UNK_SYMBOL]
-                if any([unk_id in phrase for phrase in raw_avoid_list[j]]):
+                if any([self.unk_id in phrase for phrase in raw_avoid_list[j]]):
                     logger.warning("Sentence %d: %s was found in the list of phrases to avoid; this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
 
         return source, bucket_key, raw_constraints, raw_avoid_list
