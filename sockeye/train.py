@@ -78,14 +78,11 @@ def check_arg_compatibility(args: argparse.Namespace):
 
     :param args: Arguments as returned by argparse.
     """
-
-    # TODO: check args compatibility with pointer nets if necessary
-
-    check_condition(not args.use_pointer_nets or args.shared_vocab,
+    check_condition(args.encoder == C.IMAGE_PRETRAIN_TYPE or not args.use_pointer_nets or args.shared_vocab,
                     "Pointer networks required a shared vocabulary.")
 
-    check_condition(args.optimized_metric == C.BLEU or args.optimized_metric in args.metrics,
-                    "Must optimize either BLEU or one of tracked metrics (--metrics)")
+    check_condition(args.optimized_metric == C.BLEU or args.optimized_metric == C.ROUGE1 or args.optimized_metric in args.metrics,
+                    "Must optimize either BLEU, ROUGE or one of tracked metrics (--metrics)")
 
     if args.encoder == C.TRANSFORMER_TYPE:
         check_condition(args.transformer_model_size[0] == args.num_embed[0],

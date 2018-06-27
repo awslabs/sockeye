@@ -21,7 +21,7 @@ import numpy as np
 from typing import Iterable, Optional
 from collections import defaultdict
 
-from contrib import sacrebleu
+from contrib import sacrebleu, rouge
 from sockeye.log import setup_main_logger, log_sockeye_version
 from . import arguments
 from . import constants as C
@@ -54,6 +54,35 @@ def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> flo
     return sacrebleu.corpus_chrf(hypotheses, references, order=sacrebleu.CHRF_ORDER, beta=sacrebleu.CHRF_BETA,
                                  remove_whitespace=True)
 
+def raw_corpus_rouge1(hypotheses: Iterable[str], references: Iterable[str]) -> float:
+     """
+     Simple wrapper around ROUGE-1 implementation.
+
+     :param hypotheses: Hypotheses stream.
+     :param references: Reference stream.
+     :return: ROUGE-1 score as float between 0 and 1.
+     """
+     return rouge.rouge_1(hypotheses, references)
+
+def raw_corpus_rouge2(hypotheses: Iterable[str], references: Iterable[str]) -> float:
+      """
+      Simple wrapper around ROUGE-2 implementation.
+
+      :param hypotheses: Hypotheses stream.
+      :param references: Reference stream.
+      :return: ROUGE-2 score as float between 0 and 1.
+      """
+      return rouge.rouge_2(hypotheses, references)
+
+def raw_corpus_rougel(hypotheses: Iterable[str], references: Iterable[str]) -> float:
+      """
+      Simple wrapper around ROUGE-1 implementation.
+
+      :param hypotheses: Hypotheses stream.
+      :param references: Reference stream.
+      :return: ROUGE-L score as float between 0 and 1.
+      """
+      return rouge.rouge_l(hypotheses, references)
 
 def main():
     params = argparse.ArgumentParser(description='Evaluate translations by calculating metrics with '
