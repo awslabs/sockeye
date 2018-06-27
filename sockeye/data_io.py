@@ -708,7 +708,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
                     "Wrong number of source vocabularies. Found %d, need %d." % (len(source_vocabs),
                                                                                  len(data_info.sources)))
 
-    buckets = config_data.data_statistics.buckets
+    buckets = [tuple(bucket) for bucket in config_data.data_statistics.buckets]
     max_seq_len_source = config_data.max_seq_len_source
     max_seq_len_target = config_data.max_seq_len_target
 
