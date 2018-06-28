@@ -1182,7 +1182,7 @@ class Translator:
         source = mx.nd.zeros((len(trans_inputs), bucket_key, self.num_source_factors), ctx=self.context)
         raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
 
-        max_output_lengths = [] # type: List[int]
+        max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)
             max_output_lengths.append(self.models[0].get_max_output_length(num_tokens))
@@ -1723,7 +1723,6 @@ class NormalizeFinishedHypotheses(mx.gluon.HybridBlock):
         finished = all_finished
         return finished, scores_accumulated
 
-
 class UpdateLengthsAndFinished(mx.gluon.HybridBlock):
     """
     A HybridBlock that updates the lengths of unfinished and active hypotheses and recomputes finished hypotheses.
@@ -1766,3 +1765,4 @@ class UpdateScores(mx.gluon.HybridBlock):
         pad_dist = F.concat(pad_id_scores, pad_dist)
         scores = F.where(finished + inactive, pad_dist, scores)
         return scores
+
