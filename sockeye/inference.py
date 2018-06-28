@@ -971,7 +971,6 @@ class Translator:
         self.beam_prune = beam_prune
         self.beam_search_stop = beam_search_stop
         self.source_vocabs = source_vocabs
-        self.source_vocab_0_inv = vocab.reverse_vocab(self.source_vocabs[0])
         self.vocab_target = target_vocab
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
         self.restrict_lexicon = restrict_lexicon
@@ -1000,7 +999,7 @@ class Translator:
 
         if self.use_pointer_nets:
             # pad_dist should have one fewer columns than scores
-            self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target) + self.max_input_length - 2), val=np.inf, ctx=self.context)
+            self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target) + self.max_input_length - 1), val=np.inf, ctx=self.context)
         else:
             self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target) - 1), val=np.inf, ctx=self.context)
 
@@ -1229,7 +1228,9 @@ class Translator:
         attention_matrix = translation.attention_matrix[1:, :]
 
         if self.use_pointer_nets:
-            target_tokens = [self.vocab_target_inv.get(target_id, trans_input.tokens[target_id - len(self.vocab_target)]) for target_id in target_ids]
+            # There may be some out-of-bounds (OOB) words pointed to, so handle this with a dict
+            source_inv = dict((x, y) for x, y in enumerate(trans_input.tokens))
+            target_tokens = [self.vocab_target_inv.get(target_id, source_inv.get(target_id - len(self.vocab_target), 'OOB')) for target_id in target_ids]
         else:
             target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
 
@@ -1396,7 +1397,13 @@ class Translator:
         # target vocab for this sentence.
         models_output_layer_w = list()
         models_output_layer_b = list()
-        pad_dist = self.pad_dist
+
+        if self.use_pointer_nets:
+            # Trim the pad_dist to the right size for adding to `scores` later
+            pad_dist = self.pad_dist[:,:len(self.vocab_target) + source_length - 1]
+        else:
+            pad_dist = self.pad_dist
+
         vocab_slice_ids = None  # type: mx.nd.NDArray
         if self.restrict_lexicon:
             source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
@@ -1453,7 +1460,7 @@ class Translator:
                                                                        models_output_layer_w=models_output_layer_w,
                                                                        models_output_layer_b=models_output_layer_b)
 
-            # print('TIMESTEP', t, 'MAX INPUT', self.max_input_length, 'VOCAB', len(self.vocab_target), 'SCORES', scores.shape, 'PAD', pad_dist.shape, 'finished', finished.shape, 'inactive', inactive.shape, 'accum', scores_accumulated.shape, 'inf', self.inf_array.shape)
+            # print('TIMESTEP', t, 'MAX INPUT', 'THIS INPUT', source_len, self.max_input_length, 'VOCAB', len(self.vocab_target), 'SCORES', scores.shape, 'PAD', pad_dist.shape, 'finished', finished.shape, 'inactive', inactive.shape, 'accum', scores_accumulated.shape, 'inf', self.inf_array.shape)
 
             # (2) Update scores. Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
