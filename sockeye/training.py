@@ -141,6 +141,7 @@ class TrainingModel(model.SockeyeModel):
             # target_decoded: (batch-size, target_len, decoder_depth)
             target_decoded = target_decoded_and_attention[0]
 
+            # target_decoded = mx.sym.Custom(op_type="PrintValue", data=target_decoded, print_name="TARGET")
             # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
             target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
 
@@ -157,7 +158,8 @@ class TrainingModel(model.SockeyeModel):
                     attention = mx.sym.reshape(data=attention, shape=(-3, 0))
 
                 # softmax_probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
-                softmax_probs = self.output_layer(target_decoded, attention=attention, context=context)
+                target_embed = mx.sym.reshape(data=target_embed, shape=(-3, 0))
+                softmax_probs = self.output_layer(target_decoded, attention=attention, context=context, target_embed=target_embed)
                 # softmax_probs = mx.sym.Custom(op_type="PrintValue", data=softmax_probs, print_name="SOFTMAX")
                 loss_output = self.model_loss.get_loss(softmax_probs, labels)
 

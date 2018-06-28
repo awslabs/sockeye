@@ -240,6 +240,7 @@ class PointerOutputLayer(OutputLayer):
     def __init__(self,
                  hidden_size: int,
                  encoder_hidden_size: int,
+                 target_embed_size: int,
                  vocab_size: int,
                  weight: Optional[mx.sym.Symbol],
                  weight_normalization: bool,
@@ -260,6 +261,11 @@ class PointerOutputLayer(OutputLayer):
                                               shape=(self.hidden_layer_dim, encoder_hidden_size))
         self.bias_context = mx.sym.Variable("%spointer_bias2" % self.prefix, init=mx.init.Zero())
 
+        # Switching network weights, target embed -> internal
+        self.weights_target = mx.sym.Variable("%spointer_weight3" % self.prefix, init=mx.init.Uniform(self.uniform_range),
+                                              shape=(self.hidden_layer_dim, target_embed_size))
+        self.bias_target = mx.sym.Variable("%spointer_bias3" % self.prefix, init=mx.init.Zero())
+
         # Output layer
         self.weights_output = mx.sym.Variable("%spointer_output" % self.prefix, init=mx.init.Uniform(self.uniform_range),
                                               shape=(1, self.hidden_layer_dim))
@@ -269,6 +275,7 @@ class PointerOutputLayer(OutputLayer):
                  hidden: Union[mx.sym.Symbol, mx.nd.NDArray],
                  attention: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
                  context: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
+                 target_embed: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
                  weight: Optional[mx.nd.NDArray] = None,
                  bias: Optional[mx.nd.NDArray] = None):
         """
@@ -300,8 +307,16 @@ class PointerOutputLayer(OutputLayer):
                                               flatten = False,
                                               name = C.SWITCH_PROB_NAME + '_context_layer')
 
+        switch_target = mx.sym.FullyConnected(data=target_embed,
+                                              num_hidden=self.hidden_layer_dim,
+                                              weight = self.weights_target,
+                                              bias = self.bias_target,
+                                              flatten = False,
+                                              name = C.SWITCH_PROB_NAME + '_target_embed_layer')
+
         # TODO add noisy tanh activation function
-        switch_output = mx.sym.Activation(switch_hidden + switch_context, act_type='tanh', name=C.SWITCH_PROB_NAME+'_layer1')
+        switch_output = mx.sym.Activation(switch_hidden + switch_context + switch_target,
+                                          act_type='tanh', name=C.SWITCH_PROB_NAME+'_layer1')
 
         switch_output = mx.sym.FullyConnected(data=switch_output,
                                               num_hidden=1,

@@ -128,6 +128,7 @@ class SockeyeModel:
             assert self.config.config_loss.name == C.POINTER_NET_CROSS_ENTROPY
             self.output_layer = layers.PointerOutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                           encoder_hidden_size=self.encoder.get_num_hidden(),
+                                                          target_embed_size=self.config.config_embed_target.num_embed,
                                                           vocab_size=self.config.vocab_target_size,
                                                           weight=out_weight_target,
                                                           weight_normalization=self.config.weight_normalization,
