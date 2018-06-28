@@ -13,11 +13,12 @@ max_seq_len = 30
 vocab_size = 10
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--copy', '-c', type=float, default=0.1, help="probability of copying a word to the output")
+parser.add_argument('--copy-prob', '-c', type=float, default=0.9, help="probability of copying IDs that are copied")
+parser.add_argument('--copy-max', '-n', type=int, default=0, help="All numbers less than or equal to this are copied with --copy-prob")
 parser.add_argument('--output-dir', '-o', type=str, default='data', help="output directory to write to")
 args = parser.parse_args()
 
-print('copy prob %f, writing to %s' % (args.copy, args.output_dir))
+print('copying IDs 0..%d with prob %f, writing to %s' % (args.copy_max, args.copy_prob, args.output_dir))
 
 samples = set()
 for i in range(0, num_samples):
@@ -30,7 +31,7 @@ train_samples = samples[:num_samples-num_dev]
 dev_samples = samples[num_samples-num_dev:]
 
 def int_or_char(sequence: str):
-    return ' '.join([i if random.random() <= args.copy else chr(int(i) + 65) for i in sequence.split()])
+    return ' '.join([i if int(i) <= args.copy_max and random.random() <= args.copy_prob else chr(int(i) + 65) for i in sequence.split()])
 
 if not os.path.exists(args.output_dir):
     os.mkdir(args.output_dir)
