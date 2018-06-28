@@ -602,6 +602,7 @@ def prepare_data(source_fnames: List[str],
                              max_seq_len_source=max_seq_len_source,
                              max_seq_len_target=max_seq_len_target,
                              num_source_factors=len(source_fnames),
+                             use_pointer_nets=use_pointer_nets,
                              source_with_eos=True)
     config_data_fname = os.path.join(output_prefix, C.DATA_CONFIG)
     logger.info("Writing data config to '%s'", config_data_fname)
@@ -988,12 +989,14 @@ class DataConfig(config.Config):
                  max_seq_len_source: int,
                  max_seq_len_target: int,
                  num_source_factors: int,
+                 use_pointer_nets: bool = False,
                  source_with_eos: bool = False) -> None:
         super().__init__()
         self.data_statistics = data_statistics
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
         self.num_source_factors = num_source_factors
+        self.use_pointer_nets = use_pointer_nets
         self.source_with_eos = source_with_eos
 
 
