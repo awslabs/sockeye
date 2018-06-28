@@ -474,8 +474,10 @@ def add_vocab_args(params):
                              'Will be automatically turned on when using weight tying. Default: %(default)s.')
     params.add_argument('--num-words',
                         type=multiple_values(num_values=2, greater_or_equal=0),
-                        default=(50000, 50000),
+                        default=(0, 0),
                         help='Maximum vocabulary size. Use "x:x" to specify separate values for src&tgt. '
+                             'A value of 0 indicates that the vocabulary unrestricted and determined from the data by '
+                             'creating an entry for all words that occur at least --word-min-count times.'
                              'Default: %(default)s.')
     params.add_argument('--word-min-count',
                         type=multiple_values(num_values=2, greater_or_equal=1),
