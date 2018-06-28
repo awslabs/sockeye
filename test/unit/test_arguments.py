@@ -35,7 +35,7 @@ from itertools import zip_longest
           validation_source='test_validation_src', validation_target='test_validation_tgt',
           validation_source_factors=[],
           output='test_output', overwrite_output=False,
-          source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1, 1),
+          source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(0, 0), word_min_count=(1, 1),
           no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
           monitor_pattern=None, monitor_stat_func='mx_default')),
 
@@ -49,7 +49,7 @@ from itertools import zip_longest
           validation_source='test_validation_src', validation_target='test_validation_tgt',
           validation_source_factors=[],
           output='test_output', overwrite_output=False,
-          source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1, 1),
+          source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(0, 0), word_min_count=(1, 1),
           no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
           monitor_pattern=None, monitor_stat_func='mx_default'))
 ])
@@ -333,7 +333,7 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           target_vocab=None,
           source_factors=[],
           shared_vocab=False,
-          num_words=(50000, 50000),
+          num_words=(0, 0),
           word_min_count=(1, 1),
           no_bucketing=False,
           bucket_width=10,
@@ -355,7 +355,7 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           target_vocab=None,
           source_factors=[],
           shared_vocab=False,
-          num_words=(50000, 50000),
+          num_words=(0, 0),
           word_min_count=(1, 1),
           no_bucketing=False,
           bucket_width=10,

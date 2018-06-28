@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.29]
+- No longer restrict the vocabulary to 50,000 words by default, but rather create the vocabulary from all words which occur at least `--word-min-count` times. Specifying `--num-words` explicitly will still lead to a restricted
+  vocabulary.
+
 ## [1.18.28]
 ### Changed
 - Temporarily fixing the pyyaml version to 3.12 as version 4.1 introduced some backwards incompatible changes.

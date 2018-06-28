@@ -51,6 +51,9 @@ def prepare_data(args: argparse.Namespace):
     source_vocab_paths = [args.source_vocab] + source_factor_vocab_paths
 
     num_words_source, num_words_target = args.num_words
+    num_words_source = num_words_source if num_words_source > 0 else None
+    num_words_target = num_words_target if num_words_target > 0 else None
+
     word_min_count_source, word_min_count_target = args.word_min_count
     max_seq_len_source, max_seq_len_target = args.max_seq_len
     # The maximum length is the length before we add the BOS/EOS symbols
