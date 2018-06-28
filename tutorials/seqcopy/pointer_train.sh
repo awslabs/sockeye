@@ -12,5 +12,5 @@ python3 -m sockeye.train \
         -o model \
         --use-pointer-nets \
         --shared-vocab \
-        --checkpoint-frequency 100 \
+        --checkpoint-frequency 1000 \
 	"$@"

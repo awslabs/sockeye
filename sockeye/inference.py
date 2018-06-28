@@ -998,6 +998,9 @@ class Translator:
             self.buckets_source = [self.max_input_length]
 
         if self.use_pointer_nets:
+            self.num_pointed = 0
+            self.total_tokens = 0
+
             # pad_dist should have one fewer columns than scores
             self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target) + self.max_input_length - 1), val=np.inf, ctx=self.context)
         else:
@@ -1228,6 +1231,9 @@ class Translator:
         attention_matrix = translation.attention_matrix[1:, :]
 
         if self.use_pointer_nets:
+            self.num_pointed += sum(map(lambda x: x >= len(self.vocab_target), target_ids))
+            self.total_tokens += len(target_ids)
+
             # There may be some out-of-bounds (OOB) words pointed to, so handle this with a dict
             source_inv = dict((x, y) for x, y in enumerate(trans_input.tokens))
             target_tokens = [self.vocab_target_inv.get(target_id, source_inv.get(target_id - len(self.vocab_target), 'OOB')) for target_id in target_ids]
