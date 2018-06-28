@@ -31,14 +31,14 @@ Vocab = Dict[str, int]
 InverseVocab = Dict[int, str]
 
 
-def build_from_paths(paths: List[str], num_words: int = 50000, min_count: int = 1) -> Vocab:
+def build_from_paths(paths: List[str], num_words: Optional[int] = None, min_count: int = 1) -> Vocab:
     """
     Creates vocabulary from paths to a file in sentence-per-line format. A sentence is just a whitespace delimited
     list of tokens. Note that special symbols like the beginning of sentence (BOS) symbol will be added to the
     vocabulary.
 
     :param paths: List of paths to files with one sentence per line.
-    :param num_words: Maximum number of words in the vocabulary.
+    :param num_words: Optional maximum number of words in the vocabulary.
     :param min_count: Minimum occurrences of words to be included in the vocabulary.
     :return: Word-to-id mapping.
     """
@@ -48,14 +48,14 @@ def build_from_paths(paths: List[str], num_words: int = 50000, min_count: int = 
         return build_vocab(chain(*files), num_words, min_count)
 
 
-def build_vocab(data: Iterable[str], num_words: int = 50000, min_count: int = 1) -> Vocab:
+def build_vocab(data: Iterable[str], num_words: Optional[int] = None, min_count: int = 1) -> Vocab:
     """
     Creates a vocabulary mapping from words to ids. Increasing integer ids are assigned by word frequency,
     using lexical sorting as a tie breaker. The only exception to this are special symbols such as the padding symbol
     (PAD).
 
     :param data: Sequence of sentences containing whitespace delimited tokens.
-    :param num_words: Maximum number of words in the vocabulary.
+    :param num_words: Optional maximum number of words in the vocabulary.
     :param min_count: Minimum occurrences of words to be included in the vocabulary.
     :return: Word-to-id mapping.
     """
@@ -64,15 +64,20 @@ def build_vocab(data: Iterable[str], num_words: int = 50000, min_count: int = 1)
                         if token not in vocab_symbols_set)
     # For words with the same count, they will be ordered reverse alphabetically.
     # Not an issue since we only care for consistency
-    pruned_vocab = sorted(((c, w) for w, c in raw_vocab.items() if c >= min_count), reverse=True)
+    pruned_vocab = [w for c, w in sorted(((c, w) for w, c in raw_vocab.items() if c >= min_count), reverse=True)]
 
-    vocab = islice((w for c, w in pruned_vocab), num_words)
+    if num_words is not None:
+        vocab = list(islice(pruned_vocab, num_words))
+        num_words_log = str(num_words)
+    else:
+        vocab = pruned_vocab
+        num_words_log = "None"
 
     word_to_id = {word: idx for idx, word in enumerate(chain(C.VOCAB_SYMBOLS, vocab))}
     logger.info("Vocabulary: types: %d/%d/%d/%d (initial/min_pruned/max_pruned/+special) " +
-                "[min_frequency=%d, max_num_types=%d]",
+                "[min_frequency=%d, max_num_types=%s]",
                 len(raw_vocab), len(pruned_vocab), len(word_to_id) - len(C.VOCAB_SYMBOLS),
-                len(word_to_id), min_count, num_words)
+                len(word_to_id), min_count, num_words_log)
 
     # Important: pad symbol becomes index 0
     assert word_to_id[C.PAD_SYMBOL] == C.PAD_ID
@@ -164,8 +169,8 @@ def load_or_create_vocabs(source_paths: List[str],
                           source_vocab_paths: List[Optional[str]],
                           target_vocab_path: Optional[str],
                           shared_vocab: bool,
-                          num_words_source: int, word_min_count_source: int,
-                          num_words_target: int, word_min_count_target: int) -> Tuple[List[Vocab], Vocab]:
+                          num_words_source: Optional[int], word_min_count_source: int,
+                          num_words_target: Optional[int], word_min_count_target: int) -> Tuple[List[Vocab], Vocab]:
     """
     Returns vocabularies for source files (including factors) and target.
     If the respective vocabulary paths are not None, the vocabulary is read from the path and returned.
