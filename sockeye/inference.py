@@ -1817,8 +1817,8 @@ class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
             self.length_penalty = LengthPenalty(alpha=length_penalty_alpha, beta=length_penalty_beta)
 
     def hybrid_forward(self, F, best_word_indices, max_output_lengths, finished, scores_accumulated, lengths):
-        all_finished = ((best_word_indices == self.pad_id) + (best_word_indices == self.eos_id))
-        newly_finished = all_finished - finished
+        all_finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
+        newly_finished = F.broadcast_logical_xor(all_finished, finished)
         scores_accumulated = F.where(newly_finished,
                                      scores_accumulated / self.length_penalty(lengths),
                                      scores_accumulated)
@@ -1831,11 +1831,9 @@ class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
         # - extended with <pad>, or
         # - extended with <eos>, or
         # - at their maximum length.
-        finished = F.clip(
-            (best_word_indices == self.pad_id) +
-            (best_word_indices == self.eos_id) +
-            (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') >= max_output_lengths),
-            a_min=0, a_max=1)
+        finished = F.broadcast_logical_or(F.broadcast_logical_or(best_word_indices == self.pad_id,
+                                                                 best_word_indices == self.eos_id),
+                                          (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') >= max_output_lengths))
 
         return finished, scores_accumulated, lengths
 
@@ -1858,10 +1856,8 @@ class UpdateScores(mx.gluon.HybridBlock):
         # infinity otherwise.
         scores = F.broadcast_add(scores, scores_accumulated)
         # pylint: disable=invalid-sequence-index
-        pad_id_scores = F.where(F.clip(finished - inactive, 0, 1),
-                                scores_accumulated,
-                                inf_array)
+        pad_id_scores = F.where(F.broadcast_logical_and(finished, F.logical_not(inactive)), scores_accumulated, inf_array)
         # pad_dist. Shape: (batch*beam, vocab_size)
         pad_dist = F.concat(pad_id_scores, pad_dist)
-        scores = F.where(finished + inactive, pad_dist, scores)
+        scores = F.where(F.broadcast_logical_or(finished, inactive), pad_dist, scores)
         return scores
