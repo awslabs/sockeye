@@ -84,9 +84,9 @@ def define_parallel_buckets(max_seq_len_source: int,
     # minimum bucket size is 2 (as we add BOS symbol to target side)
     source_buckets = [max(2, b) for b in source_buckets]
     target_buckets = [max(2, b) for b in target_buckets]
-    parallel_buckets = list(zip(source_buckets, target_buckets))
+    parallel_buckets = [(s, t) for s, t in zip(source_buckets, target_buckets)]
     # deduplicate for return
-    buckets = list(OrderedDict.fromkeys(parallel_buckets))
+    buckets = list(set(parallel_buckets))
     buckets.sort()
     return buckets
 
@@ -106,9 +106,9 @@ def define_empty_source_parallel_buckets(max_seq_len_target: int,
     # source buckets are always 0 since there is no text
     source_buckets = [0 for b in target_buckets]
     target_buckets = [max(2, b) for b in target_buckets]
-    parallel_buckets = list(zip(source_buckets, target_buckets))
+    parallel_buckets = [(s, t) for s, t in zip(source_buckets, target_buckets)]
     # deduplicate for return
-    buckets = list(OrderedDict.fromkeys(parallel_buckets))
+    buckets = list(set(parallel_buckets))
     buckets.sort()
     return buckets
 
@@ -708,7 +708,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
                     "Wrong number of source vocabularies. Found %d, need %d." % (len(source_vocabs),
                                                                                  len(data_info.sources)))
 
-    buckets = config_data.data_statistics.buckets
+    buckets = [tuple(bucket) for bucket in config_data.data_statistics.buckets]
     max_seq_len_source = config_data.max_seq_len_source
     max_seq_len_target = config_data.max_seq_len_target
 
