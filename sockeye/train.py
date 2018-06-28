@@ -46,6 +46,7 @@ from .config import Config
 from .log import setup_main_logger
 from .optimizers import OptimizerConfig
 from .utils import check_condition
+from . import custom_seq_parser
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
 logger = setup_main_logger(__name__, file_logging=False, console=True)
@@ -436,6 +437,22 @@ def create_encoder_config(args: argparse.Namespace,
                                                             positional_embedding_type=args.cnn_positional_embedding_type)
 
         encoder_num_hidden = args.cnn_num_hidden
+    elif args.encoder == C.CUSTOM_SEQ_TYPE:
+        logger.info("Creating encoder from configuration '%s'." % args.custom_seq_encoder)
+        utils.check_condition(args.custom_seq_encoder is not None,
+                              "Please specify the custom encoder layer sequence using --custom-seq-encoder.")
+        layer_configs = custom_seq_parser.parse_custom_seq_layers_description(default_dropout=args.custom_seq_dropout,
+                                                                              default_num_hidden=args.custom_seq_num_hidden,
+                                                                              default_num_embed=num_embed_source,
+                                                                              max_seq_len=max_seq_len_source,
+                                                                              description=args.custom_seq_encoder,
+                                                                              source_attention_needed=False,
+                                                                              source_attention_forbidden=True)
+        config_encoder = encoder.CustomSeqEncoderConfig(encoder_layers=layer_configs,
+                                                        num_embed=num_embed_source)
+
+        # TODO: how to set this correctly!?
+        encoder_num_hidden = None
     else:
         encoder_rnn_dropout_inputs, _ = args.rnn_dropout_inputs
         encoder_rnn_dropout_states, _ = args.rnn_dropout_states
@@ -472,7 +489,7 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
     _, decoder_num_layers = args.num_layers
     _, num_embed_target = args.num_embed
 
-    config_decoder = None  # type: Optional[Config]
+    config_decoder = None  # type: Optional[decoder.DecoderConfig]
 
     if args.decoder == C.TRANSFORMER_TYPE:
         _, decoder_transformer_preprocess = args.transformer_preprocess
@@ -509,7 +526,7 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
                                                             project_qkv=args.cnn_project_qkv,
                                                             hidden_dropout=args.cnn_hidden_dropout)
 
-    else:
+    elif args.decoder == C.RNN_NAME:
         rnn_attention_num_hidden = args.rnn_num_hidden if args.rnn_attention_num_hidden is None else args.rnn_attention_num_hidden
         config_coverage = None
         if args.rnn_attention_type == C.ATT_COV:
@@ -550,7 +567,22 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
             attention_in_upper_layers=args.rnn_attention_in_upper_layers,
             state_init_lhuc=args.lhuc is not None and (C.LHUC_STATE_INIT in args.lhuc or C.LHUC_ALL in args.lhuc),
             enc_last_hidden_concat_to_embedding=args.rnn_enc_last_hidden_concat_to_embedding)
-
+    elif args.decoder == C.CUSTOM_SEQ_TYPE:
+        logger.info("Creating decoder from configuration '%s'." % args.custom_seq_decoder)
+        # TODO: move argument to constant
+        utils.check_condition(args.custom_seq_decoder is not None,
+                              "Please specify the custom decoder layer sequence using --custom-seq-decoder.")
+        layer_configs = custom_seq_parser.parse_custom_seq_layers_description(default_dropout=args.custom_seq_dropout,
+                                                                              default_num_hidden=args.custom_seq_num_hidden,
+                                                                              default_num_embed=num_embed_target,
+                                                                              max_seq_len=max_seq_len_target,
+                                                                              description=args.custom_seq_decoder,
+                                                                              source_attention_needed=True,
+                                                                              source_attention_forbidden=False)
+        config_decoder = decoder.CustomSeqDecoderConfig(decoder_layers=layer_configs,
+                                                        num_embed=num_embed_target)
+    else:
+        raise ValueError("Unknown decoder type %s" % args.decoder)
     return config_decoder
 
 

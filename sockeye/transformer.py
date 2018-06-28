@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -174,13 +174,13 @@ class TransformerDecoderBlock:
         # self-attention
         target_self_att = self.self_attention(inputs=self.pre_self_attention(target, None),
                                               bias=target_bias,
-                                              cache=cache)
+                                              cache=cache)[0]
         target = self.post_self_attention(target_self_att, target)
 
         # encoder attention
         target_enc_att = self.enc_attention(queries=self.pre_enc_attention(target, None),
                                             memory=source,
-                                            bias=source_bias)
+                                            bias=source_bias)[0]
         target = self.post_enc_attention(target_enc_att, target)
 
         # feed-forward
@@ -356,70 +356,3 @@ def get_variable_length_bias(lengths: mx.sym.Symbol,
         x = layers.broadcast_to_heads(x, num_heads, ndim=2, fold_heads=fold_heads)
     return mx.sym.BlockGrad(x, name='%sbias' % name)
 
-
-def get_autoregressive_bias(max_length: int, name: str) -> mx.sym.Symbol:
-    """
-    Returns bias/mask to ensure position i can only attend to positions <i.
-
-    :param max_length: Sequence length.
-    :param name: Name of symbol.
-    :return: Bias symbol of shape (1, max_length, max_length).
-    """
-    return mx.sym.BlockGrad(mx.symbol.Custom(length=max_length,
-                                             name=name,
-                                             op_type='auto_regressive_bias'))
-
-
-class AutoRegressiveBias(mx.operator.CustomOp):
-    """
-    Returns a symbol of shape (1, length, length) with cells above the main diagonal
-    set to a large negative value, e.g.
-    length=4
-
-    0 1 1 1
-    0 0 1 1   * LARGE_NEGATIVE_VALUE
-    0 0 0 1
-    0 0 0 0
-    """
-
-    def __init__(self, length: int, dtype:str, ctx: mx.Context) -> None:
-        super().__init__()
-        self.bias = self.get_bias(length, dtype, ctx)
-
-    @staticmethod
-    def get_bias(length: int, dtype: str, ctx: mx.Context):
-        # matrix with lower triangle and main diagonal set to 0, upper triangle set to 1
-        upper_triangle = np.triu(np.ones((length, length), dtype=dtype), k=1)
-        # (1, length, length)
-        bias = -C.LARGE_VALUES[dtype] * np.reshape(upper_triangle, (1, length, length))
-        return mx.nd.array(bias, ctx=ctx)
-
-    def forward(self, is_train, req, in_data, out_data, aux):
-        self.assign(out_data[0], req[0], self.bias)
-
-    def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
-        pass
-
-
-@mx.operator.register("auto_regressive_bias")
-class AutoRegressiveBiasProp(mx.operator.CustomOpProp):
-
-    def __init__(self, length: str, dtype: str = C.DTYPE_FP32) -> None:
-        super().__init__()
-        self.length = int(length)
-        self.dtype = dtype
-
-    def list_arguments(self):
-        return []
-
-    def list_outputs(self):
-        return ['output']
-
-    def infer_shape(self, in_shape):
-        return [], [(1, self.length, self.length)], []
-
-    def infer_type(self, in_type):
-        return [], [np.dtype(self.dtype).type], []
-
-    def create_operator(self, ctx, shapes, dtypes):
-        return AutoRegressiveBias(length=self.length, dtype=self.dtype, ctx=ctx)

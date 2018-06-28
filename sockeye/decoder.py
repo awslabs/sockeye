@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -15,11 +15,13 @@
 Decoders for sequence-to-sequence models.
 """
 import logging
+import math
 from abc import ABC, abstractmethod
 from typing import Callable, cast, Dict, List, NamedTuple, Optional, Tuple, Union, Type
 
 import mxnet as mx
 
+from . import layers
 from . import constants as C
 from . import convolution
 from . import encoder
@@ -31,7 +33,8 @@ from . import utils
 from .config import Config
 
 logger = logging.getLogger(__name__)
-DecoderConfig = Union['RecurrentDecoderConfig', transformer.TransformerConfig, 'ConvolutionalDecoderConfig']
+DecoderConfig = Union['RecurrentDecoderConfig', transformer.TransformerConfig, 'ConvolutionalDecoderConfig',
+                      'CustomSeqDecoderConfig']
 
 
 def get_decoder(config: DecoderConfig, prefix: str = '') -> 'Decoder':
@@ -117,6 +120,7 @@ class Decoder(ABC):
                     step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
+                    att_dict: Dict[str, Dict[str, mx.sym.Symbol]],
                     *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the current step, the previous embedded target word,
@@ -127,6 +131,8 @@ class Decoder(ABC):
         :param step: Global step of inference procedure, starts with 1.
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
+        :param att_dict: A dictionary of attention matrices used for visualization with separate entries for source and
+        self attention
         :param states: Arbitrary list of decoder states.
         :return: logit inputs, attention probabilities, next decoder states.
         """
@@ -148,6 +154,7 @@ class Decoder(ABC):
 
     @abstractmethod
     def init_states(self,
+                    batch_size: int,
                     source_encoded: mx.sym.Symbol,
                     source_encoded_lengths: mx.sym.Symbol,
                     source_encoded_max_length: int) -> List[mx.sym.Symbol]:
@@ -155,6 +162,7 @@ class Decoder(ABC):
         Returns a list of symbolic states that represent the initial states of this decoder.
         Used for inference.
 
+        :param batch_size: The batch size.
         :param source_encoded: Encoded source. Shape: (batch_size, source_encoded_max_length, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
@@ -175,7 +183,7 @@ class Decoder(ABC):
     @abstractmethod
     def state_shapes(self,
                      batch_size: int,
-                     target_max_length: int,
+                     step: int,
                      source_encoded_max_length: int,
                      source_encoded_depth: int) -> List[mx.io.DataDesc]:
         """
@@ -183,7 +191,7 @@ class Decoder(ABC):
         Used for inference.
 
         :param batch_size: Batch size during inference.
-        :param target_max_length: Current target sequence length.
+        :param step: Current target sequence length.
         :param source_encoded_max_length: Size of encoder time dimension.
         :param source_encoded_depth: Depth of encoded source.
         :return: List of shape descriptions.
@@ -281,6 +289,7 @@ class TransformerDecoder(Decoder):
                     step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
+                    att_dict: Dict[str, Dict[str, mx.sym.Symbol]],
                     *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the current step, the previous embedded target word,
@@ -291,9 +300,12 @@ class TransformerDecoder(Decoder):
         :param step: Global step of inference procedure, starts with 1.
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
+        :param att_dict: A dictionary of attention matrices used for visualization with separate entries for source and
+        self attention.
         :param states: Arbitrary list of decoder states.
         :return: logit inputs, attention probabilities, next decoder states.
         """
+        # TODO: use att_dict
         # for step > 1, states contains source_encoded, source_encoded_lengths, and cache tensors.
         source_encoded, source_encoded_lengths, *cache = states  # type: ignore
 
@@ -364,6 +376,7 @@ class TransformerDecoder(Decoder):
         return self.config.model_size
 
     def init_states(self,
+                    batch_size: int,
                     source_encoded: mx.sym.Symbol,
                     source_encoded_lengths: mx.sym.Symbol,
                     source_encoded_max_length: int) -> List[mx.sym.Symbol]:
@@ -371,6 +384,7 @@ class TransformerDecoder(Decoder):
         Returns a list of symbolic states that represent the initial states of this decoder.
         Used for inference.
 
+        :param batch_size: The batch size.
         :param source_encoded: Encoded source. Shape: (batch_size, source_encoded_max_length, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
@@ -622,6 +636,7 @@ class RecurrentDecoder(Decoder):
                     step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
+                    att_dict: Dict[str, Dict[str, mx.sym.Symbol]],
                     *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the current step, the previous embedded target word,
@@ -632,9 +647,12 @@ class RecurrentDecoder(Decoder):
         :param step: Global step of inference procedure, starts with 1.
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
+        :param att_dict: A dictionary of attention matrices used for visualization with separate entries for source and
+        self attention.
         :param states: Arbitrary list of decoder states.
         :return: logit inputs, attention probabilities, next decoder states.
         """
+        # TODO: use att_dict
         source_encoded, prev_dynamic_source, source_encoded_length, prev_hidden, *layer_states = states
 
         # Get last state from source (batch_size, num_target_embed)
@@ -690,6 +708,7 @@ class RecurrentDecoder(Decoder):
         return self.num_hidden
 
     def init_states(self,
+                    batch_size: int,
                     source_encoded: mx.sym.Symbol,
                     source_encoded_lengths: mx.sym.Symbol,
                     source_encoded_max_length: int) -> List[mx.sym.Symbol]:
@@ -697,6 +716,7 @@ class RecurrentDecoder(Decoder):
         Returns a list of symbolic states that represent the initial states of this decoder.
         Used for inference.
 
+        :param batch_size: The batch size.
         :param source_encoded: Encoded source. Shape: (batch_size, source_encoded_max_length, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
@@ -1101,6 +1121,7 @@ class ConvolutionalDecoder(Decoder):
                     step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
+                    att_dict: Dict[str, Dict[str, mx.sym.Symbol]],
                     *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the current step, the previous embedded target word,
@@ -1111,6 +1132,8 @@ class ConvolutionalDecoder(Decoder):
         :param step: Global step of inference procedure, starts with 1.
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
+        :param att_dict: A dictionary of attention matrices used for visualization with separate entries for source and
+        self attention.
         :param states: Arbitrary list of decoder states.
         :return: logit inputs, attention probabilities, next decoder states.
         """
@@ -1191,6 +1214,7 @@ class ConvolutionalDecoder(Decoder):
         return self.config.cnn_config.num_hidden
 
     def init_states(self,
+                    batch_size: int,
                     source_encoded: mx.sym.Symbol,
                     source_encoded_lengths: mx.sym.Symbol,
                     source_encoded_max_length: int) -> List[mx.sym.Symbol]:
@@ -1198,6 +1222,7 @@ class ConvolutionalDecoder(Decoder):
         Returns a list of symbolic states that represent the initial states of this decoder.
         Used for inference.
 
+        :param batch_size: The batch size.
         :param source_encoded: Encoded source. Shape: (batch_size, source_encoded_max_length, encoder_depth).
         :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
@@ -1259,3 +1284,160 @@ class ConvolutionalDecoder(Decoder):
     def get_max_seq_len(self) -> Optional[int]:
         #  The positional embeddings potentially pose a limit on the maximum length at inference time.
         return self.pos_embedding.get_max_seq_len()
+
+
+class CustomSeqDecoderConfig(Config):
+    def __init__(self, decoder_layers: List[layers.LayerConfig], num_embed: int, dtype: str = C.DTYPE_FP32):
+        super().__init__()
+        self.num_embed = num_embed
+        self.decoder_layers = decoder_layers
+        self.dtype = dtype
+
+
+@Decoder.register(CustomSeqDecoderConfig, C.CUSTOM_SEQ_TYPE)
+class CustomSeqDecoder(Decoder):
+    """
+    Decoder composed of a customizable list of building blocks/layers, such as RNNs, CNNs and attention mechanisms.
+    """
+
+    def __init__(self, config: CustomSeqDecoderConfig,
+                 prefix: str = C.DECODER_PREFIX) -> None:
+        super().__init__(config.dtype)
+        self.config = config
+        self.prefix = prefix
+        self.layers = []
+        input_num_hidden = config.num_embed
+        for idx, layer_config in enumerate(config.decoder_layers):
+            layer = layer_config.create_decoder_layer(input_num_hidden, "%s_l%d_" % (self.prefix, idx))
+            input_num_hidden = layer.get_num_hidden()
+            self.layers.append(layer)
+
+    def get_num_hidden(self) -> int:
+        return self.layers[-1].get_num_hidden()
+
+    def decode_sequence(self,
+                        source_encoded: mx.sym.Symbol,
+                        source_encoded_lengths: mx.sym.Symbol,
+                        source_encoded_max_length: int,
+                        target: mx.sym.Symbol,
+                        target_lengths: mx.sym.Symbol,
+                        target_max_length: int) -> mx.sym.Symbol:
+        # (1, target_max_length, target_max_length)
+        target_autoregressive_bias = layers.get_autoregressive_bias(target_max_length,
+                                                                    name="%starget_bias" % self.prefix)
+
+        for layer_idx, layer in enumerate(self.layers):
+            target = layer.decode_sequence(source_encoded, source_encoded_lengths, source_encoded_max_length,
+                                           target, target_lengths, target_max_length, target_autoregressive_bias)
+
+        return target
+
+    def decode_step(self,
+                    step: int,
+                    target_embed_prev: mx.sym.Symbol,
+                    source_encoded_max_length: int,
+                    att_dict: Dict[str, Dict[str, mx.sym.Symbol]],
+                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol,mx.sym.Symbol, List[mx.sym.Symbol]]:
+        # Source_encoded: (batch_size, source_encoded_max_length, encoder_num_hidden)
+        source_encoded, source_encoded_lengths, *layer_states_flat = states
+
+        new_layer_states_flat = list(source_encoded) + [source_encoded_lengths]
+
+        target = target_embed_prev
+
+        for layer, layer_states in layers.layers_with_states_iter(self.layers, step, layer_states_flat):
+            target, new_layer_states = layer.decode_step(step,
+                                                         source_encoded,
+                                                         source_encoded_lengths,
+                                                         source_encoded_max_length,
+                                                         target,
+                                                         layer_states,
+                                                         att_dict)
+            assert isinstance(target, mx.sym.Symbol) and isinstance(new_layer_states, list) and all(
+                isinstance(s, mx.sym.Symbol)
+                for s in new_layer_states), "decode_step of layer %s at step %d does not have the correct return " \
+                                            "type. Did you forget to return the new states." % (str(layer), step)
+
+            next_step = step + 1
+            assert len(new_layer_states) == layer.num_states(next_step), "Layer %s did not return the correct number " \
+                                                                         "of next states (got %d, expected %d) at " \
+                                                                         "step %d" % (str(layer),
+                                                                                      len(new_layer_states),
+                                                                                      layer.num_states(next_step), step)
+            new_layer_states_flat.extend(new_layer_states)
+
+        # TODO: how to properly support the attention probabilities?? -> make att_dict the only attention reporting functionality
+        # (batch_size, source_encoded_max_length)
+        attention_probs = mx.sym.reshape(mx.sym.slice_axis(mx.sym.zeros_like(source_encoded),
+                                                           axis=2, begin=0, end=1),
+                                         shape=(0, -1))
+
+        return target, attention_probs, new_layer_states_flat
+
+    def att_names(self):
+        att_names = []
+        for layer in self.layers:
+            att_names.extend(layer.att_names())
+        return att_names
+
+    def self_att_names(self):
+        att_names = []
+        for layer in self.layers:
+            att_names.extend(layer.self_att_names())
+        return att_names
+
+    def reset(self):
+        for layer in self.layers:
+            layer.reset()
+
+    # TODO: add test that the custom seq decoder combines states correctly
+    def state_variables(self, target_max_length: int) -> List[mx.sym.Symbol]:
+        state_variables = [mx.sym.Variable(C.SOURCE_ENCODED_NAME)]
+        state_variables = state_variables + [mx.sym.Variable(C.SOURCE_LENGTH_NAME)]
+
+        for layer in self.layers:
+            layer_state_variables = layer.state_variables(target_max_length)
+            assert len(layer_state_variables) == layer.num_states(target_max_length), \
+                "Inconsistent number of layer state variables (%d) and number of state shapes (%d) " \
+                "for layer %s." % (len(layer_state_variables), layer.num_states(target_max_length), str(layer))
+            state_variables.extend(layer_state_variables)
+        return state_variables
+
+    def state_shapes(self, batch_size: int, step: int, source_encoded_max_length: int, source_encoded_depth: int) -> List[mx.io.DataDesc]:
+        state_shapes = [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
+                                       (batch_size, source_encoded_max_length, source_encoded_depth),
+                                       layout=C.BATCH_MAJOR)]
+        state_shapes = state_shapes + [mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")]
+
+        for layer in self.layers:
+            layer_state_shapes = layer.state_shapes(batch_size, step, source_encoded_max_length, source_encoded_depth)
+            assert len(layer_state_shapes) == layer.num_states(step), \
+                "Inconsistent number of layer states (%d) and number of state " \
+                "shapes (%d) for layer %s." % (layer.num_states(step), len(layer_state_shapes), str(layer))
+            state_shapes.extend(layer_state_shapes)
+
+        return state_shapes
+
+    def init_states(self,
+                    batch_size: int,
+                    source_encoded: List[mx.sym.Symbol],
+                    source_encoded_lengths: mx.sym.Symbol,
+                    source_encoded_max_length: int) -> List[mx.sym.Symbol]:
+        if not isinstance(source_encoded, list):
+            source_encoded = [source_encoded]
+        init_states = source_encoded + [source_encoded_lengths]
+
+        for layer in self.layers:
+            layer_init_states = layer.init_states(batch_size, source_encoded, source_encoded_lengths,
+                                                  source_encoded_max_length)
+            assert len(layer_init_states) == layer.num_states(1), \
+                "Num states at step 1 (%d) and number of init states (%d) don't match." % (len(layer_init_states),
+                                                                                           layer.num_states(1))
+            init_states.extend(layer_init_states)
+        return init_states
+
+    def get_max_seq_len(self):
+        # The smallest maximum length across layers
+        return min((layer.get_max_seq_len() for layer in self.layers if layer.get_max_seq_len() is not None),
+                   default=None)
+

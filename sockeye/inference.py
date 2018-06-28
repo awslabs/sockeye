@@ -161,10 +161,13 @@ class InferenceModel(model.SockeyeModel):
             source_words = source.split(num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
             source_length = utils.compute_lengths(source_words)
 
+
             # source embedding
             (source_embed,
              source_embed_length,
              source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
+
+            att_dict = {}
 
             # encoder
             # source_encoded: (source_encoded_length, batch_size, encoder_depth)
@@ -172,10 +175,12 @@ class InferenceModel(model.SockeyeModel):
              source_encoded_length,
              source_encoded_seq_len) = self.encoder.encode(source_embed,
                                                            source_embed_length,
-                                                           source_embed_seq_len)
+                                                           source_embed_seq_len,
+                                                           att_dict)
 
             # initial decoder states
-            decoder_init_states = self.decoder.init_states(source_encoded,
+            decoder_init_states = self.decoder.init_states(self.batch_size,
+                                                           source_encoded,
                                                            source_encoded_length,
                                                            source_encoded_seq_len)
 
@@ -219,6 +224,8 @@ class InferenceModel(model.SockeyeModel):
             # (batch_size, num_embed)
             target_embed_prev, _, _ = self.embedding_target.encode(data=target_prev, data_length=None, seq_len=1)
 
+            att_dict = {"source": {}, "self": {}}
+
             # decoder
             # target_decoded: (batch_size, decoder_depth)
             (target_decoded,
@@ -226,6 +233,7 @@ class InferenceModel(model.SockeyeModel):
              states) = self.decoder.decode_step(decode_step,
                                                 target_embed_prev,
                                                 source_encoded_seq_len,
+                                                att_dict,
                                                 *states)
 
             if self.decoder_return_logit_inputs:
