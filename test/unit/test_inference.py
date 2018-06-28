@@ -55,12 +55,11 @@ def mock_translator(batch_size: int = 1,
         def mock_model():
             t_mock = Mock(sockeye.inference.InferenceModel)
             t_mock.num_source_factors = num_source_factors
+            t_mock.batch_size = batch_size
+            t_mock.beam_size = beam_size
             return t_mock
 
         translator.models = [mock_model()]
-
-        translator.batch_size = batch_size
-        translator.beam_size = beam_size
         translator.beam_prune = beam_prune
         translator.zeros_array = mx.nd.zeros((beam_size,), dtype='int32')
         translator.inf_array = mx.nd.full((batch_size * beam_size,), val=np.inf, dtype='float32')

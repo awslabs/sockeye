@@ -982,16 +982,11 @@ class Translator:
         if strip_unknown_words:
             self.strip_ids.add(self.vocab_target[C.UNK_SYMBOL])
         self.models = models
-        utils.check_condition(all(models[0].source_with_eos == m.source_with_eos for m in models),
+        utils.check_condition(all(self.source_with_eos == m.source_with_eos for m in models),
                               "The source_with_eos property must match across models.")
-        self.source_with_eos = models[0].source_with_eos
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
-        self.beam_size = self.models[0].beam_size
-        self.batch_size = self.models[0].batch_size
-        self.use_pointer_nets = models[0].config.use_pointer_nets
 
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
-        self.max_input_length = self.models[0].max_input_length
         if bucket_source_width > 0:
             self.buckets_source = data_io.define_buckets(self.max_input_length, step=bucket_source_width)
         else:
@@ -1054,6 +1049,26 @@ class Translator:
                     "None" if len(self.models) == 1 else ensemble_mode,
                     self.batch_size,
                     self.buckets_source)
+
+    @property
+    def source_with_eos(self) -> bool:
+        return self.models[0].source_with_eos
+
+    @property
+    def beam_size(self) -> int:
+        return self.models[0].beam_size
+
+    @property
+    def batch_size(self) -> int:
+        return self.models[0].batch_size
+
+    @property
+    def max_input_length(self) -> int:
+        return self.models[0].max_input_length
+
+    @property
+    def use_pointer_nets(self) -> bool:
+        return self.models[0].config.use_pointer_nets
 
     @property
     def num_source_factors(self) -> int:

@@ -188,6 +188,9 @@ def read_and_translate(translator: inference.Translator,
         total_lines += len(chunk)
         total_time += chunk_time
 
+    if translator.use_pointer_nets:
+        logger.info('Pointed to %d / %d tokens', translator.num_pointed, translator.total_tokens)
+
     if total_lines != 0:
         logger.info("Processed %d lines in %d batches. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",
                     total_lines, ceil(total_lines / batch_size), total_time,

@@ -158,7 +158,7 @@ class CheckpointDecoder:
                 handler.handle(trans_input, trans_output)
                 translations.append(trans_output.translation)
         avg_time = trans_wall_time / len(self.target_sentences)
-        if models[0].config.use_pointer_nets:
+        if translator.use_pointer_nets:
             logger.info('Pointed to %d / %d tokens', translator.num_pointed, translator.total_tokens)
 
         # TODO(fhieber): eventually add more metrics (METEOR etc.)
