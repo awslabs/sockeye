@@ -222,21 +222,26 @@ class InferenceModel(model.SockeyeModel):
             # decoder
             # target_decoded: (batch_size, decoder_depth)
             (target_decoded,
+             attention_context,
              attention_probs,
              states) = self.decoder.decode_step(decode_step,
                                                 target_embed_prev,
                                                 source_encoded_seq_len,
                                                 *states)
-
             if self.decoder_return_logit_inputs:
                 # skip output layer in graph
                 outputs = mx.sym.identity(target_decoded, name=C.LOGIT_INPUTS_NAME)
             else:
-                # logits: (batch_size, target_vocab_size)
-                logits = self.output_layer(target_decoded)
-                if self.softmax_temperature is not None:
-                    logits /= self.softmax_temperature
-                outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
+                if not self.config.use_pointer_nets:
+                    # logits: (batch_size, target_vocab_size)
+                    logits = self.output_layer(target_decoded)
+                    if self.softmax_temperature is not None:
+                        logits /= self.softmax_temperature
+                    outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
+                else:
+#                    target_embed_prev = mx.sym.Custom(op_type="PrintValue", data=target_embed_prev, print_name="TARG")
+                    outputs = self.output_layer(target_decoded, attention=attention_probs,
+                                                context=attention_context, target_embed=target_embed_prev)
 
             data_names = [C.TARGET_NAME] + state_names
             label_names = []  # type: List[str]
@@ -966,6 +971,7 @@ class Translator:
         self.beam_prune = beam_prune
         self.beam_search_stop = beam_search_stop
         self.source_vocabs = source_vocabs
+        self.source_vocab_0_inv = vocab.reverse_vocab(self.source_vocabs[0])
         self.vocab_target = target_vocab
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
         self.restrict_lexicon = restrict_lexicon
@@ -983,14 +989,21 @@ class Translator:
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
         self.batch_size = self.models[0].batch_size
+        self.use_pointer_nets = models[0].config.use_pointer_nets
+
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         self.max_input_length = self.models[0].max_input_length
         if bucket_source_width > 0:
             self.buckets_source = data_io.define_buckets(self.max_input_length, step=bucket_source_width)
         else:
             self.buckets_source = [self.max_input_length]
-        self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target) - 1), val=np.inf,
-                                   ctx=self.context)
+
+        if self.use_pointer_nets:
+            # pad_dist should have one fewer columns than scores
+            self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target) + self.max_input_length - 2), val=np.inf, ctx=self.context)
+        else:
+            self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target) - 1), val=np.inf, ctx=self.context)
+
         # These are constants used for manipulation of the beam and scores (particularly for pruning)
         self.zeros_array = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
         self.inf_array = mx.nd.full((self.batch_size * self.beam_size, 1), val=np.inf,
@@ -1215,7 +1228,10 @@ class Translator:
         target_ids = translation.target_ids[1:]
         attention_matrix = translation.attention_matrix[1:, :]
 
-        target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
+        if self.use_pointer_nets:
+            target_tokens = [self.vocab_target_inv.get(target_id, trans_input.tokens[target_id - len(self.vocab_target)]) for target_id in target_ids]
+        else:
+            target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
 
         target_string = C.TOKEN_SEPARATOR.join(
             tok for target_id, tok in zip(target_ids, target_tokens) if target_id not in self.strip_ids)
@@ -1436,6 +1452,8 @@ class Translator:
                                                                        states=model_states,
                                                                        models_output_layer_w=models_output_layer_w,
                                                                        models_output_layer_b=models_output_layer_b)
+
+            # print('TIMESTEP', t, 'MAX INPUT', self.max_input_length, 'VOCAB', len(self.vocab_target), 'SCORES', scores.shape, 'PAD', pad_dist.shape, 'finished', finished.shape, 'inactive', inactive.shape, 'accum', scores_accumulated.shape, 'inf', self.inf_array.shape)
 
             # (2) Update scores. Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
