@@ -11,18 +11,18 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import math
 import os
 import re
 import tempfile
 
-import math
 import mxnet as mx
 import numpy as np
 import pytest
 
 from sockeye import __version__
-from sockeye import utils
 from sockeye import constants as C
+from sockeye import utils
 
 
 @pytest.mark.parametrize("some_list, expected", [
@@ -336,3 +336,14 @@ def test_print_value():
                          ])
 def test_metric_value_is_better(new, old, metric, result):
     assert utils.metric_value_is_better(new, old, metric) == result
+
+
+@pytest.mark.parametrize("num_factors", [1, 2, 3])
+def test_split(num_factors):
+    batch_size = 4
+    bucket_key = 10
+    # Simulates splitting factored input
+    data = mx.nd.random.normal(shape=(batch_size, bucket_key, num_factors))
+    result = utils.split(data, num_outputs=num_factors, axis=2, squeeze_axis=True)
+    assert isinstance(result, list)
+    assert result[0].shape == (batch_size, bucket_key)

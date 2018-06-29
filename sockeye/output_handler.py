@@ -291,7 +291,7 @@ class BeamStoringHandler(OutputHandler):
         :param t_output: Translator output.
         :param t_walltime: Total wall-clock time for translation.
         """
-        assert len(t_output.beam_histories) >= 1, "Translator output should  contain beam histories."
+        assert len(t_output.beam_histories) >= 1, "Translator output should contain beam histories."
         # If the sentence was max_len split, we may have more than one history
         for h in t_output.beam_histories:
             # Add the number of steps in each beam

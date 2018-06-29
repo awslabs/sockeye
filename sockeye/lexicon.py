@@ -74,8 +74,8 @@ class Lexicon:
         """
         Given attention/alignment scores, calculates a weighted sum over lexical distributions
         that serve as a bias for the decoder softmax.
-            * https://arxiv.org/pdf/1606.02006.pdf
-            * http://www.aclweb.org/anthology/W/W16/W16-4610.pdf
+        * https://arxiv.org/pdf/1606.02006.pdf
+        * http://www.aclweb.org/anthology/W/W16/W16-4610.pdf
 
         :param source_lexicon: Lexical biases for sentence Shape: (batch_size, target_vocab_size, source_seq_len).
         :param attention_prob_score: Attention score. Shape: (batch_size, source_seq_len).
@@ -319,7 +319,7 @@ def main():
     params = argparse.ArgumentParser(description="Create or inspect a top-k lexicon for use during decoding.")
     subparams = params.add_subparsers(title="Commands")
 
-    params_create = subparams.add_parser('create', description="Create top-k lexicon for use during decoding.")
+    params_create = subparams.add_parser('create', description="Create top-k lexicon for use during decoding. See contrib/fast_align/README.md for information on creating input lexical tables.")
     arguments.add_lexicon_args(params_create)
     arguments.add_lexicon_create_args(params_create)
     arguments.add_logging_args(params_create)

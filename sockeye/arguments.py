@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -17,11 +17,77 @@ Defines commandline arguments for the main CLIs with reasonable defaults.
 import argparse
 import os
 import sys
-from typing import Callable, Optional
+import types
+import yaml
+from typing import Any, Callable, Dict, List, Tuple, Optional
 
 from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
 from . import constants as C
 from . import data_io
+
+
+class ConfigArgumentParser(argparse.ArgumentParser):
+    """
+    Extension of argparse.ArgumentParser supporting config files.
+
+    The option --config is added automatically and expects a YAML serialized
+    dictionary, similar to the return value of parse_args(). Command line
+    parameters have precendence over config file values. Usage should be
+    transparent, just substitute argparse.ArgumentParser with this class.
+
+    Extended from
+    https://stackoverflow.com/questions/28579661/getting-required-option-from-namespace-in-python
+    """
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.argument_definitions = {}  # type: Dict[Tuple, Dict]
+        self.argument_actions = []  # type: List[Any]
+        self._overwrite_add_argument(self)
+        self.add_argument("--config", help="Config file in YAML format.", type=str)
+        # Note: not FileType so that we can get the path here
+
+    def _register_argument(self, _action, *args, **kwargs):
+        self.argument_definitions[args] = kwargs
+        self.argument_actions.append(_action)
+
+    def _overwrite_add_argument(self, original_object):
+        def _new_add_argument(this_self, *args, **kwargs):
+            action = this_self.original_add_argument(*args, **kwargs)
+            this_self.config_container._register_argument(action, *args, **kwargs)
+
+        original_object.original_add_argument = original_object.add_argument
+        original_object.config_container = self
+        original_object.add_argument = types.MethodType(_new_add_argument, original_object)
+
+        return original_object
+
+    def add_argument_group(self, *args, **kwargs):
+        group = super().add_argument_group(*args, **kwargs)
+        return self._overwrite_add_argument(group)
+
+    def parse_args(self, args=None, namespace=None) -> argparse.Namespace:
+        # Mini argument parser to find the config file
+        config_parser = argparse.ArgumentParser(add_help=False)
+        config_parser.add_argument("--config", type=regular_file())
+        config_args, _ = config_parser.parse_known_args(args=args)
+        initial_args = argparse.Namespace()
+        if config_args.config:
+            initial_args = load_args(config_args.config)
+            # Remove the 'required' flag from options loaded from config file
+            for action in self.argument_actions:
+                if action.dest in initial_args:
+                    action.required = False
+        return super().parse_args(args=args, namespace=initial_args)
+
+
+def save_args(args: argparse.Namespace, fname: str):
+    with open(fname, 'w') as out:
+        yaml.safe_dump(args.__dict__, out, default_flow_style=False)
+
+
+def load_args(fname: str) -> argparse.Namespace:
+    with open(fname, 'r') as inp:
+        return argparse.Namespace(**yaml.safe_load(inp))
 
 
 def regular_file() -> Callable:
@@ -220,7 +286,7 @@ def add_lexicon_args(params):
     lexicon_params = params.add_argument_group("Model & Top-k")
     lexicon_params.add_argument("--model", "-m", required=True,
                                 help="Model directory containing source and target vocabularies.")
-    lexicon_params.add_argument("-k", type=int, default=20,
+    lexicon_params.add_argument("-k", type=int, default=200,
                                 help="Number of target translations to keep per source. Default: %(default)s.")
 
 
@@ -334,9 +400,8 @@ def add_bucketing_args(params):
 
     params.add_argument('--max-seq-len',
                         type=multiple_values(num_values=2, greater_or_equal=1),
-                        default=(100, 100),
-                        help='Maximum sequence length in tokens. Note that the target side will be extended by '
-                             'the <BOS> (beginning of sentence) token, increasing the effective target length. '
+                        default=(99, 99),
+                        help='Maximum sequence length in tokens.'
                              'Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
 
 
@@ -409,8 +474,10 @@ def add_vocab_args(params):
                              'Will be automatically turned on when using weight tying. Default: %(default)s.')
     params.add_argument('--num-words',
                         type=multiple_values(num_values=2, greater_or_equal=0),
-                        default=(50000, 50000),
+                        default=(0, 0),
                         help='Maximum vocabulary size. Use "x:x" to specify separate values for src&tgt. '
+                             'A value of 0 indicates that the vocabulary unrestricted and determined from the data by '
+                             'creating an entry for all words that occur at least --word-min-count times.'
                              'Default: %(default)s.')
     params.add_argument('--word-min-count',
                         type=multiple_values(num_values=2, greater_or_equal=1),
@@ -433,16 +500,16 @@ def add_model_parameters(params):
 
     model_params.add_argument('--encoder',
                               choices=C.ENCODERS,
-                              default=C.RNN_NAME,
+                              default=C.TRANSFORMER_TYPE,
                               help="Type of encoder. Default: %(default)s.")
     model_params.add_argument('--decoder',
                               choices=C.DECODERS,
-                              default=C.RNN_NAME,
+                              default=C.TRANSFORMER_TYPE,
                               help="Type of encoder. Default: %(default)s.")
 
     model_params.add_argument('--num-layers',
                               type=multiple_values(num_values=2, greater_or_equal=1),
-                              default=(1, 1),
+                              default=(6, 6),
                               help='Number of layers for encoder & decoder. '
                                    'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
 
@@ -478,7 +545,7 @@ def add_model_parameters(params):
     # convolutional encoder/decoder arguments arguments
     model_params.add_argument('--cnn-kernel-width',
                               type=multiple_values(num_values=2, greater_or_equal=1, data_type=int),
-                              default=(3, 5),
+                              default=(3, 3),
                               help='Kernel width of the convolutional encoder and decoder. Default: %(default)s.')
     model_params.add_argument('--cnn-num-hidden',
                               type=int_greater_or_equal(1),
@@ -526,32 +593,23 @@ def add_model_parameters(params):
     model_params.add_argument('--rnn-context-gating', action="store_true",
                               help="Enables a context gate which adaptively weighs the RNN decoder input against the "
                                    "source context vector before each update of the decoder hidden state.")
-    # TODO: At the moment LHUC is RNN specific. We should support other models as well.
-    model_params.add_argument('--lhuc',
-                              nargs="+",
-                              default=None,
-                              choices=C.LHUC_CHOICES,
-                              metavar="COMPONENT",
-                              help="Use LHUC (Vilar 2018). Include an amplitude parameter to hidden units for"
-                              " domain adaptation. Needs a pre-trained model. Valid values: {values}. Currently only"
-                              " supported for RNN models. Default: %(default)s.".format(
-                                  values=", ".join(C.LHUC_CHOICES)))
 
     # transformer arguments
     model_params.add_argument('--transformer-model-size',
-                              type=int_greater_or_equal(1),
-                              default=512,
-                              help='Size of all layers and embeddings when using transformer. Default: %(default)s.')
+                              type=multiple_values(num_values=2, greater_or_equal=1),
+                              default=(512, 512),
+                              help='Number of hidden units in transformer layers. '
+                                   'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
     model_params.add_argument('--transformer-attention-heads',
-                              type=int_greater_or_equal(1),
-                              default=8,
+                              type=multiple_values(num_values=2, greater_or_equal=1),
+                              default=(8, 8),
                               help='Number of heads for all self-attention when using transformer layers. '
-                                   'Default: %(default)s.')
+                                   'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
     model_params.add_argument('--transformer-feed-forward-num-hidden',
-                              type=int_greater_or_equal(1),
-                              default=2048,
-                              help='Number of hidden units in feed forward layers when using transformer. '
-                                   'Default: %(default)s.')
+                              type=multiple_values(num_values=2, greater_or_equal=1),
+                              default=(2048, 2048),
+                              help='Number of hidden units in transformers feed forward layers. '
+                                   'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
     model_params.add_argument('--transformer-activation-type',
                               choices=C.TRANSFORMER_ACTIVATION_TYPES,
                               default=C.RELU,
@@ -562,7 +620,7 @@ def add_model_parameters(params):
                               help='The type of positional embedding. Default: %(default)s.')
     model_params.add_argument('--transformer-preprocess',
                               type=multiple_values(num_values=2, greater_or_equal=None, data_type=str),
-                              default=('', ''),
+                              default=('n', 'n'),
                               help='Transformer preprocess sequence for encoder and decoder. Supports three types of '
                                    'operations: d=dropout, r=residual connection, n=layer normalization. You can '
                                    'combine in any order, for example: "ndr". '
@@ -572,7 +630,7 @@ def add_model_parameters(params):
                                    'Default: %(default)s.')
     model_params.add_argument('--transformer-postprocess',
                               type=multiple_values(num_values=2, greater_or_equal=None, data_type=str),
-                              default=('drn', 'drn'),
+                              default=('dr', 'dr'),
                               help='Transformer postprocess sequence for encoder and decoder. Supports three types of '
                                    'operations: d=dropout, r=residual connection, n=layer normalization. You can '
                                    'combine in any order, for example: "ndr". '
@@ -580,6 +638,18 @@ def add_model_parameters(params):
                                    'You can specify separate sequences for encoder and decoder by separating with ":" '
                                    'For example: n:drn '
                                    'Default: %(default)s.')
+
+    # LHUC
+    # TODO: The convolutional model does not support lhuc yet
+    model_params.add_argument('--lhuc',
+                              nargs="+",
+                              default=None,
+                              choices=C.LHUC_CHOICES,
+                              metavar="COMPONENT",
+                              help="Use LHUC (Vilar 2018). Include an amplitude parameter to hidden units for"
+                              " domain adaptation. Needs a pre-trained model. Valid values: {values}. Currently not"
+                              " supported for convolutional models. Default: %(default)s.".format(
+                                  values=", ".join(C.LHUC_CHOICES)))
 
     # embedding arguments
     model_params.add_argument('--num-embed',
@@ -663,15 +733,19 @@ def add_training_args(params):
 
     train_params.add_argument('--batch-size', '-b',
                               type=int_greater_or_equal(1),
-                              default=64,
-                              help='Mini-batch size. Default: %(default)s.')
+                              default=4096,
+                              help='Mini-batch size. Note that depending on the batch-type this either refers to '
+                                   'words or sentences.'
+                                   'Sentence: each batch contains X sentences, number of words varies. '
+                                   'Word: each batch contains (approximately) X words, number of sentences varies. '
+                                   'Default: %(default)s.')
     train_params.add_argument("--batch-type",
                               type=str,
-                              default=C.BATCH_TYPE_SENTENCE,
+                              default=C.BATCH_TYPE_WORD,
                               choices=[C.BATCH_TYPE_SENTENCE, C.BATCH_TYPE_WORD],
-                              help="Sentence: each batch contains X sentences, number of words varies. Word: each batch"
-                                   " contains (approximately) X target words, number of sentences varies. "
-                                   "Default: %(default)s.")
+                              help="Sentence: each batch contains X sentences, number of words varies."
+                                   "Word: each batch contains (approximately) X target words, "
+                                   "number of sentences varies. Default: %(default)s.")
 
     train_params.add_argument('--fill-up',
                               type=str,
@@ -683,7 +757,7 @@ def add_training_args(params):
                               choices=[C.CROSS_ENTROPY],
                               help='Loss to optimize. Default: %(default)s.')
     train_params.add_argument('--label-smoothing',
-                              default=0.0,
+                              default=0.1,
                               type=float,
                               help='Smoothing constant for label smoothing. Default: %(default)s.')
     train_params.add_argument('--loss-normalization-type',
@@ -720,11 +794,11 @@ def add_training_args(params):
                               help='Maximum number of samples. Default: %(default)s.')
     train_params.add_argument(C.TRAIN_ARGS_CHECKPOINT_FREQUENCY,
                               type=int_greater_or_equal(1),
-                              default=1000,
+                              default=4000,
                               help='Checkpoint and evaluate every x updates/batches. Default: %(default)s.')
     train_params.add_argument('--max-num-checkpoint-not-improved',
                               type=int,
-                              default=8,
+                              default=32,
                               help='Maximum number of checkpoints the model is allowed to not improve in '
                                    '<optimized-metric> on validation data before training is stopped. '
                                    'Default: %(default)s.')
@@ -758,23 +832,27 @@ def add_training_args(params):
                               default=(.0, .0),
                               help='Recurrent dropout without memory loss (Semeniuta, 2016) for encoder & decoder '
                                    'LSTMs. Use "x:x" to specify separate values. Default: %(default)s.')
+    train_params.add_argument('--rnn-enc-last-hidden-concat-to-embedding',
+                              action="store_true",
+                              help='Concatenate the last hidden layer of the encoder to the input of the decoder, '
+                                   'instead of the previous state of the decoder. Default: %(default)s.')
 
     train_params.add_argument('--rnn-decoder-hidden-dropout',
                               type=float,
-                              default=.0,
+                              default=.2,
                               help='Dropout probability for hidden state that combines the context with the '
                                    'RNN hidden state in the decoder. Default: %(default)s.')
     train_params.add_argument('--transformer-dropout-attention',
                               type=float,
-                              default=0.,
+                              default=0.1,
                               help='Dropout probability for multi-head attention. Default: %(default)s.')
     train_params.add_argument('--transformer-dropout-act',
                               type=float,
-                              default=0.,
+                              default=0.1,
                               help='Dropout probability before activation in feed-forward block. Default: %(default)s.')
     train_params.add_argument('--transformer-dropout-prepost',
                               type=float,
-                              default=0.,
+                              default=0.1,
                               help='Dropout probability for pre/postprocessing blocks. Default: %(default)s.')
     train_params.add_argument('--conv-embed-dropout',
                               type=float,
@@ -782,7 +860,7 @@ def add_training_args(params):
                               help="Dropout probability for ConvolutionalEmbeddingEncoder. Default: %(default)s.")
     train_params.add_argument('--cnn-hidden-dropout',
                               type=float,
-                              default=.0,
+                              default=.2,
                               help="Dropout probability for dropout between convolutional layers. Default: %(default)s.")
 
     train_params.add_argument('--optimizer',
@@ -818,13 +896,13 @@ def add_training_args(params):
                               help='Type of base weight initialization. Default: %(default)s.')
     train_params.add_argument('--weight-init-scale',
                               type=float,
-                              default=2.34,
+                              default=3.0,
                               help='Weight initialization scale. Applies to uniform (scale) and xavier (magnitude). '
                                    'Default: %(default)s.')
     train_params.add_argument('--weight-init-xavier-factor-type',
                               type=str,
-                              default='in',
-                              choices=['in', 'out', 'avg'],
+                              default=C.INIT_XAVIER_FACTOR_TYPE_AVG,
+                              choices=C.INIT_XAVIER_FACTOR_TYPES,
                               help='Xavier factor type. Default: %(default)s.')
     train_params.add_argument('--weight-init-xavier-rand-type',
                               type=str,
@@ -840,7 +918,7 @@ def add_training_args(params):
                                    'Default: %(default)s.')
     train_params.add_argument('--initial-learning-rate',
                               type=float,
-                              default=0.0003,
+                              default=0.0002,
                               help='Initial learning rate. Default: %(default)s.')
     train_params.add_argument('--weight-decay',
                               type=float,
@@ -857,7 +935,7 @@ def add_training_args(params):
                                    'Set to negative to disable. Default: %(default)s.')
     train_params.add_argument('--gradient-clipping-type',
                               choices=C.GRADIENT_CLIPPING_TYPES,
-                              default=C.GRADIENT_CLIPPING_TYPE_ABS,
+                              default=C.GRADIENT_CLIPPING_TYPE_NONE,
                               help='The type of gradient clipping. Default: %(default)s.')
 
     train_params.add_argument('--learning-rate-scheduler-type',
@@ -866,12 +944,12 @@ def add_training_args(params):
                               help='Learning rate scheduler type. Default: %(default)s.')
     train_params.add_argument('--learning-rate-reduce-factor',
                               type=float,
-                              default=0.5,
+                              default=0.7,
                               help="Factor to multiply learning rate with "
                                    "(for 'plateau-reduce' learning rate scheduler). Default: %(default)s.")
     train_params.add_argument('--learning-rate-reduce-num-not-improved',
                               type=int,
-                              default=3,
+                              default=8,
                               help="For 'plateau-reduce' learning rate scheduler. Adjust learning rate "
                                    "if <optimized-metric> did not improve for x checkpoints. Default: %(default)s.")
     train_params.add_argument('--learning-rate-schedule',
@@ -915,7 +993,7 @@ def add_training_args(params):
                               help="Names of parameters to fix at training time. Default: %(default)s.")
 
     train_params.add_argument(C.TRAIN_ARGS_MONITOR_BLEU,
-                              default=0,
+                              default=500,
                               type=int,
                               help='x>0: decode x sampled sentences from validation data and '
                                    'compute evaluation metrics. x==-1: use full validation data. Default: %(default)s.')
@@ -958,6 +1036,13 @@ def add_translate_cli_args(params):
     add_inference_args(params)
     add_device_args(params)
     add_logging_args(params)
+
+
+def add_max_output_cli_args(params):
+    params.add_argument('--max-output-length',
+                        type=int,
+                        default=None,
+                        help='Maximum number of words to generate during translation. If None, it will be computed automatically. Default: %(default)s.')
 
 
 def add_inference_args(params):
@@ -1087,6 +1172,11 @@ def add_inference_args(params):
                                type=float,
                                help='Beta factor for the length penalty used in beam search: '
                                     '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
+    decode_params.add_argument('--override-dtype',
+                               default=None,
+                               type=str,
+                               help='EXPERIMENTAL: may be changed or removed in future. Overrides training dtype of '
+                                    'encoders and decoders during inference. Default: %(default)s')
 
 def add_evaluate_args(params):
     eval_params = params.add_argument_group("Evaluate parameters")

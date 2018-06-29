@@ -67,12 +67,13 @@ args, unparsed_args = parser.parse_known_args()
 sys.argv[1:] = unparsed_args
 
 if args.requirement is None:
-    install_requires = get_requirements('requirements.txt')
+    install_requires = get_requirements(os.path.join('requirements', 'requirements.txt'))
 else:
     install_requires = get_requirements(args.requirement)
 
 entry_points={
     'console_scripts': [
+        'sockeye-autopilot = contrib.autopilot.autopilot:main',
         'sockeye-average = sockeye.average:main',
         'sockeye-embeddings = sockeye.embeddings:main',
         'sockeye-evaluate = sockeye.evaluate:main',
@@ -102,17 +103,17 @@ args = dict(
     maintainer_email='sockeye-dev@amazon.com',
 
     license='Apache License 2.0',
-    
+
     python_requires='>=3',
 
     packages=find_packages(exclude=("test",)),
 
     setup_requires=['pytest-runner'],
-    tests_require=['pytest', 'pytest-cov'],
+    tests_require=['pytest', 'pytest-cov', 'pillow'],
 
     extras_require={
         'optional': ['mxboard', 'matplotlib'],
-        'dev': get_requirements('requirements.dev.txt')
+        'dev': get_requirements(os.path.join('requirements', 'requirements.dev.txt'))
     },
 
     install_requires=install_requires,

@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -24,6 +24,8 @@ PAD_SYMBOL = "<pad>"
 PAD_ID = 0
 TOKEN_SEPARATOR = " "
 VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
+# reserve extra space for the EOS or BOS symbol that is added to both source and target
+SPACE_FOR_XOS = 1
 
 ARG_SEPARATOR = ":"
 
@@ -54,9 +56,10 @@ RNN_WITH_CONV_EMBED_NAME = "rnn-with-conv-embed"
 TRANSFORMER_TYPE = "transformer"
 CONVOLUTION_TYPE = "cnn"
 TRANSFORMER_WITH_CONV_EMBED_TYPE = "transformer-with-conv-embed"
+IMAGE_PRETRAIN_TYPE = "image-pretrain-cnn"
 
 # available encoders
-ENCODERS = [RNN_NAME, RNN_WITH_CONV_EMBED_NAME, TRANSFORMER_TYPE, TRANSFORMER_WITH_CONV_EMBED_TYPE, CONVOLUTION_TYPE]
+ENCODERS = [RNN_NAME, RNN_WITH_CONV_EMBED_NAME, TRANSFORMER_TYPE, TRANSFORMER_WITH_CONV_EMBED_TYPE, CONVOLUTION_TYPE, IMAGE_PRETRAIN_TYPE]
 
 # available decoder
 DECODERS = [RNN_NAME, TRANSFORMER_TYPE, CONVOLUTION_TYPE]
@@ -82,6 +85,11 @@ DEFAULT_INIT_PATTERN = ".*"
 INIT_XAVIER = 'xavier'
 INIT_UNIFORM = 'uniform'
 INIT_TYPES = [INIT_XAVIER, INIT_UNIFORM]
+
+INIT_XAVIER_FACTOR_TYPE_IN = "in"
+INIT_XAVIER_FACTOR_TYPE_OUT = "out"
+INIT_XAVIER_FACTOR_TYPE_AVG = "avg"
+INIT_XAVIER_FACTOR_TYPES = [INIT_XAVIER_FACTOR_TYPE_IN, INIT_XAVIER_FACTOR_TYPE_OUT, INIT_XAVIER_FACTOR_TYPE_AVG]
 
 RAND_TYPE_UNIFORM = 'uniform'
 RAND_TYPE_GAUSSIAN = 'gaussian'
@@ -185,7 +193,11 @@ BEAM_SEARCH_STOP_ALL = 'all'
 # Inference Input JSON constants
 JSON_TEXT_KEY = "text"
 JSON_FACTORS_KEY = "factors"
+JSON_CONSTRAINTS_KEY = "constraints"
 JSON_ENCODING = "utf-8"
+
+# Lexical constraints
+BANK_ADJUSTMENT = 'even'
 
 VERSION_NAME = "version"
 CONFIG_NAME = "config"
@@ -218,7 +230,7 @@ RNG_STATE_NAME = "rng.pkl"
 TRAINING_STATE_NAME = "training.pkl"
 SCHEDULER_STATE_NAME = "scheduler.pkl"
 TRAINING_STATE_PARAMS_NAME = "params"
-ARGS_STATE_NAME = "args.json"
+ARGS_STATE_NAME = "args.yaml"
 
 # Arguments that may differ and still resume training
 ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet",
@@ -245,6 +257,7 @@ TRAIN_ARGS_CHECKPOINT_FREQUENCY = "--checkpoint-frequency"
 DEFAULT_FACTOR_DELIMITER = '|'
 
 # data layout strings
+BATCH_MAJOR_IMAGE = "NCHW"
 BATCH_MAJOR = "NTC"
 TIME_MAJOR = "TNC"
 
@@ -321,13 +334,21 @@ ACCURACY = 'accuracy'
 PERPLEXITY = 'perplexity'
 BLEU = 'bleu'
 CHRF = 'chrf'
+ROUGE = 'rouge'
+ROUGE1 = 'rouge1'
+ROUGE2 = 'rouge2'
+ROUGEL = 'rougel'
 BLEU_VAL = BLEU + "-val"
 CHRF_VAL = CHRF + "-val"
+ROUGE_VAL = ROUGE + "-val"
+ROUGE_1_VAL = ROUGE1 + "-val"
+ROUGE_2_VAL = ROUGE2 + "-val"
+ROUGE_L_VAL = ROUGEL + "-val"
 AVG_TIME = "avg-sec-per-sent-val"
 DECODING_TIME = "decode-walltime-val"
-METRICS = [PERPLEXITY, ACCURACY, BLEU]
-METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, PERPLEXITY: False}
-METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, PERPLEXITY: np.inf}
+METRICS = [PERPLEXITY, ACCURACY, BLEU, ROUGE1]
+METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, ROUGE1: True, PERPLEXITY: False}
+METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, ROUGE1: 0.0, PERPLEXITY: np.inf}
 
 # loss
 CROSS_ENTROPY = 'cross-entropy'
@@ -338,9 +359,19 @@ LOSS_NORM_VALID = "valid"
 TARGET_MAX_LENGTH_FACTOR = 2
 DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH = 2
 
+DTYPE_FP16 = 'float16'
 DTYPE_FP32 = 'float32'
 LARGE_POSITIVE_VALUE = 99999999.
 LARGE_NEGATIVE_VALUE = -LARGE_POSITIVE_VALUE
+LARGE_VALUES = {
+    # Something at the middle of 32768<x<65519. Will be rounded to a multiple of 32.
+    # https://en.wikipedia.org/wiki/Half-precision_floating-point_format#Precision_limitations_on_integer_values
+    DTYPE_FP16: 49152.0,
+
+    # Will be rounded to 1.0e8.
+    # https://en.wikipedia.org/wiki/Single-precision_floating-point_format#Precision_limits_on_integer_values.
+    DTYPE_FP32: LARGE_POSITIVE_VALUE
+}
 
 LHUC_NAME = "lhuc"
 # lhuc application points

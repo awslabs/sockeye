@@ -49,7 +49,7 @@ def test_translate_by_file(mock_file, mock_translator, mock_output_handler):
     mock_translator.num_source_factors = 1
     mock_translator.batch_size = 1
     sockeye.translate.read_and_translate(translator=mock_translator, output_handler=mock_output_handler,
-                                         chunk_size=2, inp='/dev/null', inp_factors=None)
+                                         chunk_size=2, input_file='/dev/null', input_factors=None)
 
     # Ensure translate gets called once.  Input here will be a dummy mocked result, so we'll ignore it.
     assert mock_translator.translate.call_count == 1
