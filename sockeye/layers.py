@@ -423,7 +423,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
                  inputs: mx.sym.Symbol,
                  input_lengths: Optional[mx.sym.Symbol] = None,
                  bias: Optional[mx.sym.Symbol] = None,
-                 cache: Optional[Dict[str, Optional[mx.sym.Symbol]]] = None) -> mx.sym.Symbol:
+                 cache: Optional[Dict[str, mx.sym.Symbol]] = None) -> mx.sym.Symbol:
         """
         Computes multi-head attention on a set of inputs, serving as queries, keys, and values.
         If sequence lengths are provided, they will be used to mask the attention scores.
@@ -451,8 +451,10 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
 
         if cache is not None:
             # append new keys & values to cache, update the cache
-            keys = cache['k'] = keys if cache['k'] is None else mx.sym.concat(cache['k'], keys, dim=1)
-            values = cache['v'] = values if cache['v'] is None else mx.sym.concat(cache['v'], values, dim=1)
+            keys = cache['self_att_keys'] = keys if 'self_att_keys' not in cache else mx.sym.concat(
+                cache['self_att_keys'], keys, dim=1)
+            values = cache['self_att_values'] = values if 'self_att_values' not in cache else mx.sym.concat(
+                cache['self_att_values'], values, dim=1)
 
         return self._attend(queries,
                             keys,
@@ -483,31 +485,13 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         self.w_k2h = mx.sym.Variable("%sk2h_weight" % prefix)
         self.w_v2h = mx.sym.Variable("%sv2h_weight" % prefix)
 
-    def __call__(self,
-                 queries: mx.sym.Symbol,
-                 memory: mx.sym.Symbol,
-                 memory_lengths: Optional[mx.sym.Symbol] = None,
-                 bias: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
+    def project_memory(self, memory: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
         """
-        Computes multi-head attention for queries given a memory tensor.
-        If sequence lengths are provided, they will be used to mask the attention scores.
-        A bias mask may also be used to mask the attention scores.
-        Returns a symbol of shape (batch, max_length, output_depth).
+        Defines linear input projection of the memory tensor into keys and values.
 
-        :param queries: Query tensor. Shape: (batch, query_max_length, input_depth).
         :param memory: Memory data to attend to. Shape: (batch, memory_max_length, input_depth).
-        :param memory_lengths: Optional lengths of memory to mask attention scores. Shape: (batch, 1).
-        :param bias: Optional 3d bias tensor to mask attention scores.
-        :return: Symbol of shape (batch, query_seq_len, output_depth).
+        :return: Projected memory data, keys and values.
         """
-        # (batch, query_max_length, depth)
-        queries = mx.sym.FullyConnected(data=queries,
-                                        weight=self.w_q2h,
-                                        no_bias=True,
-                                        num_hidden=self.depth,
-                                        flatten=False,
-                                        name="%sq_transform" % self.prefix)
-
         # (batch, memory_max_length, depth)
         keys = mx.sym.FullyConnected(data=memory,
                                      weight=self.w_k2h,
@@ -523,6 +507,41 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                                        num_hidden=self.depth,
                                        flatten=False,
                                        name="%sv_transform" % self.prefix)
+        return keys, values
+
+    def __call__(self,
+                 queries: mx.sym.Symbol,
+                 memory: Optional[mx.sym.Symbol],
+                 memory_lengths: Optional[mx.sym.Symbol] = None,
+                 bias: Optional[mx.sym.Symbol] = None,
+                 cache: Optional[Dict[str, mx.sym.Symbol]] = None) -> mx.sym.Symbol:
+        """
+        Computes multi-head attention for queries given a memory tensor.
+        If sequence lengths are provided, they will be used to mask the attention scores.
+        A bias mask may also be used to mask the attention scores.
+        Returns a symbol of shape (batch, max_length, output_depth).
+
+        :param queries: Query tensor. Shape: (batch, query_max_length, input_depth).
+        :param memory: Optional memory data to attend to. Shape: (batch, memory_max_length, input_depth).
+               If None, cache must be present.
+        :param memory_lengths: Optional lengths of memory to mask attention scores. Shape: (batch, 1).
+        :param bias: Optional 3d bias tensor to mask attention scores.
+        :param cache: Optional dictionary of previously computed keys and values. Must be present if memory is None.
+        :return: Symbol of shape (batch, query_seq_len, output_depth).
+        """
+        # (batch, query_max_length, depth)
+        queries = mx.sym.FullyConnected(data=queries,
+                                        weight=self.w_q2h,
+                                        no_bias=True,
+                                        num_hidden=self.depth,
+                                        flatten=False,
+                                        name="%sq_transform" % self.prefix)
+
+        if cache is not None and 'enc_att_keys' in cache and 'enc_att_values' in cache:
+            keys, values = cache['enc_att_keys'], cache['enc_att_values']
+        else:
+            assert memory is not None
+            keys, values = self.project_memory(memory)
 
         return self._attend(queries,
                             keys,

@@ -295,7 +295,7 @@ class TransformerDecoder(Decoder):
         :return: logit inputs, attention probabilities, next decoder states.
         """
         # for step > 1, states contains source_encoded, source_encoded_lengths, and cache tensors.
-        source_encoded, source_encoded_lengths, *cache = states  # type: ignore
+        source_encoded_lengths, *cache = states  # type: ignore
 
         # symbolic indices of the previous word
         indices = mx.sym.arange(start=step - 1, stop=step, step=1, name='indices')
@@ -318,17 +318,18 @@ class TransformerDecoder(Decoder):
         target_bias = transformer.get_autoregressive_bias(step, name="%sbias" % self.prefix)
         target_bias = mx.sym.slice_axis(target_bias, axis=1, begin=-1, end=step)
 
-        new_states = [source_encoded, source_encoded_lengths]
-        layer_caches = self._get_cache_per_layer(cast(List[mx.sym.Symbol], cache))
-        for layer, layer_cache in zip(self.layers, layer_caches):
+        new_states = [source_encoded_lengths]
+        for layer_idx, layer in enumerate(self.layers):
+            layer_cache = self._get_cache_for_layer(cast(List, cache), layer_idx, step)
             target = layer(target=target,
                            target_bias=target_bias,
-                           source=source_encoded,
+                           source=None,
                            source_bias=source_bias,
                            cache=layer_cache)
             # store updated keys and values in states list.
             # (layer.__call__() has the side-effect of updating contents of layer_cache)
-            new_states += [layer_cache['k'], layer_cache['v']]
+            new_states += [layer_cache['enc_att_keys'], layer_cache['enc_att_values'],
+                           layer_cache['self_att_keys'], layer_cache['self_att_values']]
 
         # (batch_size, 1, model_size)
         target = self.final_process(data=target, prev=None)
@@ -336,23 +337,24 @@ class TransformerDecoder(Decoder):
         target = mx.sym.reshape(target, shape=(-3, -1))
 
         # TODO(fhieber): no attention probs for now
-        attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
+        # (batch_size, source_encoded_max_length)
+        attention_probs = mx.sym.repeat(mx.sym.reshape(mx.sym.zeros_like(source_encoded_lengths), shape=(-1, 1)),
+                                        axis=1,
+                                        repeats=source_encoded_max_length)
 
         return target, attention_probs, new_states
 
-    def _get_cache_per_layer(self, cache: List[mx.sym.Symbol]) -> List[Dict[str, Optional[mx.sym.Symbol]]]:
-        """
-        For decoder time steps > 1 there will be cache tensors available that contain
-        previously computed key & value tensors for each transformer layer.
-
-        :param cache: List of states passed to decode_step().
-        :return: List of layer cache dictionaries.
-        """
-        if not cache:  # first decoder step
-            return [{'k': None, 'v': None} for _ in range(len(self.layers))]
-        else:
+    def _get_cache_for_layer(self, cache: List[mx.sym.Symbol], layer_idx: int, step: int) -> Dict[str, mx.sym.Symbol]:
+        assert step > 0
+        if step == 1:
+            # only encoder attention cache
             assert len(cache) == len(self.layers) * 2
-            return [{'k': cache[2 * l + 0], 'v': cache[2 * l + 1]} for l in range(len(self.layers))]
+            return {'enc_att_keys': cache[2 * layer_idx + 0], 'enc_att_values': cache[2 * layer_idx + 1]}
+        else:
+            # both encoder attention and self attention cache present
+            assert len(cache) == len(self.layers) * 4
+            return {'enc_att_keys': cache[4 * layer_idx + 0], 'enc_att_values': cache[4 * layer_idx + 1],
+                    'self_att_keys': cache[4 * layer_idx + 2], 'self_att_values': cache[4 * layer_idx + 3]}
 
     def reset(self):
         pass
@@ -376,7 +378,12 @@ class TransformerDecoder(Decoder):
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
         """
-        return [source_encoded, source_encoded_lengths]
+        states = [source_encoded_lengths]  # type: List[mx.sym.Symbol]
+        for layer in self.layers:
+            keys, values = layer.project_source(source_encoded)
+            states.append(keys)
+            states.append(values)
+        return states
 
     def state_variables(self, target_max_length: int) -> List[mx.sym.Symbol]:
         """
@@ -385,12 +392,13 @@ class TransformerDecoder(Decoder):
         :param target_max_length: Current target sequence length.
         :return: List of symbolic variables.
         """
-        variables = [mx.sym.Variable(C.SOURCE_ENCODED_NAME),
-                     mx.sym.Variable(C.SOURCE_LENGTH_NAME)]
-        if target_max_length > 1:  # no cache for initial decoder step
-            for l in range(len(self.layers)):
-                variables.append(mx.sym.Variable('cache_l%d_k' % l))
-                variables.append(mx.sym.Variable('cache_l%d_v' % l))
+        variables = [mx.sym.Variable(C.SOURCE_LENGTH_NAME)]
+        for l in range(len(self.layers)):
+            variables.append(mx.sym.Variable('enc_att_keys_%d' % l))
+            variables.append(mx.sym.Variable('enc_att_values_%d' % l))
+            if target_max_length > 1:  # no cache for initial decoder step\
+                variables.append(mx.sym.Variable('self_att_keys_%d' % l))
+                variables.append(mx.sym.Variable('self_att_values_%d' % l))
         return variables
 
     def state_shapes(self,
@@ -408,17 +416,19 @@ class TransformerDecoder(Decoder):
         :param source_encoded_depth: Depth of encoded source.
         :return: List of shape descriptions.
         """
-        shapes = [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
-                                 (batch_size, source_encoded_max_length, source_encoded_depth),
-                                 layout=C.BATCH_MAJOR),
-                  mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")]
-
-        if target_max_length > 1:  # no cache for initial decoder step
-            for l in range(len(self.layers)):
-                shapes.append(mx.io.DataDesc(name='cache_l%d_k' % l,
+        shapes = [mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")]
+        for l in range(len(self.layers)):
+            shapes.append(mx.io.DataDesc(name='enc_att_keys_%d' % l,
+                                         shape=(batch_size, source_encoded_max_length, self.config.model_size),
+                                         layout=C.BATCH_MAJOR))
+            shapes.append(mx.io.DataDesc(name='enc_att_values_%d' % l,
+                                         shape=(batch_size, source_encoded_max_length, self.config.model_size),
+                                         layout=C.BATCH_MAJOR))
+            if target_max_length > 1:  # no cache for initial decoder step
+                shapes.append(mx.io.DataDesc(name='self_att_keys_%d' % l,
                                              shape=(batch_size, target_max_length - 1, self.config.model_size),
                                              layout=C.BATCH_MAJOR))
-                shapes.append(mx.io.DataDesc(name='cache_l%d_v' % l,
+                shapes.append(mx.io.DataDesc(name='self_att_values_%d' % l,
                                              shape=(batch_size, target_max_length - 1, self.config.model_size),
                                              layout=C.BATCH_MAJOR))
         return shapes

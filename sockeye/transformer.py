@@ -11,7 +11,7 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-from typing import Dict, Optional, TYPE_CHECKING
+from typing import Dict, Optional, Tuple, TYPE_CHECKING
 
 import mxnet as mx
 import numpy as np
@@ -165,10 +165,19 @@ class TransformerDecoderBlock:
         if config.use_lhuc:
             self.lhuc = layers.LHUC(config.model_size, prefix=prefix)
 
+    def project_source(self, source: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
+        """
+        Helper function to access linear input projection of
+        the memory data from the self attention layer in this block.
+        :param source: Memory data that the encoder attention sublayer attends to.
+        :return: Projected keys and values.
+        """
+        return self.enc_attention.project_memory(memory=source)
+
     def __call__(self,
                  target: mx.sym.Symbol,
                  target_bias: mx.sym.Symbol,
-                 source: mx.sym.Symbol,
+                 source: Optional[mx.sym.Symbol],
                  source_bias: mx.sym.Symbol,
                  cache: Optional[Dict[str, Optional[mx.sym.Symbol]]] = None) -> mx.sym.Symbol:
         # self-attention
@@ -180,7 +189,8 @@ class TransformerDecoderBlock:
         # encoder attention
         target_enc_att = self.enc_attention(queries=self.pre_enc_attention(target, None),
                                             memory=source,
-                                            bias=source_bias)
+                                            bias=source_bias,
+                                            cache=cache)
         target = self.post_enc_attention(target_enc_att, target)
 
         # feed-forward
