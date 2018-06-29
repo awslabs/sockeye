@@ -41,7 +41,7 @@ def batching(iterable, n=1):
 
 
 def get_pretrained_net(args: argparse.Namespace,
-                       context: mx.Context) -> mx.mod.Module:
+                       context: mx.Context):
     # init encoder
     image_cnn_encoder_config = encoder.ImageLoadedCnnEncoderConfig(
         model_path=args.image_encoder_model_path,
@@ -61,11 +61,10 @@ def get_pretrained_net(args: argparse.Namespace,
     # Create module
     module = mx.mod.Module(symbol=symbol,
                            data_names=[C.SOURCE_NAME],
-                           label_names=None,
+                           label_names=[],
                            context=context)
     module.bind(for_training=False, data_shapes=[(C.SOURCE_NAME,
-                                                  (args.batch_size,) + tuple(
-                                                      args.source_image_size))])
+                                                  (args.batch_size,) + tuple(args.source_image_size))])
 
     # Init with pretrained net
     initializers = image_cnn_encoder.get_initializers()
@@ -77,8 +76,7 @@ def get_pretrained_net(args: argparse.Namespace,
 
 def extract_features_forward(im, module, image_root, output_root, batch_size,
                              source_image_size, context):
-    batch = mx.nd.zeros((batch_size,) + \
-                        tuple(source_image_size), context)
+    batch = mx.nd.zeros((batch_size,) + tuple(source_image_size), context)
     # Reading
     out_names = []
     for i, v in enumerate(im):

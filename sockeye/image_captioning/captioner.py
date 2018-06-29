@@ -43,7 +43,7 @@ logger = setup_main_logger(__name__, file_logging=False)
 def get_pretrained_caption_net(args: argparse.Namespace,
                                context: mx.Context,
                                image_preextracted_features: bool) -> inference_image.ImageCaptioner:
-    models, source_vocabs, target_vocab = inference_image.load_models(
+    models, target_vocab = inference_image.load_models(
         context=context,
         max_input_len=args.max_input_len,
         beam_size=args.beam_size,
@@ -60,8 +60,7 @@ def get_pretrained_caption_net(args: argparse.Namespace,
     restrict_lexicon = None  # type: TopKLexicon
     store_beam = args.output_type == C.OUTPUT_HANDLER_BEAM_STORE
     if args.restrict_lexicon:
-        restrict_lexicon = TopKLexicon(source_vocabs, target_vocab)
-        restrict_lexicon.load(args.restrict_lexicon)
+        raise NotImplementedError('restrict lexicon does not work with image captioning for now.')
 
     translator = inference_image.ImageCaptioner(context=context,
                                                 ensemble_mode=args.ensemble_mode,
