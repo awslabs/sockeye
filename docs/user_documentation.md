@@ -146,3 +146,22 @@ align_text`, or save the alignment matrix as a PNG plot using `--output-type
 align_plot`. The PNG files will be written to files beginning with the prefix
 given by the `--align-plot-prefix` option, one for each input sentence, indexed
 by the sentence id.
+
+## Scoring
+
+Sockeye has a scoring module that can be used to force the translation of an input
+sentence to a particular output. This feature is used for various purposes in research
+settings. Typically, when doing so, you'll want to retrieve the score as well. If you
+have a file containing (preprocessed) input data, and another containing (also preprocessed)
+outputs, you can score each line of the input file against the corresponding lines of the
+output as follows:
+
+```bash
+> paste input_file reference_file | python3 -m sockeye.score -m /path/to/model --output-type translation_with_score
+```
+
+The score returned is the normalized negative log-probability. Sockeye automatically adds
+the end-of-sentence symbol </s> to the references, and includes them in the score.
+
+Scoring supports batch translation (`--batch-size X`). You can also experiment with the length
+normalization parameters (`--length-penalty-alpha` and `--length-penalty-beta`).
