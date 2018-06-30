@@ -179,6 +179,9 @@ class InferenceModel(model.SockeyeModel):
                                                            source_encoded_length,
                                                            source_encoded_seq_len)
 
+            # replicate encoder/init module results beam size times
+            decoder_init_states = [mx.sym.repeat(s, repeats=self.beam_size, axis=0) for s in decoder_init_states]
+
             data_names = [C.SOURCE_NAME]
             label_names = []  # type: List[str]
             return mx.sym.Group(decoder_init_states), data_names, label_names
@@ -295,9 +298,6 @@ class InferenceModel(model.SockeyeModel):
 
         self.encoder_module.forward(data_batch=batch, is_train=False)
         decoder_states = self.encoder_module.get_outputs()
-
-        # replicate encoder/init module results beam size times
-        decoder_states = [mx.nd.repeat(s, repeats=self.beam_size, axis=0) for s in decoder_states]
         return ModelState(decoder_states)
 
     def run_decoder(self,
