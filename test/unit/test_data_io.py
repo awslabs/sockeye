@@ -23,10 +23,10 @@ import pytest
 from sockeye import constants as C
 from sockeye import data_io
 from sockeye import vocab
-from sockeye.utils import SockeyeError, get_tokens, seedRNGs
+from sockeye.utils import SockeyeError, get_tokens, seed_rngs
 from test.common import tmp_digits_dataset
 
-seedRNGs(12)
+seed_rngs(12)
 
 define_bucket_tests = [(50, 10, [10, 20, 30, 40, 50]),
                        (50, 20, [20, 40, 50]),
