@@ -47,7 +47,6 @@ def get_encoder(config: 'EncoderConfig', prefix: str = '') -> 'Encoder':
     else:
         from .image_captioning.encoder import ImageLoadedCnnEncoderConfig, \
             get_image_cnn_encoder
-        ImageEncoderConfig = ImageLoadedCnnEncoderConfig
 
         if isinstance(config, ImageLoadedCnnEncoderConfig):
             return get_image_cnn_encoder(config)
