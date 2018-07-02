@@ -15,6 +15,7 @@
 A set of utility methods.
 """
 import errno
+import fcntl
 import glob
 import gzip
 import itertools
@@ -28,7 +29,6 @@ import time
 from contextlib import contextmanager, ExitStack
 from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
 
-import fcntl
 import mxnet as mx
 import numpy as np
 
@@ -94,7 +94,7 @@ def log_basic_info(args) -> None:
     logger.info("Arguments: %s", args)
 
 
-def seedRNGs(seed: int) -> None:
+def seed_rngs(seed: int) -> None:
     """
     Seed the random number generators (Python, Numpy and MXNet)
 

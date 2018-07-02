@@ -775,7 +775,7 @@ def train(args: argparse.Namespace):
         args.output = temp_dir.name
         args.max_updates = 0
 
-    utils.seedRNGs(args.seed)
+    utils.seed_rngs(args.seed)
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
