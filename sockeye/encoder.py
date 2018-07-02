@@ -803,7 +803,7 @@ class EmptyEncoder(Encoder):
         :param data: Input data.
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
-        :return: Encoded versions of input data (data, data_length, seq_len).
+        :return: Encoded versions of input data with all-zero-values.
         """
         # outputs: (batch_size, seq_len, num_hidden)
         outputs = mx.sym.dot(data, mx.sym.zeros((self.num_embed, self.num_hidden)))
