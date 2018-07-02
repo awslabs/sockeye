@@ -1119,7 +1119,7 @@ class ConvolutionalDecoder(Decoder):
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
-        :return: logit inputs, attention context, attention probabilities, next decoder states.
+        :return: logit inputs, attention cattention probabilities, next decoder states.
         """
         # Source_encoded: (batch_size, source_encoded_max_length, encoder_depth)
         source_encoded, source_encoded_lengths, *layer_states = states

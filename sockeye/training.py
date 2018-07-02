@@ -151,16 +151,15 @@ class TrainingModel(model.SockeyeModel):
                 logits = self.output_layer(target_decoded)
                 loss_output = self.model_loss.get_loss(logits, labels)
             else:
-                if len(target_decoded_and_attention.list_outputs()) > 1:
-                    context, attention = target_decoded_and_attention[1:]
-                    # context: (batch_size * trg_seq_len, encoder_num_hidden)
-                    context = mx.sym.reshape(data=context, shape=(-3, 0))
-                    attention = mx.sym.reshape(data=attention, shape=(-3, 0))
+                context, attention = target_decoded_and_attention[1:]
+                # context: (batch_size * trg_seq_len, encoder_num_hidden)
+                context = mx.sym.reshape(data=context, shape=(-3, 0))
+                attention = mx.sym.reshape(data=attention, shape=(-3, 0))
 
                 # softmax_probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
                 target_embed = mx.sym.reshape(data=target_embed, shape=(-3, 0))
-                softmax_probs = self.output_layer(target_decoded, attention=attention, context=context, target_embed=target_embed)
-                # softmax_probs = mx.sym.Custom(op_type="PrintValue", data=softmax_probs, print_name="SOFTMAX")
+                softmax_probs = self.output_layer(target_decoded, attention=attention, context=context, target_embed=target_embed, source_encoded=source_encoded, source_encoded_length=source_encoded_length, source_max_len=source_encoded_seq_len)
+
                 loss_output = self.model_loss.get_loss(softmax_probs, labels)
 
             return mx.sym.Group(loss_output), data_names, label_names

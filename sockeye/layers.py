@@ -276,6 +276,9 @@ class PointerOutputLayer(OutputLayer):
                  attention: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
                  context: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
                  target_embed: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
+                 source_encoded: mx.sym.Symbol,
+                 source_encoded_length: int,
+                 source_encoded_max_len: int,
                  weight: Optional[mx.nd.NDArray] = None,
                  bias: Optional[mx.nd.NDArray] = None):
         """
@@ -288,10 +291,13 @@ class PointerOutputLayer(OutputLayer):
         :return: Logits. Shape(batch_size, self.vocab_size+src_len).
         """
 
-        # TODO dropout?
-        # TODO num_hidden fc1 needs to be passed as well as other nets options
-
         logits_trg = super().__call__(hidden, weight=weight, bias=bias)
+
+        attention_func = self.attention.on(source_encoded, source_encoded_lengths, source_encoded_max_len)
+        attention_state = self.attention.get_initial_state(source_encoded_lengths, source_encoded_max_len)
+
+        # decoder.py RecurrentDecoder._step()
+
 
         switch_hidden = mx.sym.FullyConnected(data=hidden,
                                               num_hidden=self.hidden_layer_dim,
@@ -314,7 +320,6 @@ class PointerOutputLayer(OutputLayer):
                                               flatten = False,
                                               name = C.SWITCH_PROB_NAME + '_target_embed_layer')
 
-        # TODO add noisy tanh activation function
         switch_output = mx.sym.Activation(switch_hidden + switch_context + switch_target,
                                           act_type='tanh', name=C.SWITCH_PROB_NAME+'_layer1')
 
@@ -327,21 +332,13 @@ class PointerOutputLayer(OutputLayer):
 
         switch_target_prob = mx.sym.Activation(switch_output, act_type='sigmoid', name=C.SWITCH_PROB_NAME+'_out')
 
-        # switch_target_prob = mx.sym.random.uniform(0.9999, 0.9999, shape=1)
-        # switch_target_prob = mx.sym.Custom(op_type="PrintValue", data=switch_target_prob, print_name="SWITCH")
-
-        # attention = mx.sym.Custom(op_type="PrintValue", data=attention, print_name="ATTENTION")
-
         probs_trg = mx.sym.softmax(data=logits_trg, axis=1)
         probs_src = attention
 
         weighted_probs_trg = mx.sym.broadcast_mul(probs_trg, switch_target_prob)
-        # weighted_probs_trg = mx.sym.Custom(op_type="PrintValue", data=weighted_probs_trg, print_name="WEIGHTED TRG")
         weighted_probs_src = mx.sym.broadcast_mul(probs_src, 1.0 - switch_target_prob)
-        # weighted_probs_src = mx.sym.Custom(op_type="PrintValue", data=weighted_probs_src, print_name="WEIGHTED SRC")
 
         result = mx.sym.concat(weighted_probs_trg, weighted_probs_src, dim=1, name=C.SOFTMAX_OUTPUT_NAME)
-        # result = mx.sym.Custom(op_type="PrintValue", data=result, print_name="RESULT")
         return result
 
 def split_heads(x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:
