@@ -274,7 +274,7 @@ def main():
     # TODO: make training compatible with full net
     args.image_preextracted_features = True  # override this for now
 
-    utils.seedRNGs(args.seed)
+    utils.seed_rngs(args.seed)
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
