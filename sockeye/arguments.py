@@ -733,7 +733,8 @@ def add_training_args(params):
 
     train_params.add_argument('--decoder-only',
                                action='store_true',
-                               help='Pre-train a decoder. Default: %(default)s.')
+                               help='Pre-train a decoder. This is currently for RNN decoders only. '
+                                    'Default: %(default)s.')
 
     train_params.add_argument('--batch-size', '-b',
                               type=int_greater_or_equal(1),

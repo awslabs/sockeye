@@ -784,7 +784,7 @@ class EncoderSequence(Encoder):
 
 class EmptyEncoder(Encoder):
     """
-    This encoder doing nothing.
+    This encoder ignores the input data and simply returns zero-filled states in the expected shape.
     :param config: configuration.
     """
 
@@ -803,7 +803,7 @@ class EmptyEncoder(Encoder):
         :param data: Input data.
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
-        :return: Encoded versions of input data with all-zero-values.
+        :return: Expected number of empty states (zero-filled).
         """
         # outputs: (batch_size, seq_len, num_hidden)
         outputs = mx.sym.dot(data, mx.sym.zeros((self.num_embed, self.num_hidden)))
