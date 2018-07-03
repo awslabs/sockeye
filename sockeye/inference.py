@@ -1332,11 +1332,11 @@ class Translator:
                      source_length: int,
                      raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                      max_output_lengths: mx.nd.NDArray) -> Tuple[mx.nd.NDArray,
-                                                      mx.nd.NDArray,
-                                                      mx.nd.NDArray,
-                                                      mx.nd.NDArray,
-                                                      List[Optional[constrained.ConstrainedHypothesis]],
-                                                      Optional[List[BeamHistory]]]:
+                                                                 mx.nd.NDArray,
+                                                                 mx.nd.NDArray,
+                                                                 mx.nd.NDArray,
+                                                                 List[Optional[constrained.ConstrainedHypothesis]],
+                                                                 Optional[List[BeamHistory]]]:
         """
         Translates multiple sentences using beam search.
 
@@ -1500,6 +1500,7 @@ class Translator:
             finished, finished_or_inactive, lengths = self._update_lengths_and_finished.forward(finished,
                                                                                                 inactive,
                                                                                                 lengths,
+                                                                                                max_output_lengths,
                                                                                                 best_word_indices)
 
             # (7) Reorder sequences and attentions according to best_hyp_indices
@@ -1540,7 +1541,6 @@ class Translator:
                 if mx.nd.sum(finished).asscalar() > 0:
                     break
             else:
-                finished = mx.nd.sign(finished + (mx.nd.cast(lengths.reshape(-1), 'int32') >= max_output_lengths))
                 if mx.nd.sum(finished).asscalar() == self.batch_size * self.beam_size:  # all finished
                     break
 
@@ -1723,6 +1723,7 @@ class NormalizeFinishedHypotheses(mx.gluon.HybridBlock):
         finished = all_finished
         return finished, scores_accumulated
 
+
 class UpdateLengthsAndFinished(mx.gluon.HybridBlock):
     """
     A HybridBlock that updates the lengths of unfinished and active hypotheses and recomputes finished hypotheses.
@@ -1733,12 +1734,22 @@ class UpdateLengthsAndFinished(mx.gluon.HybridBlock):
         self.pad_id = pad_id
         self.eos_id = eos_id
 
-    def hybrid_forward(self, F, finished, inactive, lengths, best_word_indices):
+    def hybrid_forward(self, F, finished, inactive, lengths, max_output_lengths, best_word_indices):
         finished_or_inactive = F.clip(data=finished + inactive, a_min=0, a_max=1)
         # update lengths of hypotheses unless they are finished or inactive
         lengths = lengths + F.cast(1 - F.expand_dims(finished_or_inactive, axis=1), dtype='float32')
-        finished = ((best_word_indices == self.pad_id) + (best_word_indices == self.eos_id))
+        # recompute finished. Hypotheses are finished if they are
+        # - extended with <pad>, or
+        # - extended with <eos>, or
+        # - at their maximum length.
+        finished = F.clip(
+            (best_word_indices == self.pad_id) +
+            (best_word_indices == self.eos_id) +
+            (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') >= max_output_lengths),
+            a_min=0, a_max=1)
+
         return finished, finished_or_inactive, lengths
+
 
 class UpdateScores(mx.gluon.HybridBlock):
     """
@@ -1765,4 +1776,3 @@ class UpdateScores(mx.gluon.HybridBlock):
         pad_dist = F.concat(pad_id_scores, pad_dist)
         scores = F.where(finished + inactive, pad_dist, scores)
         return scores
-
