@@ -49,7 +49,7 @@ class ImageInferenceModel(InferenceModel):
         :return: List of data descriptions.
         """
         return [mx.io.DataDesc(name=C.SOURCE_NAME,
-                               shape=(self.batch_size, ) + self.input_size,
+                               shape=(self.batch_size,) + self.input_size,
                                layout=C.BATCH_MAJOR_IMAGE)]
 
     @property
@@ -135,25 +135,31 @@ class ImageCaptioner(Translator):
             translations.extend(batch_translations)
 
         # Concatenate results
-        results = []
+        results = []  # type: List[TranslatorOutput]
         for trans_input, translation in zip(trans_inputs, translations):
             results.append(self._make_result(trans_input, translation))
-
         return results
 
-    def _get_inference_input(self, image_paths: List[str]) -> Tuple[mx.nd.NDArray, int, List[Optional[constrained.RawConstraintList]], mx.nd.NDArray]:
+    def _get_inference_input(self, image_paths: List[str]) -> Tuple[mx.nd.NDArray,
+                                                                    int,
+                                                                    List[Optional[constrained.RawConstraintList]],
+                                                                    mx.nd.NDArray]:
         """
-        Returns NDArray of images and corresponding bucket_key and an NDArray of maximum output lengths for each sentence in the batch.
+        Returns NDArray of images and corresponding bucket_key and an NDArray of maximum output lengths
+        for each sentence in the batch.
 
         :param image_paths: lists of image paths.
-        :return NDArray of images paths, bucket key, a list of raw constraint lists, an NDArray of maximum output lengths.
+        :return NDArray of images paths, bucket key, a list of raw constraint lists,
+                an NDArray of maximum output lengths.
         """
         ## TODO(bazzanil): support constraints
-        raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
+        raw_constraints = [None for _ in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
         images = self.data_loader(image_paths, self.source_image_size)
         max_input_length = 0
         max_output_lengths = [self.models[0].get_max_output_length(max_input_length)] * len(image_paths)
-        return mx.nd.array(images), max_input_length, raw_constraints, mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
+        return mx.nd.array(images), max_input_length, raw_constraints, \
+               mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
+
 
 def load_models(context: mx.context.Context,
                 max_input_len: Optional[int],
@@ -166,9 +172,7 @@ def load_models(context: mx.context.Context,
                 decoder_return_logit_inputs: bool = False,
                 cache_output_layer_w_b: bool = False,
                 source_image_size: tuple = None,
-                forced_max_output_len: Optional[int] = None) -> Tuple[List[ImageInferenceModel],
-                                                               List[vocab.Vocab],
-                                                               vocab.Vocab]:
+                forced_max_output_len: Optional[int] = None) -> Tuple[List[ImageInferenceModel], vocab.Vocab]:
     """
     Loads a list of models for inference.
 
@@ -187,9 +191,9 @@ def load_models(context: mx.context.Context,
                                    restrict lexicon).
     :param source_image_size: Size of the image to resize to. Used only for the image-text models
     :param forced_max_output_len: An optional overwrite of the maximum out length.
-    :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
+    :return: List of models, target vocabulary, source factor vocabularies.
     """
-    models = []  # type: List[InferenceModel]
+    models = []  # type: List[ImageInferenceModel]
     target_vocabs = []  # type: List[vocab.Vocab]
 
     if checkpoints is None:
@@ -209,15 +213,15 @@ def load_models(context: mx.context.Context,
             params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
         inference_model = ImageInferenceModel(config=model_config,
-                                         params_fname=params_fname,
-                                         context=context,
-                                         beam_size=beam_size,
-                                         batch_size=batch_size,
-                                         softmax_temperature=softmax_temperature,
-                                         decoder_return_logit_inputs=decoder_return_logit_inputs,
-                                         cache_output_layer_w_b=cache_output_layer_w_b,
-                                         input_size=source_image_size,
-                                         forced_max_output_len=forced_max_output_len)
+                                              params_fname=params_fname,
+                                              context=context,
+                                              beam_size=beam_size,
+                                              batch_size=batch_size,
+                                              softmax_temperature=softmax_temperature,
+                                              decoder_return_logit_inputs=decoder_return_logit_inputs,
+                                              cache_output_layer_w_b=cache_output_layer_w_b,
+                                              input_size=source_image_size,
+                                              forced_max_output_len=forced_max_output_len)
 
         models.append(inference_model)
 
@@ -230,4 +234,4 @@ def load_models(context: mx.context.Context,
     for inference_model in models:
         inference_model.initialize(max_input_len, get_max_output_length)
 
-    return models, None, target_vocabs[0]
+    return models, target_vocabs[0]

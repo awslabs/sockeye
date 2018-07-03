@@ -260,9 +260,10 @@ def get_preinit_encoders(encoders: List[encoder.Encoder]) -> List[Tuple[str, mx.
     :param encoders: List of encoders
     :return: The list of initializers
     """
-    init = []
+    init = []  # type: List[Tuple[str, mx.init.Initializer]]
     for enc in encoders:
         if hasattr(enc, "get_initializers"):
+            enc = cast(encoder_image.ImageLoadedCnnEncoder, enc)
             init.extend(enc.get_initializers())
     return init
 

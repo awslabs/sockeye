@@ -47,7 +47,6 @@ def get_encoder(config: 'EncoderConfig', prefix: str = '') -> 'Encoder':
     else:
         from .image_captioning.encoder import ImageLoadedCnnEncoderConfig, \
             get_image_cnn_encoder
-        ImageEncoderConfig = ImageLoadedCnnEncoderConfig
 
         if isinstance(config, ImageLoadedCnnEncoderConfig):
             return get_image_cnn_encoder(config)
@@ -433,13 +432,10 @@ class Embedding(Encoder):
         return self.config.num_embed
 
 
-class PassThroughEmbeddingConfig(config.Config):
+class PassThroughEmbeddingConfig(EmbeddingConfig):
 
     def __init__(self) -> None:
-        super().__init__()
-        self.vocab_size = 0
-        self.num_embed = 0
-        self.num_factors = 1
+        super().__init__(vocab_size=0, num_embed=0, dropout=0.0, factor_configs=None)
 
 
 class PassThroughEmbedding(Encoder):
@@ -451,6 +447,7 @@ class PassThroughEmbedding(Encoder):
 
     def __init__(self,
                  config: PassThroughEmbeddingConfig) -> None:
+        super().__init__('float32')
         self.config = config
 
     def encode(self,
