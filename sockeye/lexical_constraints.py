@@ -211,7 +211,8 @@ class AvoidBatch:
                 if word_id > 0:
                     to_avoid.add((i, word_id))
 
-        return list(zip(*to_avoid))
+        zipped_lists = tuple(zip(*to_avoid))
+        return zipped_lists
 
 
 class ConstrainedHypothesis:
