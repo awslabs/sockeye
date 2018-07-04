@@ -192,7 +192,7 @@ class AvoidBatch:
             if self.local_avoid_states:
                 self.local_avoid_states[i] = self.local_avoid_states[i].consume(word_id)
 
-    def avoid(self) -> Tuple[List[int], List[int]]:
+    def avoid(self) -> Tuple[Tuple[int], Tuple[int]]:
         """
         Assembles a list of per-hypothesis words to avoid. The indices are (x, y) pairs into the scores
         array, which has dimensions (beam_size, target_vocab_size). These values are then used by the caller
@@ -211,7 +211,7 @@ class AvoidBatch:
                 if word_id > 0:
                     to_avoid.add((i, word_id))
 
-        zipped_lists = tuple(zip(*to_avoid))
+        zipped_lists = tuple(zip(*to_avoid))  # type: Tuple[Tuple[int], Tuple[int]]
         return zipped_lists
 
 
