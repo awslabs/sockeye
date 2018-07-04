@@ -78,7 +78,7 @@ def check_arg_compatibility(args: argparse.Namespace):
 
     :param args: Arguments as returned by argparse.
     """
-    check_condition(args.encoder == C.IMAGE_PRETRAIN_TYPE or not args.use_pointer_nets or args.shared_vocab,
+    check_condition(args.encoder == C.IMAGE_PRETRAIN_TYPE or not args.use_pointer_nets or args.shared_vocab or args.prepared_data,
                     "Pointer networks required a shared vocabulary.")
 
     check_condition(args.optimized_metric == C.BLEU or args.optimized_metric == C.ROUGE1 or args.optimized_metric in args.metrics,
