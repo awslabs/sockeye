@@ -139,14 +139,14 @@ def setup_main_logger(name: str, file_logging=True, console=True, path: Optional
 
 
 def log_sockeye_version(logger):
-    from sockeye import __version__
+    from sockeye import __version__, __file__
     try:
         from sockeye.git_version import git_hash
     except ImportError:
         git_hash = "unknown"
-    logger.info("Sockeye version %s commit %s", __version__, git_hash)
+    logger.info("Sockeye version %s, commit %s, path %s", __version__, git_hash, __file__)
 
 
 def log_mxnet_version(logger):
-    from mxnet import __version__
-    logger.info("MXNet version %s", __version__)
+    from mxnet import __version__, __file__
+    logger.info("MXNet version %s, path %s", __version__, __file__)

@@ -31,9 +31,10 @@ try:  # Try to import pillow
 except ImportError as e:
     raise RuntimeError("Please install pillow.")
 
+
 def copy_mx_model_to(model_path, model_epoch, output_folder):
     """
-    Copy mxnet models to new path
+    Copy mxnet models to new path.
 
     :param model_path: Model path without -symbol.json and -%04d.params
     :param model_epoch: Epoch of the pretrained model
@@ -45,11 +46,11 @@ def copy_mx_model_to(model_path, model_epoch, output_folder):
                                                            target_path))
     suffix = ['-symbol.json', '-%04d.params' % (model_epoch,)]
     for s in suffix:
-        copyfile(model_path+s, target_path+s)
+        copyfile(model_path + s, target_path + s)
     return target_path
 
 
-def crop_resize_image(image, size):
+def crop_resize_image(image: np.ndarray, size) -> np.ndarray:
     """
     Resize the input image.
 
@@ -73,7 +74,7 @@ def crop_resize_image(image, size):
     return image
 
 
-def load_preprocess_images(image_paths: List[str], image_size: tuple) -> List:
+def load_preprocess_images(image_paths: List[str], image_size: tuple) -> List[np.ndarray]:
     """
     Load and pre-process the images specified with absolute paths.
 
@@ -88,20 +89,20 @@ def load_preprocess_images(image_paths: List[str], image_size: tuple) -> List:
     return images
 
 
-def load_preprocess_image(image_path: str, image_size: tuple):
+def load_preprocess_image(image_path: str, image_size: tuple) -> np.ndarray:
     with Image.open(image_path) as image:
         image_o = preprocess_image(image, image_size)
     return image_o
 
 
-def preprocess_image(image: Image, image_size: tuple):
+def preprocess_image(image: Image, image_size: tuple) -> np.ndarray:
     # Resize to fixed input
     image_o = crop_resize_image(image, image_size)
     # convert to numpy
     image_o = np.asarray(image_o)
     # Gray-level to 3 channels
-    if len(image_o.shape)==2:
-        image_o = np.tile(image_o[:,:,None], (1,1,3))
+    if len(image_o.shape) == 2:
+        image_o = np.tile(image_o[:, :, None], (1, 1, 3))
     # (height, width, channel) -> (channel, height, width)
     image_o = np.swapaxes(image_o, 0, 2)
     image_o = np.swapaxes(image_o, 1, 2)
@@ -109,14 +110,15 @@ def preprocess_image(image: Image, image_size: tuple):
 
 
 def load_features(paths: List[str],
-                  expected_shape: Optional[tuple] = None) -> List:
+                  expected_shape: Optional[tuple] = None) -> List[np.ndarray]:
     """
     Load features specified with absolute paths.
 
     :param paths: List of files specified with paths.
+    :param expected_shape: Optional expected shape.
     :return: A list of loaded images (numpy arrays).
     """
-    data = []
+    data = []  # type: List[np.ndarray]
     for path in paths:
         data.append(load_feature(path, expected_shape))
     return data
@@ -124,20 +126,20 @@ def load_features(paths: List[str],
 
 def load_feature(path: str,
                  expected_shape: Optional[tuple] = None) -> np.ndarray:
-    try: # compresse
+    try:  # compressed
         data = np.load(path)['data']
     except IndexError:  # uncompressed
         data = np.load(path)
     if expected_shape is not None:
         np.testing.assert_array_equal(data.shape, expected_shape,
-                  err_msg="Loaded feature shape different than provided one. "
-                          "(current: {}, provided{})".format(data.shape,
-                                                             expected_shape))
+                                      err_msg="Loaded feature shape different than provided one. "
+                                              "(current: {}, provided{})".format(data.shape,
+                                                                                 expected_shape))
     return data
 
 
 def save_features(paths: List[str], datas: List[np.ndarray],
-                  compressed:bool = False) -> List:
+                  compressed: bool = False) -> List:
     """
     Save features specified with absolute paths.
 
@@ -146,7 +148,7 @@ def save_features(paths: List[str], datas: List[np.ndarray],
     :param compressed: Use numpy compression
     :return: A list of file names.
     """
-    fnames = []
+    fnames = []  # type: List[str]
     for path, data in zip(paths, datas):
         fnames.append(save_feature(path, data, compressed))
     return fnames
@@ -154,7 +156,7 @@ def save_features(paths: List[str], datas: List[np.ndarray],
 
 def save_feature(path: str,
                  data: np.ndarray,
-                 compressed:bool = False) -> None:
+                 compressed: bool = False) -> str:
     if compressed:
         np.savez_compressed(path, data=data)
         path += ".npz"

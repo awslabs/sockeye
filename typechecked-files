@@ -32,3 +32,11 @@ sockeye/transformer.py
 sockeye/translate.py
 sockeye/utils.py
 sockeye/vocab.py
+sockeye/image_captioning/__init__.py
+sockeye/image_captioning/arguments.py
+sockeye/image_captioning/captioner.py
+sockeye/image_captioning/checkpoint_decoder.py
+sockeye/image_captioning/encoder.py
+sockeye/image_captioning/extract_features.py
+sockeye/image_captioning/utils.py
+sockeye/image_captioning/visualize.py

@@ -1188,16 +1188,18 @@ class Translator:
                              trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray,
                                                                            int,
                                                                            List[Optional[constrained.RawConstraintList]],
-                                                                           List[Optional[constrained.RawConstraintList]]]:
+                                                                           List[Optional[constrained.RawConstraintList]],
+                                                                           mx.nd.NDArray]:
         """
         Assembles the numerical data for the batch.
         This comprises an NDArray for the source sentences, the bucket key (padded source length), and a list of
-        raw constraint lists, one for each sentence in the batch. Each raw constraint list contains phrases in
-        the form of lists of integers in the target language vocabulary.
+        raw constraint lists, one for each sentence in the batch, an NDArray of maximum output lengths for each sentence in the batch.
+        Each raw constraint list contains phrases in the form of lists of integers in the target language vocabulary.
 
         :param trans_inputs: List of TranslatorInputs.
         :return NDArray of source ids (shape=(batch_size, bucket_key, num_factors)),
-                bucket key, list of raw constraint lists, and list of phrases to avoid.
+                bucket key, list of raw constraint lists, and list of phrases to avoid,
+                and an NDArray of maximum output lengths.
         """
 
         bucket_key = data_io.get_bucket(max(len(inp.tokens) for inp in trans_inputs), self.buckets_source)
@@ -1205,8 +1207,10 @@ class Translator:
         raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
         raw_avoid_list = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
 
+        max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)
+            max_output_lengths.append(self.models[0].get_max_output_length(num_tokens))
             source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
 
             factors = trans_input.factors if trans_input.factors is not None else []
@@ -1229,7 +1233,7 @@ class Translator:
                 if any([self.unk_id in phrase for phrase in raw_avoid_list[j]]):
                     logger.warning("Sentence %d: %s was found in the list of phrases to avoid; this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
 
-        return source, bucket_key, raw_constraints, raw_avoid_list
+        return source, bucket_key, raw_constraints, raw_avoid_list, mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
 
     def _make_result(self,
                      trans_input: TranslatorInput,
@@ -1272,7 +1276,8 @@ class Translator:
                       source: mx.nd.NDArray,
                       source_length: int,
                       raw_constraints: List[Optional[constrained.RawConstraintList]],
-                      raw_avoid_list: List[Optional[constrained.RawConstraintList]]) -> List[Translation]:
+                      raw_avoid_list: List[Optional[constrained.RawConstraintList]],
+                      max_output_lengths: mx.nd.NDArray) -> List[Translation]:
         """
         Translates source of source_length, given a bucket_key.
 
@@ -1283,7 +1288,7 @@ class Translator:
         :return: Sequence of translations.
         """
 
-        return self._get_best_from_beam(*self._beam_search(source, source_length, raw_constraints, raw_avoid_list))
+        return self._get_best_from_beam(*self._beam_search(source, source_length, raw_constraints, raw_avoid_list, max_output_lengths))
 
     def _encode(self, sources: mx.nd.NDArray, source_length: int) -> List[ModelState]:
         """
@@ -1358,12 +1363,13 @@ class Translator:
                      source: mx.nd.NDArray,
                      source_length: int,
                      raw_constraint_list: List[Optional[constrained.RawConstraintList]],
-                     raw_avoid_list: List[Optional[constrained.RawConstraintList]]) -> Tuple[mx.nd.NDArray,
-                                                                                             mx.nd.NDArray,
-                                                                                             mx.nd.NDArray,
-                                                                                             mx.nd.NDArray,
-                                                                                             List[Optional[constrained.ConstrainedHypothesis]],
-                                                                                             Optional[List[BeamHistory]]]:
+                     raw_avoid_list: List[Optional[constrained.RawConstraintList]],
+                     max_output_lengths: mx.nd.NDArray) -> Tuple[mx.nd.NDArray,
+                                                                 mx.nd.NDArray,
+                                                                 mx.nd.NDArray,
+                                                                 mx.nd.NDArray,
+                                                                 List[Optional[constrained.ConstrainedHypothesis]],
+                                                                 Optional[List[BeamHistory]]]:
         """
         Translates multiple sentences using beam search.
 
@@ -1401,6 +1407,9 @@ class Translator:
 
         lengths = mx.nd.ones((self.batch_size * self.beam_size, 1), ctx=self.context)
         finished = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
+
+        # Extending max_output_lengths to shape (batch_size * beam_size,)
+        max_output_lengths = mx.nd.repeat(max_output_lengths, self.beam_size)
 
         # attentions: (batch_size * beam_size, 1, encoded_source_length)
         attentions = mx.nd.zeros((self.batch_size * self.beam_size, 1, encoded_source_length), ctx=self.context)
@@ -1537,6 +1546,7 @@ class Translator:
             finished, finished_or_inactive, lengths = self._update_lengths_and_finished.forward(finished,
                                                                                                 inactive,
                                                                                                 lengths,
+                                                                                                max_output_lengths,
                                                                                                 best_word_indices)
 
             # (7) Reorder sequences and attentions according to best_hyp_indices
@@ -1775,11 +1785,20 @@ class UpdateLengthsAndFinished(mx.gluon.HybridBlock):
         self.pad_id = pad_id
         self.eos_id = eos_id
 
-    def hybrid_forward(self, F, finished, inactive, lengths, best_word_indices):
+    def hybrid_forward(self, F, finished, inactive, lengths, max_output_lengths, best_word_indices):
         finished_or_inactive = F.clip(data=finished + inactive, a_min=0, a_max=1)
         # update lengths of hypotheses unless they are finished or inactive
         lengths = lengths + F.cast(1 - F.expand_dims(finished_or_inactive, axis=1), dtype='float32')
-        finished = ((best_word_indices == self.pad_id) + (best_word_indices == self.eos_id))
+        # recompute finished. Hypotheses are finished if they are
+        # - extended with <pad>, or
+        # - extended with <eos>, or
+        # - at their maximum length.
+        finished = F.clip(
+            (best_word_indices == self.pad_id) +
+            (best_word_indices == self.eos_id) +
+            (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') >= max_output_lengths),
+            a_min=0, a_max=1)
+
         return finished, finished_or_inactive, lengths
 
 

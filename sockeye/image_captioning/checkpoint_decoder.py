@@ -18,7 +18,7 @@ Implements a thin wrapper around ImageCaptioner to compute BLEU scores on
 import logging
 import os
 import time
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from .. import inference
 from . import inference as inference_image
@@ -66,36 +66,33 @@ class CheckpointDecoderImageModel(CheckpointDecoder):
         :param output_name: Filename to write translations to. Defaults to /dev/null.
         :return: Mapping of metric names to scores.
         """
-
-        models, vocab_source, vocab_target = inference_image.load_models(
-            context=self.context,
-            max_input_len=self.max_input_len,
-            beam_size=self.beam_size,
-            batch_size=self.batch_size,
-            model_folders=[self.model],
-            checkpoints=[checkpoint],
-            softmax_temperature=self.softmax_temperature,
-            max_output_length_num_stds=self.max_output_length_num_stds,
-            source_image_size=tuple(self.source_image_size),
-            forced_max_output_len=self.max_output_length
-        )
+        models, vocab_target = inference_image.load_models(context=self.context,
+                                                           max_input_len=self.max_input_len,
+                                                           beam_size=self.beam_size,
+                                                           batch_size=self.batch_size,
+                                                           model_folders=[self.model],
+                                                           checkpoints=[checkpoint],
+                                                           softmax_temperature=self.softmax_temperature,
+                                                           max_output_length_num_stds=self.max_output_length_num_stds,
+                                                           source_image_size=tuple(self.source_image_size),
+                                                           forced_max_output_len=self.max_output_length)
         translator = inference_image.ImageCaptioner(context=self.context,
-                                              ensemble_mode=self.ensemble_mode,
-                                              bucket_source_width=0,
-                                              length_penalty=inference.LengthPenalty(
-                                                  self.length_penalty_alpha,
-                                                  self.length_penalty_beta),
-                                              beam_prune=0.0,
-                                              beam_search_stop='all',
-                                              models=models,
-                                              source_vocabs=None,
-                                              target_vocab=vocab_target,
-                                              restrict_lexicon=None,
-                                              store_beam=False,
-                                              source_image_size=tuple(
-                                                  self.source_image_size),
-                                              source_root=self.image_root,
-                                              use_feature_loader=self.use_feature_loader)
+                                                    ensemble_mode=self.ensemble_mode,
+                                                    bucket_source_width=0,
+                                                    length_penalty=inference.LengthPenalty(
+                                                        self.length_penalty_alpha,
+                                                        self.length_penalty_beta),
+                                                    beam_prune=0.0,
+                                                    beam_search_stop='all',
+                                                    models=models,
+                                                    source_vocabs=None,
+                                                    target_vocab=vocab_target,
+                                                    restrict_lexicon=None,
+                                                    store_beam=False,
+                                                    source_image_size=tuple(
+                                                        self.source_image_size),
+                                                    source_root=self.image_root,
+                                                    use_feature_loader=self.use_feature_loader)
 
         trans_wall_time = 0.0
         translations = []
