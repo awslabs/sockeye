@@ -695,14 +695,14 @@ def make_input_from_json_string(sentence_id: int, json_string: str) -> Translato
 
         # List of phrases that must appear in the output
         constraints = jobj.get(C.JSON_CONSTRAINTS_KEY)
-        if constraints:
+        if constraints is not None:
             constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
         else:
             constraints = None
 
         # List of phrases to prevent from occuring in the output
         avoid_list = jobj.get(C.JSON_AVOID_KEY)
-        if avoid_list:
+        if avoid_list is not None:
             avoid_list = [list(data_io.get_tokens(phrase)) for phrase in avoid_list]
         else:
             avoid_list = None
@@ -1230,7 +1230,7 @@ class Translator:
             if trans_input.avoid_list is not None:
                 raw_avoid_list[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
                                      trans_input.avoid_list]
-                if any([self.unk_id in phrase for phrase in raw_avoid_list[j]]):
+                if any(self.unk_id in phrase for phrase in raw_avoid_list[j]):
                     logger.warning("Sentence %d: %s was found in the list of phrases to avoid; this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
 
         return source, bucket_key, raw_constraints, raw_avoid_list, mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
@@ -1493,7 +1493,7 @@ class Translator:
             # Mark entries that should be blocked as having a score of np.inf
             if self.global_avoid_trie or any(raw_avoid_list):
                 block_indices = avoid_states.avoid()
-                if any(block_indices):
+                if len(block_indices[0]) > 0:
                     scores[block_indices] = np.inf
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as

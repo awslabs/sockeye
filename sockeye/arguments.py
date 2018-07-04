@@ -1156,7 +1156,7 @@ def add_inference_args(params):
     decode_params.add_argument('--avoid-list',
                                type=str,
                                default=None,
-                               help="Specify list of phrases to block from the output. Default: %(default)s.")
+                               help="Specify a file containing phrases (pre-processed, one per line) to block from the output. Default: %(default)s.")
     decode_params.add_argument('--strip-unknown-words',
                                action='store_true',
                                default=False,

@@ -38,7 +38,7 @@ class AvoidTrie:
             for phrase in raw_phrases:
                 self.add_phrase(phrase)
 
-    def __str__(self):
+    def __str__(self) -> str:
         s = '({}'.format(list(self.final_ids))
         for child_id in self.children.keys():
             s += ' -> {} {}'.format(child_id, self.children[child_id])
@@ -74,7 +74,7 @@ class AvoidTrie:
             self.final_ids.add(phrase[0])
         else:
             next_word = phrase[0]
-            if not next_word in self.children:
+            if next_word not in self.children:
                 self.children[next_word] = AvoidTrie()
             self.step(next_word).add_phrase(phrase[1:])
 
@@ -89,9 +89,9 @@ class AvoidTrie:
 
     def final(self) -> Set[int]:
         """
-        Recursively adds a phrase to this trie node.
+        Returns the set of final ids at this node.
 
-        :param phrase: A list of word IDs to add to this trie node.
+        :return: The set of word IDs that end a constraint at this state.
         """
         return self.final_ids
 
@@ -211,12 +211,7 @@ class AvoidBatch:
                 if word_id > 0:
                     to_avoid.add((i, word_id))
 
-        x_list = []  # type: List[int]
-        y_list = []  # type: List[int]
-        for item in to_avoid:
-            x_list.append(item[0])
-            y_list.append(item[1])
-        return x_list, y_list
+        return list(zip(*to_avoid))
 
 
 class ConstrainedHypothesis:
