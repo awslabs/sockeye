@@ -1063,9 +1063,9 @@ class Translator:
         """
         Returns averaged and re-normalized log probabilities
         """
-        log_probs = utils.average_arrays([mx.nd.log(p) for p in predictions])
+        log_probs = utils.average_arrays([p.log() for p in predictions])
         # pylint: disable=invalid-unary-operand-type
-        return -mx.nd.log(mx.nd.softmax(log_probs))
+        return -log_probs.log_softmax()
 
     def translate(self, trans_inputs: List[TranslatorInput]) -> List[TranslatorOutput]:
         """
