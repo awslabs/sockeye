@@ -308,13 +308,13 @@ def test_failed_make_input_from_valid_json_string(text, text_key, factors, facto
     assert isinstance(inp, sockeye.inference.BadTranslatorInput)
 
 
-@pytest.mark.parametrize("strings",
+@pytest.mark.parametrize("strings, constraints",
                          [
-                             ["a b c"],
-                             ["a b c", "f1 f2 f3", "f3 f3 f3"]
+                             (["a b c"], None),
+                             (["a b c", "f1 f2 f3", "f3 f3 f3"], "a"),
                          ])
-def test_make_input_from_multiple_strings(strings):
-    inp = sockeye.inference.make_input_from_multiple_strings(1, strings)
+def test_make_input_from_multiple_strings(strings, constraints):
+    inp = sockeye.inference.make_input_from_multiple_strings(1, strings, constraints)
 
     expected_tokens = list(sockeye.data_io.get_tokens(strings[0]))
     expected_factors = [list(sockeye.data_io.get_tokens(f)) for f in strings[1:]]

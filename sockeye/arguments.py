@@ -1075,6 +1075,12 @@ def add_inference_args(params):
                                     "Optionally, a list of factors can be provided: "
                                     "{'text': 'some input string', 'factors': ['C C C', 'X X X']}.")
 
+    decode_params.add_argument('--input-constraints',
+                               required=False,
+                               type=regular_file(),
+                               default=None,
+                               help='Input file with the constraints for translation. Default: %(default)s.')
+
     decode_params.add_argument(C.INFERENCE_ARG_OUTPUT_LONG, C.INFERENCE_ARG_OUTPUT_SHORT,
                                default=None,
                                help='Output file to write translations to. '

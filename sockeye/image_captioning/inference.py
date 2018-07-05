@@ -14,6 +14,7 @@
 """
 Code for inference/captioning.
 """
+import functools
 import logging
 import os
 from typing import List, Optional, Tuple
@@ -22,6 +23,7 @@ import mxnet as mx
 
 from . import utils as utils_image
 from .. import constants as C
+from .. import data_io
 from .. import lexical_constraints as constrained
 from .. import model
 from .. import utils
@@ -91,18 +93,8 @@ class ImageCaptioner(Translator):
         if self.use_feature_loader:
             self.data_loader = utils_image.load_features
         else:
-            self.data_loader = utils_image.load_preprocess_images
-
-    @staticmethod
-    def make_input(sentence_id: int, sentence: str) -> TranslatorInput:
-        """
-        Returns TranslatorInput from input_string
-
-        :param sentence_id: Input image id.
-        :param sentence: Input image path.
-        :return: Input for translate method.
-        """
-        return TranslatorInput(sentence_id=sentence_id, tokens=[sentence], factors=None)
+            self.data_loader = functools.partial(utils_image.load_preprocess_images,
+                                                 image_size=self.source_image_size)
 
     def translate(self, trans_inputs: List[TranslatorInput]) -> List[TranslatorOutput]:
         """
@@ -122,13 +114,7 @@ class ImageCaptioner(Translator):
             if rest > 0:
                 logger.debug("Extending the last batch to the full batch size (%d)", self.batch_size)
                 batch = batch + [batch[0]] * rest
-            paths = []
-            for b in batch:
-                path = b.tokens[0]
-                if self.source_root is not None:
-                    path = os.path.join(self.source_root, path)
-                paths.append(path)
-            batch_translations = self._translate_nd(*self._get_inference_input(paths))
+            batch_translations = self._translate_nd(*self._get_inference_input(batch))
             # truncate to remove filler translations
             if rest > 0:
                 batch_translations = batch_translations[:-rest]
@@ -140,21 +126,38 @@ class ImageCaptioner(Translator):
             results.append(self._make_result(trans_input, translation))
         return results
 
-    def _get_inference_input(self, image_paths: List[str]) -> Tuple[mx.nd.NDArray,
-                                                                    int,
-                                                                    List[Optional[constrained.RawConstraintList]],
-                                                                    mx.nd.NDArray]:
+    def _get_inference_input(self,
+                             trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray,
+                                                                           int,
+                                                                           List[Optional[constrained.RawConstraintList]],
+                                                                           mx.nd.NDArray]:
         """
         Returns NDArray of images and corresponding bucket_key and an NDArray of maximum output lengths
         for each sentence in the batch.
 
-        :param image_paths: lists of image paths.
-        :return NDArray of images paths, bucket key, a list of raw constraint lists,
+        :param trans_inputs: List of TranslatorInputs. The path of the image/feature is in the token field.
+        :param constraints: Optional list of constraints.
+        :return: NDArray of images paths, bucket key, a list of raw constraint lists,
                 an NDArray of maximum output lengths.
         """
-        ## TODO(bazzanil): support constraints
-        raw_constraints = [None for _ in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
-        images = self.data_loader(image_paths, self.source_image_size)
+
+        image_paths = [None for x in range(self.batch_size)]  # type: List[Optional[str]]
+        raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
+        for j, trans_input in enumerate(trans_inputs):
+            # Join relative path with absolute
+            path = trans_input.tokens[0]
+            if self.source_root is not None:
+                path = os.path.join(self.source_root, path)
+            image_paths[j] = path
+            # Preprocess constraints
+            if trans_input.constraints is not None:
+                raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
+                                      trans_input.constraints]
+
+        # Read data and zero pad if necessary
+        images = self.data_loader(image_paths)
+        images = utils_image.zero_pad_features(images,self.source_image_size)
+
         max_input_length = 0
         max_output_lengths = [self.models[0].get_max_output_length(max_input_length)] * len(image_paths)
         return mx.nd.array(images), max_input_length, raw_constraints, \

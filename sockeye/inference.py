@@ -743,13 +743,16 @@ def make_input_from_factored_string(sentence_id: int,
     return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
 
 
-def make_input_from_multiple_strings(sentence_id: int, strings: List[str]) -> TranslatorInput:
+def make_input_from_multiple_strings(sentence_id: int,
+                                     strings: List[str],
+                                     constraints: str = None) -> TranslatorInput:
     """
     Returns a TranslatorInput object from multiple strings, where the first element corresponds to the surface tokens
     and the remaining elements to additional factors. All strings must parse into token sequences of the same length.
 
     :param sentence_id: An integer id.
     :param strings: A list of strings representing a factored input sequence.
+    :param constraints: A string with constraints.
     :return: A TranslatorInput.
     """
     if not bool(strings):
@@ -757,10 +760,13 @@ def make_input_from_multiple_strings(sentence_id: int, strings: List[str]) -> Tr
 
     tokens = list(data_io.get_tokens(strings[0]))
     factors = [list(data_io.get_tokens(factor)) for factor in strings[1:]]
+    list_constraints = None  # type: Optional[List[Tokens]]
+    if constraints is not None:
+        list_constraints = [list(data_io.get_tokens(constraints))]
     if not all(len(factor) == len(tokens) for factor in factors):
         logger.error("Length of string sequences do not match: '%s'", strings)
         return _bad_input(sentence_id, reason=str(strings))
-    return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
+    return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors, constraints=list_constraints)
 
 
 class TranslatorOutput:

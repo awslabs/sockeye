@@ -164,3 +164,33 @@ def save_feature(path: str,
         np.save(path, data)
         path += ".npy"
     return path
+
+
+def zero_pad_features(feat: List[np.ndarray],
+                      tshape: tuple) -> List[np.ndarray]:
+    """
+    Zero pad to numpy array.
+
+    :param feat: List of numpy arrays.
+    :param tshape: Target shape of each numpy array in the list feat. Note:
+                   tshape should be greater that the largest shapes in feat.
+    :return: A list of padded numpy arrays.
+    """
+    pad_feat = []
+    for f in feat:
+        fshape = f.shape
+        if len(fshape)<len(tshape):  # add extra dimensions
+            for i in range(len(tshape)-len(fshape)):
+                f = np.expand_dims(f, axis=len(f.shape)+1)
+            fshape = f.shape
+        elif len(fshape)>len(tshape):
+            raise ValueError("Provided target shape must be bigger then the original "
+                             "shape. (provided: {}, original {})".format(len(tshape), len(fshape)))
+        diff_shape = np.subtract(tshape, fshape)
+        if np.any(diff_shape<0):
+            raise ValueError("Provided target values must be bigger then the original "
+                             "values for each dimension. (provided: {}, original {})".format(tshape, fshape))
+        diff_shape = [[0, d] for d in diff_shape]  # pad format: ((before_1, after_1), ... (before_N, after_N))
+        p = np.pad(f, diff_shape, 'constant', constant_values=0)
+        pad_feat.append(p)
+    return pad_feat
