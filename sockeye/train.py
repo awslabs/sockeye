@@ -110,6 +110,10 @@ def check_arg_compatibility(args: argparse.Namespace):
         check_condition(args.decoder != C.TRANSFORMER_TYPE or C.LHUC_STATE_INIT not in args.lhuc,
                         "The %s options only applies to RNN models" % C.LHUC_STATE_INIT)
 
+    if args.decoder_only:
+        check_condition(args.decoder != C.TRANSFORMER_TYPE and args.decoder != C.CONVOLUTION_TYPE,
+                        "Decoder pre-training currently supports RNN decoders only.")
+
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     """
@@ -242,10 +246,15 @@ def use_shared_vocab(args: argparse.Namespace) -> bool:
     weight_tying = args.weight_tying
     weight_tying_type = args.weight_tying_type
     shared_vocab = args.shared_vocab
+    decoder_only = args.decoder_only
     if weight_tying and C.WEIGHT_TYING_SRC in weight_tying_type and C.WEIGHT_TYING_TRG in weight_tying_type:
         if not shared_vocab:
             logger.info("A shared source/target vocabulary will be used as weight tying source/target weight tying "
                         "is enabled")
+        shared_vocab = True
+    if decoder_only:
+        if not shared_vocab:
+            logger.info("A shared source/target vocabulary will be used for pre-training the decoder.")
         shared_vocab = True
     return shared_vocab
 
@@ -405,7 +414,16 @@ def create_encoder_config(args: argparse.Namespace,
     num_embed_source, _ = args.num_embed
     config_encoder = None  # type: Optional[Config]
 
-    if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
+    if args.decoder_only:
+        if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
+            encoder_num_hidden = args.transformer_model_size[0]
+        elif args.encoder == C.CONVOLUTION_TYPE:
+            encoder_num_hidden = args.cnn_num_hidden
+        else:
+            encoder_num_hidden = args.rnn_num_hidden
+        config_encoder = encoder.EmptyEncoderConfig(num_embed=num_embed_source,
+                                                    num_hidden=encoder_num_hidden)
+    elif args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
         encoder_transformer_preprocess, _ = args.transformer_preprocess
         encoder_transformer_postprocess, _ = args.transformer_postprocess
         encoder_transformer_model_size = args.transformer_model_size[0]
@@ -485,6 +503,8 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
     config_decoder = None  # type: Optional[Config]
 
     if args.decoder == C.TRANSFORMER_TYPE:
+        if args.decoder_only:
+            raise NotImplementedError()
         _, decoder_transformer_preprocess = args.transformer_preprocess
         _, decoder_transformer_postprocess = args.transformer_postprocess
         config_decoder = transformer.TransformerConfig(
@@ -505,6 +525,8 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
             lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc))
 
     elif args.decoder == C.CONVOLUTION_TYPE:
+        if args.decoder_only:
+            raise NotImplementedError()
         _, cnn_kernel_width_decoder = args.cnn_kernel_width
         convolution_config = convolution.ConvolutionConfig(kernel_width=cnn_kernel_width_decoder,
                                                            num_hidden=args.cnn_num_hidden,
@@ -520,6 +542,14 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
                                                             hidden_dropout=args.cnn_hidden_dropout)
 
     else:
+        if args.decoder_only:
+            args.rnn_decoder_state_init = C.RNN_DEC_INIT_ZERO
+            args.rnn_context_gating = False
+            args.rnn_attention_type = C.ATT_FIXED
+            args.rnn_attention_in_upper_layers = False
+            args.lhuc = None
+            args.rnn_enc_last_hidden_concat_to_embedding = False
+
         rnn_attention_num_hidden = args.rnn_num_hidden if args.rnn_attention_num_hidden is None else args.rnn_attention_num_hidden
         config_coverage = None
         if args.rnn_attention_type == C.ATT_COV:
@@ -785,7 +815,7 @@ def train(args: argparse.Namespace):
         args.output = temp_dir.name
         args.max_updates = 0
 
-    utils.seedRNGs(args.seed)
+    utils.seed_rngs(args.seed)
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)

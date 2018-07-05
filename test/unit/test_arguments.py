@@ -126,7 +126,8 @@ def test_model_parameters(test_params, expected_params):
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('', dict(batch_size=4096,
+    ('', dict(decoder_only=False,
+              batch_size=4096,
               batch_type="word",
               fill_up='replicate',
               loss=C.CROSS_ENTROPY,

@@ -38,7 +38,7 @@ def prepare_data(args: argparse.Namespace):
     global logger
     logger = setup_main_logger(__name__, file_logging=True, path=os.path.join(output_folder, C.LOG_NAME))
 
-    utils.seedRNGs(args.seed)
+    utils.seed_rngs(args.seed)
 
     minimum_num_shards = args.min_num_shards
     samples_per_shard = args.num_samples_per_shard

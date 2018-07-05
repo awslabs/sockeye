@@ -22,10 +22,10 @@ import sockeye.constants as C
 import sockeye.data_io
 import sockeye.image_captioning.data_io as data_io
 from sockeye import vocab
-from sockeye.utils import seedRNGs
+from sockeye.utils import seed_rngs
 from test.common_image_captioning import generate_img_or_feat, tmp_img_captioning_dataset, _FEATURE_SHAPE, _CNN_INPUT_IMAGE_SHAPE
 
-seedRNGs(12)
+seed_rngs(12)
 
 
 @pytest.mark.parametrize("source_list, target_sentences, num_samples_per_bucket, expected_source_0, expected_target_0, expected_label_0",

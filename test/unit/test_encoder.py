@@ -144,6 +144,19 @@ def test_get_convolutional_encoder():
     assert encoder.encoders[1].__dict__.items() >= dict(dtype='float16').items()
 
 
+def test_get_empty_encoder():
+    config = sockeye.encoder.EmptyEncoderConfig(num_embed=_NUM_EMBED,
+                                                num_hidden=10,
+                                                dtype='float16')
+    encoder = sockeye.encoder.EncoderSequence([sockeye.encoder.EmptyEncoder(config)], config.dtype)
+
+    assert type(encoder) == sockeye.encoder.EncoderSequence
+    assert len(encoder.encoders) == 1
+
+    assert type(encoder.encoders[0]) == sockeye.encoder.EmptyEncoder
+    assert encoder.encoders[0].__dict__.items() >= dict(num_embed=_NUM_EMBED, num_hidden=10, dtype='float16').items()
+
+
 @pytest.mark.parametrize("config, out_data_shape, out_data_length, out_seq_len", [
     (sockeye.encoder.ConvolutionalEmbeddingConfig(num_embed=_NUM_EMBED,
                                                   output_dim=None,
