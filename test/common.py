@@ -218,7 +218,7 @@ _TRAIN_PARAMS_COMMON = "--use-cpu --max-seq-len {max_len} --source {train_source
                        " --seed {seed}"
 
 _PREPARE_DATA_COMMON = " --max-seq-len {max_len} --source {train_source} --target {train_target}" \
-                       " --output {output} {quiet}"
+                       " --output {output} {quiet} --pad-vocab-to-multiple-of 16"
 
 _TRAIN_WITH_FACTORS_COMMON = " --source-factors {source_factors}"
 _DEV_WITH_FACTORS_COMMON = " --validation-source-factors {dev_source_factors}"

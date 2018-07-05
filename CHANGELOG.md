@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.32]
+### Added
+- Added option to pad vocabulary to a multiple of x: e.g. `--pad-vocab-to-multiple-of 16`.
+
 ## [1.18.31]
 ### Added
 - Pre-training the RNN decoder. Usage:
