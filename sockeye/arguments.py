@@ -483,6 +483,10 @@ def add_vocab_args(params):
                         type=multiple_values(num_values=2, greater_or_equal=1),
                         default=(1, 1),
                         help='Minimum frequency of words to be included in vocabularies. Default: %(default)s.')
+    params.add_argument('--pad-vocab-to-multiple-of',
+                        type=int,
+                        default=None,
+                        help='Pad vocabulary to a multiple of this integer. Default: %(default)s.')
 
 
 def add_model_parameters(params):
