@@ -1255,7 +1255,13 @@ class Translator:
 
             # There may be some out-of-bounds (OOB) words pointed to, so handle this with a dict
             source_inv = dict((x, y) for x, y in enumerate(trans_input.tokens))
-            target_tokens = [self.vocab_target_inv.get(target_id, source_inv.get(target_id - len(self.vocab_target), 'OOB')) for target_id in target_ids]
+            def id2str(word_id: int):
+                if word_id > len(self.vocab_target):
+                    word_id = word_id - len(self.vocab_target) - 1
+                    return '{}/{}'.format(source_inv.get(word_id, 'OOB'), word_id)
+                else:
+                    return self.vocab_target_inv.get(word_id)
+            target_tokens = [id2str(target_id) for target_id in target_ids]
         else:
             target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
 
