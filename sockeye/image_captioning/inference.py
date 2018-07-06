@@ -143,6 +143,7 @@ class ImageCaptioner(Translator):
     def _get_inference_input(self, image_paths: List[str]) -> Tuple[mx.nd.NDArray,
                                                                     int,
                                                                     List[Optional[constrained.RawConstraintList]],
+                                                                    List[Optional[constrained.RawConstraintList]],
                                                                     mx.nd.NDArray]:
         """
         Returns NDArray of images and corresponding bucket_key and an NDArray of maximum output lengths
@@ -153,12 +154,12 @@ class ImageCaptioner(Translator):
                 an NDArray of maximum output lengths.
         """
         ## TODO(bazzanil): support constraints
-        raw_constraints = [None for _ in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
+        raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
+        raw_avoid_list = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
         images = self.data_loader(image_paths, self.source_image_size)
         max_input_length = 0
         max_output_lengths = [self.models[0].get_max_output_length(max_input_length)] * len(image_paths)
-        return mx.nd.array(images), max_input_length, raw_constraints, \
-               mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
+        return mx.nd.array(images), max_input_length, raw_constraints, raw_avoid_list, mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
 
 
 def load_models(context: mx.context.Context,

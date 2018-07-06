@@ -208,6 +208,7 @@ def test_training_arg(test_params, expected_params):
                       max_input_len=None,
                       restrict_lexicon=None,
                       restrict_lexicon_topk=None,
+                      avoid_list=None,
                       softmax_temperature=None,
                       output_type='translation',
                       sure_align_threshold=0.9,

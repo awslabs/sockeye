@@ -1000,7 +1000,6 @@ def strids2ids(tokens: Iterable[str]) -> List[int]:
     """
     Returns sequence of integer ids given a sequence of string ids.
 
-
     :param tokens: List of integer tokens.
     :return: List of word ids.
     """

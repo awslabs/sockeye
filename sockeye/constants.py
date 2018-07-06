@@ -195,6 +195,7 @@ BEAM_SEARCH_STOP_ALL = 'all'
 JSON_TEXT_KEY = "text"
 JSON_FACTORS_KEY = "factors"
 JSON_CONSTRAINTS_KEY = "constraints"
+JSON_AVOID_KEY = "avoid"
 JSON_ENCODING = "utf-8"
 
 # Lexical constraints
