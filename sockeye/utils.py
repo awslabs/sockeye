@@ -482,6 +482,37 @@ def log_gpu_memory_usage(memory_data: Dict[int, Tuple[int, int]]):
     logger.info(log_str)
 
 
+def determine_context(device_ids: List[int],
+                      use_cpu: bool,
+                      disable_device_locking: bool,
+                      lock_dir: str,
+                      exit_stack: ExitStack) -> List[mx.Context]:
+    """
+    Determine the MXNet context to run on (CPU or GPU).
+
+    :param device_ids: List of device as defined from the CLI.
+    :param use_cpu: Whether to use the CPU instead of GPU(s).
+    :param disable_device_locking: Disable Sockeye's device locking feature.
+    :param lock_dir: Directory to place device lock files in.
+    :param exit_stack: An ExitStack from contextlib.
+    :return: A list with the context(s) to run on.
+    """
+    if use_cpu:
+        context = [mx.cpu()]
+    else:
+        num_gpus = get_num_gpus()
+        check_condition(num_gpus >= 1,
+                        "No GPUs found, consider running on the CPU with --use-cpu "
+                        "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
+                        "binary isn't on the path).")
+        if disable_device_locking:
+            context = expand_requested_device_ids(device_ids)
+        else:
+            context = exit_stack.enter_context(acquire_gpus(device_ids, lock_dir=lock_dir))
+        context = [mx.gpu(gpu_id) for gpu_id in context]
+    return context
+
+
 def expand_requested_device_ids(requested_device_ids: List[int]) -> List[int]:
     """
     Transform a list of device id requests to concrete device ids. For example on a host with 8 GPUs when requesting
@@ -493,6 +524,8 @@ def expand_requested_device_ids(requested_device_ids: List[int]) -> List[int]:
     :return: A list of device ids.
     """
     num_gpus_available = get_num_gpus()
+    if "CUDA_VISIBLE_DEVICES" in os.environ:
+        logger.warning("Sockeye currently does not respect CUDA_VISIBLE_DEVICE settings when locking GPU devices.")
     return _expand_requested_device_ids(requested_device_ids, num_gpus_available)
 
 
@@ -519,7 +552,7 @@ def _expand_requested_device_ids(requested_device_ids: List[int], num_gpus_avail
 @contextmanager
 def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
                  retry_wait_min: int = 10, retry_wait_rand: int = 60,
-                 num_gpus_available: Optional[int]=None):
+                 num_gpus_available: Optional[int] = None):
     """
     Acquire a number of GPUs in a transactional way. This method should be used inside a `with` statement.
     Will try to acquire all the requested number of GPUs. If currently
