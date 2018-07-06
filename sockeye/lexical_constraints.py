@@ -166,12 +166,12 @@ class AvoidBatch:
             for raw_phrases in avoid_list:
                 self.local_avoid_states += [AvoidState(AvoidTrie(raw_phrases))] * beam_size
 
-    def reorder(self, indices: mx.nd.array) -> None:
+    def reorder(self, indices: mx.nd.NDArray) -> None:
         """
         Reorders the avoid list according to the selected row indices.
         This can produce duplicates, but this is fixed if state changes occur in consume().
 
-        :param indices: An mx.nd.array containing indices of hypotheses to select.
+        :param indices: An mx.nd.NDArray containing indices of hypotheses to select.
         """
         if self.global_avoid_states:
             self.global_avoid_states = [self.global_avoid_states[x] for x in indices.asnumpy()]
@@ -179,7 +179,7 @@ class AvoidBatch:
         if self.local_avoid_states:
             self.local_avoid_states = [self.local_avoid_states[x] for x in indices.asnumpy()]
 
-    def consume(self, word_ids: mx.nd.array) -> None:
+    def consume(self, word_ids: mx.nd.NDArray) -> None:
         """
         Consumes a word for each trie, updating respective states.
 
@@ -471,13 +471,13 @@ class ConstrainedCandidate:
 
 def topk(batch_size: int,
          beam_size: int,
-         inactive: mx.ndarray,
-         scores: mx.ndarray,
+         inactive: mx.nd.NDArray,
+         scores: mx.nd.NDArray,
          hypotheses: List[ConstrainedHypothesis],
-         best_ids: mx.ndarray,
-         best_word_ids: mx.ndarray,
-         seq_scores: mx.ndarray,
-         context: mx.context.Context) -> Tuple[np.array, np.array, np.array, List[ConstrainedHypothesis], mx.nd.array]:
+         best_ids: mx.nd.NDArray,
+         best_word_ids: mx.nd.NDArray,
+         seq_scores: mx.nd.NDArray,
+         context: mx.context.Context) -> Tuple[np.array, np.array, np.array, List[ConstrainedHypothesis], mx.nd.NDArray]:
     """
     Builds a new topk list such that the beam contains hypotheses having completed different numbers of constraints.
     These items are built from three different types: (1) the best items across the whole
@@ -520,13 +520,13 @@ def topk(batch_size: int,
 
 
 def _topk(beam_size: int,
-          inactive: mx.ndarray,
-          scores: mx.ndarray,
+          inactive: mx.nd.NDArray,
+          scores: mx.nd.NDArray,
           hypotheses: List[ConstrainedHypothesis],
-          best_ids: mx.ndarray,
-          best_word_ids: mx.ndarray,
-          sequence_scores: mx.ndarray,
-          context: mx.context.Context) -> Tuple[np.array, np.array, np.array, List[ConstrainedHypothesis], mx.nd.array]:
+          best_ids: mx.nd.NDArray,
+          best_word_ids: mx.nd.NDArray,
+          sequence_scores: mx.nd.NDArray,
+          context: mx.context.Context) -> Tuple[np.array, np.array, np.array, List[ConstrainedHypothesis], mx.nd.NDArray]:
     """
     Builds a new topk list such that the beam contains hypotheses having completed different numbers of constraints.
     These items are built from three different types: (1) the best items across the whole
@@ -559,7 +559,7 @@ def _topk(beam_size: int,
 
     # For each hypothesis, we add (2) all the constraints that could follow it and
     # (3) the best item (constrained or not) in that row
-    best_next = mx.ndarray.argmin(scores, axis=1)
+    best_next = mx.nd.NDArray.argmin(scores, axis=1)
     for row in range(beam_size):
         if inactive[row]:
             continue
