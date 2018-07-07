@@ -12,21 +12,23 @@
 # permissions and limitations under the License.
 
 """
-Evaluation CLI. Prints corpus BLEU
+Evaluation CLI.
 """
 import argparse
 import logging
 import sys
-import numpy as np
-from typing import Iterable, Optional
 from collections import defaultdict
+from functools import partial
+from typing import Callable, Iterable, Dict, List, Tuple, Optional
+
+import numpy as np
 
 from contrib import sacrebleu, rouge
-from sockeye.log import setup_main_logger, log_sockeye_version
 from . import arguments
 from . import constants as C
 from . import data_io
 from . import utils
+from .log import setup_main_logger, log_sockeye_version
 
 logger = setup_main_logger(__name__, file_logging=False)
 
@@ -54,35 +56,39 @@ def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> flo
     return sacrebleu.corpus_chrf(hypotheses, references, order=sacrebleu.CHRF_ORDER, beta=sacrebleu.CHRF_BETA,
                                  remove_whitespace=True)
 
-def raw_corpus_rouge1(hypotheses: Iterable[str], references: Iterable[str]) -> float:
-     """
-     Simple wrapper around ROUGE-1 implementation.
 
-     :param hypotheses: Hypotheses stream.
-     :param references: Reference stream.
-     :return: ROUGE-1 score as float between 0 and 1.
-     """
-     return rouge.rouge_1(hypotheses, references)
+def raw_corpus_rouge1(hypotheses: Iterable[str], references: Iterable[str]) -> float:
+    """
+    Simple wrapper around ROUGE-1 implementation.
+
+    :param hypotheses: Hypotheses stream.
+    :param references: Reference stream.
+    :return: ROUGE-1 score as float between 0 and 1.
+    """
+    return rouge.rouge_1(hypotheses, references)
+
 
 def raw_corpus_rouge2(hypotheses: Iterable[str], references: Iterable[str]) -> float:
-      """
-      Simple wrapper around ROUGE-2 implementation.
+    """
+    Simple wrapper around ROUGE-2 implementation.
 
-      :param hypotheses: Hypotheses stream.
-      :param references: Reference stream.
-      :return: ROUGE-2 score as float between 0 and 1.
-      """
-      return rouge.rouge_2(hypotheses, references)
+    :param hypotheses: Hypotheses stream.
+    :param references: Reference stream.
+    :return: ROUGE-2 score as float between 0 and 1.
+    """
+    return rouge.rouge_2(hypotheses, references)
+
 
 def raw_corpus_rougel(hypotheses: Iterable[str], references: Iterable[str]) -> float:
-      """
-      Simple wrapper around ROUGE-1 implementation.
+    """
+    Simple wrapper around ROUGE-1 implementation.
 
-      :param hypotheses: Hypotheses stream.
-      :param references: Reference stream.
-      :return: ROUGE-L score as float between 0 and 1.
-      """
-      return rouge.rouge_l(hypotheses, references)
+    :param hypotheses: Hypotheses stream.
+    :param references: Reference stream.
+    :return: ROUGE-L score as float between 0 and 1.
+    """
+    return rouge.rouge_l(hypotheses, references)
+
 
 def main():
     params = argparse.ArgumentParser(description='Evaluate translations by calculating metrics with '
@@ -103,55 +109,56 @@ def main():
 
     references = [' '.join(e) for e in data_io.read_content(args.references)]
     all_hypotheses = [[h.strip() for h in hypotheses] for hypotheses in args.hypotheses]
-    metrics = args.metrics
-    logger.info("%d hypotheses | %d references", len(all_hypotheses), len(references))
-
     if not args.not_strict:
         for hypotheses in all_hypotheses:
             utils.check_condition(len(hypotheses) == len(references),
                                   "Number of hypotheses (%d) and references (%d) does not match." % (len(hypotheses),
                                                                                                      len(references)))
-    metric_info = []
-    for metric in metrics:
-        metric_info.append("%s\t(s_opt)" % metric)
+    logger.info("%d hypothesis set(s) | %d hypotheses | %d references",
+                len(all_hypotheses), len(all_hypotheses[0]), len(references))
+
+    metric_info = ["%s\t(s_opt)" % name for name in args.metrics]
     logger.info("\t".join(metric_info))
 
+    metrics = []  # type: List[Tuple[str, Callable]]
+    for name in args.metrics:
+        if name == C.BLEU:
+            metrics.append((C.BLEU, partial(raw_corpus_bleu, offset=args.offset)))
+        elif name == C.CHRF:
+            metrics.append((C.CHRF, raw_corpus_chrf))
+        elif name == C.ROUGE1:
+            metrics.append((C.ROUGE1, raw_corpus_rouge1))
+        elif name == C.ROUGE2:
+            metrics.append((C.ROUGE2, raw_corpus_rouge2))
+        elif name == C.ROUGEL:
+            metrics.append((C.ROUGEL, raw_corpus_rougel))
+        else:
+            raise ValueError("Unknown metric %s." % name)
+
     if not args.sentence:
-        scores = defaultdict(list)
+        scores = defaultdict(list)  # type: Dict[str, List[float]]
         for hypotheses in all_hypotheses:
-            for metric in metrics:
-                if metric == C.BLEU:
-                    score = raw_corpus_bleu(hypotheses, references, args.offset)
-                elif metric == C.CHRF:
-                    score = raw_corpus_chrf(hypotheses, references)
-                else:
-                    raise ValueError("Unknown metric %s." % metric)
-                scores[metric].append(score)
+            for name, metric in metrics:
+                scores[name].append(metric(hypotheses, references))
         _print_mean_std_score(metrics, scores)
     else:
         for hypotheses in all_hypotheses:
             for h, r in zip(hypotheses, references):
-                scores = defaultdict(list)
-                for metric in metrics:
-                    if metric == C.BLEU:
-                        score = raw_corpus_bleu([h], [r], args.offset)
-                    elif metric == C.CHRF:
-                        score = raw_corpus_chrf(h, r)
-                    else:
-                        raise ValueError("Unknown metric %s." % metric)
-                    scores[metric].append(score)
+                scores = defaultdict(list)  # type: Dict[str, List[float]]
+                for name, metric in metrics:
+                    scores[name].append(metric([h], [r]))
                 _print_mean_std_score(metrics, scores)
 
 
-def _print_mean_std_score(metrics, scores):
-    scores_mean_std = []
-    for metric in metrics:
-        if len(scores[metric]) > 1:
-            score_mean = np.asscalar(np.mean(scores[metric]))
-            score_std = np.asscalar(np.std(scores[metric], ddof=1))
+def _print_mean_std_score(metrics: List[Tuple[str, Callable]], scores: Dict[str, List[float]]):
+    scores_mean_std = []  # type: List[str]
+    for name, _ in metrics:
+        if len(scores[name]) > 1:
+            score_mean = np.asscalar(np.mean(scores[name]))
+            score_std = np.asscalar(np.std(scores[name], ddof=1))
             scores_mean_std.append("%.3f\t%.3f" % (score_mean, score_std))
         else:
-            score = scores[metric][0]
+            score = scores[name][0]
             scores_mean_std.append("%.3f\t(-)" % score)
     print("\t".join(scores_mean_std))
 
