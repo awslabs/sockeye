@@ -123,17 +123,18 @@ def main():
     metrics = []  # type: List[Tuple[str, Callable]]
     for name in args.metrics:
         if name == C.BLEU:
-            metrics.append((C.BLEU, partial(raw_corpus_bleu, offset=args.offset)))
+            func = partial(raw_corpus_bleu, offset=args.offset)
         elif name == C.CHRF:
-            metrics.append((C.CHRF, raw_corpus_chrf))
+            func = raw_corpus_chrf
         elif name == C.ROUGE1:
-            metrics.append((C.ROUGE1, raw_corpus_rouge1))
+            func = raw_corpus_rouge1
         elif name == C.ROUGE2:
-            metrics.append((C.ROUGE2, raw_corpus_rouge2))
+            func = raw_corpus_rouge2
         elif name == C.ROUGEL:
-            metrics.append((C.ROUGEL, raw_corpus_rougel))
+            func = raw_corpus_rougel
         else:
             raise ValueError("Unknown metric %s." % name)
+        metrics.append((name, func))
 
     if not args.sentence:
         scores = defaultdict(list)  # type: Dict[str, List[float]]
