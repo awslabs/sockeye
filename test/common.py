@@ -459,11 +459,11 @@ def run_train_translate(train_params: str,
         if restrict_lexicon:
             bleu_restrict = raw_corpus_bleu(hypotheses=hypotheses, references=references, offset=0.01)
 
-        # Run BLEU cli
+        # Run evaluate cli
         eval_params = "{} {} ".format(sockeye.evaluate.__file__,
                                       _EVAL_PARAMS_COMMON.format(hypotheses=out_path,
                                                                  references=test_target_path,
-                                                                 metrics="bleu chrf",
+                                                                 metrics="bleu chrf rouge1",
                                                                  quiet=quiet_arg), )
         with patch.object(sys, "argv", eval_params.split()):
             sockeye.evaluate.main()
