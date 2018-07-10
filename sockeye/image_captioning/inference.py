@@ -130,6 +130,7 @@ class ImageCaptioner(Translator):
                              trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray,
                                                                            int,
                                                                            List[Optional[constrained.RawConstraintList]],
+                                                                           List[Optional[constrained.RawConstraintList]],                                                                           
                                                                            mx.nd.NDArray]:
         """
         Returns NDArray of images and corresponding bucket_key and an NDArray of maximum output lengths
@@ -143,6 +144,7 @@ class ImageCaptioner(Translator):
 
         image_paths = [None for x in range(self.batch_size)]  # type: List[Optional[str]]
         raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
+        raw_avoid_list = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
         for j, trans_input in enumerate(trans_inputs):
             # Join relative path with absolute
             path = trans_input.tokens[0]
@@ -160,7 +162,7 @@ class ImageCaptioner(Translator):
 
         max_input_length = 0
         max_output_lengths = [self.models[0].get_max_output_length(max_input_length)] * len(image_paths)
-        return mx.nd.array(images), max_input_length, raw_constraints, \
+        return mx.nd.array(images), max_input_length, raw_constraints, raw_avoid_list, \
                mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
 
 

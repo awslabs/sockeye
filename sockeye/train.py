@@ -354,7 +354,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 num_words_source=num_words_source,
                 num_words_target=num_words_target,
                 word_min_count_source=word_min_count_source,
-                word_min_count_target=word_min_count_target)
+                word_min_count_target=word_min_count_target,
+                pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
         check_condition(len(args.source_factors) == len(args.source_factors_num_embed),
                         "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (

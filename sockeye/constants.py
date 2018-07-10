@@ -22,6 +22,7 @@ EOS_SYMBOL = "</s>"
 UNK_SYMBOL = "<unk>"
 PAD_SYMBOL = "<pad>"
 PAD_ID = 0
+PAD_FORMAT = "<pad%d>"
 TOKEN_SEPARATOR = " "
 VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
 # reserve extra space for the EOS or BOS symbol that is added to both source and target
@@ -194,6 +195,7 @@ BEAM_SEARCH_STOP_ALL = 'all'
 JSON_TEXT_KEY = "text"
 JSON_FACTORS_KEY = "factors"
 JSON_CONSTRAINTS_KEY = "constraints"
+JSON_AVOID_KEY = "avoid"
 JSON_ENCODING = "utf-8"
 
 # Lexical constraints
