@@ -58,6 +58,7 @@ class ConvolutionConfig(Config):
     def effective_kernel_size(self):
         return self.kernel_width + (self.dilate - 1) * (self.kernel_width - 1)
 
+
 class ConvolutionBlock:
     """
     A Convolution-GLU block consists of the 2 following sublayers:
