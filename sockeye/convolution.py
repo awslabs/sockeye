@@ -31,12 +31,15 @@ class ConvolutionConfig(Config):
     :param kernel_width: Kernel size for 1D convolution.
     :param num_hidden: Size of hidden representation after convolution.
     :param act_type: The type of activation to use.
+    :param dropout: The dropout rate.
+    :param dilate: Dilation rate.
+    :param stride: Kernel window stride.
+    :param weight_normalization: If True weight normalization is applied.
     """
 
     def __init__(self,
                  kernel_width: int,
                  num_hidden: int,
-                 input_num_hidden: int,
                  act_type: str = C.GLU,
                  dropout: float = 0.0,
                  dilate: int = 1,
@@ -45,7 +48,6 @@ class ConvolutionConfig(Config):
         super().__init__()
         self.kernel_width = kernel_width
         self.num_hidden = num_hidden
-        self.input_num_hidden = input_num_hidden
         utils.check_condition(act_type in C.CNN_ACTIVATION_TYPES, "Unknown activation %s." % act_type)
         self.act_type = act_type
         self.dropout = dropout
@@ -274,7 +276,8 @@ class ConvolutionalEncoderLayer(layers.EncoderLayer):
 
 class ConvolutionalDecoderLayer(layers.DecoderLayer):
 
-    def __init__(self, cnn_config: ConvolutionConfig, prefix: str):
+    def __init__(self, input_num_hidden: int, cnn_config: ConvolutionConfig, prefix: str):
+        self.input_num_hidden = input_num_hidden
         self.prefix = prefix
         self.cnn_config = cnn_config
         self.cnn_block = ConvolutionBlock(self.cnn_config, pad_type=C.CNN_PAD_LEFT, prefix=prefix)
@@ -318,7 +321,7 @@ class ConvolutionalDecoderLayer(layers.DecoderLayer):
                      target_max_length: int,
                      source_encoded_max_length: int,
                      source_encoded_num_hidden: int):
-        input_num_hidden = self.cnn_config.input_num_hidden
+        input_num_hidden = self.input_num_hidden
         kernel_width = self.cnn_config.effective_kernel_size()
         return [mx.io.DataDesc("%s_conv_state" % self.prefix,
                                shape=(batch_size, kernel_width - 1, input_num_hidden),
@@ -329,7 +332,7 @@ class ConvolutionalDecoderLayer(layers.DecoderLayer):
                     source_encoded: mx.sym.Symbol,
                     source_encoded_lengths: mx.sym.Symbol,
                     source_encoded_max_length: int):
-        input_num_hidden = self.cnn_config.input_num_hidden
+        input_num_hidden = self.input_num_hidden
         kernel_width = self.cnn_config.effective_kernel_size()
         return [mx.sym.zeros(shape=(batch_size, kernel_width - 1, input_num_hidden),
                              name="%s_conv_state" % self.prefix)]
@@ -360,7 +363,6 @@ class ConvolutionalLayerConfig(layers.LayerConfig):
     def create_encoder_layer(self, input_num_hidden: int, prefix: str) -> layers.EncoderLayer:
         cnn_config = ConvolutionConfig(kernel_width=self.kernel_width,
                                        num_hidden=self.num_hidden,
-                                       input_num_hidden=input_num_hidden,
                                        dropout=self.dropout,
                                        dilate=self.dilate,
                                        stride=self.stride,
@@ -371,11 +373,11 @@ class ConvolutionalLayerConfig(layers.LayerConfig):
         assert self.stride == 1, "Stride only supported on the encoder side."
         cnn_config = ConvolutionConfig(kernel_width=self.kernel_width,
                                        num_hidden=self.num_hidden,
-                                       input_num_hidden=input_num_hidden,
                                        dropout=self.dropout,
                                        dilate=self.dilate,
                                        act_type=self.act_type)
-        return ConvolutionalDecoderLayer(cnn_config, prefix=prefix + "cnn_")
+        return ConvolutionalDecoderLayer(input_num_hidden=input_num_hidden, cnn_config=cnn_config,
+                                         prefix=prefix + "cnn_")
 
 
 class PoolingEncoderLayer(layers.EncoderLayer):
@@ -447,7 +449,7 @@ class PoolingLayerConfig(layers.LayerConfig):
                                    pool_type=self.pool_type)
 
     def create_decoder_layer(self, input_num_hidden: int, prefix: str) -> layers.DecoderLayer:
-        raise NotImplemented("Pooling only available on the encoder side.")
+        raise NotImplementedError("Pooling only available on the encoder side.")
 
 
 class QRNNBlock:
@@ -491,6 +493,7 @@ class QRNNBlock:
         data_conv = mx.sym.transpose(data_conv, axes=(0, 2, 1))
 
         # 2 * (batch_size, seq_len, num_hidden)
+        # pylint: disable=unbalanced-tuple-unpacking
         out, f_gates = mx.sym.split(data_conv, num_outputs=2, axis=2)
         out = mx.sym.Activation(data=out, act_type=self.act_type)
         f_gates = mx.sym.Activation(data=f_gates, act_type="sigmoid")
@@ -500,6 +503,7 @@ class QRNNBlock:
         # accumulate hidden state
         hidden = mx.sym.zeros(shape=(0, self.num_hidden))
         hiddens = []
+
         for f_gate, out in zip(mx.sym.split(f_gates, num_outputs=seq_len, axis=1, squeeze_axis=True),
                                mx.sym.split(gated_out, num_outputs=seq_len, axis=1, squeeze_axis=True)):
             hidden = f_gate * hidden + out
@@ -529,6 +533,7 @@ class QRNNBlock:
                                           bias=self.conv_bias,
                                           num_hidden=num_out * self.num_hidden)
         # TODO: refactor post FC code into a function to be shared by decode_step and decode_sequence
+        # pylint: disable=unbalanced-tuple-unpacking
         out, f_gates = mx.sym.split(data_conv, num_outputs=2, axis=1)
 
         out = mx.sym.Activation(data=out, act_type=self.act_type)

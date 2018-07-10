@@ -269,7 +269,7 @@ class TransformerDecoder(Decoder):
         source_bias = mx.sym.expand_dims(source_bias, axis=1)
 
         # (1, target_max_length, target_max_length)
-        target_bias = transformer.get_autoregressive_bias(target_embed_max_length, name="%starget_bias" % self.prefix)
+        target_bias = layers.get_autoregressive_bias(target_embed_max_length, name="%starget_bias" % self.prefix)
 
         # target: (batch_size, target_max_length, model_size)
         target, _, target_max_length = self.pos_embedding.encode(target_embed, None, target_embed_max_length)
@@ -328,7 +328,7 @@ class TransformerDecoder(Decoder):
 
         # auto-regressive bias for last position in sequence
         # (1, target_max_length, target_max_length)
-        target_bias = transformer.get_autoregressive_bias(step, name="%sbias" % self.prefix)
+        target_bias = layers.get_autoregressive_bias(step, name="%sbias" % self.prefix)
         target_bias = mx.sym.slice_axis(target_bias, axis=1, begin=-1, end=step)
 
         new_states = [source_encoded, source_encoded_lengths]

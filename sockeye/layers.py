@@ -537,6 +537,8 @@ class FeedForwardBlock(StatelessBlock):
         if self.act_type == C.GLU:
             # GLU
             # two times: (batch_size, seq_len, num_hidden)
+
+            # pylint: disable=unbalanced-tuple-unpacking
             gate_a, gate_b = mx.sym.split(h, num_outputs=2, axis=2)
             # (batch_size, seq_len, num_hidden)
             h = mx.sym.broadcast_mul(gate_a,
@@ -1071,7 +1073,7 @@ class MultiHeadSourceAttentionLayerConfig(LayerConfig):
         self.head_dropout = head_dropout
 
     def create_encoder_layer(self, input_num_hidden: int, prefix: str) -> EncoderLayer:
-        raise NotImplemented("Source attention is only availabe on the decoder side.")
+        raise NotImplementedError("Source attention is only availabe on the decoder side.")
 
     def create_decoder_layer(self, input_num_hidden: int, prefix: str) -> DecoderLayer:
         return MultiHeadSourceAttentionDecoderLayer(num_hidden=self.num_hidden,
