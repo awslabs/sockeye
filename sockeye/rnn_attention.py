@@ -645,7 +645,7 @@ class MlpAttention(Attention):
         # layer normalization
         self._ln = None
         if layer_normalization:
-            self._ln = layers.LayerNormalization(prefix="%snorm" % self.prefix)
+            self._ln = layers.LayerNormalization(prefix="%snorm" % self.prefix, num_hidden=num_hidden)
 
     def on(self, source: mx.sym.Symbol, source_length: mx.sym.Symbol, source_seq_len: int) -> Callable:
         """

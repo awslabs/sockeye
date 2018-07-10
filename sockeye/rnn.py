@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -38,6 +38,7 @@ class RNNConfig(Config):
            Default is to start at the second layer.
     :param forget_bias: Initial value of forget biases.
     :param lhuc: Apply LHUC (Vilar 2018) to the hidden units of the RNN.
+    :param chrono_init: Use the chrono initializer for the Janet RNN cell.
     :param dtype: Data type.
     """
 
@@ -52,6 +53,7 @@ class RNNConfig(Config):
                  first_residual_layer: int = 2,
                  forget_bias: float = 0.0,
                  lhuc: bool = False,
+                 chrono_init: bool = False,
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.cell_type = cell_type
@@ -64,6 +66,7 @@ class RNNConfig(Config):
         self.first_residual_layer = first_residual_layer
         self.forget_bias = forget_bias
         self.lhuc = lhuc
+        self.chrono_init = chrono_init
         self.dtype = dtype
 
 
@@ -115,6 +118,72 @@ class ResidualCellParallelInput(mx.rnn.ResidualCell):
         return output, states
 
 
+def get_rnn_cell(
+        cell_type: str,
+        num_hidden: int,
+        dropout_inputs: float,
+        dropout_states: float,
+        dropout_recurrent: float = 0,
+        forget_bias: float = 0.0,
+        lhuc: bool = False,
+        chrono_init: bool = False,
+        dtype: str = C.DTYPE_FP32,
+        prefix: str = ''):
+    """
+    Create a single rnn cell.
+    :param cell_type: RNN cell type.
+    :param num_hidden: Number of RNN hidden units.
+    :param num_layers: Number of RNN layers.
+    :param dropout_inputs: Dropout probability on RNN inputs (Gal, 2015).
+    :param dropout_states: Dropout probability on RNN states (Gal, 2015).
+    :param dropout_recurrent: Dropout probability on cell update (Semeniuta, 2016).
+    :param residual: Whether to add residual connections between multi-layered RNNs.
+    :param first_residual_layer: First layer with a residual connection (1-based indexes).
+           Default is to start at the second layer.
+    :param forget_bias: Initial value of forget biases.
+    :param lhuc: Apply LHUC (Vilar 2018) to the hidden units of the RNN.
+    :param chrono_init: Use the chrono initializer for the Janet RNN cell.
+    :param dtype: Data type.
+    :param prefix: Variable name prefix.
+    """
+    # fhieber: the 'l' in the prefix does NOT stand for 'layer' but for the direction 'l' as in mx.rnn.rnn_cell::517
+    # this ensures parameter name compatibility of training w/ FusedRNN and decoding with 'unfused' RNN.
+    cell_prefix = "%sl_" % prefix
+    if cell_type == C.LSTM_TYPE:
+        if dropout_recurrent > 0.0:
+            cell = RecurrentDropoutLSTMCell(num_hidden=num_hidden,
+                                            prefix=cell_prefix,
+                                            forget_bias=forget_bias,
+                                            dropout=dropout_recurrent)
+        else:
+            cell = mx.rnn.LSTMCell(num_hidden=num_hidden, prefix=cell_prefix, forget_bias=forget_bias)
+    elif cell_type == C.LNLSTM_TYPE:
+        cell = LayerNormLSTMCell(num_hidden=num_hidden, prefix=cell_prefix, forget_bias=forget_bias)
+    elif cell_type == C.LNGLSTM_TYPE:
+        cell = LayerNormPerGateLSTMCell(num_hidden=num_hidden, prefix=cell_prefix,
+                                        forget_bias=forget_bias)
+    elif cell_type == C.GRU_TYPE:
+        cell = mx.rnn.GRUCell(num_hidden=num_hidden, prefix=cell_prefix)
+    elif cell_type == C.LNGRU_TYPE:
+        cell = LayerNormGRUCell(num_hidden=num_hidden, prefix=cell_prefix)
+    elif cell_type == C.LNGGRU_TYPE:
+        cell = LayerNormPerGateGRUCell(num_hidden=num_hidden, prefix=cell_prefix)
+    elif cell_type == "simple":
+        cell = JanetCell(num_hidden=num_hidden, chrono_init=chrono_init, prefix=cell_prefix,
+                         forget_bias=forget_bias)
+    else:
+        raise NotImplementedError("Unknown cell type %s" % cell_type)
+
+    if dropout_inputs > 0 or dropout_states > 0:
+        cell = VariationalDropoutCell(cell,
+                                      dropout_inputs=dropout_inputs,
+                                      dropout_states=dropout_states)
+    if lhuc:
+        cell = LHUCCell(cell, num_hidden, dtype)
+
+    return cell
+
+
 def get_stacked_rnn(config: RNNConfig, prefix: str,
                     parallel_inputs: bool = False,
                     layers: Optional[Iterable[int]] = None) -> mx.rnn.SequentialRNNCell:
@@ -133,36 +202,10 @@ def get_stacked_rnn(config: RNNConfig, prefix: str,
     if not layers:
         layers = range(config.num_layers)
     for layer_idx in layers:
-        # fhieber: the 'l' in the prefix does NOT stand for 'layer' but for the direction 'l' as in mx.rnn.rnn_cell::517
-        # this ensures parameter name compatibility of training w/ FusedRNN and decoding with 'unfused' RNN.
-        cell_prefix = "%sl%d_" % (prefix, layer_idx)
-        if config.cell_type == C.LSTM_TYPE:
-            if config.dropout_recurrent > 0.0:
-                cell = RecurrentDropoutLSTMCell(num_hidden=config.num_hidden, prefix=cell_prefix,
-                                                forget_bias=config.forget_bias, dropout=config.dropout_recurrent)
-            else:
-                cell = mx.rnn.LSTMCell(num_hidden=config.num_hidden, prefix=cell_prefix, forget_bias=config.forget_bias)
-        elif config.cell_type == C.LNLSTM_TYPE:
-            cell = LayerNormLSTMCell(num_hidden=config.num_hidden, prefix=cell_prefix, forget_bias=config.forget_bias)
-        elif config.cell_type == C.LNGLSTM_TYPE:
-            cell = LayerNormPerGateLSTMCell(num_hidden=config.num_hidden, prefix=cell_prefix,
-                                            forget_bias=config.forget_bias)
-        elif config.cell_type == C.GRU_TYPE:
-            cell = mx.rnn.GRUCell(num_hidden=config.num_hidden, prefix=cell_prefix)
-        elif config.cell_type == C.LNGRU_TYPE:
-            cell = LayerNormGRUCell(num_hidden=config.num_hidden, prefix=cell_prefix)
-        elif config.cell_type == C.LNGGRU_TYPE:
-            cell = LayerNormPerGateGRUCell(num_hidden=config.num_hidden, prefix=cell_prefix)
-        else:
-            raise NotImplementedError()
-
-        if config.dropout_inputs > 0 or config.dropout_states > 0:
-            cell = VariationalDropoutCell(cell,
-                                          dropout_inputs=config.dropout_inputs,
-                                          dropout_states=config.dropout_states)
-
-        if config.lhuc:
-            cell = LHUCCell(cell, config.num_hidden, config.dtype)
+        cell = get_rnn_cell(cell_type=config.cell_type, num_hidden=config.num_hidden,
+                            dropout_inputs=config.dropout_inputs, dropout_states=config.dropout_states,
+                            dropout_recurrent=config.dropout_recurrent, forget_bias=config.forget_bias,
+                            lhuc=config.lhuc, chrono_init=config.chrono_init, dtype=config.dtype, prefix=prefix)
 
         # layer_idx is 0 based, whereas first_residual_layer is 1-based
         if config.residual and layer_idx + 1 >= config.first_residual_layer:
@@ -196,13 +239,13 @@ class LayerNormLSTMCell(mx.rnn.LSTMCell):
                  norm_scale: float = 1.0,
                  norm_shift: float = 0.0) -> None:
         super(LayerNormLSTMCell, self).__init__(num_hidden, prefix, params, forget_bias)
-        self._iN = layers.LayerNormalization(prefix="%si2h" % self._prefix,
+        self._iN = layers.LayerNormalization(num_hidden=num_hidden, prefix="%si2h" % self._prefix,
                                              scale=self.params.get('i2h_scale', shape=(num_hidden * 4,), init=mx.init.Constant(value=norm_scale)),
                                              shift=self.params.get('i2h_shift', shape=(num_hidden * 4,), init=mx.init.Constant(value=norm_shift)))
-        self._hN = layers.LayerNormalization(prefix="%sh2h" % self._prefix,
+        self._hN = layers.LayerNormalization(num_hidden=num_hidden, prefix="%sh2h" % self._prefix,
                                              scale=self.params.get('h2h_scale', shape=(num_hidden * 4,), init=mx.init.Constant(value=norm_scale)),
                                              shift=self.params.get('h2h_shift', shape=(num_hidden * 4,), init=mx.init.Constant(value=norm_shift)))
-        self._cN = layers.LayerNormalization(prefix="%sc" % self._prefix,
+        self._cN = layers.LayerNormalization(num_hidden=num_hidden, prefix="%sc" % self._prefix,
                                              scale=self.params.get('c_scale', shape=(num_hidden,), init=mx.init.Constant(value=norm_scale)),
                                              shift=self.params.get('c_shift', shape=(num_hidden,), init=mx.init.Constant(value=norm_shift)))
 
@@ -265,7 +308,8 @@ class LayerNormPerGateLSTMCell(mx.rnn.LSTMCell):
             shift = self.params.get('%s_scale' % name,
                                     init=mx.init.Constant(value=norm_scale if name != "f" else forget_bias))
             self._norm_layers.append(
-                layers.LayerNormalization(prefix="%s%s" % (self._prefix, name), scale=scale, shift=shift))
+                layers.LayerNormalization(prefix="%s%s" % (self._prefix, name), num_hidden=num_hidden,
+                                          scale=scale, shift=shift))
 
     def __call__(self, inputs, states):
         self._counter += 1
@@ -380,10 +424,12 @@ class LayerNormGRUCell(mx.rnn.GRUCell):
         super(LayerNormGRUCell, self).__init__(num_hidden, prefix, params)
         self._iN = layers.LayerNormalization(
             prefix="%si2h" % self._prefix,
+            num_hidden=num_hidden,
             scale=self.params.get('i2h_scale', init=mx.init.Constant(value=norm_scale)),
             shift=self.params.get('i2h_shift', init=mx.init.Constant(value=norm_shift)))
         self._hN = layers.LayerNormalization(
             prefix="%sh2h" % self._prefix,
+            num_hidden=num_hidden,
             scale=self.params.get('h2h_scale', init=mx.init.Constant(value=norm_scale)),
             shift=self.params.get('h2h_shift', init=mx.init.Constant(value=norm_shift)))
 
@@ -450,7 +496,7 @@ class LayerNormPerGateGRUCell(mx.rnn.GRUCell):
             scale = self.params.get('%s_shift' % name, init=mx.init.Constant(value=norm_shift))
             shift = self.params.get('%s_scale' % name, init=mx.init.Constant(value=norm_scale))
             self._norm_layers.append(layers.LayerNormalization(
-                prefix="%s%s" % (self._prefix, name), scale=scale, shift=shift))
+                prefix="%s%s" % (self._prefix, name), num_hidden=num_hidden, scale=scale, shift=shift))
 
     def __call__(self, inputs, states):
         self._counter += 1
@@ -603,61 +649,49 @@ class JanetCell(mx.rnn.BaseRNNCell):
 
 
 class RecurrentLayerRNNConfig(Config):
+    """
+    :param num_hidden: Number of RNN hidden units.
+    :param dropout_recurrent: Dropout probability on cell update (Semeniuta, 2016).
+    :param dropout_inputs: Dropout probability on RNN inputs (Gal, 2015).
+    :param dropout_states: Dropout probability on RNN states (Gal, 2015).
+    :param cell_type: RNN cell type.
+    :param forget_bias: Initial value of forget biases.
+    :param lhuc: Apply LHUC (Vilar 2018) to the hidden units of the RNN.
+    :param chrono_init: Use the chrono initializer for the Janet RNN cell.
+:   :param dtype: Data type.
+    """
+
     def __init__(self,
                  num_hidden: int,
                  dropout_recurrent: float = 0.0,
                  dropout_inputs: float = 0.0,
                  dropout_states: float = 0.0,
-                 dropout: float = 0.0,
                  norm_states: bool = True,
                  norm_first_step: bool = True,
                  cell_type: str = C.LSTM_TYPE,
                  forget_bias: float = 0.0,
-                 chrono_init: bool = False):
+                 lhuc: bool = False,
+                 chrono_init: bool = False,
+                 dtype: str = C.DTYPE_FP32):
         super().__init__()
         self.num_hidden = num_hidden
         # recurrent/inputs/states is for "old" cells and just "dropout" for "new states"
         self.dropout_recurrent = dropout_recurrent
         self.dropout_inputs = dropout_inputs
         self.dropout_states = dropout_states
-        self.dropout = dropout
         self.norm_states = norm_states
         self.norm_first_step = norm_first_step
         self.cell_type = cell_type
         self.forget_bias = forget_bias
+        self.lhuc = lhuc
         self.chrono_init = chrono_init
+        self.dtype = dtype
 
-    def create_rnn(self, prefix: str):
-        # TODO: combine with the RNN factory function at the top of the file
-        self.num_hidden = self.num_hidden
-        # fhieber: the 'l' in the prefix does NOT stand for 'layer' but for the direction 'l' as in mx.rnn.rnn_cell::517
-        # this ensures parameter name compatibility of training w/ FusedRNN and decoding with 'unfused' RNN.
-        cell_prefix = "%sl_" % prefix
-        if self.cell_type == C.LSTM_TYPE:
-            if self.dropout_recurrent > 0.0:
-                assert not self.chrono_init
-                cell = RecurrentDropoutLSTMCell(num_hidden=self.num_hidden,
-                                                prefix=cell_prefix,
-                                                forget_bias=self.forget_bias,
-                                                dropout=self.dropout_recurrent)
-            else:
-                cell = mx.rnn.LSTMCell(num_hidden=self.num_hidden, prefix=cell_prefix, forget_bias=self.forget_bias)
-        elif self.cell_type == C.LNLSTM_TYPE:
-            cell = LayerNormLSTMCell(num_hidden=self.num_hidden, prefix=cell_prefix, forget_bias=self.forget_bias)
-        elif self.cell_type == C.LNGLSTM_TYPE:
-            cell = LayerNormPerGateLSTMCell(num_hidden=self.num_hidden, prefix=cell_prefix,
-                                            forget_bias=self.forget_bias)
-        elif self.cell_type == C.GRU_TYPE:
-            cell = mx.rnn.GRUCell(num_hidden=self.num_hidden, prefix=cell_prefix)
-        elif self.cell_type == C.LNGRU_TYPE:
-            cell = LayerNormGRUCell(num_hidden=self.num_hidden, prefix=cell_prefix)
-        elif self.cell_type == C.LNGGRU_TYPE:
-            cell = LayerNormPerGateGRUCell(num_hidden=self.num_hidden, prefix=cell_prefix)
-        elif self.cell_type == "simple":
-            cell = JanetCell(num_hidden=self.num_hidden, chrono_init=self.chrono_init, prefix=cell_prefix,
-                             forget_bias=self.forget_bias)
-        else:
-            raise NotImplementedError("Unknown cell type %s" % self.cell_type)
+    def create_rnn_cell(self, prefix: str):
+        cell = get_rnn_cell(cell_type=self.cell_type, num_hidden=self.num_hidden,
+                            dropout_inputs=self.dropout_inputs, dropout_states=self.dropout_states,
+                            dropout_recurrent=self.dropout_recurrent, forget_bias=self.forget_bias,
+                            lhuc=self.lhuc, chrono_init=self.chrono_init, dtype=self.dtype, prefix=prefix)
 
         if self.dropout_inputs > 0 or self.dropout_states > 0:
             cell = VariationalDropoutCell(cell,
@@ -671,7 +705,7 @@ class RecurrentEncoderLayer(layers.EncoderLayer):
     def __init__(self,
                  rnn_config: RecurrentLayerRNNConfig,
                  prefix: str = ""):
-        self.rnn_cell = rnn_config.create_rnn(prefix)
+        self.rnn_cell = rnn_config.create_rnn_cell(prefix)
         self.num_hidden = rnn_config.num_hidden
 
     def encode_sequence(self, source_encoded: mx.sym.Symbol, source_encoded_lengths: mx.sym.Symbol,
@@ -692,7 +726,7 @@ class RecurrentDecoderLayer(layers.DecoderLayer):
                  rnn_config: RecurrentLayerRNNConfig,
                  prefix: str = ""):
         self.prefix = prefix
-        self.rnn_cell = rnn_config.create_rnn(prefix)
+        self.rnn_cell = rnn_config.create_rnn_cell(prefix)
         self.num_hidden = rnn_config.num_hidden
 
     def decode_sequence(self,
@@ -717,9 +751,6 @@ class RecurrentDecoderLayer(layers.DecoderLayer):
                     target: mx.sym.Symbol,
                     states: List[mx.sym.Symbol],
                     att_dict) -> Tuple[mx.sym.Symbol, List[mx.sym.Symbol]]:
-        # TODO: is this necessary?
-        # -1 because step is one based and another -1 because we first increase counter in the cell and then use it
-        self.rnn_cell._counter = step - 2
         return self.rnn_cell(target, states)
 
     def reset(self):
@@ -763,7 +794,6 @@ class RecurrentLayerConfig(layers.LayerConfig):
                  dropout_inputs: float = 0.0,
                  dropout_states: float = 0.0,
                  dropout_recurrent: float = 0.0,
-                 dropout: float = 0.0,
                  norm_states: bool = True,
                  norm_first_step: bool = True,
                  forget_bias: float = 0.0,
@@ -773,7 +803,6 @@ class RecurrentLayerConfig(layers.LayerConfig):
                                                   dropout_recurrent=dropout_recurrent,
                                                   dropout_inputs=dropout_inputs,
                                                   dropout_states=dropout_states,
-                                                  dropout=dropout,
                                                   norm_states=norm_states,
                                                   norm_first_step=norm_first_step,
                                                   cell_type=cell_type,
@@ -797,8 +826,8 @@ class BidirectionalRecurrentEncoderLayer(layers.EncoderLayer):
         self.rnn_config = rnn_config
         self.internal_rnn_config = rnn_config.copy(num_hidden=rnn_config.num_hidden // 2)
 
-        self.forward_rnn_cell = self.internal_rnn_config.create_rnn(prefix + C.FORWARD_PREFIX)
-        self.backward_rnn_cell = self.internal_rnn_config.create_rnn(prefix + C.REVERSE_PREFIX)
+        self.forward_rnn_cell = self.internal_rnn_config.create_rnn_cell(prefix + C.FORWARD_PREFIX)
+        self.backward_rnn_cell = self.internal_rnn_config.create_rnn_cell(prefix + C.REVERSE_PREFIX)
 
     def encode_sequence(self, source_encoded: mx.sym.Symbol, source_encoded_lengths: mx.sym.Symbol,
                         source_encoded_max_length: int, att_dict) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
@@ -845,7 +874,6 @@ class BidirectionalRecurrentLayerConfig(layers.LayerConfig):
                  dropout_inputs: float = 0.0,
                  dropout_states: float = 0.0,
                  dropout_recurrent: float = 0.0,
-                 dropout: float = 0.0,
                  norm_states: bool = True,
                  forget_bias: float = 0.0):
         super().__init__()
@@ -853,7 +881,6 @@ class BidirectionalRecurrentLayerConfig(layers.LayerConfig):
                                                   dropout_recurrent=dropout_recurrent,
                                                   dropout_inputs=dropout_inputs,
                                                   dropout_states=dropout_states,
-                                                  dropout=dropout,
                                                   norm_states=norm_states,
                                                   cell_type=cell_type,
                                                   forget_bias=forget_bias)

@@ -229,6 +229,7 @@ class TransformerDecoder(Decoder):
             config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                  dropout=config.dropout_prepost,
+                                                                 model_size=self.config.model_size,
                                                                  prefix="%sfinal_process_" % prefix)
 
         self.pos_embedding = encoder.get_positional_embedding(config.positional_embedding_type,
@@ -556,7 +557,7 @@ class RecurrentDecoder(Decoder):
         self.hidden_b = mx.sym.Variable("%shidden_bias" % prefix)
         self.hidden_norm = None
         if self.config.layer_normalization:
-            self.hidden_norm = layers.LayerNormalization(prefix="%shidden_norm" % prefix)
+            self.hidden_norm = layers.LayerNormalization(prefix="%shidden_norm" % prefix, num_hidden=self.num_hidden)
 
     def _create_state_init_parameters(self):
         """
@@ -572,7 +573,8 @@ class RecurrentDecoder(Decoder):
             self.init_bs.append(mx.sym.Variable("%senc2decinit_%d_bias" % (self.prefix, state_idx)))
             if self.config.layer_normalization:
                 self.init_norms.append(layers.LayerNormalization(prefix="%senc2decinit_%d_norm" % (self.prefix,
-                                                                                                   state_idx)))
+                                                                                                   state_idx),
+                                                                 num_hidden=init_num_hidden))
 
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
