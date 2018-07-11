@@ -311,7 +311,7 @@ def test_failed_make_input_from_valid_json_string(text, text_key, factors, facto
 @pytest.mark.parametrize("strings",
                          [
                              ["a b c"],
-                             ["a b c", "f1 f2 f3", "f3 f3 f3"],
+                             ["a b c", "f1 f2 f3", "f3 f3 f3"]
                          ])
 def test_make_input_from_multiple_strings(strings):
     inp = sockeye.inference.make_input_from_multiple_strings(1, strings)

@@ -754,8 +754,7 @@ def make_input_from_factored_string(sentence_id: int,
     return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
 
 
-def make_input_from_multiple_strings(sentence_id: int,
-                                     strings: List[str]) -> TranslatorInput:
+def make_input_from_multiple_strings(sentence_id: int, strings: List[str]) -> TranslatorInput:
     """
     Returns a TranslatorInput object from multiple strings, where the first element corresponds to the surface tokens
     and the remaining elements to additional factors. All strings must parse into token sequences of the same length.
