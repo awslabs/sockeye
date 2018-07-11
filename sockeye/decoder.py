@@ -462,7 +462,7 @@ class RecurrentDecoderConfig(Config):
                  max_seq_len_source: int,
                  rnn_config: rnn.RNNConfig,
                  attention_config: rnn_attention.AttentionConfig,
-                 hidden_dropout: float = .0,  # TODO: move this dropout functionality to OutputLayer
+                 hidden_dropout: float = .0,
                  state_init: str = C.RNN_DEC_INIT_LAST,
                  state_init_lhuc: bool = False,
                  context_gating: bool = False,

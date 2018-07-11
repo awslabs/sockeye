@@ -1587,12 +1587,17 @@ class Translator:
                         beam_histories[sent]["normalized_scores"].append(
                             normalized_scores[rows].asnumpy().flatten().tolist())
 
-            if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST and self.batch_size == 1:
-                # TODO: extend to work with batch_size > 1 (i.e., one stopped for each sentence)
-                if mx.nd.sum(finished).asscalar() > 0:
-                    break
+            if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
+                if self.batch_size == 1:
+                    if finished.sum().asscalar() > 0:
+                        break
+                else:
+                    # if at least one finished hypotheses for each input
+                    at_least_one_finished = finished.reshape((self.batch_size, self.beam_size)).sum(axis=1) > 0
+                    if at_least_one_finished.sum().asscalar() == self.batch_size:
+                        break
             else:
-                if mx.nd.sum(finished).asscalar() == self.batch_size * self.beam_size:  # all finished
+                if finished.sum().asscalar() == self.batch_size * self.beam_size:  # all finished
                     break
 
             # (8) update models' state with winning hypotheses (ascending)
