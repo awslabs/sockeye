@@ -193,19 +193,19 @@ def tmp_digits_dataset(prefix: str,
             # sentences with and without constraints here is critical, since this can happen in production
             # and also introduces sometimes some unanticipated interactions.
             new_sources = []
-            for sentno, (source, target) in enumerate(zip(open(data['test_source']), open(data['test_target']))):
-                target_words = target.rstrip().split()
-                target_len = len(target_words)
-                source_len = len(source.rstrip().split())
-                new_source = { 'text': source.rstrip() }
-                # From the odd-numbered sentences that are not too long, create constraints. We do
-                # only odds to ensure we get batches with mixed constraints / lack of constraints.
-                if target_len > 0 and sentno % 2 == 0:
-                    start_pos = 0
-                    end_pos = min(target_len, 3)
-                    constraint = ' '.join(target_words[start_pos:end_pos])
-                    new_source['constraints'] = [constraint]
-                new_sources.append(json.dumps(new_source))
+            with open(data['test_source']) as source_inp, open(data['test_target']) as target_inp:
+                for sentno, (source, target) in enumerate(zip(source_inp, target_inp)):
+                    target_words = target.rstrip().split()
+                    target_len = len(target_words)
+                    new_source = {'text': source.rstrip()}
+                    # From the odd-numbered sentences that are not too long, create constraints. We do
+                    # only odds to ensure we get batches with mixed constraints / lack of constraints.
+                    if target_len > 0 and sentno % 2 == 0:
+                        start_pos = 0
+                        end_pos = min(target_len, 3)
+                        constraint = ' '.join(target_words[start_pos:end_pos])
+                        new_source['constraints'] = [constraint]
+                    new_sources.append(json.dumps(new_source))
 
             with open(data['test_source'], 'w') as out:
                 for json_line in new_sources:
