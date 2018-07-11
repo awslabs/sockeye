@@ -28,6 +28,7 @@ import sockeye.average
 import sockeye.checkpoint_decoder
 import sockeye.constants as C
 import sockeye.evaluate
+import sockeye.extract_parameters
 import sockeye.lexicon
 import sockeye.prepare_data
 import sockeye.train
@@ -235,6 +236,8 @@ _TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {lexicon} --restrict-lexicon-to
 
 _EVAL_PARAMS_COMMON = "--hypotheses {hypotheses} --references {references} --metrics {metrics} {quiet}"
 
+_EXTRACT_PARAMS = "--input {input} --names target_output_bias --list-all --output {output}"
+
 
 def run_train_translate(train_params: str,
                         translate_params: str,
@@ -429,6 +432,14 @@ def run_train_translate(train_params: str,
         assert len(points) > 0
         averaged_params = sockeye.average.average(points)
         assert averaged_params
+
+        # test parameter extraction
+        extract_params = _EXTRACT_PARAMS.format(output=os.path.join(model_path, "params.extracted"),
+                                                input=model_path)
+        with patch.object(sys, "argv", extract_params.split()):
+            sockeye.extract_parameters.main()
+        with np.load(os.path.join(model_path, "params.extracted.npz")) as data:
+            assert "target_output_bias" in data
 
         # get best validation perplexity
         metrics = sockeye.utils.read_metrics_file(path=os.path.join(model_path, C.METRICS_NAME))
