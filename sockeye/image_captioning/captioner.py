@@ -109,10 +109,10 @@ def main():
     params = arguments.ConfigArgumentParser(description='Image Captioning CLI')
     arguments_image.add_image_caption_cli_args(params)
     args = params.parse_args()
-    run_captining(args)
+    run_captioning(args)
 
 
-def run_captining(args: argparse.Namespace):
+def run_captioning(args: argparse.Namespace):
     image_preextracted_features = not args.extract_image_features
 
     if args.output is not None:
@@ -150,8 +150,7 @@ def run_captining(args: argparse.Namespace):
                            output_handler=out_handler,
                            chunk_size=args.chunk_size,
                            input_file=args.input,
-                           input_is_json=args.json_input,
-                           input_constraints=args.input_constraints)
+                           input_is_json=args.json_input)
 
 
 if __name__ == '__main__':

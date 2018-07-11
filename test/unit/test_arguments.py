@@ -195,7 +195,6 @@ def test_training_arg(test_params, expected_params):
 @pytest.mark.parametrize("test_params, expected_params", [
     ('-m model', dict(input=None,
                       input_factors=None,
-                      input_constraints=None,
                       json_input=False,
                       output=None,
                       checkpoints=None,
