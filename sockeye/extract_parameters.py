@@ -22,10 +22,10 @@ from typing import Dict, List
 import mxnet as mx
 import numpy as np
 
-from sockeye.log import setup_main_logger, log_sockeye_version
 from . import arguments
 from . import constants as C
 from . import utils
+from .log import setup_main_logger, log_sockeye_version
 
 logger = setup_main_logger(__name__, console=True, file_logging=False)
 
@@ -45,7 +45,7 @@ def _extract(param_names: List[str],
     for name in param_names:
         if name in params:
             logger.info("\tFound '%s': shape=%s", name, str(params[name].shape))
-            ext_params[name] = params[name].asnumpy() 
+            ext_params[name] = params[name].asnumpy()
             remaining_param_names.remove(name)
     return remaining_param_names
 
@@ -106,10 +106,10 @@ def extract_parameters(args: argparse.Namespace):
     else:
         param_path = args.input
     ext_params = extract(param_path, args.names, args.list_all)
-    
+
     if len(ext_params) > 0:
         utils.check_condition(args.output is not None, "An output filename must be specified. (Use --output)")
-        logger.info("Writting extracted parameters to '%s'", args.output)
+        logger.info("Writing extracted parameters to '%s'", args.output)
         np.savez_compressed(args.output, **ext_params)
 
 
