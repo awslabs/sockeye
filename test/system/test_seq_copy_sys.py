@@ -71,7 +71,7 @@ COMMON_TRAINING_PARAMS = " --checkpoint-frequency 1000 --optimizer adam --initia
      " --batch-size 80 --batch-type word "
      " --max-updates 5000  "
      " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --layer-normalization" + COMMON_TRAINING_PARAMS,
-     "--beam-size 5 --batch-size 2 --beam-prune 1",
+     "--beam-size 5 --batch-size 2 --beam-prune 1 --beam-search-stop first",
      True,
      1.01,
      0.99),
