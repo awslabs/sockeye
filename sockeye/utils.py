@@ -629,7 +629,7 @@ def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
             if master_lock is not None and not any_failed:
                 try:
                     yield acquired_gpus
-                except:
+                except:  # pylint: disable=try-except-raise
                     raise
                 return
 
