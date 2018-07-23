@@ -189,7 +189,7 @@ class StringWithAlignmentMatrixOutputHandler(StringOutputHandler):
                                       source=" ".join(t_input.tokens),
                                       source_len=len(t_input.tokens),
                                       target_len=len(t_output.tokens)))
-        attention_matrix = t_output.attention_matrix.T
+        attention_matrix = t_output.attention_matrix
         for i in range(0, attention_matrix.shape[0]):
             attention_vector = attention_matrix[i]
             self.stream.write(" ".join(["%f" % value for value in attention_vector]))

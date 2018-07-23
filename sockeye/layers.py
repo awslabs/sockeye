@@ -330,6 +330,53 @@ def dot_attention(queries: mx.sym.Symbol,
     return mx.sym.batch_dot(lhs=probs, rhs=values, name='%scontexts' % prefix)
 
 
+def get_probs(queries: mx.sym.Symbol,
+                  keys: mx.sym.Symbol,
+                  values: mx.sym.Symbol,
+                  lengths: Optional[mx.sym.Symbol] = None,
+                  dropout: float = 0.0,
+                  bias: Optional[mx.sym.Symbol] = None,
+                  prefix: Optional[str] = ''):
+    """
+    Computes dot attention for a set of queries, keys, and values.
+
+    :param queries: Attention queries. Shape: (n, lq, d).
+    :param keys: Attention keys. Shape: (n, lk, d).
+    :param values: Attention values. Shape: (n, lk, dv).
+    :param lengths: Optional sequence lengths of the keys. Shape: (n,).
+    :param dropout: Dropout probability.
+    :param bias: Optional 3d bias tensor.
+    :param prefix: Optional prefix
+    :return: 'Context' vectors for each query. Shape: (n, lq, dv).
+    """
+    utils.check_condition(lengths is not None or bias is not None,
+                          "Must provide either length or bias argument for masking")
+
+    # (n, lq, lk)
+    logits = mx.sym.batch_dot(lhs=queries, rhs=keys, transpose_b=True, name='%sdot' % prefix)
+
+    if lengths is not None:
+        # mask lk dimension
+        # (lk, n, lq)
+        logits = mx.sym.transpose(data=logits, axes=(2, 0, 1))
+        logits = mx.sym.SequenceMask(data=logits,
+                                     use_sequence_length=True,
+                                     sequence_length=lengths,
+                                     value=C.LARGE_NEGATIVE_VALUE)
+        # (n, lq, lk)
+        logits = mx.sym.transpose(data=logits, axes=(1, 2, 0))
+
+    if bias is not None:
+        logits = mx.sym.broadcast_add(logits, bias, name='%sbias_add' % prefix)
+
+    probs = mx.sym.softmax(logits, axis=-1)
+    probs2 = mx.sym.Dropout(probs, p=dropout) if dropout > 0.0 else probs
+
+    # (n, lq, lk) x (n, lk, dv) -> (n, lq, dv)
+    return mx.sym.batch_dot(lhs=probs2, rhs=values, name='%scontexts' % prefix), probs
+
+
+
 class MultiHeadAttentionBase:
     """
     Base class for Multi-head attention.
@@ -529,6 +576,70 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                             values,
                             bias=bias,
                             lengths=memory_lengths)
+
+
+class MultiHeadAttentionProbs(MultiHeadAttention):
+    """
+    Multi-head attention layer for queries independent from keys/values.
+
+    :param prefix: Attention prefix.
+    :param depth_att: Attention depth / number of hidden units.
+    :param heads: Number of attention heads.
+    :param depth_out: Output depth / number of output units.
+    :param dropout: Dropout probability on attention scores
+    """
+
+    def __init__(self,
+                 prefix: str,
+                 depth_att: int = 512,
+                 heads: int = 8,
+                 depth_out: int = 512,
+                 dropout: float = 0.0) -> None:
+        super().__init__(prefix, depth_att, heads, depth_out, dropout)
+        self.w_q2h = mx.sym.Variable("%sq2h_weight" % prefix)
+        self.w_k2h = mx.sym.Variable("%sk2h_weight" % prefix)
+        self.w_v2h = mx.sym.Variable("%sv2h_weight" % prefix)
+
+    def _attend(self,
+                queries: mx.sym.Symbol,
+                keys: mx.sym.Symbol,
+                values: mx.sym.Symbol,
+                lengths: Optional[mx.sym.Symbol] = None,
+                bias: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
+        """
+        Returns context vectors of multi-head dot attention.
+
+        :param queries: Query tensor. Shape: (batch_size, query_max_length, depth).
+        :param keys: Keys. Shape: (batch_size, memory_max_length, depth).
+        :param values: Values. Shape: (batch_size, memory_max_length, depth).
+        :param lengths: Optional lengths of keys. Shape: (batch_size,).
+        :param bias: Optional 3d bias.
+        :return: Context vectors. Shape: (batch_size, query_max_length, output_depth).
+        """
+        # scale by sqrt(depth_per_head)
+        queries = queries * (self.depth_per_head ** -0.5)
+
+        # (batch*heads, length, depth/heads)
+        queries = split_heads(queries, self.depth_per_head, self.heads)
+        keys = split_heads(keys, self.depth_per_head, self.heads)
+        values = split_heads(values, self.depth_per_head, self.heads)
+        lengths = broadcast_to_heads(lengths, self.heads, ndim=1, fold_heads=True) if lengths is not None else lengths
+
+        # (batch*heads, query_max_length, depth_per_head)
+        contexts, probs = get_probs(queries, keys, values,
+                                 lengths=lengths, dropout=self.dropout, bias=bias, prefix=self.prefix)
+
+        # (batch, query_max_length, depth)
+        contexts = combine_heads(contexts, self.depth_per_head, self.heads)
+
+        # contexts: (batch, query_max_length, output_depth)
+        contexts = mx.sym.FullyConnected(data=contexts,
+                                         weight=self.w_h2o,
+                                         no_bias=True,
+                                         num_hidden=self.depth_out,
+                                         flatten=False)
+
+        return contexts, probs
 
 
 class ProjectedDotAttention:
