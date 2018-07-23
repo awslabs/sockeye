@@ -18,15 +18,13 @@ import argparse
 import sys
 import time
 from contextlib import ExitStack
-from typing import Generator, Optional, List
-
-import mxnet as mx
 from math import ceil
+from typing import Generator, Optional, List
 
 from sockeye.lexicon import TopKLexicon
 from sockeye.log import setup_main_logger
 from sockeye.output_handler import get_output_handler, OutputHandler
-from sockeye.utils import acquire_gpus, get_num_gpus, log_basic_info, check_condition, grouper
+from sockeye.utils import determine_context, log_basic_info, check_condition, grouper
 from . import arguments
 from . import constants as C
 from . import data_io
@@ -54,10 +52,6 @@ def run_translate(args: argparse.Namespace):
     if args.checkpoints is not None:
         check_condition(len(args.checkpoints) == len(args.models), "must provide checkpoints for each model")
 
-    if args.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
-        check_condition(args.batch_size == 1,
-                        "Early stopping (--beam-search-stop %s) not supported with batching" % (C.BEAM_SEARCH_STOP_FIRST))
-
     log_basic_info(args)
 
     output_handler = get_output_handler(args.output_type,
@@ -65,7 +59,13 @@ def run_translate(args: argparse.Namespace):
                                         args.sure_align_threshold)
 
     with ExitStack() as exit_stack:
-        context = _setup_context(args, exit_stack)
+        check_condition(len(args.device_ids) == 1, "translate only supports single device for now")
+        context = determine_context(device_ids=args.device_ids,
+                                    use_cpu=args.use_cpu,
+                                    disable_device_locking=args.disable_device_locking,
+                                    lock_dir=args.lock_dir,
+                                    exit_stack=exit_stack)[0]
+        logger.info("Translate Device: %s", context)
 
         if args.override_dtype == C.DTYPE_FP16:
             logger.warning('Experimental feature \'--override-dtype float16\' has been used. '
@@ -100,6 +100,7 @@ def run_translate(args: argparse.Namespace):
                                           source_vocabs=source_vocabs,
                                           target_vocab=target_vocab,
                                           restrict_lexicon=restrict_lexicon,
+                                          avoid_list=args.avoid_list,
                                           store_beam=store_beam,
                                           strip_unknown_words=args.strip_unknown_words,
                                           mark_pointed_words=args.pointer_nets_mark)
@@ -218,29 +219,6 @@ def translate(output_handler: OutputHandler,
     for trans_input, trans_output in zip(trans_inputs, trans_outputs):
         output_handler.handle(trans_input, trans_output, batch_time)
     return total_time
-
-
-def _setup_context(args, exit_stack):
-    if args.use_cpu:
-        context = mx.cpu()
-    else:
-        num_gpus = get_num_gpus()
-        check_condition(num_gpus >= 1,
-                        "No GPUs found, consider running on the CPU with --use-cpu "
-                        "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
-                        "binary isn't on the path).")
-        check_condition(len(args.device_ids) == 1, "cannot run on multiple devices for now")
-        gpu_id = args.device_ids[0]
-        if args.disable_device_locking:
-            if gpu_id < 0:
-                # without locking and a negative device id we just take the first device
-                gpu_id = 0
-        else:
-            gpu_ids = exit_stack.enter_context(acquire_gpus([gpu_id], lock_dir=args.lock_dir))
-            gpu_id = gpu_ids[0]
-
-        context = mx.gpu(gpu_id)
-    return context
 
 
 if __name__ == '__main__':

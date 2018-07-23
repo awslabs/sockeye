@@ -33,9 +33,8 @@ from ..image_captioning.extract_features import get_pretrained_net, \
     batching, read_list_file, extract_features_forward
 from ..lexicon import TopKLexicon
 from ..log import setup_main_logger
-from ..translate import read_and_translate, _setup_context
-from ..utils import check_condition
-from ..utils import log_basic_info
+from ..translate import read_and_translate
+from ..utils import check_condition, log_basic_info, determine_context
 
 logger = setup_main_logger(__name__, file_logging=False)
 
@@ -129,7 +128,12 @@ def main():
                                                     args.sure_align_threshold)
 
     with ExitStack() as exit_stack:
-        context = _setup_context(args, exit_stack)
+        context = determine_context(device_ids=args.device_ids,
+                                    use_cpu=args.use_cpu,
+                                    disable_device_locking=args.disable_device_locking,
+                                    lock_dir=args.lock_dir,
+                                    exit_stack=exit_stack)[0]
+        logger.info("Captioning Device: %s", context)
 
         if not image_preextracted_features:
             # Extract features and override input and source_root with tmp location of features

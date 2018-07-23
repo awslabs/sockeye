@@ -22,6 +22,7 @@ EOS_SYMBOL = "</s>"
 UNK_SYMBOL = "<unk>"
 PAD_SYMBOL = "<pad>"
 PAD_ID = 0
+PAD_FORMAT = "<pad%d>"
 TOKEN_SEPARATOR = " "
 VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
 # reserve extra space for the EOS or BOS symbol that is added to both source and target
@@ -196,6 +197,7 @@ BEAM_SEARCH_STOP_ALL = 'all'
 JSON_TEXT_KEY = "text"
 JSON_FACTORS_KEY = "factors"
 JSON_CONSTRAINTS_KEY = "constraints"
+JSON_AVOID_KEY = "avoid"
 JSON_ENCODING = "utf-8"
 
 # Lexical constraints
@@ -346,9 +348,11 @@ ROUGE_2_VAL = ROUGE2 + "-val"
 ROUGE_L_VAL = ROUGEL + "-val"
 AVG_TIME = "avg-sec-per-sent-val"
 DECODING_TIME = "decode-walltime-val"
-METRICS = [PERPLEXITY, ACCURACY, BLEU, ROUGE1]
-METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, ROUGE1: True, PERPLEXITY: False}
-METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, ROUGE1: 0.0, PERPLEXITY: np.inf}
+METRICS = [PERPLEXITY, ACCURACY, BLEU, CHRF, ROUGE1]
+METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, CHRF: True, ROUGE1: True, PERPLEXITY: False}
+METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, CHRF: 0.0, ROUGE1: 0.0, PERPLEXITY: np.inf}
+METRICS_REQUIRING_DECODER = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL]
+EVALUATE_METRICS = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL]
 
 # loss
 CROSS_ENTROPY = 'cross-entropy'

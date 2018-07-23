@@ -158,36 +158,6 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     return resume_training
 
 
-def determine_context(args: argparse.Namespace, exit_stack: ExitStack) -> List[mx.Context]:
-    """
-    Determine the context we should run on (CPU or GPU).
-
-    :param args: Arguments as returned by argparse.
-    :param exit_stack: An ExitStack from contextlib.
-    :return: A list with the context(s) to run on.
-    """
-    if args.use_cpu:
-        logger.info("Training Device: CPU")
-        context = [mx.cpu()]
-    else:
-        num_gpus = utils.get_num_gpus()
-        check_condition(num_gpus >= 1,
-                        "No GPUs found, consider running on the CPU with --use-cpu "
-                        "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
-                        "binary isn't on the path).")
-        if args.disable_device_locking:
-            context = utils.expand_requested_device_ids(args.device_ids)
-        else:
-            context = exit_stack.enter_context(utils.acquire_gpus(args.device_ids, lock_dir=args.lock_dir))
-        if args.batch_type == C.BATCH_TYPE_SENTENCE:
-            check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
-                                                                 "divisible by the number of devices. Choose a batch "
-                                                                 "size that is a multiple of %d." % len(context))
-        logger.info("Training Device(s): GPU %s", context)
-        context = [mx.gpu(gpu_id) for gpu_id in context]
-    return context
-
-
 def create_checkpoint_decoder(args: argparse.Namespace,
                               exit_stack: ExitStack,
                               train_context: List[mx.Context]) -> Optional[checkpoint_decoder.CheckpointDecoder]:
@@ -212,20 +182,11 @@ def create_checkpoint_decoder(args: argparse.Namespace,
     if args.use_cpu or args.decode_and_evaluate_use_cpu:
         context = mx.cpu()
     elif args.decode_and_evaluate_device_id is not None:
-        # decode device is defined from the commandline
-        num_gpus = utils.get_num_gpus()
-        check_condition(num_gpus >= 1,
-                        "No GPUs found, consider running on the CPU with --use-cpu "
-                        "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
-                        "binary isn't on the path).")
-
-        if args.disable_device_locking:
-            context = utils.expand_requested_device_ids([args.decode_and_evaluate_device_id])
-        else:
-            context = exit_stack.enter_context(utils.acquire_gpus([args.decode_and_evaluate_device_id],
-                                                                  lock_dir=args.lock_dir))
-        context = mx.gpu(context[0])
-
+        context = utils.determine_context(device_ids=args.decode_and_evaluate_device_id,
+                                          use_cpu=False,
+                                          disable_device_locking=args.disable_device_locking,
+                                          lock_dir=args.lock_dir,
+                                          exit_stack=exit_stack)[0]
     else:
         # default decode context is the last training device
         context = train_context[-1]
@@ -360,7 +321,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 num_words_source=num_words_source,
                 num_words_target=num_words_target,
                 word_min_count_source=word_min_count_source,
-                word_min_count_target=word_min_count_target)
+                word_min_count_target=word_min_count_target,
+                pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
         check_condition(len(args.source_factors) == len(args.source_factors_num_embed),
                         "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (
@@ -836,7 +798,16 @@ def train(args: argparse.Namespace):
                 max_seq_len_source, max_seq_len_target)
 
     with ExitStack() as exit_stack:
-        context = determine_context(args, exit_stack)
+        context = utils.determine_context(device_ids=args.device_ids,
+                                          use_cpu=args.use_cpu,
+                                          disable_device_locking=args.disable_device_locking,
+                                          lock_dir=args.lock_dir,
+                                          exit_stack=exit_stack)
+        if args.batch_type == C.BATCH_TYPE_SENTENCE:
+            check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
+                                                                 "divisible by the number of devices. Choose a batch "
+                                                                 "size that is a multiple of %d." % len(context))
+        logger.info("Training Device(s): %s", ", ".join(str(c) for c in context))
 
         train_iter, eval_iter, config_data, source_vocabs, target_vocab = create_data_iters_and_vocabs(
             args=args,
