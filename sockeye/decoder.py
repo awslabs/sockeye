@@ -320,8 +320,9 @@ class TransformerDecoder(Decoder):
 
         new_states = [source_encoded, source_encoded_lengths]
         layer_caches = self._get_cache_per_layer(cast(List[mx.sym.Symbol], cache))
+        attention_probs = []
         for layer, layer_cache in zip(self.layers, layer_caches):
-            target = layer(target=target,
+            target, probs = layer(target=target,
                            target_bias=target_bias,
                            source=source_encoded,
                            source_bias=source_bias,
@@ -329,15 +330,18 @@ class TransformerDecoder(Decoder):
             # store updated keys and values in states list.
             # (layer.__call__() has the side-effect of updating contents of layer_cache)
             new_states += [layer_cache['k'], layer_cache['v']]
+            attention_probs.append(probs)
 
         # (batch_size, 1, model_size)
         target = self.final_process(data=target, prev=None)
         # (batch_size, model_size)
         target = mx.sym.reshape(target, shape=(-3, -1))
 
-        # TODO(fhieber): no attention probs for now
-        attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
 
+        attention_probs = mx.sym.stack(*attention_probs, axis=0)
+        attention_probs = mx.sym.mean(attention_probs, axis=0, keepdims=False)
+        attention_probs = mx.sym.mean(attention_probs, axis=0, keepdims=False)
+        #attention_probs = mx.sym.mean(probs, axis=0, keepdims=False)
         return target, attention_probs, new_states
 
     def _get_cache_per_layer(self, cache: List[mx.sym.Symbol]) -> List[Dict[str, Optional[mx.sym.Symbol]]]:
@@ -462,7 +466,7 @@ class RecurrentDecoderConfig(Config):
                  max_seq_len_source: int,
                  rnn_config: rnn.RNNConfig,
                  attention_config: rnn_attention.AttentionConfig,
-                 hidden_dropout: float = .0,
+                 hidden_dropout: float = .0,  # TODO: move this dropout functionality to OutputLayer
                  state_init: str = C.RNN_DEC_INIT_LAST,
                  state_init_lhuc: bool = False,
                  context_gating: bool = False,

@@ -140,7 +140,7 @@ class TransformerDecoderBlock:
         self.pre_enc_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                          dropout=config.dropout_prepost,
                                                          prefix="%satt_enc_pre_" % prefix)
-        self.enc_attention = layers.MultiHeadAttention(depth_att=config.model_size,
+        self.enc_attention = layers.MultiHeadAttentionProbs(depth_att=config.model_size,
                                                        heads=config.attention_heads,
                                                        depth_out=config.model_size,
                                                        dropout=config.dropout_attention,
@@ -178,7 +178,7 @@ class TransformerDecoderBlock:
         target = self.post_self_attention(target_self_att, target)
 
         # encoder attention
-        target_enc_att = self.enc_attention(queries=self.pre_enc_attention(target, None),
+        target_enc_att, probs = self.enc_attention(queries=self.pre_enc_attention(target, None),
                                             memory=source,
                                             bias=source_bias)
         target = self.post_enc_attention(target_enc_att, target)
@@ -190,7 +190,7 @@ class TransformerDecoderBlock:
         if self.lhuc:
             target = self.lhuc(target)
 
-        return target
+        return target, probs
 
 
 class TransformerProcessBlock:
