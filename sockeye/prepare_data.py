@@ -38,7 +38,7 @@ def prepare_data(args: argparse.Namespace):
     global logger
     logger = setup_main_logger(__name__, file_logging=True, path=os.path.join(output_folder, C.LOG_NAME))
 
-    utils.seedRNGs(args.seed)
+    utils.seed_rngs(args.seed)
 
     minimum_num_shards = args.min_num_shards
     samples_per_shard = args.num_samples_per_shard
@@ -73,7 +73,8 @@ def prepare_data(args: argparse.Namespace):
         num_words_source=num_words_source,
         word_min_count_source=word_min_count_source,
         num_words_target=num_words_target,
-        word_min_count_target=word_min_count_target)
+        word_min_count_target=word_min_count_target,
+        pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
     data_io.prepare_data(source_fnames=source_paths,
                          target_fname=args.target,

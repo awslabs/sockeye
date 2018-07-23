@@ -27,91 +27,8 @@ from . import constants as C
 from . import vocab
 from .data_io import smart_open, get_tokens, tokens2ids
 from .log import setup_main_logger, log_sockeye_version
-from .utils import check_condition
 
 logger = setup_main_logger(__name__, console=True, file_logging=False)
-
-
-class Lexicon:
-    """
-    Lexicon model component. Stores lexicon and supports two operations:
-        (1) Given source batch, lookup translation distributions in the lexicon
-        (2) Given attention score vector and lexicon lookups, compute the lexical bias for the decoder
-
-    :param source_vocab_size: Source vocabulary size.
-    :param target_vocab_size: Target vocabulary size.
-    :param learn: Whether to adapt lexical biases during training.
-    """
-
-    def __init__(self, source_vocab_size: int, target_vocab_size: int, learn: bool = False) -> None:
-        self.source_vocab_size = source_vocab_size
-        self.target_vocab_size = target_vocab_size
-        # TODO: once half-precision works, use float16 for this variable to save memory
-        self.lexicon = mx.sym.Variable(name=C.LEXICON_NAME,
-                                       shape=(self.source_vocab_size,
-                                              self.target_vocab_size))
-        if not learn:
-            logger.info("Fixed lexicon bias terms")
-            self.lexicon = mx.sym.BlockGrad(self.lexicon)
-        else:
-            logger.info("Learning lexicon bias terms")
-
-    def lookup(self, source: mx.sym.Symbol) -> mx.sym.Symbol:
-        """
-        Lookup lexicon distributions for source.
-
-        :param source: Input. Shape: (batch_size, source_seq_len).
-        :return: Lexicon distributions for input. Shape: (batch_size, target_vocab_size, source_seq_len).
-        """
-        return mx.sym.swapaxes(data=mx.sym.Embedding(data=source,
-                                                     input_dim=self.source_vocab_size,
-                                                     weight=self.lexicon,
-                                                     output_dim=self.target_vocab_size,
-                                                     name=C.LEXICON_NAME + "_lookup"), dim1=1, dim2=2)
-
-    @staticmethod
-    def calculate_lex_bias(source_lexicon: mx.sym.Symbol, attention_prob_score: mx.sym.Symbol) -> mx.sym.Symbol:
-        """
-        Given attention/alignment scores, calculates a weighted sum over lexical distributions
-        that serve as a bias for the decoder softmax.
-        * https://arxiv.org/pdf/1606.02006.pdf
-        * http://www.aclweb.org/anthology/W/W16/W16-4610.pdf
-
-        :param source_lexicon: Lexical biases for sentence Shape: (batch_size, target_vocab_size, source_seq_len).
-        :param attention_prob_score: Attention score. Shape: (batch_size, source_seq_len).
-        :return: Lexical bias. Shape: (batch_size, 1, target_vocab_size).
-        """
-        # attention_prob_score: (batch_size, source_seq_len) -> (batch_size, source_seq_len, 1)
-        attention_prob_score = mx.sym.expand_dims(attention_prob_score, axis=2)
-        # lex_bias: (batch_size, target_vocab_size, 1)
-        lex_bias = mx.sym.batch_dot(source_lexicon, attention_prob_score)
-        # lex_bias: (batch_size, 1, target_vocab_size)
-        lex_bias = mx.sym.swapaxes(data=lex_bias, dim1=1, dim2=2)
-        return lex_bias
-
-
-def initialize_lexicon(cmdline_arg: str, vocab_source: Dict[str, int], vocab_target: Dict[str, int]) -> mx.nd.NDArray:
-    """
-    Reads a probabilistic word lexicon as given by the commandline argument and converts
-    to log probabilities.
-    If specified, smooths with custom value, uses 0.001 otherwise.
-
-    :param cmdline_arg: Commandline argument.
-    :param vocab_source: Source vocabulary.
-    :param vocab_target: Target vocabulary.
-    :return: Lexicon array. Shape: (vocab_source_size, vocab_target_size).
-    """
-    fields = cmdline_arg.split(":", 1)
-    path = fields[0]
-    lexicon = read_lexicon(path, vocab_source, vocab_target)
-    assert lexicon.shape == (len(vocab_source), len(vocab_target)), "Invalid lexicon shape"
-    eps = 0.001
-    if len(fields) == 2:
-        eps = float(fields[1])
-        check_condition(eps > 0, "epsilon must be >0")
-    logger.info("Smoothing lexicon with eps=%.4f", eps)
-    lexicon = mx.nd.array(np.log(lexicon + eps))
-    return lexicon
 
 
 def lexicon_iterator(path: str,
@@ -319,7 +236,9 @@ def main():
     params = argparse.ArgumentParser(description="Create or inspect a top-k lexicon for use during decoding.")
     subparams = params.add_subparsers(title="Commands")
 
-    params_create = subparams.add_parser('create', description="Create top-k lexicon for use during decoding. See contrib/fast_align/README.md for information on creating input lexical tables.")
+    params_create = subparams.add_parser('create', description="Create top-k lexicon for use during decoding. "
+                                                               "See contrib/fast_align/README.md for information "
+                                                               "on creating input lexical tables.")
     arguments.add_lexicon_args(params_create)
     arguments.add_lexicon_create_args(params_create)
     arguments.add_logging_args(params_create)

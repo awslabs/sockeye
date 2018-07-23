@@ -44,7 +44,7 @@ ENCODER_DECODER_SETTINGS = [
      " --rnn-decoder-state-init avg --rnn-encoder-reverse-input --rnn-dropout-recurrent 0.1:0.0"
      " --rnn-h2h-init orthogonal_stacked --batch-type sentence --decode-and-evaluate 0"
      " --learning-rate-decay-param-reset --weight-normalization --source-factors-num-embed 5",
-     "--beam-size 2",
+     "--beam-size 2 --beam-search-stop first",
      False, True, True, False),
     # Convolutional embedding encoder + LSTM encoder-decoder with attention
     ("--encoder rnn-with-conv-embed --decoder rnn --conv-embed-max-filter-width 3 --conv-embed-num-filters 4:4:8"
@@ -119,7 +119,7 @@ ENCODER_DECODER_SETTINGS = [
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
      " --batch-size 2 --max-updates 2 --batch-type sentence  --decode-and-evaluate 0"
      " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
-     "--beam-size 2",
+     "--beam-size 2 --beam-prune 1",
      True, False, False, False)]
 
 

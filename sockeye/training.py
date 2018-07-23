@@ -927,8 +927,8 @@ class EarlyStoppingTrainer:
 
         utils.check_condition(early_stopping_metric in C.METRICS,
                               "Unsupported early-stopping metric: %s" % early_stopping_metric)
-        if early_stopping_metric == C.BLEU:
-            utils.check_condition(cp_decoder is not None, "%s requires CheckpointDecoder" % C.BLEU)
+        if early_stopping_metric in C.METRICS_REQUIRING_DECODER:
+            utils.check_condition(cp_decoder is not None, "%s requires CheckpointDecoder" % early_stopping_metric)
 
     def _save_params(self):
         """

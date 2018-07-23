@@ -298,7 +298,6 @@ class PointerOutputLayer(OutputLayer):
 
         # decoder.py RecurrentDecoder._step()
 
-
         switch_hidden = mx.sym.FullyConnected(data=hidden,
                                               num_hidden=self.hidden_layer_dim,
                                               weight=self.weights_decoder,
@@ -332,8 +331,8 @@ class PointerOutputLayer(OutputLayer):
 
         switch_target_prob = mx.sym.Activation(switch_output, act_type='sigmoid', name=C.SWITCH_PROB_NAME+'_out')
 
-        probs_trg = mx.sym.softmax(data=logits_trg, axis=1)
         probs_src = attention
+        probs_trg = mx.sym.softmax(data=logits_trg, axis=1)
 
         weighted_probs_trg = mx.sym.broadcast_mul(probs_trg, switch_target_prob)
         weighted_probs_src = mx.sym.broadcast_mul(probs_src, 1.0 - switch_target_prob)

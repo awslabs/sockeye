@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -15,8 +15,6 @@ import numpy as np
 from . import constants as C
 
 class Aligner:
-
-    # todo: this is just a toy implementation at the moment
 
     def __init__(self, trg_vocab=None):
         self.vocab = trg_vocab

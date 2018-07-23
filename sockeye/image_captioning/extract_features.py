@@ -18,6 +18,7 @@ import argparse
 import os
 import pickle
 from contextlib import ExitStack
+from typing import List, Tuple
 
 import mxnet as mx
 import numpy as np
@@ -27,7 +28,7 @@ from . import encoder
 from . import utils
 from .. import constants as C
 from ..log import setup_main_logger
-from ..translate import _setup_context
+from ..utils import check_condition, determine_context
 
 # Temporary logger, the real one (logging to a file probably, will be created
 # in the main function)
@@ -40,8 +41,7 @@ def batching(iterable, n=1):
         yield iterable[ndx:min(ndx + n, l)]
 
 
-def get_pretrained_net(args: argparse.Namespace,
-                       context: mx.Context) -> mx.mod.Module:
+def get_pretrained_net(args: argparse.Namespace, context: mx.Context) -> Tuple[mx.mod.Module, Tuple[int]]:
     # init encoder
     image_cnn_encoder_config = encoder.ImageLoadedCnnEncoderConfig(
         model_path=args.image_encoder_model_path,
@@ -49,23 +49,19 @@ def get_pretrained_net(args: argparse.Namespace,
         layer_name=args.image_encoder_layer,
         encoded_seq_len=0,
         num_embed=100,
-        preextracted_features=False
-    )  # this num does not matter here
+        preextracted_features=False)  # this num does not matter here
 
     image_cnn_encoder = encoder.ImageLoadedCnnEncoder(image_cnn_encoder_config)
     symbol = image_cnn_encoder.sym  # this is the net before further encoding
-    arg_shapes, out_shapes, aux_shapes = symbol.infer_shape(
-        source=(1,) + tuple(args.source_image_size))
+    arg_shapes, out_shapes, aux_shapes = symbol.infer_shape(source=(1,) + tuple(args.source_image_size))
     last_layer_shape = out_shapes[-1][1:]
 
     # Create module
     module = mx.mod.Module(symbol=symbol,
                            data_names=[C.SOURCE_NAME],
-                           label_names=None,
+                           label_names=[],
                            context=context)
-    module.bind(for_training=False, data_shapes=[(C.SOURCE_NAME,
-                                                  (args.batch_size,) + tuple(
-                                                      args.source_image_size))])
+    module.bind(for_training=False, data_shapes=[(C.SOURCE_NAME, (args.batch_size,) + tuple(args.source_image_size))])
 
     # Init with pretrained net
     initializers = image_cnn_encoder.get_initializers()
@@ -75,15 +71,12 @@ def get_pretrained_net(args: argparse.Namespace,
     return module, last_layer_shape
 
 
-def extract_features_forward(im, module, image_root, output_root, batch_size,
-                             source_image_size, context):
-    batch = mx.nd.zeros((batch_size,) + \
-                        tuple(source_image_size), context)
+def extract_features_forward(im, module, image_root, output_root, batch_size, source_image_size, context):
+    batch = mx.nd.zeros((batch_size,) + tuple(source_image_size), context)
     # Reading
     out_names = []
     for i, v in enumerate(im):
-        batch[i] = utils.load_preprocess_image(os.path.join(image_root, v),
-                                               source_image_size[1:])
+        batch[i] = utils.load_preprocess_image(os.path.join(image_root, v), source_image_size[1:])
         out_names.append(os.path.join(output_root, v.replace("/", "_")))
     # Forward
     module.forward(mx.io.DataBatch([batch]))
@@ -94,17 +87,16 @@ def extract_features_forward(im, module, image_root, output_root, batch_size,
     return feats, out_names
 
 
-def read_list_file(input):
-    with open(input, "r") as fd:
-        data_list = []
+def read_list_file(inp: str) -> List[str]:
+    with open(inp, "r") as fd:
+        data_list = []  # type: List[str]
         for i in fd.readlines():
             data_list.append(i.split("\n")[0])
     return data_list
 
 
 def main():
-    params = argparse.ArgumentParser(description='CLI to extract features ' \
-                                                 'from images.')
+    params = argparse.ArgumentParser(description='CLI to extract features from images.')
     arguments.add_image_extract_features_cli_args(params)
     args = params.parse_args()
 
@@ -122,15 +114,18 @@ def main():
 
     # Get pretrained net module (already bind)
     with ExitStack() as exit_stack:
-        context = _setup_context(args, exit_stack)
+        check_condition(len(args.device_ids) == 1, "extract_features only supports single device for now")
+        context = determine_context(device_ids=args.device_ids,
+                                    use_cpu=args.use_cpu,
+                                    disable_device_locking=args.disable_device_locking,
+                                    lock_dir=args.lock_dir,
+                                    exit_stack=exit_stack)[0]
         module, _ = get_pretrained_net(args, context)
 
         # Extract features
         with open(output_file, "w") as fout:
             for i, im in enumerate(batching(image_list, args.batch_size)):
-                logger.info("Processing batch {}/{}".format(i + 1,
-                                                            int(np.ceil(len(
-                                                                image_list) / args.batch_size))))
+                logger.info("Processing batch {}/{}".format(i + 1, int(np.ceil(len(image_list) / args.batch_size))))
                 # TODO: enable caching to reuse features and resume computation
                 feats, out_names = extract_features_forward(im, module,
                                                             image_root,
@@ -141,21 +136,17 @@ def main():
                 # Save to disk
                 out_file_names = utils.save_features(out_names, feats)
                 # Write to output file
-                out_file_names = map(lambda x: os.path.basename(x) + "\n",
-                                     out_file_names)
+                out_file_names = map(lambda x: os.path.basename(x) + "\n", out_file_names)
                 fout.writelines(out_file_names)
 
         # Save the image size and feature size
         with open(size_out_file, "wb") as fout:
-            pickle.dump({"image_shape": tuple(args.source_image_size),
-                         "features_shape": tuple(feats.shape[1:])}, fout)
+            pickle.dump({"image_shape": tuple(args.source_image_size), "features_shape": tuple(feats.shape[1:])}, fout)
 
         # Copy image model to output_folder
-        image_encoder_model_path = utils.copy_mx_model_to(
-            args.image_encoder_model_path,
-            args.image_encoder_model_epoch,
-            output_root
-        )
+        image_encoder_model_path = utils.copy_mx_model_to(args.image_encoder_model_path,
+                                                          args.image_encoder_model_epoch,
+                                                          output_root)
 
         logger.info("Files saved in {}, {} and {}.".format(output_file,
                                                            size_out_file,
