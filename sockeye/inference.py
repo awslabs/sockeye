@@ -965,7 +965,8 @@ class Translator:
                  target_vocab: vocab.Vocab,
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
                  store_beam: bool = False,
-                 strip_unknown_words: bool = False) -> None:
+                 strip_unknown_words: bool = False,
+                 mark_pointed_words: Optional[bool] = True) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
@@ -981,6 +982,7 @@ class Translator:
         self.strip_ids = self.stop_ids.copy()  # ids to strip from the output
         if strip_unknown_words:
             self.strip_ids.add(self.vocab_target[C.UNK_SYMBOL])
+        self.mark_pointed_words = mark_pointed_words
         self.models = models
         utils.check_condition(all(self.source_with_eos == m.source_with_eos for m in models),
                               "The source_with_eos property must match across models.")
@@ -1256,11 +1258,14 @@ class Translator:
             # There may be some out-of-bounds (OOB) words pointed to, so handle this with a dict
             source_inv = dict((x, y) for x, y in enumerate(trans_input.tokens))
             def id2str(word_id: int):
-                if word_id > len(self.vocab_target):
+                if word_id >= len(self.vocab_target):
                     word_id = word_id - len(self.vocab_target) - 1
-                    return '{}/{}'.format(source_inv.get(word_id, 'OOB'), word_id)
+                    if self.mark_pointed_words:
+                        return '[{}/{}]'.format(source_inv.get(word_id, 'OOB'), word_id)
+                    else:
+                        return source_inv.get(word_id, 'OOB')
                 else:
-                    return self.vocab_target_inv.get(word_id)
+                    return self.vocab_target_inv[word_id]
             target_tokens = [id2str(target_id) for target_id in target_ids]
         else:
             target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]

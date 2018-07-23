@@ -1190,6 +1190,10 @@ def add_inference_args(params):
                                type=str,
                                help='EXPERIMENTAL: may be changed or removed in future. Overrides training dtype of '
                                     'encoders and decoders during inference. Default: %(default)s')
+    decode_params.add_argument('--pointer-nets-mark',
+                               default=False,
+                               action='store_true',
+                               help='Annotate pointed words in the output')
 
 def add_evaluate_args(params):
     eval_params = params.add_argument_group("Evaluate parameters")
