@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.36]
+### Fixed
+- Fixed check for existence of negative constraints
+
 ## [1.18.35]
 ### Added
 - ROUGE scores are now available in `sockeye-evaluate`.
@@ -37,7 +41,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.30]
 ### Fixed
-- Preserving max output length for each sentence to allow having identical translations for both with and without batching. 
+- Preserving max output length for each sentence to allow having identical translations for both with and without batching.
 
 ## [1.18.29]
 ### Changed
