@@ -269,7 +269,7 @@ class TransformerDecoder(Decoder):
             target = mx.sym.Dropout(data=target, p=self.config.dropout_prepost)
 
         for layer in self.layers:
-            target = layer(target=target,
+            target, probs = layer(target=target,
                            target_bias=target_bias,
                            source=source_encoded,
                            source_bias=source_bias)
