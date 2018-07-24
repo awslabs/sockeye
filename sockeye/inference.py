@@ -1029,20 +1029,15 @@ class Translator:
         self._sort_by_index.initialize(ctx=self.context)
         self._sort_by_index.hybridize()
 
-        self._normalize_finished = NormalizeFinishedHypotheses(pad_id=C.PAD_ID,
-                                                               eos_id=self.vocab_target[C.EOS_SYMBOL],
-                                                               length_penalty_alpha=self.length_penalty.alpha,
-                                                               length_penalty_beta=self.length_penalty.beta)
-        self._normalize_finished.initialize(ctx=self.context)
-        self._normalize_finished.hybridize()
+        self._update_finished = NormalizeAndUpdateFinished(pad_id=C.PAD_ID,
+                                                              eos_id=self.vocab_target[C.EOS_SYMBOL],
+                                                              length_penalty_alpha=self.length_penalty.alpha,
+                                                              length_penalty_beta=self.length_penalty.beta)
+        self._update_finished.initialize(ctx=self.context)
+        self._update_finished.hybridize()
         self._prune_hyps = PruneHypotheses(threshold=self.beam_prune, beam_size=self.beam_size)
         self._prune_hyps.initialize(ctx=self.context)
         self._prune_hyps.hybridize()
-
-        self._update_lengths_and_finished = UpdateLengthsAndFinished(pad_id=C.PAD_ID,
-                                                                     eos_id=self.vocab_target[C.EOS_SYMBOL])
-        self._update_lengths_and_finished.initialize(ctx=self.context)
-        self._update_lengths_and_finished.hybridize()
 
         self.global_avoid_trie = None
         if avoid_list is not None:
@@ -1528,11 +1523,14 @@ class Translator:
                                                                               attention_scores)
 
             # (5) Normalize the scores of newly finished hypotheses. Note that after this until the
-            # next call to topk(), hypotheses may not be in sorted order.
-            finished, scores_accumulated = self._normalize_finished.forward(best_word_indices,
-                                                                            finished,
-                                                                            scores_accumulated,
-                                                                            lengths)
+            # next call to topk(), hypotheses may not be in sorted order. Don't update `finished` yet;
+            # we need to include newly-finished (on this time-step) items for normalization and pruning,
+            # but we need the old values of `finished` to update lengths first, using the old values
+            finished, scores_accumulated, lengths = self._update_finished.forward(best_word_indices,
+                                                                                  max_output_lengths,
+                                                                                  finished,
+                                                                                  scores_accumulated,
+                                                                                  lengths)
 
             # (6) Prune out low-probability hypotheses. Pruning works by setting entries `inactive`.
             if self.beam_prune > 0.0:
@@ -1541,13 +1539,6 @@ class Translator:
                                                                                            finished,
                                                                                            self.inf_array,
                                                                                            self.zeros_array)
-
-            # Update hypotheses lengths (unless finished or inactive) and compute finished hypotheses
-            finished, finished_or_inactive, lengths = self._update_lengths_and_finished.forward(finished,
-                                                                                                inactive,
-                                                                                                lengths,
-                                                                                                max_output_lengths,
-                                                                                                best_word_indices)
 
             # (7) Reorder sequences and attentions according to best_hyp_indices
             # and extend sequences with best_word_indices.
@@ -1564,6 +1555,7 @@ class Translator:
 
             # (7b) optionally save beam history
             if self.store_beam:
+                finished_or_inactive = mx.nd.clip(data=finished + inactive, a_min=0, a_max=1)
                 unnormalized_scores = mx.nd.where(finished_or_inactive,
                                                   scores_accumulated * self.length_penalty(lengths - 1),
                                                   scores_accumulated)
@@ -1614,6 +1606,8 @@ class Translator:
         attentions = attentions.take(best_hyp_indices)
         scores_accumulated = scores_accumulated.take(best_hyp_indices)
         constraints = [constraints[x] for x in best_hyp_indices.asnumpy()]
+
+        print('SEQUENCES', sequences[0], 'LENGTHS', lengths[0], sep='\n')
 
         return sequences, attentions, scores_accumulated, lengths, constraints, beam_histories
 
@@ -1750,7 +1744,7 @@ class SortByIndex(mx.gluon.HybridBlock):
         return [F.take(arg, indices) for arg in args]
 
 
-class NormalizeFinishedHypotheses(mx.gluon.HybridBlock):
+class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
     """
     A HybridBlock for normalizing newly finished hypotheses scores with LengthPenalty.
     """
@@ -1765,31 +1759,18 @@ class NormalizeFinishedHypotheses(mx.gluon.HybridBlock):
         with self.name_scope():
             self.length_penalty = LengthPenalty(alpha=length_penalty_alpha, beta=length_penalty_beta)
 
-    def hybrid_forward(self, F, best_word_indices, finished, scores_accumulated, lengths):
+    def hybrid_forward(self, F, best_word_indices, max_output_lengths, finished, scores_accumulated, lengths):
         all_finished = ((best_word_indices == self.pad_id) + (best_word_indices == self.eos_id))
         newly_finished = all_finished - finished
         scores_accumulated = F.where(newly_finished,
                                      scores_accumulated / self.length_penalty(lengths),
                                      scores_accumulated)
-        finished = all_finished
-        return finished, scores_accumulated
 
+        # Update lengths of all items, except those that were already finished. This updates
+        # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
+        lengths = lengths + F.cast(1 - F.expand_dims(finished, axis=1), dtype='float32')
 
-class UpdateLengthsAndFinished(mx.gluon.HybridBlock):
-    """
-    A HybridBlock that updates the lengths of unfinished and active hypotheses and recomputes finished hypotheses.
-    """
-
-    def __init__(self, pad_id: int, eos_id: int) -> None:
-        super().__init__()
-        self.pad_id = pad_id
-        self.eos_id = eos_id
-
-    def hybrid_forward(self, F, finished, inactive, lengths, max_output_lengths, best_word_indices):
-        finished_or_inactive = F.clip(data=finished + inactive, a_min=0, a_max=1)
-        # update lengths of hypotheses unless they are finished or inactive
-        lengths = lengths + F.cast(1 - F.expand_dims(finished_or_inactive, axis=1), dtype='float32')
-        # recompute finished. Hypotheses are finished if they are
+        # Now, recompute finished. Hypotheses are finished if they are
         # - extended with <pad>, or
         # - extended with <eos>, or
         # - at their maximum length.
@@ -1799,7 +1780,7 @@ class UpdateLengthsAndFinished(mx.gluon.HybridBlock):
             (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') >= max_output_lengths),
             a_min=0, a_max=1)
 
-        return finished, finished_or_inactive, lengths
+        return finished, scores_accumulated, lengths
 
 
 class UpdateScores(mx.gluon.HybridBlock):
