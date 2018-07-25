@@ -979,7 +979,7 @@ class Translator:
                  avoid_list: Optional[str] = None,
                  store_beam: bool = False,
                  strip_unknown_words: bool = False,
-                 mark_pointed_words: Optional[bool] = True) -> None:
+                 mark_pointed_words: Optional[bool] = False) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
