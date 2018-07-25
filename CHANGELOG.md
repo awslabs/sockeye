@@ -12,7 +12,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.36]
 ### Fixed
-- Empty input sentence handling during inference
+- Fixed issue with the incorrect order of translations when empty inputs are present and translating in chunks.
 
 ## [1.18.35]
 ### Added
