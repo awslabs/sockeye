@@ -1210,7 +1210,7 @@ class Translator:
         max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)
-            max_output_lengths.append(self.models[0].get_max_output_length(num_tokens))
+            max_output_lengths.append(self.models[0].get_max_output_length(data_io.get_bucket(num_tokens, self.buckets_source)))
             source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
 
             factors = trans_input.factors if trans_input.factors is not None else []
