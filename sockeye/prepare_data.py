@@ -14,6 +14,7 @@
 import argparse
 import os
 
+from . import align
 from . import arguments
 from . import constants as C
 from . import data_io
@@ -45,8 +46,6 @@ def prepare_data(args: argparse.Namespace):
     bucketing = not args.no_bucketing
     bucket_width = args.bucket_width
 
-    use_pointer_nets = args.use_pointer_nets
-
     source_paths = [args.source] + args.source_factors
     # NOTE: Pre-existing source factor vocabularies not yet supported for prepare data
     source_factor_vocab_paths = [None] * len(args.source_factors)
@@ -76,6 +75,12 @@ def prepare_data(args: argparse.Namespace):
         word_min_count_target=word_min_count_target,
         pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
+    aligner = None
+    if args.use_pointer_nets:
+        aligner = align.Aligner(source_vocabs[0], target_vocab,
+                                window_size=args.pointer_nets_window_size,
+                                min_word_length=args.pointer_nets_min_word_len)
+
     data_io.prepare_data(source_fnames=source_paths,
                          target_fname=args.target,
                          source_vocabs=source_vocabs,
@@ -90,7 +95,7 @@ def prepare_data(args: argparse.Namespace):
                          samples_per_shard=samples_per_shard,
                          min_num_shards=minimum_num_shards,
                          output_prefix=output_folder,
-                         use_pointer_nets=use_pointer_nets)
+                         aligner=aligner)
 
 
 if __name__ == "__main__":
