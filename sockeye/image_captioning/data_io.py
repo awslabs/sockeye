@@ -73,7 +73,7 @@ class RawListTextDatasetLoader:
         """
         assert len(num_samples_per_bucket) == len(self.buckets)
 
-        data_source = [np.full((num_samples, ), self.pad_id, dtype=object)
+        data_source = [np.full((num_samples,), self.pad_id, dtype=object)
                        for num_samples in num_samples_per_bucket]
         # data_source is a List[numpy.array[str]] which semantic is bucket, index, str
         # Its loading to memory is deferred to the iterator, since the full data
@@ -122,18 +122,18 @@ class RawListTextDatasetLoader:
 
 
 def get_validation_image_text_data_iter(data_loader: RawParallelDatasetLoader,
-                             validation_source_root:str,
-                             validation_source: str,
-                             validation_target: str,
-                             buckets: List[Tuple[int, int]],
-                             bucket_batch_sizes: List[BucketBatchSize],
-                             source_image_size: tuple,
-                             vocab_target: vocab.Vocab,
-                             max_seq_len_target: int,
-                             batch_size: int,
-                             fill_up: str,
-                             use_feature_loader: bool = False,
-                             preload_features: bool = False) -> 'ParallelSampleIter':
+                                        validation_source_root: str,
+                                        validation_source: str,
+                                        validation_target: str,
+                                        buckets: List[Tuple[int, int]],
+                                        bucket_batch_sizes: List[BucketBatchSize],
+                                        source_image_size: tuple,
+                                        vocab_target: vocab.Vocab,
+                                        max_seq_len_target: int,
+                                        batch_size: int,
+                                        fill_up: str,
+                                        use_feature_loader: bool = False,
+                                        preload_features: bool = False) -> 'ParallelSampleIter':
     """
     Returns a ParallelSampleIter for the validation data.
     """
@@ -145,12 +145,12 @@ def get_validation_image_text_data_iter(data_loader: RawParallelDatasetLoader,
     validation_target_sentences = SequenceReader(validation_target, vocab_target, add_bos=True, limit=None)
 
     validation_data_statistics = get_data_statistics(source_readers=None,
-                                          target_reader=validation_target_sentences,
-                                          buckets=buckets,
-                                          length_ratio_mean=1.0,
-                                          length_ratio_std=1.0,
-                                          source_vocabs=[None],
-                                          target_vocab=vocab_target)
+                                                     target_reader=validation_target_sentences,
+                                                     buckets=buckets,
+                                                     length_ratio_mean=1.0,
+                                                     length_ratio_std=1.0,
+                                                     source_vocabs=[None],
+                                                     target_vocab=vocab_target)
     validation_data_statistics.log(bucket_batch_sizes)
 
     validation_data = data_loader.load(validation_source_images[0],
@@ -167,23 +167,23 @@ def get_validation_image_text_data_iter(data_loader: RawParallelDatasetLoader,
 
 
 def get_training_image_text_data_iters(source_root: str,
-                            source: str, target: str,
-                            validation_source_root: str,
-                            validation_source: str, validation_target: str,
-                            vocab_target: vocab.Vocab,
-                            vocab_target_path: Optional[str],
-                            batch_size: int,
-                            batch_by_words: bool,
-                            batch_num_devices: int,
-                            source_image_size: tuple,
-                            fill_up: str,
-                            max_seq_len_target: int,
-                            bucketing: bool,
-                            bucket_width: int,
-                            use_feature_loader: bool = False,
-                            preload_features: bool = False) -> Tuple['ParallelSampleIter',
-                                                                           'ParallelSampleIter',
-                                                                           'DataConfig', 'DataInfo']:
+                                       source: str, target: str,
+                                       validation_source_root: str,
+                                       validation_source: str, validation_target: str,
+                                       vocab_target: vocab.Vocab,
+                                       vocab_target_path: Optional[str],
+                                       batch_size: int,
+                                       batch_by_words: bool,
+                                       batch_num_devices: int,
+                                       source_image_size: tuple,
+                                       fill_up: str,
+                                       max_seq_len_target: int,
+                                       bucketing: bool,
+                                       bucket_width: int,
+                                       use_feature_loader: bool = False,
+                                       preload_features: bool = False) -> Tuple['ParallelSampleIter',
+                                                                                'ParallelSampleIter',
+                                                                                'DataConfig', 'DataInfo']:
     """
     Returns data iterators for training and validation data.
 
@@ -268,18 +268,18 @@ def get_training_image_text_data_iters(source_root: str,
                                      preload_features=preload_features)
 
     validation_iter = get_validation_image_text_data_iter(data_loader=data_loader,
-                                               validation_source_root=validation_source_root,
-                                               validation_source=validation_source,
-                                               validation_target=validation_target,
-                                               buckets=buckets,
-                                               bucket_batch_sizes=bucket_batch_sizes,
-                                               source_image_size=source_image_size,
-                                               vocab_target=vocab_target,
-                                               max_seq_len_target=max_seq_len_target,
-                                               batch_size=batch_size,
-                                               fill_up=fill_up,
-                                               use_feature_loader=use_feature_loader,
-                                               preload_features=preload_features)
+                                                          validation_source_root=validation_source_root,
+                                                          validation_source=validation_source,
+                                                          validation_target=validation_target,
+                                                          buckets=buckets,
+                                                          bucket_batch_sizes=bucket_batch_sizes,
+                                                          source_image_size=source_image_size,
+                                                          vocab_target=vocab_target,
+                                                          max_seq_len_target=max_seq_len_target,
+                                                          batch_size=batch_size,
+                                                          fill_up=fill_up,
+                                                          use_feature_loader=use_feature_loader,
+                                                          preload_features=preload_features)
 
     return train_iter, validation_iter, config_data, data_info
 
@@ -302,7 +302,7 @@ class ImageTextSampleIter(ParallelSampleIter):
                  label_name=C.TARGET_LABEL_NAME,
                  dtype='float32',
                  source_only=False,
-                 use_feature_loader:bool = False,
+                 use_feature_loader: bool = False,
                  preload_features: bool = False) -> None:
         super().__init__(data, buckets, batch_size, bucket_batch_sizes,
                          source_data_name, target_data_name, label_name, dtype)
@@ -313,7 +313,7 @@ class ImageTextSampleIter(ParallelSampleIter):
         # Override provide_data to make sure to use images
         self.provide_data = [
             mx.io.DataDesc(name=self.source_data_name,
-                           shape=(self.bucket_batch_sizes[-1].batch_size, ) + self.image_size,  # "NCHW"
+                           shape=(self.bucket_batch_sizes[-1].batch_size,) + self.image_size,  # "NCHW"
                            layout=C.BATCH_MAJOR_IMAGE)
         ]
         if self.with_text:
@@ -323,19 +323,19 @@ class ImageTextSampleIter(ParallelSampleIter):
                                layout=C.BATCH_MAJOR)
             ]
         self.use_feature_loader = use_feature_loader
-        self.preload_features =preload_features
+        self.preload_features = preload_features
         if self.use_feature_loader:
             self.data_loader = load_features
             # Load already everything to memory
             if self.preload_features:
                 logger.info("Loading all the features to memory (this might take a while, be patient)...")
                 start = time.time()
-                self.loaded_source = {}
+                self.loaded_source = {}  # type: Dict[str, np.ndarray]
                 for bucket in self.data.source:
                     for k in bucket:
                         if k not in self.loaded_source:  # avoid to load twice
                             self.loaded_source[k] = load_feature(k, self.image_size)
-                logger.info("Feature loaded in {} seconds.".format(time.time()-start))
+                logger.info("Feature loaded in {} seconds.".format(time.time() - start))
         else:
             self.data_loader = load_preprocess_images
 
@@ -353,7 +353,7 @@ class ImageTextSampleIter(ParallelSampleIter):
         source = self.data.source[i][j:j + batch_size]
         target = self.data.target[i][j:j + batch_size]
         if self.preload_features:
-            loaded_source = []
+            loaded_source = []  # type: List[np.ndarray]
             for k in source:
                 loaded_source.append(self.loaded_source[k])
             loaded_source = mx.nd.array(loaded_source)
@@ -362,13 +362,9 @@ class ImageTextSampleIter(ParallelSampleIter):
 
         label = [self.data.label[i][j:j + batch_size]]
 
-        provide_data = [
-            mx.io.DataDesc(name=self.source_data_name, shape=loaded_source.shape, layout=C.BATCH_MAJOR_IMAGE),
-        ]
+        provide_data = [mx.io.DataDesc(name=self.source_data_name, shape=loaded_source.shape, layout=C.BATCH_MAJOR_IMAGE)]
         if self.with_text:
-            provide_data += [
-                mx.io.DataDesc(name=self.target_data_name, shape=target.shape, layout=C.BATCH_MAJOR)
-        ]
+            provide_data += [mx.io.DataDesc(name=self.target_data_name, shape=target.shape, layout=C.BATCH_MAJOR)]
         provide_label = [mx.io.DataDesc(name=n, shape=x.shape, layout=C.BATCH_MAJOR) for n, x in
                          zip(self.label_names, label)]
 
@@ -382,7 +378,7 @@ class ImageTextSampleIter(ParallelSampleIter):
     @staticmethod
     def visualize_batch(batch: mx.io.DataBatch,
                         reverse_vocab: Dict[int, str],
-                        source_only: bool =False) -> None:
+                        source_only: bool = False) -> None:
 
         try:  # Try to import matplotlib
             import matplotlib  # pylint: disable=import-error
@@ -401,23 +397,23 @@ class ImageTextSampleIter(ParallelSampleIter):
             # (channel, height, width) -> (height, width, channel)
             img_ = np.swapaxes(img.asnumpy(), 0, 2)
             img_ = np.swapaxes(img_, 0, 1)
-            axs[i//N%M, i%N].imshow(np.uint8(img_))
-            axs[i//N%M, i%N].axis("off")
+            axs[i // N % M, i % N].imshow(np.uint8(img_))
+            axs[i // N % M, i % N].axis("off")
             if not source_only:
                 sentence = ""
                 sentence_ids = batch.data[1][i].asnumpy()
                 carry_on = jj = 0
-                for j,v in enumerate(sentence_ids):
+                for j, v in enumerate(sentence_ids):
                     if reverse_vocab[v] not in C.VOCAB_SYMBOLS:  # Ignore for visualization
                         sentence += reverse_vocab[v]
                         carry_on += len(reverse_vocab[v])
-                        if jj<len(sentence_ids):
-                            if carry_on>=15:
+                        if jj < len(sentence_ids):
+                            if carry_on >= 15:
                                 sentence += "\n"
                                 carry_on = 0
                             else:
                                 sentence += " "
                         jj += 1
-                axs[i//N%M, i%N].text(0, 8, sentence, fontsize=10,
-                                      bbox={'facecolor': 'white', 'alpha': 0.7, 'pad': 2})
+                axs[i // N % M, i % N].text(0, 8, sentence, fontsize=10,
+                                            bbox={'facecolor': 'white', 'alpha': 0.7, 'pad': 2})
         plt.show()

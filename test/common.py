@@ -28,6 +28,7 @@ import sockeye.average
 import sockeye.checkpoint_decoder
 import sockeye.constants as C
 import sockeye.evaluate
+import sockeye.extract_parameters
 import sockeye.lexicon
 import sockeye.prepare_data
 import sockeye.train
@@ -192,19 +193,19 @@ def tmp_digits_dataset(prefix: str,
             # sentences with and without constraints here is critical, since this can happen in production
             # and also introduces sometimes some unanticipated interactions.
             new_sources = []
-            for sentno, (source, target) in enumerate(zip(open(data['test_source']), open(data['test_target']))):
-                target_words = target.rstrip().split()
-                target_len = len(target_words)
-                source_len = len(source.rstrip().split())
-                new_source = { 'text': source.rstrip() }
-                # From the odd-numbered sentences that are not too long, create constraints. We do
-                # only odds to ensure we get batches with mixed constraints / lack of constraints.
-                if target_len > 0 and sentno % 2 == 0:
-                    start_pos = 0
-                    end_pos = min(target_len, 3)
-                    constraint = ' '.join(target_words[start_pos:end_pos])
-                    new_source['constraints'] = [constraint]
-                new_sources.append(json.dumps(new_source))
+            with open(data['test_source']) as source_inp, open(data['test_target']) as target_inp:
+                for sentno, (source, target) in enumerate(zip(source_inp, target_inp)):
+                    target_words = target.rstrip().split()
+                    target_len = len(target_words)
+                    new_source = {'text': source.rstrip()}
+                    # From the odd-numbered sentences that are not too long, create constraints. We do
+                    # only odds to ensure we get batches with mixed constraints / lack of constraints.
+                    if target_len > 0 and sentno % 2 == 0:
+                        start_pos = 0
+                        end_pos = min(target_len, 3)
+                        constraint = ' '.join(target_words[start_pos:end_pos])
+                        new_source['constraints'] = [constraint]
+                    new_sources.append(json.dumps(new_source))
 
             with open(data['test_source'], 'w') as out:
                 for json_line in new_sources:
@@ -218,7 +219,7 @@ _TRAIN_PARAMS_COMMON = "--use-cpu --max-seq-len {max_len} --source {train_source
                        " --seed {seed}"
 
 _PREPARE_DATA_COMMON = " --max-seq-len {max_len} --source {train_source} --target {train_target}" \
-                       " --output {output} {quiet}"
+                       " --output {output} {quiet} --pad-vocab-to-multiple-of 16"
 
 _TRAIN_WITH_FACTORS_COMMON = " --source-factors {source_factors}"
 _DEV_WITH_FACTORS_COMMON = " --validation-source-factors {dev_source_factors}"
@@ -234,6 +235,8 @@ _TRANSLATE_WITH_FACTORS_COMMON = " --input-factors {input_factors}"
 _TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {lexicon} --restrict-lexicon-topk {topk}"
 
 _EVAL_PARAMS_COMMON = "--hypotheses {hypotheses} --references {references} --metrics {metrics} {quiet}"
+
+_EXTRACT_PARAMS = "--input {input} --names target_output_bias --list-all --output {output}"
 
 
 def run_train_translate(train_params: str,
@@ -430,6 +433,14 @@ def run_train_translate(train_params: str,
         averaged_params = sockeye.average.average(points)
         assert averaged_params
 
+        # test parameter extraction
+        extract_params = _EXTRACT_PARAMS.format(output=os.path.join(model_path, "params.extracted"),
+                                                input=model_path)
+        with patch.object(sys, "argv", extract_params.split()):
+            sockeye.extract_parameters.main()
+        with np.load(os.path.join(model_path, "params.extracted.npz")) as data:
+            assert "target_output_bias" in data
+
         # get best validation perplexity
         metrics = sockeye.utils.read_metrics_file(path=os.path.join(model_path, C.METRICS_NAME))
         perplexity = min(m[C.PERPLEXITY + '-val'] for m in metrics)
@@ -448,11 +459,11 @@ def run_train_translate(train_params: str,
         if restrict_lexicon:
             bleu_restrict = raw_corpus_bleu(hypotheses=hypotheses, references=references, offset=0.01)
 
-        # Run BLEU cli
+        # Run evaluate cli
         eval_params = "{} {} ".format(sockeye.evaluate.__file__,
                                       _EVAL_PARAMS_COMMON.format(hypotheses=out_path,
                                                                  references=test_target_path,
-                                                                 metrics="bleu chrf",
+                                                                 metrics="bleu chrf rouge1",
                                                                  quiet=quiet_arg), )
         with patch.object(sys, "argv", eval_params.split()):
             sockeye.evaluate.main()

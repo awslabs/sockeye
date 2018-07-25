@@ -36,6 +36,7 @@ from itertools import zip_longest
           validation_source_factors=[],
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(0, 0), word_min_count=(1, 1),
+          pad_vocab_to_multiple_of=None,
           no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
           monitor_pattern=None, monitor_stat_func='mx_default')),
 
@@ -50,6 +51,7 @@ from itertools import zip_longest
           validation_source_factors=[],
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(0, 0), word_min_count=(1, 1),
+          pad_vocab_to_multiple_of=None,
           no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
           monitor_pattern=None, monitor_stat_func='mx_default'))
 ])
@@ -125,7 +127,8 @@ def test_model_parameters(test_params, expected_params):
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('', dict(batch_size=4096,
+    ('', dict(decoder_only=False,
+              batch_size=4096,
               batch_type="word",
               fill_up='replicate',
               loss=C.CROSS_ENTROPY,
@@ -205,6 +208,7 @@ def test_training_arg(test_params, expected_params):
                       max_input_len=None,
                       restrict_lexicon=None,
                       restrict_lexicon_topk=None,
+                      avoid_list=None,
                       softmax_temperature=None,
                       output_type='translation',
                       sure_align_threshold=0.9,
@@ -335,6 +339,7 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           shared_vocab=False,
           num_words=(0, 0),
           word_min_count=(1, 1),
+          pad_vocab_to_multiple_of=None,
           no_bucketing=False,
           bucket_width=10,
           max_seq_len=(99, 99),
@@ -357,6 +362,7 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           shared_vocab=False,
           num_words=(0, 0),
           word_min_count=(1, 1),
+          pad_vocab_to_multiple_of=None,
           no_bucketing=False,
           bucket_width=10,
           max_seq_len=(99, 99),
