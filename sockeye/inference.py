@@ -235,7 +235,7 @@ class InferenceModel(model.SockeyeModel):
                 # logits: (batch_size, target_vocab_size)
                 logits = self.output_layer(target_decoded)
                 if self.softmax_temperature is not None:
-                    logits /= self.softmax_temperature
+                    logits = logits / self.softmax_temperature
                 outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
 
             data_names = [C.TARGET_NAME] + state_names
