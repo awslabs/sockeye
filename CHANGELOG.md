@@ -15,6 +15,23 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 - Fixed bad check for existence of negative constraints.
 - Resolved conflict for phrases that are both positive and negative constraints.
 
+## [1.18.39]
+### Added
+- Image Captioning now supports constrained decoding.
+- Image Captioning: zero padding of features now allows input features of different shape for each image.
+
+## [1.18.38]
+### Fixed
+- Fixed issue with the incorrect order of translations when empty inputs are present and translating in chunks.
+
+## [1.18.37]
+### Fixed
+- Determining the max output length for each sentence in a batch by the bucket length rather than the actual in order to match the behavior of a single sentence translation.
+
+## [1.18.36]
+### Changed
+- Updated to [MXNet 1.2.1](https://github.com/apache/incubator-mxnet/tree/1.2.1)
+
 ## [1.18.35]
 ### Added
 - ROUGE scores are now available in `sockeye-evaluate`.
