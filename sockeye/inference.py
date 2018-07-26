@@ -700,13 +700,10 @@ def make_input_from_json_string(sentence_id: int, json_string: str) -> Translato
         # If there is overlap between positive and negative constraints, assume the user wanted
         # the words, and so remove them from the avoid_list (negative constraints)
         if constraints is not None and avoid_list is not None:
-            overlap = set(constraints).intersection(set(avoid_list))
+            avoid_set = set(avoid_list)
+            overlap = set(constraints).intersection(avoid_set)
             if len(overlap) > 0:
-                new_avoid_list = []
-                for item in avoid_list:
-                    if item not in overlap:
-                        new_avoid_list.append(item)
-                avoid_list = new_avoid_list
+                avoid_list = list(avoid_set.difference(overlap))
 
         # Convert to a list of tokens
         if isinstance(avoid_list, list):
