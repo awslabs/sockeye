@@ -690,22 +690,26 @@ def make_input_from_json_string(sentence_id: int, json_string: str) -> Translato
             if not all(l == len(tokens) for l in lengths):
                 logger.error("Factors have different length than input text: %d vs. %s", len(tokens), str(lengths))
                 return _bad_input(sentence_id, reason=json_string)
-        else:
-            factors = None
-
-        # List of phrases that must appear in the output
-        constraints = jobj.get(C.JSON_CONSTRAINTS_KEY)
-        if isinstance(constraints, list):
-            constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
-        else:
-            constraints = None
 
         # List of phrases to prevent from occuring in the output
         avoid_list = jobj.get(C.JSON_AVOID_KEY)
+
+        # List of phrases that must appear in the output
+        constraints = jobj.get(C.JSON_CONSTRAINTS_KEY)
+
+        # If there is overlap between positive and negative constraints, assume the user wanted
+        # the words, and so remove them from the avoid_list (negative constraints)
+        if constraints is not None and avoid_list is not None:
+            avoid_set = set(avoid_list)
+            overlap = set(constraints).intersection(avoid_set)
+            if len(overlap) > 0:
+                avoid_list = list(avoid_set.difference(overlap))
+
+        # Convert to a list of tokens
         if isinstance(avoid_list, list):
             avoid_list = [list(data_io.get_tokens(phrase)) for phrase in avoid_list]
-        else:
-            avoid_list = None
+        if isinstance(constraints, list):
+            constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
 
         return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors, constraints=constraints, avoid_list=avoid_list)
 
@@ -1493,7 +1497,7 @@ class Translator:
             # Mark entries that should be blocked as having a score of np.inf
             if self.global_avoid_trie or any(raw_avoid_list):
                 block_indices = avoid_states.avoid()
-                if len(block_indices[0]) > 0:
+                if len(block_indices) > 0:
                     scores[block_indices] = np.inf
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as

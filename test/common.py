@@ -189,9 +189,10 @@ def tmp_digits_dataset(prefix: str,
             data['test_source_factors'] = [test_factor_path]
 
         if with_target_constraints:
-            # When using constrained decoding, rewrite the source file. Generating a mixture of
-            # sentences with and without constraints here is critical, since this can happen in production
-            # and also introduces sometimes some unanticipated interactions.
+            # When using constrained decoding, rewrite the source file to contain target
+            # constraints.  Generating a mixture of sentences with and without constraints here is
+            # critical, since this can happen in production and also introduces sometimes some
+            # unanticipated interactions.
             new_sources = []
             with open(data['test_source']) as source_inp, open(data['test_target']) as target_inp:
                 for sentno, (source, target) in enumerate(zip(source_inp, target_inp)):
@@ -204,7 +205,11 @@ def tmp_digits_dataset(prefix: str,
                         start_pos = 0
                         end_pos = min(target_len, 3)
                         constraint = ' '.join(target_words[start_pos:end_pos])
-                        new_source['constraints'] = [constraint]
+                        # Alternate between positive and negative constraints
+                        if sentno % 4 == 0:
+                            new_source['constraints'] = [constraint]
+                        else:
+                            new_source['avoid'] = [constraint]
                     new_sources.append(json.dumps(new_source))
 
             with open(data['test_source'], 'w') as out:
