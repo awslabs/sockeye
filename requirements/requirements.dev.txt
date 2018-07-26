@@ -4,7 +4,7 @@ pillow
 check-manifest
 matplotlib
 mypy==0.610
-pylint
+pylint==2.0.1
 setuptools>=38.6.0
 twine>=1.11.0
 wheel>=0.31.0
