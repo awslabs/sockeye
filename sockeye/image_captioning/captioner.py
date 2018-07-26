@@ -108,6 +108,10 @@ def main():
     params = arguments.ConfigArgumentParser(description='Image Captioning CLI')
     arguments_image.add_image_caption_cli_args(params)
     args = params.parse_args()
+    caption(args)
+
+
+def caption(args: argparse.Namespace):
     image_preextracted_features = not args.extract_image_features
 
     if args.output is not None:
