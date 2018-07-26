@@ -12,4 +12,3 @@
 # permissions and limitations under the License.
 
 __version__ = '1.18.38'
-
