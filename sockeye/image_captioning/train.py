@@ -24,20 +24,14 @@ from typing import cast, Dict, List, Tuple, Optional
 import mxnet as mx
 import numpy as np
 
-from ..config import Config
-from ..log import setup_main_logger
-from ..train import check_resume, check_arg_compatibility, \
-    determine_context, create_decoder_config, \
-    create_optimizer_config, create_training_model
-from ..utils import check_condition
 # Sockeye captioner
 from . import arguments as arguments_image
 from . import checkpoint_decoder
 from . import data_io as data_io_image
 from . import encoder as encoder_image
-from .. import constants as C
 # Sockeye
 from .. import arguments
+from .. import constants as C
 from .. import data_io
 from .. import encoder
 from .. import loss
@@ -45,6 +39,11 @@ from .. import model
 from .. import training
 from .. import utils
 from .. import vocab
+from ..config import Config
+from ..log import setup_main_logger
+from ..train import check_resume, check_arg_compatibility, create_decoder_config, \
+    create_optimizer_config, create_training_model
+from ..utils import check_condition
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
 logger = setup_main_logger(__name__, file_logging=False, console=True)
@@ -81,20 +80,11 @@ def create_checkpoint_decoder(args: argparse.Namespace,
     if args.use_cpu or args.decode_and_evaluate_use_cpu:
         context = mx.cpu()
     elif args.decode_and_evaluate_device_id is not None:
-        # decode device is defined from the commandline
-        num_gpus = utils.get_num_gpus()
-        check_condition(num_gpus >= 1,
-                        "No GPUs found, consider running on the CPU with --use-cpu "
-                        "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
-                        "binary isn't on the path).")
-
-        if args.disable_device_locking:
-            context = utils.expand_requested_device_ids([args.decode_and_evaluate_device_id])
-        else:
-            context = exit_stack.enter_context(utils.acquire_gpus([args.decode_and_evaluate_device_id],
-                                                                  lock_dir=args.lock_dir))
-        context = mx.gpu(context[0])
-
+        context = utils.determine_context(device_ids=args.decode_and_evaluate_device_id,
+                                          use_cpu=False,
+                                          disable_device_locking=args.disable_device_locking,
+                                          lock_dir=args.lock_dir,
+                                          exit_stack=exit_stack)[0]
     else:
         # default decode context is the last training device
         context = train_context[-1]
@@ -297,7 +287,16 @@ def main():
                 max_seq_len_source, max_seq_len_target)
 
     with ExitStack() as exit_stack:
-        context = determine_context(args, exit_stack)
+        context = utils.determine_context(device_ids=args.device_ids,
+                                          use_cpu=args.use_cpu,
+                                          disable_device_locking=args.disable_device_locking,
+                                          lock_dir=args.lock_dir,
+                                          exit_stack=exit_stack)
+        if args.batch_type == C.BATCH_TYPE_SENTENCE:
+            check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
+                                                                 "divisible by the number of devices. Choose a batch "
+                                                                 "size that is a multiple of %d." % len(context))
+        logger.info("Training Device(s): %s", ", ".join(str(c) for c in context))
 
         # Read feature size
         if args.image_preextracted_features:

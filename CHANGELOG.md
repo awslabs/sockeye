@@ -10,10 +10,19 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [1.18.34]
+## [1.18.36]
 ### Added 
 - Image Captioning now supports constrained decoding. 
 - Image Captioning: zero padding of features now allows input features of different shape for each image.
+
+## [1.18.35]
+### Added
+- ROUGE scores are now available in `sockeye-evaluate`.
+- Enabled CHRF as an early-stopping metric.
+
+## [1.18.34]
+### Added
+- Added support for `--beam-search-stop first` for decoding jobs with `--batch-size > 1`.
 
 ## [1.18.33]
 ### Added

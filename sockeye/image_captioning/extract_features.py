@@ -28,7 +28,7 @@ from . import encoder
 from . import utils
 from .. import constants as C
 from ..log import setup_main_logger
-from ..translate import _setup_context
+from ..utils import check_condition, determine_context
 
 # Temporary logger, the real one (logging to a file probably, will be created
 # in the main function)
@@ -114,7 +114,12 @@ def main():
 
     # Get pretrained net module (already bind)
     with ExitStack() as exit_stack:
-        context = _setup_context(args, exit_stack)
+        check_condition(len(args.device_ids) == 1, "extract_features only supports single device for now")
+        context = determine_context(device_ids=args.device_ids,
+                                    use_cpu=args.use_cpu,
+                                    disable_device_locking=args.disable_device_locking,
+                                    lock_dir=args.lock_dir,
+                                    exit_stack=exit_stack)[0]
         module, _ = get_pretrained_net(args, context)
 
         # Extract features
