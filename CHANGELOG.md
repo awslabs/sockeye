@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.37]
+### Changed
+- Require numpy 1.14 or later to avoid MKL conflicts between numpy as mxnet-mkl.
+
 ## [1.18.36]
 ### Changed
 - Updated to [MXNet 1.2.1](https://github.com/apache/incubator-mxnet/tree/1.2.1)
