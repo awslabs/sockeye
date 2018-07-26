@@ -18,7 +18,6 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Changed
 - Updated to [MXNet 1.2.1](https://github.com/apache/incubator-mxnet/tree/1.2.1)
 
-
 ## [1.18.35]
 ### Added
 - ROUGE scores are now available in `sockeye-evaluate`.
