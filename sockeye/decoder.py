@@ -15,13 +15,11 @@
 Decoders for sequence-to-sequence models.
 """
 import logging
-import math
 from abc import ABC, abstractmethod
 from typing import Callable, cast, Dict, List, NamedTuple, Optional, Tuple, Union, Type
 
 import mxnet as mx
 
-from . import layers
 from . import constants as C
 from . import convolution
 from . import encoder
@@ -132,7 +130,7 @@ class Decoder(ABC):
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param att_dict: A dictionary of attention matrices used for visualization with separate entries for source and
-        self attention
+        self-attention.
         :param states: Arbitrary list of decoder states.
         :return: logit inputs, attention probabilities, next decoder states.
         """
@@ -302,7 +300,7 @@ class TransformerDecoder(Decoder):
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param att_dict: A dictionary of attention matrices used for visualization with separate entries for source and
-        self attention.
+        self-attention.
         :param states: Arbitrary list of decoder states.
         :return: logit inputs, attention probabilities, next decoder states.
         """
@@ -650,7 +648,7 @@ class RecurrentDecoder(Decoder):
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param att_dict: A dictionary of attention matrices used for visualization with separate entries for source and
-        self attention.
+        self-attention.
         :param states: Arbitrary list of decoder states.
         :return: logit inputs, attention probabilities, next decoder states.
         """
@@ -1135,7 +1133,7 @@ class ConvolutionalDecoder(Decoder):
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param att_dict: A dictionary of attention matrices used for visualization with separate entries for source and
-        self attention.
+        self-attention.
         :param states: Arbitrary list of decoder states.
         :return: logit inputs, attention probabilities, next decoder states.
         """
@@ -1289,7 +1287,14 @@ class ConvolutionalDecoder(Decoder):
 
 
 class CustomSeqDecoderConfig(Config):
-    def __init__(self, decoder_layers: List[layers.LayerConfig], num_embed: int, dtype: str = C.DTYPE_FP32):
+    """
+    Configuration of a custom decoder layer consisting of a list of potentially nested decoder layers.
+
+    :param decoder_layers: A list of layer configurations.
+    :param num_embed: The size of the target embeddings.
+    :param dtype: The data type.
+    """
+    def __init__(self, decoder_layers: List[layers.LayerConfig], num_embed: int, dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.num_embed = num_embed
         self.decoder_layers = decoder_layers
@@ -1315,7 +1320,7 @@ class CustomSeqDecoder(Decoder):
             self.layers.append(layer)
 
     def get_num_hidden(self) -> int:
-        return self.layers[-1].get_num_hidden()
+        return self.layers[-1].get_num_hidden() if len(self.layers) > 0 else self.config.num_embed
 
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
@@ -1377,12 +1382,18 @@ class CustomSeqDecoder(Decoder):
         return target, attention_probs, new_layer_states_flat
 
     def att_names(self):
+        """
+        :return: The names of all attention mechanisms which will be added to `att_dict` in `decode_step`.
+        """
         att_names = []
         for layer in self.layers:
             att_names.extend(layer.att_names())
         return att_names
 
     def self_att_names(self):
+        """
+        :return: The names of all self attention mechanisms which will be added to `att_dict` in `decode_step`.
+        """
         att_names = []
         for layer in self.layers:
             att_names.extend(layer.self_att_names())
@@ -1394,8 +1405,7 @@ class CustomSeqDecoder(Decoder):
 
     # TODO: add test that the custom seq decoder combines states correctly
     def state_variables(self, target_max_length: int) -> List[mx.sym.Symbol]:
-        state_variables = [mx.sym.Variable(C.SOURCE_ENCODED_NAME)]
-        state_variables = state_variables + [mx.sym.Variable(C.SOURCE_LENGTH_NAME)]
+        state_variables = [mx.sym.Variable(C.SOURCE_ENCODED_NAME), mx.sym.Variable(C.SOURCE_LENGTH_NAME)]
 
         for layer in self.layers:
             layer_state_variables = layer.state_variables(target_max_length)
@@ -1439,7 +1449,7 @@ class CustomSeqDecoder(Decoder):
         return init_states
 
     def get_max_seq_len(self):
-        # The smallest maximum length across layers
+        # The smallest maximum length across layers, as it is the most constraining
         return min((layer.get_max_seq_len() for layer in self.layers if layer.get_max_seq_len() is not None),
                    default=None)
 

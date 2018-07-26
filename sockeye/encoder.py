@@ -22,10 +22,10 @@ from typing import Callable, List, Optional, Tuple, Union, Dict
 
 import mxnet as mx
 
-from . import layers
 from . import config
 from . import constants as C
 from . import convolution
+from . import layers
 from . import rnn
 from . import transformer
 from . import utils
@@ -105,8 +105,14 @@ class ConvolutionalEncoderConfig(config.Config):
 
 
 class CustomSeqEncoderConfig(config.Config):
+    """
+    Configuration of a custom decoder layer consisting of a list of potentially nested decoder layers.
 
-    def __init__(self, encoder_layers: List[layers.LayerConfig], num_embed: int, dtype: str = C.DTYPE_FP32):
+    :param encoder_layers: A list of layer configurations.
+    :param num_embed: The size of the source embeddings.
+    :param dtype: The data type.
+    """
+    def __init__(self, encoder_layers: List[layers.LayerConfig], num_embed: int, dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.encoder_layers = encoder_layers
         self.num_embed = num_embed
@@ -244,7 +250,7 @@ class Encoder(ABC):
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
         :param att_dict: An optional dictionary of attention matrices used for visualization.
-            Each matrix must be of size (batch_size, source_length, source_length).
+        Each matrix must be of size (batch_size, source_length, source_length).
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
         pass
@@ -296,6 +302,7 @@ class ConvertLayout(Encoder):
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
         :param att_dict: A dictionary of attention matrices used for visualization.
+        Each matrix must be of size (batch_size, source_length, source_length).
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
         with mx.AttrScope(__layout__=self.target_layout):
@@ -399,6 +406,7 @@ class Embedding(Encoder):
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
         :param att_dict: A dictionary of attention matrices used for visualization.
+        Each matrix must be of size (batch_size, source_length, source_length).
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
         factor_embeddings = []  # type: List[mx.sym.Symbol]
@@ -471,6 +479,7 @@ class PassThroughEmbedding(Encoder):
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
         :param att_dict: A dictionary of attention matrices used for visualization.
+        Each matrix must be of size (batch_size, source_length, source_length).
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
         return data, data_length, seq_len
@@ -525,12 +534,13 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
                data: mx.sym.Symbol,
                data_length: Optional[mx.sym.Symbol],
                seq_len: int,
-               att_dict: Optional[Dict[str, mx.sym.Symbol]]=None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               att_dict: Optional[Dict[str, mx.sym.Symbol]] = None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         :param data: (batch_size, source_seq_len, num_embed)
         :param data_length: (batch_size,)
         :param seq_len: sequence length.
         :param att_dict: A dictionary of attention matrices used for visualization.
+        Each matrix must be of size (batch_size, source_length, source_length).
         :return: (batch_size, source_seq_len, num_embed)
         """
         # add positional embeddings to data
@@ -615,12 +625,13 @@ class AddLearnedPositionalEmbeddings(PositionalEncoder):
                data: mx.sym.Symbol,
                data_length: Optional[mx.sym.Symbol],
                seq_len: int,
-               att_dict: Optional[Dict[str, mx.sym.Symbol]]=None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               att_dict: Optional[Dict[str, mx.sym.Symbol]] = None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         :param data: (batch_size, source_seq_len, num_embed)
         :param data_length: (batch_size,)
         :param seq_len: sequence length.
         :param att_dict: A dictionary of attention matrices used for visualization.
+        Each matrix must be of size (batch_size, source_length, source_length).
         :return: (batch_size, source_seq_len, num_embed)
         """
 
@@ -675,7 +686,7 @@ class NoOpPositionalEmbeddings(PositionalEncoder):
                data: mx.sym.Symbol,
                data_length: Optional[mx.sym.Symbol],
                seq_len: int,
-               att_dict: Optional[Dict[str, mx.sym.Symbol]]=None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               att_dict: Optional[Dict[str, mx.sym.Symbol]] = None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         return data, data_length, seq_len
 
     def encode_positions(self,
@@ -748,13 +759,16 @@ class CustomSeqEncoder(Encoder):
         return data, data_length, seq_len
 
     def att_names(self):
+        """
+        :return: The names of all attention mechanisms which will be added to `att_dict` in `decode_step`.
+        """
         att_names = []
         for layer in self.layers:
             att_names.extend(layer.att_names())
         return att_names
 
     def get_num_hidden(self) -> int:
-        return self.layers[-1].get_num_hidden()
+        return self.layers[-1].get_num_hidden() if len(self.layers) > 0 else self.config.num_embed
 
     def get_encoded_seq_len(self, seq_len: int):
         for layer in self.layers:
@@ -778,7 +792,7 @@ class EncoderSequence(Encoder):
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
                seq_len: int,
-               att_dict: Optional[Dict[str, mx.sym.Symbol]]=None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               att_dict: Optional[Dict[str, mx.sym.Symbol]] = None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -786,6 +800,7 @@ class EncoderSequence(Encoder):
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
         :param att_dict: A dictionary of attention matrices used for visualization.
+        Each matrix must be of size (batch_size, source_length, source_length).
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
         for encoder in self.encoders:
@@ -859,7 +874,7 @@ class RecurrentEncoder(Encoder):
                data: mx.sym.Symbol,
                data_length: Optional[mx.sym.Symbol],
                seq_len: int,
-               att_dict: Optional[Dict[str, mx.sym.Symbol]]=None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               att_dict: Optional[Dict[str, mx.sym.Symbol]] = None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -867,6 +882,7 @@ class RecurrentEncoder(Encoder):
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
         :param att_dict: A dictionary of attention matrices used for visualization.
+        Each matrix must be of size (batch_size, source_length, source_length).
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
         outputs, _ = self.rnn.unroll(seq_len, inputs=data, merge_outputs=True, layout=self.layout)
@@ -924,7 +940,7 @@ class BiDirectionalRNNEncoder(Encoder):
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
                seq_len: int,
-               att_dict: Optional[Dict[str, mx.sym.Symbol]]=None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               att_dict: Optional[Dict[str, mx.sym.Symbol]] = None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -932,6 +948,7 @@ class BiDirectionalRNNEncoder(Encoder):
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
         :param att_dict: A dictionary of attention matrices used for visualization.
+        Each matrix must be of size (batch_size, source_length, source_length).
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
         if self.layout[0] == 'N':
@@ -1001,7 +1018,7 @@ class ConvolutionalEncoder(Encoder):
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
                seq_len: int,
-               att_dict: Optional[Dict[str, mx.sym.Symbol]]=None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               att_dict: Optional[Dict[str, mx.sym.Symbol]] = None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data with a stack of Convolution+GLU blocks given sequence lengths of individual examples
         and maximum sequence length.
@@ -1010,6 +1027,7 @@ class ConvolutionalEncoder(Encoder):
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
         :param att_dict: A dictionary of attention matrices used for visualization.
+        Each matrix must be of size (batch_size, source_length, source_length).
         :return: Encoded version of the data.
         """
         # data: (batch_size, seq_len, num_hidden)
@@ -1056,7 +1074,7 @@ class TransformerEncoder(Encoder):
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
                seq_len: int,
-               att_dict: Optional[Dict[str, mx.sym.Symbol]]=None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               att_dict: Optional[Dict[str, mx.sym.Symbol]] = None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -1064,6 +1082,7 @@ class TransformerEncoder(Encoder):
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
         :param att_dict: A dictionary of attention matrices used for visualization.
+        Each matrix must be of size (batch_size, source_length, source_length).
         :return: Encoded versions of input data data, data_length, seq_len.
         """
         data = utils.cast_conditionally(data, self.dtype)
@@ -1189,6 +1208,7 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
         :param att_dict: A dictionary of attention matrices used for visualization.
+        Each matrix must be of size (batch_size, source_length, source_length).
         :return: Encoded versions of input data data, data_length, seq_len.
         """
         total_num_filters = sum(self.num_filters)

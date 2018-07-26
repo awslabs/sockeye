@@ -11,12 +11,13 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-from parsimonious import Grammar, NodeVisitor
-from typing import List, Optional, Dict, Tuple, Any, Union
 import inspect
+from typing import List, Optional, Dict, Tuple, Any, Union
 
-from . import layers
+from parsimonious import Grammar, NodeVisitor
+
 from . import convolution
+from . import layers
 from . import rnn
 from . import utils
 
@@ -33,12 +34,12 @@ sep = "->"
 layer = meta_layer / parallel_layer / repeat_layer / subsample_layer / standard_layer 
 open = "("
 close = ")"
-empty_paran = open close
+empty_paren = open close
 
 repeat_layer = "repeat" open int comma layer_chain close
 subsample_layer = "subsample" open optional_params layer_chain_sep layer_chain close
 
-standard_layer = standard_layer_name optional_paranthesis_params
+standard_layer = standard_layer_name optional_parenthesis_params
 standard_layer_name = ~"[a-z_A-Z]+"
 
 meta_layer = meta_layer_name open layer_chain close
@@ -50,8 +51,8 @@ layer_chain_sep = "|"
 separated_layer_chain = layer_chain_sep layer_chain
 more_layer_chains = separated_layer_chain*
 
-optional_paranthesis_params = paranthesis_params?
-paranthesis_params = open param maybe_more_params close
+optional_parenthesis_params = parenthesis_params?
+parenthesis_params = open param maybe_more_params close
 optional_params = params?
 params = param maybe_more_params
 maybe_more_params = comma_param*
@@ -75,7 +76,7 @@ class CustomSeqParser(NodeVisitor):
     def __init__(self):
         super().__init__()
 
-    def visit_paranthesis_params(self, node, rest):
+    def visit_parenthesis_params(self, node, rest):
         open_paran, param, more_params, close_paran = rest
         return [param] + more_params
 
@@ -120,7 +121,7 @@ class CustomSeqParser(NodeVisitor):
         else:
             raise ValueError("%s is not a boolean." % node.text)
 
-    def visit_optional_paranthesis_params(self, node, children):
+    def visit_optional_parenthesis_params(self, node, children):
         if len(children) == 0:
             # no parameters
             return None
