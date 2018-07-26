@@ -453,6 +453,16 @@ class PoolingLayerConfig(layers.LayerConfig):
 
 
 class QRNNBlock:
+    """
+    Implements Quasi-recurrent neural networks as described by Bradbury, James, et al. "Quasi-recurrent neural
+    networks." arXiv preprint arXiv:1611.01576 (2016).
+
+    QRNNs do not have any recurrency in calculating the gates but rather use convolutions. We implement the f-pooling
+    variant so that the hidden states are calculated as
+    h_t = f_t * h_{t-1} + (1 - f_t) * z_t,
+    where f is the forget gate and z the input.
+    """
+
     def __init__(self,
                  num_hidden: int,
                  input_num_hidden: int,
@@ -517,6 +527,7 @@ class QRNNBlock:
         Run the qrnn cell over a single position. The data must be exactly as wide as the convolution filters.
 
         :param data: Shape: (batch_size, kernel_width, num_hidden).
+        :param prev_h: The previous hidden state, Shape: (batch_size, num_hidden).
         :return: Single result of a convolution. Shape: (batch_size, 1, num_hidden).
         """
         # (batch_size, num_hidden, kernel_width)
@@ -545,7 +556,7 @@ class QRNNBlock:
 
 class QRNNDecoderLayer(layers.DecoderLayer):
     """
-    QRNN implemented with masked (left-padded) convolutions and f-pooling.
+    QRNN implemented with masked (left-padded) convolutions.
     """
 
     def __init__(self, num_hidden: int, input_num_hidden: int, kernel_width: int, act_type: str = "tanh",
@@ -630,6 +641,9 @@ class QRNNDecoderLayer(layers.DecoderLayer):
 
 
 class QRNNEncoderLayer(layers.EncoderLayer):
+    """
+    QRNN encoder with f-pooling.
+    """
 
     def __init__(self, num_hidden: int, input_num_hidden: int,
                  kernel_width: int, act_type: str = "tanh", prefix: str = ""):
