@@ -147,13 +147,14 @@ def caption(args: argparse.Namespace):
         else:  # Read feature size from disk
             _, args.feature_size = read_feature_shape(args.source_root)
 
-        translator = get_pretrained_caption_net(args, context,
-                                                image_preextracted_features)
+        captioner = get_pretrained_caption_net(args, context,
+                                               image_preextracted_features)
 
-        read_and_translate(translator=translator,
+        read_and_translate(translator=captioner,
                            output_handler=out_handler,
                            chunk_size=args.chunk_size,
-                           input_file=args.input)
+                           input_file=args.input,
+                           input_is_json=args.json_input)
 
 
 if __name__ == '__main__':
