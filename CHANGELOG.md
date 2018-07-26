@@ -14,7 +14,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Changed
 - Require numpy 1.14 or later to avoid MKL conflicts between numpy as mxnet-mkl.
 
-## [1.18.40]
+## [1.18.41]
 ### Fixed
 - Fixed bad check for existence of negative constraints.
 - Resolved conflict for phrases that are both positive and negative constraints.
