@@ -10,10 +10,19 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [1.18.37]
+
+## [1.18.39]
 ### Added 
 - Image Captioning now supports constrained decoding. 
 - Image Captioning: zero padding of features now allows input features of different shape for each image.
+
+## [1.18.38]
+### Fixed
+- Fixed issue with the incorrect order of translations when empty inputs are present and translating in chunks.
+
+## [1.18.37]
+### Fixed
+- Determining the max output length for each sentence in a batch by the bucket length rather than the actual in order to match the behavior of a single sentence translation.
 
 ## [1.18.36]
 ### Changed
