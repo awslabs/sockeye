@@ -235,7 +235,7 @@ class InferenceModel(model.SockeyeModel):
                 # logits: (batch_size, target_vocab_size)
                 logits = self.output_layer(target_decoded)
                 if self.softmax_temperature is not None:
-                    logits /= self.softmax_temperature
+                    logits = logits / self.softmax_temperature
                 outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
 
             data_names = [C.TARGET_NAME] + state_names
@@ -1103,14 +1103,14 @@ class Translator:
 
         # split into chunks
         input_chunks = []  # type: List[TranslatorInput]
-        for input_idx, trans_input in enumerate(trans_inputs, 1):
+        for trans_input in trans_inputs:
             # bad input
             if isinstance(trans_input, BadTranslatorInput):
-                translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
+                translated_chunks.append(TranslatedChunk(id=trans_input.sentence_id, chunk_id=0, translation=empty_translation()))
 
             # empty input
             elif len(trans_input.tokens) == 0:
-                translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
+                translated_chunks.append(TranslatedChunk(id=trans_input.sentence_id, chunk_id=0, translation=empty_translation()))
             else:
                 # TODO(tdomhan): Remove branch without EOS with next major version bump, as future models will always be trained with source side EOS symbols
                 if self.source_with_eos:
@@ -1210,7 +1210,7 @@ class Translator:
         max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)
-            max_output_lengths.append(self.models[0].get_max_output_length(num_tokens))
+            max_output_lengths.append(self.models[0].get_max_output_length(data_io.get_bucket(num_tokens, self.buckets_source)))
             source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
 
             factors = trans_input.factors if trans_input.factors is not None else []
