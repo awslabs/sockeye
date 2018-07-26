@@ -10,17 +10,22 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [1.18.41]
+## [1.18.42]
 ### Changed
 - Require numpy 1.14 or later to avoid MKL conflicts between numpy as mxnet-mkl.
+
+## [1.18.40]
+### Fixed
+- Fixed bad check for existence of negative constraints.
+- Resolved conflict for phrases that are both positive and negative constraints.
 
 ## [1.18.40]
 ### Fixed
 - Fixed softmax temperature at inference time.
 
 ## [1.18.39]
-### Added 
-- Image Captioning now supports constrained decoding. 
+### Added
+- Image Captioning now supports constrained decoding.
 - Image Captioning: zero padding of features now allows input features of different shape for each image.
 
 ## [1.18.38]
@@ -62,7 +67,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.30]
 ### Fixed
-- Preserving max output length for each sentence to allow having identical translations for both with and without batching. 
+- Preserving max output length for each sentence to allow having identical translations for both with and without batching.
 
 ## [1.18.29]
 ### Changed
