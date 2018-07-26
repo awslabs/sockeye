@@ -262,6 +262,10 @@ def main():
     params = arguments.ConfigArgumentParser(description='Train Sockeye images-to-text models.')
     arguments_image.add_image_train_cli_args(params)
     args = params.parse_args()
+    train(args)
+
+
+def train(args: argparse.Namespace):
     # TODO: make training compatible with full net
     args.image_preextracted_features = True  # override this for now
 
