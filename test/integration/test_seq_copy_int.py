@@ -31,7 +31,7 @@ ENCODER_DECODER_SETTINGS = [
      " --rnn-attention-num-hidden 8 --batch-size 2 --loss cross-entropy --optimized-metric perplexity --max-updates 2"
      " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01 --batch-type sentence "
      " --decode-and-evaluate 0",
-     "--beam-size 2",
+     "--beam-size 2 --softmax-temperature 0.01",
      True, False, False, True),
     # "Kitchen sink" LSTM encoder-decoder with attention
     ("--encoder rnn --decoder rnn --num-layers 3:2 --rnn-cell-type lstm --rnn-num-hidden 8"

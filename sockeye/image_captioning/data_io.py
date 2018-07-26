@@ -15,6 +15,7 @@
 Implements data iterators and I/O related functions for image-to-sequence
 models.
 """
+import functools
 import logging
 import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -22,7 +23,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import mxnet as mx
 import numpy as np
 
-from .utils import load_features, load_feature, load_preprocess_images
+from .utils import load_features, load_feature, load_preprocess_images, zero_pad_features
 from .. import constants as C
 from .. import vocab
 from ..data_io import ParallelDataSet, RawParallelDatasetLoader, \
@@ -337,7 +338,8 @@ class ImageTextSampleIter(ParallelSampleIter):
                             self.loaded_source[k] = load_feature(k, self.image_size)
                 logger.info("Feature loaded in {} seconds.".format(time.time() - start))
         else:
-            self.data_loader = load_preprocess_images
+            self.data_loader = functools.partial(load_preprocess_images,
+                                                 image_size=self.image_size)
 
     def next(self) -> mx.io.DataBatch:
         """
@@ -356,9 +358,11 @@ class ImageTextSampleIter(ParallelSampleIter):
             loaded_source = []  # type: List[np.ndarray]
             for k in source:
                 loaded_source.append(self.loaded_source[k])
-            loaded_source = mx.nd.array(loaded_source)
         else:
-            loaded_source = mx.nd.array(self.data_loader(source, self.image_size))
+            loaded_source = self.data_loader(source)
+        # zero pad features if not agree with expected shape
+        loaded_source = zero_pad_features(loaded_source, self.image_size)
+        loaded_source = mx.nd.array(loaded_source)
 
         label = [self.data.label[i][j:j + batch_size]]
 
