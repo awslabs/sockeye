@@ -1103,14 +1103,14 @@ class Translator:
 
         # split into chunks
         input_chunks = []  # type: List[TranslatorInput]
-        for input_idx, trans_input in enumerate(trans_inputs, 1):
+        for trans_input in trans_inputs:
             # bad input
             if isinstance(trans_input, BadTranslatorInput):
-                translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
+                translated_chunks.append(TranslatedChunk(id=trans_input.sentence_id, chunk_id=0, translation=empty_translation()))
 
             # empty input
             elif len(trans_input.tokens) == 0:
-                translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
+                translated_chunks.append(TranslatedChunk(id=trans_input.sentence_id, chunk_id=0, translation=empty_translation()))
             else:
                 # TODO(tdomhan): Remove branch without EOS with next major version bump, as future models will always be trained with source side EOS symbols
                 if self.source_with_eos:
