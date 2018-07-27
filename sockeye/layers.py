@@ -110,6 +110,7 @@ class DecoderLayer(Layer):
     Generic decoder layer interface.
     """
 
+    # TODO: do we need all of the arguments?
     @abstractmethod
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
@@ -1143,7 +1144,7 @@ class MultiHeadSelfAttentionDecoderLayer(DecoderLayer):
                         target_encoded_max_length: int,
                         target_autoregressive_bias: mx.sym.Symbol) -> mx.sym.Symbol:
 
-        contexts = self.att(target_encoded, bias=target_autoregressive_bias)[0]
+        contexts, _ = self.att(target_encoded, bias=target_autoregressive_bias)
         if self.dropout > 0.0:
             contexts = mx.sym.Dropout(contexts, p=self.dropout)
         return contexts
