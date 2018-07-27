@@ -1553,11 +1553,11 @@ class Translator:
             if self.store_beam:
                 finished_or_inactive = mx.nd.clip(data=finished + inactive, a_min=0, a_max=1)
                 unnormalized_scores = mx.nd.where(finished_or_inactive,
-                                                  scores_accumulated * self.length_penalty(lengths - 1),
+                                                  scores_accumulated * self.length_penalty(lengths),
                                                   scores_accumulated)
                 normalized_scores = mx.nd.where(finished_or_inactive,
                                                 scores_accumulated,
-                                                scores_accumulated / self.length_penalty(lengths - 1))
+                                                scores_accumulated / self.length_penalty(lengths))
                 for sent in range(self.batch_size):
                     rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
 
