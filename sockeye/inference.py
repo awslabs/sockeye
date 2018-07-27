@@ -161,7 +161,6 @@ class InferenceModel(model.SockeyeModel):
             source_words = source.split(num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
             source_length = utils.compute_lengths(source_words)
 
-
             # source embedding
             (source_embed,
              source_embed_length,

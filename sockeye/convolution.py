@@ -587,8 +587,6 @@ class QRNNDecoderLayer(layers.DecoderLayer):
         # target: (batch_size, num_hidden) -> (batch_size, 1, num_hidden)
         target = mx.sym.expand_dims(target, axis=1)
 
-        # Incompatible input shape: expected [80,0], got [80,1,32]
-
         # (batch_size, kernel_width, num_hidden)
         target = mx.sym.concat(prev_target, target, dim=1)
 

@@ -182,15 +182,15 @@ class TransformerDecoderBlock:
                  source_bias: mx.sym.Symbol,
                  cache: Optional[Dict[str, Optional[mx.sym.Symbol]]] = None) -> mx.sym.Symbol:
         # self-attention
-        target_self_att = self.self_attention(inputs=self.pre_self_attention(target, None),
-                                              bias=target_bias,
-                                              cache=cache)[0]
+        target_self_att, _ = self.self_attention(inputs=self.pre_self_attention(target, None),
+                                                 bias=target_bias,
+                                                 cache=cache)
         target = self.post_self_attention(target_self_att, target)
 
         # encoder attention
-        target_enc_att = self.enc_attention(queries=self.pre_enc_attention(target, None),
-                                            memory=source,
-                                            bias=source_bias)[0]
+        target_enc_att, _ = self.enc_attention(queries=self.pre_enc_attention(target, None),
+                                               memory=source,
+                                               bias=source_bias)
         target = self.post_enc_attention(target_enc_att, target)
 
         # feed-forward
