@@ -72,8 +72,8 @@ class Layer(ABC):
 
 class EncoderLayer(Layer):
     """
-    Generic encoder layer interface for a layer which takes the previous hidden state and sequence lengths and produces
-    a new hidden state, potentially changing the sequence length.
+    Generic encoder layer interface for a layer which takes the sequence of previous hidden states and sequence lengths
+    and produces a new sequence hidden states, potentially changing the sequence length.
     """
 
     @abstractmethod
@@ -164,7 +164,7 @@ class DecoderLayer(Layer):
         """Names of attention matrices produced by this layer."""
         return []
 
-    def self_att_names(self):
+    def self_att_names(self) -> List[str]:
         """Names of self attention matrices produced by this layer."""
         return []
 
@@ -241,6 +241,11 @@ class LayerConfig(Config):
 
 
 class SharedEncoderDecoderLayer(DecoderLayer, EncoderLayer):
+    """
+    A layer which does not depend on the source hidden states. On the target side it will be applied on the target
+    hidden states and on the source side on the source hidden states. Using this class as a base class only the combined
+    `process_sequence` method needs to be implemented.
+    """
 
     @abstractmethod
     def process_sequence(self,
@@ -275,9 +280,17 @@ class SharedEncoderDecoderLayer(DecoderLayer, EncoderLayer):
         return new_target_encoded
 
 
-def layers_with_states_iter(layers: List[DecoderLayer],
-                            step: int,
-                            layer_states_flat: List[mx.sym.Symbol]) -> Iterator[Tuple[DecoderLayer, List[mx.sym.Symbol]]]:
+def layers_with_states_iter(
+        layers: List[DecoderLayer],
+        step: int,
+        layer_states_flat: List[mx.sym.Symbol]) -> Iterator[Tuple[DecoderLayer, List[mx.sym.Symbol]]]:
+    """
+    A generator for layers and corresponding layer states from a flat list of all layer states.
+    :param layers: A list of layers.
+    :param step: The current decoder step.
+    :param layer_states_flat: A flat list of layer states across all layers, e.g. [l1_state1, l1_state2, l2_state1, ..].
+    :return: A generator of tuples of decoder layers and their states.
+    """
     state_idx = 0
     for layer in layers:
         if layer.num_states(step) != 0:
@@ -289,72 +302,11 @@ def layers_with_states_iter(layers: List[DecoderLayer],
         yield layer, layer_states
 
 
-class NestedDecoderLayer(DecoderLayer):
-    """
-    A decoder layer which combines several other decoder sub-layers.
-    """
-
-    @property
-    @abstractmethod
-    def layers(self) -> List[DecoderLayer]:
-        pass
-
-    def layers_with_states_iter(self,
-                                step: int,
-                                layer_states_flat: List[mx.sym.Symbol]) -> Iterator[Tuple[DecoderLayer,
-                                                                                          List[mx.sym.Symbol]]]:
-        return layers_with_states_iter(self.layers, step, layer_states_flat)
-
-    def att_names(self):
-        att_names = []
-        for layer in self.layers:
-            att_names.extend(layer.att_names())
-        return att_names
-
-    def self_att_names(self):
-        att_names = []
-        for layer in self.layers:
-            att_names.extend(layer.self_att_names())
-        return att_names
-
-    def reset(self):
-        for layer in self.layers:
-            layer.reset()
-
-    def num_states(self, step):
-        return sum(layer.num_states(step) for layer in self.layers)
-
-    def state_variables(self, step: int):
-        return [var for layer in self.layers for var in layer.state_variables(step)]
-
-    def state_shapes(self,
-                     batch_size: int,
-                     step: int,
-                     source_encoded_max_length: int,
-                     source_encoded_num_hidden: int):
-        return [state_shape for layer in self.layers for state_shape in layer.state_shapes(batch_size,
-                                                                                           step,
-                                                                                           source_encoded_max_length,
-                                                                                           source_encoded_num_hidden)]
-
-    def init_states(self,
-                    batch_size: int,
-                    source_encoded: List[mx.sym.Symbol],
-                    source_encoded_lengths: mx.sym.Symbol,
-                    source_encoded_max_length: int):
-        return [init_state for layer in self.layers for init_state in layer.init_states(batch_size,
-                                                                                        source_encoded,
-                                                                                        source_encoded_lengths,
-                                                                                        source_encoded_max_length)]
-
-    def get_max_seq_len(self):
-        return min((layer.get_max_seq_len() for layer in self.layers if layer.get_max_seq_len() is not None),
-                   default=None)
-
 
 class EncoderLayerChain(EncoderLayer):
 
-    def __init__(self, layers: List[EncoderLayer]):
+    def __init__(self, layers: List[EncoderLayer]) -> None:
+        assert len(layers) >= 1, "At least one layer needed in layer chain."
         self.layers = layers
 
     def encode_sequence(self, source_encoded: mx.sym.Symbol, source_encoded_lengths: mx.sym.Symbol,
@@ -374,9 +326,73 @@ class EncoderLayerChain(EncoderLayer):
         return self.layers[-1].get_num_hidden()
 
 
+class NestedDecoderLayer(DecoderLayer):
+    """
+    A decoder layer which combines several other decoder sub-layers.
+    """
+
+    @property
+    @abstractmethod
+    def layers(self) -> List[DecoderLayer]:
+        pass
+
+    def layers_with_states_iter(self,
+                                step: int,
+                                layer_states_flat: List[mx.sym.Symbol]) -> Iterator[Tuple[DecoderLayer,
+                                                                                          List[mx.sym.Symbol]]]:
+        return layers_with_states_iter(self.layers, step, layer_states_flat)
+
+    def att_names(self) -> List[str]:
+        att_names = []
+        for layer in self.layers:
+            att_names.extend(layer.att_names())
+        return att_names
+
+    def self_att_names(self) -> List[str]:
+        att_names = []
+        for layer in self.layers:
+            att_names.extend(layer.self_att_names())
+        return att_names
+
+    def reset(self) -> None:
+        for layer in self.layers:
+            layer.reset()
+
+    def num_states(self, step) -> int:
+        return sum(layer.num_states(step) for layer in self.layers)
+
+    def state_variables(self, step: int) -> List[mx.sym.Symbol]:
+        return [var for layer in self.layers for var in layer.state_variables(step)]
+
+    def state_shapes(self,
+                     batch_size: int,
+                     step: int,
+                     source_encoded_max_length: int,
+                     source_encoded_num_hidden: int) -> List[mx.io.DataDesc]:
+        return [state_shape for layer in self.layers for state_shape in layer.state_shapes(batch_size,
+                                                                                           step,
+                                                                                           source_encoded_max_length,
+                                                                                           source_encoded_num_hidden)]
+
+    def init_states(self,
+                    batch_size: int,
+                    source_encoded: List[mx.sym.Symbol],
+                    source_encoded_lengths: mx.sym.Symbol,
+                    source_encoded_max_length: int) -> List[mx.sym.Symbol]:
+        return [init_state for layer in self.layers for init_state in layer.init_states(batch_size,
+                                                                                        source_encoded,
+                                                                                        source_encoded_lengths,
+                                                                                        source_encoded_max_length)]
+
+    def get_max_seq_len(self) -> Optional[int]:
+        return min((layer.get_max_seq_len() for layer in self.layers if layer.get_max_seq_len() is not None),
+                   default=None)
+
+
 class DecoderLayerChain(NestedDecoderLayer):
 
     def __init__(self, layers: List[DecoderLayer]):
+        assert len(layers) >= 1, "At least one layer needed in layer chain."
         self._layers = layers
 
     @property
@@ -399,7 +415,8 @@ class DecoderLayerChain(NestedDecoderLayer):
         return target_encoded
 
     def decode_step(self, step: int, source_encoded: mx.sym.Symbol, source_encoded_lengths: mx.sym.Symbol,
-                    source_encoded_max_length: int, target: mx.sym.Symbol, layer_states_flat: List[mx.sym.Symbol], att_dict) -> Tuple[mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    source_encoded_max_length: int, target: mx.sym.Symbol, layer_states_flat: List[mx.sym.Symbol],
+                    att_dict) -> Tuple[mx.sym.Symbol, List[mx.sym.Symbol]]:
         new_layer_states_flat = []
         for layer, layer_states in self.layers_with_states_iter(step, layer_states_flat):
             target, new_layer_states = layer.decode_step(step, source_encoded, source_encoded_lengths,
@@ -414,8 +431,8 @@ class DecoderLayerChain(NestedDecoderLayer):
 
 class StatelessBlock(ABC):
     """
-    A block which does not require to keep any state during at inference time so that we are able to call it one
-    timestep at a time. This basically means that the block can be run as
+    A block which does not require to keep any state during inference time so that we are able to call it one
+    timestep at a time. This means that the block can be run as
 
         concat(block(data[:,t,:]) for t in range(seq_len), dim=1)
 
@@ -463,16 +480,11 @@ class StatelessBlock(ABC):
 
 class StatelessBlockLayer(SharedEncoderDecoderLayer):
     """
-    Runs the given block on the target side of decoder being applicable to any block which does not require to keep
-    any state during at inference time (when `decode_step` is called). The latter means that the block can be run as
-
-        concat(block(data[:,t,:]) for t in range(seq_len), dim=1)
-
-    Namely, at time t we only need the data point at time t from the previous layer.
-
+    A stateless block layer which can act as both a encoder or a decoder layer, applying the block to either the
+    source or target hidden state.
     """
 
-    def __init__(self, block: StatelessBlock):
+    def __init__(self, block: StatelessBlock) -> None:
         self.block = block
 
     def process_sequence(self,
@@ -508,7 +520,7 @@ class StatelessBlockLayer(SharedEncoderDecoderLayer):
 
 class FeedForwardBlock(StatelessBlock):
     """
-    Position-wise feed-forward network with activation.
+    Position-wise feed-forward network with activation and dropout.
     """
 
     def __init__(self,
@@ -529,10 +541,19 @@ class FeedForwardBlock(StatelessBlock):
         else:
             return self.num_hidden
 
-    def _ff(self, data: mx.sym.Symbol):
+    def __call__(self,
+                 data: mx.sym.Symbol,
+                 lengths: Optional[mx.sym.Symbol] = None,
+                 max_length: Optional[int] = None) -> mx.sym.Symbol:
+        """
+        Apply the feed-forward layer.
+
+        :param x: Symbol of shape (batch_size, seq_len, num_hidden)
+        :return: Symbol of shape (batch_size, seq_len, num_hidden)
+        """
         h = mx.sym.FullyConnected(data=data, num_hidden=self._pre_activation_num_hidden(),
                                   weight=self.w_i2h, bias=self.b_i2h,
-                                  flatten=False, name=self.prefix + "_ff")
+                                  flatten=False, name=self.prefix + "ff")
 
         if self.act_type == C.GLU:
             # GLU
@@ -548,18 +569,6 @@ class FeedForwardBlock(StatelessBlock):
         if self.dropout > 0.0:
             h = mx.sym.Dropout(h, p=self.dropout)
         return h
-
-    def __call__(self,
-                 data: mx.sym.Symbol,
-                 lengths: Optional[mx.sym.Symbol] = None,
-                 max_length: Optional[int] = None) -> mx.sym.Symbol:
-        """
-        Position-wise feed-forward network with activation.
-
-        :param x: Symbol of shape (batch_size, seq_len, num_hidden)
-        :return: Symbol of shape (batch_size, seq_len, num_hidden)
-        """
-        return self._ff(data)
 
     def get_num_hidden(self) -> int:
         return self.num_hidden
@@ -591,7 +600,7 @@ class FeedForwardLayerConfig(LayerConfig):
 
 class LinearBlock(StatelessBlock):
     """
-    Position-wise feed-forward network with activation.
+    Linear projection followed by dropout.
     """
 
     def __init__(self,
@@ -606,25 +615,22 @@ class LinearBlock(StatelessBlock):
         self.w_i2h = mx.sym.Variable('%si2h_weight' % prefix)
         self.b_i2h = None if no_bias else mx.sym.Variable('%si2h_bias' % prefix)
 
-    def _fc(self, data: mx.sym.Symbol):
+    def __call__(self,
+                 data: mx.sym.Symbol,
+                 lengths: Optional[mx.sym.Symbol] = None,
+                 max_length: Optional[int] = None) -> mx.sym.Symbol:
+        """
+        Apply the linear projection.
+
+        :param x: Symbol of shape (batch_size, seq_len, num_hidden)
+        :return: Symbol of shape (batch_size, seq_len, num_hidden)
+        """
         bias = None if self.no_bias else self.b_i2h
         h = mx.sym.FullyConnected(data=data, num_hidden=self.num_hidden, weight=self.w_i2h, bias=bias,
                                   no_bias=self.no_bias, flatten=False)
         if self.dropout > 0.0:
             h = mx.sym.Dropout(h, p=self.dropout)
         return h
-
-    def __call__(self,
-                 data: mx.sym.Symbol,
-                 lengths: Optional[mx.sym.Symbol] = None,
-                 max_length: Optional[int] = None) -> mx.sym.Symbol:
-        """
-        Position-wise feed-forward network with activation.
-
-        :param x: Symbol of shape (batch_size, seq_len, num_hidden)
-        :return: Symbol of shape (batch_size, seq_len, num_hidden)
-        """
-        return self._fc(data)
 
     def get_num_hidden(self) -> int:
         return self.num_hidden
@@ -639,18 +645,17 @@ class LinearLayerConfig(LayerConfig):
         self.no_bias = no_bias
 
     def create_encoder_layer(self, input_num_hidden: int, prefix: str) -> EncoderLayer:
-        return StatelessBlockLayer(LinearBlock(self.num_hidden, self.dropout, no_bias=self.no_bias,
-                                               prefix=prefix + "linear_"))
+        return self.create_block_layer(prefix)
 
     def create_decoder_layer(self, input_num_hidden: int, prefix: str) -> DecoderLayer:
+        return self.create_block_layer(prefix)
+
+    def create_block_layer(self, prefix: str) -> StatelessBlockLayer:
         return StatelessBlockLayer(LinearBlock(self.num_hidden, self.dropout, no_bias=self.no_bias,
                                                prefix=prefix + "linear_"))
 
 
 class ActivationBlock(StatelessBlock):
-    """
-    Position-wise feed-forward network with activation.
-    """
 
     def __init__(self,
                  act_type: str,
@@ -663,12 +668,12 @@ class ActivationBlock(StatelessBlock):
                  lengths: Optional[mx.sym.Symbol] = None,
                  max_length: Optional[int] = None) -> mx.sym.Symbol:
         """
-        Position-wise feed-forward network with activation.
+        Apply the activation function.
 
         :param x: Symbol of shape (batch_size, seq_len, num_hidden)
         :return: Symbol of shape (batch_size, seq_len, num_hidden)
         """
-        data = mx.sym.Activation(data, act_type=self.act_type)
+        data = activation(data, act_type=self.act_type)
         return data
 
     def get_num_hidden(self) -> int:
@@ -731,6 +736,7 @@ class DropoutLayerConfig(LayerConfig):
 
 
 class LearnedAdditivePositionalEmbeddings(StatelessBlock):
+
     def __init__(self,
                  num_embed: int,
                  dropout: float,
@@ -892,7 +898,7 @@ class SinCosPositionalEmbeddingsLayerConfig(LayerConfig):
     def __init__(self,
                  num_embed: int,
                  dropout: float = 0.0,
-                 scale_inputs: bool = True):
+                 scale_inputs: bool = True) -> None:
         super().__init__()
         self.num_embed = num_embed
         self.dropout = dropout
@@ -989,9 +995,7 @@ class AutoRegressiveBiasProp(mx.operator.CustomOpProp):
 class MultiHeadSourceAttentionDecoderLayer(DecoderLayer):
 
     def __init__(self, num_hidden, att_num_hidden, heads: int, dropout: float, dropout_attention: float,
-                 norm_source: bool, factors: int, project_q: bool, project_kv: bool, project_out: bool, gated_heads: bool,
-                 heads_default_value: bool, head_dropout: float,
-                 prefix: str = ""):
+                 prefix: str = "") -> None:
         self.prefix = prefix
         self.num_hidden = num_hidden
         self.att_num_hidden = att_num_hidden if att_num_hidden is not None else num_hidden
@@ -1063,14 +1067,6 @@ class MultiHeadSourceAttentionLayerConfig(LayerConfig):
         self.dropout = dropout
         self.dropout_attention = dropout_attention if dropout_attention is not None else dropout
         self.heads = heads
-        self.norm_source = norm_source
-        self.factors = factors
-        self.project_q = project_q
-        self.project_kv = project_kv
-        self.project_out = project_out
-        self.gated_heads = gated_heads
-        self.heads_default_value = heads_default_value
-        self.head_dropout = head_dropout
 
     def create_encoder_layer(self, input_num_hidden: int, prefix: str) -> EncoderLayer:
         raise NotImplementedError("Source attention is only availabe on the decoder side.")
@@ -1081,21 +1077,13 @@ class MultiHeadSourceAttentionLayerConfig(LayerConfig):
                                                     heads=self.heads,
                                                     dropout=self.dropout,
                                                     dropout_attention=self.dropout_attention,
-                                                    norm_source=self.norm_source,
-                                                    factors=self.factors,
-                                                    project_q=self.project_q,
-                                                    project_kv=self.project_kv,
-                                                    project_out=self.project_out,
-                                                    gated_heads=self.gated_heads,
-                                                    heads_default_value=self.heads_default_value,
-                                                    head_dropout=self.head_dropout,
                                                     prefix=prefix + "mh_att_")
 
 
 class MultiHeadSelfAttentionEncoderLayer(EncoderLayer):
 
     def __init__(self, num_hidden, att_num_hidden: Optional[int], heads: int, dropout: float, dropout_attention: float,
-                 prefix: str):
+                 prefix: str) -> None:
         if att_num_hidden is None:
             att_num_hidden = num_hidden
         self.prefix = prefix
@@ -1276,7 +1264,7 @@ class MultiHeadSelfAttentionLayerConfig(LayerConfig):
 
 # TODO: make sure the number of hidden units does not change!
 class ResidualEncoderLayer(EncoderLayer):
-    def __init__(self, layers: List[EncoderLayer]):
+    def __init__(self, layers: List[EncoderLayer]) -> None:
         self.layers = layers
 
     def encode_sequence(self,
@@ -1307,9 +1295,10 @@ class ResidualEncoderLayer(EncoderLayer):
 
 
 # TODO: potentially add a projection layer (for when the shapes don't match up). Alternative: check that the input num hidden matches the output num_hidden (maybe add a get_input_num_hidden())
+# TODO: consider inheriting from both NestedDecoderLayer and SharedEncoderDecoderLayer to just have a single implementation
 class ResidualDecoderLayer(NestedDecoderLayer):
 
-    def __init__(self, layers: List[DecoderLayer]):
+    def __init__(self, layers: List[DecoderLayer]) -> None:
         self._layers = layers
 
     @property
