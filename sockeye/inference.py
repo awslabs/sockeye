@@ -896,46 +896,39 @@ class LengthPenalty(mx.gluon.HybridBlock):
         return self.hybrid_forward(None, lengths)
 
 
-def _concat_translations(translations: List[Translation], start_id: int, stop_ids: Set[int],
+def _concat_translations(translations: List[Translation], stop_ids: Set[int],
                          length_penalty: LengthPenalty) -> Translation:
     """
     Combine translations through concatenation.
 
     :param translations: A list of translations (sequence starting with BOS symbol, attention_matrix), score and length.
-    :param start_id: The EOS symbol.
-    :param translations: The BOS symbols.
+    :param translations: The EOS symbols.
     :return: A concatenation if the translations with a score.
     """
     # Concatenation of all target ids without BOS and EOS
-    target_ids = [start_id]
+    target_ids = []
     attention_matrices = []
     beam_histories = []  # type: List[BeamHistory]
     for idx, translation in enumerate(translations):
-        assert translation.target_ids[0] == start_id
         if idx == len(translations) - 1:
-            target_ids.extend(translation.target_ids[1:])
-            attention_matrices.append(translation.attention_matrix[1:, :])
+            target_ids.extend(translation.target_ids)
+            attention_matrices.append(translation.attention_matrix)
         else:
             if translation.target_ids[-1] in stop_ids:
-                target_ids.extend(translation.target_ids[1:-1])
-                attention_matrices.append(translation.attention_matrix[1:-1, :])
+                target_ids.extend(translation.target_ids[:-1])
+                attention_matrices.append(translation.attention_matrix[:-1, :])
             else:
-                target_ids.extend(translation.target_ids[1:])
-                attention_matrices.append(translation.attention_matrix[1:, :])
+                target_ids.extend(translation.target_ids)
+                attention_matrices.append(translation.attention_matrix)
         beam_histories.extend(translation.beam_histories)
 
     # Combine attention matrices:
     attention_shapes = [attention_matrix.shape for attention_matrix in attention_matrices]
-    # Adding another row for the empty BOS alignment vector
-    bos_align_shape = np.asarray([1, 0])
-    attention_matrix_combined = np.zeros(np.sum(np.asarray(attention_shapes), axis=0) + bos_align_shape)
-
-    # We start at position 1 as position 0 is for the BOS, which is kept zero
-    pos_t, pos_s = 1, 0
+    attention_matrix_combined = np.zeros(np.sum(np.asarray(attention_shapes), axis=0))
+    pos_t, pos_s = 0, 0
     for attention_matrix, (len_t, len_s) in zip(attention_matrices, attention_shapes):
         attention_matrix_combined[pos_t:pos_t + len_t, pos_s:pos_s + len_s] = attention_matrix
-        pos_t += len_t
-        pos_s += len_s
+        pos_s, pos_t = pos_s + len_s, pos_t + len_t
 
     # Unnormalize + sum and renormalize the score:
     score = sum(translation.score * length_penalty.get(len(translation.target_ids))
@@ -1245,9 +1238,8 @@ class Translator:
         :param translation: The translation + attention and score.
         :return: TranslatorOutput.
         """
-        # remove special sentence start symbol (<s>) from the output:
-        target_ids = translation.target_ids[1:]
-        attention_matrix = translation.attention_matrix[1:, :]
+        target_ids = translation.target_ids
+        attention_matrix = translation.attention_matrix
 
         target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
 
@@ -1269,7 +1261,7 @@ class Translator:
         :param translations: A list of translations (sequence, attention_matrix), score and length.
         :return: A concatenation if the translations with a score.
         """
-        return _concat_translations(translations, self.start_id, self.stop_ids, self.length_penalty)
+        return _concat_translations(translations, self.stop_ids, self.length_penalty)
 
     def _translate_nd(self,
                       source: mx.nd.NDArray,
@@ -1404,7 +1396,7 @@ class Translator:
         if self.store_beam:
             beam_histories = [defaultdict(list) for _ in range(self.batch_size)]
 
-        lengths = mx.nd.ones((self.batch_size * self.beam_size, 1), ctx=self.context)
+        lengths = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context)
         finished = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
 
         # Extending max_output_lengths to shape (batch_size * beam_size,)
@@ -1611,9 +1603,7 @@ class Translator:
         scores_accumulated = scores_accumulated.take(best_hyp_indices)
         constraints = [constraints[x] for x in best_hyp_indices.asnumpy()]
 
-        print('SEQUENCES', sequences[0], 'LENGTHS', lengths[0], sep='\n')
-
-        return sequences, attentions, scores_accumulated, lengths, constraints, beam_histories
+        return sequences[:,1:], attentions[:,1:,:], scores_accumulated, lengths, constraints, beam_histories
 
     def _get_best_from_beam(self,
                             sequences: mx.nd.NDArray,
