@@ -21,9 +21,9 @@ import types
 import yaml
 from typing import Any, Callable, Dict, List, Tuple, Optional
 
-from sockeye.lr_scheduler import LearningRateSchedulerFixedStep
 from . import constants as C
 from . import data_io
+from .lr_scheduler import LearningRateSchedulerFixedStep
 
 
 class ConfigArgumentParser(argparse.ArgumentParser):
@@ -32,7 +32,7 @@ class ConfigArgumentParser(argparse.ArgumentParser):
 
     The option --config is added automatically and expects a YAML serialized
     dictionary, similar to the return value of parse_args(). Command line
-    parameters have precendence over config file values. Usage should be
+    parameters have precedence over config file values. Usage should be
     transparent, just substitute argparse.ArgumentParser with this class.
 
     Extended from
@@ -474,13 +474,19 @@ def add_vocab_args(params):
                              'Will be automatically turned on when using weight tying. Default: %(default)s.')
     params.add_argument('--num-words',
                         type=multiple_values(num_values=2, greater_or_equal=0),
-                        default=(50000, 50000),
+                        default=(0, 0),
                         help='Maximum vocabulary size. Use "x:x" to specify separate values for src&tgt. '
+                             'A value of 0 indicates that the vocabulary unrestricted and determined from the data by '
+                             'creating an entry for all words that occur at least --word-min-count times.'
                              'Default: %(default)s.')
     params.add_argument('--word-min-count',
                         type=multiple_values(num_values=2, greater_or_equal=1),
                         default=(1, 1),
                         help='Minimum frequency of words to be included in vocabularies. Default: %(default)s.')
+    params.add_argument('--pad-vocab-to-multiple-of',
+                        type=int,
+                        default=None,
+                        help='Pad vocabulary to a multiple of this integer. Default: %(default)s.')
 
 
 def add_model_parameters(params):
@@ -747,6 +753,11 @@ def add_model_parameters(params):
 
 def add_training_args(params):
     train_params = params.add_argument_group("Training parameters")
+
+    train_params.add_argument('--decoder-only',
+                               action='store_true',
+                               help='Pre-train a decoder. This is currently for RNN decoders only. '
+                                    'Default: %(default)s.')
 
     train_params.add_argument('--batch-size', '-b',
                               type=int_greater_or_equal(1),
@@ -1059,7 +1070,8 @@ def add_max_output_cli_args(params):
     params.add_argument('--max-output-length',
                         type=int,
                         default=None,
-                        help='Maximum number of words to generate during translation. If None, it will be computed automatically. Default: %(default)s.')
+                        help='Maximum number of words to generate during translation. '
+                             'If None, it will be computed automatically. Default: %(default)s.')
 
 
 def add_inference_args(params):
@@ -1112,11 +1124,13 @@ def add_inference_args(params):
                                type=float,
                                default=0,
                                help='Pruning threshold for beam search. All hypotheses with scores not within '
-                               'this amount of the best finished hypothesis are discarded (0 = off). Default: %(default)s.')
+                                    'this amount of the best finished hypothesis are discarded (0 = off). '
+                                    'Default: %(default)s.')
     decode_params.add_argument('--beam-search-stop',
                                choices=[C.BEAM_SEARCH_STOP_ALL, C.BEAM_SEARCH_STOP_FIRST],
                                default=C.BEAM_SEARCH_STOP_ALL,
-                               help='Stopping criteria. Quit when (all) hypotheses are finished or when a finished hypothesis is in (first) position. Default: %(default)s.')
+                               help='Stopping criteria. Quit when (all) hypotheses are finished '
+                                    'or when a finished hypothesis is in (first) position. Default: %(default)s.')
     decode_params.add_argument('--batch-size',
                                type=int_greater_or_equal(1),
                                default=1,
@@ -1165,6 +1179,11 @@ def add_inference_args(params):
                                default=None,
                                help="Specify the number of translations to load for each source word from the lexicon "
                                     "given with --restrict-lexicon. Default: Load all entries from the lexicon.")
+    decode_params.add_argument('--avoid-list',
+                               type=str,
+                               default=None,
+                               help="Specify a file containing phrases (pre-processed, one per line) to block "
+                                    "from the output. Default: %(default)s.")
     decode_params.add_argument('--strip-unknown-words',
                                action='store_true',
                                default=False,
@@ -1195,6 +1214,7 @@ def add_inference_args(params):
                                help='EXPERIMENTAL: may be changed or removed in future. Overrides training dtype of '
                                     'encoders and decoders during inference. Default: %(default)s')
 
+
 def add_evaluate_args(params):
     eval_params = params.add_argument_group("Evaluate parameters")
     eval_params.add_argument('--references', '-r',
@@ -1205,9 +1225,10 @@ def add_evaluate_args(params):
                              type=file_or_stdin(),
                              default=[sys.stdin],
                              nargs='+',
-                             help="File(s) with hypotheses. If none will read from stdin. Default: %(default)s.")
+                             help="File(s) with hypotheses. If none will read from stdin. Default: stdin.")
     eval_params.add_argument('--metrics',
                              nargs='+',
+                             choices=C.EVALUATE_METRICS,
                              default=[C.BLEU, C.CHRF],
                              help='List of metrics to compute. Default: %(default)s.')
     eval_params.add_argument('--sentence', '-s',
@@ -1216,7 +1237,7 @@ def add_evaluate_args(params):
     eval_params.add_argument('--offset',
                              type=float,
                              default=0.01,
-                             help="Numerical value of the offset of zero n-gram counts. Default: %(default)s.")
+                             help="Numerical value of the offset of zero n-gram counts for BLEU. Default: %(default)s.")
     eval_params.add_argument('--not-strict', '-n',
                              action="store_true",
                              help="Do not fail if number of hypotheses does not match number of references. "

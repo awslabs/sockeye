@@ -14,7 +14,7 @@
 import copy
 import logging
 from operator import attrgetter
-from typing import List, Optional, Tuple, Set
+from typing import Dict, List, Optional, Set, Tuple, Set
 
 import mxnet as mx
 import numpy as np
@@ -23,6 +23,195 @@ logger = logging.getLogger(__name__)
 
 # Represents a list of raw constraints for a sentence. Each constraint is a list of target-word IDs.
 RawConstraintList = List[List[int]]
+
+class AvoidTrie:
+    """
+    Represents a set of phrasal constraints for an input sentence.
+    These are organized into a trie.
+    """
+    def __init__(self,
+                 raw_phrases: Optional[RawConstraintList] = None) -> None:
+        self.final_ids = set()  # type: Set[int]
+        self.children = {}  # type: Dict[int,'AvoidTrie']
+
+        if raw_phrases:
+            for phrase in raw_phrases:
+                self.add_phrase(phrase)
+
+    def __str__(self) -> str:
+        s = '({}'.format(list(self.final_ids))
+        for child_id in self.children.keys():
+            s += ' -> {} {}'.format(child_id, self.children[child_id])
+        s += ')'
+        return s
+
+    def __len__(self) -> int:
+        """
+        Returns the number of avoid phrases represented in the trie.
+        """
+        phrase_count = len(self.final_ids)
+        for child in self.children.values():
+            phrase_count += len(child)
+        return phrase_count
+
+    def add_trie(self,
+                 trie: 'AvoidTrie',
+                 phrase: Optional[List[int]] = None) -> None:
+        self.final_ids |= trie.final()
+        for child_id, child in trie.children.items():
+            if child_id not in self.children:
+                self.children[child_id] = AvoidTrie()
+            self.children[child_id].add_trie(child)
+
+    def add_phrase(self,
+                   phrase: List[int]) -> None:
+        """
+        Recursively adds a phrase to this trie node.
+
+        :param phrase: A list of word IDs to add to this trie node.
+        """
+        if len(phrase) == 1:
+            self.final_ids.add(phrase[0])
+        else:
+            next_word = phrase[0]
+            if next_word not in self.children:
+                self.children[next_word] = AvoidTrie()
+            self.step(next_word).add_phrase(phrase[1:])
+
+    def step(self, word_id: int) -> Optional['AvoidTrie']:
+        """
+        Returns the child node along the requested arc.
+
+        :param phrase: A list of word IDs to add to this trie node.
+        :return: The child node along the requested arc, or None if no such arc exists.
+        """
+        return self.children.get(word_id, None)
+
+    def final(self) -> Set[int]:
+        """
+        Returns the set of final ids at this node.
+
+        :return: The set of word IDs that end a constraint at this state.
+        """
+        return self.final_ids
+
+
+class AvoidState:
+    """
+    Represents the state of a hypothesis in the AvoidTrie.
+    The offset is used to return actual positions in the one-dimensionally-resized array that
+    get set to infinity.
+
+    :param avoid_trie: The trie containing the phrases to avoid.
+    :param state: The current state (defaults to root).
+    """
+    def __init__(self,
+                 avoid_trie: AvoidTrie,
+                 state: AvoidTrie = None) -> None:
+
+        self.root = avoid_trie
+        self.state = state if state else self.root
+
+    def consume(self, word_id: int) -> 'AvoidState':
+        """
+        Consumes a word, and updates the state based on it. Returns new objects on a state change.
+
+        :param word_id: The word that was just generated.
+        """
+        if word_id in self.state.children:
+            return AvoidState(self.root, self.state.step(word_id))
+        elif self.state != self.root:
+            return AvoidState(self.root, self.root)
+        else:
+            return self
+
+    def avoid(self) -> Set[int]:
+        """
+        Returns a set of word IDs that should be avoided. This includes the set of final states from the
+        root node, which are single tokens that must never be generated.
+
+        :return: A set of integers representing words that must not be generated next by this hypothesis.
+        """
+        return self.root.final() | self.state.final()
+
+    def __str__(self) -> str:
+        return str(self.state)
+
+
+class AvoidBatch:
+    """
+    Represents a set of phrasal constraints for all items in the batch.
+    For each hypotheses, there is an AvoidTrie tracking its state.
+
+    :param batch_size: The batch size.
+    :param beam_size: The beam size.
+    :param avoid_list: The list of lists (raw phrasal constraints as IDs, one for each item in the batch).
+    :param global_avoid_trie: A translator-level vocabulary of items to avoid.
+    """
+    def __init__(self,
+                 batch_size: int,
+                 beam_size: int,
+                 avoid_list: Optional[List[RawConstraintList]] = None,
+                 global_avoid_trie: Optional[AvoidTrie] = None) -> None:
+
+        self.global_avoid_states = []  # type: List[AvoidState]
+        self.local_avoid_states = []  # type: List[AvoidState]
+
+        # Store the global trie for each hypothesis
+        if global_avoid_trie is not None:
+            self.global_avoid_states = [AvoidState(global_avoid_trie)] * batch_size * beam_size
+
+        # Store the sentence-level tries for each item in their portions of the beam
+        if avoid_list is not None:
+            for raw_phrases in avoid_list:
+                self.local_avoid_states += [AvoidState(AvoidTrie(raw_phrases))] * beam_size
+
+    def reorder(self, indices: mx.nd.NDArray) -> None:
+        """
+        Reorders the avoid list according to the selected row indices.
+        This can produce duplicates, but this is fixed if state changes occur in consume().
+
+        :param indices: An mx.nd.NDArray containing indices of hypotheses to select.
+        """
+        if self.global_avoid_states:
+            self.global_avoid_states = [self.global_avoid_states[x] for x in indices.asnumpy()]
+
+        if self.local_avoid_states:
+            self.local_avoid_states = [self.local_avoid_states[x] for x in indices.asnumpy()]
+
+    def consume(self, word_ids: mx.nd.NDArray) -> None:
+        """
+        Consumes a word for each trie, updating respective states.
+
+        :param word_ids: The set of word IDs.
+        """
+        word_ids = word_ids.asnumpy().tolist()
+        for i, word_id in enumerate(word_ids):
+            if self.global_avoid_states:
+                self.global_avoid_states[i] = self.global_avoid_states[i].consume(word_id)
+            if self.local_avoid_states:
+                self.local_avoid_states[i] = self.local_avoid_states[i].consume(word_id)
+
+    def avoid(self) -> Tuple[Tuple[int], Tuple[int]]:
+        """
+        Assembles a list of per-hypothesis words to avoid. The indices are (x, y) pairs into the scores
+        array, which has dimensions (beam_size, target_vocab_size). These values are then used by the caller
+        to set these items to np.inf so they won't be selected. Words to be avoided are selected by
+        consulting both the global trie of phrases and the sentence-specific one.
+
+        :return: Two lists of indices: the x coordinates and y coordinates.
+        """
+        to_avoid = set()  # type: Set[Tuple[int, int]]
+        for i, state in enumerate(self.global_avoid_states):
+            for word_id in state.avoid():
+                if word_id > 0:
+                    to_avoid.add((i, word_id))
+        for i, state in enumerate(self.local_avoid_states):
+            for word_id in state.avoid():
+                if word_id > 0:
+                    to_avoid.add((i, word_id))
+
+        return tuple(zip(*to_avoid))  # type: ignore
 
 
 class ConstrainedHypothesis:
@@ -41,9 +230,10 @@ class ConstrainedHypothesis:
     This is represented internally as:
 
         constraints: [14 19 35 14]
-        is_sequence: [ 1  1  0  0
+        is_sequence: [ 1  1  0  0]
 
     :param constraint_list: A list of zero or raw constraints (each represented as a list of integers).
+    :param avoid_list: A list of zero or raw constraints that must *not* appear in the output.
     :param eos_id: The end-of-sentence ID.
     """
 
@@ -281,13 +471,13 @@ class ConstrainedCandidate:
 
 def topk(batch_size: int,
          beam_size: int,
-         inactive: mx.ndarray,
-         scores: mx.ndarray,
+         inactive: mx.nd.NDArray,
+         scores: mx.nd.NDArray,
          hypotheses: List[ConstrainedHypothesis],
-         best_ids: mx.ndarray,
-         best_word_ids: mx.ndarray,
-         seq_scores: mx.ndarray,
-         context: mx.context.Context) -> Tuple[np.array, np.array, np.array, List[ConstrainedHypothesis], mx.nd.array]:
+         best_ids: mx.nd.NDArray,
+         best_word_ids: mx.nd.NDArray,
+         seq_scores: mx.nd.NDArray,
+         context: mx.context.Context) -> Tuple[np.array, np.array, np.array, List[ConstrainedHypothesis], mx.nd.NDArray]:
     """
     Builds a new topk list such that the beam contains hypotheses having completed different numbers of constraints.
     These items are built from three different types: (1) the best items across the whole
@@ -330,13 +520,13 @@ def topk(batch_size: int,
 
 
 def _topk(beam_size: int,
-          inactive: mx.ndarray,
-          scores: mx.ndarray,
+          inactive: mx.nd.NDArray,
+          scores: mx.nd.NDArray,
           hypotheses: List[ConstrainedHypothesis],
-          best_ids: mx.ndarray,
-          best_word_ids: mx.ndarray,
-          sequence_scores: mx.ndarray,
-          context: mx.context.Context) -> Tuple[np.array, np.array, np.array, List[ConstrainedHypothesis], mx.nd.array]:
+          best_ids: mx.nd.NDArray,
+          best_word_ids: mx.nd.NDArray,
+          sequence_scores: mx.nd.NDArray,
+          context: mx.context.Context) -> Tuple[np.array, np.array, np.array, List[ConstrainedHypothesis], mx.nd.NDArray]:
     """
     Builds a new topk list such that the beam contains hypotheses having completed different numbers of constraints.
     These items are built from three different types: (1) the best items across the whole
@@ -369,7 +559,7 @@ def _topk(beam_size: int,
 
     # For each hypothesis, we add (2) all the constraints that could follow it and
     # (3) the best item (constrained or not) in that row
-    best_next = mx.ndarray.argmin(scores, axis=1)
+    best_next = mx.nd.NDArray.argmin(scores, axis=1)
     for row in range(beam_size):
         if inactive[row]:
             continue
@@ -426,27 +616,37 @@ def _topk(beam_size: int,
             inactive)
 
 
-def main():
+def main(args):
     """
     Usage: python3 -m sockeye.lexical_constraints [--bpe BPE_MODEL]
 
     Reads sentences and constraints on STDIN (tab-delimited) and generates the JSON format
-    that can be used when passing `--json-input` to sockeye.translate.
+    that can be used when passing `--json-input` to sockeye.translate. It supports both positive
+    constraints (phrases that must appear in the output) and negative constraints (phrases that
+    must *not* appear in the output).
 
     e.g.,
 
-        echo -e "Dies ist ein Test .\tThis is\ttest" | python3 -m sockeye.lexical_constraints
+        echo -e "Das ist ein Test .\tThis is\ttest" | python3 -m sockeye.lexical_constraints
 
     will produce the following JSON object:
 
-        { "text": "Dies ist ein Test .", "constraints": ["This is", "test"] }
+        { "text": "Das ist ein Test .", "constraints": ["This is", "test"] }
+
+    If you pass `--avoid` to the script, the constraints will be generated as negative constraints, instead:
+
+        echo -e "Das ist ein Test .\tThis is\ttest" | python3 -m sockeye.lexical_constraints --avoid
+
+    will produce the following JSON object (note the new keyword):
+
+        { "text": "Das ist ein Test .", "avoid": ["This is", "test"] }
 
     Make sure you apply all preprocessing (tokenization, BPE, etc.) to both the source and the target-side constraints.
     You can then translate this object by passing it to Sockeye on STDIN as follows:
 
         python3 -m sockeye.translate -m /path/to/model --json-input --beam-size 20 --beam-prune 20
 
-    (Note the recommended Sockeye parameters).
+    Note the recommended Sockeye parameters. Beam pruning isn't needed for negative constraints.
     """
     import sys
     import json
@@ -455,14 +655,30 @@ def main():
         line = line.rstrip()
 
         # Constraints are in fields 2+
-        source, *constraints = line.split('\t')
+        source, *restrictions = line.split('\t')
 
         obj = {'text': source}
-        if len(constraints) > 0:
+        constraints = []
+        avoid_list = []
+        for item in restrictions:
+            if args.avoid:
+                avoid_list.append(item)
+            else:
+                constraints.append(item)
+
+        if constraints:
             obj['constraints'] = constraints
+        if avoid_list:
+            obj['avoid'] = avoid_list
 
         print(json.dumps(obj, ensure_ascii=False), flush=True)
 
 
 if __name__ == '__main__':
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--avoid', action='store_true', help='Constraints are negative constraints')
+    args = parser.parse_args()
+
+    main(args)

@@ -79,9 +79,6 @@ def check_arg_compatibility(args: argparse.Namespace):
 
     :param args: Arguments as returned by argparse.
     """
-    check_condition(args.optimized_metric == C.BLEU or args.optimized_metric == C.ROUGE1 or args.optimized_metric in args.metrics,
-                    "Must optimize either BLEU, ROUGE or one of tracked metrics (--metrics)")
-
     if args.encoder == C.TRANSFORMER_TYPE:
         check_condition(args.transformer_model_size[0] == args.num_embed[0],
                         "Source embedding size must match transformer model size: %s vs. %s"
@@ -107,6 +104,10 @@ def check_arg_compatibility(args: argparse.Namespace):
                         "LHUC is not supported for convolutional models yet.")
         check_condition(args.decoder != C.TRANSFORMER_TYPE or C.LHUC_STATE_INIT not in args.lhuc,
                         "The %s options only applies to RNN models" % C.LHUC_STATE_INIT)
+
+    if args.decoder_only:
+        check_condition(args.decoder != C.TRANSFORMER_TYPE and args.decoder != C.CONVOLUTION_TYPE,
+                        "Decoder pre-training currently supports RNN decoders only.")
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
@@ -152,36 +153,6 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     return resume_training
 
 
-def determine_context(args: argparse.Namespace, exit_stack: ExitStack) -> List[mx.Context]:
-    """
-    Determine the context we should run on (CPU or GPU).
-
-    :param args: Arguments as returned by argparse.
-    :param exit_stack: An ExitStack from contextlib.
-    :return: A list with the context(s) to run on.
-    """
-    if args.use_cpu:
-        logger.info("Training Device: CPU")
-        context = [mx.cpu()]
-    else:
-        num_gpus = utils.get_num_gpus()
-        check_condition(num_gpus >= 1,
-                        "No GPUs found, consider running on the CPU with --use-cpu "
-                        "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
-                        "binary isn't on the path).")
-        if args.disable_device_locking:
-            context = utils.expand_requested_device_ids(args.device_ids)
-        else:
-            context = exit_stack.enter_context(utils.acquire_gpus(args.device_ids, lock_dir=args.lock_dir))
-        if args.batch_type == C.BATCH_TYPE_SENTENCE:
-            check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
-                                                                 "divisible by the number of devices. Choose a batch "
-                                                                 "size that is a multiple of %d." % len(context))
-        logger.info("Training Device(s): GPU %s", context)
-        context = [mx.gpu(gpu_id) for gpu_id in context]
-    return context
-
-
 def create_checkpoint_decoder(args: argparse.Namespace,
                               exit_stack: ExitStack,
                               train_context: List[mx.Context]) -> Optional[checkpoint_decoder.CheckpointDecoder]:
@@ -206,20 +177,11 @@ def create_checkpoint_decoder(args: argparse.Namespace,
     if args.use_cpu or args.decode_and_evaluate_use_cpu:
         context = mx.cpu()
     elif args.decode_and_evaluate_device_id is not None:
-        # decode device is defined from the commandline
-        num_gpus = utils.get_num_gpus()
-        check_condition(num_gpus >= 1,
-                        "No GPUs found, consider running on the CPU with --use-cpu "
-                        "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
-                        "binary isn't on the path).")
-
-        if args.disable_device_locking:
-            context = utils.expand_requested_device_ids([args.decode_and_evaluate_device_id])
-        else:
-            context = exit_stack.enter_context(utils.acquire_gpus([args.decode_and_evaluate_device_id],
-                                                                  lock_dir=args.lock_dir))
-        context = mx.gpu(context[0])
-
+        context = utils.determine_context(device_ids=args.decode_and_evaluate_device_id,
+                                          use_cpu=False,
+                                          disable_device_locking=args.disable_device_locking,
+                                          lock_dir=args.lock_dir,
+                                          exit_stack=exit_stack)[0]
     else:
         # default decode context is the last training device
         context = train_context[-1]
@@ -240,10 +202,15 @@ def use_shared_vocab(args: argparse.Namespace) -> bool:
     weight_tying = args.weight_tying
     weight_tying_type = args.weight_tying_type
     shared_vocab = args.shared_vocab
+    decoder_only = args.decoder_only
     if weight_tying and C.WEIGHT_TYING_SRC in weight_tying_type and C.WEIGHT_TYING_TRG in weight_tying_type:
         if not shared_vocab:
             logger.info("A shared source/target vocabulary will be used as weight tying source/target weight tying "
                         "is enabled")
+        shared_vocab = True
+    if decoder_only:
+        if not shared_vocab:
+            logger.info("A shared source/target vocabulary will be used for pre-training the decoder.")
         shared_vocab = True
     return shared_vocab
 
@@ -269,6 +236,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     :return: The data iterators (train, validation, config_data) as well as the source and target vocabularies.
     """
     num_words_source, num_words_target = args.num_words
+    num_words_source = num_words_source if num_words_source > 0 else None
+    num_words_target = num_words_target if num_words_target > 0 else None
+
     word_min_count_source, word_min_count_target = args.word_min_count
     batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
     batch_by_words = args.batch_type == C.BATCH_TYPE_WORD
@@ -343,7 +313,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 num_words_source=num_words_source,
                 num_words_target=num_words_target,
                 word_min_count_source=word_min_count_source,
-                word_min_count_target=word_min_count_target)
+                word_min_count_target=word_min_count_target,
+                pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
         check_condition(len(args.source_factors) == len(args.source_factors_num_embed),
                         "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (
@@ -396,7 +367,16 @@ def create_encoder_config(args: argparse.Namespace,
     num_embed_source, _ = args.num_embed
     config_encoder = None  # type: Optional[Config]
 
-    if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
+    if args.decoder_only:
+        if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
+            encoder_num_hidden = args.transformer_model_size[0]
+        elif args.encoder == C.CONVOLUTION_TYPE:
+            encoder_num_hidden = args.cnn_num_hidden
+        else:
+            encoder_num_hidden = args.rnn_num_hidden
+        config_encoder = encoder.EmptyEncoderConfig(num_embed=num_embed_source,
+                                                    num_hidden=encoder_num_hidden)
+    elif args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
         encoder_transformer_preprocess, _ = args.transformer_preprocess
         encoder_transformer_postprocess, _ = args.transformer_postprocess
         encoder_transformer_model_size = args.transformer_model_size[0]
@@ -492,6 +472,8 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
     config_decoder = None  # type: Optional[decoder.DecoderConfig]
 
     if args.decoder == C.TRANSFORMER_TYPE:
+        if args.decoder_only:
+            raise NotImplementedError()
         _, decoder_transformer_preprocess = args.transformer_preprocess
         _, decoder_transformer_postprocess = args.transformer_postprocess
         config_decoder = transformer.TransformerConfig(
@@ -512,6 +494,8 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
             lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc))
 
     elif args.decoder == C.CONVOLUTION_TYPE:
+        if args.decoder_only:
+            raise NotImplementedError()
         _, cnn_kernel_width_decoder = args.cnn_kernel_width
         convolution_config = convolution.ConvolutionConfig(kernel_width=cnn_kernel_width_decoder,
                                                            num_hidden=args.cnn_num_hidden,
@@ -527,6 +511,14 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
                                                             hidden_dropout=args.cnn_hidden_dropout)
 
     elif args.decoder == C.RNN_NAME:
+        if args.decoder_only:
+            args.rnn_decoder_state_init = C.RNN_DEC_INIT_ZERO
+            args.rnn_context_gating = False
+            args.rnn_attention_type = C.ATT_FIXED
+            args.rnn_attention_in_upper_layers = False
+            args.lhuc = None
+            args.rnn_enc_last_hidden_concat_to_embedding = False
+
         rnn_attention_num_hidden = args.rnn_num_hidden if args.rnn_attention_num_hidden is None else args.rnn_attention_num_hidden
         config_coverage = None
         if args.rnn_attention_type == C.ATT_COV:
@@ -804,7 +796,7 @@ def train(args: argparse.Namespace):
         args.output = temp_dir.name
         args.max_updates = 0
 
-    utils.seedRNGs(args.seed)
+    utils.seed_rngs(args.seed)
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
@@ -825,7 +817,16 @@ def train(args: argparse.Namespace):
                 max_seq_len_source, max_seq_len_target)
 
     with ExitStack() as exit_stack:
-        context = determine_context(args, exit_stack)
+        context = utils.determine_context(device_ids=args.device_ids,
+                                          use_cpu=args.use_cpu,
+                                          disable_device_locking=args.disable_device_locking,
+                                          lock_dir=args.lock_dir,
+                                          exit_stack=exit_stack)
+        if args.batch_type == C.BATCH_TYPE_SENTENCE:
+            check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
+                                                                 "divisible by the number of devices. Choose a batch "
+                                                                 "size that is a multiple of %d." % len(context))
+        logger.info("Training Device(s): %s", ", ".join(str(c) for c in context))
 
         train_iter, eval_iter, config_data, source_vocabs, target_vocab = create_data_iters_and_vocabs(
             args=args,

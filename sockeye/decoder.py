@@ -475,7 +475,7 @@ class RecurrentDecoderConfig(Config):
                  max_seq_len_source: int,
                  rnn_config: rnn.RNNConfig,
                  attention_config: rnn_attention.AttentionConfig,
-                 hidden_dropout: float = .0,  # TODO: move this dropout functionality to OutputLayer
+                 hidden_dropout: float = .0,
                  state_init: str = C.RNN_DEC_INIT_LAST,
                  state_init_lhuc: bool = False,
                  context_gating: bool = False,
@@ -869,11 +869,11 @@ class RecurrentDecoder(Decoder):
         # concat previous word embedding and previous hidden state
         if enc_last_hidden is not None:
             word_vec_prev = mx.sym.concat(word_vec_prev, enc_last_hidden, dim=1,
-                                            name="%sconcat_target_encoder_t%d" % (self.prefix, seq_idx))
+                                          name="%sconcat_target_encoder_t%d" % (self.prefix, seq_idx))
         rnn_input = mx.sym.concat(word_vec_prev, state.hidden, dim=1,
                                   name="%sconcat_target_context_t%d" % (self.prefix, seq_idx))
         # rnn_pre_attention_output: (batch_size, rnn_num_hidden)
-        # next_layer_states: num_layers * [batch_size, rnn_num_hidden]
+        # rnn_pre_attention_layer_states: num_layers * [batch_size, rnn_num_hidden]
         rnn_pre_attention_output, rnn_pre_attention_layer_states = \
             self.rnn_pre_attention(rnn_input, state.layer_states[:self.rnn_pre_attention_n_states])
 

@@ -1,5 +1,5 @@
-pyyaml
-mxnet-mkl==1.2.0
-numpy>=1.12
+pyyaml==3.12
+mxnet-mkl==1.2.1
+numpy>=1.14
 typing
 parsimonious

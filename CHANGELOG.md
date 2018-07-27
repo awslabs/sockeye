@@ -10,6 +10,70 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.41]
+### Changed
+- Require numpy 1.14 or later to avoid MKL conflicts between numpy as mxnet-mkl.
+
+## [1.18.40]
+### Fixed
+- Fixed bad check for existence of negative constraints.
+- Resolved conflict for phrases that are both positive and negative constraints.
+- Fixed softmax temperature at inference time.
+
+## [1.18.39]
+### Added
+- Image Captioning now supports constrained decoding.
+- Image Captioning: zero padding of features now allows input features of different shape for each image.
+
+## [1.18.38]
+### Fixed
+- Fixed issue with the incorrect order of translations when empty inputs are present and translating in chunks.
+
+## [1.18.37]
+### Fixed
+- Determining the max output length for each sentence in a batch by the bucket length rather than the actual in order to match the behavior of a single sentence translation.
+
+## [1.18.36]
+### Changed
+- Updated to [MXNet 1.2.1](https://github.com/apache/incubator-mxnet/tree/1.2.1)
+
+## [1.18.35]
+### Added
+- ROUGE scores are now available in `sockeye-evaluate`.
+- Enabled CHRF as an early-stopping metric.
+
+## [1.18.34]
+### Added
+- Added support for `--beam-search-stop first` for decoding jobs with `--batch-size > 1`.
+
+## [1.18.33]
+### Added
+- Now supports negative constraints, which are phrases that must *not* appear in the output.
+   - Global constraints can be listed in a (pre-processed) file, one per line: `--avoid-list FILE`
+   - Per-sentence constraints are passed using the `avoid` keyword in the JSON object, with a list of strings as its field value.
+
+## [1.18.32]
+### Added
+- Added option to pad vocabulary to a multiple of x: e.g. `--pad-vocab-to-multiple-of 16`.
+
+## [1.18.31]
+### Added
+- Pre-training the RNN decoder. Usage:
+  1. Train with flag `--decoder-only`.
+  2. Feed identical source/target training data.
+
+## [1.18.30]
+### Fixed
+- Preserving max output length for each sentence to allow having identical translations for both with and without batching.
+
+## [1.18.29]
+### Changed
+- No longer restrict the vocabulary to 50,000 words by default, but rather create the vocabulary from all words which occur at least `--word-min-count` times. Specifying `--num-words` explicitly will still lead to a restricted
+  vocabulary.
+
+## [1.18.28]
+### Changed
+- Temporarily fixing the pyyaml version to 3.12 as version 4.1 introduced some backwards incompatible changes.
 
 ## [1.18.27]
 ### Fixed
@@ -43,7 +107,7 @@ there was an edge case where the memory usage was sub-optimal with word based ba
 
 ## [1.18.21]
 ### Fixed
-- Constrained decoding was missed a crucial cast
+- Constrained decoding was missing a crucial cast
 - Fixed test cases that should have caught this
 
 ## [1.18.20]
