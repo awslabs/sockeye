@@ -1027,9 +1027,9 @@ class Translator:
         self._sort_by_index.hybridize()
 
         self._update_finished = NormalizeAndUpdateFinished(pad_id=C.PAD_ID,
-                                                              eos_id=self.vocab_target[C.EOS_SYMBOL],
-                                                              length_penalty_alpha=self.length_penalty.alpha,
-                                                              length_penalty_beta=self.length_penalty.beta)
+                                                           eos_id=self.vocab_target[C.EOS_SYMBOL],
+                                                           length_penalty_alpha=self.length_penalty.alpha,
+                                                           length_penalty_beta=self.length_penalty.beta)
         self._update_finished.initialize(ctx=self.context)
         self._update_finished.hybridize()
         self._prune_hyps = PruneHypotheses(threshold=self.beam_prune, beam_size=self.beam_size)
@@ -1387,9 +1387,8 @@ class Translator:
 
         best_word_indices = mx.nd.full((self.batch_size * self.beam_size,), val=self.start_id, ctx=self.context,
                                        dtype='int32')
-        # growing sequences: (batch_size * beam_size, 1), pre-filled with <s> symbols on index 0
-        sequences = mx.nd.full((self.batch_size * self.beam_size, 1), val=self.start_id, ctx=self.context,
-                               dtype='int32')
+        # The growing sequences representing the complete history for each hypothesis: (batch_size * beam_size, 1)
+        sequences = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context, dtype='int32')
 
         # Beam history
         beam_histories = None  # type: Optional[List[BeamHistory]]
@@ -1536,11 +1535,12 @@ class Translator:
                                                                                            self.inf_array,
                                                                                            self.zeros_array)
 
-            # (7) Reorder sequences and attentions according to best_hyp_indices
-            # and extend sequences with best_word_indices.
+            # (7) Reorder sequences and attentions according to best_hyp_indices...
             # pylint: disable=unsupported-assignment-operation
             sequences = mx.nd.take(sequences, best_hyp_indices)
             attentions = mx.nd.take(attentions, best_hyp_indices)
+
+            # ...and extend sequences with best_word_indices.
             sequences = mx.nd.concat(sequences, best_word_indices.reshape((-1, 1)), dim=1)
             attentions = mx.nd.concat(attentions, attention_scores.reshape((-1, 1, encoded_source_length)), dim=1)
 
@@ -1603,6 +1603,7 @@ class Translator:
         scores_accumulated = scores_accumulated.take(best_hyp_indices)
         constraints = [constraints[x] for x in best_hyp_indices.asnumpy()]
 
+        # Remove the <s> column from both sequences and attentions
         return sequences[:,1:], attentions[:,1:,:], scores_accumulated, lengths, constraints, beam_histories
 
     def _get_best_from_beam(self,
