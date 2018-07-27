@@ -146,30 +146,27 @@ def get_rnn_cell(
     :param dtype: Data type.
     :param prefix: Variable name prefix.
     """
-    # fhieber: the 'l' in the prefix does NOT stand for 'layer' but for the direction 'l' as in mx.rnn.rnn_cell::517
-    # this ensures parameter name compatibility of training w/ FusedRNN and decoding with 'unfused' RNN.
-    cell_prefix = "%sl_" % prefix
     if cell_type == C.LSTM_TYPE:
         if dropout_recurrent > 0.0:
             cell = RecurrentDropoutLSTMCell(num_hidden=num_hidden,
-                                            prefix=cell_prefix,
+                                            prefix=prefix,
                                             forget_bias=forget_bias,
                                             dropout=dropout_recurrent)
         else:
-            cell = mx.rnn.LSTMCell(num_hidden=num_hidden, prefix=cell_prefix, forget_bias=forget_bias)
+            cell = mx.rnn.LSTMCell(num_hidden=num_hidden, prefix=prefix, forget_bias=forget_bias)
     elif cell_type == C.LNLSTM_TYPE:
-        cell = LayerNormLSTMCell(num_hidden=num_hidden, prefix=cell_prefix, forget_bias=forget_bias)
+        cell = LayerNormLSTMCell(num_hidden=num_hidden, prefix=prefix, forget_bias=forget_bias)
     elif cell_type == C.LNGLSTM_TYPE:
-        cell = LayerNormPerGateLSTMCell(num_hidden=num_hidden, prefix=cell_prefix,
+        cell = LayerNormPerGateLSTMCell(num_hidden=num_hidden, prefix=prefix,
                                         forget_bias=forget_bias)
     elif cell_type == C.GRU_TYPE:
-        cell = mx.rnn.GRUCell(num_hidden=num_hidden, prefix=cell_prefix)
+        cell = mx.rnn.GRUCell(num_hidden=num_hidden, prefix=prefix)
     elif cell_type == C.LNGRU_TYPE:
-        cell = LayerNormGRUCell(num_hidden=num_hidden, prefix=cell_prefix)
+        cell = LayerNormGRUCell(num_hidden=num_hidden, prefix=prefix)
     elif cell_type == C.LNGGRU_TYPE:
-        cell = LayerNormPerGateGRUCell(num_hidden=num_hidden, prefix=cell_prefix)
+        cell = LayerNormPerGateGRUCell(num_hidden=num_hidden, prefix=prefix)
     elif cell_type == "simple":
-        cell = JanetCell(num_hidden=num_hidden, chrono_init=chrono_init, prefix=cell_prefix,
+        cell = JanetCell(num_hidden=num_hidden, chrono_init=chrono_init, prefix=prefix,
                          forget_bias=forget_bias)
     else:
         raise NotImplementedError("Unknown cell type %s" % cell_type)
@@ -202,10 +199,13 @@ def get_stacked_rnn(config: RNNConfig, prefix: str,
     if not layers:
         layers = range(config.num_layers)
     for layer_idx in layers:
+        # fhieber: the 'l' in the prefix does NOT stand for 'layer' but for the direction 'l' as in mx.rnn.rnn_cell::517
+        # this ensures parameter name compatibility of training w/ FusedRNN and decoding with 'unfused' RNN.
+        cell_prefix = "%sl%d_" % (prefix, layer_idx)
         cell = get_rnn_cell(cell_type=config.cell_type, num_hidden=config.num_hidden,
                             dropout_inputs=config.dropout_inputs, dropout_states=config.dropout_states,
                             dropout_recurrent=config.dropout_recurrent, forget_bias=config.forget_bias,
-                            lhuc=config.lhuc, chrono_init=config.chrono_init, dtype=config.dtype, prefix=prefix)
+                            lhuc=config.lhuc, chrono_init=config.chrono_init, dtype=config.dtype, prefix=cell_prefix)
 
         # layer_idx is 0 based, whereas first_residual_layer is 1-based
         if config.residual and layer_idx + 1 >= config.first_residual_layer:

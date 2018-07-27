@@ -26,15 +26,15 @@ def test_layer_normalization():
     x_nd = mx.nd.uniform(0, 10, (batch_size, other_dim, num_hidden))
     x_np = x_nd.asnumpy()
 
-    ln = sockeye.layers.LayerNormalization(prefix="")
+    ln = sockeye.layers.LayerNormalization(num_hidden=num_hidden, prefix="")
 
     expected_mean = np.mean(x_np, axis=-1, keepdims=True)
     expected_var = np.var(x_np, axis=-1, keepdims=True)
     expected_norm = (x_np - expected_mean) / np.sqrt(expected_var)
 
     norm = ln(x).eval(x=x_nd,
-                    _gamma=mx.nd.ones((num_hidden,)),
-                    _beta=mx.nd.zeros((num_hidden,)))[0]
+                      _gamma=mx.nd.ones((num_hidden,)),
+                      _beta=mx.nd.zeros((num_hidden,)))[0]
 
     assert np.isclose(norm.asnumpy(), expected_norm, atol=1.e-6).all()
 
