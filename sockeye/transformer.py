@@ -104,9 +104,9 @@ class TransformerEncoderBlock:
 
     def __call__(self, data: mx.sym.Symbol, bias: mx.sym.Symbol) -> mx.sym.Symbol:
         # self-attention
-        data_self_att = self.self_attention(inputs=self.pre_self_attention(data, None),
-                                            bias=bias,
-                                            cache=None)
+        data_self_att, _ = self.self_attention(inputs=self.pre_self_attention(data, None),
+                                               bias=bias,
+                                               cache=None)
         data = self.post_self_attention(data_self_att, data)
 
         # feed-forward

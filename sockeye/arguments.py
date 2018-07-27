@@ -645,22 +645,19 @@ def add_model_parameters(params):
 
     # Custom sequence encoder or decoder
     model_params.add_argument('--custom-seq-encoder',
-                              default=None,
+                              default='res(norm->mh_dot_att)->res(norm->ff->linear))',
                               help='Specify the layers the custom encoder will consist of.')
     model_params.add_argument('--custom-seq-decoder',
-                              default=None,
+                              default='res(norm->mh_dot_self_att)->res(norm->mh_dot_att)->res(norm->ff->linear))',
                               help='Specify the layers the custom decoder will consist of.')
-
     model_params.add_argument('--custom-seq-num-hidden',
                               type=int_greater_or_equal(1),
-                              default=1024,
+                              default=512,
                               help='Number of hidden units for encoder and decoder. Default: %(default)s.')
-
     model_params.add_argument('--custom-seq-dropout',
                               type=float,
-                              default=.0,
-                              help='Dropout used throughout the custom encoder and decoder.'
-                                   'Use "x:x" to specify separate values. Default: %(default)s.')
+                              default=.1,
+                              help='Dropout used throughout the custom encoder and decoder. Default: %(default)s.')
 
     # LHUC
     # TODO: The convolutional model does not support lhuc yet

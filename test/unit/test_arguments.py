@@ -15,7 +15,6 @@ import argparse
 import pytest
 import tempfile
 import os
-import yaml
 
 import sockeye.arguments as arguments
 import sockeye.constants as C
@@ -96,6 +95,10 @@ def test_device_args(test_params, expected_params):
               transformer_positional_embedding_type="fixed",
               transformer_preprocess=('n', 'n'),
               transformer_postprocess=('dr', 'dr'),
+              custom_seq_encoder='res(norm->mh_dot_att)->res(norm->ff->linear))',
+              custom_seq_decoder='res(norm->mh_dot_self_att)->res(norm->mh_dot_att)->res(norm->ff->linear))',
+              custom_seq_num_hidden=512,
+              custom_seq_dropout=0.1,
               rnn_attention_use_prev_word=False,
               rnn_decoder_state_init="last",
               rnn_encoder_reverse_input=False,

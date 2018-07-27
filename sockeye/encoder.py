@@ -233,6 +233,7 @@ def get_transformer_encoder(config: transformer.TransformerConfig, prefix: str) 
                            prefix=prefix + C.CHAR_SEQ_ENCODER_PREFIX)
 
     encoder_seq.append(TransformerEncoder, config=config, prefix=prefix + C.TRANSFORMER_ENCODER_PREFIX)
+    return encoder_seq
 
 
 def get_custom_seq_encoder(config: CustomSeqEncoderConfig) -> 'Encoder':
