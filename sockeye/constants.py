@@ -134,6 +134,7 @@ WEIGHT_TYING_TRG_SOFTMAX = 'trg_softmax'
 WEIGHT_TYING_SRC_TRG = 'src_trg'
 WEIGHT_TYING_SRC_TRG_SOFTMAX = 'src_trg_softmax'
 
+CUSTOM_SEQ_PREFIX = "custom_seq_"
 # default decoder prefixes
 RNN_DECODER_PREFIX = DECODER_PREFIX + "rnn_"
 TRANSFORMER_DECODER_PREFIX = DECODER_PREFIX + "transformer_"

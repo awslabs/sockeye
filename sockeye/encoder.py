@@ -44,7 +44,7 @@ def get_encoder(config: 'EncoderConfig', prefix: str = '') -> 'Encoder':
     elif isinstance(config, ConvolutionalEncoderConfig):
         return get_convolutional_encoder(config, prefix)
     elif isinstance(config, CustomSeqEncoderConfig):
-        return get_custom_seq_encoder(config)
+        return get_custom_seq_encoder(config, prefix)
     elif isinstance(config, EmptyEncoderConfig):
         return EncoderSequence([EmptyEncoder(config)], config.dtype)
     else:
@@ -236,14 +236,15 @@ def get_transformer_encoder(config: transformer.TransformerConfig, prefix: str) 
     return encoder_seq
 
 
-def get_custom_seq_encoder(config: CustomSeqEncoderConfig) -> 'Encoder':
+def get_custom_seq_encoder(config: CustomSeqEncoderConfig, prefix: str) -> 'Encoder':
     """
     Creates a custom sequence encoder encoder.
 
     :param config: Configuration for convolutional encoder.
+    :param prefix: The prefix.
     :return: Encoder instance.
     """
-    return CustomSeqEncoder(config)
+    return CustomSeqEncoder(config, prefix + C.CUSTOM_SEQ_PREFIX + C.ENCODER_PREFIX)
 
 
 class Encoder(ABC):
@@ -764,7 +765,7 @@ class CustomSeqEncoder(Encoder):
         self.layers = []
         input_num_hidden = config.num_embed
         for idx, layer_config in enumerate(config.encoder_layers):
-            layer = layer_config.create_encoder_layer(input_num_hidden, "%s_l%d_" % (self.prefix, idx))
+            layer = layer_config.create_encoder_layer(input_num_hidden, "%sl%d_" % (self.prefix, idx))
             input_num_hidden = layer.get_num_hidden()
             self.layers.append(layer)
 

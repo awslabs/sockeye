@@ -1301,7 +1301,7 @@ class CustomSeqDecoderConfig(Config):
         self.dtype = dtype
 
 
-@Decoder.register(CustomSeqDecoderConfig, C.CUSTOM_SEQ_TYPE)
+@Decoder.register(CustomSeqDecoderConfig, C.CUSTOM_SEQ_PREFIX + C.DECODER_PREFIX)
 class CustomSeqDecoder(Decoder):
     """
     Decoder composed of a customizable list of building blocks/layers, such as RNNs, CNNs and attention mechanisms.
@@ -1315,7 +1315,7 @@ class CustomSeqDecoder(Decoder):
         self.layers = []
         input_num_hidden = config.num_embed
         for idx, layer_config in enumerate(config.decoder_layers):
-            layer = layer_config.create_decoder_layer(input_num_hidden, "%s_l%d_" % (self.prefix, idx))
+            layer = layer_config.create_decoder_layer(input_num_hidden, "%sl%d_" % (self.prefix, idx))
             input_num_hidden = layer.get_num_hidden()
             self.layers.append(layer)
 
