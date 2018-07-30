@@ -928,7 +928,8 @@ def _concat_translations(translations: List[Translation], stop_ids: Set[int],
     pos_t, pos_s = 0, 0
     for attention_matrix, (len_t, len_s) in zip(attention_matrices, attention_shapes):
         attention_matrix_combined[pos_t:pos_t + len_t, pos_s:pos_s + len_s] = attention_matrix
-        pos_s, pos_t = pos_s + len_s, pos_t + len_t
+        pos_t += len_t
+        pos_s += len_s
 
     # Unnormalize + sum and renormalize the score:
     score = sum(translation.score * length_penalty.get(len(translation.target_ids))
@@ -1388,6 +1389,7 @@ class Translator:
         best_word_indices = mx.nd.full((self.batch_size * self.beam_size,), val=self.start_id, ctx=self.context,
                                        dtype='int32')
         # The growing sequences representing the complete history for each hypothesis: (batch_size * beam_size, 1)
+        # The first column represents <s>, and is later removed when _beam_search() returns.
         sequences = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context, dtype='int32')
 
         # Beam history
@@ -1604,7 +1606,7 @@ class Translator:
         constraints = [constraints[x] for x in best_hyp_indices.asnumpy()]
 
         # Remove the <s> column from both sequences and attentions
-        return sequences[:,1:], attentions[:,1:,:], scores_accumulated, lengths, constraints, beam_histories
+        return sequences[:, 1:], attentions[:, 1:, :], scores_accumulated, lengths, constraints, beam_histories
 
     def _get_best_from_beam(self,
                             sequences: mx.nd.NDArray,
