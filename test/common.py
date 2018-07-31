@@ -153,8 +153,7 @@ def tmp_digits_dataset(prefix: str,
                        test_line_count: int, test_line_count_empty: int, test_max_length: int,
                        sort_target: bool = False,
                        seed_train: int = 13, seed_dev: int = 13,
-                       with_source_factors: bool = False,
-                       with_target_constraints: bool = False):
+                       with_source_factors: bool = False):
     with TemporaryDirectory(prefix=prefix) as work_dir:
         # Simple digits files for train/dev data
         train_source_path = os.path.join(work_dir, "train.src")
@@ -187,34 +186,6 @@ def tmp_digits_dataset(prefix: str,
             data['train_source_factors'] = [train_factor_path]
             data['dev_source_factors'] = [dev_factor_path]
             data['test_source_factors'] = [test_factor_path]
-
-        if with_target_constraints:
-            # When using constrained decoding, rewrite the source file to contain target
-            # constraints.  Generating a mixture of sentences with and without constraints here is
-            # critical, since this can happen in production and also introduces sometimes some
-            # unanticipated interactions.
-            new_sources = []
-            with open(data['test_source']) as source_inp, open(data['test_target']) as target_inp:
-                for sentno, (source, target) in enumerate(zip(source_inp, target_inp)):
-                    target_words = target.rstrip().split()
-                    target_len = len(target_words)
-                    new_source = {'text': source.rstrip()}
-                    # From the odd-numbered sentences that are not too long, create constraints. We do
-                    # only odds to ensure we get batches with mixed constraints / lack of constraints.
-                    if target_len > 0 and sentno % 2 == 0:
-                        start_pos = 0
-                        end_pos = min(target_len, 3)
-                        constraint = ' '.join(target_words[start_pos:end_pos])
-                        # Alternate between positive and negative constraints
-                        if sentno % 4 == 0:
-                            new_source['constraints'] = [constraint]
-                        else:
-                            new_source['avoid'] = [constraint]
-                    new_sources.append(json.dumps(new_source))
-
-            with open(data['test_source'], 'w') as out:
-                for json_line in new_sources:
-                    print(json_line, file=out)
 
         yield data
 
@@ -257,6 +228,7 @@ def run_train_translate(train_params: str,
                         dev_source_factor_paths: Optional[List[str]] = None,
                         test_source_factor_paths: Optional[List[str]] = None,
                         use_prepared_data: bool = False,
+                        use_target_constraints: bool = False,
                         max_seq_len: int = 10,
                         restrict_lexicon: bool = False,
                         work_dir: Optional[str] = None,
@@ -374,6 +346,61 @@ def run_train_translate(train_params: str,
 
         with patch.object(sys, "argv", params.split()):
             sockeye.translate.main()
+
+        # Test target constraints
+        if use_target_constraints:
+            """
+            Read in the unconstrained system output from the first pass and use it to generate positive
+            and negative constraints. It is important to generate a mix of positive, negative, and no
+            constraints per batch, to test these production-realistic interactions as well.
+            """
+            # 'constraint' = positive constraints (must appear), 'avoid' = negative constraints (must not appear)
+            for constraint_type in ["constraints", "avoid"]:
+                constrained_sources = []
+                with open(test_source_path) as source_inp, open(out_path) as system_out:
+                    for sentno, (source, target) in enumerate(zip(source_inp, system_out)):
+                        target_words = target.rstrip().split()
+                        target_len = len(target_words)
+                        new_source = {'text': source.rstrip()}
+                        # From the odd-numbered sentences that are not too long, create constraints. We do
+                        # only odds to ensure we get batches with mixed constraints / lack of constraints.
+                        if target_len > 0 and sentno % 2 == 0:
+                            start_pos = 0
+                            end_pos = min(target_len, 3)
+                            constraint = ' '.join(target_words[start_pos:end_pos])
+                            new_source[constraint_type] = [constraint]
+                        constrained_sources.append(json.dumps(new_source))
+
+                new_test_source_path = os.path.join(work_dir, "test_constrained.txt")
+                with open(new_test_source_path, 'w') as out:
+                    for json_line in constrained_sources:
+                        print(json_line, file=out)
+
+                out_path_constrained = os.path.join(work_dir, "out_constrained.txt")
+                params = "{} {} {} --json-input".format(sockeye.translate.__file__,
+                                                        _TRANSLATE_PARAMS_COMMON.format(model=model_path,
+                                                                                        input=new_test_source_path,
+                                                                                        output=out_path_constrained,
+                                                                                        quiet=quiet_arg),
+                                                        translate_params)
+
+                with patch.object(sys, "argv", params.split()):
+                    sockeye.translate.main()
+
+                print('JSON_INPUT', open(new_test_source_path).readlines(),
+                      'CONSTRAINED', open(out_path_constrained).readlines(),
+                      'UNCONSTRAINED', open(out_path).readlines(), sep='\n')
+                for json_input, constrained_out, unconstrained_out in zip(open(new_test_source_path), open(out_path_constrained), open(out_path)):
+                    jobj = json.loads(json_input)
+                    print('JSON_INPUT', json_input, 'CONSTRAINED', constrained_out, 'UNCONSTRAINED', unconstrained_out, sep='\n')
+                    if jobj.get(constraint_type, None) == None:
+                        assert constrained_out == unconstrained_out
+                    else:
+                        restriction = jobj[constraint_type][0]
+                        if constraint_type == 'constraints':
+                            assert restriction in constrained_out
+                        else:
+                            assert restriction not in constrained_out
 
         # Translate corpus with the 2nd params
         if translate_params_equiv is not None:
