@@ -4,10 +4,18 @@ Lexical constraints provide a way to force the model to include certain words in
 Given a set of constraints, the decoder will find the best output that includes the constraints.
 This file describes how to use lexical constraints; for more technical information, please see our paper:
 
-  Fast Lexically Constrained Decoding With Dynamic Beam Allocation for Neural Machine Translation
-  Matt Post & David Vilar
-  [NAACL 2018](http://naacl2018.org/)
-  [PDF](https://arxiv.org/pdf/1804.06609.pdf)
+```
+@InProceedings{post2018:fast,
+    author = "Post, Matt and Vilar, David",
+    title = "Fast Lexically Constrained Decoding with Dynamic Beam Allocation for Neural Machine Translation",
+    booktitle = "Proceedings of the 2018 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies, Volume 1 (Long Papers)",
+    year = "2018",
+    publisher = "Association for Computational Linguistics",
+    pages = "1314--1324",
+    location = "New Orleans, Louisiana",
+    url = "http://aclweb.org/anthology/N18-1119",
+}
+```
 
 ## Example
 
@@ -22,15 +30,13 @@ This JSON object can be produced with the provided script:
     echo -e "This is a test .\tconstraint\tmulti@@ word const@@ raint" \
       | python3 -m sockeye.lexical_constraints
 
-The script creates a Python object with the constraints encoded as follows (except on one line):
+The script creates a Python object with the constraints encoded as follows:
 
-    { 'text': 'This is a test .',
-      'constraints': ['constr@@ aint',
-                      'multi@@ word constr@@ aint'] }
+    { 'text': 'This is a test .', 'constraints': ['constr@@ aint', 'multi@@ word constr@@ aint'] }
 
-You can pass the output of this to Sockeye. Make sure that you specify `--json-input` so that Sockeye knows to parse the
-input (without that flag, it will treat the JSON input as a regular sentence). We also recommend that you increase the
-beam a little bit and enable beam pruning:
+You can pass the output of this to Sockeye.
+Make sure that you (a) the JSON object is on a *single line* and (b) you pass `--json-input` to Sockeye, so that it knows to parse the input (without that flag, it will treat the JSON input as a regular sentence).
+We also recommend that you increase the beam a little bit and enable beam pruning:
 
     echo -e "This is a test .\tconstraint\tmultiword constraint" \
       | python3 -m sockeye.lexical_constraints \
