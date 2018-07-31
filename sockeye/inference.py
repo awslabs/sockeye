@@ -1520,9 +1520,7 @@ class Translator:
                                                                               attention_scores)
 
             # (5) Normalize the scores of newly finished hypotheses. Note that after this until the
-            # next call to topk(), hypotheses may not be in sorted order. Don't update `finished` yet;
-            # we need to include newly-finished (on this time-step) items for normalization and pruning,
-            # but we need the old values of `finished` to update lengths first, using the old values
+            # next call to topk(), hypotheses may not be in sorted order.
             finished, scores_accumulated, lengths = self._update_finished.forward(best_word_indices,
                                                                                   max_output_lengths,
                                                                                   finished,
