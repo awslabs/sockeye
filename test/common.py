@@ -392,6 +392,7 @@ def run_train_translate(train_params: str,
                                                                           open(out_path)):
                     jobj = json.loads(json_input)
                     if jobj.get(constraint_type, None) == None:
+                        # if there were no constraints, make sure the output is the same as the unconstrained output
                         assert constrained_out == unconstrained_out
                     else:
                         restriction = jobj[constraint_type][0]
