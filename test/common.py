@@ -387,19 +387,19 @@ def run_train_translate(train_params: str,
                 with patch.object(sys, "argv", params.split()):
                     sockeye.translate.main()
 
-                print('JSON_INPUT', open(new_test_source_path).readlines(),
-                      'CONSTRAINED', open(out_path_constrained).readlines(),
-                      'UNCONSTRAINED', open(out_path).readlines(), sep='\n')
-                for json_input, constrained_out, unconstrained_out in zip(open(new_test_source_path), open(out_path_constrained), open(out_path)):
+                for json_input, constrained_out, unconstrained_out in zip(open(new_test_source_path),
+                                                                          open(out_path_constrained),
+                                                                          open(out_path)):
                     jobj = json.loads(json_input)
-                    print('JSON_INPUT', json_input, 'CONSTRAINED', constrained_out, 'UNCONSTRAINED', unconstrained_out, sep='\n')
                     if jobj.get(constraint_type, None) == None:
                         assert constrained_out == unconstrained_out
                     else:
                         restriction = jobj[constraint_type][0]
                         if constraint_type == 'constraints':
+                            # for positive constraints, ensure the constraint is in the constrained output
                             assert restriction in constrained_out
                         else:
+                            # for negative constraints, ensure the constraints is *not* in the constrained output
                             assert restriction not in constrained_out
 
         # Translate corpus with the 2nd params

@@ -120,8 +120,8 @@ class AvoidState:
         (1) If the word is found in our set of outgoing child arcs, we take that transition.
         (2) If the word is not found, and we are not in the root state, we need to reset.
             This means we pretend we were in the root state, and see if we can take a step
-        (3) Otherwise, if we are not already the root state (i.e., we were partially through
-            the trie), we need to create a new object to track the state, in the root state
+        (3) Otherwise, if we are not already in the root state (i.e., we were partially through
+            the trie), we need to create a new object whose state is the root state
         (4) Finally, if we couldn't advance and were already in the root state, we can reuse
             this object.
 

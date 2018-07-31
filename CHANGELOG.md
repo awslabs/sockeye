@@ -11,9 +11,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
 ## [1.18.43]
-### Fixed
+### Added
 - `<s>` now supported as the first token in a multi-word negative constraint
   (e.g., '<s> I think' to prevent a sentence from starting with 'I think')
+### Fixed
 - Bugfix in resetting the state of a multiple-word negative constraint
 
 ## [1.18.42]
