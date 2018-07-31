@@ -32,7 +32,7 @@ This JSON object can be produced with the provided script:
 
 The script creates a Python object with the constraints encoded as follows:
 
-    { 'text': 'This is a test .', 'constraints': ['constr@@ aint', 'multi@@ word constr@@ aint'] }
+    { 'text': 'This is a test .', 'constraints': ['constr@@ aint', 'multi@@ word constr@@ aint'] }]
 
 You can pass the output of this to Sockeye.
 Make sure that you (a) the JSON object is on a *single line* and (b) you pass `--json-input` to Sockeye, so that it knows to parse the input (without that flag, it will treat the JSON input as a regular sentence).
@@ -43,3 +43,26 @@ We also recommend that you increase the beam a little bit and enable beam prunin
       | python3 -m sockeye.translate -m /path/to/model --json-input --beam-size 20 --beam-prune 20 [other args]
 
 You will get a translation with the required constraints as part of the output.
+
+## Scoring
+
+Lexical constraints can also be used as a rudimentary scoring mechanism, by providing the entire reference (with `<s>` and `</s>` tokens) as a constraint.
+For example:
+
+    echo '{ "text": "This is a test", "constraints": ["<s> Dies ist ein Test </s>"] }' \
+      python3 -m sockeye.translate -m /path/to/model --json-input --beam-size 1 --output-type translation_with_score
+
+This will output tab-delimited pairs of (score, translation).
+As always, don't forget to apply source- and target-side preprocessing to your input and your constraint.
+
+## Negative constraints
+
+Negative constraints---phrases that must *not* appear in the output---are also supported.
+To use them, use the "avoid" key in the JSON object instead of "constraints".
+An example JSON object:
+
+    { 'text': 'This is a test .', 'avoid': ['Test'] }
+
+Multiple negative constraints and multi-word negative constraints are supported, just like for positive constraints.
+You can also add `<s>` and `</s>` to constraints, to specify that phrases that must not start or end a sentence.
+Don't forget to apply your preprocessing!
