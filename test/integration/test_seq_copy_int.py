@@ -144,18 +144,12 @@ def test_seq_copy(train_params: str,
                             sort_target=False,
                             with_source_factors=use_source_factors) as data:
 
-        # Only one of these is supported at a time in the tests
-        assert not (use_source_factors and use_constrained_decoding)
-
         # When using source factors
         train_source_factor_paths, dev_source_factor_paths, test_source_factor_paths = None, None, None
         if use_source_factors:
             train_source_factor_paths = [data['source']]
             dev_source_factor_paths = [data['validation_source']]
             test_source_factor_paths = [data['test_source']]
-
-        if use_constrained_decoding:
-            translate_params += " --json-input"
 
         # Test model configuration, including the output equivalence of batch and no-batch decoding
         translate_params_batch = translate_params + " --batch-size 2"
@@ -177,4 +171,4 @@ def test_seq_copy(train_params: str,
                             restrict_lexicon=restrict_lexicon,
                             work_dir=data['work_dir'],
                             use_prepared_data=use_prepared_data,
-                            use_target_constraints=use_target_constraints)
+                            use_target_constraints=False)
