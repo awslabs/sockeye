@@ -12,7 +12,9 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.43]
 ### Fixed
-- `<s>` now supported in negative constraints (as the start of a multi-token sequence)
+- `<s>` now supported as the first token in a multi-word negative constraint
+  (e.g., '<s> I think' to prevent a sentence from starting with 'I think')
+- Bugfix in resetting the state of a multiple-word negative constraint
 
 ## [1.18.42]
 ### Changed
