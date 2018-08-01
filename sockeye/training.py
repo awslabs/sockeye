@@ -526,12 +526,9 @@ class EarlyStoppingTrainer:
         next_data_batch = train_iter.next()
         while True:
 
-            if not train_iter.iter_next():
-                self.state.epoch += 1
-                train_iter.reset()
-                if max_epochs is not None and self.state.epoch == max_epochs:
-                    logger.info("Maximum # of epochs (%s) reached.", max_epochs)
-                    break
+            if max_epochs is not None and self.state.epoch == max_epochs:
+                logger.info("Maximum # of epochs (%s) reached.", max_epochs)
+                break
 
             if max_updates is not None and self.state.updates == max_updates:
                 logger.info("Maximum # of updates (%s) reached.", max_updates)
@@ -546,13 +543,18 @@ class EarlyStoppingTrainer:
             ######
             batch = next_data_batch
             self._step(self.model, batch, checkpoint_frequency, metric_train, metric_loss)
-            if train_iter.iter_next():
-                next_data_batch = train_iter.next()
-                self.model.prepare_batch(next_data_batch)
             batch_num_samples = batch.data[0].shape[0]
             batch_num_tokens = batch.data[0].shape[1] * batch_num_samples
             self.state.updates += 1
             self.state.samples += batch_num_samples
+
+            if not train_iter.iter_next():
+                self.state.epoch += 1
+                train_iter.reset()
+
+            next_data_batch = train_iter.next()
+            self.model.prepare_batch(next_data_batch)
+
             speedometer(self.state.epoch, self.state.updates, batch_num_samples, batch_num_tokens, metric_train)
 
             ############
