@@ -846,8 +846,8 @@ def get_training_data_iters(sources: List[str],
                                            aligner=aligner)
 
     training_data = data_loader.load(sources_sentences, target_sentences,
-                                     data_statistics.num_sents_per_bucket, aligner).fill_up(bucket_batch_sizes,
-                                                                                            fill_up)
+                                     data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes,
+                                                                                   fill_up)
 
     data_info = DataInfo(sources=sources,
                          target=target,
