@@ -429,19 +429,19 @@ class RawParallelDatasetLoader:
                  eos_id: int,
                  pad_id: int,
                  target_vocab_size: int,
+                 aligner: Optional[align.Aligner] = None,
                  dtype: str = 'float32') -> None:
         self.buckets = buckets
         self.eos_id = eos_id
         self.pad_id = pad_id
         self.dtype = dtype
         self.target_vocab_size = target_vocab_size
-        self.aligner = align.Aligner()
+        self.aligner = aligner
 
     def load(self,
              source_iterables: Sequence[Iterable],
              target_iterable: Iterable,
-             num_samples_per_bucket: List[int],
-             use_pointer_nets: bool) -> 'ParallelDataSet':
+             num_samples_per_bucket: List[int]) -> 'ParallelDataSet':
 
         assert len(num_samples_per_bucket) == len(self.buckets)
         num_factors = len(source_iterables)
@@ -484,14 +484,11 @@ class RawParallelDatasetLoader:
             # we can try again to compute the label sequence on the fly in next().
             data_label[buck_index][sample_index, :target_len] = target[1:] + [self.eos_id]
 
-            if use_pointer_nets:
-                # We use a simple heuristic to detect copied words
-                # The only considered source is the first one [0]
-                data_pointer_label = self.aligner.get_copy_alignment(sources[0], target[1:])
-                # overwrite the original labels
-                for idx in range(len(data_pointer_label)):
-                    data_label[buck_index][sample_index, idx] = data_label[buck_index][sample_index, idx] if \
-                        data_pointer_label[idx] < 0 else (data_pointer_label[idx] + self.target_vocab_size)
+            labels = target[1:] + [self.eos_id]
+            if self.aligner is not None:
+                labels = self.aligner.get_labels(sources[0], target, labels)
+
+            data_label[buck_index][sample_index, :target_len] = labels
 
             bucket_sample_index[buck_index] += 1
 
@@ -504,6 +501,10 @@ class RawParallelDatasetLoader:
             logger.info("Created bucketed parallel data set. Introduced padding: source=%.1f%% target=%.1f%%)",
                         num_pad_source / num_tokens_source * 100,
                         num_pad_target / num_tokens_target * 100)
+
+            labels = target[1:] + [self.eos_id]
+            if self.aligner is not None:
+                labels = self.aligner.get_labels(sources[0], target, labels)
 
         return ParallelDataSet(data_source, data_target, data_label)
 
@@ -534,7 +535,7 @@ def prepare_data(source_fnames: List[str],
                  samples_per_shard: int,
                  min_num_shards: int,
                  output_prefix: str,
-                 use_pointer_nets: bool,
+                 aligner: Optional[align.Aligner] = None,
                  keep_tmp_shard_files: bool = False):
     logger.info("Preparing data.")
     # write vocabularies to data folder
@@ -570,14 +571,14 @@ def prepare_data(source_fnames: List[str],
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=target_vocab[C.EOS_SYMBOL],
                                            pad_id=C.PAD_ID,
-                                           target_vocab_size=len(target_vocab))
+                                           target_vocab_size=len(target_vocab),
+                                           aligner=aligner)
 
     # 3. convert each shard to serialized ndarrays
     for shard_idx, (shard_sources, shard_target, shard_stats) in enumerate(shards):
         sources_sentences = [SequenceReader(s) for s in shard_sources]
         target_sentences = SequenceReader(shard_target)
-        dataset = data_loader.load(sources_sentences, target_sentences, shard_stats.num_sents_per_bucket,
-                                   use_pointer_nets)
+        dataset = data_loader.load(sources_sentences, target_sentences, shard_stats.num_sents_per_bucket)
         shard_fname = os.path.join(output_prefix, C.SHARD_NAME % shard_idx)
         shard_stats.log()
         logger.info("Writing '%s'", shard_fname)
@@ -602,7 +603,7 @@ def prepare_data(source_fnames: List[str],
                              max_seq_len_source=max_seq_len_source,
                              max_seq_len_target=max_seq_len_target,
                              num_source_factors=len(source_fnames),
-                             use_pointer_nets=use_pointer_nets,
+                             use_pointer_nets=aligner is not None,
                              source_with_eos=True)
     config_data_fname = os.path.join(output_prefix, C.DATA_CONFIG)
     logger.info("Writing data config to '%s'", config_data_fname)
@@ -613,6 +614,9 @@ def prepare_data(source_fnames: List[str],
     with open(version_file, "w") as version_out:
         version_out.write(str(C.PREPARED_DATA_VERSION))
 
+    if aligner is not None:
+        logger.info("Pointed to %d / %d source words (%.2f%%)",
+                    aligner.num_pointed, aligner.num_total, 100 * aligner.num_pointed / aligner.num_total)
 
 def get_data_statistics(source_readers: Sequence[Iterable],
                         target_reader: Iterable,
@@ -646,8 +650,7 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
                              max_seq_len_source: int,
                              max_seq_len_target: int,
                              batch_size: int,
-                             fill_up: str,
-                             use_pointer_nets: bool) -> 'ParallelSampleIter':
+                             fill_up: str) -> 'ParallelSampleIter':
     """
     Returns a ParallelSampleIter for the validation data.
     """
@@ -671,9 +674,9 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
     validation_data_statistics.log(bucket_batch_sizes)
 
     validation_data = data_loader.load(validation_sources_sentences, validation_target_sentences,
-                                       validation_data_statistics.num_sents_per_bucket, use_pointer_nets).fill_up(
-        bucket_batch_sizes,
-        fill_up)
+                                       validation_data_statistics.num_sents_per_bucket).fill_up(
+                                           bucket_batch_sizes,
+                                           fill_up)
 
     return ParallelSampleIter(data=validation_data,
                               buckets=buckets,
@@ -689,10 +692,9 @@ def get_prepared_data_iters(prepared_data_dir: str,
                             batch_size: int,
                             batch_by_words: bool,
                             batch_num_devices: int,
-                            fill_up: str,
-                            use_pointer_nets: bool = False) -> Tuple['BaseParallelSampleIter',
-                                                                     'BaseParallelSampleIter',
-                                                                     'DataConfig', List[vocab.Vocab], vocab.Vocab]:
+                            fill_up: str) -> Tuple['BaseParallelSampleIter',
+                                                   'BaseParallelSampleIter',
+                                                   'DataConfig', List[vocab.Vocab], vocab.Vocab]:
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
@@ -763,8 +765,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                                max_seq_len_source=max_seq_len_source,
                                                max_seq_len_target=max_seq_len_target,
                                                batch_size=batch_size,
-                                               fill_up=fill_up,
-                                               use_pointer_nets=use_pointer_nets)
+                                               fill_up=fill_up)
 
     return train_iter, validation_iter, config_data, source_vocabs, target_vocab
 
@@ -786,9 +787,9 @@ def get_training_data_iters(sources: List[str],
                             max_seq_len_target: int,
                             bucketing: bool,
                             bucket_width: int,
-                            use_pointer_nets: bool) -> Tuple['BaseParallelSampleIter',
-                                                             'BaseParallelSampleIter',
-                                                             'DataConfig', 'DataInfo']:
+                            aligner: Optional[align.Aligner] = None) -> Tuple['BaseParallelSampleIter',
+                                                                              'BaseParallelSampleIter',
+                                                                              'DataConfig', 'DataInfo']:
     """
     Returns data iterators for training and validation data.
 
@@ -809,7 +810,7 @@ def get_training_data_iters(sources: List[str],
     :param max_seq_len_target: Maximum target sequence length.
     :param bucketing: Whether to use bucketing.
     :param bucket_width: Size of buckets.
-    :param use_pointer_nets: Enable the usage of pointer networks.
+    :param aligner: The aligner to use if pointer nets are enabled.
     :return: Tuple of (training data iterator, validation data iterator, data config).
     """
     logger.info("===============================")
@@ -841,11 +842,12 @@ def get_training_data_iters(sources: List[str],
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=target_vocab[C.EOS_SYMBOL],
                                            pad_id=C.PAD_ID,
-                                           target_vocab_size=len(target_vocab))
+                                           target_vocab_size=len(target_vocab),
+                                           aligner=aligner)
 
     training_data = data_loader.load(sources_sentences, target_sentences,
-                                     data_statistics.num_sents_per_bucket, use_pointer_nets).fill_up(bucket_batch_sizes,
-                                                                                                     fill_up)
+                                     data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes,
+                                                                                   fill_up)
 
     data_info = DataInfo(sources=sources,
                          target=target,
@@ -876,8 +878,7 @@ def get_training_data_iters(sources: List[str],
                                                max_seq_len_source=max_seq_len_source,
                                                max_seq_len_target=max_seq_len_target,
                                                batch_size=batch_size,
-                                               fill_up=fill_up,
-                                               use_pointer_nets=use_pointer_nets)
+                                               fill_up=fill_up)
 
     return train_iter, validation_iter, config_data, data_info
 
@@ -1247,7 +1248,7 @@ class ParallelDataSet(Sized):
         mx.nd.save(fname, out)
 
     @staticmethod
-    def load(fname: str, use_pointer_nets=False) -> 'ParallelDataSet':
+    def load(fname: str) -> 'ParallelDataSet':
         """
         Loads a dataset from a binary .npy file.
         """

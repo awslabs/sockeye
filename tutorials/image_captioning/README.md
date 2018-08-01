@@ -122,6 +122,20 @@ You can also caption directly from image with the option `--extract-image-featur
         --beam-size 3 > validation_set.predictions
 ```
 
+
+#### Using Lexical Constrains
+
+It is also possible to use lexical constrains during inference as described in the tutorial [decoding with lexical constraints](../constraints/README.md).
+As described in that tutorial, first we need to covert the `validation_set.images` file (containing the relative paths to the images) to JSON objects with the following format:
+
+    { 'text': 'relative/path/of/image/given/in/validation_set/file/filename.jpg',
+      'constraints': ['constr@@ aint',
+                      'multi@@ word constr@@ aint'] }
+
+For that it is possible to use the module `sockeye.lexical_constraints`.
+Once the file is generated, the option `--json-input` should be used as argument of `sockeye.image_captioning.captioner`.
+
+
 ### Visualization
 
 You can now visualize the results in a nice format as follows:

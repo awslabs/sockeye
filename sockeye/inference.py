@@ -236,7 +236,7 @@ class InferenceModel(model.SockeyeModel):
                     # logits: (batch_size, target_vocab_size)
                     logits = self.output_layer(target_decoded)
                     if self.softmax_temperature is not None:
-                        logits /= self.softmax_temperature
+                        logits = logits / self.softmax_temperature
                     outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
                 else:
 #                    target_embed_prev = mx.sym.Custom(op_type="PrintValue", data=target_embed_prev, print_name="TARG")
@@ -695,22 +695,26 @@ def make_input_from_json_string(sentence_id: int, json_string: str) -> Translato
             if not all(l == len(tokens) for l in lengths):
                 logger.error("Factors have different length than input text: %d vs. %s", len(tokens), str(lengths))
                 return _bad_input(sentence_id, reason=json_string)
-        else:
-            factors = None
-
-        # List of phrases that must appear in the output
-        constraints = jobj.get(C.JSON_CONSTRAINTS_KEY)
-        if isinstance(constraints, list):
-            constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
-        else:
-            constraints = None
 
         # List of phrases to prevent from occuring in the output
         avoid_list = jobj.get(C.JSON_AVOID_KEY)
+
+        # List of phrases that must appear in the output
+        constraints = jobj.get(C.JSON_CONSTRAINTS_KEY)
+
+        # If there is overlap between positive and negative constraints, assume the user wanted
+        # the words, and so remove them from the avoid_list (negative constraints)
+        if constraints is not None and avoid_list is not None:
+            avoid_set = set(avoid_list)
+            overlap = set(constraints).intersection(avoid_set)
+            if len(overlap) > 0:
+                avoid_list = list(avoid_set.difference(overlap))
+
+        # Convert to a list of tokens
         if isinstance(avoid_list, list):
             avoid_list = [list(data_io.get_tokens(phrase)) for phrase in avoid_list]
-        else:
-            avoid_list = None
+        if isinstance(constraints, list):
+            constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
 
         return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors, constraints=constraints, avoid_list=avoid_list)
 
@@ -897,42 +901,36 @@ class LengthPenalty(mx.gluon.HybridBlock):
         return self.hybrid_forward(None, lengths)
 
 
-def _concat_translations(translations: List[Translation], start_id: int, stop_ids: Set[int],
+def _concat_translations(translations: List[Translation], stop_ids: Set[int],
                          length_penalty: LengthPenalty) -> Translation:
     """
     Combine translations through concatenation.
 
     :param translations: A list of translations (sequence starting with BOS symbol, attention_matrix), score and length.
-    :param start_id: The EOS symbol.
-    :param translations: The BOS symbols.
+    :param translations: The EOS symbols.
     :return: A concatenation if the translations with a score.
     """
     # Concatenation of all target ids without BOS and EOS
-    target_ids = [start_id]
+    target_ids = []
     attention_matrices = []
     beam_histories = []  # type: List[BeamHistory]
     for idx, translation in enumerate(translations):
-        assert translation.target_ids[0] == start_id
         if idx == len(translations) - 1:
-            target_ids.extend(translation.target_ids[1:])
-            attention_matrices.append(translation.attention_matrix[1:, :])
+            target_ids.extend(translation.target_ids)
+            attention_matrices.append(translation.attention_matrix)
         else:
             if translation.target_ids[-1] in stop_ids:
-                target_ids.extend(translation.target_ids[1:-1])
-                attention_matrices.append(translation.attention_matrix[1:-1, :])
+                target_ids.extend(translation.target_ids[:-1])
+                attention_matrices.append(translation.attention_matrix[:-1, :])
             else:
-                target_ids.extend(translation.target_ids[1:])
-                attention_matrices.append(translation.attention_matrix[1:, :])
+                target_ids.extend(translation.target_ids)
+                attention_matrices.append(translation.attention_matrix)
         beam_histories.extend(translation.beam_histories)
 
     # Combine attention matrices:
     attention_shapes = [attention_matrix.shape for attention_matrix in attention_matrices]
-    # Adding another row for the empty BOS alignment vector
-    bos_align_shape = np.asarray([1, 0])
-    attention_matrix_combined = np.zeros(np.sum(np.asarray(attention_shapes), axis=0) + bos_align_shape)
-
-    # We start at position 1 as position 0 is for the BOS, which is kept zero
-    pos_t, pos_s = 1, 0
+    attention_matrix_combined = np.zeros(np.sum(np.asarray(attention_shapes), axis=0))
+    pos_t, pos_s = 0, 0
     for attention_matrix, (len_t, len_s) in zip(attention_matrices, attention_shapes):
         attention_matrix_combined[pos_t:pos_t + len_t, pos_s:pos_s + len_s] = attention_matrix
         pos_t += len_t
@@ -1041,20 +1039,15 @@ class Translator:
         self._sort_by_index.initialize(ctx=self.context)
         self._sort_by_index.hybridize()
 
-        self._normalize_finished = NormalizeFinishedHypotheses(pad_id=C.PAD_ID,
-                                                               eos_id=self.vocab_target[C.EOS_SYMBOL],
-                                                               length_penalty_alpha=self.length_penalty.alpha,
-                                                               length_penalty_beta=self.length_penalty.beta)
-        self._normalize_finished.initialize(ctx=self.context)
-        self._normalize_finished.hybridize()
+        self._update_finished = NormalizeAndUpdateFinished(pad_id=C.PAD_ID,
+                                                           eos_id=self.vocab_target[C.EOS_SYMBOL],
+                                                           length_penalty_alpha=self.length_penalty.alpha,
+                                                           length_penalty_beta=self.length_penalty.beta)
+        self._update_finished.initialize(ctx=self.context)
+        self._update_finished.hybridize()
         self._prune_hyps = PruneHypotheses(threshold=self.beam_prune, beam_size=self.beam_size)
         self._prune_hyps.initialize(ctx=self.context)
         self._prune_hyps.hybridize()
-
-        self._update_lengths_and_finished = UpdateLengthsAndFinished(pad_id=C.PAD_ID,
-                                                                     eos_id=self.vocab_target[C.EOS_SYMBOL])
-        self._update_lengths_and_finished.initialize(ctx=self.context)
-        self._update_lengths_and_finished.hybridize()
 
         self.global_avoid_trie = None
         if avoid_list is not None:
@@ -1135,14 +1128,14 @@ class Translator:
 
         # split into chunks
         input_chunks = []  # type: List[TranslatorInput]
-        for input_idx, trans_input in enumerate(trans_inputs, 1):
+        for trans_input in trans_inputs:
             # bad input
             if isinstance(trans_input, BadTranslatorInput):
-                translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
+                translated_chunks.append(TranslatedChunk(id=trans_input.sentence_id, chunk_id=0, translation=empty_translation()))
 
             # empty input
             elif len(trans_input.tokens) == 0:
-                translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
+                translated_chunks.append(TranslatedChunk(id=trans_input.sentence_id, chunk_id=0, translation=empty_translation()))
             else:
                 # TODO(tdomhan): Remove branch without EOS with next major version bump, as future models will always be trained with source side EOS symbols
                 if self.source_with_eos:
@@ -1242,7 +1235,7 @@ class Translator:
         max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)
-            max_output_lengths.append(self.models[0].get_max_output_length(num_tokens))
+            max_output_lengths.append(self.models[0].get_max_output_length(data_io.get_bucket(num_tokens, self.buckets_source)))
             source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
 
             factors = trans_input.factors if trans_input.factors is not None else []
@@ -1278,9 +1271,8 @@ class Translator:
         :param translation: The translation + attention and score.
         :return: TranslatorOutput.
         """
-        # remove special sentence start symbol (<s>) from the output:
-        target_ids = translation.target_ids[1:]
-        attention_matrix = translation.attention_matrix[1:, :]
+        target_ids = translation.target_ids
+        attention_matrix = translation.attention_matrix
 
         if self.use_pointer_nets:
             self.num_pointed += sum(map(lambda x: x >= len(self.vocab_target), target_ids))
@@ -1319,7 +1311,7 @@ class Translator:
         :param translations: A list of translations (sequence, attention_matrix), score and length.
         :return: A concatenation if the translations with a score.
         """
-        return _concat_translations(translations, self.start_id, self.stop_ids, self.length_penalty)
+        return _concat_translations(translations, self.stop_ids, self.length_penalty)
 
     def _translate_nd(self,
                       source: mx.nd.NDArray,
@@ -1445,16 +1437,16 @@ class Translator:
 
         best_word_indices = mx.nd.full((self.batch_size * self.beam_size,), val=self.start_id, ctx=self.context,
                                        dtype='int32')
-        # growing sequences: (batch_size * beam_size, 1), pre-filled with <s> symbols on index 0
-        sequences = mx.nd.full((self.batch_size * self.beam_size, 1), val=self.start_id, ctx=self.context,
-                               dtype='int32')
+        # The growing sequences representing the complete history for each hypothesis: (batch_size * beam_size, 1)
+        # The first column represents <s>, and is later removed when _beam_search() returns.
+        sequences = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context, dtype='int32')
 
         # Beam history
         beam_histories = None  # type: Optional[List[BeamHistory]]
         if self.store_beam:
             beam_histories = [defaultdict(list) for _ in range(self.batch_size)]
 
-        lengths = mx.nd.ones((self.batch_size * self.beam_size, 1), ctx=self.context)
+        lengths = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context)
         finished = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
 
         # Extending max_output_lengths to shape (batch_size * beam_size,)
@@ -1524,6 +1516,7 @@ class Translator:
             avoid_states = constrained.AvoidBatch(self.batch_size, self.beam_size,
                                                   avoid_list=raw_avoid_list,
                                                   global_avoid_trie=self.global_avoid_trie)
+            avoid_states.consume(best_word_indices)
 
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
         # item on the beam for each sentence
@@ -1550,7 +1543,7 @@ class Translator:
             # Mark entries that should be blocked as having a score of np.inf
             if self.global_avoid_trie or any(raw_avoid_list):
                 block_indices = avoid_states.avoid()
-                if len(block_indices[0]) > 0:
+                if len(block_indices) > 0:
                     scores[block_indices] = np.inf
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
@@ -1586,10 +1579,11 @@ class Translator:
 
             # (5) Normalize the scores of newly finished hypotheses. Note that after this until the
             # next call to topk(), hypotheses may not be in sorted order.
-            finished, scores_accumulated = self._normalize_finished.forward(best_word_indices,
-                                                                            finished,
-                                                                            scores_accumulated,
-                                                                            lengths)
+            finished, scores_accumulated, lengths = self._update_finished.forward(best_word_indices,
+                                                                                  max_output_lengths,
+                                                                                  finished,
+                                                                                  scores_accumulated,
+                                                                                  lengths)
 
             # (6) Prune out low-probability hypotheses. Pruning works by setting entries `inactive`.
             if self.beam_prune > 0.0:
@@ -1599,18 +1593,12 @@ class Translator:
                                                                                            self.inf_array,
                                                                                            self.zeros_array)
 
-            # Update hypotheses lengths (unless finished or inactive) and compute finished hypotheses
-            finished, finished_or_inactive, lengths = self._update_lengths_and_finished.forward(finished,
-                                                                                                inactive,
-                                                                                                lengths,
-                                                                                                max_output_lengths,
-                                                                                                best_word_indices)
-
-            # (7) Reorder sequences and attentions according to best_hyp_indices
-            # and extend sequences with best_word_indices.
+            # (7) Reorder sequences and attentions according to best_hyp_indices...
             # pylint: disable=unsupported-assignment-operation
             sequences = mx.nd.take(sequences, best_hyp_indices)
             attentions = mx.nd.take(attentions, best_hyp_indices)
+
+            # ...and extend sequences with best_word_indices.
             sequences = mx.nd.concat(sequences, best_word_indices.reshape((-1, 1)), dim=1)
             attentions = mx.nd.concat(attentions, attention_scores.reshape((-1, 1, encoded_source_length)), dim=1)
 
@@ -1621,12 +1609,13 @@ class Translator:
 
             # (7b) optionally save beam history
             if self.store_beam:
+                finished_or_inactive = mx.nd.clip(data=finished + inactive, a_min=0, a_max=1)
                 unnormalized_scores = mx.nd.where(finished_or_inactive,
-                                                  scores_accumulated * self.length_penalty(lengths - 1),
+                                                  scores_accumulated * self.length_penalty(lengths),
                                                   scores_accumulated)
                 normalized_scores = mx.nd.where(finished_or_inactive,
                                                 scores_accumulated,
-                                                scores_accumulated / self.length_penalty(lengths - 1))
+                                                scores_accumulated / self.length_penalty(lengths))
                 for sent in range(self.batch_size):
                     rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
 
@@ -1672,7 +1661,8 @@ class Translator:
         scores_accumulated = scores_accumulated.take(best_hyp_indices)
         constraints = [constraints[x] for x in best_hyp_indices.asnumpy()]
 
-        return sequences, attentions, scores_accumulated, lengths, constraints, beam_histories
+        # Remove the <s> column from both sequences and attentions
+        return sequences[:, 1:], attentions[:, 1:, :], scores_accumulated, lengths, constraints, beam_histories
 
     def _get_best_from_beam(self,
                             sequences: mx.nd.NDArray,
@@ -1807,7 +1797,7 @@ class SortByIndex(mx.gluon.HybridBlock):
         return [F.take(arg, indices) for arg in args]
 
 
-class NormalizeFinishedHypotheses(mx.gluon.HybridBlock):
+class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
     """
     A HybridBlock for normalizing newly finished hypotheses scores with LengthPenalty.
     """
@@ -1822,31 +1812,18 @@ class NormalizeFinishedHypotheses(mx.gluon.HybridBlock):
         with self.name_scope():
             self.length_penalty = LengthPenalty(alpha=length_penalty_alpha, beta=length_penalty_beta)
 
-    def hybrid_forward(self, F, best_word_indices, finished, scores_accumulated, lengths):
+    def hybrid_forward(self, F, best_word_indices, max_output_lengths, finished, scores_accumulated, lengths):
         all_finished = ((best_word_indices == self.pad_id) + (best_word_indices == self.eos_id))
         newly_finished = all_finished - finished
         scores_accumulated = F.where(newly_finished,
                                      scores_accumulated / self.length_penalty(lengths),
                                      scores_accumulated)
-        finished = all_finished
-        return finished, scores_accumulated
 
+        # Update lengths of all items, except those that were already finished. This updates
+        # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
+        lengths = lengths + F.cast(1 - F.expand_dims(finished, axis=1), dtype='float32')
 
-class UpdateLengthsAndFinished(mx.gluon.HybridBlock):
-    """
-    A HybridBlock that updates the lengths of unfinished and active hypotheses and recomputes finished hypotheses.
-    """
-
-    def __init__(self, pad_id: int, eos_id: int) -> None:
-        super().__init__()
-        self.pad_id = pad_id
-        self.eos_id = eos_id
-
-    def hybrid_forward(self, F, finished, inactive, lengths, max_output_lengths, best_word_indices):
-        finished_or_inactive = F.clip(data=finished + inactive, a_min=0, a_max=1)
-        # update lengths of hypotheses unless they are finished or inactive
-        lengths = lengths + F.cast(1 - F.expand_dims(finished_or_inactive, axis=1), dtype='float32')
-        # recompute finished. Hypotheses are finished if they are
+        # Now, recompute finished. Hypotheses are finished if they are
         # - extended with <pad>, or
         # - extended with <eos>, or
         # - at their maximum length.
@@ -1856,7 +1833,7 @@ class UpdateLengthsAndFinished(mx.gluon.HybridBlock):
             (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') >= max_output_lengths),
             a_min=0, a_max=1)
 
-        return finished, finished_or_inactive, lengths
+        return finished, scores_accumulated, lengths
 
 
 class UpdateScores(mx.gluon.HybridBlock):

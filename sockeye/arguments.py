@@ -393,6 +393,14 @@ def add_pointer_args(params):
     params.add_argument('--use-pointer-nets',
                         action='store_true',
                         help='Enable the usage of pointer networks. Default: %(default)s.')
+    params.add_argument('--pointer-nets-window-size',
+                        type=int,
+                        default=20,
+                        help='Window size (with current target word index centered in this window')
+    params.add_argument('--pointer-nets-min-word-len',
+                        type=int,
+                        default=2,
+                        help='Shortest word length that can be pointed to')
 
 
 def add_bucketing_args(params):
@@ -1202,7 +1210,7 @@ def add_inference_args(params):
                                type=str,
                                help='EXPERIMENTAL: may be changed or removed in future. Overrides training dtype of '
                                     'encoders and decoders during inference. Default: %(default)s')
-    decode_params.add_argument('--pointer-nets-mark',
+    decode_params.add_argument('--mark-pointed-words',
                                default=False,
                                action='store_true',
                                help='Annotate pointed words in the output')

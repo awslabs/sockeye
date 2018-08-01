@@ -271,9 +271,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_num_devices=batch_num_devices,
             fill_up=args.fill_up)
 
-        check_condition(data_config.use_pointer_nets == args.use_pointer_nets,
-                        "You must specify --use-pointer-nets iff. the data was prepared that way, too")
-
         check_condition(len(source_vocabs) == len(args.source_factors_num_embed) + 1,
                         "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
                             len(source_vocabs), len(args.source_factors_num_embed) + 1))
@@ -331,6 +328,12 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         sources = [args.source] + args.source_factors
         sources = [str(os.path.abspath(source)) for source in sources]
 
+        aligner = None
+        if args.use_pointer_nets:
+            aligner = align.Aligner(source_vocabs[0], target_vocab,
+                                    window_size=args.pointer_nets_window_size,
+                                    min_word_length=args.pointer_nets_min_word_len)
+
         train_iter, validation_iter, config_data, data_info = data_io.get_training_data_iters(
             sources=sources,
             target=os.path.abspath(args.target),
@@ -349,7 +352,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
             bucket_width=args.bucket_width,
-            use_pointer_nets=args.use_pointer_nets)
+            aligner=aligner)
 
         data_info_fname = os.path.join(output_folder, C.DATA_INFO)
         logger.info("Writing data config to '%s'", data_info_fname)
