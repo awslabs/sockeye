@@ -16,6 +16,10 @@ MODEL_NONE = "none"
 MODEL_TRANSFORMER = "transformer"
 MODEL_GNMT = "gnmt"
 
+# Names model test settings
+MODEL_TEST_ARGS_TRANSFORMER = "ttransformer"
+MODEL_TEST_ARGS_GNMT = "tgnmt"
+
 # Named decoding settings
 DECODE_STANDARD = "standard"
 DECODE_GNMT = "dgnmt"
@@ -65,7 +69,7 @@ MODELS = {
     MODEL_GNMT: [
         "--encoder=rnn",
         "--decoder=rnn",
-        "--rnn-num-hidden=512"，
+        "--rnn-num-hidden=512",
         "--rnn-attention-in-upper-layers",
         "--rnn-attention-type=dot",
         "--rnn-decoder-hidden-dropout=0.2",
@@ -75,7 +79,7 @@ MODELS = {
         "--weight-init-scale=3.0",
         "--weight-init-xavier-factor-type=avg",
         "--num-embed=256:256",
-        "--max-seq-len=100"
+        "--max-seq-len=100",
         "--optimizer=adam",
         "--optimized-metric=perplexity",
         "--initial-learning-rate=0.0001",
