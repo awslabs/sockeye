@@ -43,8 +43,9 @@ from contrib.autopilot.tasks import TEXT_UTF8_RAW_BITEXT_REVERSE, TEXT_REQUIRES_
 from contrib.autopilot.tasks import TEXT_UTF8_TOKENIZED
 from contrib.autopilot.tasks import RAW_FILES
 from contrib.autopilot.tasks import Task, TASKS
-from contrib.autopilot.models import MODELS, MODEL_NONE, MODEL_TEST_ARGS
-from contrib.autopilot.models import DECODE_ARGS, DECODE_STANDARD
+from contrib.autopilot.models import MODELS, MODEL_NONE
+from contrib.autopilot.models import MODEL_TEST_ARGS, MODEL_TEST_ARGS_TRANSFORMER, MODEL_TEST_ARGS_GNMT
+from contrib.autopilot.models import DECODE_ARGS, DECODE_STANDARD, DECODE_GNMT
 from contrib.autopilot import third_party
 
 
@@ -863,6 +864,8 @@ def main():
                             help="Pre-defined data set for model training.")
     arg_parser.add_argument("--model", type=str, choices=sorted(MODELS.keys()),
                             help="Type of translation model to train.")
+    arg_parser.add_argument("--model-test-settings", type=str, choices=sorted(MODEL_TEST_ARGS.keys()), default=MODEL_TEST_ARGS_TRANSFORMER,
+                            help="Model test settings. Default: %(default)s.")
     arg_parser.add_argument("--decode-settings", type=str, choices=sorted(DECODE_ARGS.keys()), default=DECODE_STANDARD,
                             help="Decoding settings. Default: %(default)s.")
     arg_parser.add_argument("--custom-task", type=str, metavar="NAME",
