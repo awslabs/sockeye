@@ -357,6 +357,7 @@ EVALUATE_METRICS = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL]
 # loss
 CROSS_ENTROPY = 'cross-entropy'
 POINTER_NET_CROSS_ENTROPY = 'pointer-net-cross-entropy'
+POINTER_NET_OUTPUT_LAYER_PREFIX = "pointer_output_"
 
 LOSS_NORM_BATCH = 'batch'
 LOSS_NORM_VALID = "valid"
@@ -385,6 +386,11 @@ LHUC_DECODER = "decoder"
 LHUC_STATE_INIT = "state_init"
 LHUC_ALL = "all"
 LHUC_CHOICES = [LHUC_ENCODER, LHUC_DECODER, LHUC_STATE_INIT, LHUC_ALL]
+
+# pointer networks
+POINTER_NET_RNN = "rnn"
+POINTER_NET_SHARED = "shared"
+POINTER_NET_CHOICES = [POINTER_NET_RNN]
 
 # data sharding
 SHARD_NAME = "shard.%05d"

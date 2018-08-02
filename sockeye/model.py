@@ -63,6 +63,7 @@ class ModelConfig(Config):
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
                  weight_normalization: bool = False,
                  use_pointer_nets: bool = False,
+                 pointer_net_type: Optional[str] = None,
                  lhuc: bool = False) -> None:
         super().__init__()
         self.config_data = config_data
@@ -79,6 +80,7 @@ class ModelConfig(Config):
         if weight_tying and weight_tying_type is None:
             raise RuntimeError("weight_tying_type must be specified when using weight_tying.")
         self.use_pointer_nets = use_pointer_nets
+        self.pointer_net_type = pointer_net_type
         self.lhuc = lhuc
 
 

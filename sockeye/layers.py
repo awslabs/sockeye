@@ -244,7 +244,7 @@ class PointerOutputLayer(OutputLayer):
                  vocab_size: int,
                  weight: Optional[mx.sym.Symbol],
                  weight_normalization: bool,
-                 prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX) -> None:
+                 prefix: str = C.POINTER_NET_OUTPUT_LAYER_PREFIX) -> None:
 
         super().__init__(hidden_size, vocab_size, weight, weight_normalization, prefix)
 
@@ -276,9 +276,6 @@ class PointerOutputLayer(OutputLayer):
                  attention: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
                  context: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
                  target_embed: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
-                 source_encoded: mx.sym.Symbol,
-                 source_encoded_length: int,
-                 source_encoded_max_len: int,
                  weight: Optional[mx.nd.NDArray] = None,
                  bias: Optional[mx.nd.NDArray] = None):
         """
@@ -293,9 +290,6 @@ class PointerOutputLayer(OutputLayer):
 
         logits_trg = super().__call__(hidden, weight=weight, bias=bias)
 
-        attention_func = self.attention.on(source_encoded, source_encoded_lengths, source_encoded_max_len)
-        attention_state = self.attention.get_initial_state(source_encoded_lengths, source_encoded_max_len)
-
         # decoder.py RecurrentDecoder._step()
 
         switch_hidden = mx.sym.FullyConnected(data=hidden,
@@ -303,39 +297,39 @@ class PointerOutputLayer(OutputLayer):
                                               weight=self.weights_decoder,
                                               bias=self.bias_decoder,
                                               flatten=False,
-                                              name=C.SWITCH_PROB_NAME + '_hidden_layer')
+                                              name=self.prefix + '_hidden_layer')
 
         switch_context = mx.sym.FullyConnected(data=context,
                                               num_hidden=self.hidden_layer_dim,
-                                              weight = self.weights_context,
-                                              bias = self.bias_context,
-                                              flatten = False,
-                                              name = C.SWITCH_PROB_NAME + '_context_layer')
+                                              weight=self.weights_context,
+                                              bias=self.bias_context,
+                                              flatten=False,
+                                              name=self.prefix + '_context_layer')
 
         switch_target = mx.sym.FullyConnected(data=target_embed,
                                               num_hidden=self.hidden_layer_dim,
-                                              weight = self.weights_target,
-                                              bias = self.bias_target,
-                                              flatten = False,
-                                              name = C.SWITCH_PROB_NAME + '_target_embed_layer')
+                                              weight=self.weights_target,
+                                              bias=self.bias_target,
+                                              flatten=False,
+                                              name=self.prefix + '_target_embed_layer')
 
         switch_output = mx.sym.Activation(switch_hidden + switch_context + switch_target,
-                                          act_type='tanh', name=C.SWITCH_PROB_NAME+'_layer1')
+                                          act_type='tanh', name=self.prefix + '_layer1')
 
         switch_output = mx.sym.FullyConnected(data=switch_output,
                                               num_hidden=1,
                                               weight=self.weights_output,
                                               bias=self.bias_output,
                                               flatten=False,
-                                              name=C.SWITCH_PROB_NAME + '_output_layer')
+                                              name=self.prefix + '_output_layer')
 
-        switch_target_prob = mx.sym.Activation(switch_output, act_type='sigmoid', name=C.SWITCH_PROB_NAME+'_out')
+        switch_target_prob = mx.sym.Activation(switch_output, act_type='sigmoid', name=self.prefix+'_out')
 
         probs_src = attention
         probs_trg = mx.sym.softmax(data=logits_trg, axis=1)
 
-        weighted_probs_trg = mx.sym.broadcast_mul(probs_trg, switch_target_prob)
-        weighted_probs_src = mx.sym.broadcast_mul(probs_src, 1.0 - switch_target_prob)
+        weighted_probs_trg = mx.sym.broadcast_mul(probs_trg, switch_target_prob, name="mattpost_mul1")
+        weighted_probs_src = mx.sym.broadcast_mul(probs_src, 1.0 - switch_target_prob, name="mattpost_mul2")
 
         result = mx.sym.concat(weighted_probs_trg, weighted_probs_src, dim=1, name=C.SOFTMAX_OUTPUT_NAME)
         return result

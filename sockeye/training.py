@@ -37,6 +37,7 @@ from . import model
 from . import utils
 from . import vocab
 from .optimizers import BatchState, CheckpointState, SockeyeOptimizer, OptimizerConfig
+from .rnn_attention import PointerAttention
 
 logger = logging.getLogger(__name__)
 
@@ -141,24 +142,33 @@ class TrainingModel(model.SockeyeModel):
             # target_decoded: (batch-size, target_len, decoder_depth)
             target_decoded = target_decoded_and_attention[0]
 
-            # target_decoded = mx.sym.Custom(op_type="PrintValue", data=target_decoded, print_name="TARGET")
-            # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
-            target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
+            # source_encoded = mx.sym.Custom(op_type="PrintValue", data=source_encoded, print_name="SOURCE")
+            # source_encoded_length = mx.sym.Custom(op_type="PrintValue", data=source_encoded_length, print_name="SOURCE LEN")
 
             # output layer
             if not self.config.use_pointer_nets:
+                # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
+                target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
+
                 # logits: (batch_size * target_seq_len, target_vocab_size)
                 logits = self.output_layer(target_decoded)
                 loss_output = self.model_loss.get_loss(logits, labels)
             else:
-                context, attention = target_decoded_and_attention[1:]
-                # context: (batch_size * trg_seq_len, encoder_num_hidden)
-                context = mx.sym.reshape(data=context, shape=(-3, 0))
-                attention = mx.sym.reshape(data=attention, shape=(-3, 0))
+                if self.config.pointer_net_type == C.POINTER_NET_RNN:
+                    ## RESHAPING
+                    # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
+                    target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
+                    # target_embed: (batch, targ max len, embedding) -> (batch * targ max len, embedding)
+                    target_embed = mx.sym.reshape(data=target_embed, shape=(-3, 0))
 
-                # softmax_probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
-                target_embed = mx.sym.reshape(data=target_embed, shape=(-3, 0))
-                softmax_probs = self.output_layer(target_decoded, attention=attention, context=context, target_embed=target_embed, source_encoded=source_encoded, source_encoded_length=source_encoded_length, source_max_len=source_encoded_seq_len)
+                    context, attention = target_decoded_and_attention[1:]
+
+                    # context: (batch_size * trg_seq_len, encoder_num_hidden)
+                    context = mx.sym.reshape(data=context, shape=(-3, 0))
+                    attention = mx.sym.reshape(data=attention, shape=(-3, 0))
+
+                    # softmax_probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
+                    softmax_probs = self.output_layer(target_decoded, attention=attention, context=context, target_embed=target_embed)
 
                 loss_output = self.model_loss.get_loss(softmax_probs, labels)
 

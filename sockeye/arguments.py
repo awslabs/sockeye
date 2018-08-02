@@ -393,6 +393,10 @@ def add_pointer_args(params):
     params.add_argument('--use-pointer-nets',
                         action='store_true',
                         help='Enable the usage of pointer networks. Default: %(default)s.')
+    params.add_argument('--pointer-nets-type',
+                        choices=C.POINTER_NET_CHOICES,
+                        default=C.POINTER_NET_RNN,
+                        help="Type of pointer net. Default: %(default)s.")
     params.add_argument('--pointer-nets-window-size',
                         type=int,
                         default=20,
