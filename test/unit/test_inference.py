@@ -399,3 +399,15 @@ def test_topk_func(batch_size, beam_size, target_vocab_size):
     assert all(mx_hyp == np_hyp)
     assert all(mx_word == np_word)
     assert all(mx_values == np_values)
+
+
+def test_get_best_word_indeces_for_kth_hypotheses():
+    np.random.seed(13)
+    all_hyp_indices = np.random.randint(0, 10, size=(10, 16), dtype='int32')
+
+    for batch_size in range(1, all_hyp_indices.shape[0]):
+        ks = np.random.randint(0, all_hyp_indices.shape[0], size=(batch_size,))
+        result = sockeye.inference.Translator._get_best_word_indeces_for_kth_hypotheses(ks, all_hyp_indices)
+        assert isinstance(result, np.ndarray)
+        assert result.shape[0] == batch_size
+        assert result.shape[1] == all_hyp_indices.shape[1] - 1
