@@ -1517,18 +1517,11 @@ class Translator:
             if self.restrict_lexicon:
                 best_word_indices = vocab_slice_ids.take(best_word_indices)
 
-            # Collect best hypotheses and word indices
-            best_hyp_indices_list.append(best_hyp_indices)
-            best_word_indices_list.append(best_word_indices)
-
             # (4) Reorder fixed-size beam data according to best_hyp_indices (ascending)
             finished, lengths, attention_scores = self._sort_by_index.forward(best_hyp_indices,
                                                                               finished,
                                                                               lengths,
                                                                               attention_scores)
-
-            # Collect attention distributions
-            attentions.append(attention_scores)
 
             # (5) Normalize the scores of newly finished hypotheses. Note that after this until the
             # next call to topk(), hypotheses may not be in sorted order.
@@ -1576,6 +1569,11 @@ class Translator:
                         beam_histories[sent]["scores"].append(unnormalized_scores[rows].asnumpy().flatten().tolist())
                         beam_histories[sent]["normalized_scores"].append(
                             normalized_scores[rows].asnumpy().flatten().tolist())
+
+            # Collect best hypotheses, best word indices, and attention scores
+            best_hyp_indices_list.append(best_hyp_indices)
+            best_word_indices_list.append(best_word_indices)
+            attentions.append(attention_scores)
 
             if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
                 at_least_one_finished = finished.reshape((self.batch_size, self.beam_size)).sum(axis=1) > 0
