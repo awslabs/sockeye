@@ -43,8 +43,7 @@ from contrib.autopilot.tasks import TEXT_UTF8_RAW_BITEXT_REVERSE, TEXT_REQUIRES_
 from contrib.autopilot.tasks import TEXT_UTF8_TOKENIZED
 from contrib.autopilot.tasks import RAW_FILES
 from contrib.autopilot.tasks import Task, TASKS
-from contrib.autopilot.models import MODELS, MODEL_NONE
-from contrib.autopilot.models import MODEL_TEST_ARGS, MODEL_TEST_ARGS_TRANSFORMER, MODEL_TEST_ARGS_GNMT
+from contrib.autopilot.models import MODELS, MODEL_NONE, MODEL_TEST_ARGS
 from contrib.autopilot.models import DECODE_ARGS, DECODE_STANDARD, DECODE_GNMT
 from contrib.autopilot import third_party
 
@@ -326,7 +325,7 @@ def renew_step_dir(step_dir: str):
     os.makedirs(step_dir)
 
 
-def call_sockeye_train(args: List[str],
+def call_sockeye_train(model: str,
                        bpe_dir: str,
                        model_dir: str,
                        log_fname: str,
@@ -337,7 +336,7 @@ def call_sockeye_train(args: List[str],
     partial training or skip training if model is already finished.  Record
     command for future use.
 
-    :param args: Command line arguments for sockeye.train.
+    :param model: Type of translation model to train.
     :param bpe_dir: Directory of BPE-encoded input data.
     :param model_dir: Model output directory.
     :param log_fname: Location to write log file.
@@ -352,7 +351,7 @@ def call_sockeye_train(args: List[str],
               "--validation-target={}".format(os.path.join(bpe_dir, PREFIX_DEV + SUFFIX_TRG_GZ)),
               "--output={}".format(model_dir)]
     # Assemble command
-    command = [sys.executable, "-m", "sockeye.train"] + fnames + args
+    command = [sys.executable, "-m", "sockeye.train"] + fnames + MODELS[model]
     # Request GPUs or specify CPU
     if num_gpus > 0:
         command.append("--device-ids=-{}".format(num_gpus))
@@ -360,7 +359,7 @@ def call_sockeye_train(args: List[str],
         command.append("--use-cpu")
     # Test mode trains a smaller model for a small number of steps
     if test_mode:
-        command += MODEL_TEST_ARGS
+        command += MODEL_TEST_ARGS[model]
     command_fname = os.path.join(model_dir, FILE_COMMAND.format("sockeye.train"))
     # Run unless training already finished
     if not os.path.exists(command_fname):
@@ -730,7 +729,7 @@ def run_steps(args: argparse.Namespace):
         log_fname = os.path.join(args.workspace,
                                  DIR_LOGS,
                                  "sockeye.{{}}.{}.{}.{}.log".format(task_name, args.model, os.getpid()))
-        call_sockeye_train(MODELS[args.model],
+        call_sockeye_train(args.model,
                            step_dir_bpe,
                            step_dir_model,
                            log_fname.format("train"),
@@ -864,8 +863,6 @@ def main():
                             help="Pre-defined data set for model training.")
     arg_parser.add_argument("--model", type=str, choices=sorted(MODELS.keys()),
                             help="Type of translation model to train.")
-    arg_parser.add_argument("--model-test-settings", type=str, choices=sorted(MODEL_TEST_ARGS.keys()), default=MODEL_TEST_ARGS_TRANSFORMER,
-                            help="Model test settings. Default: %(default)s.")
     arg_parser.add_argument("--decode-settings", type=str, choices=sorted(DECODE_ARGS.keys()), default=DECODE_STANDARD,
                             help="Decoding settings. Default: %(default)s.")
     arg_parser.add_argument("--custom-task", type=str, metavar="NAME",

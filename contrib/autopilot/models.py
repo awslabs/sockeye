@@ -16,13 +16,9 @@ MODEL_NONE = "none"
 MODEL_TRANSFORMER = "transformer"
 MODEL_GNMT = "gnmt"
 
-# Names model test settings
-MODEL_TEST_ARGS_TRANSFORMER = "ttransformer"
-MODEL_TEST_ARGS_GNMT = "tgnmt"
-
 # Named decoding settings
 DECODE_STANDARD = "standard"
-DECODE_GNMT = "dgnmt"
+DECODE_GNMT = "gnmt"
 
 # Model configurations (architecture, training recipe, etc.)
 MODELS = {
@@ -98,7 +94,7 @@ MODELS = {
 # version quickly for system tests.  When multiple versions of the same argument
 # exist, the last version to appear (this list) takes precedence.
 MODEL_TEST_ARGS = {
-    MODEL_TEST_ARGS_TRANSFORMER: [
+    MODEL_TRANSFORMER: [
         "--num-layers=1:1",
         "--transformer-model-size=16",
         "--transformer-feed-forward-num-hidden=16",
@@ -110,7 +106,7 @@ MODEL_TEST_ARGS = {
         "--checkpoint-frequency=2",
     ],
 
-    MODEL_TEST_ARGS_GNMT: [
+    MODEL_GNMT: [
         "--num-layers=1:1",
         "--rnn-num-hidden=16",
         "--num-embed=16:16",
