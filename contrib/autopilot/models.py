@@ -14,11 +14,11 @@
 # Names model types
 MODEL_NONE = "none"
 MODEL_TRANSFORMER = "transformer"
-MODEL_GNMT = "gnmt"
+MODEL_GNMT = "gnmt_like"
 
 # Named decoding settings
 DECODE_STANDARD = "standard"
-DECODE_GNMT = "gnmt"
+DECODE_GNMT = "gnmt_like"
 
 # Model configurations (architecture, training recipe, etc.)
 MODELS = {

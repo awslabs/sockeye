@@ -721,6 +721,8 @@ def run_steps(args: argparse.Namespace):
 
     logging.info("=== Train translation model ===")
     logging.info("Model: %s", args.model)
+    if args.model == "gnmt_like":
+        logging.info("WARNING: This is an 8 layer LSTMs model which can resembles the 'GNMT' architecture.")
     step_dir_model = os.path.join(dir_task, DIR_PREFIX_MODEL + args.model)
     complete_fname = os.path.join(step_dir_model, FILE_COMPLETE)
     if os.path.exists(complete_fname):

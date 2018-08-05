@@ -116,8 +116,8 @@ def main():
                    "-m",
                    "contrib.autopilot.autopilot",
                    "--task={}".format(WNMT_TASK),
-                   "--model=gnmt",
-                   "--decode-settings=gnmt",
+                   "--model=gnmt_like",
+                   "--decode-settings=gnmt_like",
                    "--gpus=0",
                    "--test"]
         run_test(command, workspace=work_dir)
@@ -127,8 +127,8 @@ def main():
                    "-m",
                    "contrib.autopilot.autopilot",
                    "--task={}".format(WMT_TASK),
-                   "--model=gnmt",
-                   "--decode-settings=gnmt",
+                   "--model=gnmt_like",
+                   "--decode-settings=gnmt_like",
                    "--gpus=0",
                    "--test"]
         run_test(command, workspace=work_dir)
@@ -239,8 +239,8 @@ def main():
                    WMT_SRC,
                    WMT_TRG,
                    "--custom-bpe-op={}".format(WMT_BPE),
-                   "--model=gnmt",
-                   "--decode-settings=gnmt",
+                   "--model=gnmt_like",
+                   "--decode-settings=gnmt_like",
                    "--gpus=0",
                    "--test"]
         run_test(command, workspace=work_dir)
@@ -267,8 +267,8 @@ def main():
                                 autopilot.DIR_TOK, autopilot.PREFIX_TEST + PREFIX_ZERO + autopilot.SUFFIX_TRG_GZ),
                    "--custom-text-type=tok",
                    "--custom-bpe-op={}".format(WMT_BPE),
-                   "--model=gnmt",
-                   "--decode-settings=gnmt",
+                   "--model=gnmt_like",
+                   "--decode-settings=gnmt_like",
                    "--gpus=0",
                    "--test"]
         run_test(command, workspace=work_dir)
@@ -294,8 +294,8 @@ def main():
                    os.path.join(work_dir, autopilot.DIR_SYSTEMS, WMT_TASK + autopilot.SUFFIX_TEST, autopilot.DIR_DATA,
                                 autopilot.DIR_BPE, autopilot.PREFIX_TEST + PREFIX_ZERO + autopilot.SUFFIX_TRG_GZ),
                    "--custom-text-type=bpe",
-                   "--model=gnmt",
-                   "--decode-settings=gnmt",
+                   "--model=gnmt_like",
+                   "--decode-settings=gnmt_like",
                    "--gpus=0",
                    "--test"]
         run_test(command, workspace=work_dir)
