@@ -43,7 +43,7 @@ from contrib.autopilot.tasks import TEXT_UTF8_RAW_BITEXT_REVERSE, TEXT_REQUIRES_
 from contrib.autopilot.tasks import TEXT_UTF8_TOKENIZED
 from contrib.autopilot.tasks import RAW_FILES
 from contrib.autopilot.tasks import Task, TASKS
-from contrib.autopilot.models import MODELS, MODEL_NONE, MODEL_TEST_ARGS
+from contrib.autopilot.models import MODELS, MODEL_NONE, MODEL_GNMT, MODEL_TEST_ARGS
 from contrib.autopilot.models import DECODE_ARGS, DECODE_STANDARD, DECODE_GNMT
 from contrib.autopilot import third_party
 
@@ -721,8 +721,8 @@ def run_steps(args: argparse.Namespace):
 
     logging.info("=== Train translation model ===")
     logging.info("Model: %s", args.model)
-    if args.model == "gnmt_like":
-        logging.info("WARNING: This is an 8 layer LSTMs model which can resembles the 'GNMT' architecture.")
+    if args.model == MODEL_GNMT:
+        logging.info("NOTE: This is an 8 layer LSTM model similar (but not exactly identical) to the 'GNMT' architecture.")
     step_dir_model = os.path.join(dir_task, DIR_PREFIX_MODEL + args.model)
     complete_fname = os.path.join(step_dir_model, FILE_COMPLETE)
     if os.path.exists(complete_fname):
