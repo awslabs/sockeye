@@ -1356,11 +1356,11 @@ class Translator:
                      source_length: int,
                      raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                      raw_avoid_list: List[Optional[constrained.RawConstraintList]],
-                     max_output_lengths: mx.nd.NDArray) -> Tuple[mx.nd.NDArray,
-                                                                 mx.nd.NDArray,
-                                                                 mx.nd.NDArray,
-                                                                 mx.nd.NDArray,
-                                                                 mx.nd.NDArray,
+                     max_output_lengths: mx.nd.NDArray) -> Tuple[np.ndarray,
+                                                                 np.ndarray,
+                                                                 np.ndarray,
+                                                                 np.ndarray,
+                                                                 np.ndarray,
                                                                  List[Optional[constrained.ConstrainedHypothesis]],
                                                                  Optional[List[BeamHistory]]]:
         """
