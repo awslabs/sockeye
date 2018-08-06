@@ -1625,8 +1625,8 @@ class Translator:
         """
         Return the best (aka top) entry from the n-best list.
 
-        :param best_hyp_indices: List of best hypotheses indices ids. Shape: (batch * beam, num_beam_search_steps + 1).
-        :param best_word_indices: List of best hypotheses indices ids. Shape: (batch * beam, num_beam_search_steps).
+        :param best_hyp_indices: Array of best hypotheses indices ids. Shape: (batch * beam, num_beam_search_steps + 1).
+        :param best_word_indices: Array of best hypotheses indices ids. Shape: (batch * beam, num_beam_search_steps).
         :param attentions: Array of attentions over source words.
                            Shape: (batch * beam, num_beam_search_steps, encoded_source_length).
         :param seq_scores: Array of length-normalized negative log-probs. Shape: (batch * beam, 1)
