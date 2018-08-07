@@ -421,7 +421,7 @@ def test_get_best_word_indeces_for_kth_hypotheses():
         assert result.shape == expected_result.shape
         assert (result == expected_result).all()
 
-    # extract all at one
+    # extract all at once
     ks = np.concatenate(ks, axis=0)
     expected_indices = np.concatenate(expected_indices, axis=0)
     result = sockeye.inference.Translator._get_best_word_indeces_for_kth_hypotheses(ks, all_hyp_indices)
