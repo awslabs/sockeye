@@ -10,6 +10,14 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.45]
+### Added
+- Added an 8 layer LSTM model similar (but not exactly identical) to the 'GNMT' architecture to autopilot.
+
+## [1.18.44]
+### Fixed
+- Fixed an issue with `--max-num-epochs` causing training to stop before the update/batch that actually completes the epoch was made.
+
 ## [1.18.43]
 ### Added
 - `<s>` now supported as the first token in a multi-word negative constraint

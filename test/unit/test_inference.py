@@ -398,3 +398,31 @@ def test_topk_func(batch_size, beam_size, target_vocab_size):
     assert all(mx_hyp == np_hyp)
     assert all(mx_word == np_word)
     assert all(mx_values == np_values)
+
+
+def test_get_best_word_indeces_for_kth_hypotheses():
+    # data
+    all_hyp_indices = np.array([[0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 2, 0, 0, 4, 3],
+                                [0, 2, 2, 0, 1, 0, 0, 2, 1, 1, 3, 1, 1, 0, 1, 4, 0, 4],
+                                [0, 1, 0, 1, 2, 1, 4, 3, 2, 3, 0, 4, 3, 1, 2, 1, 1, 0],
+                                [0, 1, 0, 0, 3, 2, 2, 1, 3, 4, 4, 2, 2, 3, 3, 2, 2, 1],
+                                [0, 2, 4, 1, 4, 2, 3, 4, 4, 2, 0, 3, 4, 4, 4, 3, 3, 2]], dtype='int32')
+    ks = [np.array([0]), np.array([1]), np.array([2]), np.array([3]), np.array([4])]
+    expected_indices = [np.array([[2, 1, 0, 0, 0, 0, 1, 3, 3, 2, 0, 0, 0, 1, 1, 2, 3]], dtype='int32'),
+                        np.array([[1, 2, 1, 2, 2, 3, 4, 4, 4, 3, 1, 1, 1, 2, 2, 3, 4]], dtype='int32'),
+                        np.array([[2, 1, 0, 0, 0, 1, 0, 0, 0, 0, 4, 2, 3, 3, 3, 4, 0]], dtype='int32'),
+                        np.array([[2, 1, 0, 0, 0, 1, 0, 0, 0, 0, 2, 3, 2, 0, 0, 0, 1]], dtype='int32'),
+                        np.array([[2, 1, 0, 1, 1, 2, 3, 2, 2, 4, 3, 4, 4, 4, 4, 1, 2]], dtype='int32')]
+
+    # extract individually
+    for k, expected_result in zip(ks, expected_indices):
+        result = sockeye.inference.Translator._get_best_word_indeces_for_kth_hypotheses(k, all_hyp_indices)
+        assert result.shape == expected_result.shape
+        assert (result == expected_result).all()
+
+    # extract all at once
+    ks = np.concatenate(ks, axis=0)
+    expected_indices = np.concatenate(expected_indices, axis=0)
+    result = sockeye.inference.Translator._get_best_word_indeces_for_kth_hypotheses(ks, all_hyp_indices)
+    assert result.shape == expected_indices.shape
+    assert (result == expected_indices).all()
