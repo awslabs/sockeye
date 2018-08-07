@@ -1356,10 +1356,11 @@ class Translator:
                      source_length: int,
                      raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                      raw_avoid_list: List[Optional[constrained.RawConstraintList]],
-                     max_output_lengths: mx.nd.NDArray) -> Tuple[mx.nd.NDArray,
-                                                                 mx.nd.NDArray,
-                                                                 mx.nd.NDArray,
-                                                                 mx.nd.NDArray,
+                     max_output_lengths: mx.nd.NDArray) -> Tuple[np.ndarray,
+                                                                 np.ndarray,
+                                                                 np.ndarray,
+                                                                 np.ndarray,
+                                                                 np.ndarray,
                                                                  List[Optional[constrained.ConstrainedHypothesis]],
                                                                  Optional[List[BeamHistory]]]:
         """
@@ -1371,8 +1372,9 @@ class Translator:
                that must appear in each output.
         :param raw_avoid_list: A list of optional lists containing phrases (as lists of target word IDs)
                that must NOT appear in each output.
-        :return List of lists of word ids, list of attentions, array of accumulated length-normalized
-                negative log-probs.
+        :return List of best hypotheses indices, list of best word indices, list of attentions,
+                array of accumulated length-normalized negative log-probs, hypotheses lengths, constraints (if any),
+                beam histories (if any).
         """
 
         # Length of encoded sequence (may differ from initial input length)
@@ -1388,9 +1390,10 @@ class Translator:
 
         best_word_indices = mx.nd.full((self.batch_size * self.beam_size,), val=self.start_id, ctx=self.context,
                                        dtype='int32')
-        # The growing sequences representing the complete history for each hypothesis: (batch_size * beam_size, 1)
-        # The first column represents <s>, and is later removed when _beam_search() returns.
-        sequences = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context, dtype='int32')
+
+        # Best word and hypotheses indices across beam search steps from topk operation.
+        best_hyp_indices_list = []  # type: List[mx.nd.NDArray]
+        best_word_indices_list = []  # type: List[mx.nd.NDArray]
 
         # Beam history
         beam_histories = None  # type: Optional[List[BeamHistory]]
@@ -1403,8 +1406,8 @@ class Translator:
         # Extending max_output_lengths to shape (batch_size * beam_size,)
         max_output_lengths = mx.nd.repeat(max_output_lengths, self.beam_size)
 
-        # attentions: (batch_size * beam_size, 1, encoded_source_length)
-        attentions = mx.nd.zeros((self.batch_size * self.beam_size, 1, encoded_source_length), ctx=self.context)
+        # Attention distributions across beam search steps
+        attentions = []  # type: List[mx.nd.NDArray]
 
         # scores_accumulated: chosen smallest scores in scores (ascending).
         scores_accumulated = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context)
@@ -1536,21 +1539,12 @@ class Translator:
                                                                                            self.inf_array,
                                                                                            self.zeros_array)
 
-            # (7) Reorder sequences and attentions according to best_hyp_indices...
-            # pylint: disable=unsupported-assignment-operation
-            sequences = mx.nd.take(sequences, best_hyp_indices)
-            attentions = mx.nd.take(attentions, best_hyp_indices)
-
-            # ...and extend sequences with best_word_indices.
-            sequences = mx.nd.concat(sequences, best_word_indices.reshape((-1, 1)), dim=1)
-            attentions = mx.nd.concat(attentions, attention_scores.reshape((-1, 1, encoded_source_length)), dim=1)
-
-            # (7a) update negative constraints
+            # (7) update negative constraints
             if self.global_avoid_trie or any(raw_avoid_list):
                 avoid_states.reorder(best_hyp_indices)
                 avoid_states.consume(best_word_indices)
 
-            # (7b) optionally save beam history
+            # (8) optionally save beam history
             if self.store_beam:
                 finished_or_inactive = mx.nd.clip(data=finished + inactive, a_min=0, a_max=1)
                 unnormalized_scores = mx.nd.where(finished_or_inactive,
@@ -1576,6 +1570,11 @@ class Translator:
                         beam_histories[sent]["normalized_scores"].append(
                             normalized_scores[rows].asnumpy().flatten().tolist())
 
+            # Collect best hypotheses, best word indices, and attention scores
+            best_hyp_indices_list.append(best_hyp_indices)
+            best_word_indices_list.append(best_word_indices)
+            attentions.append(attention_scores)
+
             if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
                 at_least_one_finished = finished.reshape((self.batch_size, self.beam_size)).sum(axis=1) > 0
                 if at_least_one_finished.sum().asscalar() == self.batch_size:
@@ -1584,7 +1583,7 @@ class Translator:
                 if finished.sum().asscalar() == self.batch_size * self.beam_size:  # all finished
                     break
 
-            # (8) update models' state with winning hypotheses (ascending)
+            # (9) update models' state with winning hypotheses (ascending)
             for ms in model_states:
                 ms.sort_state(best_hyp_indices)
 
@@ -1598,59 +1597,94 @@ class Translator:
                                                         scores_accumulated.shape),
                                        dtype='int32',
                                        ctx=self.offset.context)[0] + self.offset
-        sequences = sequences.take(best_hyp_indices)
+        best_hyp_indices_list.append(best_hyp_indices)
         lengths = lengths.take(best_hyp_indices)
-        attentions = attentions.take(best_hyp_indices)
         scores_accumulated = scores_accumulated.take(best_hyp_indices)
         constraints = [constraints[x] for x in best_hyp_indices.asnumpy()]
 
-        # Remove the <s> column from both sequences and attentions
-        return sequences[:, 1:], attentions[:, 1:, :], scores_accumulated, lengths, constraints, beam_histories
+        all_best_hyp_indices = mx.nd.stack(*best_hyp_indices_list, axis=1)
+        all_best_word_indices = mx.nd.stack(*best_word_indices_list, axis=1)
+        all_attentions = mx.nd.stack(*attentions, axis=1)
+
+        return all_best_hyp_indices.asnumpy(), \
+               all_best_word_indices.asnumpy(), \
+               all_attentions.asnumpy(), \
+               scores_accumulated.asnumpy(), \
+               lengths.asnumpy().astype('int32'), \
+               constraints, \
+               beam_histories
 
     def _get_best_from_beam(self,
-                            sequences: mx.nd.NDArray,
-                            attention_lists: mx.nd.NDArray,
-                            seq_scores: mx.nd.NDArray,
-                            lengths: mx.nd.NDArray,
+                            best_hyp_indices: np.ndarray,
+                            best_word_indices: np.ndarray,
+                            attentions: np.ndarray,
+                            seq_scores: np.ndarray,
+                            lengths: np.ndarray,
                             constraints: List[Optional[constrained.ConstrainedHypothesis]],
                             beam_histories: Optional[List[BeamHistory]] = None) -> List[Translation]:
         """
         Return the best (aka top) entry from the n-best list.
 
-        :param sequences: Array of word ids. Shape: (batch * beam, bucket_key).
-        :param attention_lists: Array of attentions over source words.
-                                Shape: (batch * beam, max_output_length, encoded_source_length).
+        :param best_hyp_indices: Array of best hypotheses indices ids. Shape: (batch * beam, num_beam_search_steps + 1).
+        :param best_word_indices: Array of best hypotheses indices ids. Shape: (batch * beam, num_beam_search_steps).
+        :param attentions: Array of attentions over source words.
+                           Shape: (batch * beam, num_beam_search_steps, encoded_source_length).
         :param seq_scores: Array of length-normalized negative log-probs. Shape: (batch * beam, 1)
-        :param lengths: The lengths of all items in the beam. Shape: (batch * beam).
+        :param lengths: The lengths of all items in the beam. Shape: (batch * beam). Dtype: int32.
         :param constraints: The constraints for all items in the beam. Shape: (batch * beam).
         :param beam_histories: The beam histories for each sentence in the batch.
         :return: List of Translation objects containing all relevant information.
         """
-        utils.check_condition(sequences.shape[0] == attention_lists.shape[0] == seq_scores.shape[0] == lengths.shape[0],
-                              "Shape mismatch")
-
         # Initialize the best_ids to the first item in each batch
-        best_ids = mx.nd.arange(0, self.batch_size * self.beam_size, self.beam_size, ctx=self.context, dtype='int32')
+        best_ids = np.arange(0, self.batch_size * self.beam_size, self.beam_size, dtype='int32')
+
+        # Obtain sequences for all best hypotheses in the batch
+        indices = self._get_best_word_indeces_for_kth_hypotheses(best_ids, best_hyp_indices)
 
         if any(constraints):
             # For constrained decoding, select from items that have met all constraints (might not be finished)
-            unmet = mx.nd.array([c.num_needed() if c is not None else 0 for c in constraints], ctx=self.context)
-            filtered = mx.nd.where(unmet == 0, seq_scores, self.inf_array)
+            unmet = np.array([c.num_needed() if c is not None else 0 for c in constraints])
+            filtered = np.where(unmet == 0, seq_scores.flatten(), np.inf)
             filtered = filtered.reshape((self.batch_size, self.beam_size))
-            best_ids += mx.nd.cast(mx.nd.argmin(filtered, axis=1), dtype='int32')
+            best_ids += np.argmin(filtered, axis=1).astype('int32')
 
         histories = beam_histories if beam_histories is not None else [None] * self.batch_size  # type: List
-        return [self._assemble_translation(*x) for x in zip(sequences[best_ids],
+        return [self._assemble_translation(*x) for x in zip(best_word_indices[indices, np.arange(indices.shape[1])],
                                                             lengths[best_ids],
-                                                            attention_lists[best_ids],
+                                                            attentions[best_ids],
                                                             seq_scores[best_ids],
                                                             histories)]
 
     @staticmethod
-    def _assemble_translation(sequence: mx.nd.NDArray,
-                              length: mx.nd.NDArray,
-                              attention_lists: mx.nd.NDArray,
-                              seq_score: mx.nd.NDArray,
+    def _get_best_word_indeces_for_kth_hypotheses(ks: np.ndarray, all_hyp_indices: np.ndarray) -> np.ndarray:
+        """
+        Traverses the matrix of best hypotheses indices collected during beam search in reversed order by
+        by using the kth hypotheses index as a backpointer.
+        Returns and array containing the indices into the best_word_indices collected during beam search to extract
+        the kth hypotheses.
+
+        :param ks: The kth-best hypotheses to extract. Supports multiple for batch_size > 1. Shape: (batch,).
+        :param all_hyp_indices: All best hypotheses indices list collected in beam search. Shape: (batch * beam, steps).
+        :return: Array of indices into the best_word_indices collected in beam search
+            that extract the kth-best hypothesis. Shape: (batch,).
+        """
+        batch_size = ks.shape[0]
+        num_steps = all_hyp_indices.shape[1]
+        result = np.zeros((batch_size, num_steps - 1), dtype=all_hyp_indices.dtype)
+        # first index into the history of the desired hypotheses.
+        pointer = all_hyp_indices[ks, -1]
+        # for each column/step follow the pointer, starting from the penultimate column/step
+        num_steps = all_hyp_indices.shape[1]
+        for step in range(num_steps - 2, -1, -1):
+            result[:, step] = pointer
+            pointer = all_hyp_indices[pointer, step]
+        return result
+
+    @staticmethod
+    def _assemble_translation(sequence: np.ndarray,
+                              length: np.ndarray,
+                              attention_lists: np.ndarray,
+                              seq_score: np.ndarray,
                               beam_history: Optional[BeamHistory]) -> Translation:
         """
         Takes a set of data pertaining to a single translated item, performs slightly different
@@ -1664,11 +1698,10 @@ class Translator:
         :param beam_history: The optional beam histories for each sentence in the batch.
         :return: A Translation object.
         """
-
-        length = int(length.asscalar())
-        sequence = sequence[:length].asnumpy().tolist()
-        attention_matrix = np.stack(attention_lists.asnumpy()[:length, :], axis=0)
-        score = seq_score.asscalar()
+        length = int(length)
+        sequence = sequence[:length].tolist()
+        attention_matrix = attention_lists[:length, :]
+        score = float(seq_score)
         beam_history_list = [beam_history] if beam_history is not None else []
         return Translation(sequence, attention_matrix, score, beam_history_list)
 
