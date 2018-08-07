@@ -13,16 +13,33 @@
 
 import pytest
 import numpy as np
+
 from sockeye import align
+from sockeye.data_io import tokens2ids
+from sockeye import constants as C
 
+# Dummy vocab that maps strings to integers
+vocab_size = 1000
+vocab = {}
+for i, symbol in enumerate(C.VOCAB_SYMBOLS):
+    vocab[symbol] = i
+bos_id = vocab[C.BOS_SYMBOL]
+eos_id = vocab[C.EOS_SYMBOL]
+for x in range(len(vocab), vocab_size):
+    vocab[str(x)] = x
 
-def test_generate_pointer_labels():
-    aligner = align.Aligner()
+@pytest.mark.parametrize("src, trg, expected_labels",
+                         [
+                             ('12 13 14', '12 11 21', [vocab_size + 0, 11, 21, eos_id])
+                         ])
+def test_generate_pointer_labels(src, trg, expected_labels):
+    aligner = align.Aligner(vocab, vocab)
 
     # TODO: create test fixtures
-    src = [[2, 3, 4], [12, 1, 2], [1, 1, 1, 12]]
-    trg = [[2, 1, 1], [1, 22, 21], [9, 1, 1]]
-    expected_out = [[1, -1, -1], [2, -1, -1], [-1, 1, 2]]
+    source = tokens2ids(list(src.split()) + [eos_id], vocab)
+    target = tokens2ids([bos_id] + list(trg.split()), vocab)
+    labels = target[1:] + [eos_id]
 
-    for i in range(len(src)):
-        assert (expected_out[i] == aligner.get_copy_alignment(src[i], trg[i])).all()
+    new_labels = aligner.get_labels(source, target, labels)
+
+    assert new_labels == expected_labels

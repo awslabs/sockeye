@@ -486,8 +486,7 @@ def test_get_training_data_iters():
             max_seq_len_source=train_max_length,
             max_seq_len_target=train_max_length,
             bucketing=True,
-            bucket_width=10,
-            use_pointer_nets=False)
+            bucket_width=10)
         assert isinstance(train_iter, data_io.ParallelSampleIter)
         assert isinstance(val_iter, data_io.ParallelSampleIter)
         assert isinstance(config_data, data_io.DataConfig)
@@ -566,10 +565,7 @@ def test_get_training_data_iters_with_pointer_labels():
                                                                                        max_seq_len_source=train_max_length,
                                                                                        max_seq_len_target=train_max_length,
                                                                                        bucketing=True,
-                                                                                       bucket_width=10,
-                                                                                       use_pointer_nets=True)
-
-
+                                                                                       bucket_width=10)
 
         assert isinstance(train_iter, data_io.ParallelSampleIter)
         assert len(train_iter.label_names) == 1

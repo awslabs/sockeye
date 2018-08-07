@@ -38,7 +38,7 @@ from itertools import zip_longest
           source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(0, 0), word_min_count=(1, 1),
           pad_vocab_to_multiple_of=None,
           no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
-          use_pointer_nets=False,
+          use_pointer_nets=False, pointer_nets_min_word_len=2, pointer_nets_type='rnn', pointer_nets_window_size=20,
           monitor_pattern=None, monitor_stat_func='mx_default')),
 
     # short parameters
@@ -53,7 +53,8 @@ from itertools import zip_longest
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(0, 0), word_min_count=(1, 1),
           pad_vocab_to_multiple_of=None,
-          no_bucketing=False, bucket_width=10, max_seq_len=(99, 99), use_pointer_nets=False,
+          no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
+          use_pointer_nets=False, pointer_nets_min_word_len=2, pointer_nets_type='rnn', pointer_nets_window_size=20,
           monitor_pattern=None, monitor_stat_func='mx_default'))
 ])
 def test_io_args(test_params, expected_params):
@@ -218,7 +219,7 @@ def test_training_arg(test_params, expected_params):
                       length_penalty_alpha=1.0,
                       length_penalty_beta=0.0,
                       strip_unknown_words=False,
-                      pointer_nets_mark=False,
+                      mark_pointed_words=False,
                       override_dtype=None)),
 ])
 def test_inference_args(test_params, expected_params):
@@ -349,7 +350,7 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           num_samples_per_shard=1000000,
           seed=13,
           output='train_data',
-          use_pointer_nets=False
+          use_pointer_nets=False, pointer_nets_min_word_len=2, pointer_nets_type='rnn', pointer_nets_window_size=20,
           ))
 ])
 def test_tutorial_prepare_data_cli_args(test_params, expected_params):
@@ -373,7 +374,7 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           num_samples_per_shard=1000000,
           seed=13,
           output='prepared_data',
-          use_pointer_nets=False
+          use_pointer_nets=False, pointer_nets_min_word_len=2, pointer_nets_type='rnn', pointer_nets_window_size=20,
           ))
 ])
 def test_prepare_data_cli_args(test_params, expected_params):

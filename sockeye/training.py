@@ -37,7 +37,6 @@ from . import model
 from . import utils
 from . import vocab
 from .optimizers import BatchState, CheckpointState, SockeyeOptimizer, OptimizerConfig
-from .rnn_attention import PointerAttention
 
 logger = logging.getLogger(__name__)
 

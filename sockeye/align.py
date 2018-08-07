@@ -21,6 +21,15 @@ from typing import List
 logger = logging.getLogger(__name__)
 
 class Aligner:
+    """
+    Alignment used for pointer networks. Rewrites the label stream with indexes past the maximum target vocabulary item,
+    which are interpreted as pointing into the source sentence.
+
+    :param source_vocab: The source vocabulary.
+    :param target_vocab: The target vocabulary.
+    :param window_size: The maximum window size a target word can point to in the source sentence.
+    :param min_word_length: The shortest word that can be considered as a pointer.
+    """
 
     def __init__(self,
                  source_vocab: vocab.Vocab,
@@ -40,7 +49,20 @@ class Aligner:
 
         logger.info("Pointer networks: window_size=%d min_word_len=%d", self.window_size, self.min_word_length)
 
-    def get_labels(self, source: str, target: str, label: List[int]):
+    def get_labels(self,
+                   source: List[str],
+                   target: List[str],
+                   label: List[int]):
+        """
+        Takes the source, target, and current set of labels (shifted target)
+        and produces a new set of labels, with some words possibly pointing.
+
+        The source includes the </s> token.
+        The target includes <s> but no </s>.
+        The labels is the same as target, but dropping <s> and adding </s>.
+
+        :return: The new label with pointed words set to len(target_vocab) + source_index.
+        """
 
         new_label = [x for x in label]
 
