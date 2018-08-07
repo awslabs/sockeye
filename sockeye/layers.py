@@ -330,15 +330,15 @@ def dot_attention(queries: mx.sym.Symbol,
     return mx.sym.batch_dot(lhs=probs, rhs=values, name='%scontexts' % prefix)
 
 
-def get_probs(queries: mx.sym.Symbol,
-                  keys: mx.sym.Symbol,
-                  values: mx.sym.Symbol,
-                  lengths: Optional[mx.sym.Symbol] = None,
-                  dropout: float = 0.0,
-                  bias: Optional[mx.sym.Symbol] = None,
-                  prefix: Optional[str] = ''):
+def dot_attention_with_probs(queries: mx.sym.Symbol,
+                             keys: mx.sym.Symbol,
+                             values: mx.sym.Symbol,
+                             lengths: Optional[mx.sym.Symbol] = None,
+                             dropout: float = 0.0,
+                             bias: Optional[mx.sym.Symbol] = None,
+                             prefix: Optional[str] = ''):
     """
-    Computes dot attention for a set of queries, keys, and values.
+    Computes dot attention for a set of queries, keys, and values, additionally return attention probabilities.
 
     :param queries: Attention queries. Shape: (n, lq, d).
     :param keys: Attention keys. Shape: (n, lk, d).
@@ -578,7 +578,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                             lengths=memory_lengths)
 
 
-class MultiHeadAttentionProbs(MultiHeadAttention):
+class MultiHeadAttentionWithProbs(MultiHeadAttention):
     """
     Multi-head attention layer for queries independent from keys/values.
 
@@ -626,11 +626,13 @@ class MultiHeadAttentionProbs(MultiHeadAttention):
         lengths = broadcast_to_heads(lengths, self.heads, ndim=1, fold_heads=True) if lengths is not None else lengths
 
         # (batch*heads, query_max_length, depth_per_head)
-        contexts, probs = get_probs(queries, keys, values,
-                                 lengths=lengths, dropout=self.dropout, bias=bias, prefix=self.prefix)
+        contexts, probs = dot_attention_with_probs(queries, keys, values,
+                                                   lengths=lengths, dropout=self.dropout, bias=bias, prefix=self.prefix)
 
         # (batch, query_max_length, depth)
         contexts = combine_heads(contexts, self.depth_per_head, self.heads)
+        # (batch, length, heads, depth_per_head)
+        attention_probs = mx.sym.reshape(data=probs, shape=(-4, -1, self.heads, 0, query_max_length))
 
         # contexts: (batch, query_max_length, output_depth)
         contexts = mx.sym.FullyConnected(data=contexts,
@@ -639,7 +641,7 @@ class MultiHeadAttentionProbs(MultiHeadAttention):
                                          num_hidden=self.depth_out,
                                          flatten=False)
 
-        return contexts, probs
+        return contexts, attention_probs
 
 
 class ProjectedDotAttention:

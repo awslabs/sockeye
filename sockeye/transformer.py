@@ -140,11 +140,11 @@ class TransformerDecoderBlock:
         self.pre_enc_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                          dropout=config.dropout_prepost,
                                                          prefix="%satt_enc_pre_" % prefix)
-        self.enc_attention = layers.MultiHeadAttentionProbs(depth_att=config.model_size,
-                                                       heads=config.attention_heads,
-                                                       depth_out=config.model_size,
-                                                       dropout=config.dropout_attention,
-                                                       prefix="%satt_enc_" % prefix)
+        self.enc_attention = layers.MultiHeadAttentionWithProbs(depth_att=config.model_size,
+                                                                heads=config.attention_heads,
+                                                                depth_out=config.model_size,
+                                                                dropout=config.dropout_attention,
+                                                                prefix="%satt_enc_" % prefix)
         self.post_enc_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                           dropout=config.dropout_prepost,
                                                           prefix="%satt_enc_post_" % prefix)

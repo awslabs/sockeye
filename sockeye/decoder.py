@@ -330,6 +330,7 @@ class TransformerDecoder(Decoder):
             # store updated keys and values in states list.
             # (layer.__call__() has the side-effect of updating contents of layer_cache)
             new_states += [layer_cache['k'], layer_cache['v']]
+
             attention_probs.append(probs)
 
         # (batch_size, 1, model_size)
@@ -338,10 +339,15 @@ class TransformerDecoder(Decoder):
         target = mx.sym.reshape(target, shape=(-3, -1))
 
 
-        attention_probs = mx.sym.stack(*attention_probs, axis=0)
-        attention_probs = mx.sym.mean(attention_probs, axis=0, keepdims=False)
-        attention_probs = mx.sym.mean(attention_probs, axis=0, keepdims=False)
-        #attention_probs = mx.sym.mean(probs, axis=0, keepdims=False)
+        #attention_probs = mx.sym.stack(*attention_probs, axis=0)
+        #attention_probs = mx.sym.mean(attention_probs, axis=0, keepdims=False)
+        # (batch, heads, length, depth_per_head)
+        #attention_probs = mx.sym.reshape(data=attention_probs, shape=(-4, -1, self.config.attention_heads, 0, int(512/self.config.attention_heads)))
+        # biku nesmuki - 512 vaieta jabut attention dim
+
+        attention_probs = mx.sym.mean(probs, axis=(1,2), keepdims=False)
+        #attention_probs = mx.sym.mean(attention_probs, axis=, keepdims=False)
+        #attention_probs = mx.sym.mean(probs, axis=-1, keepdims=False)
         return target, attention_probs, new_states
 
     def _get_cache_per_layer(self, cache: List[mx.sym.Symbol]) -> List[Dict[str, Optional[mx.sym.Symbol]]]:
