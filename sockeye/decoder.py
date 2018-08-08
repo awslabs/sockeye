@@ -269,7 +269,7 @@ class TransformerDecoder(Decoder):
             target = mx.sym.Dropout(data=target, p=self.config.dropout_prepost)
 
         for layer in self.layers:
-            target, probs = layer(target=target,
+            target, layer_probs = layer(target=target,
                            target_bias=target_bias,
                            source=source_encoded,
                            source_bias=source_bias)
@@ -320,9 +320,11 @@ class TransformerDecoder(Decoder):
 
         new_states = [source_encoded, source_encoded_lengths]
         layer_caches = self._get_cache_per_layer(cast(List[mx.sym.Symbol], cache))
+
         attention_probs = []
+
         for layer, layer_cache in zip(self.layers, layer_caches):
-            target, probs = layer(target=target,
+            target, layer_probs = layer(target=target,
                            target_bias=target_bias,
                            source=source_encoded,
                            source_bias=source_bias,
@@ -330,20 +332,16 @@ class TransformerDecoder(Decoder):
             # store updated keys and values in states list.
             # (layer.__call__() has the side-effect of updating contents of layer_cache)
             new_states += [layer_cache['k'], layer_cache['v']]
-
-            attention_probs.append(probs)
+            attention_probs.append(layer_probs)
 
         # (batch_size, 1, model_size)
         target = self.final_process(data=target, prev=None)
         # (batch_size, model_size)
         target = mx.sym.reshape(target, shape=(-3, -1))
 
-
         attention_probs = mx.sym.stack(*attention_probs, axis=0)
-
         attention_probs = mx.sym.mean(attention_probs, axis=0, keepdims=False)
-
-        attention_probs = mx.sym.mean(attention_probs, axis=(1,2), keepdims=False)
+        attention_probs = mx.sym.mean(attention_probs, axis=(1, 2), keepdims=False)
         return target, attention_probs, new_states
 
     def _get_cache_per_layer(self, cache: List[mx.sym.Symbol]) -> List[Dict[str, Optional[mx.sym.Symbol]]]:

@@ -632,7 +632,7 @@ class MultiHeadAttentionWithProbs(MultiHeadAttention):
         # (batch, query_max_length, depth)
         contexts = combine_heads(contexts, self.depth_per_head, self.heads)
         # (batch, length, heads, query_max_length)
-        attention_probs = mx.sym.reshape(data=probs, shape=(-4, -1, self.heads, 0, 0)) # <- where/how to get query_max_length
+        attention_probs = mx.sym.reshape(data=probs, shape=(-4, -1, self.heads, 0, 0))
 
         # contexts: (batch, query_max_length, output_depth)
         contexts = mx.sym.FullyConnected(data=contexts,
