@@ -614,7 +614,8 @@ class MultiHeadAttentionWithProbs(MultiHeadAttention):
         :param values: Values. Shape: (batch_size, memory_max_length, depth).
         :param lengths: Optional lengths of keys. Shape: (batch_size,).
         :param bias: Optional 3d bias.
-        :return: Context vectors. Shape: (batch_size, query_max_length, output_depth).
+        :return: Context vectors: Shape: (batch_size, query_max_length, output_depth).
+        :return: Attention probabilities: Shape: (batch_size, 1, heads, source_length).
         """
         # scale by sqrt(depth_per_head)
         queries = queries * (self.depth_per_head ** -0.5)
@@ -626,13 +627,13 @@ class MultiHeadAttentionWithProbs(MultiHeadAttention):
         lengths = broadcast_to_heads(lengths, self.heads, ndim=1, fold_heads=True) if lengths is not None else lengths
 
         # (batch*heads, query_max_length, depth_per_head), (batch*heads, query_max_length, source_length)
-        contexts, probs = dot_attention_with_probs(queries, keys, values,
+        contexts, attention_probs = dot_attention_with_probs(queries, keys, values,
                                                    lengths=lengths, dropout=self.dropout, bias=bias, prefix=self.prefix)
 
         # (batch, query_max_length, depth)
         contexts = combine_heads(contexts, self.depth_per_head, self.heads)
-        # (batch, 1, heads, source_length)
-        attention_probs = mx.sym.reshape(data=probs, shape=(-4, -1, self.heads, 0, 0))
+        # (batch, length, heads, source_length)
+        attention_probs = mx.sym.reshape(data=attention_probs, shape=(-4, -1, self.heads, 0, 0))
 
         # contexts: (batch, query_max_length, output_depth)
         contexts = mx.sym.FullyConnected(data=contexts,
