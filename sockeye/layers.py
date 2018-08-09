@@ -370,10 +370,10 @@ def dot_attention_with_probs(queries: mx.sym.Symbol,
         logits = mx.sym.broadcast_add(logits, bias, name='%sbias_add' % prefix)
 
     probs = mx.sym.softmax(logits, axis=-1)
-    probs2 = mx.sym.Dropout(probs, p=dropout) if dropout > 0.0 else probs
+    probs_with_dropout = mx.sym.Dropout(probs, p=dropout) if dropout > 0.0 else probs
 
     # (n, lq, lk) x (n, lk, dv) -> (n, lq, dv)
-    return mx.sym.batch_dot(lhs=probs2, rhs=values, name='%scontexts' % prefix), probs
+    return mx.sym.batch_dot(lhs=probs_with_dropout, rhs=values, name='%scontexts' % prefix), probs
 
 
 
@@ -625,13 +625,13 @@ class MultiHeadAttentionWithProbs(MultiHeadAttention):
         values = split_heads(values, self.depth_per_head, self.heads)
         lengths = broadcast_to_heads(lengths, self.heads, ndim=1, fold_heads=True) if lengths is not None else lengths
 
-        # (batch*heads, query_max_length, depth_per_head)
+        # (batch*heads, query_max_length, depth_per_head), (batch*heads, query_max_length, source_length)
         contexts, probs = dot_attention_with_probs(queries, keys, values,
                                                    lengths=lengths, dropout=self.dropout, bias=bias, prefix=self.prefix)
 
         # (batch, query_max_length, depth)
         contexts = combine_heads(contexts, self.depth_per_head, self.heads)
-        # (batch, length, heads, query_max_length)
+        # (batch, 1, heads, source_length)
         attention_probs = mx.sym.reshape(data=probs, shape=(-4, -1, self.heads, 0, 0))
 
         # contexts: (batch, query_max_length, output_depth)

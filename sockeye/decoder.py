@@ -340,7 +340,9 @@ class TransformerDecoder(Decoder):
         target = mx.sym.reshape(target, shape=(-3, -1))
 
         attention_probs = mx.sym.stack(*attention_probs, axis=0)
+        # average over layer probabilities
         attention_probs = mx.sym.mean(attention_probs, axis=0, keepdims=False)
+        # average over heads
         attention_probs = mx.sym.mean(attention_probs, axis=(1, 2), keepdims=False)
         return target, attention_probs, new_states
 
