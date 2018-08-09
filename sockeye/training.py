@@ -181,14 +181,7 @@ class TrainingModel(model.SockeyeModel):
                     loss_output = self.model_loss.get_loss(softmax_probs, labels)
 
                 else:
-                    # context: (batch-size, target_len, encoder_num_hidden)
-                    context = target_decoded_and_context[1]
-                    # attention: (batch-size, target_len, att_len)
-                    attention = target_decoded_and_context[2]
-                    # coverage: (batch-size, target_len, att_len)
-                    coverage = target_decoded_and_context[3]
-                    # target_embed: (batch_size * target_seq_len, target_embed_len)
-                    target_embed = target_decoded_and_context[4]
+                    context, attention, coverage, target_embed = target_decoded_and_context[1:]
 
                     # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
                     target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
@@ -206,15 +199,7 @@ class TrainingModel(model.SockeyeModel):
                     max_seq_len_target = self.config.config_data.max_seq_len_target
                     ext_vocab_size = self.config.config_embed_source.vocab_size + self.config.max_oov_words
 
-                    # the transformer attention is calculated using multiple attention heads, so only the last set of
-                    # attention values are considered
-                    # total_attn_len = transformer_num_heads * target_len
-                    if type(self.config.config_decoder).__name__ == 'TransformerConfig':
-                        attention_reverse = mx.sym.reverse(attention, axis=0)
-                        attention = mx.sym.slice_like(data=attention_reverse, shape_like=target_decoded, axes=0)
-                        attention = mx.sym.reverse(attention, axis=0)
-
-                    # prob_vocab: (batch_size * target_seq_len, ext_vocab_size)
+                    # prob_vocab: (batch_size * target_seq_len, vocab_size)
                     # prob_source: (batch_size * target_seq_len, source_len)
                     prob_vocab, prob_source = self.output_layer(target_decoded, context=context,
                                                                           attention=attention,
