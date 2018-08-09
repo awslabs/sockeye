@@ -615,7 +615,7 @@ class MultiHeadAttentionWithProbs(MultiHeadAttention):
         :param lengths: Optional lengths of keys. Shape: (batch_size,).
         :param bias: Optional 3d bias.
         :return: Context vectors: Shape: (batch_size, query_max_length, output_depth).
-        :return: Attention probabilities: Shape: (batch_size, 1, heads, source_length).
+        :return: Attention probabilities: Shape: (batch_size, length, heads, source_length).
         """
         # scale by sqrt(depth_per_head)
         queries = queries * (self.depth_per_head ** -0.5)
@@ -634,7 +634,9 @@ class MultiHeadAttentionWithProbs(MultiHeadAttention):
         contexts = combine_heads(contexts, self.depth_per_head, self.heads)
         # (batch, length, heads, source_length)
         attention_probs = mx.sym.reshape(data=attention_probs, shape=(-4, -1, self.heads, 0, 0))
-
+        # MultiHeadAttentionWithProbs is only used in Encoder therefore length=1 so we can drop it
+        # (batch, heads, source_length)
+        attention_probs = mx.sym.reshape(data=attention_probs, shape=(0, -3, 0))
         # contexts: (batch, query_max_length, output_depth)
         contexts = mx.sym.FullyConnected(data=contexts,
                                          weight=self.w_h2o,

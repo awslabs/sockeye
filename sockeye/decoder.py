@@ -343,7 +343,7 @@ class TransformerDecoder(Decoder):
         # average over layer probabilities
         attention_probs = mx.sym.mean(attention_probs, axis=0, keepdims=False)
         # average over heads
-        attention_probs = mx.sym.mean(attention_probs, axis=(1, 2), keepdims=False)
+        attention_probs = mx.sym.mean(attention_probs, axis=1, keepdims=False)
         return target, attention_probs, new_states
 
     def _get_cache_per_layer(self, cache: List[mx.sym.Symbol]) -> List[Dict[str, Optional[mx.sym.Symbol]]]:
