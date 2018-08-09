@@ -354,7 +354,11 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           output='train_data',
           use_pointer_nets=False,
           max_oov_words=50,
-          pointer_nets_type=C.POINTER_NET_RNN
+          pointer_nets_type=C.POINTER_NET_RNN,
+          pointer_nets_min_word_len=2,
+          pointer_nets_window_size=20,
+          use_coverage_loss=False,
+          coverage_loss_weight=0.01
           ))
 ])
 def test_tutorial_prepare_data_cli_args(test_params, expected_params):
