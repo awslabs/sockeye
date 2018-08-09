@@ -221,7 +221,8 @@ def inspect(args):
         tokens = list(get_tokens(line))
         if not tokens:
             continue
-        ids = tokens2ids(tokens, vocab_source)
+        ids = tokens2ids(tokens, vocab_source, use_pointer_nets=False, max_oov_words=1,
+                         point_nets_type=C.POINTER_NET_SUMMARY)
         print("Input:  n=%d" % len(tokens), " ".join("%s(%d)" % (tok, i) for tok, i in zip(tokens, ids)))
         trg_ids = lexicon.get_trg_ids(np.array(ids))
         tokens_trg = [vocab_target_inv.get(trg_id, C.UNK_SYMBOL) for trg_id in trg_ids]

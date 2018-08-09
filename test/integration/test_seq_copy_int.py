@@ -171,4 +171,7 @@ def test_seq_copy(train_params: str,
                             restrict_lexicon=restrict_lexicon,
                             work_dir=data['work_dir'],
                             use_prepared_data=use_prepared_data,
-                            use_target_constraints=False)
+                            use_target_constraints=False,
+                            use_pointer_nets=False,
+                            max_oov_words=1,
+                            pointer_nets_type=C.POINTER_NET_SUMMARY)

@@ -41,12 +41,20 @@ class LossConfig(config.Config):
                  name: str,
                  vocab_size: int,
                  normalization_type: str,
+                 use_pointer_nets: bool,
+                 pointer_nets_type: str,
+                 use_coverage_loss: bool,
+                 coverage_loss_weight: float,
                  label_smoothing: float = 0.0) -> None:
         super().__init__()
         self.name = name
         self.vocab_size = vocab_size
         self.normalization_type = normalization_type
         self.label_smoothing = label_smoothing
+        self.use_pointer_nets = use_pointer_nets
+        self.pointer_nets_type = pointer_nets_type
+        self.use_coverage_loss = use_coverage_loss
+        self.coverage_loss_weight = coverage_loss_weight
 
 
 def get_loss(loss_config: LossConfig) -> 'Loss':
@@ -72,12 +80,15 @@ class Loss(ABC):
     provides softmax outputs for forward() AND cross_entropy gradients for backward().
     """
 
-    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> List[mx.sym.Symbol]:
+    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol, attention: Optional[mx.sym.Symbol] = None,
+                 coverage: Optional[mx.sym.Symbol] = None) -> List[mx.sym.Symbol]:
         """
         Returns loss and softmax output symbols given logits and integer-coded labels.
 
         :param logits: Shape: (batch_size * target_seq_len, target_vocab_size).
         :param labels: Shape: (batch_size * target_seq_len,).
+        :param attention: Shape: (batch_size * target_seq_len, att_len).
+        :param coverage: Shape: (batch_size * target_seq_len, att_len).
         :return: List of loss and softmax output symbols.
         """
         raise NotImplementedError()
@@ -102,12 +113,15 @@ class CrossEntropyLoss(Loss):
                     loss_config.normalization_type, loss_config.label_smoothing)
         self.loss_config = loss_config
 
-    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> List[mx.sym.Symbol]:
+    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol, attention: Optional[mx.sym.Symbol] = None,
+                 coverage: Optional[mx.sym.Symbol] = None) -> List[mx.sym.Symbol]:
         """
         Returns loss and softmax output symbols given logits and integer-coded labels.
 
         :param logits: Shape: (batch_size * target_seq_len, target_vocab_size).
         :param labels: Shape: (batch_size * target_seq_len,).
+        :param attention: Shape: (batch_size * target_seq_len, att_len).
+        :param coverage: Shape: (batch_size * target_seq_len, att_len).
         :return: List of loss symbol.
         """
         if self.loss_config.normalization_type == C.LOSS_NORM_VALID:
@@ -140,7 +154,8 @@ class PointerNetsCrossEntropyLoss(Loss):
         self.loss_config = loss_config
         self.trg_vocab_size = loss_config.vocab_size
 
-    def get_loss(self, softmax_probs: mx.sym.Symbol, labels: mx.sym.Symbol) -> List[mx.sym.Symbol]:
+    def get_loss(self, softmax_probs: mx.sym.Symbol, labels: mx.sym.Symbol, attention: Optional[mx.sym.Symbol] = None,
+                 coverage: Optional[mx.sym.Symbol] = None) -> List[mx.sym.Symbol]:
         """
         Returns loss and softmax output symbols given logits and integer-coded labels.
 
@@ -156,14 +171,16 @@ class PointerNetsCrossEntropyLoss(Loss):
         else:
             raise ValueError("Unknown loss normalization type: %s" % self.loss_config.normalization_type)
 
-        # softmax_probs = mx.sym.Custom(op_type="PrintValue", data=softmax_probs, print_name="SOFTMAX")
-        # labels = mx.sym.Custom(op_type="PrintValue", data=labels, print_name="LABELS")
-
-        probs = mx.sym.pick(data=softmax_probs, index=labels)
-        # probs = mx.sym.Custom(op_type="PrintValue", data=probs, print_name="PROBS")
-        loss = -mx.sym.log(probs + 1e-8)  # pylint: disable=invalid-unary-operand-type
-        # loss = mx.sym.Custom(op_type="PrintValue", data=loss, print_name="LOSS")
-        return [mx.sym.make_loss(loss, normalization=normalization, name="PN_CE_Loss"), mx.sym.BlockGrad(softmax_probs, name=C.SOFTMAX_NAME)]
+        prob = mx.sym.pick(softmax_probs, labels)
+        ce_loss = -mx.sym.log(prob + 1e-8)  # pylint: disable=invalid-unary-operand-type
+        if self.loss_config.use_pointer_nets and self.loss_config.pointer_nets_type == C.POINTER_NET_SUMMARY \
+                and self.loss_config.use_coverage_loss:
+            coverage_loss = mx.sym.min(mx.sym.concat(attention, coverage, dim=1), axis=1)
+            total_loss = ce_loss + self.loss_config.coverage_loss_weight * coverage_loss
+        else:
+            total_loss = ce_loss
+        return [mx.sym.make_loss(total_loss, normalization=normalization, name="PN_CE_Loss"),
+                mx.sym.BlockGrad(softmax_probs, name=C.SOFTMAX_NAME)]
 
     def create_metric(self) -> "CrossEntropyMetric":
         return CrossEntropyMetric(self.loss_config)

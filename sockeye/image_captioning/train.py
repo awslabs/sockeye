@@ -226,7 +226,11 @@ def create_model_config(args: argparse.Namespace,
     config_loss = loss.LossConfig(name=args.loss,
                                   vocab_size=vocab_target_size,
                                   normalization_type=args.loss_normalization_type,
-                                  label_smoothing=args.label_smoothing)
+                                  label_smoothing=args.label_smoothing,
+                                  use_pointer_nets=False,
+                                  use_coverage_loss=False,
+                                  coverage_loss_weight=0,
+                                  pointer_nets_type=C.POINTER_NET_SUMMARY)
 
     model_config = model.ModelConfig(config_data=config_data,
                                      vocab_source_size=0,
@@ -384,7 +388,10 @@ def train(args: argparse.Namespace):
                     mxmonitor_pattern=args.monitor_pattern,
                     mxmonitor_stat_func=args.monitor_stat_func,
                     allow_missing_parameters=args.allow_missing_params,
-                    existing_parameters=args.params)
+                    existing_parameters=args.params,
+                    use_pointer_nets=False,
+                    max_oov_words=C.MAX_OOV_WORDS,
+                    pointer_nets_type=C.POINTER_NET_SUMMARY)
 
 
 if __name__ == "__main__":

@@ -153,8 +153,9 @@ class ImageCaptioner(Translator):
             image_paths[j] = path
             # Preprocess constraints
             if trans_input.constraints is not None:
-                raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
-                                      trans_input.constraints]
+                raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target, use_pointer_nets=False,
+                                                         max_oov_words=1, point_nets_type=C.POINTER_NET_SUMMARY)
+                                      for phrase in trans_input.constraints]
 
         # Read data and zero pad if necessary
         images = self.data_loader(image_paths)

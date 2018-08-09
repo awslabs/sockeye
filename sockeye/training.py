@@ -65,6 +65,7 @@ class TrainingModel(model.SockeyeModel):
                  provide_label: List[mx.io.DataDesc],
                  default_bucket_key: Tuple[int, int],
                  bucketing: bool,
+                 batch_size: Optional[int],
                  gradient_compression_params: Optional[Dict[str, Any]] = None,
                  fixed_param_names: Optional[List[str]] = None) -> None:
 
@@ -74,6 +75,7 @@ class TrainingModel(model.SockeyeModel):
         self.fixed_param_names = fixed_param_names
         self._bucketing = bucketing
         self._gradient_compression_params = gradient_compression_params
+        self.batch_size = batch_size
         self._initialize(provide_data, provide_label, default_bucket_key)
         self._monitor = None  # type: Optional[mx.monitor.Monitor]
 
@@ -85,16 +87,25 @@ class TrainingModel(model.SockeyeModel):
         Initializes model components, creates training symbol and module, and binds it.
         """
         source = mx.sym.Variable(C.SOURCE_NAME)
+        if self.config.use_pointer_nets and self.config.pointer_net_type == C.POINTER_NET_SUMMARY:
+            source_oov = mx.sym.Variable(C.SOURCE_NAME)
+            # since the source vector contains ids for OOV words, clip them to max vocab size
+            # here vocab_size - 1 corresponds to UNK ID
+            source = mx.sym.clip(source_oov, a_min=0, a_max=self.config.config_embed_source.vocab_size-1)
+
         source_words = source.split(num_outputs=self.config.config_embed_source.num_factors,
                                     axis=2, squeeze_axis=True)[0]
-
+        source_length = utils.compute_lengths(source_words)
+        target = mx.sym.Variable(C.TARGET_NAME)
+        if self.config.use_pointer_nets and self.config.pointer_net_type == C.POINTER_NET_SUMMARY:
+            # since the target vector contains ids for OOV words, clip them to max vocab size
+            # here vocab_size - 1 corresponds to UNK ID
+            target = mx.sym.clip(target, a_min=0, a_max=self.config.config_embed_source.vocab_size - 1)
+        target_length = utils.compute_lengths(target)
+        labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
 
         self.model_loss = loss.get_loss(self.config.config_loss)
 
-        source_length = utils.compute_lengths(source_words)
-        target = mx.sym.Variable(C.TARGET_NAME)
-        target_length = utils.compute_lengths(target)
-        labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
         data_names = [C.SOURCE_NAME, C.TARGET_NAME]
         label_names = [C.TARGET_LABEL_NAME]
 
@@ -132,14 +143,14 @@ class TrainingModel(model.SockeyeModel):
                                                            source_embed_seq_len)
 
             # decoder
-            target_decoded_and_attention = self.decoder.decode_sequence(source_encoded,
+            target_decoded_and_context = self.decoder.decode_sequence(source_encoded,
                                                                         source_encoded_length,
                                                                         source_encoded_seq_len,
                                                                         target_embed,
                                                                         target_embed_length,
                                                                         target_embed_seq_len)
             # target_decoded: (batch-size, target_len, decoder_depth)
-            target_decoded = target_decoded_and_attention[0]
+            target_decoded = target_decoded_and_context[0]
 
             # source_encoded = mx.sym.Custom(op_type="PrintValue", data=source_encoded, print_name="SOURCE")
             # source_encoded_length = mx.sym.Custom(op_type="PrintValue", data=source_encoded_length, print_name="SOURCE LEN")
@@ -160,12 +171,77 @@ class TrainingModel(model.SockeyeModel):
                     # target_embed: (batch, targ max len, embedding) -> (batch * targ max len, embedding)
                     target_embed = mx.sym.reshape(data=target_embed, shape=(-3, 0))
 
-                    context, attention = target_decoded_and_attention[1:]
+                    context, attention = target_decoded_and_context[1:]
 
                     # context: (batch_size * trg_seq_len, encoder_num_hidden)
                     context = mx.sym.reshape(data=context, shape=(-3, 0))
                     attention = mx.sym.reshape(data=attention, shape=(-3, 0))
 
+                if self.config.pointer_net_type == C.POINTER_NET_SUMMARY:
+                    # context: (batch-size, target_len, encoder_num_hidden)
+                    context = target_decoded_and_context[1]
+                    # attention: (batch-size, target_len, att_len)
+                    attention = target_decoded_and_context[2]
+                    # coverage: (batch-size, target_len, att_len)
+                    coverage = target_decoded_and_context[3]
+                    # target_embed: (batch_size * target_seq_len, target_embed_len)
+                    target_embed = target_decoded_and_context[4]
+
+                    # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
+                    target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
+                    # context: (batch_size * trg_seq_len, encoder_num_hidden)
+                    context = mx.sym.reshape(data=context, shape=(-3, 0))
+                    # attention: (batch_size * target_seq_len, att_len)
+                    attention = mx.sym.reshape(data=attention, shape=(-3, 0))
+                    # coverage: (batch_size * target_seq_len, att_len)
+                    coverage = mx.sym.reshape(data=coverage, shape=(-3, 0))
+                    # target_embed: (batch_size * target_seq_len, target_embed_len)
+                    target_embed = mx.sym.reshape(data=target_embed, shape=(-3, -1))
+
+                    batch_size = self.batch_size * self.config.config_data.max_seq_len_target
+                    max_seq_len_source = self.config.config_data.max_seq_len_source
+                    max_seq_len_target = self.config.config_data.max_seq_len_target
+                    ext_vocab_size = self.config.config_embed_source.vocab_size + self.config.max_oov_words
+
+                    # the transformer attention is calculated using multiple attention heads, so only the last set of
+                    # attention values are considered
+                    # total_attn_len = transformer_num_heads * target_len
+                    if type(self.config.config_decoder).__name__ == 'TransformerConfig':
+                        attention_reverse = mx.sym.reverse(attention, axis=0)
+                        attention = mx.sym.slice_like(data=attention_reverse, shape_like=target_decoded, axes=0)
+                        attention = mx.sym.reverse(attention, axis=0)
+
+                    # prob_vocab: (batch_size * target_seq_len, ext_vocab_size)
+                    # prob_source: (batch_size * target_seq_len, source_len)
+                    prob_gen, prob_vocab, prob_source = self.output_layer(target_decoded, context=context,
+                                                                          attention=attention,
+                                                                          target_embed=target_embed)
+
+                    # to correctly add source word probabilities based on the source word indices in the vocabulary
+                    # generate corresponding indices matrix
+                    # dim_range: (batch_size * max_target_len, max_source_len)
+                    dim_range = mx.sym.tile(mx.sym.reshape(mx.sym.arange(start=0, stop=batch_size), shape=(-1, 1)),
+                                            reps=(1, max_seq_len_source))
+                    # reshape indices like source probability matrix
+                    dim_val = mx.sym.slice_like(data=dim_range, shape_like=prob_source)
+                    ext_source = mx.sym.tile(mx.sym.squeeze(source_oov), reps=(max_seq_len_target, 1))
+                    ext_source = mx.sym.slice_like(data=ext_source, shape_like=prob_source)
+                    # indices: (2, batch_size * target_seq_len, source_seq_len)
+                    indices = mx.sym.stack(dim_val, ext_source, axis=0)
+
+                    # ext_prob_source: (batch_size * target_seq_len, ext_vocab_size)
+                    ext_prob_source = mx.sym.scatter_nd(data=prob_source, indices=indices,
+                                                        shape=(batch_size, ext_vocab_size))
+                    # ext_prob_vocab: (batch_size * target_seq_len, ext_vocab_size)
+                    ext_prob_vocab = mx.sym.concat(prob_vocab, mx.sym.slice_axis(mx.sym.zeros_like(prob_vocab), axis=1,
+                                                                                 begin=0,
+                                                                                 end=self.config.max_oov_words))
+                    ext_prob_source = mx.sym.slice_like(data=ext_prob_source, shape_like=ext_prob_vocab)
+
+                    # softmax_probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
+                    softmax_probs = ext_prob_vocab.__add__(ext_prob_source)
+
+                if self.config.pointer_net_type != C.POINTER_NET_SUMMARY:
                     # softmax_probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
                     softmax_probs = self.output_layer(target_decoded, attention=attention, context=context, target_embed=target_embed)
 
@@ -471,6 +547,9 @@ class EarlyStoppingTrainer:
             metrics: List[str],
             checkpoint_frequency: int,
             max_num_not_improved: int,
+            use_pointer_nets: bool,
+            max_oov_words: int,
+            pointer_nets_type: str,
             min_samples: Optional[int] = None,
             max_samples: Optional[int] = None,
             min_updates: Optional[int] = None,
@@ -497,6 +576,9 @@ class EarlyStoppingTrainer:
 
         :param max_num_not_improved: Stop training if early_stopping_metric did not improve for this many checkpoints.
                Use -1 to disable stopping based on early_stopping_metric.
+        :param use_pointer_nets: Flag to indicate if pointer networks are being used.
+        :param max_oov_words: Maximum size by which vocabulary can be extended. (used with pointer networks summary)
+        :param pointer_nets_type: Pointer Networks implementation to use.
         :param min_samples: Optional minimum number of samples.
         :param max_samples: Optional maximum number of samples.
         :param min_updates: Optional minimum number of update steps.
@@ -543,7 +625,9 @@ class EarlyStoppingTrainer:
 
         process_manager = None
         if decoder is not None:
-            process_manager = DecoderProcessManager(self.model.output_dir, decoder=decoder)
+            process_manager = DecoderProcessManager(self.model.output_dir, decoder=decoder,
+                                                    use_pointer_nets=use_pointer_nets, max_oov_words=max_oov_words,
+                                                    pointer_nets_type=pointer_nets_type)
 
         if mxmonitor_pattern is not None:
             self.model.install_monitor(mxmonitor_pattern, mxmonitor_stat_func)
@@ -1145,12 +1229,18 @@ class DecoderProcessManager(object):
 
     def __init__(self,
                  output_folder: str,
-                 decoder: checkpoint_decoder.CheckpointDecoder) -> None:
+                 decoder: checkpoint_decoder.CheckpointDecoder,
+                 max_oov_words: int,
+                 use_pointer_nets: bool,
+                 pointer_nets_type: str) -> None:
         self.output_folder = output_folder
         self.decoder = decoder
         self.ctx = mp.get_context('spawn')  # type: ignore
         self.decoder_metric_queue = self.ctx.Queue()
         self.decoder_process = None  # type: Optional[mp.Process]
+        self.use_pointer_nets = use_pointer_nets
+        self.max_oov_words = max_oov_words
+        self.pointer_nets_type = pointer_nets_type
 
     def start_decoder(self, checkpoint: int):
         """
@@ -1161,7 +1251,9 @@ class DecoderProcessManager(object):
         assert self.decoder_process is None
         output_name = os.path.join(self.output_folder, C.DECODE_OUT_NAME % checkpoint)
         self.decoder_process = self.ctx.Process(target=_decode_and_evaluate,
-                                                args=(self.decoder, checkpoint, output_name, self.decoder_metric_queue))
+                                                args=(self.decoder, checkpoint, output_name, self.decoder_metric_queue,
+                                                      self.max_oov_words, self.use_pointer_nets,
+                                                      self.pointer_nets_type))
         self.decoder_process.name = 'Decoder-%d' % checkpoint
         logger.info("Starting process: %s", self.decoder_process.name)
         self.decoder_process.start()
@@ -1200,10 +1292,15 @@ class DecoderProcessManager(object):
 def _decode_and_evaluate(decoder: checkpoint_decoder.CheckpointDecoder,
                          checkpoint: int,
                          output_name: str,
-                         queue: mp.Queue):
+                         queue: mp.Queue,
+                         max_oov_words: int,
+                         use_pointer_nets: Optional[bool] = False,
+                         pointer_nets_type: Optional[str] = C.POINTER_NET_SUMMARY):
     """
     Decodes and evaluates using given checkpoint_decoder and puts result in the queue,
     indexed by the checkpoint.
     """
-    metrics = decoder.decode_and_evaluate(checkpoint, output_name)
+    metrics = decoder.decode_and_evaluate(use_pointer_nets=use_pointer_nets, max_oov_words=max_oov_words,
+                                          pointer_nets_type=pointer_nets_type,
+                                          checkpoint=checkpoint, output_name=output_name)
     queue.put((checkpoint, metrics))

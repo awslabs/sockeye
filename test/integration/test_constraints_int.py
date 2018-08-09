@@ -82,4 +82,7 @@ def test_constraints(train_params: str,
                             work_dir=data['work_dir'],
                             use_prepared_data=False,
                             restrict_lexicon=False,
-                            use_target_constraints=True)
+                            use_target_constraints=True,
+                            use_pointer_nets=False,
+                            max_oov_words=1,
+                            pointer_nets_type=C.POINTER_NET_SUMMARY)

@@ -57,11 +57,17 @@ class CheckpointDecoderImageModel(CheckpointDecoder):
         self.use_feature_loader = use_feature_loader
 
     def decode_and_evaluate(self,
+                            use_pointer_nets: bool,
+                            max_oov_words: int,
+                            pointer_nets_type: str,
                             checkpoint: Optional[int] = None,
                             output_name: str = os.devnull) -> Dict[str, float]:
         """
         Decodes data set and evaluates given a checkpoint.
 
+        :param use_pointer_nets: Flag to indicate if pointer network is enabled(not available with captioning as of now)
+        :param max_oov_words: Maximum number of words to consider in the extended vocabulary (with pointer networks)
+        :param pointer_nets_type: Pointer Networks Implementation to use.
         :param checkpoint: Checkpoint to load parameters from.
         :param output_name: Filename to write translations to. Defaults to /dev/null.
         :return: Mapping of metric names to scores.

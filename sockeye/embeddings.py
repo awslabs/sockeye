@@ -134,7 +134,7 @@ def embeddings(args: argparse.Namespace):
         if not tokens:
             continue
         print("Input:", line.rstrip())
-        ids = tokens2ids(tokens, vocab)
+        ids = tokens2ids(tokens, vocab, use_pointer_nets=False, max_oov_words=0, point_nets_type=None)
         for token, token_id in zip(tokens, ids):
             print("%s id=%d" % (token, token_id))
             neighbours = nearest_k(sims, token_id, args.k, args.gamma)

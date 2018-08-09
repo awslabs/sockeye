@@ -405,6 +405,18 @@ def add_pointer_args(params):
                         type=int,
                         default=2,
                         help='Shortest word length that can be pointed to')
+    params.add_argument('--max-oov-words',
+                        type=int_greater_or_equal(1),
+                        default=50,
+                        help='maximum out-of-vocabulary words to consider. Default: %(default)s')
+    params.add_argument('--use-coverage-loss',
+                        action='store_true',
+                        default=False,
+                        help='Use coverage loss function. Default: %(default)s.')
+    params.add_argument('--coverage-loss-weight',
+                        type=float,
+                        default=0.01,
+                        help='weight of the coverage loss term for pointer networks')
 
 
 def add_bucketing_args(params):
@@ -1065,6 +1077,7 @@ def add_translate_cli_args(params):
     add_inference_args(params)
     add_device_args(params)
     add_logging_args(params)
+    add_pointer_args(params)
 
 
 def add_max_output_cli_args(params):

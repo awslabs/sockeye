@@ -49,7 +49,10 @@ def mock_translator(batch_size: int = 1,
                                                   target_vocab=None,
                                                   restrict_lexicon=None,
                                                   store_beam=None,
-                                                  strip_unknown_words=None)
+                                                  strip_unknown_words=None,
+                                                  use_pointer_nets=False,
+                                                  max_oov_words=0,
+                                                  pointer_nets_type=C.POINTER_NET_SUMMARY)
 
         # This is needed for returning the right number of source factors
         def mock_model():

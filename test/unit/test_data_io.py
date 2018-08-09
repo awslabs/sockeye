@@ -83,13 +83,13 @@ def test_get_bucket(buckets, length, expected_bucket):
     assert bucket == expected_bucket
 
 
-tokens2ids_tests = [(["a", "b", "c"], {"a": 1, "b": 0, "c": 300, C.UNK_SYMBOL: 12}, [1, 0, 300]),
-                    (["a", "x", "c"], {"a": 1, "b": 0, "c": 300, C.UNK_SYMBOL: 12}, [1, 12, 300])]
+tokens2ids_tests = [(["a", "b", "c"], {"a": 1, "b": 0, "c": 300, C.UNK_SYMBOL: 12}, [1, 0, 300], False, 50, None),
+                    (["a", "x", "c"], {"a": 1, "b": 0, "c": 300, C.UNK_SYMBOL: 12}, [1, 12, 300], False, 50, None)]
 
 
-@pytest.mark.parametrize("tokens, vocab, expected_ids", tokens2ids_tests)
-def test_tokens2ids(tokens, vocab, expected_ids):
-    ids = data_io.tokens2ids(tokens, vocab)
+@pytest.mark.parametrize("tokens, vocab, expected_ids, use_pointer_nets, max_oov_words, point_nets_type", tokens2ids_tests)
+def test_tokens2ids(tokens, vocab, expected_ids, use_pointer_nets, max_oov_words, point_nets_type):
+    ids = data_io.tokens2ids(tokens, vocab, use_pointer_nets, max_oov_words, point_nets_type)
     assert ids == expected_ids
 
 
@@ -105,14 +105,14 @@ def test_ids2strids(ids, expected_string):
     assert string == expected_string
 
 
-sequence_reader_tests = [(["1 2 3", "2", "", "2 2 2"], False, False, False),
-                         (["a b c", "c"], True, False, False),
-                         (["a b c", ""], True, False, False),
-                         (["a b c", "c"], True, True, True)]
+sequence_reader_tests = [(["1 2 3", "2", "", "2 2 2"], False, False, False, False, 50, None),
+                         (["a b c", "c"], True, False, False, False, 50, None),
+                         (["a b c", ""], True, False, False, False, 50, None),
+                         (["a b c", "c"], True, True, True, False, 50, None)]
 
 
-@pytest.mark.parametrize("sequences, use_vocab, add_bos, add_eos", sequence_reader_tests)
-def test_sequence_reader(sequences, use_vocab, add_bos, add_eos):
+@pytest.mark.parametrize("sequences, use_vocab, add_bos, add_eos, use_pointer_nets, max_oov_words, point_nets_type", sequence_reader_tests)
+def test_sequence_reader(sequences, use_vocab, add_bos, add_eos, use_pointer_nets, max_oov_words, point_nets_type):
     with TemporaryDirectory() as work_dir:
         path = os.path.join(work_dir, 'input')
         with open(path, 'w') as f:
@@ -121,20 +121,23 @@ def test_sequence_reader(sequences, use_vocab, add_bos, add_eos):
 
         vocabulary = vocab.build_vocab(sequences) if use_vocab else None
 
-        reader = data_io.SequenceReader(path, vocabulary=vocabulary, add_bos=add_bos, add_eos=add_eos)
+        reader = data_io.SequenceReader(path, vocabulary=vocabulary, add_bos=add_bos, add_eos=add_eos,
+                                        pointer_nets_type=C.POINTER_NET_SUMMARY)
 
         read_sequences = [s for s in reader]
         assert len(read_sequences) == len(sequences)
 
         if vocabulary is None:
             with pytest.raises(SockeyeError) as e:
-                _ = data_io.SequenceReader(path, vocabulary=vocabulary, add_bos=True)
+                _ = data_io.SequenceReader(path, vocabulary=vocabulary, add_bos=True,
+                                           pointer_nets_type=C.POINTER_NET_SUMMARY)
             assert str(e.value) == "Adding a BOS or EOS symbol requires a vocabulary"
 
             expected_sequences = [data_io.strids2ids(get_tokens(s)) if s else None for s in sequences]
             assert read_sequences == expected_sequences
         else:
-            expected_sequences = [data_io.tokens2ids(get_tokens(s), vocabulary) if s else None for s in sequences]
+            expected_sequences = [data_io.tokens2ids(get_tokens(s), vocabulary, use_pointer_nets=use_pointer_nets,
+                                                     max_oov_words=max_oov_words, point_nets_type=point_nets_type) if s else None for s in sequences]
             if add_bos:
                 expected_sequences = [[vocabulary[C.BOS_SYMBOL]] + s if s else None for s in expected_sequences]
             if add_eos:
@@ -459,6 +462,9 @@ def test_get_training_data_iters():
     test_line_count_empty = 0
     test_max_length = 30
     batch_size = 5
+    use_pointer_nets = False
+    max_oov_words = 50
+    point_nets_type = C.POINTER_NET_SUMMARY
     with tmp_digits_dataset("tmp_corpus",
                             train_line_count, train_max_length - C.SPACE_FOR_XOS,
                             dev_line_count, dev_max_length - C.SPACE_FOR_XOS,
@@ -486,7 +492,10 @@ def test_get_training_data_iters():
             max_seq_len_source=train_max_length,
             max_seq_len_target=train_max_length,
             bucketing=True,
-            bucket_width=10)
+            bucket_width=10,
+            use_pointer_nets=use_pointer_nets,
+            max_oov_words=max_oov_words,
+            pointer_nets_type=point_nets_type)
         assert isinstance(train_iter, data_io.ParallelSampleIter)
         assert isinstance(val_iter, data_io.ParallelSampleIter)
         assert isinstance(config_data, data_io.DataConfig)
@@ -565,7 +574,12 @@ def test_get_training_data_iters_with_pointer_labels():
                                                                                        max_seq_len_source=train_max_length,
                                                                                        max_seq_len_target=train_max_length,
                                                                                        bucketing=True,
-                                                                                       bucket_width=10)
+                                                                                       bucket_width=10,
+                                                                                       use_pointer_nets=True,
+                                                                                       max_oov_words=10,
+                                                                                       pointer_nets_type=C.POINTER_NET_SUMMARY)
+
+
 
         assert isinstance(train_iter, data_io.ParallelSampleIter)
         assert len(train_iter.label_names) == 1

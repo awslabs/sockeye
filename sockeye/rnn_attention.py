@@ -760,7 +760,7 @@ class MlpCovAttention(MlpAttention):
                  input_previous_word: bool,
                  num_hidden: int,
                  layer_normalization: bool = False,
-                 config_coverage: Optional[coverage.CoverageConfig] = None,
+                 config_coverage: coverage.CoverageConfig = None,
                  prefix: str = C.ATTENTION_PREFIX,
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__(input_previous_word=input_previous_word,

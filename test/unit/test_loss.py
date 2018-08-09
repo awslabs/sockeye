@@ -21,7 +21,9 @@ import sockeye.model
 
 
 def test_cross_entropy_loss():
-    config = sockeye.loss.LossConfig(name=C.CROSS_ENTROPY, vocab_size=4, normalization_type=C.LOSS_NORM_BATCH)
+    config = sockeye.loss.LossConfig(name=C.CROSS_ENTROPY, vocab_size=4, normalization_type=C.LOSS_NORM_BATCH,
+                                     use_pointer_nets=False, use_coverage_loss=False, coverage_loss_weight=0.01,
+                                     pointer_nets_type=C.POINTER_NET_SUMMARY)
     loss = sockeye.loss.get_loss(config)
     assert isinstance(loss, sockeye.loss.CrossEntropyLoss)
 
@@ -69,7 +71,11 @@ def test_smoothed_cross_entropy_loss():
     config = sockeye.loss.LossConfig(name=C.CROSS_ENTROPY,
                                      vocab_size=4,
                                      normalization_type=C.LOSS_NORM_BATCH,
-                                     label_smoothing=0.5)
+                                     label_smoothing=0.5,
+                                     use_pointer_nets=False,
+                                     use_coverage_loss=False,
+                                     coverage_loss_weight=0.01,
+                                     pointer_nets_type=C.POINTER_NET_SUMMARY)
     loss = sockeye.loss.get_loss(config)
     assert isinstance(loss, sockeye.loss.CrossEntropyLoss)
 
@@ -115,7 +121,11 @@ def test_smoothed_cross_entropy_loss():
 
 def test_pointer_net_cross_entropy_loss():
     config = sockeye.loss.LossConfig(name=C.POINTER_NET_CROSS_ENTROPY, vocab_size=3,
-                                     normalization_type=C.LOSS_NORM_BATCH)
+                                     normalization_type=C.LOSS_NORM_BATCH,
+                                     use_pointer_nets=True,
+                                     use_coverage_loss=False,
+                                     coverage_loss_weight=0.01,
+                                     pointer_nets_type=C.POINTER_NET_RNN)
     loss = sockeye.loss.get_loss(config)
     assert isinstance(loss, sockeye.loss.PointerNetsCrossEntropyLoss)
 
@@ -159,6 +169,74 @@ def test_pointer_net_cross_entropy_loss():
     assert np.isclose(sum(grad[3][:]), grad[3][3])
 
 
+def test_pointer_net_cross_entropy_loss_with_coverage():
+    config = sockeye.loss.LossConfig(name=C.POINTER_NET_CROSS_ENTROPY, vocab_size=3,
+                                     normalization_type=C.LOSS_NORM_BATCH,
+                                     use_pointer_nets=True,
+                                     use_coverage_loss=True,
+                                     coverage_loss_weight=0.01,
+                                     pointer_nets_type=C.POINTER_NET_SUMMARY)
+    loss = sockeye.loss.get_loss(config)
+    assert isinstance(loss, sockeye.loss.PointerNetsCrossEntropyLoss)
+
+    logits = mx.sym.Variable("probs")
+    labels = mx.sym.Variable("labels")
+    attention = mx.sym.Variable("attention")
+    coverage = mx.sym.Variable("coverage")
+
+    sym = mx.sym.Group(loss.get_loss(logits, labels, attention, coverage))
+
+    probs_np = mx.nd.array([[0.1, 0.2, 0.3, 0.4],
+                            [0.35, 0.2, 0.15, 0.3],
+                            [0.3, 0.3, 0.3, 0.1],
+                            [0.25, 0.25, 0.25, 0.25]])
+    labels_np = mx.nd.array([1, 0, 2, 3])  # C.PAD_ID == 0
+    attention_np = mx.nd.array([[0.1, 0.2, 0.1, 0.15],
+                            [0.35, 0.2, 0.25, 0.35],
+                            [0.2, 0.3, 0.4, 0.15],
+                            [0.15, 0.2, 0.25, 0.2]])
+    coverage_np = mx.nd.array([[0.3, 0.1, 0.4, 0.2],
+                            [0.25, 0.3, 0.15, 0.2],
+                            [0.35, 0.4, 0.2, 0.1],
+                            [0.15, 0.25, 0.1, 0.35]])
+
+    _, loss_shapes, _ = (sym.infer_shape(probs=probs_np.shape,
+                                         labels=labels_np.shape,
+                                         attention=attention_np.shape,
+                                         coverage=coverage_np.shape))
+
+    assert loss_shapes[0] == (probs_np.shape[0],)
+    assert loss_shapes[1] == probs_np.shape
+
+    executor = sym.simple_bind(ctx=mx.cpu(),
+                               probs=probs_np.shape,
+                               labels=labels_np.shape,
+                               attention=attention_np.shape,
+                               coverage=coverage_np.shape)
+
+    executor.arg_dict["probs"][:] = probs_np
+    executor.arg_dict["labels"][:] = labels_np
+    executor.arg_dict["attention"][:] = attention_np
+    executor.arg_dict["coverage"][:] = coverage_np
+
+    output = executor.forward(is_train=True)
+    loss = output[0].asnumpy()
+    softmax_probs = output[1].asnumpy()
+
+    assert softmax_probs.shape == probs_np.shape
+    assert loss.shape == labels_np.shape
+
+    assert np.isclose(loss, [1.61044, 1.0513221, 1.20497, 1.38729]).all()
+
+    executor.backward()
+
+    grad = executor.grad_dict["probs"].asnumpy()
+    assert np.isclose(sum(grad[0][:]), grad[0][1])
+    assert np.isclose(sum(grad[1][:]), grad[1][0])
+    assert np.isclose(sum(grad[2][:]), grad[2][2])
+    assert np.isclose(sum(grad[3][:]), grad[3][3])
+
+
 
 @pytest.mark.parametrize("preds, labels, normalization_type, label_smoothing, expected_value",
                          [(mx.nd.array([[0.0, 0.2, 0.8],
@@ -180,7 +258,11 @@ def test_cross_entropy_metric(preds, labels, normalization_type, label_smoothing
     config = sockeye.loss.LossConfig(name=C.CROSS_ENTROPY,
                                      vocab_size=preds.shape[1],
                                      normalization_type=normalization_type,
-                                     label_smoothing=label_smoothing)
+                                     label_smoothing=label_smoothing,
+                                     use_pointer_nets=False,
+                                     use_coverage_loss=False,
+                                     coverage_loss_weight=0.01,
+                                     pointer_nets_type=C.POINTER_NET_SUMMARY)
     metric = sockeye.loss.CrossEntropyMetric(config)
     metric.update([labels], [preds])
     name, value = metric.get()

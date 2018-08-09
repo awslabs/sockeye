@@ -115,6 +115,9 @@ class CheckpointDecoder:
                     context)
 
     def decode_and_evaluate(self,
+                            use_pointer_nets: bool,
+                            max_oov_words: int,
+                            pointer_nets_type: str,
                             checkpoint: Optional[int] = None,
                             output_name: str = os.devnull) -> Dict[str, float]:
         """
@@ -122,6 +125,9 @@ class CheckpointDecoder:
 
         :param checkpoint: Checkpoint to load parameters from.
         :param output_name: Filename to write translations to. Defaults to /dev/null.
+        :param use_pointer_nets: Flag to indicate if pointer network is enabled
+        :param max_oov_words: Maximum number of words to consider in the extended vocabulary (with pointer networks)
+        :param pointer_nets_type: Pointer Networks implementation to use.
         :return: Mapping of metric names to scores.
         """
         models, source_vocabs, target_vocab = inference.load_models(
@@ -143,7 +149,10 @@ class CheckpointDecoder:
                                           source_vocabs=source_vocabs,
                                           target_vocab=target_vocab,
                                           restrict_lexicon=None,
-                                          store_beam=False)
+                                          store_beam=False,
+                                          use_pointer_nets=use_pointer_nets,
+                                          max_oov_words=max_oov_words,
+                                          pointer_nets_type=pointer_nets_type)
         trans_wall_time = 0.0
         translations = []
         with data_io.smart_open(output_name, 'w') as output:

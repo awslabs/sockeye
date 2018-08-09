@@ -222,30 +222,35 @@ class InferenceModel(model.SockeyeModel):
             # decoder
             # target_decoded: (batch_size, decoder_depth)
             (target_decoded,
-             attention_context,
+             context,
              attention_probs,
              states) = self.decoder.decode_step(decode_step,
                                                 target_embed_prev,
                                                 source_encoded_seq_len,
                                                 *states)
-            if self.decoder_return_logit_inputs:
-                # skip output layer in graph
-                outputs = mx.sym.identity(target_decoded, name=C.LOGIT_INPUTS_NAME)
+
+            if self.config.use_pointer_nets and self.config.pointer_net_type == C.POINTER_NET_SUMMARY:
+                prob_vocab, prob_source = self.output_layer(target_decoded, context=context, attention=attention_probs,
+                                                            target_embed=target_embed_prev)
+
             else:
-                if not self.config.use_pointer_nets:
-                    # logits: (batch_size, target_vocab_size)
-                    logits = self.output_layer(target_decoded)
-                    if self.softmax_temperature is not None:
-                        logits = logits / self.softmax_temperature
-                    outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
+                if self.decoder_return_logit_inputs:
+                    # skip output layer in graph
+                    outputs = mx.sym.identity(target_decoded, name=C.LOGIT_INPUTS_NAME)
                 else:
-#                    target_embed_prev = mx.sym.Custom(op_type="PrintValue", data=target_embed_prev, print_name="TARG")
-                    outputs = self.output_layer(target_decoded, attention=attention_probs,
-                                                context=attention_context, target_embed=target_embed_prev)
+                        # logits: (batch_size, target_vocab_size)
+                        logits = self.output_layer(target_decoded)
+                        if self.softmax_temperature is not None:
+                            logits = logits / self.softmax_temperature
+                        outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
 
             data_names = [C.TARGET_NAME] + state_names
             label_names = []  # type: List[str]
-            return mx.sym.Group([outputs, attention_probs] + states), data_names, label_names
+
+            if self.config.use_pointer_nets:
+                return mx.sym.Group([prob_vocab, prob_source, attention_probs] + states), data_names, label_names
+            else:
+                return mx.sym.Group([outputs, attention_probs] + states), data_names, label_names
 
         # pylint: disable=not-callable
         default_bucket_key = (self.max_input_length, self.get_max_output_length(self.max_input_length))
@@ -308,7 +313,8 @@ class InferenceModel(model.SockeyeModel):
     def run_decoder(self,
                     prev_word: mx.nd.NDArray,
                     bucket_key: Tuple[int, int],
-                    model_state: 'ModelState') -> Tuple[mx.nd.NDArray, mx.nd.NDArray, 'ModelState']:
+                    model_state: 'ModelState') -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray,
+                                                        'ModelState']:
         """
         Runs forward pass of the single-step decoder.
 
@@ -320,8 +326,12 @@ class InferenceModel(model.SockeyeModel):
             bucket_key=bucket_key,
             provide_data=self._get_decoder_data_shapes(bucket_key))
         self.decoder_module.forward(data_batch=batch, is_train=False)
-        out, attention_probs, *model_state.states = self.decoder_module.get_outputs()
-        return out, attention_probs, model_state
+        if self.config.use_pointer_nets and self.config.pointer_net_type == C.POINTER_NET_SUMMARY:
+            prob_gen, vocab_out, source_out, attention_probs, *model_state.states = self.decoder_module.get_outputs()
+            return vocab_out, source_out, attention_probs, model_state
+        else:
+            out, attention_probs, *model_state.states = self.decoder_module.get_outputs()
+            return out, mx.nd.zeros_like(out), attention_probs, model_state
 
     @property
     def training_max_seq_len_source(self) -> int:
@@ -973,6 +983,9 @@ class Translator:
                  models: List[InferenceModel],
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
+                 use_pointer_nets: bool,
+                 max_oov_words: int,
+                 pointer_nets_type: str,
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
                  avoid_list: Optional[str] = None,
                  store_beam: bool = False,
@@ -1006,12 +1019,18 @@ class Translator:
         else:
             self.buckets_source = [self.max_input_length]
 
+        self.max_oov_words = max_oov_words
+        self.pointer_nets_type = pointer_nets_type
         if self.use_pointer_nets:
             self.num_pointed = 0
             self.total_tokens = 0
-
-            # pad_dist should have one fewer columns than scores
-            self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target) + self.max_input_length - 1), val=np.inf, ctx=self.context)
+            if self.pointer_nets_type == C.POINTER_NET_SUMMARY:
+                self.pad_dist = mx.nd.full(
+                    (self.batch_size * self.beam_size, len(self.vocab_target) + self.max_oov_words),
+                    val=np.inf, ctx=self.context)
+            else:
+                # pad_dist should have one fewer columns than scores
+                self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target) + self.max_input_length - 1), val=np.inf, ctx=self.context)
         else:
             self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target) - 1), val=np.inf, ctx=self.context)
 
@@ -1024,6 +1043,7 @@ class Translator:
         self.offset = mx.nd.array(np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size),
                                   dtype='int32', ctx=self.context)
 
+        ### check for pointer nets summary
         self._update_scores = UpdateScores()
         self._update_scores.initialize(ctx=self.context)
         self._update_scores.hybridize()
@@ -1053,7 +1073,9 @@ class Translator:
         if avoid_list is not None:
             self.global_avoid_trie = constrained.AvoidTrie()
             for phrase in data_io.read_content(avoid_list):
-                phrase_ids = data_io.tokens2ids(phrase, self.vocab_target)
+                phrase_ids = data_io.tokens2ids(phrase, self.vocab_target, use_pointer_nets=self.use_pointer_nets,
+                                                max_oov_words=self.max_oov_words,
+                                                point_nets_type=self.pointer_nets_type)
                 if self.unk_id in phrase_ids:
                     logger.warning("Global avoid phrase '%s' contains an %s; this may indicate improper preprocessing.", ' '.join(phrase), C.UNK_SYMBOL)
                 self.global_avoid_trie.add_phrase(phrase_ids)
@@ -1236,7 +1258,10 @@ class Translator:
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)
             max_output_lengths.append(self.models[0].get_max_output_length(data_io.get_bucket(num_tokens, self.buckets_source)))
-            source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
+            source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0],
+                                                           use_pointer_nets=self.use_pointer_nets,
+                                                           max_oov_words=self.max_oov_words,
+                                                           point_nets_type=self.pointer_nets_type)
 
             factors = trans_input.factors if trans_input.factors is not None else []
             num_factors = 1 + len(factors)
@@ -1246,14 +1271,23 @@ class Translator:
             for i, factor in enumerate(factors[:self.num_source_factors - 1], start=1):
                 # fill in as many factors as there are tokens
 
-                source[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
+                source[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i],
+                                                               use_pointer_nets=self.use_pointer_nets,
+                                                               max_oov_words=self.max_oov_words,
+                                                               point_nets_type=self.pointer_nets_type)[:num_tokens]
 
             if trans_input.constraints is not None:
-                raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
+                raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target,
+                                                         use_pointer_nets=self.use_pointer_nets,
+                                                         max_oov_words=self.max_oov_words,
+                                                         point_nets_type=self.pointer_nets_type) for phrase in
                                       trans_input.constraints]
 
             if trans_input.avoid_list is not None:
-                raw_avoid_list[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
+                raw_avoid_list[j] = [data_io.tokens2ids(phrase, self.vocab_target,
+                                                        use_pointer_nets=self.use_pointer_nets,
+                                                        max_oov_words=self.max_oov_words,
+                                                        point_nets_type=self.pointer_nets_type) for phrase in
                                      trans_input.avoid_list]
                 if any(self.unk_id in phrase for phrase in raw_avoid_list[j]):
                     logger.warning("Sentence %d: %s was found in the list of phrases to avoid; this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
@@ -1275,21 +1309,39 @@ class Translator:
         attention_matrix = translation.attention_matrix
 
         if self.use_pointer_nets:
-            self.num_pointed += sum(map(lambda x: x >= len(self.vocab_target), target_ids))
-            self.total_tokens += len(target_ids)
+            if self.pointer_nets_type == C.POINTER_NET_SUMMARY:
+                # in case of pointer nets (summary), regenerate the temporary dictionary for OOV source words for
+                # reverse mapping of predicted target ids
 
-            # There may be some out-of-bounds (OOB) words pointed to, so handle this with a dict
-            source_inv = dict((x, y) for x, y in enumerate(trans_input.tokens))
-            def id2str(word_id: int):
-                if word_id >= len(self.vocab_target):
-                    word_id = word_id - len(self.vocab_target) - 1
-                    if self.mark_pointed_words:
-                        return '[{}/{}]'.format(source_inv.get(word_id, 'OOB'), word_id)
+                self.num_pointed += sum(map(lambda x: x >= len(self.vocab_target), target_ids))
+                self.total_tokens += len(target_ids)
+                num_new_tokens = 0
+                vocab_size = len(self.vocab_target)
+                vocab_target_copy = dict(self.vocab_target)
+                for source_token in trans_input.tokens:
+                    if source_token not in vocab_target_copy and num_new_tokens < self.max_oov_words:
+                        vocab_target_copy[source_token] = vocab_size
+                        vocab_size = len(vocab_target_copy)
+                        num_new_tokens += 1
+                vocab_target_copy_inv = vocab.reverse_vocab(vocab_target_copy)
+                target_tokens = [vocab_target_copy_inv[target_id] if target_id in vocab_target_copy_inv
+                                 else C.UNK_SYMBOL for target_id in target_ids]
+            else:
+                self.num_pointed += sum(map(lambda x: x >= len(self.vocab_target), target_ids))
+                self.total_tokens += len(target_ids)
+
+                # There may be some out-of-bounds (OOB) words pointed to, so handle this with a dict
+                source_inv = dict((x, y) for x, y in enumerate(trans_input.tokens))
+                def id2str(word_id: int):
+                    if word_id >= len(self.vocab_target):
+                        word_id = word_id - len(self.vocab_target) - 1
+                        if self.mark_pointed_words:
+                            return '[{}/{}]'.format(source_inv.get(word_id, 'OOB'), word_id)
+                        else:
+                            return source_inv.get(word_id, 'OOB')
                     else:
-                        return source_inv.get(word_id, 'OOB')
-                else:
-                    return self.vocab_target_inv[word_id]
-            target_tokens = [id2str(target_id) for target_id in target_ids]
+                        return self.vocab_target_inv[word_id]
+                target_tokens = [id2str(target_id) for target_id in target_ids]
         else:
             target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
 
@@ -1347,8 +1399,10 @@ class Translator:
                      source_length: int,
                      states: List[ModelState],
                      models_output_layer_w: List[mx.nd.NDArray],
-                     models_output_layer_b: List[mx.nd.NDArray]) \
-            -> Tuple[mx.nd.NDArray, mx.nd.NDArray, List[ModelState]]:
+                     models_output_layer_b: List[mx.nd.NDArray],
+                     source: mx.nd.NDArray,
+                     batch_size:Optional[int],
+                     vocab_size: Optional[int]) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, List[ModelState]]:
         """
         Returns decoder predictions (combined from all models), attention scores, and updated states.
 
@@ -1366,14 +1420,50 @@ class Translator:
         # We use zip_longest here since we'll have empty lists when not using restrict_lexicon
         for model, out_w, out_b, state in itertools.zip_longest(
                 self.models, models_output_layer_w, models_output_layer_b, states):
-            decoder_outputs, attention_probs, state = model.run_decoder(prev_word, bucket_key, state)
-            # Compute logits and softmax with restricted vocabulary
-            if self.restrict_lexicon:
-                logits = model.output_layer(decoder_outputs, out_w, out_b)
-                probs = mx.nd.softmax(logits)
+            if self.use_pointer_nets and self.pointer_nets_type == C.POINTER_NET_SUMMARY:
+                # prob_vocab: (batch_size * target_seq_len, ext_vocab_size)
+                # prob_source: (batch_size * target_seq_len, source_len)
+                prob_vocab, prob_source, attention_probs, state = model.run_decoder(prev_word, bucket_key, state)
+
+                # weigh the attention and logit based probabilities using the pointer networks and add the probabilities
+                # for source words in the vocabulary, token generation and copying probabilities are added
+                # for source words that are out-of-vocabulary, token generation probability is zero
+                # for vocabulary words not in the source article, copying probability is zero
+                total_batch_size = batch_size * self.models[0].config.config_data.max_seq_len_target
+                max_seq_len_source = self.models[0].config.config_data.max_seq_len_source
+                max_seq_len_target = self.models[0].config.config_data.max_seq_len_target
+
+                # to correctly add source word probabilities based on the source word indices in the vocabulary
+                # generate corresponding indices matrix
+                # dim_range: (batch_size * max_target_len, max_source_len)
+                dim_range = mx.nd.tile(mx.nd.reshape(mx.nd.arange(start=0, stop=total_batch_size), shape=(-1, 1)),
+                                       reps=(1, max_seq_len_source)).as_in_context(self.context)
+                # reshape indices like source probability matrix
+                dim_val = mx.nd.slice_like(data=dim_range, shape_like=prob_source)
+                # indices: (2, batch_size * target_seq_len, source_seq_len)
+                indices = mx.nd.stack(dim_val, mx.nd.slice_like(
+                    data=mx.nd.tile(mx.nd.squeeze(source),
+                                    reps=(max_seq_len_target, 1)),
+                    shape_like=prob_source), axis=0)
+                # ext_prob_source: (batch_size * target_seq_len, ext_vocab_size)
+                ext_prob_source = mx.nd.scatter_nd(data=prob_source, indices=indices,
+                                                   shape=(total_batch_size, vocab_size + self.max_oov_words))
+                # ext_prob_vocab: (batch_size * target_seq_len, ext_vocab_size)
+                ext_prob_vocab = mx.nd.concat(prob_vocab, mx.nd.slice_axis(mx.nd.zeros_like(prob_vocab),
+                                                                           axis=1, begin=0, end=self.max_oov_words))
+                extend_prob_source = mx.nd.slice_like(data=ext_prob_source, shape_like=ext_prob_vocab)
+                # probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
+                probs = mx.nd.broadcast_add(ext_prob_vocab, extend_prob_source)
             else:
-                # Otherwise decoder outputs are already target vocab probs
-                probs = decoder_outputs
+                decoder_outputs, _, attention_probs, state = model.run_decoder(prev_word, bucket_key, state)
+
+            # Compute logits and softmax with restricted vocabulary
+                if self.restrict_lexicon:
+                    logits = model.output_layer(decoder_outputs, out_w, out_b)
+                    probs = mx.nd.softmax(logits)
+                else:
+                    # Otherwise decoder outputs are already target vocab probs
+                    probs = decoder_outputs
             model_probs.append(probs)
             model_attention_probs.append(attention_probs)
             model_states.append(state)
@@ -1469,7 +1559,7 @@ class Translator:
         models_output_layer_w = list()
         models_output_layer_b = list()
 
-        if self.use_pointer_nets:
+        if self.use_pointer_nets and self.pointer_nets_type != C.POINTER_NET_SUMMARY:
             # Trim the pad_dist to the right size for adding to `scores` later
             pad_dist = self.pad_dist[:,:len(self.vocab_target) + source_length - 1]
         else:
@@ -1535,7 +1625,10 @@ class Translator:
                                                                        source_length=source_length,
                                                                        states=model_states,
                                                                        models_output_layer_w=models_output_layer_w,
-                                                                       models_output_layer_b=models_output_layer_b)
+                                                                       models_output_layer_b=models_output_layer_b,
+                                                                       source=source,
+                                                                       batch_size=self.batch_size,
+                                                                       vocab_size=len(self.vocab_target))
 
             # print('TIMESTEP', t, 'MAX INPUT', 'THIS INPUT', source_len, self.max_input_length, 'VOCAB', len(self.vocab_target), 'SCORES', scores.shape, 'PAD', pad_dist.shape, 'finished', finished.shape, 'inactive', inactive.shape, 'accum', scores_accumulated.shape, 'inf', self.inf_array.shape)
 

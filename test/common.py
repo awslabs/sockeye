@@ -224,6 +224,9 @@ def run_train_translate(train_params: str,
                         dev_target_path: str,
                         test_source_path: str,
                         test_target_path: str,
+                        use_pointer_nets: bool,
+                        max_oov_words: int,
+                        pointer_nets_type: str,
                         train_source_factor_paths: Optional[List[str]] = None,
                         dev_source_factor_paths: Optional[List[str]] = None,
                         test_source_factor_paths: Optional[List[str]] = None,
@@ -246,6 +249,9 @@ def run_train_translate(train_params: str,
     :param dev_target_path: Path to the development target file.
     :param test_source_path: Path to the test source file.
     :param test_target_path: Path to the test target file.
+    :param use_pointer_nets: Flag to indicate if pointer networks are used.
+    :param max_oov_words: Maximum number of words by  which vocabulary is extended. (used with pointer networks)
+    :param pointer_nets_type: Pointer Networks implementation to use.
     :param train_source_factor_paths: Optional list of paths to training source factor files.
     :param dev_source_factor_paths: Optional list of paths to dev source factor files.
     :param test_source_factor_paths: Optional list of paths to test source factor files.
@@ -328,7 +334,9 @@ def run_train_translate(train_params: str,
                                                                   sample_size=sample_size,
                                                                   batch_size=2,
                                                                   beam_size=2)
-        cp_metrics = cp_decoder.decode_and_evaluate()
+        cp_metrics = cp_decoder.decode_and_evaluate(use_pointer_nets=use_pointer_nets,
+                                                    pointer_nets_type=pointer_nets_type,
+                                                    max_oov_words=max_oov_words)
         logger.info("Checkpoint decoder metrics: %s", cp_metrics)
 
         logger.info("Translating with parameters %s.", translate_params)

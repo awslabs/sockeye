@@ -15,10 +15,12 @@ import argparse
 import json
 import logging
 import os
+import copy
 from collections import Counter
 from contextlib import ExitStack
 from itertools import chain, islice
 from typing import Dict, Iterable, List, Optional, Tuple
+
 
 from . import constants as C
 from . import log
@@ -64,6 +66,8 @@ def build_vocab(data: Iterable[str], num_words: Optional[int] = None, min_count:
     :return: Word-to-id mapping.
     """
     vocab_symbols_set = set(C.VOCAB_SYMBOLS)
+    vocab_symbols_list = copy.deepcopy(C.VOCAB_SYMBOLS)
+
     raw_vocab = Counter(token for line in data for token in utils.get_tokens(line)
                         if token not in vocab_symbols_set)
     # For words with the same count, they will be ordered reverse alphabetically.
@@ -89,7 +93,11 @@ def build_vocab(data: Iterable[str], num_words: Optional[int] = None, min_count:
         pad_entries = []
         pad_to_multiple_log = "None"
 
-    word_to_id = {word: idx for idx, word in enumerate(chain(C.VOCAB_SYMBOLS, vocab, pad_entries))}
+    # remove UNK from vocab symbols list
+    vocab_symbols_list.remove(C.UNK_SYMBOL)
+    word_to_id = {word: idx for idx, word in enumerate(chain(vocab_symbols_list, vocab, pad_entries))}
+    # assign UNK symbol (vocab_size - 1) ID
+    word_to_id[C.UNK_SYMBOL] = len(word_to_id)
     logger.info("Vocabulary: types: %d/%d/%d/%d (initial/min_pruned/max_pruned/+special) " +
                 "[min_frequency=%d, max_num_types=%s, pad_to_multiple_of=%s]",
                 len(raw_vocab), len(pruned_vocab), len(vocab),

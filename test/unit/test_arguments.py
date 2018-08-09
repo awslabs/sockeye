@@ -39,6 +39,7 @@ from itertools import zip_longest
           pad_vocab_to_multiple_of=None,
           no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
           use_pointer_nets=False, pointer_nets_min_word_len=2, pointer_nets_type='rnn', pointer_nets_window_size=20,
+          max_oov_words=50, use_coverage_loss=False, coverage_loss_weight=0.01,
           monitor_pattern=None, monitor_stat_func='mx_default')),
 
     # short parameters
@@ -55,6 +56,7 @@ from itertools import zip_longest
           pad_vocab_to_multiple_of=None,
           no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
           use_pointer_nets=False, pointer_nets_min_word_len=2, pointer_nets_type='rnn', pointer_nets_window_size=20,
+          max_oov_words=50, use_coverage_loss=False, coverage_loss_weight=0.01,
           monitor_pattern=None, monitor_stat_func='mx_default'))
 ])
 def test_io_args(test_params, expected_params):
@@ -350,7 +352,9 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           num_samples_per_shard=1000000,
           seed=13,
           output='train_data',
-          use_pointer_nets=False, pointer_nets_min_word_len=2, pointer_nets_type='rnn', pointer_nets_window_size=20,
+          use_pointer_nets=False,
+          max_oov_words=50,
+          pointer_nets_type=C.POINTER_NET_RNN
           ))
 ])
 def test_tutorial_prepare_data_cli_args(test_params, expected_params):
@@ -374,7 +378,13 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           num_samples_per_shard=1000000,
           seed=13,
           output='prepared_data',
-          use_pointer_nets=False, pointer_nets_min_word_len=2, pointer_nets_type='rnn', pointer_nets_window_size=20,
+          use_pointer_nets=False,
+          pointer_nets_min_word_len=2,
+          pointer_nets_type='rnn',
+          pointer_nets_window_size=20,
+          max_oov_words=50,
+          use_coverage_loss=False,
+          coverage_loss_weight=0.01
           ))
 ])
 def test_prepare_data_cli_args(test_params, expected_params):

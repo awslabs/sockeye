@@ -52,7 +52,7 @@ COMMON_TRAINING_PARAMS = " --checkpoint-frequency 1000 --optimizer adam --initia
      " --max-updates 4000"
      " --gradient-clipping-type norm --gradient-clipping-threshold 10" + COMMON_TRAINING_PARAMS,
      "--beam-size 5 ",
-     True,
+     True, False, 1,
      1.03,
      0.98),
     ("Copy:chunking",
@@ -62,7 +62,7 @@ COMMON_TRAINING_PARAMS = " --checkpoint-frequency 1000 --optimizer adam --initia
      " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0"
      " --max-updates 5000" + COMMON_TRAINING_PARAMS,
      "--beam-size 5 --max-input-len 4",
-     False,
+     False, False, 1,
      1.01,
      0.99),
     ("Copy:word-based-batching:pruning",
@@ -71,8 +71,8 @@ COMMON_TRAINING_PARAMS = " --checkpoint-frequency 1000 --optimizer adam --initia
      " --batch-size 80 --batch-type word "
      " --max-updates 5000  "
      " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --layer-normalization" + COMMON_TRAINING_PARAMS,
-     "--beam-size 5 --batch-size 2 --beam-prune 1 --beam-search-stop first",
-     True,
+     "--beam-size 5 --batch-size 2 --beam-prune 1",
+     True, False, 1,
      1.01,
      0.99),
     ("Copy:transformer:lstm",
@@ -83,7 +83,7 @@ COMMON_TRAINING_PARAMS = " --checkpoint-frequency 1000 --optimizer adam --initia
      " --transformer-feed-forward-num-hidden 64 --transformer-activation-type gelu"
      " --batch-size 16 --batch-type sentence" + COMMON_TRAINING_PARAMS,
      "--beam-size 5",
-     False,
+     False, False, 1,
      1.01,
      0.99),
     ("Copy:lstm:transformer",
@@ -94,7 +94,7 @@ COMMON_TRAINING_PARAMS = " --checkpoint-frequency 1000 --optimizer adam --initia
      " --transformer-attention-heads 4 --transformer-model-size 32"
      " --transformer-feed-forward-num-hidden 64 --transformer-activation-type swish1" + COMMON_TRAINING_PARAMS,
      "--beam-size 5",
-     True,
+     True, False, 1,
      1.01,
      0.98),
     ("Copy:transformer:transformer",
@@ -104,7 +104,7 @@ COMMON_TRAINING_PARAMS = " --checkpoint-frequency 1000 --optimizer adam --initia
      " --transformer-feed-forward-num-hidden 64 --num-embed 32"
      " --batch-size 16 --batch-type sentence" + COMMON_TRAINING_PARAMS,
      "--beam-size 1",
-     False,
+     False, False, 1,
      1.02,
      0.98),
     ("Copy:cnn:cnn",
@@ -113,11 +113,12 @@ COMMON_TRAINING_PARAMS = " --checkpoint-frequency 1000 --optimizer adam --initia
      " --cnn-num-hidden 32 --cnn-positional-embedding-type fixed --cnn-project-qkv"
      " --batch-size 16 --batch-type sentence" + COMMON_TRAINING_PARAMS,
      "--beam-size 1",
-     True,
+     True, False, 1,
      1.04,
      0.98)
 ])
-def test_seq_copy(name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh):
+def test_seq_copy(name, train_params, translate_params, use_prepared_data, use_pointer_nets,
+                  max_oov_words, perplexity_thresh, bleu_thresh):
     """Task: copy short sequences of digits"""
     with tmp_digits_dataset("test_seq_copy.", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT,
                             _LINE_MAX_LENGTH, _TEST_LINE_COUNT, _TEST_LINE_COUNT_EMPTY, _TEST_MAX_LENGTH,
@@ -136,7 +137,10 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
                                                                     max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
                                                                     restrict_lexicon=True,
                                                                     work_dir=data['work_dir'],
-                                                                    seed=seed)
+                                                                    seed=seed,
+                                                                    use_pointer_nets=use_pointer_nets,
+                                                                    max_oov_words=max_oov_words,
+                                                                    pointer_nets_type=C.POINTER_NET_SUMMARY)
         logger.info("test: %s", name)
         logger.info("perplexity=%f, bleu=%f, bleu_restrict=%f chrf=%f", perplexity, bleu, bleu_restrict, chrf)
         assert perplexity <= perplexity_thresh
@@ -153,7 +157,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --max-updates 7000 "
      " --batch-size 16 --batch-type sentence" + COMMON_TRAINING_PARAMS,
      "--beam-size 5",
-     True, False,
+     True, False, False, 1,
      1.03,
      0.97),
     ("Sort:word-based-batching",
@@ -163,7 +167,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --max-updates 6000"
      " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0" + COMMON_TRAINING_PARAMS,
      "--beam-size 5",
-     False, False,
+     False, False, False, 1,
      1.03,
      0.97),
     ("Sort:transformer:lstm",
@@ -176,7 +180,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --transformer-attention-heads 4 --transformer-model-size 32"
      " --transformer-feed-forward-num-hidden 64 --transformer-activation-type gelu" + COMMON_TRAINING_PARAMS,
      "--beam-size 5",
-     True, False,
+     True, False, False, 1,
      1.03,
      0.97),
     ("Sort:lstm:transformer",
@@ -188,7 +192,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
      " --batch-size 16 --batch-type sentence" + COMMON_TRAINING_PARAMS,
      "--beam-size 5",
-     False, False,
+     False, False, False, 1,
      1.03,
      0.97),
     ("Sort:transformer:transformer",
@@ -199,7 +203,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
      " --transformer-feed-forward-num-hidden 64" + COMMON_TRAINING_PARAMS,
      "--beam-size 1",
-     True, False,
+     True, False, False, 1,
      1.03,
      0.97),
     ("Sort:transformer_with_source_factor",
@@ -211,7 +215,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --transformer-feed-forward-num-hidden 64"
      " --source-factors-num-embed 2" + COMMON_TRAINING_PARAMS,
      "--beam-size 1",
-     True, True,
+     True, True, False, 1,
      1.03,
      0.96),
     ("Sort:cnn:cnn",
@@ -220,12 +224,12 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --max-updates 6000"
      " --num-layers 3 --cnn-num-hidden 32 --cnn-positional-embedding-type fixed" + COMMON_TRAINING_PARAMS,
      "--beam-size 1",
-     False, False,
+     False, False, False, 1,
      1.05,
      0.94)
 ])
-def test_seq_sort(name, train_params, translate_params, use_prepared_data,
-                  use_source_factor, perplexity_thresh, bleu_thresh):
+def test_seq_sort(name, train_params, translate_params, use_prepared_data, use_source_factor,
+                  use_pointer_nets, max_oov_words, perplexity_thresh, bleu_thresh):
     """Task: sort short sequences of digits"""
     with tmp_digits_dataset("test_seq_sort.", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT, _LINE_MAX_LENGTH,
                             _TEST_LINE_COUNT, _TEST_LINE_COUNT_EMPTY, _TEST_MAX_LENGTH,
@@ -251,7 +255,10 @@ def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                                                                     max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
                                                                     restrict_lexicon=True,
                                                                     work_dir=data['work_dir'],
-                                                                    seed=seed)
+                                                                    seed=seed,
+                                                                    use_pointer_nets=use_pointer_nets,
+                                                                    max_oov_words=max_oov_words,
+                                                                    pointer_nets_type=C.POINTER_NET_SUMMARY)
         logger.info("test: %s", name)
         logger.info("perplexity=%f, bleu=%f, bleu_restrict=%f chrf=%f", perplexity, bleu, bleu_restrict, chrf)
         assert perplexity <= perplexity_thresh

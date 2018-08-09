@@ -76,7 +76,7 @@ def prepare_data(args: argparse.Namespace):
         pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
     aligner = None
-    if args.use_pointer_nets:
+    if args.use_pointer_nets and args.pointer_nets_type != C.POINTER_NET_SUMMARY:
         aligner = align.Aligner(source_vocabs[0], target_vocab,
                                 window_size=args.pointer_nets_window_size,
                                 min_word_length=args.pointer_nets_min_word_len)
@@ -95,7 +95,10 @@ def prepare_data(args: argparse.Namespace):
                          samples_per_shard=samples_per_shard,
                          min_num_shards=minimum_num_shards,
                          output_prefix=output_folder,
-                         aligner=aligner)
+                         aligner=aligner,
+                         use_pointer_nets=args.use_pointer_nets,
+                         max_oov_words=args.max_oov_words,
+                         pointer_nets_type=args.pointer_nets_type)
 
 
 if __name__ == "__main__":

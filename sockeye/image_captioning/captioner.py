@@ -78,7 +78,10 @@ def get_pretrained_caption_net(args: argparse.Namespace,
                                                 source_image_size=tuple(
                                                     args.feature_size),
                                                 source_root=args.source_root,
-                                                use_feature_loader=image_preextracted_features)
+                                                use_feature_loader=image_preextracted_features,
+                                                use_pointer_nets=False,
+                                                max_oov_words=C.MAX_OOV_WORDS,
+                                                pointer_nets_type=None)
     return translator
 
 

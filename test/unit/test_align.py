@@ -36,8 +36,10 @@ def test_generate_pointer_labels(src, trg, expected_labels):
     aligner = align.Aligner(vocab, vocab)
 
     # TODO: create test fixtures
-    source = tokens2ids(list(src.split()) + [eos_id], vocab)
-    target = tokens2ids([bos_id] + list(trg.split()), vocab)
+    source = tokens2ids(list(src.split()) + [eos_id], vocab, use_pointer_nets=False, max_oov_words=1,
+                        point_nets_type=C.POINTER_NET_SUMMARY)
+    target = tokens2ids([bos_id] + list(trg.split()), vocab, use_pointer_nets=False, max_oov_words=1,
+                        point_nets_type=C.POINTER_NET_SUMMARY)
     labels = target[1:] + [eos_id]
 
     new_labels = aligner.get_labels(source, target, labels)

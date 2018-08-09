@@ -14,7 +14,7 @@
 import copy
 import logging
 import os
-from typing import cast, Dict, Optional, Tuple
+from typing import cast, Dict, Optional, Tuple, Union
 
 import mxnet as mx
 
@@ -63,6 +63,7 @@ class ModelConfig(Config):
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
                  weight_normalization: bool = False,
                  use_pointer_nets: bool = False,
+                 max_oov_words: int = C.MAX_OOV_WORDS,
                  pointer_net_type: Optional[str] = None,
                  lhuc: bool = False) -> None:
         super().__init__()
@@ -80,6 +81,7 @@ class ModelConfig(Config):
         if weight_tying and weight_tying_type is None:
             raise RuntimeError("weight_tying_type must be specified when using weight_tying.")
         self.use_pointer_nets = use_pointer_nets
+        self.max_oov_words = max_oov_words
         self.pointer_net_type = pointer_net_type
         self.lhuc = lhuc
 
@@ -126,6 +128,7 @@ class SockeyeModel:
                                                   embed_weight=embed_weight_target)
 
         # output layer
+        self.output_layer: Union[layers.OutputLayer, layers.PointerOutputLayer]
         if self.config.use_pointer_nets:
             assert self.config.config_loss.name == C.POINTER_NET_CROSS_ENTROPY
             self.output_layer = layers.PointerOutputLayer(hidden_size=self.decoder.get_num_hidden(),

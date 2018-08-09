@@ -103,7 +103,9 @@ def run_translate(args: argparse.Namespace):
                                           avoid_list=args.avoid_list,
                                           store_beam=store_beam,
                                           strip_unknown_words=args.strip_unknown_words,
-                                          mark_pointed_words=args.mark_pointed_words)
+                                          use_pointer_nets=args.use_pointer_nets,
+                                          max_oov_words=args.max_oov_words,
+                                          pointer_nets_type=args.pointer_nets_type)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,

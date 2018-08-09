@@ -470,7 +470,9 @@ class RecurrentDecoderConfig(Config):
                  layer_normalization: bool = False,
                  attention_in_upper_layers: bool = False,
                  dtype: str = C.DTYPE_FP32,
-                 enc_last_hidden_concat_to_embedding: bool = False) -> None:
+                 enc_last_hidden_concat_to_embedding: bool = False,
+                 use_pointer_nets: bool = False,
+                 pointer_nets_type: str = C.POINTER_NET_SUMMARY) -> None:
 
         super().__init__()
         self.max_seq_len_source = max_seq_len_source
@@ -484,6 +486,8 @@ class RecurrentDecoderConfig(Config):
         self.attention_in_upper_layers = attention_in_upper_layers
         self.enc_last_hidden_concat_to_embedding = enc_last_hidden_concat_to_embedding
         self.dtype = dtype
+        self.use_pointer_nets = use_pointer_nets
+        self.pointer_nets_type = pointer_nets_type
 
 
 @Decoder.register(RecurrentDecoderConfig, C.RNN_DECODER_PREFIX)
@@ -582,6 +586,7 @@ class RecurrentDecoder(Decoder):
         """
 
         # target_embed: target_seq_len * (batch_size, num_target_embed)
+        target_embed_local = target_embed
         target_embed = mx.sym.split(data=target_embed, num_outputs=target_embed_max_length, axis=1, squeeze_axis=True)
 
         # Get last state from source (batch_size, num_target_embed)
@@ -606,7 +611,7 @@ class RecurrentDecoder(Decoder):
         hidden_states = []  # type: List[mx.sym.Symbol]
         context_vectors = []  # type: List[mx.sym.Symbol]
         attention_probs = []  # type: List[mx.sym.Symbol]
-        # TODO: possible alternative: feed back the context vector instead of the hidden (see lamtram)
+        coverage_vectors = [] # type: List[mx.sym.Symbol]
         self.reset()
         for seq_idx in range(target_embed_max_length):
             # hidden: (batch_size, rnn_num_hidden)
@@ -619,11 +624,21 @@ class RecurrentDecoder(Decoder):
             hidden_states.append(state.hidden)
             context_vectors.append(attention_state.context)
             attention_probs.append(attention_state.probs)
+            coverage_vectors.append(attention_state.dynamic_source)
 
         # concatenate along time axis: (batch_size, target_embed_max_length, rnn_num_hidden)
-        return mx.sym.Group([mx.sym.stack(*hidden_states, axis=1, name='%shidden_stack' % self.prefix), \
-                             mx.sym.stack(*context_vectors, axis=1, name='%scontext_stack' % self.prefix),
-                             mx.sym.stack(*attention_probs, axis=1, name='%sattention_stack' % self.prefix)])
+        if self.rnn_config.use_pointer_nets and self.rnn_config.pointer_nets_type == C.POINTER_NET_SUMMARY:
+            return mx.sym.Group([mx.sym.stack(*hidden_states, axis=1, name='%shidden_stack' % self.prefix), \
+                                    # expected size: (batch_size, trg_max_length, encoder_num_hidden)
+                                 mx.sym.stack(*context_vectors, axis=1, name='%scontext_stack' % self.prefix),
+                                    # expected size: (batch_size, trg_max_length, attn_len)
+                                    mx.sym.stack(*attention_probs, axis=1, name='%sattention_stack' % self.prefix),
+                                    # expected size: (batch_size, trg_max_length, attn_len)
+                                    mx.sym.stack(*coverage_vectors, axis=1, name='%scoverage_stack' % self.prefix),
+                                    # expected size: (batch_size, trg_max_length, trg_embed_len)
+                                    target_embed_local])
+        else:
+            return mx.sym.stack(*hidden_states, axis=1, name='%shidden_stack' % self.prefix)
 
     def decode_step(self,
                     step: int,

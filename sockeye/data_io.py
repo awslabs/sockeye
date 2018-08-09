@@ -243,9 +243,13 @@ def analyze_sequence_lengths(sources: List[str],
                              vocab_sources: List[vocab.Vocab],
                              vocab_target: vocab.Vocab,
                              max_seq_len_source: int,
-                             max_seq_len_target: int) -> 'LengthStatistics':
+                             max_seq_len_target: int,
+                             use_pointer_nets: bool,
+                             max_oov_words: int,
+                             pointer_nets_type: str) -> 'LengthStatistics':
     train_sources_sentences, train_target_sentences = create_sequence_readers(sources, target, vocab_sources,
-                                                                              vocab_target)
+                                                                              vocab_target, use_pointer_nets,
+                                                                              max_oov_words, pointer_nets_type)
 
     length_statistics = calculate_length_statistics(train_sources_sentences, train_target_sentences,
                                                     max_seq_len_source,
@@ -354,7 +358,10 @@ def shard_data(source_fnames: List[str],
                buckets: List[Tuple[int, int]],
                length_ratio_mean: float,
                length_ratio_std: float,
-               output_prefix: str) -> Tuple[List[Tuple[List[str], str, 'DataStatistics']], 'DataStatistics']:
+               output_prefix: str,
+               use_pointer_nets: bool,
+               max_oov_words: int,
+               pointer_nets_type: str) -> Tuple[List[Tuple[List[str], str, 'DataStatistics']], 'DataStatistics']:
     """
     Assign int-coded source/target sentence pairs to shards at random.
 
@@ -386,8 +393,9 @@ def shard_data(source_fnames: List[str],
                           range(len(source_fnames))]
         target_shards = [exit_stack.enter_context(smart_open(f, mode="wt")) for f in target_shard_fnames]
 
-        source_readers, target_reader = create_sequence_readers(source_fnames, target_fname,
-                                                                source_vocabs, target_vocab)
+        source_readers, target_reader = create_sequence_readers(source_fnames, target_fname, source_vocabs,
+                                                                target_vocab, use_pointer_nets, max_oov_words,
+                                                                pointer_nets_type)
 
         random_shard_iter = iter(lambda: random.randrange(num_shards), None)
 
@@ -444,7 +452,9 @@ class RawParallelDatasetLoader:
     def load(self,
              source_iterables: Sequence[Iterable],
              target_iterable: Iterable,
-             num_samples_per_bucket: List[int]) -> 'ParallelDataSet':
+             num_samples_per_bucket: List[int],
+             use_pointer_nets: bool,
+             pointer_nets_type: str) -> 'ParallelDataSet':
 
         assert len(num_samples_per_bucket) == len(self.buckets)
         num_factors = len(source_iterables)
@@ -487,11 +497,12 @@ class RawParallelDatasetLoader:
             # we can try again to compute the label sequence on the fly in next().
             data_label[buck_index][sample_index, :target_len] = target[1:] + [self.eos_id]
 
-            labels = target[1:] + [self.eos_id]
-            if self.aligner is not None:
-                labels = self.aligner.get_labels(sources[0], target, labels)
+            if pointer_nets_type != C.POINTER_NET_SUMMARY:
+                labels = target[1:] + [self.eos_id]
+                if self.aligner is not None:
+                    labels = self.aligner.get_labels(sources[0], target, labels)
 
-            data_label[buck_index][sample_index, :target_len] = labels
+                data_label[buck_index][sample_index, :target_len] = labels
 
             bucket_sample_index[buck_index] += 1
 
@@ -505,9 +516,10 @@ class RawParallelDatasetLoader:
                         num_pad_source / num_tokens_source * 100,
                         num_pad_target / num_tokens_target * 100)
 
-            labels = target[1:] + [self.eos_id]
-            if self.aligner is not None:
-                labels = self.aligner.get_labels(sources[0], target, labels)
+            if pointer_nets_type != C.POINTER_NET_SUMMARY:
+                labels = target[1:] + [self.eos_id]
+                if self.aligner is not None:
+                    labels = self.aligner.get_labels(sources[0], target, labels)
 
         return ParallelDataSet(data_source, data_target, data_label)
 
@@ -538,6 +550,9 @@ def prepare_data(source_fnames: List[str],
                  samples_per_shard: int,
                  min_num_shards: int,
                  output_prefix: str,
+                 use_pointer_nets: bool,
+                 max_oov_words: int,
+                 pointer_nets_type: str,
                  aligner: Optional[align.Aligner] = None,
                  keep_tmp_shard_files: bool = False):
     logger.info("Preparing data.")
@@ -547,7 +562,9 @@ def prepare_data(source_fnames: List[str],
 
     # Pass 1: get target/source length ratios.
     length_statistics = analyze_sequence_lengths(source_fnames, target_fname, source_vocabs, target_vocab,
-                                                 max_seq_len_source, max_seq_len_target)
+                                                 max_seq_len_source, max_seq_len_target,
+                                                 use_pointer_nets=use_pointer_nets, max_oov_words=max_oov_words,
+                                                 pointer_nets_type=pointer_nets_type)
 
     # define buckets
     buckets = define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width,
@@ -568,7 +585,10 @@ def prepare_data(source_fnames: List[str],
                                          buckets=buckets,
                                          length_ratio_mean=length_statistics.length_ratio_mean,
                                          length_ratio_std=length_statistics.length_ratio_std,
-                                         output_prefix=output_prefix)
+                                         output_prefix=output_prefix,
+                                         use_pointer_nets=use_pointer_nets,
+                                         max_oov_words=max_oov_words,
+                                         pointer_nets_type=pointer_nets_type)
     data_statistics.log()
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
@@ -579,9 +599,13 @@ def prepare_data(source_fnames: List[str],
 
     # 3. convert each shard to serialized ndarrays
     for shard_idx, (shard_sources, shard_target, shard_stats) in enumerate(shards):
-        sources_sentences = [SequenceReader(s) for s in shard_sources]
-        target_sentences = SequenceReader(shard_target)
-        dataset = data_loader.load(sources_sentences, target_sentences, shard_stats.num_sents_per_bucket)
+        sources_sentences = [SequenceReader(s, use_pointer_nets=use_pointer_nets, max_oov_words=max_oov_words,
+                                            pointer_nets_type=pointer_nets_type)
+                             for s in shard_sources]
+        target_sentences = SequenceReader(shard_target, use_pointer_nets=use_pointer_nets, max_oov_words=max_oov_words,
+                                          pointer_nets_type=pointer_nets_type)
+        dataset = data_loader.load(sources_sentences, target_sentences, shard_stats.num_sents_per_bucket,
+                                   use_pointer_nets, pointer_nets_type)
         shard_fname = os.path.join(output_prefix, C.SHARD_NAME % shard_idx)
         shard_stats.log()
         logger.info("Writing '%s'", shard_fname)
@@ -607,6 +631,7 @@ def prepare_data(source_fnames: List[str],
                              max_seq_len_target=max_seq_len_target,
                              num_source_factors=len(source_fnames),
                              use_pointer_nets=aligner is not None,
+                             pointer_nets_type=pointer_nets_type,
                              source_with_eos=True)
     config_data_fname = os.path.join(output_prefix, C.DATA_CONFIG)
     logger.info("Writing data config to '%s'", config_data_fname)
@@ -617,7 +642,7 @@ def prepare_data(source_fnames: List[str],
     with open(version_file, "w") as version_out:
         version_out.write(str(C.PREPARED_DATA_VERSION))
 
-    if aligner is not None:
+    if aligner is not None and pointer_nets_type != C.POINTER_NET_SUMMARY:
         logger.info("Pointed to %d / %d source words (%.2f%%)",
                     aligner.num_pointed, aligner.num_total, 100 * aligner.num_pointed / aligner.num_total)
 
@@ -653,7 +678,10 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
                              max_seq_len_source: int,
                              max_seq_len_target: int,
                              batch_size: int,
-                             fill_up: str) -> 'ParallelSampleIter':
+                             fill_up: str,
+                             use_pointer_nets: bool,
+                             max_oov_words: int,
+                             pointer_nets_type: str) -> 'ParallelSampleIter':
     """
     Returns a ParallelSampleIter for the validation data.
     """
@@ -662,10 +690,15 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
     logger.info("=================================")
     validation_length_statistics = analyze_sequence_lengths(validation_sources, validation_target,
                                                             source_vocabs, target_vocab,
-                                                            max_seq_len_source, max_seq_len_target)
+                                                            max_seq_len_source, max_seq_len_target,
+                                                            use_pointer_nets,
+                                                            max_oov_words,
+                                                            pointer_nets_type)
     validation_sources_sentences, validation_target_sentences = create_sequence_readers(validation_sources,
                                                                                         validation_target,
-                                                                                        source_vocabs, target_vocab)
+                                                                                        source_vocabs, target_vocab,
+                                                                                        use_pointer_nets, max_oov_words,
+                                                                                        pointer_nets_type)
 
     validation_data_statistics = get_data_statistics(validation_sources_sentences,
                                                      validation_target_sentences,
@@ -677,7 +710,8 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
     validation_data_statistics.log(bucket_batch_sizes)
 
     validation_data = data_loader.load(validation_sources_sentences, validation_target_sentences,
-                                       validation_data_statistics.num_sents_per_bucket).fill_up(
+                                       validation_data_statistics.num_sents_per_bucket,
+                                       use_pointer_nets, pointer_nets_type).fill_up(
                                            bucket_batch_sizes,
                                            fill_up)
 
@@ -695,7 +729,10 @@ def get_prepared_data_iters(prepared_data_dir: str,
                             batch_size: int,
                             batch_by_words: bool,
                             batch_num_devices: int,
-                            fill_up: str) -> Tuple['BaseParallelSampleIter',
+                            fill_up: str,
+                            use_pointer_nets: bool,
+                            max_oov_words: int,
+                            pointer_nets_type: str) -> Tuple['BaseParallelSampleIter',
                                                    'BaseParallelSampleIter',
                                                    'DataConfig', List[vocab.Vocab], vocab.Vocab]:
     logger.info("===============================")
@@ -768,7 +805,10 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                                max_seq_len_source=max_seq_len_source,
                                                max_seq_len_target=max_seq_len_target,
                                                batch_size=batch_size,
-                                               fill_up=fill_up)
+                                               fill_up=fill_up,
+                                               use_pointer_nets=use_pointer_nets,
+                                               max_oov_words=max_oov_words,
+                                               pointer_nets_type=pointer_nets_type)
 
     return train_iter, validation_iter, config_data, source_vocabs, target_vocab
 
@@ -790,6 +830,9 @@ def get_training_data_iters(sources: List[str],
                             max_seq_len_target: int,
                             bucketing: bool,
                             bucket_width: int,
+                            use_pointer_nets: bool,
+                            max_oov_words: int,
+                            pointer_nets_type: str,
                             aligner: Optional[align.Aligner] = None) -> Tuple['BaseParallelSampleIter',
                                                                               'BaseParallelSampleIter',
                                                                               'DataConfig', 'DataInfo']:
@@ -814,6 +857,9 @@ def get_training_data_iters(sources: List[str],
     :param bucketing: Whether to use bucketing.
     :param bucket_width: Size of buckets.
     :param aligner: The aligner to use if pointer nets are enabled.
+    :param use_pointer_nets: Flag to indicate if pointer networks is enabled.
+    :param max_oov_words: Max out-of-vocabulary words to consider if point-nets-summary is used.
+    :param pointer_nets_type: Pointer Networks implementation to use.
     :return: Tuple of (training data iterator, validation data iterator, data config).
     """
     logger.info("===============================")
@@ -821,13 +867,17 @@ def get_training_data_iters(sources: List[str],
     logger.info("===============================")
     # Pass 1: get target/source length ratios.
     length_statistics = analyze_sequence_lengths(sources, target, source_vocabs, target_vocab,
-                                                 max_seq_len_source, max_seq_len_target)
+                                                 max_seq_len_source, max_seq_len_target,
+                                                 use_pointer_nets, max_oov_words,
+                                                 pointer_nets_type)
     # define buckets
     buckets = define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width,
                                       length_statistics.length_ratio_mean) if bucketing else [
         (max_seq_len_source, max_seq_len_target)]
 
-    sources_sentences, target_sentences = create_sequence_readers(sources, target, source_vocabs, target_vocab)
+    sources_sentences, target_sentences = create_sequence_readers(sources, target, source_vocabs, target_vocab,
+                                                                  use_pointer_nets, max_oov_words,
+                                                                  pointer_nets_type)
 
     # 2. pass: Get data statistics
     data_statistics = get_data_statistics(sources_sentences, target_sentences, buckets,
@@ -849,7 +899,8 @@ def get_training_data_iters(sources: List[str],
                                            aligner=aligner)
 
     training_data = data_loader.load(sources_sentences, target_sentences,
-                                     data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes,
+                                     data_statistics.num_sents_per_bucket, use_pointer_nets,
+                                     pointer_nets_type).fill_up(bucket_batch_sizes,
                                                                                    fill_up)
 
     data_info = DataInfo(sources=sources,
@@ -881,7 +932,10 @@ def get_training_data_iters(sources: List[str],
                                                max_seq_len_source=max_seq_len_source,
                                                max_seq_len_target=max_seq_len_target,
                                                batch_size=batch_size,
-                                               fill_up=fill_up)
+                                               fill_up=fill_up,
+                                               use_pointer_nets=use_pointer_nets,
+                                               max_oov_words=max_oov_words,
+                                               pointer_nets_type=pointer_nets_type)
 
     return train_iter, validation_iter, config_data, data_info
 
@@ -994,7 +1048,8 @@ class DataConfig(config.Config):
                  max_seq_len_target: int,
                  num_source_factors: int,
                  use_pointer_nets: bool = False,
-                 source_with_eos: bool = False) -> None:
+                 source_with_eos: bool = False,
+                 pointer_nets_type: str = C.POINTER_NET_SUMMARY) -> None:
         super().__init__()
         self.data_statistics = data_statistics
         self.max_seq_len_source = max_seq_len_source
@@ -1002,6 +1057,7 @@ class DataConfig(config.Config):
         self.num_source_factors = num_source_factors
         self.use_pointer_nets = use_pointer_nets
         self.source_with_eos = source_with_eos
+        self.pointer_nets_type = pointer_nets_type
 
 
 def read_content(path: str, limit: Optional[int] = None) -> Iterator[List[str]]:
@@ -1019,15 +1075,41 @@ def read_content(path: str, limit: Optional[int] = None) -> Iterator[List[str]]:
             yield list(get_tokens(line))
 
 
-def tokens2ids(tokens: Iterable[str], vocab: Dict[str, int]) -> List[int]:
+def tokens2ids(tokens: Iterable[str], vocab: Dict[str, int], use_pointer_nets: bool, max_oov_words: int,
+               point_nets_type: str) -> List[int]:
     """
     Returns sequence of integer ids given a sequence of tokens and vocab.
 
     :param tokens: List of string tokens.
     :param vocab: Vocabulary (containing UNK symbol).
+    :param use_pointer_nets: Flag to indicate if pointer networks is enabled.
+    :param max_oov_words: Maximum number of words to consider in the extended vocabulary (for pointer networks)
+    :param pointer_nets_type: Pointer Networks implementation to use.
     :return: List of word ids.
     """
-    return [vocab.get(w, vocab[C.UNK_SYMBOL]) for w in tokens]
+
+    # in case of pointer nets, generate a temporary vocabulary for the current article. Global vocabulary is only
+    # extended by a fixed maximum length per article.
+    if use_pointer_nets and point_nets_type == C.POINTER_NET_SUMMARY:
+        num_new_tokens = 0
+        temp_vocab = dict(vocab)
+        vocab_size = len(temp_vocab)
+        token_list = []
+
+        for w in tokens:
+            if w in temp_vocab:
+                token_list.append(temp_vocab[w])
+            elif num_new_tokens < max_oov_words:
+                temp_vocab[w] = vocab_size
+                token_list.append(vocab_size)
+                vocab_size = len(temp_vocab)
+                num_new_tokens += 1
+            else:
+                token_list.append(vocab[C.UNK_SYMBOL])
+        return token_list
+
+    else:
+        return [vocab.get(w, vocab[C.UNK_SYMBOL]) for w in tokens]
 
 
 def strids2ids(tokens: Iterable[str]) -> List[int]:
@@ -1066,6 +1148,9 @@ class SequenceReader(Iterable):
     def __init__(self,
                  path: str,
                  vocabulary: Optional[vocab.Vocab] = None,
+                 use_pointer_nets: bool = False,
+                 max_oov_words: int = C.MAX_OOV_WORDS,
+                 pointer_nets_type: str = C.POINTER_NET_SUMMARY,
                  add_bos: bool = False,
                  add_eos: bool = False,
                  limit: Optional[int] = None) -> None:
@@ -1085,11 +1170,14 @@ class SequenceReader(Iterable):
         self.add_bos = add_bos
         self.add_eos = add_eos
         self.limit = limit
+        self.use_pointer_nets = use_pointer_nets
+        self.max_oov_words = max_oov_words
+        self.pointer_nets_type = pointer_nets_type
 
     def __iter__(self):
         for tokens in read_content(self.path, self.limit):
             if self.vocab is not None:
-                sequence = tokens2ids(tokens, self.vocab)
+                sequence = tokens2ids(tokens, self.vocab, self.use_pointer_nets, self.max_oov_words, self.pointer_nets_type)
             else:
                 sequence = strids2ids(tokens)
             if len(sequence) == 0:
@@ -1104,7 +1192,10 @@ class SequenceReader(Iterable):
 
 def create_sequence_readers(sources: List[str], target: str,
                             vocab_sources: List[vocab.Vocab],
-                            vocab_target: vocab.Vocab) -> Tuple[List[SequenceReader], SequenceReader]:
+                            vocab_target: vocab.Vocab,
+                            use_pointer_nets: bool,
+                            max_oov_words: int,
+                            pointer_nets_type: str) -> Tuple[List[SequenceReader], SequenceReader]:
     """
     Create source readers with EOS and target readers with BOS.
 
@@ -1112,11 +1203,18 @@ def create_sequence_readers(sources: List[str], target: str,
     :param target: The file name of the target data.
     :param vocab_sources: The source vocabularies.
     :param vocab_target: The target vocabularies.
+    :param use_pointer_nets: Flag to indicate if pointer networks is enabled.
+    :param max_oov_words: Maximum out-of-vocabulary words to consider with pointer-nets-summary.
+    :param pointer_nets_type: Pointer Networks implementation to use.
     :return: The source sequence readers and the target reader.
     """
-    source_sequence_readers = [SequenceReader(source, vocab, add_eos=True) for source, vocab in
+    source_sequence_readers = [SequenceReader(source, vocabulary=vocab, use_pointer_nets=use_pointer_nets,
+                                              max_oov_words=max_oov_words, add_eos=True,
+                                              pointer_nets_type=pointer_nets_type) for source, vocab in
                                zip(sources, vocab_sources)]
-    target_sequence_reader = SequenceReader(target, vocab_target, add_bos=True)
+    target_sequence_reader = SequenceReader(target, vocabulary=vocab_target, use_pointer_nets=use_pointer_nets,
+                                            max_oov_words=max_oov_words, add_bos=True,
+                                            pointer_nets_type=pointer_nets_type)
     return source_sequence_readers, target_sequence_reader
 
 
@@ -1251,7 +1349,7 @@ class ParallelDataSet(Sized):
         mx.nd.save(fname, out)
 
     @staticmethod
-    def load(fname: str) -> 'ParallelDataSet':
+    def load(fname: str, use_pointer_nets=False, pointer_nets_type=None) -> 'ParallelDataSet':
         """
         Loads a dataset from a binary .npy file.
         """

@@ -46,6 +46,8 @@ class RNNConfig(Config):
                  num_layers: int,
                  dropout_inputs: float,
                  dropout_states: float,
+                 use_pointer_nets: bool = False,
+                 pointer_nets_type: str = C.POINTER_NET_SUMMARY,
                  dropout_recurrent: float = 0,
                  residual: bool = False,
                  first_residual_layer: int = 2,
@@ -64,6 +66,8 @@ class RNNConfig(Config):
         self.forget_bias = forget_bias
         self.lhuc = lhuc
         self.dtype = dtype
+        self.use_pointer_nets = use_pointer_nets
+        self.pointer_nets_type = pointer_nets_type
 
 
 class SequentialRNNCellParallelInput(mx.rnn.SequentialRNNCell):
