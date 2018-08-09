@@ -137,7 +137,8 @@ class SockeyeModel:
                                                           vocab_size=self.config.vocab_target_size,
                                                           weight=out_weight_target,
                                                           weight_normalization=self.config.weight_normalization,
-                                                          prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
+                                                          prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX,
+                                                          pointer_nets_tye=self.config.pointer_net_type)
 
         else:
             self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),

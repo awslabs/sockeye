@@ -238,16 +238,17 @@ class InferenceModel(model.SockeyeModel):
                     # skip output layer in graph
                     outputs = mx.sym.identity(target_decoded, name=C.LOGIT_INPUTS_NAME)
                 else:
-                        # logits: (batch_size, target_vocab_size)
-                        logits = self.output_layer(target_decoded)
-                        if self.softmax_temperature is not None:
-                            logits = logits / self.softmax_temperature
-                        outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
+                    # logits: (batch_size, target_vocab_size)
+                    logits = self.output_layer(target_decoded, context=context, attention=attention_probs,
+                                               target_embed=target_embed_prev)
+                    if self.softmax_temperature is not None:
+                        logits = logits / self.softmax_temperature
+                    outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
 
             data_names = [C.TARGET_NAME] + state_names
             label_names = []  # type: List[str]
 
-            if self.config.use_pointer_nets:
+            if self.config.use_pointer_nets and self.config.pointer_net_type == C.POINTER_NET_SUMMARY:
                 return mx.sym.Group([prob_vocab, prob_source, attention_probs] + states), data_names, label_names
             else:
                 return mx.sym.Group([outputs, attention_probs] + states), data_names, label_names
@@ -327,7 +328,7 @@ class InferenceModel(model.SockeyeModel):
             provide_data=self._get_decoder_data_shapes(bucket_key))
         self.decoder_module.forward(data_batch=batch, is_train=False)
         if self.config.use_pointer_nets and self.config.pointer_net_type == C.POINTER_NET_SUMMARY:
-            prob_gen, vocab_out, source_out, attention_probs, *model_state.states = self.decoder_module.get_outputs()
+            vocab_out, source_out, attention_probs, *model_state.states = self.decoder_module.get_outputs()
             return vocab_out, source_out, attention_probs, model_state
         else:
             out, attention_probs, *model_state.states = self.decoder_module.get_outputs()
@@ -1630,11 +1631,19 @@ class Translator:
                                                                        batch_size=self.batch_size,
                                                                        vocab_size=len(self.vocab_target))
 
-            # print('TIMESTEP', t, 'MAX INPUT', 'THIS INPUT', source_len, self.max_input_length, 'VOCAB', len(self.vocab_target), 'SCORES', scores.shape, 'PAD', pad_dist.shape, 'finished', finished.shape, 'inactive', inactive.shape, 'accum', scores_accumulated.shape, 'inf', self.inf_array.shape)
-
             # (2) Update scores. Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
-            scores = self._update_scores.forward(scores, finished, inactive, scores_accumulated, self.inf_array, pad_dist)
+            if self.use_pointer_nets and self.pointer_nets_type == C.POINTER_NET_SUMMARY:
+                scores += scores_accumulated
+                # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
+                # infinity otherwise.
+                # pylint: disable=invalid-sequence-index
+                pad_dist[:, C.PAD_ID] = mx.nd.where(mx.nd.clip(finished - inactive, 0, 1),
+                                                    scores_accumulated[:, 0],
+                                                    self.inf_array[:, 0])
+                scores = mx.nd.where(finished + inactive, pad_dist, scores)
+            else:
+                scores = self._update_scores.forward(scores, finished, inactive, scores_accumulated, self.inf_array, pad_dist)
 
             # Mark entries that should be blocked as having a score of np.inf
             if self.global_avoid_trie or any(raw_avoid_list):

@@ -628,7 +628,7 @@ class RecurrentDecoder(Decoder):
 
         # concatenate along time axis: (batch_size, target_embed_max_length, rnn_num_hidden)
         if self.rnn_config.use_pointer_nets and self.rnn_config.pointer_nets_type == C.POINTER_NET_SUMMARY:
-            return mx.sym.Group([mx.sym.stack(*hidden_states, axis=1, name='%shidden_stack' % self.prefix), \
+            return mx.sym.Group([mx.sym.stack(*hidden_states, axis=1, name='%shidden_stack' % self.prefix),
                                     # expected size: (batch_size, trg_max_length, encoder_num_hidden)
                                  mx.sym.stack(*context_vectors, axis=1, name='%scontext_stack' % self.prefix),
                                     # expected size: (batch_size, trg_max_length, attn_len)
@@ -638,7 +638,9 @@ class RecurrentDecoder(Decoder):
                                     # expected size: (batch_size, trg_max_length, trg_embed_len)
                                     target_embed_local])
         else:
-            return mx.sym.stack(*hidden_states, axis=1, name='%shidden_stack' % self.prefix)
+            return mx.sym.Group([mx.sym.stack(*hidden_states, axis=1, name='%shidden_stack' % self.prefix),
+                                 mx.sym.stack(*context_vectors, axis=1, name='%scontext_stack' % self.prefix),
+                                 mx.sym.stack(*attention_probs, axis=1, name='%sattention_stack' % self.prefix)])
 
     def decode_step(self,
                     step: int,

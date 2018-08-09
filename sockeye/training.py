@@ -152,9 +152,6 @@ class TrainingModel(model.SockeyeModel):
             # target_decoded: (batch-size, target_len, decoder_depth)
             target_decoded = target_decoded_and_context[0]
 
-            # source_encoded = mx.sym.Custom(op_type="PrintValue", data=source_encoded, print_name="SOURCE")
-            # source_encoded_length = mx.sym.Custom(op_type="PrintValue", data=source_encoded_length, print_name="SOURCE LEN")
-
             # output layer
             if not self.config.use_pointer_nets:
                 # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
@@ -177,7 +174,13 @@ class TrainingModel(model.SockeyeModel):
                     context = mx.sym.reshape(data=context, shape=(-3, 0))
                     attention = mx.sym.reshape(data=attention, shape=(-3, 0))
 
-                if self.config.pointer_net_type == C.POINTER_NET_SUMMARY:
+                if self.config.pointer_net_type != C.POINTER_NET_SUMMARY:
+                    # softmax_probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
+                    softmax_probs = self.output_layer(target_decoded, attention=attention,
+                                                      context=context, target_embed=target_embed)
+                    loss_output = self.model_loss.get_loss(softmax_probs, labels)
+
+                else:
                     # context: (batch-size, target_len, encoder_num_hidden)
                     context = target_decoded_and_context[1]
                     # attention: (batch-size, target_len, att_len)
@@ -213,7 +216,7 @@ class TrainingModel(model.SockeyeModel):
 
                     # prob_vocab: (batch_size * target_seq_len, ext_vocab_size)
                     # prob_source: (batch_size * target_seq_len, source_len)
-                    prob_gen, prob_vocab, prob_source = self.output_layer(target_decoded, context=context,
+                    prob_vocab, prob_source = self.output_layer(target_decoded, context=context,
                                                                           attention=attention,
                                                                           target_embed=target_embed)
 
@@ -241,11 +244,7 @@ class TrainingModel(model.SockeyeModel):
                     # softmax_probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
                     softmax_probs = ext_prob_vocab.__add__(ext_prob_source)
 
-                if self.config.pointer_net_type != C.POINTER_NET_SUMMARY:
-                    # softmax_probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
-                    softmax_probs = self.output_layer(target_decoded, attention=attention, context=context, target_embed=target_embed)
-
-                loss_output = self.model_loss.get_loss(softmax_probs, labels)
+                    loss_output = self.model_loss.get_loss(softmax_probs, labels, coverage)
 
             return mx.sym.Group(loss_output), data_names, label_names
 
