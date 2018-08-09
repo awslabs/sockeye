@@ -62,6 +62,7 @@ class Decoder(ABC):
 
         :return: Class decorator.
         """
+
         def wrapper(target_cls):
             cls.__registry[config_type] = (target_cls, suffix)
             return target_cls
@@ -270,9 +271,9 @@ class TransformerDecoder(Decoder):
 
         for layer in self.layers:
             target, layer_probs = layer(target=target,
-                           target_bias=target_bias,
-                           source=source_encoded,
-                           source_bias=source_bias)
+                                        target_bias=target_bias,
+                                        source=source_encoded,
+                                        source_bias=source_bias)
         target = self.final_process(data=target, prev=None)
 
         return target
@@ -325,10 +326,10 @@ class TransformerDecoder(Decoder):
 
         for layer, layer_cache in zip(self.layers, layer_caches):
             target, layer_probs = layer(target=target,
-                           target_bias=target_bias,
-                           source=source_encoded,
-                           source_bias=source_bias,
-                           cache=layer_cache)
+                                        target_bias=target_bias,
+                                        source=source_encoded,
+                                        source_bias=source_bias,
+                                        cache=layer_cache)
             # store updated keys and values in states list.
             # (layer.__call__() has the side-effect of updating contents of layer_cache)
             new_states += [layer_cache['k'], layer_cache['v']]
@@ -339,11 +340,11 @@ class TransformerDecoder(Decoder):
         # (batch_size, model_size)
         target = mx.sym.reshape(target, shape=(-3, -1))
 
+        # (layers, batch_size, heads, source_length)
         attention_probs = mx.sym.stack(*attention_probs, axis=0)
-        # average over layer probabilities
-        attention_probs = mx.sym.mean(attention_probs, axis=0, keepdims=False)
-        # average over heads
-        attention_probs = mx.sym.mean(attention_probs, axis=1, keepdims=False)
+        # (batch_size, source_length)
+        attention_probs = mx.sym.mean(attention_probs, axis=(0, 2), keepdims=False)
+
         return target, attention_probs, new_states
 
     def _get_cache_per_layer(self, cache: List[mx.sym.Symbol]) -> List[Dict[str, Optional[mx.sym.Symbol]]]:
@@ -476,7 +477,6 @@ class RecurrentDecoderConfig(Config):
                  attention_in_upper_layers: bool = False,
                  dtype: str = C.DTYPE_FP32,
                  enc_last_hidden_concat_to_embedding: bool = False) -> None:
-
         super().__init__()
         self.max_seq_len_source = max_seq_len_source
         self.rnn_config = rnn_config
@@ -593,9 +593,9 @@ class RecurrentDecoder(Decoder):
         enc_last_hidden = None
         if self.config.enc_last_hidden_concat_to_embedding:
             enc_last_hidden = mx.sym.SequenceLast(data=source_encoded,
-                                     sequence_length=source_encoded_lengths,
-                                     axis=1,
-                                     use_sequence_length=True)
+                                                  sequence_length=source_encoded_lengths,
+                                                  axis=1,
+                                                  use_sequence_length=True)
 
         # get recurrent attention function conditioned on source
         attention_func = self.attention.on(source_encoded, source_encoded_lengths,
@@ -838,7 +838,8 @@ class RecurrentDecoder(Decoder):
               attention_func: Callable,
               attention_state: rnn_attention.AttentionState,
               seq_idx: int = 0,
-              enc_last_hidden: Optional[mx.sym.Symbol] = None) -> Tuple[RecurrentDecoderState, rnn_attention.AttentionState]:
+              enc_last_hidden: Optional[mx.sym.Symbol] = None) -> Tuple[
+        RecurrentDecoderState, rnn_attention.AttentionState]:
 
         """
         Performs single-time step in the RNN, given previous word vector, previous hidden state, attention function,
@@ -855,7 +856,7 @@ class RecurrentDecoder(Decoder):
         # concat previous word embedding and previous hidden state
         if enc_last_hidden is not None:
             word_vec_prev = mx.sym.concat(word_vec_prev, enc_last_hidden, dim=1,
-                                            name="%sconcat_target_encoder_t%d" % (self.prefix, seq_idx))
+                                          name="%sconcat_target_encoder_t%d" % (self.prefix, seq_idx))
         rnn_input = mx.sym.concat(word_vec_prev, state.hidden, dim=1,
                                   name="%sconcat_target_context_t%d" % (self.prefix, seq_idx))
         # rnn_pre_attention_output: (batch_size, rnn_num_hidden)

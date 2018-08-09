@@ -179,8 +179,8 @@ class TransformerDecoderBlock:
 
         # encoder attention
         target_enc_att, attention_probs = self.enc_attention(queries=self.pre_enc_attention(target, None),
-                                            memory=source,
-                                            bias=source_bias)
+                                                             memory=source,
+                                                             bias=source_bias)
         target = self.post_enc_attention(target_enc_att, target)
 
         # feed-forward
@@ -382,7 +382,7 @@ class AutoRegressiveBias(mx.operator.CustomOp):
     0 0 0 0
     """
 
-    def __init__(self, length: int, dtype:str, ctx: mx.Context) -> None:
+    def __init__(self, length: int, dtype: str, ctx: mx.Context) -> None:
         super().__init__()
         self.bias = self.get_bias(length, dtype, ctx)
 

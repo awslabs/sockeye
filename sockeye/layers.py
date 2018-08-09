@@ -44,7 +44,7 @@ def activation(data: mx.sym.Symbol, act_type: str) -> mx.sym.Symbol:
         return data * mx.sym.Activation(data, act_type="sigmoid")
     elif act_type == C.GELU:
         # Approximation of x * gaussian_cdf(x) used by Hendrycks and Gimpel
-        return 0.5 * data * (1 + mx.sym.Activation((math.sqrt(2 / math.pi) * (data + (0.044715 * (data**3)))),
+        return 0.5 * data * (1 + mx.sym.Activation((math.sqrt(2 / math.pi) * (data + (0.044715 * (data ** 3)))),
                                                    act_type="tanh"))
     else:
         return mx.sym.Activation(data, act_type=act_type)
@@ -60,6 +60,7 @@ class LayerNormalization:
     :param scale_init: Initial value of scale variable if scale is None. Default 1.0.
     :param shift_init: Initial value of shift variable if shift is None. Default 0.0.
     """
+
     def __init__(self,
                  prefix: str = 'layernorm',
                  scale: Optional[mx.sym.Symbol] = None,
@@ -99,6 +100,7 @@ class LHUC:
     :param weight: Optional parameter vector.
     :param prefix: Optional prefix for created parameters (if not given as weight).
     """
+
     def __init__(self,
                  num_hidden: int,
                  weight: Optional[mx.sym.Symbol] = None,
@@ -376,7 +378,6 @@ def dot_attention_with_probs(queries: mx.sym.Symbol,
     return mx.sym.batch_dot(lhs=probs_with_dropout, rhs=values, name='%scontexts' % prefix), probs
 
 
-
 class MultiHeadAttentionBase:
     """
     Base class for Multi-head attention.
@@ -387,6 +388,7 @@ class MultiHeadAttentionBase:
     :param depth_out: Output depth / number of output units.
     :param dropout: Dropout probability on attention scores
     """
+
     def __init__(self,
                  prefix: str,
                  depth_att: int = 512,
@@ -457,6 +459,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
     :param depth_out: Output depth / number of output units.
     :param dropout: Dropout probability on attention scores
     """
+
     def __init__(self,
                  prefix: str,
                  depth_att: int = 512,
@@ -615,7 +618,7 @@ class MultiHeadAttentionWithProbs(MultiHeadAttention):
         :param lengths: Optional lengths of keys. Shape: (batch_size,).
         :param bias: Optional 3d bias.
         :return: Context vectors: Shape: (batch_size, query_max_length, output_depth).
-        :return: Attention probabilities: Shape: (batch_size, length, heads, source_length).
+        :return: Attention probabilities: Shape: (batch_size, heads, source_length).
         """
         # scale by sqrt(depth_per_head)
         queries = queries * (self.depth_per_head ** -0.5)
@@ -628,7 +631,8 @@ class MultiHeadAttentionWithProbs(MultiHeadAttention):
 
         # (batch*heads, query_max_length, depth_per_head), (batch*heads, query_max_length, source_length)
         contexts, attention_probs = dot_attention_with_probs(queries, keys, values,
-                                                   lengths=lengths, dropout=self.dropout, bias=bias, prefix=self.prefix)
+                                                             lengths=lengths, dropout=self.dropout, bias=bias,
+                                                             prefix=self.prefix)
 
         # (batch, query_max_length, depth)
         contexts = combine_heads(contexts, self.depth_per_head, self.heads)
@@ -637,6 +641,7 @@ class MultiHeadAttentionWithProbs(MultiHeadAttention):
         # MultiHeadAttentionWithProbs is only used in Encoder therefore length=1 so we can drop it
         # (batch, heads, source_length)
         attention_probs = mx.sym.reshape(data=attention_probs, shape=(0, -3, 0))
+
         # contexts: (batch, query_max_length, output_depth)
         contexts = mx.sym.FullyConnected(data=contexts,
                                          weight=self.w_h2o,
