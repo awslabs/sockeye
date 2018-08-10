@@ -228,7 +228,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      0.94)
 ])
 def test_seq_sort(name, train_params, translate_params, use_prepared_data, use_source_factor,
-                  use_pointer_nets, max_oov_words, perplexity_thresh, bleu_thresh):
+                  perplexity_thresh, bleu_thresh):
     """Task: sort short sequences of digits"""
     with tmp_digits_dataset("test_seq_sort.", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT, _LINE_MAX_LENGTH,
                             _TEST_LINE_COUNT, _TEST_LINE_COUNT_EMPTY, _TEST_MAX_LENGTH,
