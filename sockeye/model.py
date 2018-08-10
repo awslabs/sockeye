@@ -128,7 +128,7 @@ class SockeyeModel:
                                                   embed_weight=embed_weight_target)
 
         # output layer
-        self.output_layer: Union[layers.OutputLayer, layers.PointerOutputLayer]
+        # self.output_layer: Union[layers.OutputLayer, layers.PointerOutputLayer]
         if self.config.use_pointer_nets:
             assert self.config.config_loss.name == C.POINTER_NET_CROSS_ENTROPY
             self.output_layer = layers.PointerOutputLayer(hidden_size=self.decoder.get_num_hidden(),
