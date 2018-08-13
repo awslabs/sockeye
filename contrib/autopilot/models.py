@@ -14,9 +14,11 @@
 # Names model types
 MODEL_NONE = "none"
 MODEL_TRANSFORMER = "transformer"
+MODEL_GNMT = "gnmt_like"
 
 # Named decoding settings
 DECODE_STANDARD = "standard"
+DECODE_GNMT = "gnmt_like"
 
 # Model configurations (architecture, training recipe, etc.)
 MODELS = {
@@ -59,22 +61,62 @@ MODELS = {
         "--decode-and-evaluate=500",
         "--keep-last-params=60",
     ],
+
+    MODEL_GNMT: [
+        "--encoder=rnn",
+        "--decoder=rnn",
+        "--rnn-num-hidden=512",
+        "--rnn-attention-in-upper-layers",
+        "--rnn-attention-type=dot",
+        "--rnn-decoder-hidden-dropout=0.2",
+        "--embed-dropout=0.2",
+        "--num-layers=8:8",
+        "--weight-init=xavier",
+        "--weight-init-scale=3.0",
+        "--weight-init-xavier-factor-type=avg",
+        "--num-embed=256:256",
+        "--max-seq-len=100",
+        "--optimizer=adam",
+        "--optimized-metric=perplexity",
+        "--initial-learning-rate=0.0001",
+        "--learning-rate-reduce-num-not-improved=8",
+        "--learning-rate-reduce-factor=0.7",
+        "--max-num-checkpoint-not-improved=32",
+        "--batch-type=sentence",
+        "--batch-size=128",
+        "--checkpoint-frequency=2000",
+        "--decode-and-evaluate=500",
+        "--keep-last-params=60",
+    ],
 }  # type: Dict[str, List[str]]
 
 # Arguments added to the end of any model in test mode to train a smaller
 # version quickly for system tests.  When multiple versions of the same argument
 # exist, the last version to appear (this list) takes precedence.
-MODEL_TEST_ARGS = [
-    "--num-layers=1:1",
-    "--transformer-model-size=16",
-    "--transformer-feed-forward-num-hidden=16",
-    "--num-embed=16:16",
-    "--num-words=16:16",
-    "--batch-type=sentence",
-    "--batch-size=1",
-    "--max-updates=4",
-    "--checkpoint-frequency=2",
-]
+MODEL_TEST_ARGS = {
+    MODEL_TRANSFORMER: [
+        "--num-layers=1:1",
+        "--transformer-model-size=16",
+        "--transformer-feed-forward-num-hidden=16",
+        "--num-embed=16:16",
+        "--num-words=16:16",
+        "--batch-type=sentence",
+        "--batch-size=1",
+        "--max-updates=4",
+        "--checkpoint-frequency=2",
+    ],
+
+    MODEL_GNMT: [
+        "--num-layers=1:1",
+        "--rnn-num-hidden=16",
+        "--num-embed=16:16",
+        "--num-words=16:16",
+        "--batch-type=sentence",
+        "--batch-size=1",
+        "--max-updates=4",
+        "--checkpoint-frequency=2",
+    ],
+}
 
 # Decoding configurations
 DECODE_ARGS = {
@@ -86,5 +128,15 @@ DECODE_ARGS = {
         "--length-penalty-beta=0.0",
         "--max-output-length-num-stds=2",
         "--bucket-width=10",
-    ]
+    ],
+
+    DECODE_GNMT: [
+        "--beam-size=10",
+        "--batch-size=32",
+        "--chunk-size=1000",
+        "--length-penalty-alpha=0.1",
+        "--length-penalty-beta=0.0",
+        "--max-output-length-num-stds=2",
+        "--bucket-width=10",
+    ],
 }
