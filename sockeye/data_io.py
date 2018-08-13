@@ -505,10 +505,6 @@ class RawParallelDatasetLoader:
                         num_pad_source / num_tokens_source * 100,
                         num_pad_target / num_tokens_target * 100)
 
-            labels = target[1:] + [self.eos_id]
-            if self.aligner is not None:
-                labels = self.aligner.get_labels(sources[0], target, labels)
-
         return ParallelDataSet(data_source, data_target, data_label)
 
 
