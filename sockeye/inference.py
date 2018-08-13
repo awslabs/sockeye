@@ -1021,7 +1021,7 @@ class Translator:
                              k=self.beam_size,
                              batch_size=self.batch_size,
                              offset=self.offset,
-                             use_mxnet_topk=self.context != mx.cpu())  # MXNet implementation is faster on GPUs
+                             use_mxnet_topk=True)
 
         self._sort_by_index = SortByIndex()
         self._sort_by_index.initialize(ctx=self.context)
