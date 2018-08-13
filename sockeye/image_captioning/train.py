@@ -119,6 +119,7 @@ def create_data_iters_and_vocab(args: argparse.Namespace,
     """
 
     _, num_words_target = args.num_words
+    num_words_target = num_words_target if num_words_target > 0 else None
     _, word_min_count_target = args.word_min_count
     batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
     batch_by_words = args.batch_type == C.BATCH_TYPE_WORD
