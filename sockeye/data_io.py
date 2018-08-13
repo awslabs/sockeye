@@ -230,7 +230,10 @@ def calculate_length_statistics(source_iterables: Sequence[Iterable[Any]],
 
     num_sents = mean_and_variance.count
     mean = mean_and_variance.mean
-    std = math.sqrt(mean_and_variance.variance)
+    if not math.isnan(mean_and_variance.variance):
+        std = math.sqrt(mean_and_variance.variance)
+    else:
+        std = 0.0
     return LengthStatistics(num_sents, mean, std)
 
 
