@@ -16,7 +16,7 @@ Encoders for sequence-to-sequence models.
 """
 import logging
 import mxnet as mx
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Dict
 
 from .. import constants as C
 from ..config import Config
@@ -141,13 +141,15 @@ class ImageLoadedCnnEncoder(Encoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
-               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int,
+               att_dict: Optional[Dict[str, mx.sym.Symbol]] = None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
         :param data: Ignored. Assume that the input is the image.
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
+        :param att_dict: An optional dictionary of attention matrices used for visualization.
         :return: Encoded versions of input data data, data_length, seq_len.
         """
 

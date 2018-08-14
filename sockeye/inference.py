@@ -166,7 +166,7 @@ class InferenceModel(model.SockeyeModel):
              source_embed_length,
              source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
 
-            att_dict = {}
+            att_dict = {}  # type: Dict[str, mx.sym.Symbol]
 
             # encoder
             # source_encoded: (source_encoded_length, batch_size, encoder_depth)
@@ -223,7 +223,7 @@ class InferenceModel(model.SockeyeModel):
             # (batch_size, num_embed)
             target_embed_prev, _, _ = self.embedding_target.encode(data=target_prev, data_length=None, seq_len=1)
 
-            att_dict = {"source": {}, "self": {}}
+            att_dict = {"source": {}, "self": {}}  # type: Dict[str, Dict[str, mx.sym.Symbol]]
 
             # decoder
             # target_decoded: (batch_size, decoder_depth)

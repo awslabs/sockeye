@@ -758,11 +758,11 @@ class CustomSeqEncoder(Encoder):
     """
     Encoder consisting of a custom sequence of layers.
     """
-    def __init__(self, config: CustomSeqEncoderConfig, prefix: str = C.ENCODER_PREFIX):
+    def __init__(self, config: CustomSeqEncoderConfig, prefix: str = C.ENCODER_PREFIX) -> None:
         super().__init__(config.dtype)
         self.config = config
         self.prefix = prefix
-        self.layers = []
+        self.layers = [] # type: List[layers.EncoderLayer]
         input_num_hidden = config.num_embed
         for idx, layer_config in enumerate(config.encoder_layers):
             layer = layer_config.create_encoder_layer(input_num_hidden, "%sl%d_" % (self.prefix, idx))
@@ -887,12 +887,15 @@ class EmptyEncoder(Encoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: Optional[mx.sym.Symbol],
-               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int,
+               att_dict: Optional[Dict[str, mx.sym.Symbol]] = None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
         :param data: Input data.
         :param data_length: Vector with sequence lengths.
         :param seq_len: Maximum sequence length.
+        :param att_dict: An optional dictionary of attention matrices used for visualization.
+        Each matrix must be of size (batch_size, source_length, source_length).
         :return: Expected number of empty states (zero-filled).
         """
         # outputs: (batch_size, seq_len, num_hidden)
@@ -1382,6 +1385,6 @@ class ConvolutionalEmbeddingEncoder(Encoder):
 
 
 EncoderConfig = Union[RecurrentEncoderConfig, transformer.TransformerConfig, ConvolutionalEncoderConfig,
-                      EmptyEncoderConfig]
+                      CustomSeqEncoderConfig, EmptyEncoderConfig]
 if ImageEncoderConfig is not None:
     EncoderConfig = Union[EncoderConfig, ImageEncoderConfig]  # type: ignore

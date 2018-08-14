@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 # List is needed for mypy, but not used in the code, only in special comments
-from typing import Optional, List, Iterable, Tuple  # NOQA pylint: disable=unused-import
+from typing import Optional, List, Iterable, Tuple, Sequence  # NOQA pylint: disable=unused-import
 
 import mxnet as mx
 
@@ -643,7 +643,7 @@ class RecurrentLayerRNNConfig(Config):
                  cell_type: str = C.LSTM_TYPE,
                  forget_bias: float = 0.0,
                  lhuc: bool = False,
-                 dtype: str = C.DTYPE_FP32):
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.num_hidden = num_hidden
         # recurrent/inputs/states is for "old" cells and just "dropout" for "new states"
@@ -674,7 +674,7 @@ class RecurrentEncoderLayer(layers.EncoderLayer):
 
     def __init__(self,
                  rnn_config: RecurrentLayerRNNConfig,
-                 prefix: str = ""):
+                 prefix: str = "") -> None:
         self.rnn_cell = rnn_config.create_rnn_cell(prefix)
         self.num_hidden = rnn_config.num_hidden
 
@@ -694,7 +694,7 @@ class RecurrentDecoderLayer(layers.DecoderLayer):
 
     def __init__(self,
                  rnn_config: RecurrentLayerRNNConfig,
-                 prefix: str = ""):
+                 prefix: str = "") -> None:
         self.prefix = prefix
         self.rnn_cell = rnn_config.create_rnn_cell(prefix)
         self.num_hidden = rnn_config.num_hidden
@@ -719,8 +719,8 @@ class RecurrentDecoderLayer(layers.DecoderLayer):
                     source_encoded_lengths: mx.sym.Symbol,
                     source_encoded_max_length: int,
                     target: mx.sym.Symbol,
-                    states: List[mx.sym.Symbol],
-                    att_dict) -> Tuple[mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    states: Sequence[mx.sym.Symbol],
+                    att_dict) -> Tuple[mx.sym.Symbol, Sequence[mx.sym.Symbol]]:
         return self.rnn_cell(target, states)
 
     def reset(self):
@@ -736,7 +736,7 @@ class RecurrentDecoderLayer(layers.DecoderLayer):
     def num_states(self, step: int) -> int:
         return len(self.rnn_cell.state_info)
 
-    def state_variables(self, step: int) -> List[mx.sym.Symbol]:
+    def state_variables(self, step: int) -> Sequence[mx.sym.Symbol]:
         return [mx.sym.Variable("%rnn_state_%d" % (self.prefix, i))
                 for i, state_info in enumerate(self.rnn_cell.state_info)]
 
@@ -744,7 +744,7 @@ class RecurrentDecoderLayer(layers.DecoderLayer):
                     batch_size,
                     source_encoded: mx.sym.Symbol,
                     source_encoded_lengths: mx.sym.Symbol,
-                    source_encoded_max_length: int) -> List[mx.sym.Symbol]:
+                    source_encoded_max_length: int) -> Sequence[mx.sym.Symbol]:
         return [mx.sym.zeros(shape=(batch_size, num_hidden)) for (_, num_hidden) in self.rnn_cell.state_shape]
 
     def state_shapes(self,
@@ -766,7 +766,7 @@ class RecurrentLayerConfig(layers.LayerConfig):
                  dropout_recurrent: float = 0.0,
                  norm_states: bool = True,
                  norm_first_step: bool = True,
-                 forget_bias: float = 0.0):
+                 forget_bias: float = 0.0) -> None:
         super().__init__()
         self.rnn_config = RecurrentLayerRNNConfig(num_hidden=num_hidden,
                                                   dropout_recurrent=dropout_recurrent,
@@ -787,7 +787,7 @@ class RecurrentLayerConfig(layers.LayerConfig):
 class BidirectionalRecurrentEncoderLayer(layers.EncoderLayer):
     def __init__(self,
                  rnn_config: RecurrentLayerRNNConfig,
-                 prefix: str = ""):
+                 prefix: str = "") -> None:
         self.prefix = prefix
         utils.check_condition(rnn_config.num_hidden % 2 == 0,
                               "num_hidden must be a multiple of 2 for BiDirectionalRNNEncoders.")
@@ -843,7 +843,7 @@ class BidirectionalRecurrentLayerConfig(layers.LayerConfig):
                  dropout_states: float = 0.0,
                  dropout_recurrent: float = 0.0,
                  norm_states: bool = True,
-                 forget_bias: float = 0.0):
+                 forget_bias: float = 0.0) -> None:
         super().__init__()
         self.rnn_config = RecurrentLayerRNNConfig(num_hidden=num_hidden,
                                                   dropout_recurrent=dropout_recurrent,

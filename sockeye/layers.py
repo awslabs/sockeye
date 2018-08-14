@@ -13,7 +13,7 @@
 
 import logging
 import math
-from typing import Dict, Optional, Tuple, Union, List, Iterator
+from typing import Dict, Optional, Tuple, Union, List, Iterator, Sequence
 from abc import ABC, abstractmethod
 
 import mxnet as mx
@@ -142,8 +142,8 @@ class DecoderLayer(Layer):
                     source_encoded_lengths: mx.sym.Symbol,
                     source_encoded_max_length: int,
                     target: mx.sym.Symbol,
-                    states: List[mx.sym.Symbol],
-                    att_dict: Dict[str, Dict[str, mx.sym.Symbol]]) -> Tuple[mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    states: Sequence[mx.sym.Symbol],
+                    att_dict: Dict[str, Dict[str, mx.sym.Symbol]]) -> Tuple[mx.sym.Symbol, Sequence[mx.sym.Symbol]]:
         """
         Run the decoder layer for a single position given the current step, the previous embedded target word,
         and previous decoder layer states.
@@ -183,7 +183,7 @@ class DecoderLayer(Layer):
         """
         return 0
 
-    def state_variables(self, step: int) -> List[mx.sym.Symbol]:
+    def state_variables(self, step: int) -> Sequence[mx.sym.Symbol]:
         """
         Returns the list of symbolic variables for this decoder to be used during inference.
 
@@ -194,9 +194,9 @@ class DecoderLayer(Layer):
 
     def init_states(self,
                     batch_size: int,
-                    source_encoded: List[mx.sym.Symbol],
+                    source_encoded: Sequence[mx.sym.Symbol],
                     source_encoded_lengths: mx.sym.Symbol,
-                    source_encoded_max_length: int) -> List[mx.sym.Symbol]:
+                    source_encoded_max_length: int) -> Sequence[mx.sym.Symbol]:
         """
         Returns a list of symbolic states that represent the initial states of this decoder.
         Used for inference.
@@ -284,7 +284,7 @@ class SharedEncoderDecoderLayer(DecoderLayer, EncoderLayer):
 def layers_with_states_iter(
         layers: List[DecoderLayer],
         step: int,
-        layer_states_flat: List[mx.sym.Symbol]) -> Iterator[Tuple[DecoderLayer, List[mx.sym.Symbol]]]:
+        layer_states_flat: Sequence[mx.sym.Symbol]) -> Iterator[Tuple[DecoderLayer, Sequence[mx.sym.Symbol]]]:
     """
     A generator for layers and corresponding layer states from a flat list of all layer states.
     :param layers: A list of layers.
@@ -299,9 +299,7 @@ def layers_with_states_iter(
             state_idx += layer.num_states(step)
         else:
             layer_states = []
-
         yield layer, layer_states
-
 
 
 class EncoderLayerChain(EncoderLayer):
@@ -339,8 +337,8 @@ class NestedDecoderLayer(DecoderLayer):
 
     def layers_with_states_iter(self,
                                 step: int,
-                                layer_states_flat: List[mx.sym.Symbol]) -> Iterator[Tuple[DecoderLayer,
-                                                                                          List[mx.sym.Symbol]]]:
+                                layer_states_flat: Sequence[mx.sym.Symbol]) -> Iterator[Tuple[DecoderLayer,
+                                                                                          Sequence[mx.sym.Symbol]]]:
         return layers_with_states_iter(self.layers, step, layer_states_flat)
 
     def att_names(self) -> List[str]:
@@ -362,7 +360,7 @@ class NestedDecoderLayer(DecoderLayer):
     def num_states(self, step) -> int:
         return sum(layer.num_states(step) for layer in self.layers)
 
-    def state_variables(self, step: int) -> List[mx.sym.Symbol]:
+    def state_variables(self, step: int) -> Sequence[mx.sym.Symbol]:
         return [var for layer in self.layers for var in layer.state_variables(step)]
 
     def state_shapes(self,
@@ -377,9 +375,9 @@ class NestedDecoderLayer(DecoderLayer):
 
     def init_states(self,
                     batch_size: int,
-                    source_encoded: List[mx.sym.Symbol],
+                    source_encoded: Sequence[mx.sym.Symbol],
                     source_encoded_lengths: mx.sym.Symbol,
-                    source_encoded_max_length: int) -> List[mx.sym.Symbol]:
+                    source_encoded_max_length: int) -> Sequence[mx.sym.Symbol]:
         return [init_state for layer in self.layers for init_state in layer.init_states(batch_size,
                                                                                         source_encoded,
                                                                                         source_encoded_lengths,
@@ -392,7 +390,7 @@ class NestedDecoderLayer(DecoderLayer):
 
 class DecoderLayerChain(NestedDecoderLayer):
 
-    def __init__(self, layers: List[DecoderLayer]):
+    def __init__(self, layers: List[DecoderLayer]) -> None:
         assert len(layers) >= 1, "At least one layer needed in layer chain."
         self._layers = layers
 
@@ -416,9 +414,9 @@ class DecoderLayerChain(NestedDecoderLayer):
         return target_encoded
 
     def decode_step(self, step: int, source_encoded: mx.sym.Symbol, source_encoded_lengths: mx.sym.Symbol,
-                    source_encoded_max_length: int, target: mx.sym.Symbol, layer_states_flat: List[mx.sym.Symbol],
-                    att_dict) -> Tuple[mx.sym.Symbol, List[mx.sym.Symbol]]:
-        new_layer_states_flat = []
+                    source_encoded_max_length: int, target: mx.sym.Symbol, layer_states_flat: Sequence[mx.sym.Symbol],
+                    att_dict) -> Tuple[mx.sym.Symbol, Sequence[mx.sym.Symbol]]:
+        new_layer_states_flat = []  # type: List[mx.sym.Symbol]
         for layer, layer_states in self.layers_with_states_iter(step, layer_states_flat):
             target, new_layer_states = layer.decode_step(step, source_encoded, source_encoded_lengths,
                                                          source_encoded_max_length, target, layer_states, att_dict)
@@ -503,8 +501,8 @@ class StatelessBlockLayer(SharedEncoderDecoderLayer):
                     source_encoded_lengths: mx.sym.Symbol,
                     source_encoded_max_length: int,
                     target: mx.sym.Symbol,
-                    states: List[mx.sym.Symbol],
-                    att_dict: Dict[str, Dict[str, mx.sym.Symbol]]) -> Tuple[mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    states: Sequence[mx.sym.Symbol],
+                    att_dict: Dict[str, Dict[str, mx.sym.Symbol]]) -> Tuple[mx.sym.Symbol, Sequence[mx.sym.Symbol]]:
         # (batch_size, 1, num_hidden)
         target = mx.sym.expand_dims(target, axis=1)
 
@@ -580,7 +578,7 @@ class FeedForwardLayerConfig(LayerConfig):
     def __init__(self,
                  num_hidden: int,
                  dropout: float,
-                 act_type: str = C.RELU):
+                 act_type: str = C.RELU) -> None:
         super().__init__()
         self.num_hidden = num_hidden
         self.act_type = act_type
@@ -639,7 +637,7 @@ class LinearBlock(StatelessBlock):
 
 class LinearLayerConfig(LayerConfig):
 
-    def __init__(self, num_hidden: int, dropout: float, no_bias=False):
+    def __init__(self, num_hidden: int, dropout: float, no_bias=False) -> None:
         super().__init__()
         self.num_hidden = num_hidden
         self.dropout = dropout
@@ -683,7 +681,7 @@ class ActivationBlock(StatelessBlock):
 
 class ActivationLayerConfig(LayerConfig):
 
-    def __init__(self, act_type: str = C.RELU):
+    def __init__(self, act_type: str = C.RELU) -> None:
         super().__init__()
         self.act_type = act_type
 
@@ -725,7 +723,7 @@ class DropoutBlock(StatelessBlock):
 
 class DropoutLayerConfig(LayerConfig):
 
-    def __init__(self, dropout: float):
+    def __init__(self, dropout: float) -> None:
         super().__init__()
         self.dropout = dropout
 
@@ -792,7 +790,7 @@ class LearnedPositionalEmbeddingsLayerConfig(LayerConfig):
     def __init__(self,
                  num_embed: int,
                  dropout: float,
-                 max_seq_len: int):
+                 max_seq_len: int) -> None:
         super().__init__()
         self.num_embed = num_embed
         self.dropout = dropout
@@ -1027,8 +1025,8 @@ class MultiHeadSourceAttentionDecoderLayer(DecoderLayer):
                     source_encoded_lengths: mx.sym.Symbol,
                     source_encoded_max_length: int,
                     target: mx.sym.Symbol,
-                    states: List[mx.sym.Symbol],
-                    att_dict: Dict[str, Dict[str, mx.sym.Symbol]]) -> Tuple[mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    states: Sequence[mx.sym.Symbol],
+                    att_dict: Dict[str, Dict[str, mx.sym.Symbol]]) -> Tuple[mx.sym.Symbol, Sequence[mx.sym.Symbol]]:
         # (batch_size, 1, num_hidden)
         target = mx.sym.expand_dims(target, axis=1)
 
@@ -1054,13 +1052,7 @@ class MultiHeadSourceAttentionLayerConfig(LayerConfig):
                  dropout: float = 0.0,
                  dropout_attention: Optional[float] = None,
                  num_hidden: int = None,
-                 att_num_hidden: Optional[int] = None,
-                 norm_source: bool = False,
-                 factors: Optional[int] = None,
-                 project_q: bool = True, project_kv: bool = True, project_out: bool = True,
-                 gated_heads: bool = False,
-                 heads_default_value: bool = False,
-                 head_dropout: float = 0.0):
+                 att_num_hidden: Optional[int] = None) -> None:
         super().__init__()
         assert num_hidden is not None
         self.num_hidden = num_hidden
@@ -1124,7 +1116,7 @@ class MultiHeadSelfAttentionEncoderLayer(EncoderLayer):
 class MultiHeadSelfAttentionDecoderLayer(DecoderLayer):
 
     def __init__(self, num_hidden, att_num_hidden: int, heads: int, dropout: float, dropout_attention: float,
-                 prefix: str = ""):
+                 prefix: str = "") -> None:
         self.prefix = prefix
         self.num_hidden = num_hidden
         self.att_num_hidden = att_num_hidden if att_num_hidden is not None else num_hidden
@@ -1136,7 +1128,7 @@ class MultiHeadSelfAttentionDecoderLayer(DecoderLayer):
                                           depth_out=num_hidden)
 
     def decode_sequence(self,
-                        source_encoded: List[mx.sym.Symbol],
+                        source_encoded: Sequence[mx.sym.Symbol],
                         source_encoded_lengths: mx.sym.Symbol,
                         source_encoded_max_length: int,
                         target_encoded: mx.sym.Symbol,
@@ -1155,8 +1147,8 @@ class MultiHeadSelfAttentionDecoderLayer(DecoderLayer):
                     source_encoded_lengths: mx.sym.Symbol,
                     source_encoded_max_length: int,
                     target: mx.sym.Symbol,
-                    states: List[mx.sym.Symbol],
-                    att_dict: Dict[str, Dict[str, mx.sym.Symbol]]) -> Tuple[mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    states: Sequence[mx.sym.Symbol],
+                    att_dict: Dict[str, Dict[str, mx.sym.Symbol]]) -> Tuple[mx.sym.Symbol, Sequence[mx.sym.Symbol]]:
         target = mx.sym.expand_dims(target, axis=1)
 
         if step > 1:
@@ -1167,7 +1159,7 @@ class MultiHeadSelfAttentionDecoderLayer(DecoderLayer):
 
         context, probs = self.att(target, cache=cache)
 
-        new_states = [cache['k'], cache['v']]  # type: List[mx.sym.Symbol]
+        new_states = [cache['k'], cache['v']]  # type: Sequence[mx.sym.Symbol]
 
         # Fill the attention dictionary
         # probs has shape (batch, heads, 1, target_length)
@@ -1220,7 +1212,7 @@ class MultiHeadSelfAttentionDecoderLayer(DecoderLayer):
 
     def init_states(self,
                     batch_size: int,
-                    source_encoded: List[mx.sym.Symbol],
+                    source_encoded: Sequence[mx.sym.Symbol],
                     source_encoded_lengths: mx.sym.Symbol,
                     source_encoded_max_length: int):
         return []
@@ -1236,7 +1228,7 @@ class MultiHeadSelfAttentionLayerConfig(LayerConfig):
                  dropout: float = 0.0,
                  dropout_attention: Optional[float] = None,
                  num_hidden: int = None,
-                 att_num_hidden: Optional[int] = None):
+                 att_num_hidden: Optional[int] = None) -> None:
         super().__init__()
         assert num_hidden is not None, "num_hidden required"
         self.num_hidden = num_hidden
@@ -1319,10 +1311,10 @@ class ResidualDecoderLayer(NestedDecoderLayer):
         return target_encoded_input + target_encoded
 
     def decode_step(self, step: int, source_encoded: mx.sym.Symbol, source_encoded_lengths: mx.sym.Symbol,
-                    source_encoded_max_length: int, target: mx.sym.Symbol, layer_states_flat: List[mx.sym.Symbol],
-                    att_dict: Dict[str, Dict[str, mx.sym.Symbol]]) -> Tuple[mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    source_encoded_max_length: int, target: mx.sym.Symbol, layer_states_flat: Sequence[mx.sym.Symbol],
+                    att_dict: Dict[str, Dict[str, mx.sym.Symbol]]) -> Tuple[mx.sym.Symbol, Sequence[mx.sym.Symbol]]:
 
-        new_layer_states_flat = []
+        new_layer_states_flat = []  # type: List[mx.sym.Symbol]
         target_input = target
 
         for layer, layer_states in self.layers_with_states_iter(step, layer_states_flat):
@@ -1336,7 +1328,7 @@ class ResidualDecoderLayer(NestedDecoderLayer):
 
 
 class ResidualLayerConfig(LayerConfig):
-    def __init__(self, layer_configs: List[LayerConfig]):
+    def __init__(self, layer_configs: List[LayerConfig]) -> None:
         super().__init__()
         self.layer_configs = layer_configs
 
@@ -1368,7 +1360,7 @@ class ResidualLayerConfig(LayerConfig):
 # TODO: make this a block!?
 class HighwayLayer:
 
-    def __init__(self, num_hidden: input, gate_input: str, gated: str, prefix: str):
+    def __init__(self, num_hidden: int, gate_input: str, gated: str, prefix: str) -> None:
         self.gate_input = gate_input
         self.gated = gated
         self.ff = FeedForwardBlock(num_hidden=num_hidden,
@@ -1416,7 +1408,7 @@ class HighwayEncoderLayer(EncoderLayer, HighwayLayer):
                  layers: List[EncoderLayer],
                  gate_input: str,
                  gated: str,
-                 prefix: str = ""):
+                 prefix: str = "") -> None:
         super().__init__(num_hidden=layers[-1].get_num_hidden(), gate_input=gate_input, gated=gated, prefix=prefix)
         self._layers = layers
 
@@ -1453,7 +1445,7 @@ class HighwayDecoderLayer(NestedDecoderLayer, HighwayLayer):
                  layers: List[DecoderLayer],
                  gate_input: str,
                  gated: str,
-                 prefix: str = ""):
+                 prefix: str = "") -> None:
         # TODO: make sure input num hidden equals output num hidden
         super().__init__(num_hidden=layers[-1].get_num_hidden(), gate_input=gate_input, gated=gated, prefix=prefix)
         self._layers = layers
@@ -1487,12 +1479,12 @@ class HighwayDecoderLayer(NestedDecoderLayer, HighwayLayer):
                             target_encoded)
 
     def decode_step(self, step: int, source_encoded: mx.sym.Symbol, source_encoded_lengths: mx.sym.Symbol,
-                    source_encoded_max_length: int, target: mx.sym.Symbol, layer_states_flat: List[mx.sym.Symbol],
-                    att_dict: Dict[str, Dict[str, mx.sym.Symbol]]) -> Tuple[mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    source_encoded_max_length: int, target: mx.sym.Symbol, layer_states_flat: Sequence[mx.sym.Symbol],
+                    att_dict: Dict[str, Dict[str, mx.sym.Symbol]]) -> Tuple[mx.sym.Symbol, Sequence[mx.sym.Symbol]]:
         highway_input = target
         gate_input = target
 
-        new_layer_states_flat = []
+        new_layer_states_flat = []  # type: List[mx.sym.Symbol]
 
         for layer, layer_states in self.layers_with_states_iter(step, layer_states_flat):
             target, new_layer_states = layer.decode_step(step, source_encoded, source_encoded_lengths,
@@ -1507,7 +1499,7 @@ class HighwayDecoderLayer(NestedDecoderLayer, HighwayLayer):
 
 class HighwayLayerConfig(LayerConfig):
 
-    def __init__(self, layer_configs: List[LayerConfig], gate_input="input", gated: str = "both"):
+    def __init__(self, layer_configs: List[LayerConfig], gate_input="input", gated: str = "both") -> None:
         super().__init__()
         self.layer_configs = layer_configs
         self.gate_input = gate_input
@@ -1515,8 +1507,8 @@ class HighwayLayerConfig(LayerConfig):
 
     def create_encoder_layer(self, input_num_hidden: int, prefix: str) -> EncoderLayer:
         layers = []
-        for idx, layer in enumerate(self.layer_configs):
-            layer = layer.create_encoder_layer(input_num_hidden, "%shighway%d_" % (prefix, idx))
+        for idx, layer_config in enumerate(self.layer_configs):
+            layer = layer_config.create_encoder_layer(input_num_hidden, "%shighway%d_" % (prefix, idx))
             input_num_hidden = layer.get_num_hidden()
             layers.append(layer)
         return HighwayEncoderLayer(layers=layers, gate_input=self.gate_input,
@@ -1525,8 +1517,8 @@ class HighwayLayerConfig(LayerConfig):
 
     def create_decoder_layer(self, input_num_hidden: int, prefix: str) -> DecoderLayer:
         layers = []
-        for idx, layer in enumerate(self.layer_configs):
-            layer = layer.create_decoder_layer(input_num_hidden, "%s_highway%d" % (prefix, idx))
+        for idx, layer_config in enumerate(self.layer_configs):
+            layer = layer_config.create_decoder_layer(input_num_hidden, "%s_highway%d" % (prefix, idx))
             input_num_hidden = layer.get_num_hidden()
             layers.append(layer)
         return HighwayDecoderLayer(layers=layers, gate_input=self.gate_input,
@@ -1551,14 +1543,14 @@ class IdentityDecoderLayer(DecoderLayer):
     def __init__(self, num_hidden):
         self.num_hidden = num_hidden
 
-    def decode_sequence(self, source_encoded: List[mx.sym.Symbol], source_encoded_lengths: mx.sym.Symbol,
+    def decode_sequence(self, source_encoded: Sequence[mx.sym.Symbol], source_encoded_lengths: mx.sym.Symbol,
                         source_encoded_max_length: int, target_encoded: mx.sym.Symbol,
                         target_encoded_lengths: mx.sym.Symbol, target_encoded_max_length: int,
                         target_autoregressive_bias: mx.sym.Symbol) -> mx.sym.Symbol:
         return target_encoded
 
-    def decode_step(self, step: int, source_encoded: List[mx.sym.Symbol], source_encoded_lengths: mx.sym.Symbol,
-                    source_encoded_max_length: int, target: mx.sym.Symbol, states: List[mx.sym.Symbol], att_dict) -> Tuple[mx.sym.Symbol, List[mx.sym.Symbol]]:
+    def decode_step(self, step: int, source_encoded: Sequence[mx.sym.Symbol], source_encoded_lengths: mx.sym.Symbol,
+                    source_encoded_max_length: int, target: mx.sym.Symbol, states: Sequence[mx.sym.Symbol], att_dict) -> Tuple[mx.sym.Symbol, Sequence[mx.sym.Symbol]]:
         return target, []
 
     def get_num_hidden(self) -> int:
@@ -2032,7 +2024,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                  queries: mx.sym.Symbol,
                  memory: mx.sym.Symbol,
                  memory_lengths: Optional[mx.sym.Symbol] = None,
-                 bias: Optional[mx.sym.Symbol] = None) -> [mx.sym.Symbol, mx.sym.Symbol]:
+                 bias: Optional[mx.sym.Symbol] = None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
         """
         Computes multi-head attention for queries given a memory tensor.
         If sequence lengths are provided, they will be used to mask the attention scores.

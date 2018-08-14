@@ -18,7 +18,7 @@ from sockeye.config import Config
 from . import utils
 from . import constants as C
 from . import layers
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict, Optional, Sequence
 
 import mxnet as mx
 import math
@@ -250,7 +250,7 @@ class ConvolutionBlock:
 
 # TODO: encoder side left-padding
 class ConvolutionalEncoderLayer(layers.EncoderLayer):
-    def __init__(self, cnn_config: ConvolutionConfig, prefix: str):
+    def __init__(self, cnn_config: ConvolutionConfig, prefix: str) -> None:
         self.prefix = prefix
         self.cnn_config = cnn_config
         self.cnn_block = ConvolutionBlock(self.cnn_config, pad_type=C.CNN_PAD_CENTERED, prefix=prefix)
@@ -277,7 +277,7 @@ class ConvolutionalEncoderLayer(layers.EncoderLayer):
 
 class ConvolutionalDecoderLayer(layers.DecoderLayer):
 
-    def __init__(self, input_num_hidden: int, cnn_config: ConvolutionConfig, prefix: str):
+    def __init__(self, input_num_hidden: int, cnn_config: ConvolutionConfig, prefix: str) -> None:
         self.input_num_hidden = input_num_hidden
         self.prefix = prefix
         self.cnn_config = cnn_config
@@ -291,7 +291,7 @@ class ConvolutionalDecoderLayer(layers.DecoderLayer):
         return self.cnn_block(target_encoded, target_encoded_lengths, target_encoded_max_length)[0]
 
     def decode_step(self, step: int, source_encoded: mx.sym.Symbol, source_encoded_lengths: mx.sym.Symbol,
-                    source_encoded_max_length: int, target: mx.sym.Symbol, states: List[mx.sym.Symbol], att_dict) -> Tuple[mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    source_encoded_max_length: int, target: mx.sym.Symbol, states: Sequence[mx.sym.Symbol], att_dict) -> Tuple[mx.sym.Symbol, Sequence[mx.sym.Symbol]]:
         # (batch_size, kernel_width - 1, num_hidden)
         prev_target = states[0]
 
@@ -351,7 +351,7 @@ class ConvolutionalLayerConfig(layers.LayerConfig):
                  dropout: float = 0.0,
                  dilate: int = 1,
                  stride: int = 1,
-                 prefix: str=""):
+                 prefix: str="") -> None:
         super().__init__()
         self.num_hidden = num_hidden
         self.kernel_width = kernel_width
@@ -387,7 +387,7 @@ class PoolingEncoderLayer(layers.EncoderLayer):
     are not a multiple of the stride.
     """
 
-    def __init__(self, num_hidden, stride: int = 3, kernel: int = 3, pool_type: str = "avg"):
+    def __init__(self, num_hidden, stride: int = 3, kernel: int = 3, pool_type: str = "avg") -> None:
         self.pool_type = pool_type
         self.stride = stride
         self.kernel = kernel
@@ -439,7 +439,7 @@ class PoolingEncoderLayer(layers.EncoderLayer):
 
 class PoolingLayerConfig(layers.LayerConfig):
 
-    def __init__(self, stride: int = 3, kernel: Optional[int] = None, pool_type: str = "avg", prefix: str=""):
+    def __init__(self, stride: int = 3, kernel: Optional[int] = None, pool_type: str = "avg", prefix: str="") -> None:
         super().__init__()
         self.stride = stride
         self.kernel = kernel if kernel is not None else stride
@@ -469,7 +469,7 @@ class QRNNBlock:
                  input_num_hidden: int,
                  kernel_width: int,
                  act_type: str = "tanh",
-                 prefix: str = ""):
+                 prefix: str = "") -> None:
         self.num_hidden = num_hidden
         self.kernel_width = kernel_width
         self.act_type = act_type
@@ -561,7 +561,7 @@ class QRNNDecoderLayer(layers.DecoderLayer):
     """
 
     def __init__(self, num_hidden: int, input_num_hidden: int, kernel_width: int, act_type: str = "tanh",
-                 prefix: str = ""):
+                 prefix: str = "") -> None:
         self.num_hidden = num_hidden
         self.input_num_hidden = input_num_hidden
         self.prefix = prefix
@@ -569,7 +569,7 @@ class QRNNDecoderLayer(layers.DecoderLayer):
                               kernel_width=kernel_width, act_type=act_type, prefix=prefix)
 
     def decode_sequence(self,
-                        source_encoded: List[mx.sym.Symbol],
+                        source_encoded: Sequence[mx.sym.Symbol],
                         source_encoded_lengths: mx.sym.Symbol,
                         source_encoded_max_length: int,
                         target_encoded: mx.sym.Symbol,
@@ -578,9 +578,9 @@ class QRNNDecoderLayer(layers.DecoderLayer):
                         target_autoregressive_bias: mx.sym.Symbol) -> mx.sym.Symbol:
         return self.qrnn(target_encoded, target_encoded_lengths, target_encoded_max_length)[0]
 
-    def decode_step(self, step: int, source_encoded: List[mx.sym.Symbol], source_encoded_lengths: mx.sym.Symbol,
-                    source_encoded_max_length: int, target: mx.sym.Symbol, states: List[mx.sym.Symbol],
-                    att_dict: dict) -> Tuple[mx.sym.Symbol, List[mx.sym.Symbol]]:
+    def decode_step(self, step: int, source_encoded: Sequence[mx.sym.Symbol], source_encoded_lengths: mx.sym.Symbol,
+                    source_encoded_max_length: int, target: mx.sym.Symbol, states: Sequence[mx.sym.Symbol],
+                    att_dict: dict) -> Tuple[mx.sym.Symbol, Sequence[mx.sym.Symbol]]:
         # (batch_size, kernel_width - 1, num_hidden)
         prev_h = states[0]
         prev_target = states[1]
@@ -608,15 +608,15 @@ class QRNNDecoderLayer(layers.DecoderLayer):
     def num_states(self, step: int) -> int:
         return 2
 
-    def state_variables(self, step: int) -> List[mx.sym.Symbol]:
+    def state_variables(self, step: int) -> Sequence[mx.sym.Symbol]:
         return [mx.sym.Variable(name="%s_qrnn_prev_h" % self.prefix),
                 mx.sym.Variable(name="%s_qrnn_in_state" % self.prefix)]
 
     def init_states(self,
                     batch_size: int,
-                    source_encoded: List[mx.sym.Symbol],
+                    source_encoded: Sequence[mx.sym.Symbol],
                     source_encoded_lengths: mx.sym.Symbol,
-                    source_encoded_max_length: int) -> List[mx.sym.Symbol]:
+                    source_encoded_max_length: int) -> Sequence[mx.sym.Symbol]:
         input_num_hidden = self.input_num_hidden
         kernel_width = self.qrnn.kernel_width
         return [mx.sym.zeros(shape=(batch_size, self.qrnn.num_hidden),
@@ -645,7 +645,7 @@ class QRNNEncoderLayer(layers.EncoderLayer):
     """
 
     def __init__(self, num_hidden: int, input_num_hidden: int,
-                 kernel_width: int, act_type: str = "tanh", prefix: str = ""):
+                 kernel_width: int, act_type: str = "tanh", prefix: str = "") -> None:
         self.num_hidden = num_hidden
         self.qrnn = QRNNBlock(num_hidden=num_hidden, input_num_hidden=input_num_hidden,
                               kernel_width=kernel_width, act_type=act_type, prefix=prefix)
@@ -661,7 +661,7 @@ class QRNNEncoderLayer(layers.EncoderLayer):
 
 class QRNNLayerConfig(layers.LayerConfig):
 
-    def __init__(self, num_hidden: int, kernel_width: int = 3, act_type: str = "tanh"):
+    def __init__(self, num_hidden: int, kernel_width: int = 3, act_type: str = "tanh") -> None:
         super().__init__()
         self.num_hidden = num_hidden
         self.kernel_width = kernel_width
