@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.46]
+### Fixed
+- Fixed issue with `--num-words 0:0` in image captioning and another issue related to loading all features to memory with variable length.
+
 ## [1.18.45]
 ### Added
 - Added an 8 layer LSTM model similar (but not exactly identical) to the 'GNMT' architecture to autopilot.
