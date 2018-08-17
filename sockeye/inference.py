@@ -577,25 +577,23 @@ class TranslatorInput:
     :param chunk_id: Chunk id. Defaults to -1.
     """
 
-    __slots__ = ('sentence_id', 'tokens', 'factors', 'constraints', 'avoid_list', 'chunk_id')
+    __slots__ = ('sentence_id', 'tokens', 'factors', 'constraints', 'avoid_list')
 
     def __init__(self,
                  sentence_id: int,
                  tokens: Tokens,
                  factors: Optional[List[Tokens]] = None,
                  constraints: Optional[List[Tokens]] = None,
-                 avoid_list: Optional[List[Tokens]] = None,
-                 chunk_id: int = -1) -> None:
+                 avoid_list: Optional[List[Tokens]] = None) -> None:
         self.sentence_id = sentence_id
-        self.chunk_id = chunk_id
         self.tokens = tokens
         self.factors = factors
         self.constraints = constraints
         self.avoid_list = avoid_list
 
     def __str__(self):
-        return 'TranslatorInput(%d, %s, factors=%s, constraints=%s, avoid=%s, chunk_id=%d)' \
-            % (self.sentence_id, self.tokens, self.factors, self.constraints, self.avoid_list, self.chunk_id)
+        return 'TranslatorInput(%d, %s, factors=%s, constraints=%s, avoid=%s)' \
+            % (self.sentence_id, self.tokens, self.factors, self.constraints, self.avoid_list)
 
     def __len__(self):
         return len(self.tokens)
@@ -631,8 +629,7 @@ class TranslatorInput:
                                   tokens=self.tokens[i:i + chunk_size],
                                   factors=factors,
                                   constraints=constraints,
-                                  avoid_list=self.avoid_list,
-                                  chunk_id=chunk_id)
+                                  avoid_list=self.avoid_list)
 
     def with_eos(self) -> 'TranslatorInput':
         """
@@ -643,14 +640,13 @@ class TranslatorInput:
                                factors=[factor + [C.EOS_SYMBOL] for factor in
                                         self.factors] if self.factors is not None else None,
                                constraints=self.constraints,
-                               avoid_list=self.avoid_list,
-                               chunk_id=self.chunk_id)
+                               avoid_list=self.avoid_list)
 
 
 class BadTranslatorInput(TranslatorInput):
 
     def __init__(self, sentence_id, tokens):
-        super().__init__(sentence_id=sentence_id, tokens=tokens, chunk_id=-1, factors=None)
+        super().__init__(sentence_id=sentence_id, tokens=tokens, factors=None)
 
 
 def _bad_input(sentence_id: int, reason: str = '') -> BadTranslatorInput:
@@ -828,16 +824,30 @@ def empty_translation() -> Translation:
     return Translation(target_ids=[], attention_matrix=np.asarray([[0]]), score=-np.inf)
 
 
-TranslatedChunk = NamedTuple('TranslatedChunk', [
-    ('id', int),
-    ('chunk_id', int),
+IndexedTranslatorInput = NamedTuple('IndexedTranslatorInput', [
+    ('input_idx', int),
+    ('chunk_idx', int),
+    ('translator_input', TranslatorInput)
+])
+"""
+Translation of a chunk of a sentence.
+
+:param input_idx: Internal index of translation requests to keep track of the correct order of translations.
+:param chunk_idx: The index of the chunk. Used when TranslatorInputs get split across multiple chunks.
+:param input: The translator input.
+"""
+
+
+IndexedTranslation = NamedTuple('IndexedTranslation', [
+    ('input_idx', int),
+    ('chunk_idx', int),
     ('translation', Translation),
 ])
 """
 Translation of a chunk of a sentence.
 
-:param id: Id of the sentence.
-:param chunk_id: Id of the chunk.
+:param input_idx: Internal index of translation requests to keep track of the correct order of translations.
+:param chunk_idx: The index of the chunk. Used when TranslatorInputs get split across multiple chunks.
 :param translation: The translation of the input chunk.
 """
 
@@ -1092,18 +1102,19 @@ class Translator:
         :param trans_inputs: List of TranslatorInputs as returned by make_input().
         :return: List of translation results.
         """
-        translated_chunks = []  # type: List[TranslatedChunk]
+        translated_chunks = []  # type: List[IndexedTranslation]
 
         # split into chunks
-        input_chunks = []  # type: List[TranslatorInput]
-        for trans_input in trans_inputs:
+        input_chunks = []  # type: List[IndexedTranslatorInput]
+        for trans_input_idx, trans_input in enumerate(trans_inputs):
             # bad input
             if isinstance(trans_input, BadTranslatorInput):
-                translated_chunks.append(TranslatedChunk(id=trans_input.sentence_id, chunk_id=0, translation=empty_translation()))
-
+                translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
+                                                         translation=empty_translation()))
             # empty input
             elif len(trans_input.tokens) == 0:
-                translated_chunks.append(TranslatedChunk(id=trans_input.sentence_id, chunk_id=0, translation=empty_translation()))
+                translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
+                                                         translation=empty_translation()))
             else:
                 # TODO(tdomhan): Remove branch without EOS with next major version bump, as future models will always be trained with source side EOS symbols
                 if self.source_with_eos:
@@ -1115,26 +1126,33 @@ class Translator:
                             "Splitting into chunks of size %d.",
                             trans_input.sentence_id, len(trans_input.tokens),
                             self.buckets_source[-1], max_input_length_without_eos)
-                        input_chunks.extend([trans_input_chunk.with_eos()
-                                             for trans_input_chunk in
-                                             trans_input.chunks(max_input_length_without_eos)])
+                        chunks = [trans_input_chunk.with_eos()
+                                  for trans_input_chunk in trans_input.chunks(max_input_length_without_eos)]
+                        input_chunks.extend([IndexedTranslatorInput(trans_input_idx, chunk_idx, chunk_input)
+                                             for chunk_idx, chunk_input in enumerate(chunks)])
                     # regular input
                     else:
-                        input_chunks.append(trans_input.with_eos())
+                        input_chunks.append(IndexedTranslatorInput(trans_input_idx,
+                                                                   chunk_idx=0,
+                                                                   translator_input=trans_input.with_eos()))
                 else:
-                    # oversized input
                     if len(trans_input.tokens) > self.max_input_length:
+                        # oversized input
                         logger.debug(
                             "Input %d has length (%d) that exceeds max input length (%d). "
                             "Splitting into chunks of size %d.",
                             trans_input.sentence_id, len(trans_input.tokens),
                             self.buckets_source[-1], self.max_input_length)
-                        input_chunks.extend([trans_input_chunk
-                                             for trans_input_chunk in
-                                             trans_input.chunks(self.max_input_length)])
-                    # regular input
+                        chunks = [trans_input_chunk
+                                  for trans_input_chunk in
+                                  trans_input.chunks(self.max_input_length)]
+                        input_chunks.extend([IndexedTranslatorInput(trans_input_idx, chunk_idx, chunk_input)
+                                             for chunk_idx, chunk_input in enumerate(chunks)])
                     else:
-                        input_chunks.append(trans_input)
+                        # regular input
+                        input_chunks.append(IndexedTranslatorInput(trans_input_idx,
+                                                                   chunk_idx=0,
+                                                                   translator_input=trans_input.with_eos()))
 
             if trans_input.constraints is not None:
                 logger.info("Input %d has %d %s: %s", trans_input.sentence_id,
@@ -1143,7 +1161,7 @@ class Translator:
                             ", ".join(" ".join(x) for x in trans_input.constraints))
 
         # Sort longest to shortest (to rather fill batches of shorter than longer sequences)
-        input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.tokens), reverse=True)
+        input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.translator_input.tokens), reverse=True)
 
         # translate in batch-sized blocks over input chunks
         for batch_id, batch in enumerate(utils.grouper(input_chunks, self.batch_size)):
@@ -1153,18 +1171,19 @@ class Translator:
             if rest > 0:
                 logger.debug("Extending the last batch to the full batch size (%d)", self.batch_size)
                 batch = batch + [batch[0]] * rest
-            batch_translations = self._translate_nd(*self._get_inference_input(batch))
+            translator_inputs = [indexed_translator_input.translator_input for indexed_translator_input in batch]
+            batch_translations = self._translate_nd(*self._get_inference_input(translator_inputs))
             # truncate to remove filler translations
             if rest > 0:
                 batch_translations = batch_translations[:-rest]
             for chunk, translation in zip(batch, batch_translations):
-                translated_chunks.append(TranslatedChunk(chunk.sentence_id, chunk.chunk_id, translation))
+                translated_chunks.append(IndexedTranslation(chunk.input_idx, chunk.chunk_idx, translation))
         # Sort by input idx and then chunk id
         translated_chunks = sorted(translated_chunks)
 
         # Concatenate results
         results = []  # type: List[TranslatorOutput]
-        chunks_by_input_idx = itertools.groupby(translated_chunks, key=lambda translation: translation.id)
+        chunks_by_input_idx = itertools.groupby(translated_chunks, key=lambda translation: translation.input_idx)
         for trans_input, (input_idx, chunks) in zip(trans_inputs, chunks_by_input_idx):
             chunks = list(chunks)  # type: ignore
             if len(chunks) == 1:  # type: ignore
