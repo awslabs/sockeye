@@ -12,28 +12,30 @@
 # permissions and limitations under the License.
 
 import io
-import pytest
+
 import numpy as np
-from sockeye.inference import TranslatorInput, TranslatorOutput
+import pytest
+
 import sockeye.output_handler
+from sockeye.inference import TranslatorInput, TranslatorOutput
 
 stream_handler_tests = [(sockeye.output_handler.StringOutputHandler(io.StringIO()),
                          TranslatorInput(sentence_id=0, tokens=[], factors=[], constraints=[]),
-                         TranslatorOutput(id=0, translation="ein Test", tokens=None,
+                         TranslatorOutput(sentence_id=0, translation="ein Test", tokens=None,
                                           attention_matrix=None,
                                           score=0.),
                          0.,
                          "ein Test\n"),
                         (sockeye.output_handler.StringOutputHandler(io.StringIO()),
                          TranslatorInput(sentence_id=0, tokens=[], factors=[]),
-                         TranslatorOutput(id=0, translation="", tokens=None,
+                         TranslatorOutput(sentence_id=0, translation="", tokens=None,
                                           attention_matrix=None,
                                           score=0.),
                          0.,
                          "\n"),
                         (sockeye.output_handler.StringWithAlignmentsOutputHandler(io.StringIO(), threshold=0.5),
                          TranslatorInput(sentence_id=0, tokens="a test".split(), factors=[]),
-                         TranslatorOutput(id=0, translation="ein Test", tokens=None,
+                         TranslatorOutput(sentence_id=0, translation="ein Test", tokens=None,
                                           attention_matrix=np.asarray([[1, 0],
                                                                        [0, 1]]),
                                           score=0.),
@@ -41,7 +43,7 @@ stream_handler_tests = [(sockeye.output_handler.StringOutputHandler(io.StringIO(
                          "ein Test\t0-0 1-1\n"),
                         (sockeye.output_handler.StringWithAlignmentsOutputHandler(io.StringIO(), threshold=0.5),
                          TranslatorInput(sentence_id=0, tokens="a test".split(), factors=[]),
-                         TranslatorOutput(id=0, translation="ein Test !", tokens=None,
+                         TranslatorOutput(sentence_id=0, translation="ein Test !", tokens=None,
                                           attention_matrix=np.asarray([[0.4, 0.6],
                                                                        [0.8, 0.2],
                                                                        [0.5, 0.5]]),
@@ -50,14 +52,14 @@ stream_handler_tests = [(sockeye.output_handler.StringOutputHandler(io.StringIO(
                          "ein Test !\t0-1 1-0\n"),
                         (sockeye.output_handler.BenchmarkOutputHandler(io.StringIO()),
                          TranslatorInput(sentence_id=0, tokens=["a", "test"], factors=[]),
-                         TranslatorOutput(id=0, translation="ein Test", tokens=["ein", "Test"],
+                         TranslatorOutput(sentence_id=0, translation="ein Test", tokens=["ein", "Test"],
                                           attention_matrix=None,
                                           score=0.),
                          0.5,
                          "input=a test\toutput=ein Test\tinput_tokens=2\toutput_tokens=2\ttranslation_time=0.5000\n"),
                         (sockeye.output_handler.BeamStoringHandler(io.StringIO()),
                          TranslatorInput(sentence_id=0, tokens=["What"]),
-                         TranslatorOutput(id=0, translation="Was", tokens=["Was"],
+                         TranslatorOutput(sentence_id=0, translation="Was", tokens=["Was"],
                                           attention_matrix=None, score=0.,
                                           beam_histories=[
                                               {"predicted_ids": [[258, 137, 31],

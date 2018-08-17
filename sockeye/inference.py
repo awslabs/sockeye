@@ -564,13 +564,14 @@ def get_max_input_output_length(supported_max_seq_len_source: Optional[int],
 
 BeamHistory = Dict[str, List]
 Tokens = List[str]
+SentenceId = Union[int, str]
 
 
 class TranslatorInput:
     """
     Object required by Translator.translate().
 
-    :param sentence_id: Sentence id.
+    :param sentence_id: SentenceId.
     :param tokens: List of input tokens.
     :param factors: Optional list of additional factor sequences.
     :param constraints: Optional list of target-side constraints.
@@ -579,7 +580,7 @@ class TranslatorInput:
     __slots__ = ('sentence_id', 'tokens', 'factors', 'constraints', 'avoid_list')
 
     def __init__(self,
-                 sentence_id: int,
+                 sentence_id: SentenceId,
                  tokens: Tokens,
                  factors: Optional[List[Tokens]] = None,
                  constraints: Optional[List[Tokens]] = None,
@@ -591,7 +592,7 @@ class TranslatorInput:
         self.avoid_list = avoid_list
 
     def __str__(self):
-        return 'TranslatorInput(%d, %s, factors=%s, constraints=%s, avoid=%s)' \
+        return 'TranslatorInput(%s, %s, factors=%s, constraints=%s, avoid=%s)' \
             % (self.sentence_id, self.tokens, self.factors, self.constraints, self.avoid_list)
 
     def __len__(self):
@@ -614,7 +615,7 @@ class TranslatorInput:
 
         if len(self.tokens) > chunk_size and self.constraints is not None:
             logger.warning(
-                'Input %d has length (%d) that exceeds max input length (%d), '
+                'Input %s has length (%d) that exceeds max input length (%d), '
                 'triggering internal splitting. Placing all target-side constraints '
                 'with the first chunk, which is probably wrong.',
                 self.sentence_id, len(self.tokens), chunk_size)
@@ -644,31 +645,31 @@ class TranslatorInput:
 
 class BadTranslatorInput(TranslatorInput):
 
-    def __init__(self, sentence_id, tokens):
+    def __init__(self, sentence_id: SentenceId, tokens: Tokens):
         super().__init__(sentence_id=sentence_id, tokens=tokens, factors=None)
 
 
-def _bad_input(sentence_id: int, reason: str = '') -> BadTranslatorInput:
-    logger.warning("Bad input (%d): '%s'. Will return empty output.", sentence_id, reason.strip())
+def _bad_input(sentence_id: SentenceId, reason: str = '') -> BadTranslatorInput:
+    logger.warning("Bad input (%s): '%s'. Will return empty output.", sentence_id, reason.strip())
     return BadTranslatorInput(sentence_id=sentence_id, tokens=[])
 
 
-def make_input_from_plain_string(sentence_id: int, string: str) -> TranslatorInput:
+def make_input_from_plain_string(sentence_id: SentenceId, string: str) -> TranslatorInput:
     """
     Returns a TranslatorInput object from a plain string.
 
-    :param sentence_id: An integer id.
+    :param sentence_id: SentenceId.
     :param string: An input string.
     :return: A TranslatorInput.
     """
     return TranslatorInput(sentence_id, tokens=list(data_io.get_tokens(string)), factors=None)
 
 
-def make_input_from_json_string(sentence_id: int, json_string: str) -> TranslatorInput:
+def make_input_from_json_string(sentence_id: SentenceId, json_string: str) -> TranslatorInput:
     """
     Returns a TranslatorInput object from a JSON object, serialized as a string.
 
-    :param sentence_id: An integer id.
+    :param sentence_id: SentenceId.
     :param json_string: A JSON object serialized as a string that must contain a key "text", mapping to the input text,
            and optionally a key "factors" that maps to a list of strings, each of which representing a factor sequence
            for the input text.
@@ -713,7 +714,7 @@ def make_input_from_json_string(sentence_id: int, json_string: str) -> Translato
         return _bad_input(sentence_id, reason=json_string)
 
 
-def make_input_from_factored_string(sentence_id: int,
+def make_input_from_factored_string(sentence_id: SentenceId,
                                     factored_string: str,
                                     translator: 'Translator',
                                     delimiter: str = C.DEFAULT_FACTOR_DELIMITER) -> TranslatorInput:
@@ -721,7 +722,7 @@ def make_input_from_factored_string(sentence_id: int,
     Returns a TranslatorInput object from a string with factor annotations on a token level, separated by delimiter.
     If translator does not require any source factors, the string is parsed as a plain token string.
 
-    :param sentence_id: An integer id.
+    :param sentence_id: SentenceId.
     :param factored_string: An input string with additional factors per token, separated by delimiter.
     :param translator: A translator object.
     :param delimiter: A factor delimiter. Default: '|'.
@@ -753,12 +754,12 @@ def make_input_from_factored_string(sentence_id: int,
     return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
 
 
-def make_input_from_multiple_strings(sentence_id: int, strings: List[str]) -> TranslatorInput:
+def make_input_from_multiple_strings(sentence_id: SentenceId, strings: List[str]) -> TranslatorInput:
     """
     Returns a TranslatorInput object from multiple strings, where the first element corresponds to the surface tokens
     and the remaining elements to additional factors. All strings must parse into token sequences of the same length.
 
-    :param sentence_id: An integer id.
+    :param sentence_id: SentenceId.
     :param strings: A list of strings representing a factored input sequence.
     :return: A TranslatorInput.
     """
@@ -777,7 +778,7 @@ class TranslatorOutput:
     """
     Output structure from Translator.
 
-    :param id: Id of input sentence.
+    :param sentence_id: SentenceId.
     :param translation: Translation string without sentence boundary tokens.
     :param tokens: List of translated tokens.
     :param attention_matrix: Attention matrix. Shape: (target_length, source_length).
@@ -785,16 +786,16 @@ class TranslatorOutput:
     :param beam_histories: List of beam histories. The list will contain more than one
            history if it was split due to exceeding max_length.
     """
-    __slots__ = ('id', 'translation', 'tokens', 'attention_matrix', 'score', 'beam_histories')
+    __slots__ = ('sentence_id', 'translation', 'tokens', 'attention_matrix', 'score', 'beam_histories')
 
     def __init__(self,
-                 id: int,
+                 sentence_id: SentenceId,
                  translation: str,
                  tokens: List[str],
                  attention_matrix: np.ndarray,
                  score: float,
                  beam_histories: Optional[List[BeamHistory]] = None) -> None:
-        self.id = id
+        self.sentence_id = sentence_id
         self.translation = translation
         self.tokens = tokens
         self.attention_matrix = attention_matrix
@@ -1121,7 +1122,7 @@ class Translator:
                     # oversized input
                     if len(trans_input.tokens) > max_input_length_without_eos:
                         logger.debug(
-                            "Input %d has length (%d) that exceeds max input length (%d). "
+                            "Input %s has length (%d) that exceeds max input length (%d). "
                             "Splitting into chunks of size %d.",
                             trans_input.sentence_id, len(trans_input.tokens),
                             self.buckets_source[-1], max_input_length_without_eos)
@@ -1138,7 +1139,7 @@ class Translator:
                     if len(trans_input.tokens) > self.max_input_length:
                         # oversized input
                         logger.debug(
-                            "Input %d has length (%d) that exceeds max input length (%d). "
+                            "Input %s has length (%d) that exceeds max input length (%d). "
                             "Splitting into chunks of size %d.",
                             trans_input.sentence_id, len(trans_input.tokens),
                             self.buckets_source[-1], self.max_input_length)
@@ -1154,7 +1155,7 @@ class Translator:
                                                                    translator_input=trans_input))
 
             if trans_input.constraints is not None:
-                logger.info("Input %d has %d %s: %s", trans_input.sentence_id,
+                logger.info("Input %s has %d %s: %s", trans_input.sentence_id,
                             len(trans_input.constraints),
                             "constraint" if len(trans_input.constraints) == 1 else "constraints",
                             ", ".join(" ".join(x) for x in trans_input.constraints))
@@ -1243,7 +1244,8 @@ class Translator:
                 raw_avoid_list[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
                                      trans_input.avoid_list]
                 if any(self.unk_id in phrase for phrase in raw_avoid_list[j]):
-                    logger.warning("Sentence %d: %s was found in the list of phrases to avoid; this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
+                    logger.warning("Sentence %s: %s was found in the list of phrases to avoid; "
+                                   "this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
 
         return source, bucket_key, raw_constraints, raw_avoid_list, mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
 
@@ -1267,7 +1269,7 @@ class Translator:
             tok for target_id, tok in zip(target_ids, target_tokens) if target_id not in self.strip_ids)
         attention_matrix = attention_matrix[:, :len(trans_input.tokens)]
 
-        return TranslatorOutput(id=trans_input.sentence_id,
+        return TranslatorOutput(sentence_id=trans_input.sentence_id,
                                 translation=target_string,
                                 tokens=target_tokens,
                                 attention_matrix=attention_matrix,
