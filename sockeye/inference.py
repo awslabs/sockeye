@@ -571,7 +571,7 @@ class TranslatorInput:
     """
     Object required by Translator.translate().
 
-    :param sentence_id: SentenceId.
+    :param sentence_id: Sentence id.
     :param tokens: List of input tokens.
     :param factors: Optional list of additional factor sequences.
     :param constraints: Optional list of target-side constraints.
@@ -645,7 +645,7 @@ class TranslatorInput:
 
 class BadTranslatorInput(TranslatorInput):
 
-    def __init__(self, sentence_id: SentenceId, tokens: Tokens):
+    def __init__(self, sentence_id: SentenceId, tokens: Tokens) -> None:
         super().__init__(sentence_id=sentence_id, tokens=tokens, factors=None)
 
 
@@ -658,7 +658,7 @@ def make_input_from_plain_string(sentence_id: SentenceId, string: str) -> Transl
     """
     Returns a TranslatorInput object from a plain string.
 
-    :param sentence_id: SentenceId.
+    :param sentence_id: Sentence id.
     :param string: An input string.
     :return: A TranslatorInput.
     """
@@ -669,7 +669,7 @@ def make_input_from_json_string(sentence_id: SentenceId, json_string: str) -> Tr
     """
     Returns a TranslatorInput object from a JSON object, serialized as a string.
 
-    :param sentence_id: SentenceId.
+    :param sentence_id: Sentence id.
     :param json_string: A JSON object serialized as a string that must contain a key "text", mapping to the input text,
            and optionally a key "factors" that maps to a list of strings, each of which representing a factor sequence
            for the input text.
@@ -722,7 +722,7 @@ def make_input_from_factored_string(sentence_id: SentenceId,
     Returns a TranslatorInput object from a string with factor annotations on a token level, separated by delimiter.
     If translator does not require any source factors, the string is parsed as a plain token string.
 
-    :param sentence_id: SentenceId.
+    :param sentence_id: Sentence id.
     :param factored_string: An input string with additional factors per token, separated by delimiter.
     :param translator: A translator object.
     :param delimiter: A factor delimiter. Default: '|'.
@@ -759,7 +759,7 @@ def make_input_from_multiple_strings(sentence_id: SentenceId, strings: List[str]
     Returns a TranslatorInput object from multiple strings, where the first element corresponds to the surface tokens
     and the remaining elements to additional factors. All strings must parse into token sequences of the same length.
 
-    :param sentence_id: SentenceId.
+    :param sentence_id: Sentence id.
     :param strings: A list of strings representing a factored input sequence.
     :return: A TranslatorInput.
     """
@@ -778,7 +778,7 @@ class TranslatorOutput:
     """
     Output structure from Translator.
 
-    :param sentence_id: SentenceId.
+    :param sentence_id: Sentence id.
     :param translation: Translation string without sentence boundary tokens.
     :param tokens: List of translated tokens.
     :param attention_matrix: Attention matrix. Shape: (target_length, source_length).
