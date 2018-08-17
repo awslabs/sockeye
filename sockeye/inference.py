@@ -1184,12 +1184,13 @@ class Translator:
         # Concatenate results
         results = []  # type: List[TranslatorOutput]
         chunks_by_input_idx = itertools.groupby(translated_chunks, key=lambda translation: translation.input_idx)
-        for trans_input, (input_idx, chunks) in zip(trans_inputs, chunks_by_input_idx):
-            chunks = list(chunks)  # type: ignore
-            if len(chunks) == 1:  # type: ignore
-                translation = chunks[0].translation  # type: ignore
+        for trans_input, (input_idx, translations_for_input_idx) in zip(trans_inputs, chunks_by_input_idx):
+            translations_for_input_idx = list(translations_for_input_idx)  # type: ignore
+            if len(translations_for_input_idx) == 1:  # type: ignore
+                translation = translations_for_input_idx[0].translation  # type: ignore
             else:
-                translations_to_concat = [translated_chunk.translation for translated_chunk in chunks]
+                translations_to_concat = [translated_chunk.translation
+                                          for translated_chunk in translations_for_input_idx]
                 translation = self._concat_translations(translations_to_concat)
 
             results.append(self._make_result(trans_input, translation))
