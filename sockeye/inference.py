@@ -1110,11 +1110,11 @@ class Translator:
             # bad input
             if isinstance(trans_input, BadTranslatorInput):
                 translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
-                                                         translation=empty_translation()))
+                                                            translation=empty_translation()))
             # empty input
             elif len(trans_input.tokens) == 0:
                 translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
-                                                         translation=empty_translation()))
+                                                            translation=empty_translation()))
             else:
                 # TODO(tdomhan): Remove branch without EOS with next major version bump, as future models will always be trained with source side EOS symbols
                 if self.source_with_eos:
@@ -1152,7 +1152,7 @@ class Translator:
                         # regular input
                         input_chunks.append(IndexedTranslatorInput(trans_input_idx,
                                                                    chunk_idx=0,
-                                                                   translator_input=trans_input.with_eos()))
+                                                                   translator_input=trans_input))
 
             if trans_input.constraints is not None:
                 logger.info("Input %d has %d %s: %s", trans_input.sentence_id,
