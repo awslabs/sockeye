@@ -143,13 +143,11 @@ def test_translator_input(sentence_id, sentence, factors, chunk_size):
     if factors is not None:
         for factor in trans_input.factors:
             assert len(factor) == len(tokens)
-    assert trans_input.chunk_id == -1
 
     chunked_inputs = list(trans_input.chunks(chunk_size))
     assert len(chunked_inputs) == ceil(len(tokens) / chunk_size)
     for chunk_id, chunk_input in enumerate(chunked_inputs):
         assert chunk_input.sentence_id == sentence_id
-        assert chunk_input.chunk_id == chunk_id
         assert chunk_input.tokens == trans_input.tokens[chunk_id * chunk_size: (chunk_id + 1) * chunk_size]
         if factors:
             assert len(chunk_input.factors) == len(factors)
@@ -228,7 +226,6 @@ def test_make_input_from_factored_string(sentence, num_expected_factors, delimit
                                                             translator=translator, delimiter=delimiter)
     assert isinstance(inp, sockeye.inference.TranslatorInput)
     assert inp.sentence_id == sentence_id
-    assert inp.chunk_id == -1
     assert inp.tokens == expected_tokens
     assert inp.factors == expected_factors
     if num_expected_factors > 1:
