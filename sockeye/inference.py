@@ -574,7 +574,6 @@ class TranslatorInput:
     :param tokens: List of input tokens.
     :param factors: Optional list of additional factor sequences.
     :param constraints: Optional list of target-side constraints.
-    :param chunk_id: Chunk id. Defaults to -1.
     """
 
     __slots__ = ('sentence_id', 'tokens', 'factors', 'constraints', 'avoid_list')
