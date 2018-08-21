@@ -57,6 +57,8 @@ def get_loss(loss_config: LossConfig) -> 'Loss':
     """
     if loss_config.name == C.CROSS_ENTROPY:
         return CrossEntropyLoss(loss_config)
+    elif loss_config.name == C.POINTER_NET_CROSS_ENTROPY:
+        return PointerNetsCrossEntropyLoss(loss_config)
     else:
         raise ValueError("unknown loss name: %s" % loss_config.name)
 
@@ -125,6 +127,47 @@ class CrossEntropyLoss(Loss):
     def create_metric(self) -> "CrossEntropyMetric":
         return CrossEntropyMetric(self.loss_config)
 
+class PointerNetsCrossEntropyLoss(Loss):
+    """
+    Computes the cross-entropy loss.
+
+    :param loss_config: Loss configuration.
+    """
+
+    def __init__(self, loss_config: LossConfig) -> None:
+        logger.info("Loss: PointerNetsCrossEntropy(normalization_type=%s, label_smoothing=%s)",
+                    loss_config.normalization_type, loss_config.label_smoothing)
+        self.loss_config = loss_config
+        self.trg_vocab_size = loss_config.vocab_size
+
+    def get_loss(self, softmax_probs: mx.sym.Symbol, labels: mx.sym.Symbol) -> List[mx.sym.Symbol]:
+        """
+        Returns loss and softmax output symbols given logits and integer-coded labels.
+
+        :param softmax_probs: Shape: (batch_size * target_seq_len, target_vocab_size).
+        :param labels: group of symbols.
+        :return: List of loss symbol.
+        """
+
+        if self.loss_config.normalization_type == C.LOSS_NORM_VALID:
+            normalization = "valid"
+        elif self.loss_config.normalization_type == C.LOSS_NORM_BATCH:
+            normalization = "null"
+        else:
+            raise ValueError("Unknown loss normalization type: %s" % self.loss_config.normalization_type)
+
+        # softmax_probs = mx.sym.Custom(op_type="PrintValue", data=softmax_probs, print_name="SOFTMAX")
+        # labels = mx.sym.Custom(op_type="PrintValue", data=labels, print_name="LABELS")
+
+        probs = mx.sym.pick(data=softmax_probs, index=labels)
+        # probs = mx.sym.Custom(op_type="PrintValue", data=probs, print_name="PROBS")
+        loss = -mx.sym.log(probs + 1e-8)  # pylint: disable=invalid-unary-operand-type
+        # loss = mx.sym.Custom(op_type="PrintValue", data=loss, print_name="LOSS")
+        return [mx.sym.make_loss(loss, normalization=normalization, name="PN_CE_Loss"), mx.sym.BlockGrad(softmax_probs, name=C.SOFTMAX_NAME)]
+
+    def create_metric(self) -> "CrossEntropyMetric":
+        return CrossEntropyMetric(self.loss_config)
+
 
 class CrossEntropyMetric(EvalMetric):
     """
@@ -161,6 +204,9 @@ class CrossEntropyMetric(EvalMetric):
         return ce
 
     def update(self, labels, preds):
+
+
+
         for label, pred in zip(labels, preds):
             batch_size = label.shape[0]
             label = label.as_in_context(pred.context).reshape((label.size,))

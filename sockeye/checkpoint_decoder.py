@@ -160,19 +160,28 @@ class CheckpointDecoder:
         avg_time = trans_wall_time / len(self.target_sentences)
 
         # TODO(fhieber): eventually add more metrics (METEOR etc.)
-        return {C.BLEU_VAL: evaluate.raw_corpus_bleu(hypotheses=translations,
-                                                     references=self.target_sentences,
-                                                     offset=0.01),
-                C.CHRF_VAL: evaluate.raw_corpus_chrf(hypotheses=translations,
-                                                     references=self.target_sentences),
-                C.ROUGE_1_VAL: evaluate.raw_corpus_rouge1(hypotheses=translations,
-                                                          references=self.target_sentences),
-                C.ROUGE_2_VAL: evaluate.raw_corpus_rouge2(hypotheses=translations,
-                                                          references=self.target_sentences),
-                C.ROUGE_L_VAL: evaluate.raw_corpus_rougel(hypotheses=translations,
-                                                          references=self.target_sentences),
-                C.AVG_TIME: avg_time,
-                C.DECODING_TIME: trans_wall_time}
+        stats = {C.BLEU_VAL: evaluate.raw_corpus_bleu(hypotheses=translations,
+                                                      references=self.target_sentences,
+                                                      offset=0.01),
+                 C.CHRF_VAL: evaluate.raw_corpus_chrf(hypotheses=translations,
+                                                      references=self.target_sentences),
+                 C.ROUGE_1_VAL: evaluate.raw_corpus_rouge1(hypotheses=translations,
+                                                           references=self.target_sentences),
+                 C.ROUGE_2_VAL: evaluate.raw_corpus_rouge2(hypotheses=translations,
+                                                           references=self.target_sentences),
+                 C.ROUGE_L_VAL: evaluate.raw_corpus_rougel(hypotheses=translations,
+                                                           references=self.target_sentences),
+                 C.AVG_TIME: avg_time,
+                 C.DECODING_TIME: trans_wall_time}
+
+        if translator.use_pointer_nets:
+            stats['pointer_pointed'] = translator.num_pointed
+            stats['pointer_total'] = translator.total_tokens
+            stats['pointer_pct'] = translator.num_pointed / translator.total_tokens
+            logger.info('Pointed to %d / %d tokens (%.2f%%)', translator.num_pointed, translator.total_tokens,
+                        100 * translator.num_pointed / translator.total_tokens)
+
+        return stats
 
 
 def parallel_subsample(parallel_sequences: List[List[Any]], sample_size: int, seed: int) -> List[Any]:

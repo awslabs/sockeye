@@ -102,7 +102,8 @@ def run_translate(args: argparse.Namespace):
                                           restrict_lexicon=restrict_lexicon,
                                           avoid_list=args.avoid_list,
                                           store_beam=store_beam,
-                                          strip_unknown_words=args.strip_unknown_words)
+                                          strip_unknown_words=args.strip_unknown_words,
+                                          mark_pointed_words=args.mark_pointed_words)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
@@ -188,6 +189,9 @@ def read_and_translate(translator: inference.Translator,
         chunk_time = translate(output_handler, chunk, translator)
         total_lines += len(chunk)
         total_time += chunk_time
+
+    if translator.use_pointer_nets:
+        logger.info('Pointed to %d / %d tokens', translator.num_pointed, translator.total_tokens)
 
     if total_lines != 0:
         logger.info("Processed %d lines in %d batches. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",

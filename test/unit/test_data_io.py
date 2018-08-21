@@ -530,6 +530,120 @@ def test_get_training_data_iters():
             train_iter.reset()
 
 
+def test_get_training_data_iters_with_pointer_labels():
+    train_line_count = 100
+    train_max_length = 30
+    dev_line_count = 20
+    dev_max_length = 30
+    expected_mean = 1.0
+    expected_std = 0.0
+    test_line_count = 20
+    test_line_count_empty = 0
+    test_max_length = 30
+    batch_size = 5
+    with tmp_digits_dataset("tmp_corpus",
+                            train_line_count, train_max_length, dev_line_count, dev_max_length,
+                            test_line_count, test_line_count_empty, test_max_length) as data:
+        # tmp common vocab
+        vcb = vocab.build_from_paths([data['source'], data['target']])
+
+        train_iter, val_iter, config_data, data_info = data_io.get_training_data_iters(sources=[data['source']],
+                                                                                       target=data['target'],
+                                                                                       validation_sources=[
+                                                                                           data['validation_source']],
+                                                                                       validation_target=data[
+                                                                                           'validation_target'],
+                                                                                       source_vocabs=[vcb],
+                                                                                       target_vocab=vcb,
+                                                                                       source_vocab_paths=[None],
+                                                                                       target_vocab_path=None,
+                                                                                       shared_vocab=True,
+                                                                                       batch_size=batch_size,
+                                                                                       batch_by_words=False,
+                                                                                       batch_num_devices=1,
+                                                                                       fill_up="replicate",
+                                                                                       max_seq_len_source=train_max_length,
+                                                                                       max_seq_len_target=train_max_length,
+                                                                                       bucketing=True,
+                                                                                       bucket_width=10)
+
+        assert isinstance(train_iter, data_io.ParallelSampleIter)
+        assert len(train_iter.label_names) == 1
+        assert isinstance(val_iter, data_io.ParallelSampleIter)
+        assert isinstance(config_data, data_io.DataConfig)
+        assert data_info.sources == [data['source']]
+        assert data_info.target == data['target']
+        assert data_info.source_vocabs == [None]
+        assert data_info.target_vocab is None
+        assert config_data.data_statistics.max_observed_len_source == train_max_length
+        assert config_data.data_statistics.max_observed_len_target == train_max_length
+        assert np.isclose(config_data.data_statistics.length_ratio_mean, expected_mean)
+        assert np.isclose(config_data.data_statistics.length_ratio_std, expected_std)
+
+        assert train_iter.batch_size == batch_size
+        assert val_iter.batch_size == batch_size
+        assert train_iter.default_bucket_key == (train_max_length, train_max_length)
+        assert val_iter.default_bucket_key == (dev_max_length, dev_max_length)
+        assert train_iter.dtype == 'float32'
+
+        # test some batches
+        bos_id = vcb[C.BOS_SYMBOL]
+        expected_first_target_symbols = np.full((batch_size,), bos_id, dtype='float32')
+
+        first_batch = True
+
+        for epoch in range(2):
+            while train_iter.iter_next():
+                batch = train_iter.next()
+                assert len(batch.data) == 2
+                assert len(batch.label) == 1
+                assert batch.bucket_key in train_iter.buckets
+                source = batch.data[0].asnumpy()
+                target = batch.data[1].asnumpy()
+                label = batch.label[0].asnumpy()
+
+                '''
+labels
+
+[[ 6. 10.  8.  4.  3.  0.  0.  0.  0.  0.]
+ [ 6.  7. 11. 11.  3.  0.  0.  0.  0.  0.]
+ [ 8.  5.  6. 12.  5. 11.  3.  0.  0.  0.]
+ [11.  3.  0.  0.  0.  0.  0.  0.  0.  0.]
+ [12. 13.  8.  8.  3.  0.  0.  0.  0.  0.]]
+
+pointer labels
+
+[[ 1.  2.  3.  4. -1.  0.  0.  0.  0.  0.]
+ [ 1.  2.  3.  4. -1.  0.  0.  0.  0.  0.]
+ [ 1.  2.  3.  4.  5.  6. -1.  0.  0.  0.]
+ [ 1. -1.  0.  0.  0.  0.  0.  0.  0.  0.]
+[ 1.  2.  3.  4. -1.  0.  0.  0.  0.  0.]]
+                
+                '''
+
+                #print(label)
+
+                #if first_batch:
+                #    first_batch = False
+                    #the following labels are the same of the original ones
+                #    assert label[0,4] == 3
+                #    assert label[0, 4] == 3
+                #    assert label[3, 1] == 3
+
+                    #the following labels have been replaced using pointing info
+                #    assert label[0, 0] == 15
+                #    assert label[3, 0] == 15
+                #    assert label[4, 3] == 18
+
+                assert source.shape[0] == target.shape[0] == label.shape[0] == batch_size
+                # target first symbol should be BOS
+                assert np.array_equal(target[:, 0], expected_first_target_symbols)
+                # each label sequence contains one EOS symbol
+                assert np.sum(label == vcb[C.EOS_SYMBOL]) == batch_size
+
+            train_iter.reset()
+
+
 def _data_batches_equal(db1, db2):
     # We just compare the data, should probably be enough
     equal = True
@@ -561,7 +675,7 @@ def test_parallel_sample_iter():
         fname = os.path.join(work_dir, "saved_iter")
         it.save_state(fname)
 
-        it_loaded = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes)
+        it_loaded = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes, -1, False)
         it_loaded.reset()
         it_loaded.load_state(fname)
         loaded_batch = it_loaded.next()
@@ -572,7 +686,7 @@ def test_parallel_sample_iter():
         expected_batch = it.next()
         it.save_state(fname)
 
-        it_loaded = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes)
+        it_loaded = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes, -1, False)
         it_loaded.reset()
         it_loaded.load_state(fname)
 
@@ -583,7 +697,7 @@ def test_parallel_sample_iter():
         it.reset()
         expected_batch = it.next()
         it.save_state(fname)
-        it_loaded = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes)
+        it_loaded = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes, -1, False)
         it_loaded.reset()
         it_loaded.load_state(fname)
 

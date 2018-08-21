@@ -386,6 +386,25 @@ def add_training_io_args(params):
     add_vocab_args(params)
     add_training_output_args(params)
     add_monitoring_args(params)
+    add_pointer_args(params)
+
+
+def add_pointer_args(params):
+    params.add_argument('--use-pointer-nets',
+                        action='store_true',
+                        help='Enable the usage of pointer networks. Default: %(default)s.')
+    params.add_argument('--pointer-nets-type',
+                        choices=C.POINTER_NET_CHOICES,
+                        default=C.POINTER_NET_RNN,
+                        help="Type of pointer net. Default: %(default)s.")
+    params.add_argument('--pointer-nets-window-size',
+                        type=int,
+                        default=20,
+                        help='Window size (with current target word index centered in this window')
+    params.add_argument('--pointer-nets-min-word-len',
+                        type=int,
+                        default=2,
+                        help='Shortest word length that can be pointed to')
 
 
 def add_bucketing_args(params):
@@ -410,6 +429,7 @@ def add_prepare_data_cli_args(params):
     add_training_data_args(params, required=True)
     add_vocab_args(params)
     add_bucketing_args(params)
+    add_pointer_args(params)
 
     params.add_argument('--num-samples-per-shard',
                         type=int_greater_or_equal(1),
@@ -467,7 +487,7 @@ def add_vocab_args(params):
                         required=False,
                         default=None,
                         help='Existing target vocabulary (JSON).')
-    params.add_argument(C.VOCAB_ARG_SHARED_VOCAB,
+    params.add_argument("--shared-vocab",
                         action='store_true',
                         default=False,
                         help='Share source and target vocabulary. '
@@ -1030,7 +1050,7 @@ def add_training_args(params):
     train_params.add_argument('--dry-run',
                               action='store_true',
                               help="Do not perform any actual training, but print statistics about the model"
-                              " and mode of operation.")
+                                   " and mode of operation.")
 
 
 def add_train_cli_args(params):
@@ -1194,6 +1214,10 @@ def add_inference_args(params):
                                type=str,
                                help='EXPERIMENTAL: may be changed or removed in future. Overrides training dtype of '
                                     'encoders and decoders during inference. Default: %(default)s')
+    decode_params.add_argument('--mark-pointed-words',
+                               default=False,
+                               action='store_true',
+                               help='Annotate pointed words in the output')
 
 
 def add_evaluate_args(params):

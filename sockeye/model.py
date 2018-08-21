@@ -62,6 +62,8 @@ class ModelConfig(Config):
                  weight_tying: bool = False,
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
                  weight_normalization: bool = False,
+                 use_pointer_nets: bool = False,
+                 pointer_net_type: Optional[str] = None,
                  lhuc: bool = False) -> None:
         super().__init__()
         self.config_data = config_data
@@ -77,6 +79,8 @@ class ModelConfig(Config):
         self.weight_normalization = weight_normalization
         if weight_tying and weight_tying_type is None:
             raise RuntimeError("weight_tying_type must be specified when using weight_tying.")
+        self.use_pointer_nets = use_pointer_nets
+        self.pointer_net_type = pointer_net_type
         self.lhuc = lhuc
 
 
@@ -122,11 +126,22 @@ class SockeyeModel:
                                                   embed_weight=embed_weight_target)
 
         # output layer
-        self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
-                                               vocab_size=self.config.vocab_target_size,
-                                               weight=out_weight_target,
-                                               weight_normalization=self.config.weight_normalization,
-                                               prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
+        if self.config.use_pointer_nets:
+            assert self.config.config_loss.name == C.POINTER_NET_CROSS_ENTROPY
+            self.output_layer = layers.PointerOutputLayer(hidden_size=self.decoder.get_num_hidden(),
+                                                          encoder_hidden_size=self.encoder.get_num_hidden(),
+                                                          target_embed_size=self.config.config_embed_target.num_embed,
+                                                          vocab_size=self.config.vocab_target_size,
+                                                          weight=out_weight_target,
+                                                          weight_normalization=self.config.weight_normalization,
+                                                          prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
+
+        else:
+            self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
+                                                   vocab_size=self.config.vocab_target_size,
+                                                   weight=out_weight_target,
+                                                   weight_normalization=self.config.weight_normalization,
+                                                   prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
 
         self.params = None  # type: Optional[Dict]
         self.aux_params = None  # type: Optional[Dict]

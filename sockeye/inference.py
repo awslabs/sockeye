@@ -222,21 +222,26 @@ class InferenceModel(model.SockeyeModel):
             # decoder
             # target_decoded: (batch_size, decoder_depth)
             (target_decoded,
+             attention_context,
              attention_probs,
              states) = self.decoder.decode_step(decode_step,
                                                 target_embed_prev,
                                                 source_encoded_seq_len,
                                                 *states)
-
             if self.decoder_return_logit_inputs:
                 # skip output layer in graph
                 outputs = mx.sym.identity(target_decoded, name=C.LOGIT_INPUTS_NAME)
             else:
-                # logits: (batch_size, target_vocab_size)
-                logits = self.output_layer(target_decoded)
-                if self.softmax_temperature is not None:
-                    logits = logits / self.softmax_temperature
-                outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
+                if not self.config.use_pointer_nets:
+                    # logits: (batch_size, target_vocab_size)
+                    logits = self.output_layer(target_decoded)
+                    if self.softmax_temperature is not None:
+                        logits = logits / self.softmax_temperature
+                    outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
+                else:
+#                    target_embed_prev = mx.sym.Custom(op_type="PrintValue", data=target_embed_prev, print_name="TARG")
+                    outputs = self.output_layer(target_decoded, attention=attention_probs,
+                                                context=attention_context, target_embed=target_embed_prev)
 
             data_names = [C.TARGET_NAME] + state_names
             label_names = []  # type: List[str]
@@ -981,7 +986,8 @@ class Translator:
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
                  avoid_list: Optional[str] = None,
                  store_beam: bool = False,
-                 strip_unknown_words: bool = False) -> None:
+                 strip_unknown_words: bool = False,
+                 mark_pointed_words: Optional[bool] = False) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
@@ -998,21 +1004,27 @@ class Translator:
         self.unk_id = self.vocab_target[C.UNK_SYMBOL]
         if strip_unknown_words:
             self.strip_ids.add(self.unk_id)
+        self.mark_pointed_words = mark_pointed_words
         self.models = models
-        utils.check_condition(all(models[0].source_with_eos == m.source_with_eos for m in models),
+        utils.check_condition(all(self.source_with_eos == m.source_with_eos for m in models),
                               "The source_with_eos property must match across models.")
-        self.source_with_eos = models[0].source_with_eos
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
-        self.beam_size = self.models[0].beam_size
-        self.batch_size = self.models[0].batch_size
+
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
-        self.max_input_length = self.models[0].max_input_length
         if bucket_source_width > 0:
             self.buckets_source = data_io.define_buckets(self.max_input_length, step=bucket_source_width)
         else:
             self.buckets_source = [self.max_input_length]
-        self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target) - 1), val=np.inf,
-                                   ctx=self.context)
+
+        if self.use_pointer_nets:
+            self.num_pointed = 0
+            self.total_tokens = 0
+
+            # pad_dist should have one fewer columns than scores
+            self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target) + self.max_input_length - 1), val=np.inf, ctx=self.context)
+        else:
+            self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target) - 1), val=np.inf, ctx=self.context)
+
         # These are constants used for manipulation of the beam and scores (particularly for pruning)
         self.zeros_array = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
         self.inf_array = mx.nd.full((self.batch_size * self.beam_size, 1), val=np.inf,
@@ -1066,6 +1078,26 @@ class Translator:
                     self.batch_size,
                     self.buckets_source,
                     0 if self.global_avoid_trie is None else len(self.global_avoid_trie))
+
+    @property
+    def source_with_eos(self) -> bool:
+        return self.models[0].source_with_eos
+
+    @property
+    def beam_size(self) -> int:
+        return self.models[0].beam_size
+
+    @property
+    def batch_size(self) -> int:
+        return self.models[0].batch_size
+
+    @property
+    def max_input_length(self) -> int:
+        return self.models[0].max_input_length
+
+    @property
+    def use_pointer_nets(self) -> bool:
+        return self.models[0].config.use_pointer_nets
 
     @property
     def num_source_factors(self) -> int:
@@ -1263,7 +1295,24 @@ class Translator:
         target_ids = translation.target_ids
         attention_matrix = translation.attention_matrix
 
-        target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
+        if self.use_pointer_nets:
+            self.num_pointed += sum(map(lambda x: x >= len(self.vocab_target), target_ids))
+            self.total_tokens += len(target_ids)
+
+            # There may be some out-of-bounds (OOB) words pointed to, so handle this with a dict
+            source_inv = dict((x, y) for x, y in enumerate(trans_input.tokens))
+            def id2str(word_id: int):
+                if word_id >= len(self.vocab_target):
+                    word_id = word_id - len(self.vocab_target) - 1
+                    if self.mark_pointed_words:
+                        return '[{}/{}]'.format(source_inv.get(word_id, 'OOB'), word_id)
+                    else:
+                        return source_inv.get(word_id, 'OOB')
+                else:
+                    return self.vocab_target_inv[word_id]
+            target_tokens = [id2str(target_id) for target_id in target_ids]
+        else:
+            target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
 
         target_string = C.TOKEN_SEPARATOR.join(
             tok for target_id, tok in zip(target_ids, target_tokens) if target_id not in self.strip_ids)
@@ -1440,7 +1489,13 @@ class Translator:
         # target vocab for this sentence.
         models_output_layer_w = list()
         models_output_layer_b = list()
-        pad_dist = self.pad_dist
+
+        if self.use_pointer_nets:
+            # Trim the pad_dist to the right size for adding to `scores` later
+            pad_dist = self.pad_dist[:,:len(self.vocab_target) + source_length - 1]
+        else:
+            pad_dist = self.pad_dist
+
         vocab_slice_ids = None  # type: mx.nd.NDArray
         if self.restrict_lexicon:
             source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
@@ -1502,6 +1557,8 @@ class Translator:
                                                                        states=model_states,
                                                                        models_output_layer_w=models_output_layer_w,
                                                                        models_output_layer_b=models_output_layer_b)
+
+            # print('TIMESTEP', t, 'MAX INPUT', 'THIS INPUT', source_len, self.max_input_length, 'VOCAB', len(self.vocab_target), 'SCORES', scores.shape, 'PAD', pad_dist.shape, 'finished', finished.shape, 'inactive', inactive.shape, 'accum', scores_accumulated.shape, 'inf', self.inf_array.shape)
 
             # (2) Update scores. Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score

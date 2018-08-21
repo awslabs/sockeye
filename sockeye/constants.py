@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 """
-Defines various constants used througout the project
+Defines various constants used throughout the project
 """
 import mxnet as mx
 import numpy as np
@@ -161,6 +161,7 @@ SOURCE_NAME = "source"
 SOURCE_LENGTH_NAME = "source_length"
 TARGET_NAME = "target"
 TARGET_LABEL_NAME = "target_label"
+POINTER_LABEL_NAME = "pointer_label"
 LEXICON_NAME = "lexicon"
 
 SOURCE_ENCODED_NAME = "encoded_source"
@@ -172,6 +173,7 @@ LOGIT_INPUTS_NAME = "logit_inputs"
 LOGITS_NAME = "logits"
 SOFTMAX_NAME = "softmax"
 SOFTMAX_OUTPUT_NAME = SOFTMAX_NAME + "_output"
+SWITCH_PROB_NAME = "switch_prob"
 
 MEASURE_SPEED_EVERY = 50  # measure speed and metrics every X batches
 
@@ -243,8 +245,6 @@ ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet",
 TRAINING_ARG_SOURCE = "--source"
 TRAINING_ARG_TARGET = "--target"
 TRAINING_ARG_PREPARED_DATA = "--prepared-data"
-
-VOCAB_ARG_SHARED_VOCAB = "--shared-vocab"
 
 INFERENCE_ARG_INPUT_LONG = "--input"
 INFERENCE_ARG_INPUT_SHORT = "-i"
@@ -356,6 +356,8 @@ EVALUATE_METRICS = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL]
 
 # loss
 CROSS_ENTROPY = 'cross-entropy'
+POINTER_NET_CROSS_ENTROPY = 'pointer-net-cross-entropy'
+POINTER_NET_OUTPUT_LAYER_PREFIX = "pointer_output_"
 
 LOSS_NORM_BATCH = 'batch'
 LOSS_NORM_VALID = "valid"
@@ -384,6 +386,11 @@ LHUC_DECODER = "decoder"
 LHUC_STATE_INIT = "state_init"
 LHUC_ALL = "all"
 LHUC_CHOICES = [LHUC_ENCODER, LHUC_DECODER, LHUC_STATE_INIT, LHUC_ALL]
+
+# pointer networks
+POINTER_NET_RNN = "rnn"
+POINTER_NET_SHARED = "shared"
+POINTER_NET_CHOICES = [POINTER_NET_RNN]
 
 # data sharding
 SHARD_NAME = "shard.%05d"

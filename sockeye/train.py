@@ -78,6 +78,12 @@ def check_arg_compatibility(args: argparse.Namespace):
 
     :param args: Arguments as returned by argparse.
     """
+    check_condition(args.encoder == C.IMAGE_PRETRAIN_TYPE or not args.use_pointer_nets or args.shared_vocab or args.prepared_data,
+                    "Pointer networks required a shared vocabulary.")
+
+    check_condition(args.optimized_metric == C.BLEU or args.optimized_metric == C.ROUGE1 or args.optimized_metric in args.metrics,
+                    "Must optimize either BLEU, ROUGE or one of tracked metrics (--metrics)")
+
     if args.encoder == C.TRANSFORMER_TYPE:
         check_condition(args.transformer_model_size[0] == args.num_embed[0],
                         "Source embedding size must match transformer model size: %s vs. %s"
@@ -250,9 +256,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                                      C.TRAINING_ARG_TARGET,
                                                      C.TRAINING_ARG_PREPARED_DATA)
     if args.prepared_data is not None:
-        utils.check_condition(args.source is None and args.target is None, either_raw_or_prepared_error_msg)
+        check_condition(args.source is None and args.target is None, either_raw_or_prepared_error_msg)
         if not resume_training:
-            utils.check_condition(args.source_vocab is None and args.target_vocab is None,
+            check_condition(args.source_vocab is None and args.target_vocab is None,
                                   "You are using a prepared data folder, which is tied to a vocabulary. "
                                   "To change it you need to rerun data preparation with a different vocabulary.")
         train_iter, validation_iter, data_config, source_vocabs, target_vocab = data_io.get_prepared_data_iters(
@@ -273,11 +279,11 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             # resuming training. Making sure the vocabs in the model and in the prepared data match up
             model_source_vocabs = vocab.load_source_vocabs(output_folder)
             for i, (v, mv) in enumerate(zip(source_vocabs, model_source_vocabs)):
-                utils.check_condition(vocab.are_identical(v, mv),
-                                      "Prepared data and resumed model source vocab %d do not match." % i)
+                check_condition(vocab.are_identical(v, mv),
+                                "Prepared data and resumed model source vocab %d do not match." % i)
             model_target_vocab = vocab.load_target_vocab(output_folder)
-            utils.check_condition(vocab.are_identical(target_vocab, model_target_vocab),
-                                  "Prepared data and resumed model target vocabs do not match.")
+            check_condition(vocab.are_identical(target_vocab, model_target_vocab),
+                            "Prepared data and resumed model target vocabs do not match.")
 
             check_condition(len(args.source_factors) == len(args.validation_source_factors),
                             'Training and validation data must have the same number of factors: %d vs. %d.' % (
@@ -286,8 +292,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         return train_iter, validation_iter, data_config, source_vocabs, target_vocab
 
     else:
-        utils.check_condition(args.prepared_data is None and args.source is not None and args.target is not None,
-                              either_raw_or_prepared_error_msg)
+        check_condition(args.prepared_data is None and args.source is not None and args.target is not None,
+                        either_raw_or_prepared_error_msg)
 
         if resume_training:
             # Load the existing vocabs created when starting the training run.
@@ -322,6 +328,12 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         sources = [args.source] + args.source_factors
         sources = [str(os.path.abspath(source)) for source in sources]
 
+        aligner = None
+        if args.use_pointer_nets:
+            aligner = align.Aligner(source_vocabs[0], target_vocab,
+                                    window_size=args.pointer_nets_window_size,
+                                    min_word_length=args.pointer_nets_min_word_len)
+
         train_iter, validation_iter, config_data, data_info = data_io.get_training_data_iters(
             sources=sources,
             target=os.path.abspath(args.target),
@@ -339,7 +351,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
-            bucket_width=args.bucket_width)
+            bucket_width=args.bucket_width,
+            aligner=aligner)
 
         data_info_fname = os.path.join(output_folder, C.DATA_INFO)
         logger.info("Writing data config to '%s'", data_info_fname)
@@ -625,7 +638,9 @@ def create_model_config(args: argparse.Namespace,
                                                   num_embed=num_embed_target,
                                                   dropout=embed_dropout_target)
 
-    config_loss = loss.LossConfig(name=args.loss,
+    loss_name = C.POINTER_NET_CROSS_ENTROPY if args.use_pointer_nets else args.loss
+
+    config_loss = loss.LossConfig(name=loss_name,
                                   vocab_size=target_vocab_size,
                                   normalization_type=args.loss_normalization_type,
                                   label_smoothing=args.label_smoothing)
@@ -641,6 +656,8 @@ def create_model_config(args: argparse.Namespace,
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
                                      weight_normalization=args.weight_normalization,
+                                     use_pointer_nets=args.use_pointer_nets,
+                                     pointer_net_type=args.pointer_nets_type,
                                      lhuc=args.lhuc is not None)
     return model_config
 

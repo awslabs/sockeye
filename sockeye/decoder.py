@@ -117,7 +117,7 @@ class Decoder(ABC):
                     step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the current step, the previous embedded target word,
         and previous decoder states.
@@ -128,7 +128,7 @@ class Decoder(ABC):
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
-        :return: logit inputs, attention probabilities, next decoder states.
+        :return: logit inputs, attention context, attention probabilities, next decoder states.
         """
         pass
 
@@ -281,7 +281,7 @@ class TransformerDecoder(Decoder):
                     step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the current step, the previous embedded target word,
         and previous decoder states.
@@ -292,7 +292,7 @@ class TransformerDecoder(Decoder):
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
-        :return: logit inputs, attention probabilities, next decoder states.
+        :return: logit inputs, attention context, attention probabilities, next decoder states.
         """
         # for step > 1, states contains source_encoded, source_encoded_lengths, and cache tensors.
         source_encoded, source_encoded_lengths, *cache = states  # type: ignore
@@ -335,10 +335,11 @@ class TransformerDecoder(Decoder):
         # (batch_size, model_size)
         target = mx.sym.reshape(target, shape=(-3, -1))
 
-        # TODO(fhieber): no attention probs for now
+        # TODO(fhieber): no attention probs or context for now
+        attention_context = None
         attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
 
-        return target, attention_probs, new_states
+        return target, attention_context, attention_probs, new_states
 
     def _get_cache_per_layer(self, cache: List[mx.sym.Symbol]) -> List[Dict[str, Optional[mx.sym.Symbol]]]:
         """
@@ -603,6 +604,8 @@ class RecurrentDecoder(Decoder):
 
         # hidden_all: target_embed_max_length * (batch_size, rnn_num_hidden)
         hidden_states = []  # type: List[mx.sym.Symbol]
+        context_vectors = []  # type: List[mx.sym.Symbol]
+        attention_probs = []  # type: List[mx.sym.Symbol]
         # TODO: possible alternative: feed back the context vector instead of the hidden (see lamtram)
         self.reset()
         for seq_idx in range(target_embed_max_length):
@@ -614,15 +617,19 @@ class RecurrentDecoder(Decoder):
                                                 seq_idx,
                                                 enc_last_hidden=enc_last_hidden)
             hidden_states.append(state.hidden)
+            context_vectors.append(attention_state.context)
+            attention_probs.append(attention_state.probs)
 
         # concatenate along time axis: (batch_size, target_embed_max_length, rnn_num_hidden)
-        return mx.sym.stack(*hidden_states, axis=1, name='%shidden_stack' % self.prefix)
+        return mx.sym.Group([mx.sym.stack(*hidden_states, axis=1, name='%shidden_stack' % self.prefix), \
+                             mx.sym.stack(*context_vectors, axis=1, name='%scontext_stack' % self.prefix),
+                             mx.sym.stack(*attention_probs, axis=1, name='%sattention_stack' % self.prefix)])
 
     def decode_step(self,
                     step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the current step, the previous embedded target word,
         and previous decoder states.
@@ -633,7 +640,7 @@ class RecurrentDecoder(Decoder):
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
-        :return: logit inputs, attention probabilities, next decoder states.
+        :return: logit inputs, attention context, attention probabilities, next decoder states.
         """
         source_encoded, prev_dynamic_source, source_encoded_length, prev_hidden, *layer_states = states
 
@@ -665,7 +672,7 @@ class RecurrentDecoder(Decoder):
                       source_encoded_length,
                       state.hidden] + state.layer_states
 
-        return state.hidden, attention_state.probs, new_states
+        return state.hidden, attention_state.context, attention_state.probs, new_states
 
     def reset(self):
         """
@@ -1101,7 +1108,7 @@ class ConvolutionalDecoder(Decoder):
                     step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the current step, the previous embedded target word,
         and previous decoder states.
@@ -1112,7 +1119,7 @@ class ConvolutionalDecoder(Decoder):
         :param target_embed_prev: Previous target word embedding. Shape: (batch_size, target_num_embed).
         :param source_encoded_max_length: Length of encoded source time dimension.
         :param states: Arbitrary list of decoder states.
-        :return: logit inputs, attention probabilities, next decoder states.
+        :return: logit inputs, attention cattention probabilities, next decoder states.
         """
         # Source_encoded: (batch_size, source_encoded_max_length, encoder_depth)
         source_encoded, source_encoded_lengths, *layer_states = states
@@ -1174,12 +1181,15 @@ class ConvolutionalDecoder(Decoder):
                 # (batch_size, 1, num_hidden) -> (batch_size, num_hidden)
                 target_hidden = mx.sym.reshape(target_hidden_step, shape=(-3, -1))
 
+        # TODO(mjpost): No context for now
+        attention_context = None
+
         # (batch_size, source_encoded_max_length)
         attention_probs = mx.sym.reshape(mx.sym.slice_axis(mx.sym.zeros_like(source_encoded),
                                                            axis=2, begin=0, end=1),
                                          shape=(0, -1))
 
-        return target_hidden, attention_probs, [source_encoded, source_encoded_lengths] + new_layer_states
+        return target_hidden, attention_context, attention_probs, [source_encoded, source_encoded_lengths] + new_layer_states
 
     def reset(self):
         pass

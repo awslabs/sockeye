@@ -28,6 +28,7 @@ from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sequence
 import mxnet as mx
 import numpy as np
 
+from . import align
 from . import config
 from . import constants as C
 from . import vocab
@@ -430,11 +431,15 @@ class RawParallelDatasetLoader:
                  buckets: List[Tuple[int, int]],
                  eos_id: int,
                  pad_id: int,
+                 target_vocab_size: int,
+                 aligner: Optional[align.Aligner] = None,
                  dtype: str = 'float32') -> None:
         self.buckets = buckets
         self.eos_id = eos_id
         self.pad_id = pad_id
         self.dtype = dtype
+        self.target_vocab_size = target_vocab_size
+        self.aligner = aligner
 
     def load(self,
              source_iterables: Sequence[Iterable],
@@ -482,6 +487,12 @@ class RawParallelDatasetLoader:
             # we can try again to compute the label sequence on the fly in next().
             data_label[buck_index][sample_index, :target_len] = target[1:] + [self.eos_id]
 
+            labels = target[1:] + [self.eos_id]
+            if self.aligner is not None:
+                labels = self.aligner.get_labels(sources[0], target, labels)
+
+            data_label[buck_index][sample_index, :target_len] = labels
+
             bucket_sample_index[buck_index] += 1
 
         for i in range(len(data_source)):
@@ -523,6 +534,7 @@ def prepare_data(source_fnames: List[str],
                  samples_per_shard: int,
                  min_num_shards: int,
                  output_prefix: str,
+                 aligner: Optional[align.Aligner] = None,
                  keep_tmp_shard_files: bool = False):
     logger.info("Preparing data.")
     # write vocabularies to data folder
@@ -557,7 +569,9 @@ def prepare_data(source_fnames: List[str],
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=target_vocab[C.EOS_SYMBOL],
-                                           pad_id=C.PAD_ID)
+                                           pad_id=C.PAD_ID,
+                                           target_vocab_size=len(target_vocab),
+                                           aligner=aligner)
 
     # 3. convert each shard to serialized ndarrays
     for shard_idx, (shard_sources, shard_target, shard_stats) in enumerate(shards):
@@ -588,6 +602,7 @@ def prepare_data(source_fnames: List[str],
                              max_seq_len_source=max_seq_len_source,
                              max_seq_len_target=max_seq_len_target,
                              num_source_factors=len(source_fnames),
+                             use_pointer_nets=aligner is not None,
                              source_with_eos=True)
     config_data_fname = os.path.join(output_prefix, C.DATA_CONFIG)
     logger.info("Writing data config to '%s'", config_data_fname)
@@ -598,6 +613,9 @@ def prepare_data(source_fnames: List[str],
     with open(version_file, "w") as version_out:
         version_out.write(str(C.PREPARED_DATA_VERSION))
 
+    if aligner is not None:
+        logger.info("Pointed to %d / %d source words (%.2f%%)",
+                    aligner.num_pointed, aligner.num_total, 100 * aligner.num_pointed / aligner.num_total)
 
 def get_data_statistics(source_readers: Sequence[Iterable],
                         target_reader: Iterable,
@@ -655,8 +673,9 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
     validation_data_statistics.log(bucket_batch_sizes)
 
     validation_data = data_loader.load(validation_sources_sentences, validation_target_sentences,
-                                       validation_data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes,
-                                                                                                fill_up)
+                                       validation_data_statistics.num_sents_per_bucket).fill_up(
+                                           bucket_batch_sizes,
+                                           fill_up)
 
     return ParallelSampleIter(data=validation_data,
                               buckets=buckets,
@@ -701,8 +720,8 @@ def get_prepared_data_iters(prepared_data_dir: str,
         check_condition(os.path.exists(shard_fname), "Shard %s does not exist." % shard_fname)
 
     check_condition(shared_vocab == data_info.shared_vocab, "Shared config needed (e.g. for weight tying), but "
-                                                            "data was prepared without a shared vocab. Use %s when "
-                                                            "preparing the data." % C.VOCAB_ARG_SHARED_VOCAB)
+                                                            "data was prepared without a shared vocab. Use --shared-vocab when "
+                                                            "preparing the data.")
 
     source_vocabs = vocab.load_source_vocabs(prepared_data_dir)
     target_vocab = vocab.load_target_vocab(prepared_data_dir)
@@ -732,7 +751,8 @@ def get_prepared_data_iters(prepared_data_dir: str,
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=target_vocab[C.EOS_SYMBOL],
-                                           pad_id=C.PAD_ID)
+                                           pad_id=C.PAD_ID,
+                                           target_vocab_size=len(target_vocab))
 
     validation_iter = get_validation_data_iter(data_loader=data_loader,
                                                validation_sources=validation_sources,
@@ -765,9 +785,10 @@ def get_training_data_iters(sources: List[str],
                             max_seq_len_source: int,
                             max_seq_len_target: int,
                             bucketing: bool,
-                            bucket_width: int) -> Tuple['BaseParallelSampleIter',
-                                                        'BaseParallelSampleIter',
-                                                        'DataConfig', 'DataInfo']:
+                            bucket_width: int,
+                            aligner: Optional[align.Aligner] = None) -> Tuple['BaseParallelSampleIter',
+                                                                              'BaseParallelSampleIter',
+                                                                              'DataConfig', 'DataInfo']:
     """
     Returns data iterators for training and validation data.
 
@@ -788,6 +809,7 @@ def get_training_data_iters(sources: List[str],
     :param max_seq_len_target: Maximum target sequence length.
     :param bucketing: Whether to use bucketing.
     :param bucket_width: Size of buckets.
+    :param aligner: The aligner to use if pointer nets are enabled.
     :return: Tuple of (training data iterator, validation data iterator, data config).
     """
     logger.info("===============================")
@@ -818,10 +840,13 @@ def get_training_data_iters(sources: List[str],
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=target_vocab[C.EOS_SYMBOL],
-                                           pad_id=C.PAD_ID)
+                                           pad_id=C.PAD_ID,
+                                           target_vocab_size=len(target_vocab),
+                                           aligner=aligner)
 
     training_data = data_loader.load(sources_sentences, target_sentences,
-                                     data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes, fill_up)
+                                     data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes,
+                                                                                   fill_up)
 
     data_info = DataInfo(sources=sources,
                          target=target,
@@ -964,12 +989,14 @@ class DataConfig(config.Config):
                  max_seq_len_source: int,
                  max_seq_len_target: int,
                  num_source_factors: int,
+                 use_pointer_nets: bool = False,
                  source_with_eos: bool = False) -> None:
         super().__init__()
         self.data_statistics = data_statistics
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
         self.num_source_factors = num_source_factors
+        self.use_pointer_nets = use_pointer_nets
         self.source_with_eos = source_with_eos
 
 
@@ -1198,9 +1225,10 @@ class ParallelDataSet(Sized):
                  target: List[mx.nd.array],
                  label: List[mx.nd.array]) -> None:
         check_condition(len(source) == len(target) == len(label),
-                        "Number of buckets for source/target/label do not match: %d/%d/%d." % (len(source),
-                                                                                               len(target),
-                                                                                               len(label)))
+                        "Number of buckets for source/target/label do not match: %d/%d/%d" % (len(source),
+                                                                                              len(target),
+                                                                                              len(label)))
+
         self.source = source
         self.target = target
         self.label = label
@@ -1215,7 +1243,8 @@ class ParallelDataSet(Sized):
         """
         Saves the dataset to a binary .npy file.
         """
-        mx.nd.save(fname, self.source + self.target + self.label)
+        out = self.source + self.target + self.label
+        mx.nd.save(fname, out)
 
     @staticmethod
     def load(fname: str) -> 'ParallelDataSet':
@@ -1223,11 +1252,13 @@ class ParallelDataSet(Sized):
         Loads a dataset from a binary .npy file.
         """
         data = mx.nd.load(fname)
+
         n = len(data) // 3
         source = data[:n]
         target = data[n:2 * n]
         label = data[2 * n:]
         assert len(source) == len(target) == len(label)
+
         return ParallelDataSet(source, target, label)
 
     def fill_up(self,
@@ -1254,6 +1285,7 @@ class ParallelDataSet(Sized):
             bucket_source = self.source[bucket_idx]
             bucket_target = self.target[bucket_idx]
             bucket_label = self.label[bucket_idx]
+
             num_samples = bucket_source.shape[0]
 
             if num_samples % bucket_batch_size != 0:
@@ -1270,6 +1302,7 @@ class ParallelDataSet(Sized):
                         source[bucket_idx] = mx.nd.concat(bucket_source, bucket_source.take(random_indices), dim=0)
                     target[bucket_idx] = mx.nd.concat(bucket_target, bucket_target.take(random_indices), dim=0)
                     label[bucket_idx] = mx.nd.concat(bucket_label, bucket_label.take(random_indices), dim=0)
+
                 else:
                     raise NotImplementedError('Unknown fill-up strategy')
 
@@ -1280,6 +1313,7 @@ class ParallelDataSet(Sized):
         source = []
         target = []
         label = []
+
         for buck_idx in range(len(self)):
             num_samples = self.source[buck_idx].shape[0]
             if num_samples:  # not empty bucket
@@ -1392,6 +1426,7 @@ class BaseParallelSampleIter(mx.io.DataIter):
             mx.io.DataDesc(name=self.target_data_name,
                            shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[1]),
                            layout=C.BATCH_MAJOR)]
+
         self.provide_label = [
             mx.io.DataDesc(name=self.label_name,
                            shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[1]),
@@ -1445,15 +1480,16 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
         self.shards_fnames = list(shards_fnames)
         self.shard_index = -1
         self.fill_up = fill_up
-
         self.reset()
 
     def _load_shard(self):
         shard_fname = self.shards_fnames[self.shard_index]
         logger.info("Loading shard %s.", shard_fname)
-        dataset = ParallelDataSet.load(self.shards_fnames[self.shard_index]).fill_up(self.bucket_batch_sizes,
-                                                                                     self.fill_up,
-                                                                                     seed=self.shard_index)
+
+        dataset = ParallelDataSet.load(self.shards_fnames[self.shard_index]).fill_up(
+            self.bucket_batch_sizes,
+            self.fill_up,
+            seed=self.shard_index)
         self.shard_iter = ParallelSampleIter(data=dataset,
                                              buckets=self.buckets,
                                              batch_size=self.batch_size,

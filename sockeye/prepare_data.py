@@ -14,6 +14,7 @@
 import argparse
 import os
 
+from . import align
 from . import arguments
 from . import constants as C
 from . import data_io
@@ -74,6 +75,12 @@ def prepare_data(args: argparse.Namespace):
         word_min_count_target=word_min_count_target,
         pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
+    aligner = None
+    if args.use_pointer_nets:
+        aligner = align.Aligner(source_vocabs[0], target_vocab,
+                                window_size=args.pointer_nets_window_size,
+                                min_word_length=args.pointer_nets_min_word_len)
+
     data_io.prepare_data(source_fnames=source_paths,
                          target_fname=args.target,
                          source_vocabs=source_vocabs,
@@ -87,7 +94,8 @@ def prepare_data(args: argparse.Namespace):
                          bucket_width=bucket_width,
                          samples_per_shard=samples_per_shard,
                          min_num_shards=minimum_num_shards,
-                         output_prefix=output_folder)
+                         output_prefix=output_folder,
+                         aligner=aligner)
 
 
 if __name__ == "__main__":

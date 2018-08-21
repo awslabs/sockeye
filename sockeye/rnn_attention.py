@@ -45,6 +45,7 @@ class AttentionConfig(config.Config):
     :param is_scaled: If 'dot' attentions should be scaled.
     :param dtype: Data type.
     """
+
     def __init__(self,
                  type: str,
                  num_hidden: int,
@@ -207,8 +208,8 @@ class Attention(object):
         Returns AttentionInput to be fed into the attend callable returned by the on() method.
 
         :param seq_idx: Decoder time step.
-        :param word_vec_prev: Embedding of previously predicted ord
-        :param decoder_state: Current decoder state
+        :param word_vec_prev: Embedding of the previously predicted word.
+        :param decoder_state: Current decoder state.
         :return: Attention input.
         """
         query = decoder_state
@@ -759,7 +760,7 @@ class MlpCovAttention(MlpAttention):
                  input_previous_word: bool,
                  num_hidden: int,
                  layer_normalization: bool = False,
-                 config_coverage: coverage.CoverageConfig = None,
+                 config_coverage: Optional[coverage.CoverageConfig] = None,
                  prefix: str = C.ATTENTION_PREFIX,
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__(input_previous_word=input_previous_word,
