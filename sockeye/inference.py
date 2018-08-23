@@ -1006,11 +1006,11 @@ class Translator:
         self.beam_size = self.models[0].beam_size
         self.batch_size = self.models[0].batch_size
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
-        self.max_input_length = self.models[0].max_input_length
+        self._max_input_length = self.models[0].max_input_length
         if bucket_source_width > 0:
-            self.buckets_source = data_io.define_buckets(self.max_input_length, step=bucket_source_width)
+            self.buckets_source = data_io.define_buckets(self._max_input_length, step=bucket_source_width)
         else:
-            self.buckets_source = [self.max_input_length]
+            self.buckets_source = [self._max_input_length]
         self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target) - 1), val=np.inf,
                                    ctx=self.context)
         # These are constants used for manipulation of the beam and scores (particularly for pruning)
@@ -1068,6 +1068,16 @@ class Translator:
                     0 if self.global_avoid_trie is None else len(self.global_avoid_trie))
 
     @property
+    def max_input_length(self) -> int:
+        """
+        Returns maximum input length for TranslatorInput objects passed to translate()
+        """
+        if self.source_with_eos:
+            return self._max_input_length - C.SPACE_FOR_XOS
+        else:
+            return self._max_input_length
+
+    @property
     def num_source_factors(self) -> int:
         return self.models[0].num_source_factors
 
@@ -1118,7 +1128,7 @@ class Translator:
             else:
                 # TODO(tdomhan): Remove branch without EOS with next major version bump, as future models will always be trained with source side EOS symbols
                 if self.source_with_eos:
-                    max_input_length_without_eos = self.max_input_length - C.SPACE_FOR_XOS
+                    max_input_length_without_eos = self.max_input_length
                     # oversized input
                     if len(trans_input.tokens) > max_input_length_without_eos:
                         logger.debug(
