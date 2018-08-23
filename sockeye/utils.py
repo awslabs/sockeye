@@ -433,19 +433,22 @@ def average_arrays(arrays: List[mx.nd.NDArray]) -> mx.nd.NDArray:
     return new_array
 
 
+MAX_NUM_GPU_TO_TRY = 100
+
+
 def get_num_gpus() -> int:
     """
-    Gets the number of GPUs available on the host (depends on nvidia-smi).
+    Gets the number of GPUs available on the host.
 
     :return: The number of GPUs on the system.
     """
-    if shutil.which("nvidia-smi") is None:
-        logger.warning("Couldn't find nvidia-smi, therefore we assume no GPUs are available.")
-        return 0
-    sp = subprocess.Popen(['nvidia-smi', '-L'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    out_str = sp.communicate()[0].decode("utf-8")
-    num_gpus = len(out_str.rstrip("\n").split("\n"))
-    return num_gpus
+    # TODO (domhant): Switch to mx.context.num_gpus() with mxnet version 1.3
+    for device_id in range(MAX_NUM_GPU_TO_TRY):
+        try:
+            mx.nd.zeros((1,), ctx=mx.gpu(device_id))
+        except:
+            return device_id
+    return MAX_NUM_GPU_TO_TRY
 
 
 def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, int]]:
