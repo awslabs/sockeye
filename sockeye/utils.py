@@ -505,9 +505,7 @@ def determine_context(device_ids: List[int],
     else:
         num_gpus = get_num_gpus()
         check_condition(num_gpus >= 1,
-                        "No GPUs found, consider running on the CPU with --use-cpu "
-                        "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
-                        "binary isn't on the path).")
+                        "No GPUs found, consider running on the CPU with --use-cpu ")
         if disable_device_locking:
             context = expand_requested_device_ids(device_ids)
         else:
