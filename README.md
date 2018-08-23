@@ -71,7 +71,7 @@ python -m sockeye.average -n 8 --output model/params.best --strategy best model
 Say we want to train a standard Transformer model.
 The model definition is given by:
 
-```--custom-seq-encoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->ff()->linear)->norm"```
+```--custom-seq-encoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->ff->linear)->norm"```
 ```--custom-seq-decoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->mh_dot_att)->res(norm->ff($FF_NUM_HIDDEN)->linear)->norm```
 
 Thus the full training commands are given by
@@ -96,7 +96,7 @@ Transforming an RNN into a Transformer style architecture. + shows the increment
 
 Model | ADL
 -- | ---
-Transformer | ```--custom-seq-encoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->ff()->linear)->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->mh_dot_att)->res(norm->ff($FF_NUM_HIDDEN)->linear)->norm"```
+Transformer | ```--custom-seq-encoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->ff($FF_NUM_HIDDEN)->linear)->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->mh_dot_att)->res(norm->ff($FF_NUM_HIDDEN)->linear)->norm"```
 RNN | ```--custom-seq-encoder "dropout->res(birnn->dropout)->repeat(5,res(rnn->dropout))"``` <br> ```--custom-seq-decoder "dropout->repeat(6,res(rnn->dropout))->res(mh_dot_att(heads=1))->res(ff($FF_NUM_HIDDEN)->linear)"```
 &nbsp;&nbsp;&nbsp;&nbsp; \+ mh | ```--custom-seq-encoder "dropout->res(birnn->dropout)->repeat(5,res(rnn->dropout))"``` <br> ```--custom-seq-decoder "dropout->repeat(6,res(rnn->dropout))->res(mh_dot_att)->res(ff($FF_NUM_HIDDEN)->linear)"```
 &nbsp;&nbsp;&nbsp;&nbsp; \+ pos | ```--custom-seq-encoder "pos->res(birnn->dropout)->repeat(5,res(rnn->dropout))"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(rnn->dropout))->res(mh_dot_att)->res(ff($FF_NUM_HIDDEN)->linear)"```
