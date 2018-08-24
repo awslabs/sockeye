@@ -351,4 +351,3 @@ def test_split(num_factors):
 
 def test_get_num_gpus():
     assert utils.get_num_gpus() >= 0
-
