@@ -71,8 +71,8 @@ python -m sockeye.average -n 8 --output model/params.best --strategy best model
 Say we want to train a standard Transformer model.
 The model definition is given by:
 
-```--custom-seq-encoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->ff->linear)->norm"```
-```--custom-seq-decoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->mh_dot_att)->res(norm->ff($FF_NUM_HIDDEN)->linear)->norm```
+```--custom-seq-encoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->ff->linear))->norm"```
+```--custom-seq-decoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->mh_dot_att)->res(norm->ff($FF_NUM_HIDDEN)->linear))->norm```
 
 Thus the full training commands are given by
 ```
@@ -96,7 +96,7 @@ Transforming an RNN into a Transformer style architecture. + shows the increment
 
 Model | ADL
 -- | ---
-Transformer | ```--custom-seq-encoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->ff($FF_NUM_HIDDEN)->linear)->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->mh_dot_att)->res(norm->ff($FF_NUM_HIDDEN)->linear)->norm"```
+Transformer | ```--custom-seq-encoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->ff($FF_NUM_HIDDEN)->linear))->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->mh_dot_att)->res(norm->ff($FF_NUM_HIDDEN)->linear))->norm"```
 RNN | ```--custom-seq-encoder "dropout->res(birnn->dropout)->repeat(5,res(rnn->dropout))"``` <br> ```--custom-seq-decoder "dropout->repeat(6,res(rnn->dropout))->res(mh_dot_att(heads=1))->res(ff($FF_NUM_HIDDEN)->linear)"```
 &nbsp;&nbsp;&nbsp;&nbsp; \+ mh | ```--custom-seq-encoder "dropout->res(birnn->dropout)->repeat(5,res(rnn->dropout))"``` <br> ```--custom-seq-decoder "dropout->repeat(6,res(rnn->dropout))->res(mh_dot_att)->res(ff($FF_NUM_HIDDEN)->linear)"```
 &nbsp;&nbsp;&nbsp;&nbsp; \+ pos | ```--custom-seq-encoder "pos->res(birnn->dropout)->repeat(5,res(rnn->dropout))"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(rnn->dropout))->res(mh_dot_att)->res(ff($FF_NUM_HIDDEN)->linear)"```
@@ -110,15 +110,15 @@ Transforming a CNN based model into a Transformer style architecture. The BLEU a
 
 Model | ADL
 -- | ---
-Transformer | ```--custom-seq-encoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->ff($FF_NUM_HIDDEN)->linear)->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->mh_dot_att)->res(norm->ff($FF_NUM_HIDDEN)->linear)->norm"```
-CNN GLU | ```--custom-seq-encoder "pos->repeat(6,res(cnn))"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(cnn->res(mh_dot_att(heads=1)))"```
+Transformer | ```--custom-seq-encoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->ff($FF_NUM_HIDDEN)->linear))->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->mh_dot_att)->res(norm->ff($FF_NUM_HIDDEN)->linear))->norm"```
+CNN GLU | ```--custom-seq-encoder "pos->repeat(6,res(cnn))"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(cnn->res(mh_dot_att(heads=1))))"```
 &nbsp;&nbsp;&nbsp;&nbsp; \+ norm | ```--custom-seq-encoder "pos->repeat(6,res(norm->cnn))->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->cnn)->res(norm->mh_dot_att(heads=1)))->norm"```
 &nbsp;&nbsp;&nbsp;&nbsp; \+ mh | ```--custom-seq-encoder "pos->repeat(6,res(norm->cnn))->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->cnn)->res(norm->mh_dot_att))->norm"```
-&nbsp;&nbsp;&nbsp;&nbsp; \+ ff | ```--custom-seq-encoder "pos->repeat(6,res(norm->cnn)->res(norm->ff($FF_NUM_HIDDEN)->linear)->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->cnn)->res(norm->mh_dot_att)->res(norm->ff($FF_NUM_HIDDEN)->linear)->norm"```
+&nbsp;&nbsp;&nbsp;&nbsp; \+ ff | ```--custom-seq-encoder "pos->repeat(6,res(norm->cnn)->res(norm->ff($FF_NUM_HIDDEN)->linear))->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->cnn)->res(norm->mh_dot_att)->res(norm->ff($FF_NUM_HIDDEN)->linear))->norm"```
 CNN ReLU | ```--custom-seq-encoder "pos->repeat(6,res(cnn($NUM_HIDDEN,3,relu)))"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(cnn($NUM_HIDDEN,3,relu))->res(mh_dot_att(heads=1)))"```
 &nbsp;&nbsp;&nbsp;&nbsp; \+ norm | ```--custom-seq-encoder "pos->repeat(6,res(norm->cnn($NUM_HIDDEN,3,relu)))->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->cnn($NUM_HIDDEN,3,relu))->res(norm->mh_dot_att(heads=1)))->norm"```
 &nbsp;&nbsp;&nbsp;&nbsp; \+ mh | ```--custom-seq-encoder "pos->repeat(6,res(norm->cnn($NUM_HIDDEN,3,relu)))->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->cnn($NUM_HIDDEN,3,relu))->res(norm->mh_dot_att))->norm"```
-&nbsp;&nbsp;&nbsp;&nbsp; \+ ff | ```--custom-seq-encoder "pos->repeat(6,res(norm->cnn($NUM_HIDDEN,3,relu))->res(norm->ff($FF_NUM_HIDDEN)->linear)->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->cnn($NUM_HIDDEN,3,relu))->res(norm->mh_dot_att)->res(norm->ff($FF_NUM_HIDDEN)->linear)->norm"```
+&nbsp;&nbsp;&nbsp;&nbsp; \+ ff | ```--custom-seq-encoder "pos->repeat(6,res(norm->cnn($NUM_HIDDEN,3,relu))->res(norm->ff($FF_NUM_HIDDEN)->linear))->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->cnn($NUM_HIDDEN,3,relu))->res(norm->mh_dot_att)->res(norm->ff($FF_NUM_HIDDEN)->linear))->norm"```
 
 ### Table 5
 Different variations of the encoder and decoder self-attention layer. The BLEU and METEOR scores are given in the paper.
@@ -126,7 +126,7 @@ Different variations of the encoder and decoder self-attention layer. The BLEU a
 
 Encoder | Decoder | ADL
 -- | --- | ----
-self-att | self-att | ```--custom-seq-encoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->ff($FF_NUM_HIDDEN)->linear)->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->mh_dot_att)->res(norm->ff($FF_NUM_HIDDEN)->linear)->norm"```
+self-att | self-att | ```--custom-seq-encoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->ff($FF_NUM_HIDDEN)->linear))->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->mh_dot_att)->res(norm->ff($FF_NUM_HIDDEN)->linear))->norm"```
 self-att | RNN | ```--custom-seq-encoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->ff($FF_NUM_HIDDEN)->linear))->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->rnn->dropout)->res(norm->mh_dot_att)->res(norm->ff($FF_NUM_HIDDEN)->linear))->norm"```
 self-att | CNN | ```--custom-seq-encoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->ff($FF_NUM_HIDDEN)->linear))->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->cnn($NUM_HIDDEN,3,relu))->res(norm->mh_dot_att)->res(norm->ff($FF_NUM_HIDDEN)->linear))->norm"```
 RNN | self-att | ```--custom-seq-encoder "pos->res(norm->birnn->dropout)->res(norm->ff($FF_NUM_HIDDEN)->linear)->repeat(5,res(norm->rnn->dropout)->res(norm->ff($FF_NUM_HIDDEN)->linear))->norm"``` <br> ```--custom-seq-decoder "pos->repeat(6,res(norm->mh_dot_self_att)->res(norm->mh_dot_att)->res(norm->ff($FF_NUM_HIDDEN)->linear))->norm"```
