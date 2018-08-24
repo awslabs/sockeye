@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.49]
+### Changed
+- Removed dependence on the nvidia-smi tool. The number of GPUs is now determined programatically.
+
 ## [1.18.48]
 ### Changed
 - Translator.max_input_length now reports correct maximum input length for TranslatorInput objects, independent of the internal representation, where an additional EOS gets added. 
