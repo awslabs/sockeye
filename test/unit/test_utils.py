@@ -347,3 +347,7 @@ def test_split(num_factors):
     result = utils.split(data, num_outputs=num_factors, axis=2, squeeze_axis=True)
     assert isinstance(result, list)
     assert result[0].shape == (batch_size, bucket_key)
+
+
+def test_get_num_gpus():
+    assert utils.get_num_gpus() >= 0

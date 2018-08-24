@@ -435,17 +435,18 @@ def average_arrays(arrays: List[mx.nd.NDArray]) -> mx.nd.NDArray:
 
 def get_num_gpus() -> int:
     """
-    Gets the number of GPUs available on the host (depends on nvidia-smi).
+    Gets the number of GPUs available on the host.
 
     :return: The number of GPUs on the system.
     """
-    if shutil.which("nvidia-smi") is None:
-        logger.warning("Couldn't find nvidia-smi, therefore we assume no GPUs are available.")
-        return 0
-    sp = subprocess.Popen(['nvidia-smi', '-L'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    out_str = sp.communicate()[0].decode("utf-8")
-    num_gpus = len(out_str.rstrip("\n").split("\n"))
-    return num_gpus
+    # TODO (domhant): Switch to mx.context.num_gpus() with mxnet version 1.3
+    for device_id in itertools.count():
+        try:
+            mx.nd.zeros((1,), ctx=mx.gpu(device_id))
+        except mx.MXNetError:
+            return device_id
+    # Note: Return statement to make mypy happy, the for loop is infinite, so an exception is the only way out.
+    return device_id + 1
 
 
 def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, int]]:
@@ -502,9 +503,7 @@ def determine_context(device_ids: List[int],
     else:
         num_gpus = get_num_gpus()
         check_condition(num_gpus >= 1,
-                        "No GPUs found, consider running on the CPU with --use-cpu "
-                        "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
-                        "binary isn't on the path).")
+                        "No GPUs found, consider running on the CPU with --use-cpu ")
         if disable_device_locking:
             context = expand_requested_device_ids(device_ids)
         else:
