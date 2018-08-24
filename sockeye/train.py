@@ -279,9 +279,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             utils.check_condition(vocab.are_identical(target_vocab, model_target_vocab),
                                   "Prepared data and resumed model target vocabs do not match.")
 
-            check_condition(len(args.source_factors) == len(args.validation_source_factors),
-                            'Training and validation data must have the same number of factors: %d vs. %d.' % (
-                                len(args.source_factors), len(args.validation_source_factors)))
+        check_condition(len(args.source_factors) == len(args.validation_source_factors),
+                        'Training and validation data must have the same number of factors: %d vs. %d.' % (
+                            len(args.source_factors), len(args.validation_source_factors)))
 
         return train_iter, validation_iter, data_config, source_vocabs, target_vocab
 
