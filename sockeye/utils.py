@@ -28,7 +28,6 @@ import sys
 import time
 from contextlib import contextmanager, ExitStack
 from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
-import itertools
 
 import mxnet as mx
 import numpy as np
