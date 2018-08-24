@@ -28,6 +28,7 @@ import sys
 import time
 from contextlib import contextmanager, ExitStack
 from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
+import itertools
 
 import mxnet as mx
 import numpy as np
@@ -433,9 +434,6 @@ def average_arrays(arrays: List[mx.nd.NDArray]) -> mx.nd.NDArray:
     return new_array
 
 
-MAX_NUM_GPU_TO_TRY = 100
-
-
 def get_num_gpus() -> int:
     """
     Gets the number of GPUs available on the host.
@@ -443,12 +441,11 @@ def get_num_gpus() -> int:
     :return: The number of GPUs on the system.
     """
     # TODO (domhant): Switch to mx.context.num_gpus() with mxnet version 1.3
-    for device_id in range(MAX_NUM_GPU_TO_TRY):
+    for device_id in itertools.count():
         try:
             mx.nd.zeros((1,), ctx=mx.gpu(device_id))
-        except:
+        except mx.MXNetError:
             return device_id
-    return MAX_NUM_GPU_TO_TRY
 
 
 def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, int]]:
