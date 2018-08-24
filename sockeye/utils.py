@@ -446,6 +446,8 @@ def get_num_gpus() -> int:
             mx.nd.zeros((1,), ctx=mx.gpu(device_id))
         except mx.MXNetError:
             return device_id
+    # Note: Return statement to make mypy happy, the for loop is infinite, so an exception is the only way out.
+    return device_id + 1
 
 
 def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, int]]:
