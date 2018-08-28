@@ -10,6 +10,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.51]
+### Changed
+- Batch size is now specified during inference runtime, rather than preallocated.
+### Added
+- Added option for --use-dynamic-batch-size, to allow Sockeye to support dynamic batch sizes during inference (on STDIN with json input only).
+
 ## [1.18.50]
 ### Fixed
 - Check for equivalency of training and validation source factors was incorrectly indented.

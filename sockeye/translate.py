@@ -108,6 +108,7 @@ def run_translate(args: argparse.Namespace):
                            chunk_size=args.chunk_size,
                            input_file=args.input,
                            input_factors=args.input_factors,
+                           dynamic_batch_mode_enabled=args.use_dynamic_batch_size,
                            input_is_json=args.json_input)
 
 
@@ -150,12 +151,23 @@ def make_inputs(input_file: Optional[str],
                 else:
                     yield inference.make_input_from_multiple_strings(sentence_id=sentence_id, strings=list(inputs))
 
+def make_input_lists() -> Generator[List[inference.TranslatorInput], None, None]:
+    """
+    Generates Lists of TranslatorInput instances from input. Reads from stdin.
+    the function will look for factors attached to each token, separated by '|'.
+
+    :return: TranslatorInput objects.
+    """
+    for sentence_id, line in enumerate(sys.stdin, 1):
+        yield inference.make_inputs_from_json_string_list(sentence_id=sentence_id, json_string=line)
+
 
 def read_and_translate(translator: inference.Translator,
                        output_handler: OutputHandler,
                        chunk_size: Optional[int],
                        input_file: Optional[str] = None,
                        input_factors: Optional[List[str]] = None,
+                       dynamic_batch_mode_enabled: bool = False,
                        input_is_json: bool = False) -> None:
     """
     Reads from either a file or stdin and translates each line, calling the output_handler with the result.
@@ -165,29 +177,47 @@ def read_and_translate(translator: inference.Translator,
     :param chunk_size: The size of the portion to read at a time from the input.
     :param input_file: Optional path to file which will be translated line-by-line if included, if none use stdin.
     :param input_factors: Optional list of paths to files that contain source factors.
+    :param dynamic_batch_mode_enabled: Flag set to allow dynamic batches in translation, rather than fixed value
     :param input_is_json: Whether the input is in json format.
     """
     batch_size = translator.batch_size
-    if chunk_size is None:
-        if translator.batch_size == 1:
-            # No batching, therefore there is not need to read segments in chunks.
-            chunk_size = C.CHUNK_SIZE_NO_BATCHING
-        else:
-            # Get a constant number of batches per call to Translator.translate.
-            chunk_size = C.CHUNK_SIZE_PER_BATCH_SEGMENT * translator.batch_size
-    else:
-        if chunk_size < translator.batch_size:
-            logger.warning("You specified a chunk size (%d) smaller than the batch size (%d). This will lead to "
-                           "a reduction in translation speed. Consider choosing a larger chunk size." % (chunk_size,
-                                                                                                         batch_size))
 
     logger.info("Translating...")
 
     total_time, total_lines = 0.0, 0
-    for chunk in grouper(make_inputs(input_file, translator, input_is_json, input_factors), size=chunk_size):
-        chunk_time = translate(output_handler, chunk, translator)
-        total_lines += len(chunk)
-        total_time += chunk_time
+    # We allow for dynamic batch calls if calling from STDIN with json inputs
+    if dynamic_batch_mode_enabled and input_file is None and input_is_json:
+        logger.info("Dynamic batch mode enabled, translating in batches as delivered...")
+        for translation_in in make_input_lists():
+            # if the input goes beyond the max batch_size, split into batch_size chunks
+            max_batches = [translation_in[i:i + batch_size] for i in xrange(0, len(translation_in), batch_size)]
+            for max_batch in max_batches:
+                translate_time = translate(output_handler=output_handler,
+                                           dynamic_batch_mode_enabled=dynamic_batch_mode_enabled,
+                                           trans_inputs=max_batch,
+                                           translator=translator)
+                total_lines += len(max_batch)
+                total_time += translate_time
+    else:
+        if chunk_size is None:
+            if translator.batch_size == 1:
+                # No batching, therefore there is not need to read segments in chunks.
+                chunk_size = C.CHUNK_SIZE_NO_BATCHING
+            else:
+                # Get a constant number of batches per call to Translator.translate.
+                chunk_size = C.CHUNK_SIZE_PER_BATCH_SEGMENT * translator.batch_size
+        else:
+            if chunk_size < translator.batch_size:
+                logger.warning("You specified a chunk size (%d) smaller than the batch size (%d). This will lead to "
+                               "a reduction in translation speed. Consider choosing a larger chunk size." % (chunk_size,
+                                                                                                             batch_size))
+        for chunk in grouper(make_inputs(input_file, translator, input_is_json, input_factors), size=chunk_size):
+            chunk_time = translate(output_handler=output_handler,
+                                   dynamic_batch_mode_enabled=dynamic_batch_mode_enabled,
+                                   trans_inputs=chunk,
+                                   translator=translator)
+            total_lines += len(chunk)
+            total_time += chunk_time
 
     if total_lines != 0:
         logger.info("Processed %d lines in %d batches. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",
@@ -198,18 +228,23 @@ def read_and_translate(translator: inference.Translator,
 
 
 def translate(output_handler: OutputHandler,
+              dynamic_batch_mode_enabled: bool,
               trans_inputs: List[inference.TranslatorInput],
               translator: inference.Translator) -> float:
     """
     Translates each line from source_data, calling output handler after translating a batch.
 
     :param output_handler: A handler that will be called once with the output of each translation.
+    :param dynamic_batch_mode_enabled: Flag set to allow dynamic batches in translation, rather than fixed value
     :param trans_inputs: A enumerable list of translator inputs.
     :param translator: The translator that will be used for each line of input.
     :return: Total time taken.
     """
     tic = time.time()
-    trans_outputs = translator.translate(trans_inputs)
+    if dynamic_batch_mode_enabled:
+        trans_outputs = translator.translate_dynamic_batch_size(trans_inputs=trans_inputs)
+    else:
+        trans_outputs = translator.translate(trans_inputs)
     total_time = time.time() - tic
     batch_time = total_time / len(trans_inputs)
     for trans_input, trans_output in zip(trans_inputs, trans_outputs):

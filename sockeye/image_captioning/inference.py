@@ -43,7 +43,7 @@ class ImageInferenceModel(InferenceModel):
         super().__init__(**kwargs)
         self.input_size = input_size
 
-    def _get_encoder_data_shapes(self, bucket_key: int = None) -> List[mx.io.DataDesc]:
+    def _get_encoder_data_shapes(self, batch_size: int, bucket_key: int = None) -> List[mx.io.DataDesc]:
         """
         Returns data shapes of the encoder module.
 
@@ -51,7 +51,7 @@ class ImageInferenceModel(InferenceModel):
         :return: List of data descriptions.
         """
         return [mx.io.DataDesc(name=C.SOURCE_NAME,
-                               shape=(self.batch_size,) + self.input_size,
+                               shape=(batch_size,) + self.input_size,
                                layout=C.BATCH_MAJOR_IMAGE)]
 
     @property
@@ -114,7 +114,8 @@ class ImageCaptioner(Translator):
             if rest > 0:
                 logger.debug("Extending the last batch to the full batch size (%d)", self.batch_size)
                 batch = batch + [batch[0]] * rest
-            batch_translations = self._translate_nd(*self._get_inference_input(batch))
+            batch_translations = self._translate_nd(*self._get_inference_input(trans_inputs=batch,
+                                                                               batch_size=len(batch)))
             # truncate to remove filler translations
             if rest > 0:
                 batch_translations = batch_translations[:-rest]
@@ -127,11 +128,13 @@ class ImageCaptioner(Translator):
         return results
 
     def _get_inference_input(self,
-                             trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray,
-                                                                           int,
-                                                                           List[Optional[constrained.RawConstraintList]],
-                                                                           List[Optional[constrained.RawConstraintList]],                                                                           
-                                                                           mx.nd.NDArray]:
+                             trans_inputs: List[TranslatorInput],
+                             batch_size: int) -> Tuple[mx.nd.NDArray,
+                                                       int,
+                                                       int,
+                                                       List[Optional[constrained.RawConstraintList]],
+                                                       List[Optional[constrained.RawConstraintList]],                                                                           
+                                                       mx.nd.NDArray]:
         """
         Returns NDArray of images and corresponding bucket_key and an NDArray of maximum output lengths
         for each sentence in the batch.
@@ -142,9 +145,9 @@ class ImageCaptioner(Translator):
                 an NDArray of maximum output lengths.
         """
 
-        image_paths = [None for x in range(self.batch_size)]  # type: List[Optional[str]]
-        raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
-        raw_avoid_list = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
+        image_paths = [None for x in range(batch_size)]  # type: List[Optional[str]]
+        raw_constraints = [None for x in range(batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
+        raw_avoid_list = [None for x in range(batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
         for j, trans_input in enumerate(trans_inputs):
             # Join relative path with absolute
             path = trans_input.tokens[0]
@@ -162,7 +165,7 @@ class ImageCaptioner(Translator):
 
         max_input_length = 0
         max_output_lengths = [self.models[0].get_max_output_length(max_input_length)] * len(image_paths)
-        return mx.nd.array(images), max_input_length, raw_constraints, raw_avoid_list, \
+        return mx.nd.array(images), max_input_length, batch_size, raw_constraints, raw_avoid_list, \
                mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
 
 

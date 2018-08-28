@@ -1139,6 +1139,14 @@ def add_inference_args(params):
                                type=int,
                                default=None,
                                help='Maximum input sequence length. Default: value from model(s).')
+    decode_params.add_argument('--use-dynamic-batch-size',
+                               action='store_true',
+                               default=False,
+                               help='Turning on this option allows inference to be done with dynamic batch-sizes, up to the'
+                                    'specified value in the --batch-size argument.  NOTE: This option can only be used when'
+                                    'reading from STDIN for translation using the built-in interface - otherwise the option'
+                                    'will simply be disregarded. Default: False')
+
     decode_params.add_argument('--softmax-temperature',
                                type=float,
                                default=None,

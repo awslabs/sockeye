@@ -21,7 +21,7 @@ import os
 import time
 from collections import defaultdict
 from functools import lru_cache, partial
-from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set
+from typing import Any, Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set
 
 import mxnet as mx
 import numpy as np
@@ -127,8 +127,11 @@ class InferenceModel(model.SockeyeModel):
         self.encoder_module, self.encoder_default_bucket_key = self._get_encoder_module()
         self.decoder_module, self.decoder_default_bucket_key = self._get_decoder_module()
 
-        max_encoder_data_shapes = self._get_encoder_data_shapes(self.encoder_default_bucket_key)
-        max_decoder_data_shapes = self._get_decoder_data_shapes(self.decoder_default_bucket_key)
+        # self.batch_size represents the maximum batch_size achievable
+        max_encoder_data_shapes = self._get_encoder_data_shapes(bucket_key=self.encoder_default_bucket_key,
+                                                                batch_size=self.batch_size)
+        max_decoder_data_shapes = self._get_decoder_data_shapes(bucket_key=self.decoder_default_bucket_key,
+                                                                batch_size=self.batch_size)
         self.encoder_module.bind(data_shapes=max_encoder_data_shapes, for_training=False, grad_req="null")
         self.decoder_module.bind(data_shapes=max_decoder_data_shapes, for_training=False, grad_req="null")
 
@@ -249,7 +252,7 @@ class InferenceModel(model.SockeyeModel):
                                         context=self.context)
         return module, default_bucket_key
 
-    def _get_encoder_data_shapes(self, bucket_key: int) -> List[mx.io.DataDesc]:
+    def _get_encoder_data_shapes(self, bucket_key: int, batch_size: int) -> List[mx.io.DataDesc]:
         """
         Returns data shapes of the encoder module.
 
@@ -257,11 +260,13 @@ class InferenceModel(model.SockeyeModel):
         :return: List of data descriptions.
         """
         return [mx.io.DataDesc(name=C.SOURCE_NAME,
-                               shape=(self.batch_size, bucket_key, self.num_source_factors),
+                               shape=(batch_size, bucket_key, self.num_source_factors),
                                layout=C.BATCH_MAJOR)]
 
     @lru_cache(maxsize=None)
-    def _get_decoder_data_shapes(self, bucket_key: Tuple[int, int]) -> List[mx.io.DataDesc]:
+    def _get_decoder_data_shapes(self,
+                                 bucket_key: Tuple[int, int],
+                                 batch_size: int) -> List[mx.io.DataDesc]:
         """
         Returns data shapes of the decoder module.
 
@@ -269,29 +274,31 @@ class InferenceModel(model.SockeyeModel):
         :return: List of data descriptions.
         """
         source_max_length, target_max_length = bucket_key
-        return [mx.io.DataDesc(name=C.TARGET_NAME, shape=(self.batch_size * self.beam_size,), layout="NT")] + \
-               self.decoder.state_shapes(self.batch_size * self.beam_size,
+        return [mx.io.DataDesc(name=C.TARGET_NAME, shape=(batch_size * self.beam_size,), layout="NT")] + \
+               self.decoder.state_shapes(batch_size * self.beam_size,
                                          target_max_length,
                                          self.encoder.get_encoded_seq_len(source_max_length),
                                          self.encoder.get_num_hidden())
 
     def run_encoder(self,
                     source: mx.nd.NDArray,
+                    batch_size: int,
                     source_max_length: int) -> 'ModelState':
         """
-        Runs forward pass of the encoder.
+        Runs forward pass of the encoder, with dynamic batch size.
         Encodes source given source length and bucket key.
         Returns encoder representation of the source, source_length, initial hidden state of decoder RNN,
         and initial decoder states tiled to beam size.
 
         :param source: Integer-coded input tokens. Shape (batch_size, source length, num_source_factors).
+        :param batch_size: The batch size for the given encoder run
         :param source_max_length: Bucket key.
         :return: Initial model state.
         """
         batch = mx.io.DataBatch(data=[source],
                                 label=None,
                                 bucket_key=source_max_length,
-                                provide_data=self._get_encoder_data_shapes(source_max_length))
+                                provide_data=self._get_encoder_data_shapes(source_max_length, batch_size))
 
         self.encoder_module.forward(data_batch=batch, is_train=False)
         decoder_states = self.encoder_module.get_outputs()
@@ -303,6 +310,7 @@ class InferenceModel(model.SockeyeModel):
     def run_decoder(self,
                     prev_word: mx.nd.NDArray,
                     bucket_key: Tuple[int, int],
+                    batch_size: int,
                     model_state: 'ModelState') -> Tuple[mx.nd.NDArray, mx.nd.NDArray, 'ModelState']:
         """
         Runs forward pass of the single-step decoder.
@@ -313,7 +321,7 @@ class InferenceModel(model.SockeyeModel):
             data=[prev_word.as_in_context(self.context)] + model_state.states,
             label=None,
             bucket_key=bucket_key,
-            provide_data=self._get_decoder_data_shapes(bucket_key))
+            provide_data=self._get_decoder_data_shapes(bucket_key, batch_size))
         self.decoder_module.forward(data_batch=batch, is_train=False)
         out, attention_probs, *model_state.states = self.decoder_module.get_outputs()
         return out, attention_probs, model_state
@@ -664,6 +672,29 @@ def make_input_from_plain_string(sentence_id: SentenceId, string: str) -> Transl
     """
     return TranslatorInput(sentence_id, tokens=list(data_io.get_tokens(string)), factors=None)
 
+def make_inputs_from_json_string_list(sentence_id: SentenceId, json_string: str) -> List[TranslatorInput]:
+    """
+    Returns a list of TranslatorInput objects from a JSON list object, serialized as a string.
+
+    :param sentence_id: Sentence id.
+    :param json_string: A list of JSON objects serialized as a string that must contain a key "text", mapping to the 
+           input text, and optionally a key "factors" that maps to a list of strings, each of which representing a
+           factor sequence for the input text.
+    :return: A List of TranslatorInput.
+    """
+    try:
+        translator_input_list = [] # type: List[TranslatorInput]
+        jobj_list = json.loads(json_string, encoding=C.JSON_ENCODING)
+        for jobj in jobj_list:
+            translator_input_list.append(_json_object_to_transation_input_parser(sentence_id=sentence_id,
+                                                                                 jobj=jobj,
+                                                                                 json_string=json_string))
+        return translator_input_list
+
+    except Exception as e:
+        logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
+        return [_bad_input(sentence_id, reason=json_string)]
+
 
 def make_input_from_json_string(sentence_id: SentenceId, json_string: str) -> TranslatorInput:
     """
@@ -677,41 +708,56 @@ def make_input_from_json_string(sentence_id: SentenceId, json_string: str) -> Tr
     """
     try:
         jobj = json.loads(json_string, encoding=C.JSON_ENCODING)
-        tokens = jobj[C.JSON_TEXT_KEY]
-        tokens = list(data_io.get_tokens(tokens))
-        factors = jobj.get(C.JSON_FACTORS_KEY)
-        if isinstance(factors, list):
-            factors = [list(data_io.get_tokens(factor)) for factor in factors]
-            lengths = [len(f) for f in factors]
-            if not all(l == len(tokens) for l in lengths):
-                logger.error("Factors have different length than input text: %d vs. %s", len(tokens), str(lengths))
-                return _bad_input(sentence_id, reason=json_string)
-
-        # List of phrases to prevent from occuring in the output
-        avoid_list = jobj.get(C.JSON_AVOID_KEY)
-
-        # List of phrases that must appear in the output
-        constraints = jobj.get(C.JSON_CONSTRAINTS_KEY)
-
-        # If there is overlap between positive and negative constraints, assume the user wanted
-        # the words, and so remove them from the avoid_list (negative constraints)
-        if constraints is not None and avoid_list is not None:
-            avoid_set = set(avoid_list)
-            overlap = set(constraints).intersection(avoid_set)
-            if len(overlap) > 0:
-                avoid_list = list(avoid_set.difference(overlap))
-
-        # Convert to a list of tokens
-        if isinstance(avoid_list, list):
-            avoid_list = [list(data_io.get_tokens(phrase)) for phrase in avoid_list]
-        if isinstance(constraints, list):
-            constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
-
-        return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors, constraints=constraints, avoid_list=avoid_list)
+        return _json_object_to_transation_input_parser(sentence_id=sentence_id, jobj=jobj, json_string=json_string)
 
     except Exception as e:
         logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
         return _bad_input(sentence_id, reason=json_string)
+
+
+def _json_object_to_transation_input_parser(sentence_id: SentenceId,
+                                            jobj: Dict[str, Any],
+                                            json_string: str) -> TranslatorInput:
+    """
+    Returns a TranslatorInput object from a JSON object.
+
+    :param sentence_id: Sentence id.
+    :param jobj: A JSON object that must contain a key "text", mapping to the input text, and optionally a key 
+           "factors" that maps to a list of strings, each of which representing a factor sequence for the input
+           text.
+    :return: A TranslatorInput.
+    """
+    tokens = jobj[C.JSON_TEXT_KEY]
+    tokens = list(data_io.get_tokens(tokens))
+    factors = jobj.get(C.JSON_FACTORS_KEY)
+    if isinstance(factors, list):
+        factors = [list(data_io.get_tokens(factor)) for factor in factors]
+        lengths = [len(f) for f in factors]
+        if not all(l == len(tokens) for l in lengths):
+            logger.error("Factors have different length than input text: %d vs. %s", len(tokens), str(lengths))
+            return _bad_input(sentence_id, reason=json_string)
+
+    # List of phrases to prevent from occuring in the output
+    avoid_list = jobj.get(C.JSON_AVOID_KEY)
+
+    # List of phrases that must appear in the output
+    constraints = jobj.get(C.JSON_CONSTRAINTS_KEY)
+
+    # If there is overlap between positive and negative constraints, assume the user wanted
+    # the words, and so remove them from the avoid_list (negative constraints)
+    if constraints is not None and avoid_list is not None:
+        avoid_set = set(avoid_list)
+        overlap = set(constraints).intersection(avoid_set)
+        if len(overlap) > 0:
+            avoid_list = list(avoid_set.difference(overlap))
+
+    # Convert to a list of tokens
+    if isinstance(avoid_list, list):
+        avoid_list = [list(data_io.get_tokens(phrase)) for phrase in avoid_list]
+    if isinstance(constraints, list):
+        constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
+
+    return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors, constraints=constraints, avoid_list=avoid_list)
 
 
 def make_input_from_factored_string(sentence_id: SentenceId,
@@ -1011,16 +1057,6 @@ class Translator:
             self.buckets_source = data_io.define_buckets(self._max_input_length, step=bucket_source_width)
         else:
             self.buckets_source = [self._max_input_length]
-        self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target) - 1), val=np.inf,
-                                   ctx=self.context)
-        # These are constants used for manipulation of the beam and scores (particularly for pruning)
-        self.zeros_array = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
-        self.inf_array = mx.nd.full((self.batch_size * self.beam_size, 1), val=np.inf,
-                                    ctx=self.context, dtype='float32')
-
-        # offset for hypothesis indices in batch decoding
-        self.offset = mx.nd.array(np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size),
-                                  dtype='int32', ctx=self.context)
 
         self._update_scores = UpdateScores()
         self._update_scores.initialize(ctx=self.context)
@@ -1029,8 +1065,6 @@ class Translator:
         # topk function used in beam search
         self._topk = partial(utils.topk,
                              k=self.beam_size,
-                             batch_size=self.batch_size,
-                             offset=self.offset,
                              use_mxnet_topk=self.context != mx.cpu())  # MXNet implementation is faster on GPUs
 
         self._sort_by_index = SortByIndex()
@@ -1057,7 +1091,7 @@ class Translator:
                 self.global_avoid_trie.add_phrase(phrase_ids)
 
         logger.info("Translator (%d model(s) beam_size=%d beam_prune=%s beam_search_stop=%s "
-                    "ensemble_mode=%s batch_size=%d buckets_source=%s avoiding=%d)",
+                    "ensemble_mode=%s default_batch_dize=%d buckets_source=%s avoiding=%d)",
                     len(self.models),
                     self.beam_size,
                     'off' if not self.beam_prune else "%.2f" % self.beam_prune,
@@ -1110,6 +1144,33 @@ class Translator:
         Splits oversized sentences to sentence chunks of size less than max_input_length.
 
         :param trans_inputs: List of TranslatorInputs as returned by make_input().
+        :return: List of translation results.
+        """
+        return self._translate(trans_inputs, self.batch_size)
+
+    def translate_dynamic_batch_size(self,
+                  trans_inputs: List[TranslatorInput]) -> List[TranslatorOutput]:
+        """
+        Batch-translates a list of TranslatorInputs, returns a list of TranslatorOutputs.
+        Allows the specification of dynamic batch size during inference, up to a maximum
+        of the originally specified batch size.
+        Splits oversized sentences to sentence chunks of size less than max_input_length.
+
+        :param trans_inputs: List of TranslatorInputs as returned by make_input().
+        :return: List of translation results.
+        """
+        return self._translate(trans_inputs, len(trans_inputs))
+
+    def _translate(self,
+                  trans_inputs: List[TranslatorInput],
+                  batch_size: int) -> List[TranslatorOutput]:
+        """
+        Batch-translates a list of TranslatorInputs, returns a list of TranslatorOutputs.
+        Splits oversized sentences to sentence chunks of size less than max_input_length.
+        Translations are done in batch_size chunks.
+
+        :param trans_inputs: List of TranslatorInputs as returned by make_input().
+        :param batch_size: The batch_size to run the inference call with.
         :return: List of translation results.
         """
         translated_chunks = []  # type: List[IndexedTranslation]
@@ -1174,15 +1235,16 @@ class Translator:
         input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.translator_input.tokens), reverse=True)
 
         # translate in batch-sized blocks over input chunks
-        for batch_id, batch in enumerate(utils.grouper(input_chunks, self.batch_size)):
+        for batch_id, batch in enumerate(utils.grouper(input_chunks, batch_size)):
             logger.debug("Translating batch %d", batch_id)
             # underfilled batch will be filled to a full batch size with copies of the 1st input
-            rest = self.batch_size - len(batch)
+            rest = batch_size - len(batch)
             if rest > 0:
-                logger.debug("Extending the last batch to the full batch size (%d)", self.batch_size)
+                logger.debug("Extending the last batch to the full batch size (%d)", batch_size)
                 batch = batch + [batch[0]] * rest
             translator_inputs = [indexed_translator_input.translator_input for indexed_translator_input in batch]
-            batch_translations = self._translate_nd(*self._get_inference_input(translator_inputs))
+            batch_translations = self._translate_nd(*self._get_inference_input(trans_inputs=translator_inputs,
+                                                                               batch_size=batch_size))
             # truncate to remove filler translations
             if rest > 0:
                 batch_translations = batch_translations[:-rest]
@@ -1208,11 +1270,13 @@ class Translator:
         return results
 
     def _get_inference_input(self,
-                             trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray,
-                                                                           int,
-                                                                           List[Optional[constrained.RawConstraintList]],
-                                                                           List[Optional[constrained.RawConstraintList]],
-                                                                           mx.nd.NDArray]:
+                             trans_inputs: List[TranslatorInput],
+                             batch_size: int) -> Tuple[mx.nd.NDArray,
+                                                       int,
+                                                       int,
+                                                       List[Optional[constrained.RawConstraintList]],
+                                                       List[Optional[constrained.RawConstraintList]],
+                                                       mx.nd.NDArray]:
         """
         Assembles the numerical data for the batch.
         This comprises an NDArray for the source sentences, the bucket key (padded source length), and a list of
@@ -1227,8 +1291,8 @@ class Translator:
 
         bucket_key = data_io.get_bucket(max(len(inp.tokens) for inp in trans_inputs), self.buckets_source)
         source = mx.nd.zeros((len(trans_inputs), bucket_key, self.num_source_factors), ctx=self.context)
-        raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
-        raw_avoid_list = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
+        raw_constraints = [None for x in range(batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
+        raw_avoid_list = [None for x in range(batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
 
         max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
@@ -1257,7 +1321,7 @@ class Translator:
                     logger.warning("Sentence %s: %s was found in the list of phrases to avoid; "
                                    "this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
 
-        return source, bucket_key, raw_constraints, raw_avoid_list, mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
+        return source, bucket_key, batch_size, raw_constraints, raw_avoid_list, mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
 
     def _make_result(self,
                      trans_input: TranslatorInput,
@@ -1298,6 +1362,7 @@ class Translator:
     def _translate_nd(self,
                       source: mx.nd.NDArray,
                       source_length: int,
+                      batch_size: int,
                       raw_constraints: List[Optional[constrained.RawConstraintList]],
                       raw_avoid_list: List[Optional[constrained.RawConstraintList]],
                       max_output_lengths: mx.nd.NDArray) -> List[Translation]:
@@ -1305,28 +1370,38 @@ class Translator:
         Translates source of source_length, given a bucket_key.
 
         :param source: Source ids. Shape: (batch_size, bucket_key, num_factors).
+        :param batch_size: Dynamic batch-size, if available.
         :param source_length: Bucket key.
         :param raw_constraints: A list of optional constraint lists.
 
         :return: Sequence of translations.
         """
 
-        return self._get_best_from_beam(*self._beam_search(source, source_length, raw_constraints, raw_avoid_list, max_output_lengths))
+        return self._get_best_from_beam(*self._beam_search(source=source,
+                                                           batch_size=batch_size,
+                                                           source_length=source_length,
+                                                           raw_constraint_list=raw_constraints,
+                                                           raw_avoid_list=raw_avoid_list,
+                                                           max_output_lengths=max_output_lengths))
 
-    def _encode(self, sources: mx.nd.NDArray, source_length: int) -> List[ModelState]:
+    def _encode(self, sources: mx.nd.NDArray, source_length: int, batch_size: int) -> List[ModelState]:
         """
         Returns a ModelState for each model representing the state of the model after encoding the source.
 
         :param sources: Source ids. Shape: (batch_size, bucket_key, num_factors).
         :param source_length: Bucket key.
+        :param batch_size: Size of the inference batch 
         :return: List of ModelStates.
         """
-        return [model.run_encoder(sources, source_length) for model in self.models]
+        return [model.run_encoder(source=sources,
+                                  batch_size=batch_size,
+                                  source_max_length=source_length) for model in self.models]
 
     def _decode_step(self,
                      prev_word: mx.nd.NDArray,
                      step: int,
                      source_length: int,
+                     batch_size: int,
                      states: List[ModelState],
                      models_output_layer_w: List[mx.nd.NDArray],
                      models_output_layer_b: List[mx.nd.NDArray]) \
@@ -1348,7 +1423,10 @@ class Translator:
         # We use zip_longest here since we'll have empty lists when not using restrict_lexicon
         for model, out_w, out_b, state in itertools.zip_longest(
                 self.models, models_output_layer_w, models_output_layer_b, states):
-            decoder_outputs, attention_probs, state = model.run_decoder(prev_word, bucket_key, state)
+            decoder_outputs, attention_probs, state = model.run_decoder(prev_word=prev_word,
+                                                                        bucket_key=bucket_key,
+                                                                        batch_size=batch_size,
+                                                                        model_state=state)
             # Compute logits and softmax with restricted vocabulary
             if self.restrict_lexicon:
                 logits = model.output_layer(decoder_outputs, out_w, out_b)
@@ -1384,6 +1462,7 @@ class Translator:
 
     def _beam_search(self,
                      source: mx.nd.NDArray,
+                     batch_size: int,
                      source_length: int,
                      raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                      raw_avoid_list: List[Optional[constrained.RawConstraintList]],
@@ -1392,6 +1471,7 @@ class Translator:
                                                                  np.ndarray,
                                                                  np.ndarray,
                                                                  np.ndarray,
+                                                                 int,
                                                                  List[Optional[constrained.ConstrainedHypothesis]],
                                                                  Optional[List[BeamHistory]]]:
         """
@@ -1419,7 +1499,7 @@ class Translator:
         # General data structure: each row has batch_size * beam blocks for the 1st sentence, with a full beam,
         # then the next block for the 2nd sentence and so on
 
-        best_word_indices = mx.nd.full((self.batch_size * self.beam_size,), val=self.start_id, ctx=self.context,
+        best_word_indices = mx.nd.full((batch_size * self.beam_size,), val=self.start_id, ctx=self.context,
                                        dtype='int32')
 
         # Best word and hypotheses indices across beam search steps from topk operation.
@@ -1429,10 +1509,10 @@ class Translator:
         # Beam history
         beam_histories = None  # type: Optional[List[BeamHistory]]
         if self.store_beam:
-            beam_histories = [defaultdict(list) for _ in range(self.batch_size)]
+            beam_histories = [defaultdict(list) for _ in range(batch_size)]
 
-        lengths = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context)
-        finished = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
+        lengths = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context)
+        finished = mx.nd.zeros((batch_size * self.beam_size,), ctx=self.context, dtype='int32')
 
         # Extending max_output_lengths to shape (batch_size * beam_size,)
         max_output_lengths = mx.nd.repeat(max_output_lengths, self.beam_size)
@@ -1441,16 +1521,16 @@ class Translator:
         attentions = []  # type: List[mx.nd.NDArray]
 
         # scores_accumulated: chosen smallest scores in scores (ascending).
-        scores_accumulated = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context)
+        scores_accumulated = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context)
 
         # reset all padding distribution cells to np.inf
-        self.pad_dist[:] = np.inf
+        pad_dist = mx.nd.full((batch_size * self.beam_size, len(self.vocab_target) - 1), val=np.inf,
+                                   ctx=self.context)
 
         # If using a top-k lexicon, select param rows for logit computation that correspond to the
         # target vocab for this sentence.
         models_output_layer_w = list()
         models_output_layer_b = list()
-        pad_dist = self.pad_dist
         vocab_slice_ids = None  # type: mx.nd.NDArray
         if self.restrict_lexicon:
             source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
@@ -1478,28 +1558,34 @@ class Translator:
                                                           ctx=self.context, dtype='int32'),
                                                dim=0)
 
-            pad_dist = mx.nd.full((self.batch_size * self.beam_size, vocab_slice_ids.shape[0] - 1),
+            pad_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids.shape[0] - 1),
                                   val=np.inf, ctx=self.context)
             for m in self.models:
                 models_output_layer_w.append(m.output_layer_w.take(vocab_slice_ids))
                 models_output_layer_b.append(m.output_layer_b.take(vocab_slice_ids))
 
         # (0) encode source sentence, returns a list
-        model_states = self._encode(source, source_length)
+        model_states = self._encode(source, source_length, batch_size)
 
         # Initialize the beam to track constraint sets, where target-side lexical constraints are present
         constraints = constrained.init_batch(raw_constraint_list, self.beam_size, self.start_id,
                                              self.vocab_target[C.EOS_SYMBOL])
 
         if self.global_avoid_trie or any(raw_avoid_list):
-            avoid_states = constrained.AvoidBatch(self.batch_size, self.beam_size,
+            avoid_states = constrained.AvoidBatch(batch_size=batch_size,
+                                                  beam_size=self.beam_size,
                                                   avoid_list=raw_avoid_list,
                                                   global_avoid_trie=self.global_avoid_trie)
             avoid_states.consume(best_word_indices)
 
+        # Initalize constants that will be used throughout the inference call
+        offset = mx.nd.array(np.repeat(np.arange(0, batch_size * self.beam_size, self.beam_size), self.beam_size),
+                                  dtype='int32', ctx=self.context)
+        inf_array = mx.nd.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context, dtype='float32')
+        zeros_array = mx.nd.zeros((batch_size * self.beam_size,), ctx=self.context, dtype='int32')
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
         # item on the beam for each sentence
-        inactive = mx.nd.ones((self.batch_size * self.beam_size), dtype='int32', ctx=self.context)
+        inactive = mx.nd.ones((batch_size * self.beam_size), dtype='int32', ctx=self.context)
         inactive[::self.beam_size] = 0
         t = 1
         for t in range(1, max_output_length):
@@ -1509,13 +1595,14 @@ class Translator:
             scores, attention_scores, model_states = self._decode_step(prev_word=best_word_indices,
                                                                        step=t,
                                                                        source_length=source_length,
+                                                                       batch_size=batch_size,
                                                                        states=model_states,
                                                                        models_output_layer_w=models_output_layer_w,
                                                                        models_output_layer_b=models_output_layer_b)
 
             # (2) Update scores. Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
-            scores = self._update_scores.forward(scores, finished, inactive, scores_accumulated, self.inf_array, pad_dist)
+            scores = self._update_scores.forward(scores, finished, inactive, scores_accumulated, inf_array, pad_dist)
 
             # Mark entries that should be blocked as having a score of np.inf
             if self.global_avoid_trie or any(raw_avoid_list):
@@ -1525,20 +1612,22 @@ class Translator:
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
-            best_hyp_indices, best_word_indices, scores_accumulated = self._topk(scores)
+            best_hyp_indices, best_word_indices, scores_accumulated = self._topk(scores=scores,
+                                                                                 batch_size=batch_size,
+                                                                                 offset=offset)
 
             # Constraints for constrained decoding are processed sentence by sentence
             if any(raw_constraint_list):
                 best_hyp_indices, best_word_indices, scores_accumulated, \
-                constraints, inactive = constrained.topk(self.batch_size,
-                                                         self.beam_size,
-                                                         inactive,
-                                                         scores,
-                                                         constraints,
-                                                         best_hyp_indices,
-                                                         best_word_indices,
-                                                         scores_accumulated,
-                                                         self.context)
+                constraints, inactive = constrained.topk(batch_size=batch_size,
+                                                         beam_size=self.beam_size,
+                                                         inactive=inactive,
+                                                         scores=scores,
+                                                         hypotheses=constraints,
+                                                         best_ids=best_hyp_indices,
+                                                         best_word_ids=best_word_indices,
+                                                         seq_scores=scores_accumulated,
+                                                         context=self.context)
 
             else:
                 # All rows are now active (after special treatment of start state at t=1)
@@ -1567,8 +1656,8 @@ class Translator:
                 inactive, best_word_indices, scores_accumulated = self._prune_hyps.forward(best_word_indices,
                                                                                            scores_accumulated,
                                                                                            finished,
-                                                                                           self.inf_array,
-                                                                                           self.zeros_array)
+                                                                                           inf_array,
+                                                                                           zeros_array)
 
             # (7) update negative constraints
             if self.global_avoid_trie or any(raw_avoid_list):
@@ -1584,7 +1673,7 @@ class Translator:
                 normalized_scores = mx.nd.where(finished_or_inactive,
                                                 scores_accumulated,
                                                 scores_accumulated / self.length_penalty(lengths))
-                for sent in range(self.batch_size):
+                for sent in range(batch_size):
                     rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
 
                     best_word_indices_sent = best_word_indices[rows].asnumpy().tolist()
@@ -1607,11 +1696,11 @@ class Translator:
             attentions.append(attention_scores)
 
             if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
-                at_least_one_finished = finished.reshape((self.batch_size, self.beam_size)).sum(axis=1) > 0
-                if at_least_one_finished.sum().asscalar() == self.batch_size:
+                at_least_one_finished = finished.reshape((batch_size, self.beam_size)).sum(axis=1) > 0
+                if at_least_one_finished.sum().asscalar() == batch_size:
                     break
             else:
-                if finished.sum().asscalar() == self.batch_size * self.beam_size:  # all finished
+                if finished.sum().asscalar() == batch_size * self.beam_size:  # all finished
                     break
 
             # (9) update models' state with winning hypotheses (ascending)
@@ -1621,13 +1710,13 @@ class Translator:
         logger.debug("Finished after %d / %d steps.", t + 1, max_output_length)
 
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
-        folded_accumulated_scores = scores_accumulated.reshape((self.batch_size,
+        folded_accumulated_scores = scores_accumulated.reshape((batch_size,
                                                                 self.beam_size * scores_accumulated.shape[-1]))
         indices = mx.nd.argsort(folded_accumulated_scores, axis=1)
         best_hyp_indices = mx.nd.array(np.unravel_index(indices.astype(np.int32).asnumpy().ravel(),
                                                         scores_accumulated.shape),
                                        dtype='int32',
-                                       ctx=self.offset.context)[0] + self.offset
+                                       ctx=offset.context)[0] + offset
         best_hyp_indices_list.append(best_hyp_indices)
         lengths = lengths.take(best_hyp_indices)
         scores_accumulated = scores_accumulated.take(best_hyp_indices)
@@ -1642,6 +1731,7 @@ class Translator:
                all_attentions.asnumpy(), \
                scores_accumulated.asnumpy(), \
                lengths.asnumpy().astype('int32'), \
+               batch_size, \
                constraints, \
                beam_histories
 
@@ -1651,6 +1741,7 @@ class Translator:
                             attentions: np.ndarray,
                             seq_scores: np.ndarray,
                             lengths: np.ndarray,
+                            batch_size: int,
                             constraints: List[Optional[constrained.ConstrainedHypothesis]],
                             beam_histories: Optional[List[BeamHistory]] = None) -> List[Translation]:
         """
@@ -1662,12 +1753,13 @@ class Translator:
                            Shape: (batch * beam, num_beam_search_steps, encoded_source_length).
         :param seq_scores: Array of length-normalized negative log-probs. Shape: (batch * beam, 1)
         :param lengths: The lengths of all items in the beam. Shape: (batch * beam). Dtype: int32.
+        :param batch_size: The batch_size of sentences translated in this given invocation.
         :param constraints: The constraints for all items in the beam. Shape: (batch * beam).
         :param beam_histories: The beam histories for each sentence in the batch.
         :return: List of Translation objects containing all relevant information.
         """
         # Initialize the best_ids to the first item in each batch
-        best_ids = np.arange(0, self.batch_size * self.beam_size, self.beam_size, dtype='int32')
+        best_ids = np.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32')
 
         # Obtain sequences for all best hypotheses in the batch
         indices = self._get_best_word_indeces_for_kth_hypotheses(best_ids, best_hyp_indices)
@@ -1676,10 +1768,10 @@ class Translator:
             # For constrained decoding, select from items that have met all constraints (might not be finished)
             unmet = np.array([c.num_needed() if c is not None else 0 for c in constraints])
             filtered = np.where(unmet == 0, seq_scores.flatten(), np.inf)
-            filtered = filtered.reshape((self.batch_size, self.beam_size))
+            filtered = filtered.reshape((batch_size, self.beam_size))
             best_ids += np.argmin(filtered, axis=1).astype('int32')
 
-        histories = beam_histories if beam_histories is not None else [None] * self.batch_size  # type: List
+        histories = beam_histories if beam_histories is not None else [None] * batch_size  # type: List
         return [self._assemble_translation(*x) for x in zip(best_word_indices[indices, np.arange(indices.shape[1])],
                                                             lengths[best_ids],
                                                             attentions[best_ids],
@@ -1741,6 +1833,7 @@ class Translator:
                     accumulated_scores: mx.nd.NDArray,
                     finished: mx.nd.NDArray,
                     inactive: mx.nd.NDArray,
+                    batch_size: int,
                     constraints: List[Optional[constrained.ConstrainedHypothesis]],
                     timestep: int) -> None:
         """
@@ -1754,7 +1847,7 @@ class Translator:
         :param timestep: The current timestep.
         """
         logger.info('BEAM AT TIMESTEP %d', timestep)
-        for i in range(self.batch_size * self.beam_size):
+        for i in range(batch_size * self.beam_size):
             # for each hypothesis, print its entire history
             score = accumulated_scores[i].asscalar()
             word_ids = [int(x.asscalar()) for x in sequences[i]]

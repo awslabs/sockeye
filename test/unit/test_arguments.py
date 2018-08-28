@@ -206,6 +206,7 @@ def test_training_arg(test_params, expected_params):
                       ensemble_mode='linear',
                       bucket_width=10,
                       max_input_len=None,
+                      use_dynamic_batch_size=False,
                       restrict_lexicon=None,
                       restrict_lexicon_topk=None,
                       avoid_list=None,

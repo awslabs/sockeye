@@ -303,6 +303,34 @@ def test_failed_make_input_from_valid_json_string(text, text_key, factors, facto
     inp = sockeye.inference.make_input_from_json_string(sentence_id, json.dumps({text_key: text, factors_key: factors}))
     assert isinstance(inp, sockeye.inference.BadTranslatorInput)
 
+@pytest.mark.parametrize("inputs",
+                         [[{"text": "this is a test without factors", "factors": None},
+                           {"text": "", "factors": None},
+                           {"text": "test", "factors": ["X", "X"]},
+                           {"text": "a b c", "factors": ["x y z"]},
+                           {"text": "a", "factors": []}]])
+def test_make_inputs_from_valid_json_string_list(inputs):
+    sentence_id = 1
+    expected_tokens = [list(sockeye.data_io.get_tokens(json_obj["text"])) for json_obj in inputs]
+    expected_factors = [json_obj["factors"] for json_obj in inputs]
+    inp = sockeye.inference.make_inputs_from_json_string_list(sentence_id, json.dumps(inputs))
+    assert len(inp) == len(expected_tokens)
+    for parsed_json, expected_token_list, expected_factor_list in zip(inp, expected_tokens, expected_factors):
+        assert len(parsed_json.tokens) == len(expected_token_list)
+        assert parsed_json.tokens == expected_token_list
+        if expected_factor_list is not None:
+            assert len(parsed_json.factors) == len(expected_factor_list)
+        else:
+            assert parsed_json.factors is None
+
+
+@pytest.mark.parametrize("text, text_key, factors, factors_key", [("a", "blub", None, "")])
+def test_failed_make_inputs_from_valid_json_string_list(text, text_key, factors, factors_key):
+    sentence_id = 1
+    inp = sockeye.inference.make_inputs_from_json_string_list(sentence_id, json.dumps({text_key: text, factors_key: factors}))
+    for actual in inp:
+        assert isinstance(actual, sockeye.inference.BadTranslatorInput)
+
 
 @pytest.mark.parametrize("strings",
                          [
