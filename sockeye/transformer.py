@@ -95,8 +95,9 @@ class TransformerEncoderBlock:
                                                dropout=config.dropout_prepost,
                                                prefix="%sff_post_" % prefix)
         self.lhuc = None
-        if config.use_lhuc:
-            self.lhuc = layers.LHUC(config.model_size, prefix=prefix)
+        if hasattr(config, 'use_lhuc'):
+            if config.use_lhuc:
+                self.lhuc = layers.LHUC(config.model_size, prefix=prefix)
 
     def __call__(self, data: mx.sym.Symbol, bias: mx.sym.Symbol) -> mx.sym.Symbol:
         # self-attention
@@ -162,8 +163,9 @@ class TransformerDecoderBlock:
                                                prefix="%sff_post_" % prefix)
 
         self.lhuc = None
-        if config.use_lhuc:
-            self.lhuc = layers.LHUC(config.model_size, prefix=prefix)
+        if hasattr(config, 'use_lhuc'):
+            if config.use_lhuc:
+                self.lhuc = layers.LHUC(config.model_size, prefix=prefix)
 
     def __call__(self,
                  target: mx.sym.Symbol,
