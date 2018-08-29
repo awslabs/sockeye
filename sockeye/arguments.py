@@ -1148,6 +1148,16 @@ def add_inference_args(params):
                                     ' Default: %d without batching '
                                     'and %d * batch_size with batching.' % (C.CHUNK_SIZE_NO_BATCHING,
                                                                             C.CHUNK_SIZE_PER_BATCH_SEGMENT))
+    decode_params.add_argument('--skip-softmax',
+                               default=False,
+                               action='store_true',
+                               help='Do not compute softmax for greedy decoding (when --beam-size 1).'
+                                    'Default: %(default)s.')
+    decode_params.add_argument('--skip-topk',
+                               default=False,
+                               action='store_true',
+                               help='Use argmax instead of topk for greedy decoding (when --beam-size 1).'
+                                    'Default: %(default)s.')
     decode_params.add_argument('--ensemble-mode',
                                type=str,
                                default='linear',
