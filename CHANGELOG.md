@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.51]
+### Added
+- Added a CLI for reranking of an nbest list of translations.
+
 ## [1.18.50]
 ### Fixed
 - Check for equivalency of training and validation source factors was incorrectly indented.
