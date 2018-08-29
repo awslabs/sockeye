@@ -11,4 +11,4 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-from contrib.sacrebleu.sacrebleu import raw_corpus_bleu, compute_bleu, corpus_chrf, CHRF_ORDER, CHRF_BETA
+from contrib.sacrebleu.sacrebleu import raw_corpus_bleu, compute_bleu, corpus_chrf, CHRF_ORDER, CHRF_BETA, sentence_bleu, sentence_chrf
