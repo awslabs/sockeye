@@ -42,10 +42,10 @@ class Reranker:
     """
 
     def __init__(self, metric: str,
-                 return_score: bool = False, ):
-        if metric == 'bleu':
+                 return_score: bool = False) -> None:
+        if metric == C.RERANK_BLEU:
             self.scoring_function = sacrebleu.sentence_bleu
-        elif metric == 'chrf':
+        elif metric == C.RERANK_CHRF:
             self.scoring_function = sacrebleu.sentence_chrf
         else:
             raise utils.SockeyeError("Scoring metric '%s' unknown. Choices are: %s" % (metric, C.RERANK_METRICS))
