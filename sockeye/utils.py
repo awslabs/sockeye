@@ -466,10 +466,14 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, 
         return {}
     ids = [str(c.device_id) for c in ctx]
     query = "--query-gpu=index,memory.used,memory.total"
-    format = "--format=csv,noheader,nounits"
-    sp = subprocess.Popen(['nvidia-smi', query, format, "-i", ",".join(ids)],
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    result = sp.communicate()[0].decode("utf-8").rstrip().split("\n")
+    format_arg = "--format=csv,noheader,nounits"
+    try:
+        sp = subprocess.Popen(['nvidia-smi', query, format_arg, "-i", ",".join(ids)],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        result = sp.communicate()[0].decode("utf-8").rstrip().split("\n")
+    except OSError:
+        logger.exception("Failed calling nvidia-smi to query memory usage.")
+        return {}
     memory_data = {}
     for line in result:
         gpu_id, mem_used, mem_total = line.split(",")
