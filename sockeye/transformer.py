@@ -42,6 +42,7 @@ class TransformerConfig(config.Config):
                  max_seq_len_target: int,
                  conv_config: Optional['encoder.ConvolutionalEmbeddingConfig'] = None,
                  lhuc: bool = False,
+                 universal: bool = False,
                  dtype: str = C.DTYPE_FP32) -> None:  # type: ignore
         super().__init__()
         self.model_size = model_size
@@ -59,6 +60,7 @@ class TransformerConfig(config.Config):
         self.max_seq_len_target = max_seq_len_target
         self.conv_config = conv_config
         self.use_lhuc = lhuc
+        self.universal = universal
         self.dtype = dtype
 
 

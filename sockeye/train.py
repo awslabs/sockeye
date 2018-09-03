@@ -404,7 +404,9 @@ def create_encoder_config(args: argparse.Namespace,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
             conv_config=config_conv,
-            lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc))
+            lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc,),
+            universal=args.universal_transformer
+        )
         encoder_num_hidden = encoder_transformer_model_size
     elif args.encoder == C.CONVOLUTION_TYPE:
         cnn_kernel_width_encoder, _ = args.cnn_kernel_width

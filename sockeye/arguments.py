@@ -664,6 +664,9 @@ def add_model_parameters(params):
                                    'You can specify separate sequences for encoder and decoder by separating with ":" '
                                    'For example: n:drn '
                                    'Default: %(default)s.')
+    model_params.add_argument('--universal-transformer',
+                              action="store_true",
+                              help="Define a universal transformer, as in Dehghani et al. 2018. Default: %(default)s.")
 
     # LHUC
     # TODO: The convolutional model does not support lhuc yet

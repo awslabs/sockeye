@@ -1015,8 +1015,12 @@ class TransformerEncoder(Encoder):
         super().__init__(config.dtype)
         self.config = config
         self.prefix = prefix
-        self.layers = [transformer.TransformerEncoderBlock(
-            config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
+        if not self.config.universal:
+            self.layers = [transformer.TransformerEncoderBlock(
+                config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
+        else:
+            self.layers = [transformer.TransformerEncoderBlock(
+                config, prefix="%s" % (prefix))] * self.config.num_layers
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                  dropout=config.dropout_prepost,
                                                                  prefix="%sfinal_process_" % prefix)
