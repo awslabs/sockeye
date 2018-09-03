@@ -52,10 +52,6 @@ def run_translate(args: argparse.Namespace):
     if args.checkpoints is not None:
         check_condition(len(args.checkpoints) == len(args.models), "must provide checkpoints for each model")
 
-    if args.skip_softmax:
-        check_condition(len(args.models) == 1,
-                        "For an ensemble of models, softmax cannot be skipped. Do not use --skip-softmax.")
-
     log_basic_info(args)
 
     output_handler = get_output_handler(args.output_type,
@@ -88,7 +84,6 @@ def run_translate(args: argparse.Namespace):
             decoder_return_logit_inputs=args.restrict_lexicon is not None,
             cache_output_layer_w_b=args.restrict_lexicon is not None,
             override_dtype=args.override_dtype,
-            skip_softmax=args.skip_softmax,
             skip_topk=args.skip_topk)
         restrict_lexicon = None  # type: Optional[TopKLexicon]
         if args.restrict_lexicon:

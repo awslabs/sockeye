@@ -12,7 +12,8 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.53]
 ### Added
-- Added options `--skip-softmax` and `--skip-topk` for greedy decoding at inference time.
+- Always skipping softmax for greedy decoding by default, only for single models.
+- Added option `--skip-topk` for greedy decoding.
 
 ## [1.18.52]
 ### Fixed

@@ -373,7 +373,6 @@ def load_models(context: mx.context.Context,
                 cache_output_layer_w_b: bool = False,
                 forced_max_output_len: Optional[int] = None,
                 override_dtype: Optional[str] = None,
-                skip_softmax: bool = False,
                 skip_topk: bool = False) -> Tuple[List[InferenceModel],
                                                   List[vocab.Vocab],
                                                   vocab.Vocab]:
@@ -395,7 +394,6 @@ def load_models(context: mx.context.Context,
                                    restrict lexicon).
     :param forced_max_output_len: An optional overwrite of the maximum output length.
     :param override_dtype: Overrides dtype of encoder and decoder defined at training time to a different one.
-    :param skip_softmax: If True, does not compute softmax for greedy decoding.
     :param skip_topk: If True, uses argmax instead of topk for greedy decoding.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
@@ -407,6 +405,13 @@ def load_models(context: mx.context.Context,
 
     if checkpoints is None:
         checkpoints = [None] * len(model_folders)
+
+    # skip softmax for a single model,
+    if len(model_folders) == 1:
+        skip_softmax = True
+    else:
+        # but not for an ensemble
+        skip_softmax = False
 
     for model_folder, checkpoint in zip(model_folders, checkpoints):
         model_source_vocabs = vocab.load_source_vocabs(model_folder)
@@ -442,6 +447,8 @@ def load_models(context: mx.context.Context,
                               "number of source factors for model '%s' (%d)" % (len(model_source_vocabs), model_folder,
                                                                                 inference_model.num_source_factors))
         models.append(inference_model)
+
+
 
     utils.check_condition(vocab.are_identical(*target_vocabs), "Target vocabulary ids do not match")
     first_model_vocabs = source_vocabs[0]
@@ -1021,7 +1028,8 @@ class Translator:
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
         self.batch_size = self.models[0].batch_size
-        self.skip_softmax = self.models[0].skip_softmax
+        # skip softmax for a single model, but not for an ensemble
+        self.skip_softmax = True if len(models) == 1 else False
         self.skip_topk = self.models[0].skip_topk
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         self._max_input_length = self.models[0].max_input_length
