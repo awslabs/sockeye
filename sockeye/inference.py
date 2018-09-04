@@ -1669,15 +1669,15 @@ class Translator:
         # Initialize the best_ids to the first item in each batch
         best_ids = np.arange(0, self.batch_size * self.beam_size, self.beam_size, dtype='int32')
 
-        # Obtain sequences for all best hypotheses in the batch
-        indices = self._get_best_word_indeces_for_kth_hypotheses(best_ids, best_hyp_indices)
-
         if any(constraints):
             # For constrained decoding, select from items that have met all constraints (might not be finished)
             unmet = np.array([c.num_needed() if c is not None else 0 for c in constraints])
             filtered = np.where(unmet == 0, seq_scores.flatten(), np.inf)
             filtered = filtered.reshape((self.batch_size, self.beam_size))
             best_ids += np.argmin(filtered, axis=1).astype('int32')
+
+        # Obtain sequences for all best hypotheses in the batch
+        indices = self._get_best_word_indeces_for_kth_hypotheses(best_ids, best_hyp_indices)
 
         histories = beam_histories if beam_histories is not None else [None] * self.batch_size  # type: List
         return [self._assemble_translation(*x) for x in zip(best_word_indices[indices, np.arange(indices.shape[1])],
