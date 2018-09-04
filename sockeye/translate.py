@@ -87,8 +87,7 @@ def run_translate(args: argparse.Namespace):
             max_output_length_num_stds=args.max_output_length_num_stds,
             decoder_return_logit_inputs=args.restrict_lexicon is not None,
             cache_output_layer_w_b=args.restrict_lexicon is not None,
-            override_dtype=args.override_dtype,
-            skip_topk=args.skip_topk)
+            override_dtype=args.override_dtype)
         restrict_lexicon = None  # type: Optional[TopKLexicon]
         if args.restrict_lexicon:
             restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
@@ -107,7 +106,8 @@ def run_translate(args: argparse.Namespace):
                                           restrict_lexicon=restrict_lexicon,
                                           avoid_list=args.avoid_list,
                                           store_beam=store_beam,
-                                          strip_unknown_words=args.strip_unknown_words)
+                                          strip_unknown_words=args.strip_unknown_words,
+                                          skip_topk=args.skip_topk)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,

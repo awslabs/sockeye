@@ -56,7 +56,6 @@ class InferenceModel(model.SockeyeModel):
                                         vocabulary.  Used when logits/softmax are handled separately.
     :param cache_output_layer_w_b: Cache weights and biases for logit computation.
     :param skip_softmax: If True, does not compute softmax for greedy decoding.
-    :param skip_topk: If True, uses argmax instead of topk for greedy decoding.
     """
 
     def __init__(self,
@@ -70,21 +69,21 @@ class InferenceModel(model.SockeyeModel):
                  decoder_return_logit_inputs: bool = False,
                  cache_output_layer_w_b: bool = False,
                  forced_max_output_len: Optional[int] = None,
-                 skip_softmax: bool = False,
-                 skip_topk: bool = False) -> None:
+                 skip_softmax: bool = False) -> None:
         super().__init__(config)
         self.params_fname = params_fname
         self.context = context
         self.beam_size = beam_size
         utils.check_condition(beam_size < self.config.vocab_target_size,
                               'The beam size must be smaller than the target vocabulary size.')
+        if skip_softmax:
+            utils.check_condition(beam_size == 1, 'Skipping softmax does not have any effect for beam size > 1')
         self.batch_size = batch_size
         self.softmax_temperature = softmax_temperature
         self.max_input_length, self.get_max_output_length = models_max_input_output_length([self],
                                                                                            max_output_length_num_stds,
                                                                                            forced_max_output_len=forced_max_output_len)
         self.skip_softmax = skip_softmax
-        self.skip_topk = skip_topk
 
         self.encoder_module = None  # type: Optional[mx.mod.BucketingModule]
         self.encoder_default_bucket_key = None  # type: Optional[int]
@@ -242,7 +241,7 @@ class InferenceModel(model.SockeyeModel):
                 logits = self.output_layer(target_decoded)
                 if self.softmax_temperature is not None:
                     logits = logits / self.softmax_temperature
-                if self.beam_size == 1 and self.skip_softmax:
+                if self.skip_softmax:
                     # skip softmax for greedy decoding
                     outputs = logits
                 else:
@@ -372,10 +371,9 @@ def load_models(context: mx.context.Context,
                 decoder_return_logit_inputs: bool = False,
                 cache_output_layer_w_b: bool = False,
                 forced_max_output_len: Optional[int] = None,
-                override_dtype: Optional[str] = None,
-                skip_topk: bool = False) -> Tuple[List[InferenceModel],
-                                                  List[vocab.Vocab],
-                                                  vocab.Vocab]:
+                override_dtype: Optional[str] = None) -> Tuple[List[InferenceModel],
+                                                               List[vocab.Vocab],
+                                                               vocab.Vocab]:
     """
     Loads a list of models for inference.
 
@@ -394,7 +392,6 @@ def load_models(context: mx.context.Context,
                                    restrict lexicon).
     :param forced_max_output_len: An optional overwrite of the maximum output length.
     :param override_dtype: Overrides dtype of encoder and decoder defined at training time to a different one.
-    :param skip_topk: If True, uses argmax instead of topk for greedy decoding.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
@@ -407,7 +404,7 @@ def load_models(context: mx.context.Context,
         checkpoints = [None] * len(model_folders)
 
     # skip softmax for a single model,
-    if len(model_folders) == 1:
+    if len(model_folders) == 1 and beam_size == 1:
         skip_softmax = True
     else:
         # but not for an ensemble
@@ -440,8 +437,7 @@ def load_models(context: mx.context.Context,
                                          softmax_temperature=softmax_temperature,
                                          decoder_return_logit_inputs=decoder_return_logit_inputs,
                                          cache_output_layer_w_b=cache_output_layer_w_b,
-                                         skip_softmax=skip_softmax,
-                                         skip_topk=skip_topk)
+                                         skip_softmax=skip_softmax)
         utils.check_condition(inference_model.num_source_factors == len(model_source_vocabs),
                               "Number of loaded source vocabularies (%d) does not match "
                               "number of source factors for model '%s' (%d)" % (len(model_source_vocabs), model_folder,
@@ -989,6 +985,7 @@ class Translator:
     :param avoid_list: Global list of phrases to exclude from the output.
     :param store_beam: If True, store the beam search history and return it in the TranslatorOutput.
     :param strip_unknown_words: If True, removes any <unk> symbols from outputs.
+    :param skip_topk: If True, uses argmax instead of topk for greedy decoding.
     """
 
     def __init__(self,
@@ -1004,7 +1001,8 @@ class Translator:
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
                  avoid_list: Optional[str] = None,
                  store_beam: bool = False,
-                 strip_unknown_words: bool = False) -> None:
+                 strip_unknown_words: bool = False,
+                 skip_topk: bool = False,) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
@@ -1030,7 +1028,7 @@ class Translator:
         self.batch_size = self.models[0].batch_size
         # skip softmax for a single model, but not for an ensemble
         self.skip_softmax = True if len(models) == 1 else False
-        self.skip_topk = self.models[0].skip_topk
+        self.skip_topk = skip_topk
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         self._max_input_length = self.models[0].max_input_length
         if bucket_source_width > 0:
