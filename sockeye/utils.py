@@ -14,6 +14,7 @@
 """
 A set of utility methods.
 """
+import binascii
 import errno
 import fcntl
 import glob
@@ -313,22 +314,31 @@ def get_tokens(line: str) -> Iterator[str]:
             yield token
 
 
+def is_gzip_file(filename: str) -> bool:
+    # check for magic gzip number
+    with open(filename, 'rb') as test_f:
+        return binascii.hexlify(test_f.read(2)) == b'1f8b'
+
+
 def smart_open(filename: str, mode: str = "rt", ftype: str = "auto", errors: str = 'replace'):
     """
     Returns a file descriptor for filename with UTF-8 encoding.
     If mode is "rt", file is opened read-only.
     If ftype is "auto", uses gzip iff filename endswith .gz.
     If ftype is {"gzip","gz"}, uses gzip.
+    If ftype is "auto" and read mode requested, uses gzip iff is_gzip_file(filename).
 
     Note: encoding error handling defaults to "replace"
 
     :param filename: The filename to open.
     :param mode: Reader mode.
-    :param ftype: File type. If 'auto' checks filename suffix for gz to try gzip.open
-    :param errors: Encoding error handling during reading. Defaults to 'replace'
-    :return: File descriptor
+    :param ftype: File type. If 'auto' checks filename suffix for gz to try gzip.open.
+    :param errors: Encoding error handling during reading. Defaults to 'replace'.
+    :return: File descriptor.
     """
-    if ftype == 'gzip' or ftype == 'gz' or (ftype == 'auto' and filename.endswith(".gz")):
+    if ftype in ('gzip', 'gz') \
+            or (ftype == 'auto' and filename.endswith(".gz")) \
+            or (ftype == 'auto' and 'r' in mode and is_gzip_file(filename)):
         return gzip.open(filename, mode=mode, encoding='utf-8', errors=errors)
     else:
         return open(filename, mode=mode, encoding='utf-8', errors=errors)
