@@ -52,6 +52,10 @@ def run_translate(args: argparse.Namespace):
     if args.checkpoints is not None:
         check_condition(len(args.checkpoints) == len(args.models), "must provide checkpoints for each model")
 
+    if args.skip_topk:
+        check_condition(args.beam_size == 1, "--skip-topk has no effect if beam size is larger than 1")
+        check_condition(len(args.models) == 1, "--skip-topk has no effect for decoding with more than 1 model")
+
     log_basic_info(args)
 
     output_handler = get_output_handler(args.output_type,
