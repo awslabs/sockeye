@@ -1030,6 +1030,9 @@ class Translator:
         self.batch_size = self.models[0].batch_size
         # skip softmax for a single model, but not for an ensemble
         self.skip_softmax = self.models[0].skip_softmax
+        if self.skip_softmax:
+            utils.check_condition(len(self.models) == 1 and self.beam_size == 1, "Skipping softmax cannot be enabled for several models, or a beam size > 1.")
+
         self.skip_topk = skip_topk
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         self._max_input_length = self.models[0].max_input_length
@@ -1412,7 +1415,7 @@ class Translator:
 
         # combine model predictions and convert to neg log probs
         if len(self.models) == 1:
-            if self.beam_size == 1 and self.skip_softmax:
+            if self.skip_softmax:
                 neg_probs = -probs[0]
             else:
                 neg_probs = -mx.nd.log(probs[0])  # pylint: disable=invalid-unary-operand-type
