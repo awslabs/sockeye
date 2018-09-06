@@ -77,7 +77,7 @@ class InferenceModel(model.SockeyeModel):
         utils.check_condition(beam_size < self.config.vocab_target_size,
                               'The beam size must be smaller than the target vocabulary size.')
         if skip_softmax:
-            utils.check_condition(beam_size == 1, 'Skipping softmax does not have any effect for beam size > 1')
+            assert beam_size == 1, 'Skipping softmax does not have any effect for beam size > 1'
         self.batch_size = batch_size
         self.softmax_temperature = softmax_temperature
         self.max_input_length, self.get_max_output_length = models_max_input_output_length([self],
@@ -406,9 +406,11 @@ def load_models(context: mx.context.Context,
     # skip softmax for a single model,
     if len(model_folders) == 1 and beam_size == 1:
         skip_softmax = True
+        logger.info("Enabled skipping softmax for a single model and greedy decoding.")
     else:
-        # but not for an ensemble
+        # but not for an ensemble or beam search
         skip_softmax = False
+        logger.info("Disabled skipping softmax for several models or beam size larger than 1.")
 
     for model_folder, checkpoint in zip(model_folders, checkpoints):
         model_source_vocabs = vocab.load_source_vocabs(model_folder)
@@ -1002,7 +1004,7 @@ class Translator:
                  avoid_list: Optional[str] = None,
                  store_beam: bool = False,
                  strip_unknown_words: bool = False,
-                 skip_topk: bool = False,) -> None:
+                 skip_topk: bool = False) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
@@ -1027,7 +1029,7 @@ class Translator:
         self.beam_size = self.models[0].beam_size
         self.batch_size = self.models[0].batch_size
         # skip softmax for a single model, but not for an ensemble
-        self.skip_softmax = True if len(models) == 1 else False
+        self.skip_softmax = self.models[0].skip_softmax
         self.skip_topk = skip_topk
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         self._max_input_length = self.models[0].max_input_length
@@ -1380,8 +1382,8 @@ class Translator:
             # Compute logits and softmax with restricted vocabulary
             if self.restrict_lexicon:
                 logits = model.output_layer(decoder_outputs, out_w, out_b)
-                if self.beam_size == 1 and self.skip_softmax:
-                    # skip softmax for greedy decoding
+                if self.skip_softmax:
+                    # skip softmax for greedy decoding and single model
                     probs = logits
                 else:
                     probs = mx.nd.softmax(logits)
