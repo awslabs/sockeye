@@ -35,7 +35,7 @@ from itertools import zip_longest
           validation_source='test_validation_src', validation_target='test_validation_tgt',
           validation_source_factors=[],
           output='test_output', overwrite_output=False,
-          source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(0, 0), word_min_count=(1, 1),
+          source_vocab=[None], target_vocab=None, shared_vocab=False, num_words=(0, 0), word_min_count=(1, 1),
           pad_vocab_to_multiple_of=None,
           no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
           monitor_pattern=None, monitor_stat_func='mx_default')),
@@ -50,7 +50,7 @@ from itertools import zip_longest
           validation_source='test_validation_src', validation_target='test_validation_tgt',
           validation_source_factors=[],
           output='test_output', overwrite_output=False,
-          source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(0, 0), word_min_count=(1, 1),
+          source_vocab=[None], target_vocab=None, shared_vocab=False, num_words=(0, 0), word_min_count=(1, 1),
           pad_vocab_to_multiple_of=None,
           no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
           monitor_pattern=None, monitor_stat_func='mx_default'))
@@ -333,7 +333,7 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
     # WMT tutorial
     ('--source corpus.tc.BPE.de --target corpus.tc.BPE.en --output train_data ',
      dict(source='corpus.tc.BPE.de', target='corpus.tc.BPE.en',
-          source_vocab=None,
+          source_vocab=[None],
           target_vocab=None,
           source_factors=[],
           shared_vocab=False,
@@ -356,7 +356,7 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
 @pytest.mark.parametrize("test_params, expected_params", [
     ('--source test_src --target test_tgt --output prepared_data ',
      dict(source='test_src', target='test_tgt',
-          source_vocab=None,
+          source_vocab=[None],
           target_vocab=None,
           source_factors=[],
           shared_vocab=False,
