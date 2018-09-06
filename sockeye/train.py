@@ -252,7 +252,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     if args.prepared_data is not None:
         utils.check_condition(args.source is None and args.target is None, either_raw_or_prepared_error_msg)
         if not resume_training:
-            utils.check_condition(args.source_vocab is None and args.target_vocab is None,
+            utils.check_condition(args.source_vocab[0] is None and args.target_vocab is None,
                                   "You are using a prepared data folder, which is tied to a vocabulary. "
                                   "To change it you need to rerun data preparation with a different vocabulary.")
         train_iter, validation_iter, data_config, source_vocabs, target_vocab = data_io.get_prepared_data_iters(
