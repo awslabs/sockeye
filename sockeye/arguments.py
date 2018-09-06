@@ -482,9 +482,11 @@ def add_device_args(params):
 
 def add_vocab_args(params):
     params.add_argument('--source-vocab',
+                        type=multiple_values(data_type=str),
                         required=False,
-                        default=None,
-                        help='Existing source vocabulary (JSON).')
+                        default=(None,),
+                        help='Existing source vocabularies (JSON). '
+                             'Use "v0:v1:v2" to specify multiple source factor vocabularies.')
     params.add_argument('--target-vocab',
                         required=False,
                         default=None,
