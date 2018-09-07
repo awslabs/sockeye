@@ -36,6 +36,8 @@ archivePrefix = "arXiv",
 }
 ```
 
+In addition, this framework provides an experimental [image-to-description module](https://github.com/awslabs/sockeye/tree/master/sockeye/image_captioning) that can be used for image captioning.
+
 If you are interested in collaborating or have any questions, please submit a pull request or issue. [Click to find our developer guidelines](docs/development.md).
 You can also send questions to *sockeye-dev-at-amazon-dot-com*.
 
