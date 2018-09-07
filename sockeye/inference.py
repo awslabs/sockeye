@@ -410,7 +410,6 @@ def load_models(context: mx.context.Context,
     else:
         # but not for an ensemble or beam search
         skip_softmax = False
-        logger.info("Disabled skipping softmax for several models or beam size larger than 1.")
 
     for model_folder, checkpoint in zip(model_folders, checkpoints):
         model_source_vocabs = vocab.load_source_vocabs(model_folder)
