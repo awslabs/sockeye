@@ -40,6 +40,10 @@ def test_translate_by_file():
     mock_translator.num_source_factors = 1
     mock_translator.batch_size = 1
 
+    mock_translator.nbest_size = 1
+    sockeye.translate.read_and_translate(translator=mock_translator, output_handler=mock_output_handler,
+                                         chunk_size=2, input_file='/dev/null', input_factors=None)
+
     with TemporaryDirectory() as temp:
         input_filename = os.path.join(temp, 'input')
         with open(input_filename, 'w') as f:
@@ -59,6 +63,7 @@ def test_translate_by_stdin_chunk2():
     mock_translator.translate.return_value = ['', '']
     mock_translator.num_source_factors = 1
     mock_translator.batch_size = 1
+    mock_translator.nbest_size = 1
     sockeye.translate.read_and_translate(translator=mock_translator,
                                          output_handler=mock_output_handler,
                                          chunk_size=2)

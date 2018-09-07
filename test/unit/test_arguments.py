@@ -200,6 +200,7 @@ def test_training_arg(test_params, expected_params):
                       checkpoints=None,
                       models=['model'],
                       beam_size=5,
+                      nbest_size=1,
                       beam_prune=0,
                       batch_size=1,
                       chunk_size=None,
