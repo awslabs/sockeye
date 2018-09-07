@@ -1118,11 +1118,15 @@ def add_inference_args(params):
                                nargs='+',
                                help='If not given, chooses best checkpoints for model(s). '
                                     'If specified, must have the same length as --models and be integer')
-
+    decode_params.add_argument('--nbest-size',
+                               type=int_greater_or_equal(1),
+                               default=1,
+                               help='Size of the nbest list of translations. Default: %(default)s.')
     decode_params.add_argument('--beam-size', '-b',
                                type=int_greater_or_equal(1),
                                default=5,
                                help='Size of the beam. Default: %(default)s.')
+
     decode_params.add_argument('--beam-prune', '-p',
                                type=float,
                                default=0,

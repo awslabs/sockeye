@@ -50,6 +50,12 @@ def get_output_handler(output_type: str,
         return AlignTextHandler(sure_align_threshold)
     elif output_type == C.OUTPUT_HANDLER_BEAM_STORE:
         return BeamStoringHandler(output_stream)
+    elif output_type == C.OUTPUT_HANDLER_NBEST:
+        return NBestOutputHandler(output_stream)
+    elif output_type == C.OUTPUT_HANDLER_NBEST_WITH_SCORE:
+        return NBestWithScoreOutputHandler(output_stream)
+    elif output_type == C.OUTPUT_HANDLER_NBEST_WITH_ALIGNMENTS:
+        return NBestWithAlignmentsOutputHandler(output_stream, sure_align_threshold)
     else:
         raise ValueError("unknown output type")
 
@@ -300,3 +306,69 @@ class BeamStoringHandler(OutputHandler):
             h["id"] = t_output.sentence_id  # type: ignore
             self.stream.write("%s\n" % json.dumps(h, sort_keys=True))
         self.stream.flush()
+
+
+class NBestOutputHandler(OutputHandler):
+    """
+    Output handler to output nbest translations as JSON.
+
+    :param stream: Stream to write translations to (e.g. sys.stdout).
+    """
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    def handle(self,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
+               t_walltime: float = 0.):
+        self.stream.write("%s\n" % json.dumps(t_output.nbest_translations, sort_keys=True))
+
+
+class NBestWithScoreOutputHandler(OutputHandler):
+    """
+    Output handler to output nbest translations together with their scores,
+    as JSON.
+
+    :param stream: Stream to write translations to (e.g. sys.stdout).
+    """
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    def handle(self,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
+               t_walltime: float = 0.):
+
+        d_ = {"translations": t_output.nbest_translations,
+              "scores": t_output.nbest_scores}
+        self.stream.write("%s\n" % json.dumps(d_, sort_keys=True))
+
+
+class NBestWithAlignmentsOutputHandler(OutputHandler):
+    """
+    Output handler to output nbest translations together with alignments,
+    as JSON.
+
+    :param stream: Stream to write translations and alignments to.
+    :param threshold: Threshold for including alignment links.
+    """
+
+    def __init__(self, stream, threshold: float) -> None:
+        self.stream = stream
+        self.threshold = threshold
+
+    def handle(self,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
+               t_walltime: float = 0.):
+
+        extracted_alignments = []
+        for alignment_matrix in t_output.nbest_attention_matrices:
+            extracted_alignments.append(list(get_alignments(alignment_matrix, threshold=self.threshold)))
+
+        d_ = {"translations": t_output.nbest_translations,
+              "alignments": extracted_alignments}
+
+        self.stream.write("%s\n" % json.dumps(d_, sort_keys=True))

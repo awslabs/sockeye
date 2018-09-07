@@ -63,6 +63,7 @@ class CheckpointDecoder:
                  max_input_len: Optional[int] = None,
                  batch_size: int = 16,
                  beam_size: int = C.DEFAULT_BEAM_SIZE,
+                 nbest_size: int = C.DEFAULT_NBEST_SIZE,
                  bucket_width_source: int = 10,
                  length_penalty_alpha: float = 1.0,
                  length_penalty_beta: float = 0.0,
@@ -76,6 +77,7 @@ class CheckpointDecoder:
         self.max_output_length_num_stds = max_output_length_num_stds
         self.ensemble_mode = ensemble_mode
         self.beam_size = beam_size
+        self.nbest_size = nbest_size
         self.batch_size = batch_size
         self.bucket_width_source = bucket_width_source
         self.length_penalty_alpha = length_penalty_alpha
@@ -139,6 +141,7 @@ class CheckpointDecoder:
                                           length_penalty=inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
                                           beam_prune=0.0,
                                           beam_search_stop='all',
+                                          nbest_size=1,
                                           models=models,
                                           source_vocabs=source_vocabs,
                                           target_vocab=target_vocab,
