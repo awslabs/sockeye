@@ -83,7 +83,8 @@ entry_points={
         'sockeye-prepare-data = sockeye.prepare_data:main',
         'sockeye-train = sockeye.train:main',
         'sockeye-translate = sockeye.translate:main',
-        'sockeye-vocab = sockeye.vocab:main'
+        'sockeye-vocab = sockeye.vocab:main',
+        'sockeye-rerank = sockeye.rerank:main',
     ],
 }
 

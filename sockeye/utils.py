@@ -14,6 +14,7 @@
 """
 A set of utility methods.
 """
+import binascii
 import errno
 import fcntl
 import glob
@@ -313,22 +314,31 @@ def get_tokens(line: str) -> Iterator[str]:
             yield token
 
 
+def is_gzip_file(filename: str) -> bool:
+    # check for magic gzip number
+    with open(filename, 'rb') as test_f:
+        return binascii.hexlify(test_f.read(2)) == b'1f8b'
+
+
 def smart_open(filename: str, mode: str = "rt", ftype: str = "auto", errors: str = 'replace'):
     """
     Returns a file descriptor for filename with UTF-8 encoding.
     If mode is "rt", file is opened read-only.
     If ftype is "auto", uses gzip iff filename endswith .gz.
     If ftype is {"gzip","gz"}, uses gzip.
+    If ftype is "auto" and read mode requested, uses gzip iff is_gzip_file(filename).
 
     Note: encoding error handling defaults to "replace"
 
     :param filename: The filename to open.
     :param mode: Reader mode.
-    :param ftype: File type. If 'auto' checks filename suffix for gz to try gzip.open
-    :param errors: Encoding error handling during reading. Defaults to 'replace'
-    :return: File descriptor
+    :param ftype: File type. If 'auto' checks filename suffix for gz to try gzip.open.
+    :param errors: Encoding error handling during reading. Defaults to 'replace'.
+    :return: File descriptor.
     """
-    if ftype == 'gzip' or ftype == 'gz' or (ftype == 'auto' and filename.endswith(".gz")):
+    if ftype in ('gzip', 'gz') \
+            or (ftype == 'auto' and filename.endswith(".gz")) \
+            or (ftype == 'auto' and 'r' in mode and is_gzip_file(filename)):
         return gzip.open(filename, mode=mode, encoding='utf-8', errors=errors)
     else:
         return open(filename, mode=mode, encoding='utf-8', errors=errors)
@@ -435,17 +445,18 @@ def average_arrays(arrays: List[mx.nd.NDArray]) -> mx.nd.NDArray:
 
 def get_num_gpus() -> int:
     """
-    Gets the number of GPUs available on the host (depends on nvidia-smi).
+    Gets the number of GPUs available on the host.
 
     :return: The number of GPUs on the system.
     """
-    if shutil.which("nvidia-smi") is None:
-        logger.warning("Couldn't find nvidia-smi, therefore we assume no GPUs are available.")
-        return 0
-    sp = subprocess.Popen(['nvidia-smi', '-L'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    out_str = sp.communicate()[0].decode("utf-8")
-    num_gpus = len(out_str.rstrip("\n").split("\n"))
-    return num_gpus
+    # TODO (domhant): Switch to mx.context.num_gpus() with mxnet version 1.3
+    for device_id in itertools.count():
+        try:
+            mx.nd.zeros((1,), ctx=mx.gpu(device_id))
+        except mx.MXNetError:
+            return device_id
+    # Note: Return statement to make mypy happy, the for loop is infinite, so an exception is the only way out.
+    return device_id + 1
 
 
 def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, int]]:
@@ -465,10 +476,14 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, 
         return {}
     ids = [str(c.device_id) for c in ctx]
     query = "--query-gpu=index,memory.used,memory.total"
-    format = "--format=csv,noheader,nounits"
-    sp = subprocess.Popen(['nvidia-smi', query, format, "-i", ",".join(ids)],
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    result = sp.communicate()[0].decode("utf-8").rstrip().split("\n")
+    format_arg = "--format=csv,noheader,nounits"
+    try:
+        sp = subprocess.Popen(['nvidia-smi', query, format_arg, "-i", ",".join(ids)],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        result = sp.communicate()[0].decode("utf-8").rstrip().split("\n")
+    except OSError:
+        logger.exception("Failed calling nvidia-smi to query memory usage.")
+        return {}
     memory_data = {}
     for line in result:
         gpu_id, mem_used, mem_total = line.split(",")
@@ -502,9 +517,7 @@ def determine_context(device_ids: List[int],
     else:
         num_gpus = get_num_gpus()
         check_condition(num_gpus >= 1,
-                        "No GPUs found, consider running on the CPU with --use-cpu "
-                        "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
-                        "binary isn't on the path).")
+                        "No GPUs found, consider running on the CPU with --use-cpu ")
         if disable_device_locking:
             context = expand_requested_device_ids(device_ids)
         else:

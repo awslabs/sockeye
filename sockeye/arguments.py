@@ -282,6 +282,28 @@ def add_extract_args(params):
                                 help="File to write extracted parameters to (in .npz format).")
 
 
+def add_rerank_args(params):
+    rerank_params = params.add_argument_group("Reranking")
+    rerank_params.add_argument("--reference", "-r",
+                               type=str,
+                               required=True,
+                               help="File where target reference translations are stored.")
+    rerank_params.add_argument("--hypotheses", "-hy",
+                               type=str,
+                               required=True,
+                               help="File with nbest translations, one nbest list per line, in JSON format.")
+    rerank_params.add_argument("--metric", "-m",
+                               type=str,
+                               required=False,
+                               default=C.RERANK_BLEU,
+                               choices=C.RERANK_METRICS,
+                               help="Sentence-level metric used to compare each nbest translation to the reference."
+                                    "Default: %(default)s.")
+    rerank_params.add_argument("--output-best",
+                               action="store_true",
+                               help="Output only the best hypothesis from each nbest list.")
+
+
 def add_lexicon_args(params):
     lexicon_params = params.add_argument_group("Model & Top-k")
     lexicon_params.add_argument("--model", "-m", required=True,
