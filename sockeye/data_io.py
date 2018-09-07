@@ -1026,22 +1026,21 @@ def ids2strids(ids: Iterable[int]) -> str:
     :param ids: Sequence of integers.
     :return: String sequence
     """
-    return " ".join(map(str, ids))
+    return C.TOKEN_SEPARATOR.join(map(str, ids))
 
 
 def ids2tokens(token_ids: Iterable[int],
                vocab_inv: Dict[int, str],
-               exclude_set: Set[int] = set()) -> Iterator[str]:
+               exclude_set: Set[int]) -> Iterator[str]:
     """
-    Transforms a list of token IDs into a list of words, exluding any IDs in `exclude_set`.
+    Transforms a list of token IDs into a list of words, excluding any IDs in `exclude_set`.
 
     :param token_ids: The list of token IDs.
     :param vocab_inv: The inverse vocabulary.
     :param exclude_set: The list of token IDs to exclude.
     :return: The list of words.
-"""
-
-    tokens = [vocab_inv[token] for token in token_ids]
+    """
+    tokens = (vocab_inv[token] for token in token_ids)
     return (tok for token_id, tok in zip(token_ids, tokens) if token_id not in exclude_set)
 
 

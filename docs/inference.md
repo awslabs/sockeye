@@ -70,6 +70,17 @@ This object can also specify the source factors as a list of token-parallel stri
 { "text": "The boy ate the waff@@ le .", "factors": ["O O O O B E O"] }
 ```
 
+## N-best translations
+
+Sockeye can return the n best hypotheses per input (*nbest lists*).
+Such nbest lists can for example be used in reranking (`python -m sockeye.rerank`).
+
+When `--nbest-size > 1`, each line in the output of `translate` will contain the following JSON object:
+```python
+{"alignments": [<1st alignment>, <2nd alignment>, ...], "scores": [<1st score>, <2nd score>, ...], "translations": ["<1st hypothesis>", "<2nd hypothesis>", ...]}
+```
+Note that `--nbest-size` must be smaller or equal to `--beam-size` and `--beam-search-stop` must be set to `all`.
+
 ## Lexical constraints
 
 Lexical constraints provide a way to force the model to include certain words in the output.
