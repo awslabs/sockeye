@@ -252,6 +252,28 @@ class OnlineMeanAndVariance:
             return self._M2 / self._count
 
 
+def top1(scores: mx.nd.NDArray,
+         offset: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
+    """
+    Get the single lowest element per sentence from a `scores` matrix. Expects that
+    beam size is 1, for greedy decoding.
+
+    NOTE(mathmu): The current implementation of argmin in MXNet much slower than topk with k=1.
+
+    :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+    :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+    :return: The row indices, column indices and values of the smallest items in matrix.
+    """
+    best_word_indices = mx.nd.cast(mx.nd.argmin(scores, axis=1), dtype='int32')
+    values = scores[mx.nd.arange(scores.shape[0], dtype='int32', ctx=scores.context), best_word_indices]
+
+    values = values.reshape((-1, 1))
+
+    # for top1, the best hyp indices are equal to the plain offset
+
+    return offset, best_word_indices, values
+
+
 def topk(scores: mx.nd.NDArray,
          k: int,
          batch_size: int,
