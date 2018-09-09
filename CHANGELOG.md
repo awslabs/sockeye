@@ -11,8 +11,8 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
 ## [1.18.53]
-### Changed
-- `--source-vocab` can take multiple files for additional source factor vocabularies.
+### Added
+- `--source-factor-vocabs` can be set for source factor vocabularies.
 
 ## [1.18.52]
 ### Fixed
