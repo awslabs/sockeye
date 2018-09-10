@@ -1681,12 +1681,26 @@ class CurriculumParallelSampleIter(BaseParallelSampleIter):
         with open(fname, "wb") as fp:
             pickle.dump(self.shards_fnames, fp)
             pickle.dump(self.shard_index, fp)
+
+            # Custom variables for curriculum training
+            pickle.dump(self.max_shard_complexity, fp)
+            pickle.dump(self.update_max_shard_complexity, fp)
+            pickle.dump(self.shards_complexity, fp)
+            pickle.dump(self.visible_shards_fnames, fp)
+            pickle.dump(self.updates_processed, fp)
+
         self.shard_iter.save_state(fname + ".sharditer")
 
     def load_state(self, fname: str):
         with open(fname, "rb") as fp:
             self.shards_fnames = pickle.load(fp)
             self.shard_index = pickle.load(fp)
+            # Custom variables for curriculum training
+            self.max_shard_complexity = pickle.load(fp)
+            self.update_max_shard_complexity = pickle.load(fp)
+            self.shards_complexity = pickle.load(fp)
+            self.visible_shards_fnames = pickle.load(fp)
+            self.updates_processed = pickle.load(fp)
         self._load_shard()
         self.shard_iter.load_state(fname + ".sharditer")
 
