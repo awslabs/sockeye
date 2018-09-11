@@ -1197,6 +1197,15 @@ class Translator:
                     logger.warning("Global avoid phrase '%s' contains an %s; this may indicate improper preprocessing.", ' '.join(phrase), C.UNK_SYMBOL)
                 self.global_avoid_trie.add_phrase(phrase_ids)
 
+        if self.nbest_size > 1:
+            self._concat_translations_function = partial(_concat_nbest_translations,
+                                            stop_ids=self.stop_ids,
+                                            length_penalty=self.length_penalty)
+        else:
+            self._concat_translations_function = partial(_concat_translations,
+                                            stop_ids=self.stop_ids,
+                                            length_penalty=self.length_penalty)
+
         logger.info("Translator (%d model(s) beam_size=%d beam_prune=%s beam_search_stop=%s "
                     "nbest_size=%s ensemble_mode=%s batch_size=%d buckets_source=%s avoiding=%d)",
                     len(self.models),
@@ -1343,7 +1352,7 @@ class Translator:
             else:
                 translations_to_concat = [translated_chunk.translation
                                           for translated_chunk in translations_for_input_idx]
-                translation = self._concat_nbest_translations(translations_to_concat)
+                translation = self._concat_translations_function(translations_to_concat)
 
             results.append(self._make_result(trans_input, translation))
 
@@ -1447,16 +1456,6 @@ class Translator:
                                     nbest_tokens=target_tokens_list,
                                     nbest_attention_matrices=attention_matrices,
                                     nbest_scores=scores)
-
-
-    def _concat_nbest_translations(self, translations: List[Translation]) -> Translation:
-        """
-        Combine translations through concatenation.
-
-        :param translations: A list of translations (sequence, attention_matrix), score and length.
-        :return: A concatenation of the translations with a score.
-        """
-        return _concat_nbest_translations(translations, self.stop_ids, self.length_penalty)
 
     def _translate_nd(self,
                       source: mx.nd.NDArray,
