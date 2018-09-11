@@ -489,6 +489,12 @@ def add_vocab_args(params):
                         required=False,
                         default=None,
                         help='Existing target vocabulary (JSON).')
+    params.add_argument('--source-factor-vocabs',
+                        required=False,
+                        nargs='+',
+                        type=regular_file(),
+                        default=[],
+                        help='Existing source factor vocabulary (-ies) (JSON).')
     params.add_argument(C.VOCAB_ARG_SHARED_VOCAB,
                         action='store_true',
                         default=False,
