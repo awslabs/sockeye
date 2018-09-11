@@ -141,7 +141,7 @@ class CheckpointDecoder:
                                           length_penalty=inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
                                           beam_prune=0.0,
                                           beam_search_stop='all',
-                                          nbest_size=1,
+                                          nbest_size=self.nbest_size,
                                           models=models,
                                           source_vocabs=source_vocabs,
                                           target_vocab=target_vocab,

@@ -847,30 +847,38 @@ class TranslatorOutput:
 TokenIds = List[int]
 
 
+class NBestTranslations:
+    __slots__ = ('target_ids_list',
+                 'attention_matrices',
+                 'scores')
+    def __init__(self,
+                 target_ids_list: List[TokenIds],
+                 attention_matrices: List[np.ndarray],
+                 scores: List[float]) -> None:
+
+        self.target_ids_list = target_ids_list
+        self.attention_matrices = attention_matrices
+        self.scores = scores
+
+
 class Translation:
     __slots__ = ('target_ids',
                  'attention_matrix',
                  'score',
                  'beam_histories',
-                 'nbest_target_ids',
-                 'nbest_attention_matrices',
-                 'nbest_scores')
+                 'nbest_translations')
 
     def __init__(self,
                  target_ids: TokenIds,
                  attention_matrix: np.ndarray,
                  score: float,
                  beam_histories: List[BeamHistory] = None,
-                 nbest_target_ids: List[TokenIds] = None,
-                 nbest_attention_matrices: List[np.ndarray] = None,
-                 nbest_scores: List[float] = None) -> None:
+                 nbest_translations: NBestTranslations = None) -> None:
         self.target_ids = target_ids
         self.attention_matrix = attention_matrix
         self.score = score
         self.beam_histories = beam_histories if beam_histories is not None else []
-        self.nbest_target_ids = nbest_target_ids if nbest_target_ids is not None else []
-        self.nbest_attention_matrices = nbest_attention_matrices if nbest_attention_matrices is not None else []
-        self.nbest_scores = nbest_scores if nbest_scores is not None else []
+        self.nbest_translations = nbest_translations
 
 
 def empty_translation() -> Translation:
@@ -960,13 +968,13 @@ class LengthPenalty(mx.gluon.HybridBlock):
 
 
 def _concat_nbest_translations(translations: List[Translation], stop_ids: Set[int],
-                               length_penalty: LengthPenalty, nbest_size: int) -> Translation:
+                               length_penalty: LengthPenalty) -> Translation:
     """
     Combine nbest translations through concatenation.
+
     :param translations: A list of translations (sequence starting with BOS symbol,
         attention_matrix), score and length.
     :param translations: The EOS symbols.
-    :param nbest_size: Size of nbest list.
     :return: A concatenation of the translations with a score.
     """
     expanded_translations = [_expand_nbest_translation(translation) for translation in translations]
@@ -981,39 +989,41 @@ def _concat_nbest_translations(translations: List[Translation], stop_ids: Set[in
     return _reduce_nbest_translations(concatenated_translations)
 
 
-def _reduce_nbest_translations(nbest_translations: List[Translation]) -> Translation:
+def _reduce_nbest_translations(nbest_translations_list: List[Translation]) -> Translation:
     """
     Combines Translation objects that are nbest translations of the same sentence.
+
     :param nbest_translations: A list of Translation objects, all of them translations of
         the same source sentence.
     :return: A single Translation object where nbest lists are collapsed.
     """
-    best_translation = nbest_translations[0]
+    best_translation = nbest_translations_list[0]
 
-    sequences = [translation.target_ids for translation in nbest_translations]
-    attention_matrices = [translation.attention_matrix for translation in nbest_translations]
-    scores = [translation.score for translation in nbest_translations]
+    sequences = [translation.target_ids for translation in nbest_translations_list]
+    attention_matrices = [translation.attention_matrix for translation in nbest_translations_list]
+    scores = [translation.score for translation in nbest_translations_list]
+
+    nbest_translations = NBestTranslations(sequences, attention_matrices, scores)
 
     return Translation(best_translation.target_ids,
                        best_translation.attention_matrix,
                        best_translation.score,
                        best_translation.beam_histories,
-                       sequences,
-                       attention_matrices,
-                       scores)
+                       nbest_translations)
 
 
 def _expand_nbest_translation(translation: Translation) -> List[Translation]:
     """
     Expand nbest translations in a single Translation object to one Translation
-        object per nbest translation
+        object per nbest translation.
+
     :param translation: A Translation object.
     :return: A list of Translation objects.
     """
-    nbest_list = []
-    for target_ids, attention_matrix, score in zip(translation.nbest_target_ids,
-                                                   translation.nbest_attention_matrices,
-                                                   translation.nbest_scores):
+    nbest_list = []  # type = List[Translation]
+    for target_ids, attention_matrix, score in zip(translation.nbest_translations.target_ids_list,
+                                                   translation.nbest_translations.attention_matrices,
+                                                   translation.nbest_translations.scores):
         nbest_list.append(Translation(target_ids, attention_matrix, score, translation.beam_histories))
 
     return nbest_list
@@ -1023,6 +1033,7 @@ def _concat_translations(translations: List[Translation], stop_ids: Set[int],
                          length_penalty: LengthPenalty) -> Translation:
     """
     Combine translations through concatenation.
+
     :param translations: A list of translations (sequence starting with BOS symbol, attention_matrix), score and length.
     :param translations: The EOS symbols.
     :return: A concatenation of the translations with a score.
@@ -1394,41 +1405,49 @@ class Translator:
                      trans_input: TranslatorInput,
                      translation: Translation) -> TranslatorOutput:
         """
-        Returns a translator result from generated target-side word ids, attention matrix, and score.
+        Returns a translator result from generated target-side word ids, attention matrices and scores.
         Strips stop ids from translation string.
+
         :param trans_input: Translator input.
         :param translation: The translation + attention and score.
         :return: TranslatorOutput.
         """
         target_ids = translation.target_ids
-        nbest_target_ids = translation.nbest_target_ids
+        target_tokens = utils.ids_to_tokens(translation.target_ids, self.vocab_target_inv)
+        target_string = utils.tokens_to_string(target_ids, target_tokens, self.strip_ids)
+
         attention_matrix = translation.attention_matrix
-
-        def ids_to_tokens(ids):
-            return [self.vocab_target_inv[id] for id in ids]
-
-        target_tokens = ids_to_tokens(translation.target_ids)
-        target_tokens_list = [ids_to_tokens(ids) for ids in nbest_target_ids ]
-
-        def ids_tokens_to_string(target_ids, target_tokens):
-            return C.TOKEN_SEPARATOR.join(
-                tok for target_id, tok in zip(target_ids, target_tokens) if target_id not in self.strip_ids)
-
-        target_string = ids_tokens_to_string(target_ids, target_tokens)
-        target_strings = [ids_tokens_to_string(ids, tokens) for ids, tokens in zip(nbest_target_ids, target_tokens_list)]
         attention_matrix = attention_matrix[:, :len(trans_input.tokens)]
-        attention_matrices = [matrix[:, :len(trans_input.tokens)] for matrix in translation.nbest_attention_matrices]
 
-        return TranslatorOutput(sentence_id=trans_input.sentence_id,
-                                translation=target_string,
-                                tokens=target_tokens,
-                                attention_matrix=attention_matrix,
-                                score=translation.score,
-                                beam_histories=translation.beam_histories,
-                                nbest_translations=target_strings,
-                                nbest_tokens=target_tokens_list,
-                                nbest_attention_matrices=attention_matrices,
-                                nbest_scores=translation.nbest_scores)
+        if translation.nbest_translations is None:
+            return TranslatorOutput(sentence_id=trans_input.sentence_id,
+                                    translation=target_string,
+                                    tokens=target_tokens,
+                                    attention_matrix=attention_matrix,
+                                    score=translation.score,
+                                    beam_histories=translation.beam_histories)
+        else:
+
+            nbest_target_ids = translation.nbest_translations.target_ids_list
+            target_tokens_list = [utils.ids_to_tokens(ids, self.vocab_target_inv) for ids in nbest_target_ids ]
+
+            target_strings = [utils.tokens_to_string(ids, tokens, self.strip_ids) for ids, tokens in zip(nbest_target_ids, target_tokens_list)]
+
+            attention_matrices = [matrix[:, :len(trans_input.tokens)] for matrix in translation.nbest_translations.attention_matrices]
+
+            scores = translation.nbest_translations.scores
+
+            return TranslatorOutput(sentence_id=trans_input.sentence_id,
+                                    translation=target_string,
+                                    tokens=target_tokens,
+                                    attention_matrix=attention_matrix,
+                                    score=translation.score,
+                                    beam_histories=translation.beam_histories,
+                                    nbest_translations=target_strings,
+                                    nbest_tokens=target_tokens_list,
+                                    nbest_attention_matrices=attention_matrices,
+                                    nbest_scores=scores)
+
 
     def _concat_nbest_translations(self, translations: List[Translation]) -> Translation:
         """
@@ -1437,7 +1456,7 @@ class Translator:
         :param translations: A list of translations (sequence, attention_matrix), score and length.
         :return: A concatenation of the translations with a score.
         """
-        return _concat_nbest_translations(translations, self.stop_ids, self.length_penalty, self.nbest_size)
+        return _concat_nbest_translations(translations, self.stop_ids, self.length_penalty)
 
     def _translate_nd(self,
                       source: mx.nd.NDArray,
