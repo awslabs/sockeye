@@ -164,6 +164,8 @@ def test_model_parameters(test_params, expected_params):
               learning_rate_schedule=None,
               learning_rate_decay_param_reset=False,
               learning_rate_decay_optimizer_states_reset='off',
+              curriculum_training=False,
+              curriculum_update_freq=4000,
               weight_init='xavier',
               weight_init_scale=3.0,
               weight_init_xavier_rand_type='uniform',
@@ -340,7 +342,8 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           min_num_shards=1,
           num_samples_per_shard=1000000,
           seed=13,
-          output='train_data'
+          output='train_data',
+          curriculum_score_file=None,
           ))
 ])
 def test_tutorial_prepare_data_cli_args(test_params, expected_params):
@@ -362,7 +365,8 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           min_num_shards=1,
           num_samples_per_shard=1000000,
           seed=13,
-          output='prepared_data'
+          output='prepared_data',
+          curriculum_score_file=None
           ))
 ])
 def test_prepare_data_cli_args(test_params, expected_params):
