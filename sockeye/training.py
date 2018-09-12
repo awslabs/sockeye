@@ -724,8 +724,7 @@ class EarlyStoppingTrainer:
                               "gradient-norm": self.state.gradient_norm,
                               "time-elapsed": time.time() - self.state.start_tic}
         gpu_memory_usage = utils.get_gpu_memory_usage(self.model.context)
-        if gpu_memory_usage is not None:
-            checkpoint_metrics['used-gpu-memory'] = sum(v[0] for v in gpu_memory_usage.values())
+        checkpoint_metrics['used-gpu-memory'] = sum(v[0] for v in gpu_memory_usage.values())
 
         for name, value in metric_train.get_name_value():
             checkpoint_metrics["%s-train" % name] = value

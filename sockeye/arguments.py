@@ -282,6 +282,28 @@ def add_extract_args(params):
                                 help="File to write extracted parameters to (in .npz format).")
 
 
+def add_rerank_args(params):
+    rerank_params = params.add_argument_group("Reranking")
+    rerank_params.add_argument("--reference", "-r",
+                               type=str,
+                               required=True,
+                               help="File where target reference translations are stored.")
+    rerank_params.add_argument("--hypotheses", "-hy",
+                               type=str,
+                               required=True,
+                               help="File with nbest translations, one nbest list per line, in JSON format.")
+    rerank_params.add_argument("--metric", "-m",
+                               type=str,
+                               required=False,
+                               default=C.RERANK_BLEU,
+                               choices=C.RERANK_METRICS,
+                               help="Sentence-level metric used to compare each nbest translation to the reference."
+                                    "Default: %(default)s.")
+    rerank_params.add_argument("--output-best",
+                               action="store_true",
+                               help="Output only the best hypothesis from each nbest list.")
+
+
 def add_lexicon_args(params):
     lexicon_params = params.add_argument_group("Model & Top-k")
     lexicon_params.add_argument("--model", "-m", required=True,
@@ -467,6 +489,12 @@ def add_vocab_args(params):
                         required=False,
                         default=None,
                         help='Existing target vocabulary (JSON).')
+    params.add_argument('--source-factor-vocabs',
+                        required=False,
+                        nargs='+',
+                        type=regular_file(),
+                        default=[],
+                        help='Existing source factor vocabulary (-ies) (JSON).')
     params.add_argument(C.VOCAB_ARG_SHARED_VOCAB,
                         action='store_true',
                         default=False,
@@ -1126,6 +1154,11 @@ def add_inference_args(params):
                                     ' Default: %d without batching '
                                     'and %d * batch_size with batching.' % (C.CHUNK_SIZE_NO_BATCHING,
                                                                             C.CHUNK_SIZE_PER_BATCH_SEGMENT))
+    decode_params.add_argument('--skip-topk',
+                               default=False,
+                               action='store_true',
+                               help='Use argmax instead of topk for greedy decoding (when --beam-size 1).'
+                                    'Default: %(default)s.')
     decode_params.add_argument('--ensemble-mode',
                                type=str,
                                default='linear',

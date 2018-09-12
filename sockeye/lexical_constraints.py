@@ -241,7 +241,10 @@ class ConstrainedHypothesis:
     This is represented internally as:
 
         constraints: [14 19 35 14]
-        is_sequence: [ 1  1  0  0]
+        is_sequence: [False False True True]
+        
+    That is, the constraints are simply concatenated, and we maintain a parallel array indicating whether each
+    token ID must be followed by the next token ID. The same token ID can be present any number of times.
 
     :param constraint_list: A list of zero or raw constraints (each represented as a list of integers).
     :param avoid_list: A list of zero or raw constraints that must *not* appear in the output.

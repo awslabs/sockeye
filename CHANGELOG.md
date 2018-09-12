@@ -10,6 +10,43 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.54]
+### Added
+- `--source-factor-vocabs` can be set to provide source factor vocabularies.
+
+## [1.18.53]
+### Added
+- Always skipping softmax for greedy decoding by default, only for single models.
+- Added option `--skip-topk` for greedy decoding.
+
+## [1.18.52]
+### Fixed
+- Fixed bug in constrained decoding to make sure best hypothesis satifies all constraints.
+
+## [1.18.51]
+### Added
+- Added a CLI for reranking of an nbest list of translations.
+
+## [1.18.50]
+### Fixed
+- Check for equivalency of training and validation source factors was incorrectly indented.
+
+## [1.18.49]
+### Changed
+- Removed dependence on the nvidia-smi tool. The number of GPUs is now determined programatically.
+
+## [1.18.48]
+### Changed
+- Translator.max_input_length now reports correct maximum input length for TranslatorInput objects, independent of the internal representation, where an additional EOS gets added. 
+
+## [1.18.47]
+### Changed
+- translate CLI: no longer rely on external, user-given input id for sorting translations. Also allow string ids for sentences.
+
+## [1.18.46]
+### Fixed
+- Fixed issue with `--num-words 0:0` in image captioning and another issue related to loading all features to memory with variable length.
+
 ## [1.18.45]
 ### Added
 - Added an 8 layer LSTM model similar (but not exactly identical) to the 'GNMT' architecture to autopilot.

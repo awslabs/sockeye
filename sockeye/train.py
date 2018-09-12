@@ -279,9 +279,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             utils.check_condition(vocab.are_identical(target_vocab, model_target_vocab),
                                   "Prepared data and resumed model target vocabs do not match.")
 
-            check_condition(len(args.source_factors) == len(args.validation_source_factors),
-                            'Training and validation data must have the same number of factors: %d vs. %d.' % (
-                                len(args.source_factors), len(args.validation_source_factors)))
+        check_condition(data_config.num_source_factors == len(validation_sources),
+                        'Training and validation data must have the same number of factors, but found %d and %d.' % (
+                            data_config.num_source_factors, len(validation_sources)))
 
         return train_iter, validation_iter, data_config, source_vocabs, target_vocab
 
@@ -301,7 +301,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 
         else:
             # Load or create vocabs
-            source_vocab_paths = [args.source_vocab] + [None] * len(args.source_factors)
+            source_factor_vocab_paths = [args.source_factor_vocabs[i] if i < len(args.source_factor_vocabs)
+                                         else None for i in range(len(args.source_factors))]
+            source_vocab_paths = [args.source_vocab] + source_factor_vocab_paths
             target_vocab_path = args.target_vocab
             source_vocabs, target_vocab = vocab.load_or_create_vocabs(
                 source_paths=[args.source] + args.source_factors,
@@ -321,6 +323,10 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 
         sources = [args.source] + args.source_factors
         sources = [str(os.path.abspath(source)) for source in sources]
+
+        check_condition(len(sources) == len(validation_sources),
+                        'Training and validation data must have the same number of factors, but found %d and %d.' % (
+                            len(source_vocabs), len(validation_sources)))
 
         train_iter, validation_iter, config_data, data_info = data_io.get_training_data_iters(
             sources=sources,
