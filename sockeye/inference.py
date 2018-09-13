@@ -1055,9 +1055,11 @@ class Translator:
         self._update_scores.hybridize(static_alloc=True, static_shape=True)
 
         if self.skip_topk:
-            self._top = partial(utils.top1, offset=self.offset)
+            self._top = partial(utils.top1, offset=self.offset)  # type: Callable
         else:
-            self._top = TopK(k=self.beam_size, batch_size=self.batch_size, vocab_size=len(self.vocab_target))
+            self._top = TopK(k=self.beam_size,
+                             batch_size=self.batch_size,
+                             vocab_size=len(self.vocab_target))  # type: mx.gluon.HybridBlock
             self._top.initialize(ctx=self.context)
             self._top.hybridize(static_alloc=True, static_shape=True)
 
