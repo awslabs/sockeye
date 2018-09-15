@@ -1070,12 +1070,14 @@ class Translator:
             if self.skip_topk:
                 self._top = Top1(k=self.beam_size,
                                  batch_size=self.batch_size)  # type: mx.gluon.HybridBlock
+                self._top.initialize(ctx=self.context)
+                self._top.hybridize(static_alloc=True, static_shape=True)
             else:
                 self._top = TopK(k=self.beam_size,
                                  batch_size=self.batch_size,
                                  vocab_size=len(self.vocab_target))  # type: mx.gluon.HybridBlock
-            self._top.initialize(ctx=self.context)
-            self._top.hybridize(static_alloc=True, static_shape=True)
+                self._top.initialize(ctx=self.context)
+                self._top.hybridize(static_alloc=True, static_shape=True)
 
         self._sort_by_index = SortByIndex()
         self._sort_by_index.initialize(ctx=self.context)
