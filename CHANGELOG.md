@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.55]
+### Changed
+- Update to MXNet 1.3.0.post0
+
 ## [1.18.54]
 ### Added
 - `--source-factor-vocabs` can be set to provide source factor vocabularies.
