@@ -276,7 +276,6 @@ def top1(scores: mx.nd.NDArray,
 
 def topk(scores: mx.nd.NDArray,
          k: int,
-         batch_size: int,
          offset: mx.nd.NDArray,
          use_mxnet_topk: bool) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
     """
@@ -284,13 +283,13 @@ def topk(scores: mx.nd.NDArray,
 
     :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
     :param k: The number of smallest scores to return.
-    :param batch_size: Number of sentences being decoded at once.
     :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
     :param use_mxnet_topk: True to use the mxnet implementation or False to use the numpy one.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
     # (batch_size, beam_size * target_vocab_size)
-    folded_scores = scores.reshape((batch_size, k * scores.shape[-1]))
+    folded_scores = scores.reshape((-1, k * scores.shape[-1]))
+    batch_size = folded_scores.shape[0]
 
     if use_mxnet_topk:
         # pylint: disable=unbalanced-tuple-unpacking
