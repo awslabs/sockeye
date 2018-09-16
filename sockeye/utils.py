@@ -468,14 +468,7 @@ def get_num_gpus() -> int:
 
     :return: The number of GPUs on the system.
     """
-    # TODO (domhant): Switch to mx.context.num_gpus() with mxnet version 1.3
-    for device_id in itertools.count():
-        try:
-            mx.nd.zeros((1,), ctx=mx.gpu(device_id))
-        except mx.MXNetError:
-            return device_id
-    # Note: Return statement to make mypy happy, the for loop is infinite, so an exception is the only way out.
-    return device_id + 1
+    return mx.context.num_gpus()
 
 
 def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, int]]:
