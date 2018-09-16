@@ -33,8 +33,8 @@ from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Opt
 import mxnet as mx
 import numpy as np
 
-from sockeye import __version__, constants as C
-from sockeye.log import log_sockeye_version, log_mxnet_version
+from . import __version__, constants as C
+from .log import log_sockeye_version, log_mxnet_version
 
 logger = logging.getLogger(__name__)
 
@@ -452,14 +452,12 @@ def average_arrays(arrays: List[mx.nd.NDArray]) -> mx.nd.NDArray:
     :param arrays: A list of NDArrays with the same shape that will be averaged.
     :return: The average of the NDArrays in the same context as arrays[0].
     """
+    if not arrays:
+        raise ValueError("arrays is empty.")
     if len(arrays) == 1:
         return arrays[0]
     check_condition(all(arrays[0].shape == a.shape for a in arrays), "nd array shapes do not match")
-    new_array = mx.nd.zeros(arrays[0].shape, dtype=arrays[0].dtype, ctx=arrays[0].context)
-    for a in arrays:
-        new_array += a.as_in_context(new_array.context)
-    new_array /= len(arrays)
-    return new_array
+    return mx.nd.add_n(*arrays) / len(arrays)
 
 
 def get_num_gpus() -> int:
@@ -842,8 +840,8 @@ class PrintValueProp(mx.operator.CustomOpProp):
 
     def create_operator(self, ctx, shapes, dtypes):
         return PrintValue(self.print_name,
-                          print_grad=self.print_grad,
-                          use_logger=self.use_logger)
+                          print_grad=str(self.print_grad),
+                          use_logger=str(self.use_logger))
 
 
 def grouper(iterable: Iterable, size: int) -> Iterable:
