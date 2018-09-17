@@ -751,8 +751,8 @@ def get_prepared_data_iters(prepared_data_dir: str,
 
 def get_training_data_iters(sources: List[str],
                             target: str,
-                            validation_sources: List[str],
-                            validation_target: str,
+                            validation_sources: Optional[List[str]],
+                            validation_target: Optional[str],
                             source_vocabs: List[vocab.Vocab],
                             target_vocab: vocab.Vocab,
                             source_vocab_paths: List[Optional[str]],
@@ -842,17 +842,19 @@ def get_training_data_iters(sources: List[str],
                                     bucket_batch_sizes=bucket_batch_sizes,
                                     num_factors=len(sources))
 
-    validation_iter = get_validation_data_iter(data_loader=data_loader,
-                                               validation_sources=validation_sources,
-                                               validation_target=validation_target,
-                                               buckets=buckets,
-                                               bucket_batch_sizes=bucket_batch_sizes,
-                                               source_vocabs=source_vocabs,
-                                               target_vocab=target_vocab,
-                                               max_seq_len_source=max_seq_len_source,
-                                               max_seq_len_target=max_seq_len_target,
-                                               batch_size=batch_size,
-                                               fill_up=fill_up)
+    validation_iter = None
+    if validation_sources is not None and validation_target is not None:
+        validation_iter = get_validation_data_iter(data_loader=data_loader,
+                                                   validation_sources=validation_sources,
+                                                   validation_target=validation_target,
+                                                   buckets=buckets,
+                                                   bucket_batch_sizes=bucket_batch_sizes,
+                                                   source_vocabs=source_vocabs,
+                                                   target_vocab=target_vocab,
+                                                   max_seq_len_source=max_seq_len_source,
+                                                   max_seq_len_target=max_seq_len_target,
+                                                   batch_size=batch_size,
+                                                   fill_up=fill_up)
 
     return train_iter, validation_iter, config_data, data_info
 

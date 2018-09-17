@@ -393,6 +393,7 @@ DATA_INFO = "data.info"
 DATA_CONFIG = "data.config"
 PREPARED_DATA_VERSION_FILE = "data.version"
 PREPARED_DATA_VERSION = 2
+DEFAULT_FILL_UP_STRATEGY = 'replicate'
 
 # reranking
 RERANK_BLEU = "bleu"
