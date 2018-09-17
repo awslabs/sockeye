@@ -320,16 +320,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 word_min_count_target=word_min_count_target,
                 pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
-        check_condition(len(args.source_factors) == len(args.source_factors_num_embed),
-                        "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (
-                            len(args.source_factors), len(args.source_factors_num_embed)))
-
         sources = [args.source] + args.source_factors
         sources = [str(os.path.abspath(source)) for source in sources]
-
-        check_condition(len(sources) == len(validation_sources),
-                        'Training and validation data must have the same number of factors, but found %d and %d.' % (
-                            len(source_vocabs), len(validation_sources)))
 
         train_iter, validation_iter, config_data, data_info = data_io.get_training_data_iters(
             sources=sources,
@@ -349,10 +341,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
             bucket_width=args.bucket_width)
-
-        data_info_fname = os.path.join(output_folder, C.DATA_INFO)
-        logger.info("Writing data config to '%s'", data_info_fname)
-        data_info.save(data_info_fname)
 
         return train_iter, validation_iter, config_data, source_vocabs, target_vocab
 
@@ -817,6 +805,18 @@ def train(args: argparse.Namespace):
             fill_up=args.fill_up)
         max_seq_len_source = config_data.max_seq_len_source
         max_seq_len_target = config_data.max_seq_len_target
+
+        data_info_fname = os.path.join(output_folder, C.DATA_INFO)
+        logger.info("Writing data config to '%s'", data_info_fname)
+        data_info.save(data_info_fname)
+
+        check_condition(len(args.source_factors) == len(args.source_factors_num_embed),
+                        "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (
+                            len(args.source_factors), len(args.source_factors_num_embed)))
+
+        check_condition(len(sources) == len(validation_sources),
+                        'Training and validation data must have the same number of factors, but found %d and %d.' % (
+                            len(source_vocabs), len(validation_sources)))
 
         # Dump the vocabularies if we're just starting up
         if not resume_training:
