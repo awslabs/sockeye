@@ -754,33 +754,43 @@ def add_model_parameters(params):
                                    "(and all convolutional weight matrices for CNN decoders). Default: %(default)s.")
 
 
+def add_batch_args(params):
+    params.add_argument('--batch-size', '-b',
+                        type=int_greater_or_equal(1),
+                        default=4096,
+                        help='Mini-batch size. Note that depending on the batch-type this either refers to '
+                             'words or sentences.'
+                             'Sentence: each batch contains X sentences, number of words varies. '
+                             'Word: each batch contains (approximately) X words, number of sentences varies. '
+                             'Default: %(default)s.')
+    params.add_argument("--batch-type",
+                        type=str,
+                        default=C.BATCH_TYPE_WORD,
+                        choices=[C.BATCH_TYPE_SENTENCE, C.BATCH_TYPE_WORD],
+                        help="Sentence: each batch contains X sentences, number of words varies."
+                             "Word: each batch contains (approximately) X target words, "
+                             "number of sentences varies. Default: %(default)s.")
+
+
+
+def add_scoring_args(params):
+    scoring_params = params.add_argument_group("Scoring parameters")
+
+    add_batch_args(scoring_params)
+
+
 def add_training_args(params):
     train_params = params.add_argument_group("Training parameters")
+
+    add_batch_args(training_params)
 
     train_params.add_argument('--decoder-only',
                                action='store_true',
                                help='Pre-train a decoder. This is currently for RNN decoders only. '
                                     'Default: %(default)s.')
-
-    train_params.add_argument('--batch-size', '-b',
-                              type=int_greater_or_equal(1),
-                              default=4096,
-                              help='Mini-batch size. Note that depending on the batch-type this either refers to '
-                                   'words or sentences.'
-                                   'Sentence: each batch contains X sentences, number of words varies. '
-                                   'Word: each batch contains (approximately) X words, number of sentences varies. '
-                                   'Default: %(default)s.')
-    train_params.add_argument("--batch-type",
-                              type=str,
-                              default=C.BATCH_TYPE_WORD,
-                              choices=[C.BATCH_TYPE_SENTENCE, C.BATCH_TYPE_WORD],
-                              help="Sentence: each batch contains X sentences, number of words varies."
-                                   "Word: each batch contains (approximately) X target words, "
-                                   "number of sentences varies. Default: %(default)s.")
-
     train_params.add_argument('--fill-up',
                               type=str,
-                              default='replicate',
+                              default=C.DEFAULT_FILL_UP_STRATEGY,
                               help=argparse.SUPPRESS)
 
     train_params.add_argument('--loss',
@@ -1067,6 +1077,20 @@ def add_translate_cli_args(params):
     add_inference_args(params)
     add_device_args(params)
     add_logging_args(params)
+
+
+def add_score_cli_args(params):
+    add_training_data_args(params, required=False)
+    add_prepared_data_args(params)
+    add_vocab_args(params)
+    add_bucketing_args(params)
+    add_scoring_args(params)
+    add_device_args(params)
+    add_logging_args(params)
+
+    params = params.add_argument_group("Scoring parameters")
+    params.add_argument("--model", "-m", required=True,
+                        help="Model directory containing trained model.")
 
 
 def add_max_output_cli_args(params):
