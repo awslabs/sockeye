@@ -1595,13 +1595,14 @@ class ParallelSampleIter(BaseParallelSampleIter):
         Resets and reshuffles the data.
         """
         self.curr_batch_index = 0
-        # shuffle batch start indices
-        random.shuffle(self.batch_indices)
-
-        # restore
-        self.data = self.data.permute(self.inverse_data_permutations)
-
         if not self.no_permute:
+            # shuffle batch start indices
+            random.shuffle(self.batch_indices)
+
+            # restore
+            self.data = self.data.permute(self.inverse_data_permutations)
+
+            # permute the data within each batch
             self.data_permutations, self.inverse_data_permutations = get_permutations(self.data.get_bucket_counts())
             self.data = self.data.permute(self.data_permutations)
 
