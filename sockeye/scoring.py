@@ -217,6 +217,7 @@ class Scorer:
             batch_size, target_seq_len, _ = batch.provide_data[0][1]
             outputs = mx.nd.reshape(data=outputs[0], shape=(-4, batch_size, target_seq_len, -2))
 
+            # print('BATCH SOURCE', batch.data[0])
             probs = mx.nd.pick(outputs, labels)
             ones = mx.nd.ones_like(probs)
             lengths = mx.nd.sum(labels != 0, axis=1) - 1

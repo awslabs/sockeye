@@ -782,7 +782,7 @@ def add_scoring_args(params):
 def add_training_args(params):
     train_params = params.add_argument_group("Training parameters")
 
-    add_batch_args(training_params)
+    add_batch_args(train_params)
 
     train_params.add_argument('--decoder-only',
                                action='store_true',

@@ -226,7 +226,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                  no_permute: bool = False) -> Tuple['data_io.BaseParallelSampleIter',
                                                                     'data_io.BaseParallelSampleIter',
                                                                     'data_io.DataConfig',
-                                                                    List[vocab.Vocab], vocab.Vocab]:
+                                                                    List[vocab.Vocab], vocab.Vocab, Optional[data_io.DataInfo]]:
     """
     Create the data iterators and the vocabularies.
 
@@ -236,7 +236,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     :param shared_vocab: Whether to create a shared vocabulary.
     :param resume_training: Whether to resume training.
     :param output_folder: Output folder.
-    :return: The data iterators (train, validation, config_data) as well as the source and target vocabularies.
+    :return: The data iterators (train, validation, config_data) as well as the source and target vocabularies, and data_info if not using prepared data.
     """
     num_words_source, num_words_target = args.num_words
     num_words_source = num_words_source if num_words_source > 0 else None
@@ -269,7 +269,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
             batch_num_devices=batch_num_devices,
-            fill_up=fill_up)
+            fill_up=fill_up,
+            no_permute=no_permute)
 
         check_condition(len(source_vocabs) == len(args.source_factors_num_embed) + 1,
                         "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
@@ -285,11 +286,15 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             utils.check_condition(vocab.are_identical(target_vocab, model_target_vocab),
                                   "Prepared data and resumed model target vocabs do not match.")
 
-        check_condition(data_config.num_source_factors == len(validation_sources),
-                        'Training and validation data must have the same number of factors, but found %d and %d.' % (
-                            data_config.num_source_factors, len(validation_sources)))
+        if validation_sources is not None:
+            check_condition(data_config.num_source_factors == len(validation_sources),
+                            'Training and validation data must have the same number of factors, but found %d and %d.' % (
+                                data_config.num_source_factors, len(validation_sources)))
 
-        return train_iter, validation_iter, data_config, source_vocabs, target_vocab
+        # This is only returned when the data has been created, which is not the case for prepared data.
+        data_info = None
+
+        return train_iter, validation_iter, data_config, source_vocabs, target_vocab, data_info
 
     else:
         utils.check_condition(args.prepared_data is None and args.source is not None and args.target is not None,
@@ -321,8 +326,18 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 word_min_count_target=word_min_count_target,
                 pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
+
+        check_condition(len(args.source_factors) == len(args.source_factors_num_embed),
+                        "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (
+                            len(args.source_factors), len(args.source_factors_num_embed)))
+
         sources = [args.source] + args.source_factors
         sources = [str(os.path.abspath(source)) for source in sources]
+
+        if validation_sources is not None:
+            check_condition(len(sources) == len(validation_sources),
+                            'Training and validation data must have the same number of factors, but found %d and %d.' % (
+                                len(source_vocabs), len(validation_sources)))
 
         train_iter, validation_iter, config_data, data_info = data_io.get_training_data_iters(
             sources=sources,
@@ -344,7 +359,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             bucketing=not args.no_bucketing,
             bucket_width=args.bucket_width)
 
-        return train_iter, validation_iter, config_data, source_vocabs, target_vocab
+        return train_iter, validation_iter, config_data, source_vocabs, target_vocab, data_info
 
 
 def create_encoder_config(args: argparse.Namespace,
@@ -795,7 +810,7 @@ def train(args: argparse.Namespace):
                                                                  "size that is a multiple of %d." % len(context))
         logger.info("Training Device(s): %s", ", ".join(str(c) for c in context))
 
-        train_iter, eval_iter, config_data, source_vocabs, target_vocab = create_data_iters_and_vocabs(
+        train_iter, eval_iter, config_data, source_vocabs, target_vocab, data_info = create_data_iters_and_vocabs(
             args=args,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
@@ -808,17 +823,10 @@ def train(args: argparse.Namespace):
         max_seq_len_source = config_data.max_seq_len_source
         max_seq_len_target = config_data.max_seq_len_target
 
-        data_info_fname = os.path.join(output_folder, C.DATA_INFO)
-        logger.info("Writing data config to '%s'", data_info_fname)
-        data_info.save(data_info_fname)
-
-        check_condition(len(args.source_factors) == len(args.source_factors_num_embed),
-                        "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (
-                            len(args.source_factors), len(args.source_factors_num_embed)))
-
-        check_condition(len(sources) == len(validation_sources),
-                        'Training and validation data must have the same number of factors, but found %d and %d.' % (
-                            len(source_vocabs), len(validation_sources)))
+        if data_info is not None:
+            data_info_fname = os.path.join(output_folder, C.DATA_INFO)
+            logger.info("Writing data config to '%s'", data_info_fname)
+            data_info.save(data_info_fname)
 
         # Dump the vocabularies if we're just starting up
         if not resume_training:

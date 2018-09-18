@@ -114,7 +114,7 @@ def score(args: argparse.Namespace):
                                                                  "size that is a multiple of %d." % len(context))
         logger.info("Scoring Device(s): %s", ", ".join(str(c) for c in context))
 
-        score_iter, _, config_data, source_vocabs, target_vocab = train.create_data_iters_and_vocabs(
+        score_iter, _, config_data, source_vocabs, target_vocab, data_info = train.create_data_iters_and_vocabs(
             args=args,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,

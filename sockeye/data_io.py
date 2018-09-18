@@ -672,9 +672,10 @@ def get_prepared_data_iters(prepared_data_dir: str,
                             batch_size: int,
                             batch_by_words: bool,
                             batch_num_devices: int,
-                            fill_up: str) -> Tuple['BaseParallelSampleIter',
-                                                   'BaseParallelSampleIter',
-                                                   'DataConfig', List[vocab.Vocab], vocab.Vocab]:
+                            fill_up: str,
+                            no_permute: bool = False) -> Tuple['BaseParallelSampleIter',
+                                                               'BaseParallelSampleIter',
+                                                               'DataConfig', List[vocab.Vocab], vocab.Vocab]:
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
