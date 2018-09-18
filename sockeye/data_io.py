@@ -31,7 +31,7 @@ import numpy as np
 from . import config
 from . import constants as C
 from . import vocab
-from .utils import check_condition, smart_open, get_tokens, OnlineMeanAndVariance
+from .utils import check_condition, smart_open, get_tokens, OnlineMeanAndVariance, inflect
 
 logger = logging.getLogger(__name__)
 
@@ -1258,22 +1258,30 @@ class ParallelDataSet(Sized):
             bucket_label = self.label[bucket_idx]
             num_samples = bucket_source.shape[0]
 
+            # Fill up the last batch according to the fill up policy.
+            # 'replicate' randomly samples to populate the remaining spots.
+            # 'repeate_last' instead repeats the last element.
             if num_samples % bucket_batch_size != 0:
+                rest = bucket_batch_size - num_samples % bucket_batch_size
                 if fill_up == 'replicate':
-                    rest = bucket_batch_size - num_samples % bucket_batch_size
-                    logger.info("Replicating %d random samples from %d samples in bucket %s "
-                                "to size it to multiple of %d",
-                                rest, num_samples, bucket, bucket_batch_size)
-                    random_indices_np = rs.randint(num_samples, size=rest)
-                    random_indices = mx.nd.array(random_indices_np)
-                    if isinstance(source[bucket_idx], np.ndarray):
-                        source[bucket_idx] = np.concatenate((bucket_source, bucket_source.take(random_indices_np)), axis=0)
-                    else:
-                        source[bucket_idx] = mx.nd.concat(bucket_source, bucket_source.take(random_indices), dim=0)
-                    target[bucket_idx] = mx.nd.concat(bucket_target, bucket_target.take(random_indices), dim=0)
-                    label[bucket_idx] = mx.nd.concat(bucket_label, bucket_label.take(random_indices), dim=0)
+                    logger.info("Filling bucket %s from size %d to %d by sampling with replacement",
+                                bucket, num_samples, bucket_batch_size)
+                    desired_indices_np = rs.randint(num_samples, size=rest)
+                elif fill_up == 'repeat_last':
+                    logger.info("Filling bucket %s from size %d to %d by repeating the last element %d %s",
+                                bucket, num_samples, bucket_batch_size, rest, inflect('time', rest))
+                    desired_indices_np = np.array([num_samples-1] * rest)
                 else:
                     raise NotImplementedError('Unknown fill-up strategy')
+
+                if isinstance(source[bucket_idx], np.ndarray):
+                    source[bucket_idx] = np.concatenate((bucket_source, bucket_source.take(desired_indices_np)), axis=0)
+                else:
+                    desired_indices = mx.nd.array(desired_indices_np)
+                    source[bucket_idx] = mx.nd.concat(bucket_source, bucket_source.take(desired_indices), dim=0)
+
+                target[bucket_idx] = mx.nd.concat(bucket_target, bucket_target.take(desired_indices), dim=0)
+                label[bucket_idx] = mx.nd.concat(bucket_label, bucket_label.take(desired_indices), dim=0)
 
         return ParallelDataSet(source, target, label)
 
