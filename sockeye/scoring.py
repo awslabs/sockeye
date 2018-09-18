@@ -31,7 +31,7 @@ from math import sqrt
 from . import checkpoint_decoder
 from . import constants as C
 from . import data_io
-from . import loss
+from . import inference
 from . import lr_scheduler
 from . import model
 from . import utils
@@ -194,9 +194,10 @@ class Scorer:
     def __init__(self,
                  model: ScoringModel,
                  source_vocabs: List[vocab.Vocab],
-                 target_vocab: vocab.Vocab):
+                 target_vocab: vocab.Vocab,
+                 length_penalty: Optional[inference.LengthPenalty] = None) -> None:
         self.model = model
-
+        self.length_penalty = length_penalty
 
     def score(self,
               score_iter):
@@ -216,7 +217,10 @@ class Scorer:
             ones = mx.nd.ones_like(probs)
             lengths = mx.nd.sum(labels != 0, axis=1) - 1
             logs = -mx.nd.log(mx.nd.where(labels != 0, probs, ones))
-            print('LOGS', logs)
-            print('LENS', lengths)
-            sums = mx.nd.sum(logs, axis=1) / lengths
-            print('SUMS', sums)
+            # print('LOGS', logs)
+            # print('LENS', lengths)
+            sums = mx.nd.sum(logs, axis=1) / self.length_penalty(lengths)
+            # print('SUMS', sums)
+            sums = sums.asnumpy().tolist()
+            for s in sums:
+                print('{:.3f}'.format(s))

@@ -1092,6 +1092,17 @@ def add_score_cli_args(params):
     params.add_argument("--model", "-m", required=True,
                         help="Model directory containing trained model.")
 
+    params.add_argument('--length-penalty-alpha',
+                        default=1.0,
+                        type=float,
+                        help='Alpha factor for the length penalty used in beam search: '
+                        '(beta + len(Y))**alpha/(beta + 1)**alpha. A value of 0.0 will therefore turn off '
+                        'length normalization. Default: %(default)s')
+    params.add_argument('--length-penalty-beta',
+                        default=0.0,
+                        type=float,
+                        help='Beta factor for the length penalty used in beam search: '
+                        '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
 
 def add_max_output_cli_args(params):
     params.add_argument('--max-output-length',

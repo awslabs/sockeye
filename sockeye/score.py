@@ -32,6 +32,7 @@ from . import coverage
 from . import data_io
 from . import decoder
 from . import encoder
+from . import inference
 from . import initializer
 from . import loss
 from . import lr_scheduler
@@ -131,7 +132,9 @@ def score(args: argparse.Namespace):
                                              context=context,
                                              score_iter=score_iter)
 
-        scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab)
+        scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab,
+                                length_penalty=inference.LengthPenalty(alpha=args.length_penalty_alpha,
+                                                                       beta=args.length_penalty_beta))
 
         scorer.score(score_iter=score_iter)
 
