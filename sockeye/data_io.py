@@ -728,7 +728,8 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                            batch_size,
                                            bucket_batch_sizes,
                                            fill_up,
-                                           num_factors=len(data_info.sources))
+                                           num_factors=len(data_info.sources),
+                                           no_permute=no_permute)
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=target_vocab[C.EOS_SYMBOL],
@@ -765,9 +766,10 @@ def get_training_data_iters(sources: List[str],
                             max_seq_len_source: int,
                             max_seq_len_target: int,
                             bucketing: bool,
-                            bucket_width: int) -> Tuple['BaseParallelSampleIter',
-                                                        'BaseParallelSampleIter',
-                                                        'DataConfig', 'DataInfo']:
+                            bucket_width: int,
+                            no_permute: bool = False) -> Tuple['BaseParallelSampleIter',
+                                                               'BaseParallelSampleIter',
+                                                               'DataConfig', 'DataInfo']:
     """
     Returns data iterators for training and validation data.
 
@@ -840,7 +842,8 @@ def get_training_data_iters(sources: List[str],
                                     buckets=buckets,
                                     batch_size=batch_size,
                                     bucket_batch_sizes=bucket_batch_sizes,
-                                    num_factors=len(sources))
+                                    num_factors=len(sources),
+                                    no_permute=no_permute)
 
     validation_iter = None
     if validation_sources is not None and validation_target is not None:
@@ -1267,21 +1270,31 @@ class ParallelDataSet(Sized):
                     logger.info("Filling bucket %s from size %d to %d by sampling with replacement",
                                 bucket, num_samples, bucket_batch_size)
                     desired_indices_np = rs.randint(num_samples, size=rest)
-                elif fill_up == 'repeat_last':
+                    desired_indices = mx.nd.array(desired_indices_np)
+
+                    if isinstance(source[bucket_idx], np.ndarray):
+                        source[bucket_idx] = np.concatenate((bucket_source, bucket_source.take(desired_indices_np)), axis=0)
+                    else:
+                        source[bucket_idx] = mx.nd.concat(bucket_source, bucket_source.take(desired_indices), dim=0)
+
+                    target[bucket_idx] = mx.nd.concat(bucket_target, bucket_target.take(desired_indices), dim=0)
+                    label[bucket_idx] = mx.nd.concat(bucket_label, bucket_label.take(desired_indices), dim=0)
+
+                elif fill_up == 'zeros':
                     logger.info("Filling bucket %s from size %d to %d by repeating the last element %d %s",
                                 bucket, num_samples, bucket_batch_size, rest, inflect('time', rest))
                     desired_indices_np = np.array([num_samples-1] * rest)
+                    desired_indices = mx.nd.array(desired_indices_np)
+
+                    zeros_source = mx.nd.zeros_like(bucket_source[0, :, :]).expand_dims(axis=0)
+                    zeros_target = mx.nd.zeros_like(bucket_target[0, :]).expand_dims(axis=0)
+                    zeros_label = mx.nd.zeros_like(bucket_label[0, :]).expand_dims(axis=0)
+
+                    source[bucket_idx] = mx.nd.concat(bucket_source, mx.nd.repeat(zeros_source, repeats=rest, axis=0), dim=0)
+                    target[bucket_idx] = mx.nd.concat(bucket_target, mx.nd.repeat(zeros_target, repeats=rest, axis=0), dim=0)
+                    label[bucket_idx] = mx.nd.concat(bucket_label, mx.nd.repeat(zeros_label, repeats=rest, axis=0), dim=0)
                 else:
                     raise NotImplementedError('Unknown fill-up strategy')
-
-                if isinstance(source[bucket_idx], np.ndarray):
-                    source[bucket_idx] = np.concatenate((bucket_source, bucket_source.take(desired_indices_np)), axis=0)
-                else:
-                    desired_indices = mx.nd.array(desired_indices_np)
-                    source[bucket_idx] = mx.nd.concat(bucket_source, bucket_source.take(desired_indices), dim=0)
-
-                target[bucket_idx] = mx.nd.concat(bucket_target, bucket_target.take(desired_indices), dim=0)
-                label[bucket_idx] = mx.nd.concat(bucket_label, bucket_label.take(desired_indices), dim=0)
 
         return ParallelDataSet(source, target, label)
 
@@ -1447,6 +1460,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
                  num_factors: int = 1,
+                 no_permute: bool = False,
                  dtype='float32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          source_data_name=source_data_name, target_data_name=target_data_name,
@@ -1455,6 +1469,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
         self.shards_fnames = list(shards_fnames)
         self.shard_index = -1
         self.fill_up = fill_up
+        self.no_permute = no_permute
 
         self.reset()
 
@@ -1470,7 +1485,8 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                                              bucket_batch_sizes=self.bucket_batch_sizes,
                                              source_data_name=self.source_data_name,
                                              target_data_name=self.target_data_name,
-                                             num_factors=self.num_factors)
+                                             num_factors=self.num_factors,
+                                             no_permute=self.no_permute)
 
     def reset(self):
         if len(self.shards_fnames) > 1:
@@ -1538,6 +1554,7 @@ class ParallelSampleIter(BaseParallelSampleIter):
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
                  num_factors: int = 1,
+                 no_permute: bool = False,
                  dtype='float32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          source_data_name=source_data_name, target_data_name=target_data_name,
@@ -1555,6 +1572,8 @@ class ParallelSampleIter(BaseParallelSampleIter):
         self.data_permutations = [mx.nd.arange(0, max(1, self.data.source[i].shape[0]))
                                   for i in range(len(self.data))]
 
+        self.no_permute = no_permute
+
         self.reset()
 
     def reset(self):
@@ -1568,9 +1587,9 @@ class ParallelSampleIter(BaseParallelSampleIter):
         # restore
         self.data = self.data.permute(self.inverse_data_permutations)
 
-        self.data_permutations, self.inverse_data_permutations = get_permutations(self.data.get_bucket_counts())
-
-        self.data = self.data.permute(self.data_permutations)
+        if not self.no_permute:
+            self.data_permutations, self.inverse_data_permutations = get_permutations(self.data.get_bucket_counts())
+            self.data = self.data.permute(self.data_permutations)
 
     def iter_next(self) -> bool:
         """

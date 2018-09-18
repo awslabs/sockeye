@@ -222,10 +222,11 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                  validation_sources: Optional[List[str]] = None,
                                  validation_target: Optional[str] = None,
                                  output_folder: Optional[str] = None,
-                                 fill_up: str = C.DEFAULT_FILL_UP_STRATEGY) -> Tuple['data_io.BaseParallelSampleIter',
-                                                                                     'data_io.BaseParallelSampleIter',
-                                                                                     'data_io.DataConfig',
-                                                                                     List[vocab.Vocab], vocab.Vocab]:
+                                 fill_up: str = C.DEFAULT_FILL_UP_STRATEGY,
+                                 no_permute: bool = False) -> Tuple['data_io.BaseParallelSampleIter',
+                                                                    'data_io.BaseParallelSampleIter',
+                                                                    'data_io.DataConfig',
+                                                                    List[vocab.Vocab], vocab.Vocab]:
     """
     Create the data iterators and the vocabularies.
 
@@ -337,6 +338,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_by_words=batch_by_words,
             batch_num_devices=batch_num_devices,
             fill_up=fill_up,
+            no_permute=no_permute,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,

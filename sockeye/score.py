@@ -121,7 +121,8 @@ def score(args: argparse.Namespace):
             shared_vocab=args.shared_vocab,
             resume_training=True,
             output_folder=args.model,
-            fill_up='repeat_last')
+            fill_up='zeros',
+            no_permute=True)
 
         max_seq_len_source = config_data.max_seq_len_source
         max_seq_len_target = config_data.max_seq_len_target
