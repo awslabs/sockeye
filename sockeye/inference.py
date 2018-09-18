@@ -1306,10 +1306,8 @@ class Translator:
         attention_matrix = translation.attention_matrix
 
         target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
-        target_string = data_io.ids2tokens(target_ids, self.vocab_target_inv, self.strip_ids)
+        target_string = C.TOKEN_SEPARATOR.join(data_io.ids2tokens(target_ids, self.vocab_target_inv, self.strip_ids))
 
-        target_string = C.TOKEN_SEPARATOR.join(
-            tok for target_id, tok in zip(target_ids, target_tokens) if target_id not in self.strip_ids)
         attention_matrix = attention_matrix[:, :len(trans_input.tokens)]
 
         return TranslatorOutput(sentence_id=trans_input.sentence_id,

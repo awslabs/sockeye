@@ -221,7 +221,7 @@ class Scorer:
             probs = mx.nd.pick(outputs, labels)
             ones = mx.nd.ones_like(probs)
             lengths = mx.nd.sum(labels != 0, axis=1) - 1
-            logs = -mx.nd.log(mx.nd.where(labels != 0, probs, ones))
+            logs = -1 * mx.nd.log(mx.nd.where(labels != 0, probs, ones))
             # print('LOGS', logs)
             # print('LENS', lengths)
             sums = mx.nd.sum(logs, axis=1) / self.length_penalty(lengths)

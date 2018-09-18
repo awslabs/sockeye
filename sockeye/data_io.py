@@ -23,7 +23,7 @@ import random
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from contextlib import ExitStack
-from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sequence, Sized, Tuple
+from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sequence, Sized, Tuple, Set
 
 import mxnet as mx
 import numpy as np
@@ -1026,8 +1026,8 @@ def ids2strids(ids: Iterable[int]) -> str:
 
 
 def ids2tokens(token_ids: Iterable[int],
-               vocab_inv: vocab.Vocab,
-               exclude_list: List[int] = []) -> List[str]:
+               vocab_inv: Dict[int, str],
+               exclude_list: Set[int] = set()) -> List[str]:
     """
     Transforms a list of token IDs into a list of words, exluding any IDs in `exclude_list`.
 
