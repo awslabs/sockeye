@@ -26,7 +26,7 @@ from . import log
 from . import utils
 from . import arguments
 from . import constants as C
-from contrib import sacrebleu
+from sockeye_contrib import sacrebleu
 
 logger = log.setup_main_logger(__name__, console=True, file_logging=False)
 

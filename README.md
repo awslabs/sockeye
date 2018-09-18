@@ -133,7 +133,7 @@ For example *sockeye-train* can also be invoked as
 
 ## First Steps
 
-For easily training popular model types on known data sets, see the [Sockeye Autopilot documentation](https://github.com/awslabs/sockeye/tree/master/contrib/autopilot).
+For easily training popular model types on known data sets, see the [Sockeye Autopilot documentation](https://github.com/awslabs/sockeye/tree/master/sockeye_contrib/autopilot).
 For manually training and running translation models on your data, read on.
 
 ### Train

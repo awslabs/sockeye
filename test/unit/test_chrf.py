@@ -15,7 +15,7 @@
 
 import pytest
 
-from contrib import sacrebleu
+from sockeye_contrib import sacrebleu
 
 EPSILON = 1e-8
 
