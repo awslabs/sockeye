@@ -55,6 +55,7 @@ class InferenceModel(model.SockeyeModel):
     :param decoder_return_logit_inputs: Decoder returns inputs to logit computation instead of softmax over target
                                         vocabulary.  Used when logits/softmax are handled separately.
     :param cache_output_layer_w_b: Cache weights and biases for logit computation.
+    :param skip_softmax: If True, does not compute softmax for greedy decoding.
     """
 
     def __init__(self,
@@ -67,18 +68,22 @@ class InferenceModel(model.SockeyeModel):
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  decoder_return_logit_inputs: bool = False,
                  cache_output_layer_w_b: bool = False,
-                 forced_max_output_len: Optional[int] = None) -> None:
+                 forced_max_output_len: Optional[int] = None,
+                 skip_softmax: bool = False) -> None:
         super().__init__(config)
         self.params_fname = params_fname
         self.context = context
         self.beam_size = beam_size
         utils.check_condition(beam_size < self.config.vocab_target_size,
                               'The beam size must be smaller than the target vocabulary size.')
+        if skip_softmax:
+            assert beam_size == 1, 'Skipping softmax does not have any effect for beam size > 1'
         self.batch_size = batch_size
         self.softmax_temperature = softmax_temperature
         self.max_input_length, self.get_max_output_length = models_max_input_output_length([self],
                                                                                            max_output_length_num_stds,
                                                                                            forced_max_output_len=forced_max_output_len)
+        self.skip_softmax = skip_softmax
 
         self.encoder_module = None  # type: Optional[mx.mod.BucketingModule]
         self.encoder_default_bucket_key = None  # type: Optional[int]
@@ -236,7 +241,11 @@ class InferenceModel(model.SockeyeModel):
                 logits = self.output_layer(target_decoded)
                 if self.softmax_temperature is not None:
                     logits = logits / self.softmax_temperature
-                outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
+                if self.skip_softmax:
+                    # skip softmax for greedy decoding
+                    outputs = logits
+                else:
+                    outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
 
             data_names = [C.TARGET_NAME] + state_names
             label_names = []  # type: List[str]
@@ -394,6 +403,14 @@ def load_models(context: mx.context.Context,
     if checkpoints is None:
         checkpoints = [None] * len(model_folders)
 
+    # skip softmax for a single model,
+    if len(model_folders) == 1 and beam_size == 1:
+        skip_softmax = True
+        logger.info("Enabled skipping softmax for a single model and greedy decoding.")
+    else:
+        # but not for an ensemble or beam search
+        skip_softmax = False
+
     for model_folder, checkpoint in zip(model_folders, checkpoints):
         model_source_vocabs = vocab.load_source_vocabs(model_folder)
         model_target_vocab = vocab.load_target_vocab(model_folder)
@@ -420,12 +437,15 @@ def load_models(context: mx.context.Context,
                                          batch_size=batch_size,
                                          softmax_temperature=softmax_temperature,
                                          decoder_return_logit_inputs=decoder_return_logit_inputs,
-                                         cache_output_layer_w_b=cache_output_layer_w_b)
+                                         cache_output_layer_w_b=cache_output_layer_w_b,
+                                         skip_softmax=skip_softmax)
         utils.check_condition(inference_model.num_source_factors == len(model_source_vocabs),
                               "Number of loaded source vocabularies (%d) does not match "
                               "number of source factors for model '%s' (%d)" % (len(model_source_vocabs), model_folder,
                                                                                 inference_model.num_source_factors))
         models.append(inference_model)
+
+
 
     utils.check_condition(vocab.are_identical(*target_vocabs), "Target vocabulary ids do not match")
     first_model_vocabs = source_vocabs[0]
@@ -966,6 +986,7 @@ class Translator:
     :param avoid_list: Global list of phrases to exclude from the output.
     :param store_beam: If True, store the beam search history and return it in the TranslatorOutput.
     :param strip_unknown_words: If True, removes any <unk> symbols from outputs.
+    :param skip_topk: If True, uses argmax instead of topk for greedy decoding.
     """
 
     def __init__(self,
@@ -981,7 +1002,8 @@ class Translator:
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
                  avoid_list: Optional[str] = None,
                  store_beam: bool = False,
-                 strip_unknown_words: bool = False) -> None:
+                 strip_unknown_words: bool = False,
+                 skip_topk: bool = False) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
@@ -1005,6 +1027,12 @@ class Translator:
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
         self.batch_size = self.models[0].batch_size
+        # skip softmax for a single model, but not for an ensemble
+        self.skip_softmax = self.models[0].skip_softmax
+        if self.skip_softmax:
+            utils.check_condition(len(self.models) == 1 and self.beam_size == 1, "Skipping softmax cannot be enabled for several models, or a beam size > 1.")
+
+        self.skip_topk = skip_topk
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         self._max_input_length = self.models[0].max_input_length
         if bucket_source_width > 0:
@@ -1027,11 +1055,15 @@ class Translator:
         self._update_scores.hybridize()
 
         # topk function used in beam search
-        self._topk = partial(utils.topk,
-                             k=self.beam_size,
-                             batch_size=self.batch_size,
-                             offset=self.offset,
-                             use_mxnet_topk=self.context != mx.cpu())  # MXNet implementation is faster on GPUs
+        if self.skip_topk:
+            self._top = partial(utils.top1,
+                                offset=self.offset)
+        else:
+            self._top = partial(utils.topk,
+                                k=self.beam_size,
+                                batch_size=self.batch_size,
+                                offset=self.offset,
+                                use_mxnet_topk=self.context != mx.cpu())  # MXNet implementation is faster on GPUs
 
         self._sort_by_index = SortByIndex()
         self._sort_by_index.initialize(ctx=self.context)
@@ -1353,9 +1385,14 @@ class Translator:
             # Compute logits and softmax with restricted vocabulary
             if self.restrict_lexicon:
                 logits = model.output_layer(decoder_outputs, out_w, out_b)
-                probs = mx.nd.softmax(logits)
+                if self.skip_softmax:
+                    # skip softmax for greedy decoding and single model
+                    probs = logits
+                else:
+                    probs = mx.nd.softmax(logits)
             else:
-                # Otherwise decoder outputs are already target vocab probs
+                # Otherwise decoder outputs are already target vocab probs,
+                # or logits if beam size is 1
                 probs = decoder_outputs
             model_probs.append(probs)
             model_attention_probs.append(attention_probs)
@@ -1378,10 +1415,13 @@ class Translator:
 
         # combine model predictions and convert to neg log probs
         if len(self.models) == 1:
-            neg_logprobs = -mx.nd.log(probs[0])  # pylint: disable=invalid-unary-operand-type
+            if self.skip_softmax:
+                neg_probs = -probs[0]
+            else:
+                neg_probs = -mx.nd.log(probs[0])  # pylint: disable=invalid-unary-operand-type
         else:
-            neg_logprobs = self.interpolation_func(probs)
-        return neg_logprobs, attention_prob_score
+            neg_probs = self.interpolation_func(probs)
+        return neg_probs, attention_prob_score
 
     def _beam_search(self,
                      source: mx.nd.NDArray,
@@ -1526,7 +1566,7 @@ class Translator:
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
-            best_hyp_indices, best_word_indices, scores_accumulated = self._topk(scores)
+            best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores)
 
             # Constraints for constrained decoding are processed sentence by sentence
             if any(raw_constraint_list):

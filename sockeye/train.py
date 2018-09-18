@@ -312,7 +312,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 
         else:
             # Load or create vocabs
-            source_vocab_paths = [args.source_vocab] + [None] * len(args.source_factors)
+            source_factor_vocab_paths = [args.source_factor_vocabs[i] if i < len(args.source_factor_vocabs)
+                                         else None for i in range(len(args.source_factors))]
+            source_vocab_paths = [args.source_vocab] + source_factor_vocab_paths
             target_vocab_path = args.target_vocab
             source_vocabs, target_vocab = vocab.load_or_create_vocabs(
                 source_paths=[args.source] + args.source_factors,

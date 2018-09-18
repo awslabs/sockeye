@@ -489,6 +489,12 @@ def add_vocab_args(params):
                         required=False,
                         default=None,
                         help='Existing target vocabulary (JSON).')
+    params.add_argument('--source-factor-vocabs',
+                        required=False,
+                        nargs='+',
+                        type=regular_file(),
+                        default=[],
+                        help='Existing source factor vocabulary (-ies) (JSON).')
     params.add_argument(C.VOCAB_ARG_SHARED_VOCAB,
                         action='store_true',
                         default=False,
@@ -1183,6 +1189,11 @@ def add_inference_args(params):
                                     ' Default: %d without batching '
                                     'and %d * batch_size with batching.' % (C.CHUNK_SIZE_NO_BATCHING,
                                                                             C.CHUNK_SIZE_PER_BATCH_SEGMENT))
+    decode_params.add_argument('--skip-topk',
+                               default=False,
+                               action='store_true',
+                               help='Use argmax instead of topk for greedy decoding (when --beam-size 1).'
+                                    'Default: %(default)s.')
     decode_params.add_argument('--ensemble-mode',
                                type=str,
                                default='linear',
