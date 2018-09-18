@@ -1289,29 +1289,26 @@ class ParallelDataSet(Sized):
                     desired_indices_np = rs.randint(num_samples, size=rest)
                     desired_indices = mx.nd.array(desired_indices_np)
 
-                    if isinstance(source[bucket_idx], np.ndarray):
-                        source[bucket_idx] = np.concatenate((bucket_source, bucket_source.take(desired_indices_np)), axis=0)
-                    else:
-                        source[bucket_idx] = mx.nd.concat(bucket_source, bucket_source.take(desired_indices), dim=0)
-
-                    target[bucket_idx] = mx.nd.concat(bucket_target, bucket_target.take(desired_indices), dim=0)
-                    label[bucket_idx] = mx.nd.concat(bucket_label, bucket_label.take(desired_indices), dim=0)
-
                 elif fill_up == 'zeros':
                     logger.info("Filling bucket %s from size %d to %d by repeating the last element %d %s",
                                 bucket, num_samples, bucket_batch_size, rest, inflect('time', rest))
                     desired_indices_np = np.array([num_samples-1] * rest)
                     desired_indices = mx.nd.array(desired_indices_np)
 
-                    zeros_source = mx.nd.zeros_like(bucket_source[0, :, :]).expand_dims(axis=0)
-                    zeros_target = mx.nd.zeros_like(bucket_target[0, :]).expand_dims(axis=0)
-                    zeros_label = mx.nd.zeros_like(bucket_label[0, :]).expand_dims(axis=0)
-
-                    source[bucket_idx] = mx.nd.concat(bucket_source, mx.nd.repeat(zeros_source, repeats=rest, axis=0), dim=0)
-                    target[bucket_idx] = mx.nd.concat(bucket_target, mx.nd.repeat(zeros_target, repeats=rest, axis=0), dim=0)
-                    label[bucket_idx] = mx.nd.concat(bucket_label, mx.nd.repeat(zeros_label, repeats=rest, axis=0), dim=0)
                 else:
                     raise NotImplementedError('Unknown fill-up strategy')
+
+                if isinstance(source[bucket_idx], np.ndarray):
+                    source[bucket_idx] = np.concatenate((bucket_source, bucket_source.take(desired_indices_np)), axis=0)
+                else:
+                    source[bucket_idx] = mx.nd.concat(bucket_source, bucket_source.take(desired_indices), dim=0)
+                target[bucket_idx] = mx.nd.concat(bucket_target, bucket_target.take(desired_indices), dim=0)
+                label[bucket_idx] = mx.nd.concat(bucket_label, bucket_label.take(desired_indices), dim=0)
+
+                if fill_up == 'zeros':
+                    source[bucket_idx][num_samples:,:,:] = 0
+                    target[bucket_idx][num_samples:,:] = 0
+                    label[bucket_idx][num_samples:,:] = 0
 
         return ParallelDataSet(source, target, label)
 

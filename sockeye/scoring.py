@@ -209,7 +209,7 @@ class Scorer:
         for i, batch in enumerate(score_iter):
             # data_io generates labels, too, which we don't need
             label, batch.provide_label = batch.provide_label, None
-            labels = batch.label[0]
+            labels = batch.label[0].as_in_context(self.model.context[0])
             self.model.prepare_batch(batch)
             self.model.run_forward(batch)
             outputs = self.model.get_outputs()
@@ -217,15 +217,11 @@ class Scorer:
             batch_size, target_seq_len, _ = batch.provide_data[0][1]
             outputs = mx.nd.reshape(data=outputs[0], shape=(-4, batch_size, target_seq_len, -2))
 
-            # print('BATCH SOURCE', batch.data[0])
             probs = mx.nd.pick(outputs, labels)
-            ones = mx.nd.ones_like(probs)
+            ones = mx.nd.ones_like(probs, ctx=self.model.context)
             lengths = mx.nd.sum(labels != 0, axis=1) - 1
-            logs = -1 * mx.nd.log(mx.nd.where(labels != 0, probs, ones))
-            # print('LOGS', logs)
-            # print('LENS', lengths)
+            logs = -1 * mx.nd.log(mx.nd.where(labels != 0, probs, ones, ctx=self.model.context), ctx=self.model.context)
             sums = mx.nd.sum(logs, axis=1) / self.length_penalty(lengths)
-            # print('SUMS', sums)
             sums = sums.asnumpy().tolist()
             for source, score in zip(batch.data[0], sums):
                 if source[0] == 0:
@@ -236,4 +232,4 @@ class Scorer:
                     data_io.ids2tokens(source_ids, self.source_vocab_inv, self.exclude_list))
 
 #                input_string = [self.vocab_source_inv[token] for token in source]
-                print('{:.3f} {}'.format(score, source_string))
+                print('{:.3f}\t{}'.format(score, source_string))
