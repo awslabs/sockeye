@@ -62,9 +62,11 @@ class ScoringModel(model.SockeyeModel):
                  model_dir: str,
                  context: List[mx.context.Context],
                  provide_data: List[mx.io.DataDesc],
+                 bucketing: bool,
                  default_bucket_key: Tuple[int, int]) -> None:
         super().__init__(config)
         self.context = context
+        self.bucketing = bucketing
         self._initialize(provide_data, default_bucket_key)
 
         params_fname = os.path.join(model_dir, C.PARAMS_BEST_NAME)
@@ -134,16 +136,24 @@ class ScoringModel(model.SockeyeModel):
             # return the outputs and the data names (we don't need the labels)
             return outputs, data_names, None
 
-        logger.info("Using bucketing. Default max_seq_len=%s", default_bucket_key)
-        self.module = mx.mod.BucketingModule(sym_gen=sym_gen,
-                                             logger=logger,
-                                             default_bucket_key=default_bucket_key,
-                                             context=self.context)
+        if self.bucketing:
+            logger.info("Using bucketing. Default max_seq_len=%s", default_bucket_key)
+            self.module = mx.mod.BucketingModule(sym_gen=sym_gen,
+                                                 logger=logger,
+                                                 default_bucket_key=default_bucket_key,
+                                                 context=self.context)
+        else:
+            symbol, _, __ = sym_gen(default_bucket_key)
+            self.module = mx.mod.Module(symbol=symbol,
+                                        data_names=data_names,
+                                        label_names=None,
+                                        logger=logger,
+                                        context=self.context)
 
         self.module.bind(data_shapes=provide_data,
                          label_shapes=None,
                          for_training=False,
-                         force_rebind=True,
+                         force_rebind=False,
                          grad_req=None)
 
 
@@ -207,9 +217,10 @@ class Scorer:
               score_iter):
 
         for i, batch in enumerate(score_iter):
-            # data_io generates labels, too, which we don't need
-            label, batch.provide_label = batch.provide_label, None
+            # data_io generates labels, too, which aren't needed in the computation graph
+            batch.provide_label = None
             labels = batch.label[0].as_in_context(self.model.context[0])
+            batch.label = None
             self.model.prepare_batch(batch)
             self.model.run_forward(batch)
             outputs = self.model.get_outputs()

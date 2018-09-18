@@ -61,7 +61,8 @@ def check_arg_compatibility(args: argparse.Namespace):
 def create_scoring_model(config: model.ModelConfig,
                          model_dir: str,
                          context: List[mx.Context],
-                         score_iter: data_io.BaseParallelSampleIter) -> scoring.ScoringModel:
+                         score_iter: data_io.BaseParallelSampleIter,
+                         bucketing: bool = False) -> scoring.ScoringModel:
     """
     Create a scoring model and load the parameters from disk if needed.
 
@@ -76,7 +77,8 @@ s    :return: The training model.
                                          model_dir=model_dir,
                                          context=context,
                                          provide_data=score_iter.provide_data,
-                                         default_bucket_key=score_iter.default_bucket_key)
+                                         default_bucket_key=score_iter.default_bucket_key,
+                                         bucketing=bucketing)
 
     return scoring_model
 
@@ -132,6 +134,7 @@ def score(args: argparse.Namespace):
         scoring_model = create_scoring_model(config=model_config,
                                              model_dir=args.model,
                                              context=context,
+                                             bucketing=not args.no_bucketing,
                                              score_iter=score_iter)
 
         scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab,
