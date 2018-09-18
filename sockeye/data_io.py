@@ -1024,6 +1024,22 @@ def ids2strids(ids: Iterable[int]) -> str:
     return " ".join(map(str, ids))
 
 
+def ids2tokens(token_ids: Iterable[int],
+               vocab_inv: vocab.Vocab,
+               exclude_list: List[int] = []) -> List[str]:
+    """
+    Transforms a list of token IDs into a list of words, exluding any IDs in `exclude_list`.
+
+    :param token_ids: The list of token IDs.
+    :param vocab_inv: The inverse vocabulary.
+    :param exclude_list: The list of token IDs to exclude.
+    :return: The list of words.
+"""
+
+    tokens = [vocab_inv[token] for token in token_ids]
+    return [tok for token_id, tok in zip(token_ids, tokens) if token_id not in exclude_list]
+
+
 class SequenceReader(Iterable):
     """
     Reads sequence samples from path and (optionally) creates integer id sequences.

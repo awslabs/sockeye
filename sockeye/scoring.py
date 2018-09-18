@@ -196,8 +196,12 @@ class Scorer:
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
                  length_penalty: Optional[inference.LengthPenalty] = None) -> None:
+        self.source_vocab_inv = vocab.reverse_vocab(source_vocabs[0])
+        self.target_vocab_inv = vocab.reverse_vocab(target_vocab)
         self.model = model
         self.length_penalty = length_penalty
+
+        self.exclude_list = [source_vocabs[0][C.BOS_SYMBOL], target_vocab[C.EOS_SYMBOL], C.PAD_ID]
 
     def score(self,
               score_iter):
@@ -222,5 +226,13 @@ class Scorer:
             sums = mx.nd.sum(logs, axis=1) / self.length_penalty(lengths)
             # print('SUMS', sums)
             sums = sums.asnumpy().tolist()
-            for s in sums:
-                print('{:.3f}'.format(s))
+            for source, score in zip(batch.data[0], sums):
+                if source[0] == 0:
+                    break
+
+                source_ids = [int(x) for x in source[:, 0].asnumpy().tolist()]
+                source_string = C.TOKEN_SEPARATOR.join(
+                    data_io.ids2tokens(source_ids, self.source_vocab_inv, self.exclude_list))
+
+#                input_string = [self.vocab_source_inv[token] for token in source]
+                print('{:.3f} {}'.format(score, source_string))
