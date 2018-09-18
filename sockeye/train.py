@@ -272,10 +272,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             fill_up=fill_up,
             no_permute=no_permute)
 
-        check_condition(len(source_vocabs) == len(args.source_factors_num_embed) + 1,
-                        "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
-                            len(source_vocabs), len(args.source_factors_num_embed) + 1))
-
         if resume_training:
             # resuming training. Making sure the vocabs in the model and in the prepared data match up
             model_source_vocabs = vocab.load_source_vocabs(output_folder)
@@ -327,11 +323,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 word_min_count_source=word_min_count_source,
                 word_min_count_target=word_min_count_target,
                 pad_to_multiple_of=args.pad_vocab_to_multiple_of)
-
-
-        check_condition(len(args.source_factors) == len(args.source_factors_num_embed),
-                        "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (
-                            len(args.source_factors), len(args.source_factors_num_embed)))
 
         sources = [args.source] + args.source_factors
         sources = [str(os.path.abspath(source)) for source in sources]
@@ -824,6 +815,10 @@ def train(args: argparse.Namespace):
             fill_up=args.fill_up)
         max_seq_len_source = config_data.max_seq_len_source
         max_seq_len_target = config_data.max_seq_len_target
+
+        check_condition(len(source_vocabs) == len(args.source_factors_num_embed) + 1,
+                        "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
+                            len(source_vocabs), len(args.source_factors_num_embed) + 1))
 
         if data_info is not None:
             data_info_fname = os.path.join(output_folder, C.DATA_INFO)
