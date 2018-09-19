@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.56]
+### Added
+- Added `sockeye.score` CLI for quickly scoring existing translations ([documentation](tutorials/scoring.md)).
+
 ## [1.18.55]
 ### Changed
 - Renamed `contrib` to less-generic `sockeye_contrib`
