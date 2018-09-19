@@ -214,8 +214,11 @@ class Scorer:
         self.exclude_list = [source_vocabs[0][C.BOS_SYMBOL], target_vocab[C.EOS_SYMBOL], C.PAD_ID]
 
     def score(self,
-              score_iter):
+              score_iter,
+              score_type: str,
+              output: List[str]):
 
+        sentence_no = 0
         for i, batch in enumerate(score_iter):
             # data_io generates labels, too, which aren't needed in the computation graph
             batch.provide_label = None
@@ -231,16 +234,37 @@ class Scorer:
             probs = mx.nd.pick(outputs, labels)
             ones = mx.nd.ones_like(probs, ctx=self.model.context)
             lengths = mx.nd.sum(labels != 0, axis=1) - 1
-            logs = -1 * mx.nd.log(mx.nd.where(labels != 0, probs, ones, ctx=self.model.context), ctx=self.model.context)
-            sums = mx.nd.sum(logs, axis=1) / self.length_penalty(lengths)
+
+            scores = mx.nd.log(mx.nd.where(labels != 0, probs, ones, ctx=self.model.context), ctx=self.model.context)
+            if score_type == C.SCORING_TYPE_NEGLOGPROB:
+                scores = -1 * scores
+            sums = mx.nd.sum(scores, axis=1) / self.length_penalty(lengths)
             sums = sums.asnumpy().tolist()
-            for source, score in zip(batch.data[0], sums):
+            for source, target, score in zip(batch.data[0], batch.data[1], sums):
+
+                # The "zeros" padding method will have filled remainder batches with zeros, so we can skip them here
                 if source[0] == 0:
                     break
 
-                source_ids = [int(x) for x in source[:, 0].asnumpy().tolist()]
-                source_string = C.TOKEN_SEPARATOR.join(
-                    data_io.ids2tokens(source_ids, self.source_vocab_inv, self.exclude_list))
+                sentence_no += 1
 
-#                input_string = [self.vocab_source_inv[token] for token in source]
-                print('{:.3f}\t{}'.format(score, source_string))
+                outputs = []
+                for output_type in output:
+                    if output_type == C.SCORING_OUTPUT_ID:
+                        outputs.append(sentence_no)
+                    elif output_type == C.SCORING_OUTPUT_SOURCE:
+                        source_ids = [int(x) for x in source[:, 0].asnumpy().tolist()]
+                        source_string = C.TOKEN_SEPARATOR.join(
+                            data_io.ids2tokens(source_ids, self.source_vocab_inv, self.exclude_list))
+                        outputs.append(source_string)
+                    elif output_type == C.SCORING_OUTPUT_TARGET:
+                        target_ids = [int(x) for x in target.asnumpy().tolist()]
+                        target_string = C.TOKEN_SEPARATOR.join(
+                            data_io.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
+                        outputs.append(target_string)
+                    elif output_type == C.SCORING_OUTPUT_SCORE:
+                        outputs.append(score)
+                    else:
+                        outputs.append(C.SCORING_OUTPUT_UNKNOWN)
+
+                print(*outputs, sep='\t')

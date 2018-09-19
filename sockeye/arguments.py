@@ -778,13 +778,6 @@ def add_batch_args(params, default_batch_size=4096):
                              "number of sentences varies. Default: %(default)s.")
 
 
-
-def add_scoring_args(params):
-    scoring_params = params.add_argument_group("Scoring parameters")
-
-    add_batch_args(scoring_params, default_batch_size=500)
-
-
 def add_training_args(params):
     train_params = params.add_argument_group("Training parameters")
 
@@ -1089,11 +1082,12 @@ def add_score_cli_args(params):
     add_training_data_args(params, required=False)
     add_prepared_data_args(params)
     add_vocab_args(params)
-    add_scoring_args(params)
     add_device_args(params)
     add_logging_args(params)
+    add_batch_args(params, default_batch_size=500)
 
     params = params.add_argument_group("Scoring parameters")
+
     params.add_argument("--model", "-m", required=True,
                         help="Model directory containing trained model.")
 
@@ -1108,6 +1102,15 @@ def add_score_cli_args(params):
                         type=float,
                         help='Beta factor for the length penalty used in beam search: '
                         '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
+    params.add_argument('--output',
+                        nargs='+',
+                        choices=C.SCORING_OUTPUT_CHOICES,
+                        default=[C.SCORING_OUTPUT_DEFAULT],
+                        help='Fields to output for each input pair (tab-delimited). Default: %(default)s')
+    params.add_argument('--score-type',
+                        choices=C.SCORING_TYPE_CHOICES,
+                        default=C.SCORING_TYPE_DEFAULT,
+                        help='Score type to output. Default: %(default)s')
 
 def add_max_output_cli_args(params):
     params.add_argument('--max-output-length',

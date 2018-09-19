@@ -135,7 +135,7 @@ def score(args: argparse.Namespace):
                                 length_penalty=inference.LengthPenalty(alpha=args.length_penalty_alpha,
                                                                        beta=args.length_penalty_beta))
 
-        scorer.score(score_iter=score_iter)
+        scorer.score(score_iter=score_iter, score_type=args.score_type, output=args.output)
 
 if __name__ == "__main__":
     main()
