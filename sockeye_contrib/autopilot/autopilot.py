@@ -468,7 +468,7 @@ def call_sacrebleu(input_fname: str, ref_fname: str, output_fname: str, log_fnam
     # Assemble command
     command = [sys.executable,
                "-m",
-               "sockye_contrib.sacrebleu.sacrebleu",
+               "sockeye_contrib.sacrebleu.sacrebleu",
                "--score-only",
                "--input={}".format(input_fname),
                ref_fname]
