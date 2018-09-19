@@ -1,4 +1,4 @@
-# Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -11,7 +11,4 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-from contrib.autopilot import autopilot
-from contrib.autopilot import tasks
-from contrib.autopilot import models
-from contrib.autopilot import third_party
+from sockeye_contrib.sacrebleu.sacrebleu import raw_corpus_bleu, compute_bleu, corpus_chrf, CHRF_ORDER, CHRF_BETA, sentence_bleu, sentence_chrf

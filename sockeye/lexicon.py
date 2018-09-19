@@ -241,8 +241,8 @@ def main():
     subparams = params.add_subparsers(title="Commands")
 
     params_create = subparams.add_parser('create', description="Create top-k lexicon for use during decoding. "
-                                                               "See contrib/fast_align/README.md for information "
-                                                               "on creating input lexical tables.")
+                                                               "See sockeye_contrib/fast_align/README.md "
+                                                               "for information on creating input lexical tables.")
     arguments.add_lexicon_args(params_create)
     arguments.add_lexicon_create_args(params_create)
     arguments.add_logging_args(params_create)
