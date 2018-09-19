@@ -760,10 +760,10 @@ def add_model_parameters(params):
                                    "(and all convolutional weight matrices for CNN decoders). Default: %(default)s.")
 
 
-def add_batch_args(params):
+def add_batch_args(params, default_batch_size=4096):
     params.add_argument('--batch-size', '-b',
                         type=int_greater_or_equal(1),
-                        default=4096,
+                        default=default_batch_size,
                         help='Mini-batch size. Note that depending on the batch-type this either refers to '
                              'words or sentences.'
                              'Sentence: each batch contains X sentences, number of words varies. '
@@ -782,7 +782,7 @@ def add_batch_args(params):
 def add_scoring_args(params):
     scoring_params = params.add_argument_group("Scoring parameters")
 
-    add_batch_args(scoring_params)
+    add_batch_args(scoring_params, default_batch_size=500)
 
 
 def add_training_args(params):
