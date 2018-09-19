@@ -222,6 +222,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                  validation_sources: Optional[List[str]] = None,
                                  validation_target: Optional[str] = None,
                                  output_folder: Optional[str] = None,
+                                 bucketing: bool = True,
+                                 bucket_width: int = 10,
                                  fill_up: str = C.DEFAULT_FILL_UP_STRATEGY,
                                  no_permute: bool = False) -> Tuple['data_io.BaseParallelSampleIter',
                                                                     'data_io.BaseParallelSampleIter',
@@ -349,8 +351,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             no_permute=no_permute,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
-            bucketing=not args.no_bucketing,
-            bucket_width=args.bucket_width)
+            bucketing=bucketing,
+            bucket_width=bucket_width)
 
         return train_iter, validation_iter, config_data, source_vocabs, target_vocab, data_info
 
@@ -812,6 +814,8 @@ def train(args: argparse.Namespace):
             validation_sources=[args.validation_source] + args.validation_source_factors,
             validation_target=args.validation_target,
             output_folder=output_folder,
+            bucketing=not args.no_bucketing,
+            bucket_width=args.bucket_width,
             fill_up=args.fill_up)
         max_seq_len_source = config_data.max_seq_len_source
         max_seq_len_target = config_data.max_seq_len_target

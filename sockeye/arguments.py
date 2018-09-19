@@ -1089,7 +1089,6 @@ def add_score_cli_args(params):
     add_training_data_args(params, required=False)
     add_prepared_data_args(params)
     add_vocab_args(params)
-    add_bucketing_args(params)
     add_scoring_args(params)
     add_device_args(params)
     add_logging_args(params)

@@ -78,7 +78,7 @@ s    :return: The training model.
                                          context=context,
                                          provide_data=score_iter.provide_data,
                                          default_bucket_key=score_iter.default_bucket_key,
-                                         bucketing=bucketing)
+                                         bucketing=False)
 
     return scoring_model
 
@@ -97,13 +97,6 @@ def score(args: argparse.Namespace):
 
     utils.log_basic_info(args)
 
-    max_seq_len_source, max_seq_len_target = args.max_seq_len
-    # The maximum length is the length before we add the BOS/EOS symbols
-    max_seq_len_source = max_seq_len_source + C.SPACE_FOR_XOS
-    max_seq_len_target = max_seq_len_target + C.SPACE_FOR_XOS
-    logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
-                max_seq_len_source, max_seq_len_target)
-
     with ExitStack() as exit_stack:
         context = utils.determine_context(device_ids=args.device_ids,
                                           use_cpu=args.use_cpu,
@@ -116,6 +109,10 @@ def score(args: argparse.Namespace):
                                                                  "size that is a multiple of %d." % len(context))
         logger.info("Scoring Device(s): %s", ", ".join(str(c) for c in context))
 
+        model_config = model.SockeyeModel.load_config(os.path.join(args.model, C.CONFIG_NAME))
+        max_seq_len_source = model_config.config_data.max_seq_len_source
+        max_seq_len_target = model_config.config_data.max_seq_len_target
+
         score_iter, _, config_data, source_vocabs, target_vocab, data_info = train.create_data_iters_and_vocabs(
             args=args,
             max_seq_len_source=max_seq_len_source,
@@ -123,18 +120,15 @@ def score(args: argparse.Namespace):
             shared_vocab=args.shared_vocab,
             resume_training=True,
             output_folder=args.model,
+            bucketing=False,
             fill_up='zeros',
             no_permute=True)
 
-        max_seq_len_source = config_data.max_seq_len_source
-        max_seq_len_target = config_data.max_seq_len_target
-
-        model_config = model.SockeyeModel.load_config(os.path.join(args.model, C.CONFIG_NAME))
 
         scoring_model = create_scoring_model(config=model_config,
                                              model_dir=args.model,
                                              context=context,
-                                             bucketing=not args.no_bucketing,
+                                             bucketing=False,
                                              score_iter=score_iter)
 
         scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab,
