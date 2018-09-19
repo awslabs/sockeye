@@ -211,7 +211,7 @@ class Scorer:
         self.model = model
         self.length_penalty = length_penalty
 
-        self.exclude_list = [source_vocabs[0][C.BOS_SYMBOL], target_vocab[C.EOS_SYMBOL], C.PAD_ID]
+        self.exclude_list = set([source_vocabs[0][C.BOS_SYMBOL], target_vocab[C.EOS_SYMBOL], C.PAD_ID])
 
     def score(self,
               score_iter,
