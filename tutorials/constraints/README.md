@@ -55,6 +55,8 @@ For example:
 This will output tab-delimited pairs of (score, translation).
 As always, don't forget to apply source- and target-side preprocessing to your input and your constraint.
 
+However, it is probably better to use [Sockeye's scoring module](../scoring.md) directly, since it makes use of the training time computation graph and is therefore much faster.
+
 ## Negative constraints
 
 Negative constraints---phrases that must *not* appear in the output---are also supported.

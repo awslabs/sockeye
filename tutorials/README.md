@@ -17,3 +17,4 @@ introduce different concepts and parameters used for training and translation.
 1. [Domain adaptation of NMT models](adapt)
 1. [Decoding with lexical constraints](constraints)
 1. [Process per core translation](process_per_core_translation)
+1. [Scoring](scoring.md)
