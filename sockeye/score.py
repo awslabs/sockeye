@@ -31,6 +31,7 @@ from . import scoring
 from . import train
 from . import utils
 from .log import setup_main_logger
+from .output_handler import get_output_handler, OutputHandler
 from .utils import check_condition, log_basic_info
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
@@ -90,7 +91,9 @@ def score(args: argparse.Namespace):
 
         scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab)
 
-        scorer.score(score_iter=score_iter, score_type=args.score_type, output=args.output)
+        scorer.score(score_iter=score_iter,
+                     score_type=args.score_type,
+                     output_handler=get_output_handler(args.output_type))
 
 
 if __name__ == "__main__":

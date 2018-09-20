@@ -1102,11 +1102,10 @@ def add_score_cli_args(params):
                         type=float,
                         help='Beta factor for the length penalty used in beam search: '
                         '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
-    params.add_argument('--output',
-                        nargs='+',
-                        choices=C.SCORING_OUTPUT_CHOICES,
-                        default=[C.SCORING_OUTPUT_DEFAULT],
-                        help='Fields to output for each input pair (tab-delimited). Default: %(default)s')
+    params.add_argument('--output-type',
+                        default=C.OUTPUT_HANDLER_SCORE,
+                        choices=C.OUTPUT_HANDLERS_SCORING,
+                        help='Output type. Default: %(default)s.')
     params.add_argument('--score-type',
                         choices=C.SCORING_TYPE_CHOICES,
                         default=C.SCORING_TYPE_DEFAULT,
@@ -1145,7 +1144,7 @@ def add_inference_args(params):
                                     "Optionally, a list of factors can be provided: "
                                     "{'text': 'some input string', 'factors': ['C C C', 'X X X']}.")
 
-    decode_params.add_argument(C.INFERENCE_ARG_OUTPUT_LONG, C.INFERENCE_ARG_OUTPUT_SHORT,
+    decode_params.add_argument('--output', '-o',
                                default=None,
                                help='Output file to write translations to. '
                                     'If not given, will write to stdout.')

@@ -35,6 +35,9 @@ from . import model
 from . import utils
 from . import vocab
 
+from .output_handler import OutputHandler
+from .inference import TranslatorInput, TranslatorOutput
+
 logger = logging.getLogger(__name__)
 
 
@@ -236,13 +239,19 @@ class Scorer:
     def score(self,
               score_iter,
               score_type: str,
-              output: List[str]):
+              output_handler: OutputHandler):
 
+        tic = time.time()
         sentence_no = 0
         for i, batch in enumerate(score_iter):
 
+            batch_tic = time.time()
+
             self.model.run_forward(batch)
             scores, __ = self.model.get_outputs()
+
+            total_time = time.time() - tic
+            batch_time = time.time() - batch_tic
 
             for source, target, score in zip(batch.data[0], batch.data[1], scores):
 
@@ -252,25 +261,14 @@ class Scorer:
 
                 sentence_no += 1
 
+                # Transform arguments
+                source_ids = [int(x) for x in source[:, 0].asnumpy().tolist()]
+                source_tokens = data_io.ids2tokens(source_ids, self.source_vocab_inv, self.exclude_list)
+                target_ids = [int(x) for x in target.asnumpy().tolist()]
+                target_string = C.TOKEN_SEPARATOR.join(
+                    data_io.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
                 score = score.asscalar()
 
-                outputs = []  # type: List[str]
-                for output_type in output:
-                    if output_type == C.SCORING_OUTPUT_ID:
-                        outputs.append(str(sentence_no))
-                    elif output_type == C.SCORING_OUTPUT_SOURCE:
-                        source_ids = [int(x) for x in source[:, 0].asnumpy().tolist()]
-                        source_string = C.TOKEN_SEPARATOR.join(
-                            data_io.ids2tokens(source_ids, self.source_vocab_inv, self.exclude_list))
-                        outputs.append(source_string)
-                    elif output_type == C.SCORING_OUTPUT_TARGET:
-                        target_ids = [int(x) for x in target.asnumpy().tolist()]
-                        target_string = C.TOKEN_SEPARATOR.join(
-                            data_io.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
-                        outputs.append(target_string)
-                    elif output_type == C.SCORING_OUTPUT_SCORE:
-                        outputs.append(str(score))
-                    else:
-                        outputs.append(C.SCORING_OUTPUT_UNKNOWN)
-
-                print(*outputs, sep='\t')
+                output_handler.handle(TranslatorInput(sentence_no, source_tokens),
+                                      TranslatorOutput(sentence_no, target_string, None, None, score),
+                                      batch_time)
