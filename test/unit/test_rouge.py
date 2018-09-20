@@ -13,7 +13,7 @@
 
 import pytest
 
-from contrib import rouge
+from sockeye_contrib import rouge
 
 test_cases = [(["this is a test", "another test case"], ["this is a test case", "another test case"], 0.9444444394753087, 0.928571423622449, 0.9338624338620563),
               (["this is a single test case"], ["this is a single test case"], 0.999999995, 0.999999995, 0.9999999999995),
