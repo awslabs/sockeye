@@ -154,14 +154,6 @@ class ScoringModel(model.SockeyeModel):
                          grad_req=None)
 
 
-    def prepare_batch(self, batch: mx.io.DataBatch):
-        """
-        Pre-fetches the next mini-batch.
-
-        :param batch: The mini-batch to prepare.
-        """
-        self.module.prepare(batch)
-
     def run_forward(self, batch: mx.io.DataBatch):
         """
         Runs forward pass.
@@ -221,7 +213,6 @@ class Scorer:
             batch.provide_label = None
             labels = batch.label[0].as_in_context(self.model.context[0])
             batch.label = None
-            self.model.prepare_batch(batch)
             self.model.run_forward(batch)
             outputs = self.model.get_outputs()
 
