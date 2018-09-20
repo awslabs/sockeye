@@ -1280,7 +1280,7 @@ class ParallelDataSet(Sized):
 
             # Fill up the last batch according to the fill up policy.
             # 'replicate' randomly samples to populate the remaining spots.
-            # 'repeate_last' instead repeats the last element.
+            # 'zeros' instead repeats the last element and then writes zeros over everything.
             if num_samples % bucket_batch_size != 0:
                 rest = bucket_batch_size - num_samples % bucket_batch_size
                 if fill_up == 'replicate':
@@ -1306,9 +1306,9 @@ class ParallelDataSet(Sized):
                 label[bucket_idx] = mx.nd.concat(bucket_label, bucket_label.take(desired_indices), dim=0)
 
                 if fill_up == 'zeros':
-                    source[bucket_idx][num_samples:,:,:] = 0
-                    target[bucket_idx][num_samples:,:] = 0
-                    label[bucket_idx][num_samples:,:] = 0
+                    source[bucket_idx][num_samples:,:,:] = C.PAD_ID
+                    target[bucket_idx][num_samples:,:] = C.PAD_ID
+                    label[bucket_idx][num_samples:,:] = C.PAD_ID
 
         return ParallelDataSet(source, target, label)
 

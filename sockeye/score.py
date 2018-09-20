@@ -16,46 +16,25 @@ Simple Training CLI.
 """
 import argparse
 import os
-import shutil
 import sys
-import tempfile
 from contextlib import ExitStack
 from typing import Any, cast, Optional, Dict, List, Tuple
 
 import mxnet as mx
 
 from . import arguments
-from . import checkpoint_decoder
 from . import constants as C
-from . import convolution
-from . import coverage
 from . import data_io
-from . import decoder
-from . import encoder
 from . import inference
-from . import initializer
-from . import loss
-from . import lr_scheduler
 from . import model
-from . import rnn
-from . import rnn_attention
 from . import scoring
 from . import train
-from . import training
-from . import transformer
 from . import utils
-from . import vocab
-from .config import Config
 from .log import setup_main_logger
-from .optimizers import OptimizerConfig
 from .utils import check_condition, log_basic_info
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
 logger = setup_main_logger(__name__, file_logging=False, console=True)
-
-
-def check_arg_compatibility(args: argparse.Namespace):
-    pass
 
 
 def create_scoring_model(config: model.ModelConfig,
@@ -90,8 +69,6 @@ def main():
 
 
 def score(args: argparse.Namespace):
-    check_arg_compatibility(args)
-
     global logger
     logger = setup_main_logger(__name__, file_logging=False)
 
@@ -124,7 +101,6 @@ def score(args: argparse.Namespace):
             fill_up='zeros',
             no_permute=True)
 
-
         scoring_model = create_scoring_model(config=model_config,
                                              model_dir=args.model,
                                              context=context,
@@ -136,6 +112,7 @@ def score(args: argparse.Namespace):
                                                                        beta=args.length_penalty_beta))
 
         scorer.score(score_iter=score_iter, score_type=args.score_type, output=args.output)
+
 
 if __name__ == "__main__":
     main()
