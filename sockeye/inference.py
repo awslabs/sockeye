@@ -1052,32 +1052,46 @@ class Translator:
 
         self._update_scores = UpdateScores()
         self._update_scores.initialize(ctx=self.context)
-        self._update_scores.hybridize()
+        self._update_scores.hybridize(static_alloc=True, static_shape=True)
 
-        # topk function used in beam search
-        if self.skip_topk:
-            self._top = partial(utils.top1,
-                                offset=self.offset)
+        # Vocabulary selection leads to different vocabulary sizes across requests. Hence, we cannot use a
+        # statically-shaped HybridBlock for the topk operation in this case; resorting to imperative topk
+        # function in this case.
+        if self.restrict_lexicon:
+            if self.skip_topk:
+                self._top = partial(utils.top1, offset=self.offset)  # type: Callable
+            else:
+                self._top = partial(utils.topk,
+                                    k=self.beam_size,
+                                    offset=self.offset,
+                                    use_mxnet_topk=True)  # type: Callable
         else:
-            self._top = partial(utils.topk,
-                                k=self.beam_size,
-                                batch_size=self.batch_size,
-                                offset=self.offset,
-                                use_mxnet_topk=self.context != mx.cpu())  # MXNet implementation is faster on GPUs
+            if self.skip_topk:
+                self._top = Top1(k=self.beam_size,
+                                 batch_size=self.batch_size)  # type: mx.gluon.HybridBlock
+                self._top.initialize(ctx=self.context)
+                self._top.hybridize(static_alloc=True, static_shape=True)
+            else:
+                self._top = TopK(k=self.beam_size,
+                                 batch_size=self.batch_size,
+                                 vocab_size=len(self.vocab_target))  # type: mx.gluon.HybridBlock
+                self._top.initialize(ctx=self.context)
+                self._top.hybridize(static_alloc=True, static_shape=True)
 
         self._sort_by_index = SortByIndex()
         self._sort_by_index.initialize(ctx=self.context)
-        self._sort_by_index.hybridize()
+        self._sort_by_index.hybridize(static_alloc=True, static_shape=True)
 
         self._update_finished = NormalizeAndUpdateFinished(pad_id=C.PAD_ID,
                                                            eos_id=self.vocab_target[C.EOS_SYMBOL],
                                                            length_penalty_alpha=self.length_penalty.alpha,
                                                            length_penalty_beta=self.length_penalty.beta)
         self._update_finished.initialize(ctx=self.context)
-        self._update_finished.hybridize()
+        self._update_finished.hybridize(static_alloc=True, static_shape=True)
+
         self._prune_hyps = PruneHypotheses(threshold=self.beam_prune, beam_size=self.beam_size)
         self._prune_hyps.initialize(ctx=self.context)
-        self._prune_hyps.hybridize()
+        self._prune_hyps.hybridize(static_alloc=True, static_shape=True)
 
         self.global_avoid_trie = None
         if avoid_list is not None:
@@ -1662,11 +1676,8 @@ class Translator:
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
         folded_accumulated_scores = scores_accumulated.reshape((self.batch_size,
                                                                 self.beam_size * scores_accumulated.shape[-1]))
-        indices = mx.nd.argsort(folded_accumulated_scores, axis=1)
-        best_hyp_indices = mx.nd.array(np.unravel_index(indices.astype(np.int32).asnumpy().ravel(),
-                                                        scores_accumulated.shape),
-                                       dtype='int32',
-                                       ctx=self.offset.context)[0] + self.offset
+        indices = mx.nd.cast(mx.nd.argsort(folded_accumulated_scores, axis=1), dtype='int32').reshape((-1,))
+        best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated.shape) + self.offset
         best_hyp_indices_list.append(best_hyp_indices)
         lengths = lengths.take(best_hyp_indices)
         scores_accumulated = scores_accumulated.take(best_hyp_indices)
@@ -1843,6 +1854,82 @@ class SortByIndex(mx.gluon.HybridBlock):
         return [F.take(arg, indices) for arg in args]
 
 
+class TopK(mx.gluon.HybridBlock):
+    """
+    A HybridBlock for a statically-shaped batch-wise topk operation.
+    """
+
+    def __init__(self, k: int, batch_size: int, vocab_size: int) -> None:
+        """
+        :param k: The number of smallest scores to return.
+        :param batch_size: Number of sentences being decoded at once.
+        :param vocab_size: Vocabulary size.
+        """
+        super().__init__()
+        self.k = k
+        self.batch_size = batch_size
+        self.vocab_size = vocab_size
+        with self.name_scope():
+            offset = mx.nd.repeat(mx.nd.arange(0, batch_size * k, k, dtype='int32'), k)
+            self.offset = self.params.get_constant(name='offset', value=offset)
+
+    def hybrid_forward(self, F, scores, offset):
+        """
+        Get the lowest k elements per sentence from a `scores` matrix.
+
+        :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+        :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+        :return: The row indices, column indices and values of the k smallest items in matrix.
+        """
+        folded_scores = F.reshape(scores, shape=(self.batch_size, self.k * self.vocab_size))
+        values, indices = F.topk(folded_scores, axis=1, k=self.k, ret_typ='both', is_ascend=True)
+        indices = F.reshape(F.cast(indices, 'int32'), shape=(-1,))
+        unraveled = F.unravel_index(indices, shape=(self.batch_size * self.k, self.vocab_size))
+        best_hyp_indices, best_word_indices = F.split(unraveled, axis=0, num_outputs=2, squeeze_axis=True)
+        best_hyp_indices = best_hyp_indices + offset
+        values = F.reshape(values, shape=(-1, 1))
+        return best_hyp_indices, best_word_indices, values
+
+
+class Top1(mx.gluon.HybridBlock):
+    """
+    A HybridBlock for a statically-shaped batch-wise first-best operation.
+
+    Get the single lowest element per sentence from a `scores` matrix. Expects that
+    beam size is 1, for greedy decoding.
+
+    NOTE(mathmu): The current implementation of argmin in MXNet much slower than topk with k=1.
+    """
+    def __init__(self, k: int, batch_size: int) -> None:
+        """
+        :param k: The number of smallest scores to return.
+        :param batch_size: Number of sentences being decoded at once.
+        :param vocab_size: Vocabulary size.
+        """
+        super().__init__()
+        with self.name_scope():
+            offset = mx.nd.repeat(mx.nd.arange(0, batch_size * k, k, dtype='int32'), k)
+            self.offset = self.params.get_constant(name='offset', value=offset)
+
+    def hybrid_forward(self, F, scores, offset):
+        """
+        Get the single lowest element per sentence from a `scores` matrix. Expects that
+        beam size is 1, for greedy decoding.
+
+        :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+        :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+        :return: The row indices, column indices and values of the smallest items in matrix.
+        """
+        best_word_indices = F.cast(F.argmin(scores, axis=1), dtype='int32')
+        values = F.pick(scores, best_word_indices, axis=1)
+        values = F.reshape(values, shape=(-1, 1))
+
+        # for top1, the best hyp indices are equal to the plain offset
+        best_hyp_indices = offset
+
+        return best_hyp_indices, best_word_indices, values
+
+
 class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
     """
     A HybridBlock for normalizing newly finished hypotheses scores with LengthPenalty.
@@ -1859,8 +1946,8 @@ class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
             self.length_penalty = LengthPenalty(alpha=length_penalty_alpha, beta=length_penalty_beta)
 
     def hybrid_forward(self, F, best_word_indices, max_output_lengths, finished, scores_accumulated, lengths):
-        all_finished = ((best_word_indices == self.pad_id) + (best_word_indices == self.eos_id))
-        newly_finished = all_finished - finished
+        all_finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
+        newly_finished = F.broadcast_logical_xor(all_finished, finished)
         scores_accumulated = F.where(newly_finished,
                                      scores_accumulated / self.length_penalty(lengths),
                                      scores_accumulated)
@@ -1873,11 +1960,9 @@ class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
         # - extended with <pad>, or
         # - extended with <eos>, or
         # - at their maximum length.
-        finished = F.clip(
-            (best_word_indices == self.pad_id) +
-            (best_word_indices == self.eos_id) +
-            (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') >= max_output_lengths),
-            a_min=0, a_max=1)
+        finished = F.broadcast_logical_or(F.broadcast_logical_or(best_word_indices == self.pad_id,
+                                                                 best_word_indices == self.eos_id),
+                                          (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') >= max_output_lengths))
 
         return finished, scores_accumulated, lengths
 
@@ -1900,10 +1985,8 @@ class UpdateScores(mx.gluon.HybridBlock):
         # infinity otherwise.
         scores = F.broadcast_add(scores, scores_accumulated)
         # pylint: disable=invalid-sequence-index
-        pad_id_scores = F.where(F.clip(finished - inactive, 0, 1),
-                                scores_accumulated,
-                                inf_array)
+        pad_id_scores = F.where(F.broadcast_logical_and(finished, F.logical_not(inactive)), scores_accumulated, inf_array)
         # pad_dist. Shape: (batch*beam, vocab_size)
         pad_dist = F.concat(pad_id_scores, pad_dist)
-        scores = F.where(finished + inactive, pad_dist, scores)
+        scores = F.where(F.broadcast_logical_or(finished, inactive), pad_dist, scores)
         return scores

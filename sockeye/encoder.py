@@ -1243,8 +1243,8 @@ class ConvolutionalEmbeddingEncoder(Encoder):
                 transform = mx.sym.Dropout(data=transform, p=self.dropout)
             # Connection
             seg_embedding = gate * transform + (1 - gate) * seg_embedding
-        # (batch_size, seq_len/stride, outut_dim) aka
-        # (batch_size, encoded_seq_len, num_segment_emded)
+        # (batch_size, seq_len/stride, output_dim) aka
+        # (batch_size, encoded_seq_len, num_segment_embed)
         seg_embedding = mx.sym.Reshape(data=seg_embedding,
                                        shape=(-1, encoded_seq_len, self.output_dim))
 
