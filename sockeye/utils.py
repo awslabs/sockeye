@@ -948,9 +948,9 @@ def inflect(word: str,
     """
     Minimal inflection module.
 
-    :param noun: The noun to inflect.
+    :param word: The word to inflect.
     :param count: The count.
-    :return: The noun, perhaps inflected for number.
+    :return: The word, perhaps inflected for number.
     """
     if word in ['time', 'sentence']:
         return word if count == 1 else word + 's'

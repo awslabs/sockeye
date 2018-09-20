@@ -48,13 +48,13 @@ class ScoringModel(model.SockeyeModel):
     It is analogous to TrainingModel, but more limited.
 
     :param config: Configuration object holding details about the model.
+    :param model_dir: Directory containing the trained model.
     :param context: The context(s) that MXNet will be run in (GPU(s)/CPU).
-    :param output_dir: Directory where this model is stored.
     :param provide_data: List of input data descriptions.
     :param provide_label: List of label descriptions.
     :param default_bucket_key: Default bucket key.
-    :param bucketing: If True bucketing will be used, if False the computation graph will always be
-            unrolled to the full length.
+    :param score_type: The type of score to output (negative logprob or logprob).
+    :param length_penalty: The length penalty class to use.
     """
 
     def __init__(self,
@@ -78,7 +78,7 @@ class ScoringModel(model.SockeyeModel):
 
         # Load model parameters into graph
         params_fname = os.path.join(model_dir, C.PARAMS_BEST_NAME)
-        self.load_params_from_file(params_fname)
+        super().load_params_from_file(params_fname)
         self.module.set_params(arg_params=self.params,
                                aux_params=self.aux_params,
                                allow_missing=False)
@@ -192,40 +192,23 @@ class ScoringModel(model.SockeyeModel):
 
     def run_forward(self, batch: mx.io.DataBatch):
         """
-        Runs forward pass.
+        Runs the forward pass.
         """
         self.module.forward(batch, is_train=False)
 
     def get_outputs(self):
         return self.module.get_outputs()
 
-    def log_parameters(self):
-        """
-        Logs information about model parameters.
-        """
-        arg_params, aux_params = self.module.get_params()
-        total_parameters = 0
-        info = []  # type: List[str]
-        for name, array in sorted(arg_params.items()):
-            info.append("%s: %s" % (name, array.shape))
-            total_parameters += reduce(lambda x, y: x * y, array.shape)
-        logger.info("Model parameters: %s", ", ".join(info))
-        logger.info("Total # of parameters: %d", total_parameters)
-
-    def load_params_from_file(self, fname: str, allow_missing_params: bool = False):
-        """
-        Loads parameters from a file and sets the parameters of the underlying module and this model instance.
-
-        :param fname: File name to load parameters from.
-        :param allow_missing_params: If set, the given parameters are allowed to be a subset of the Module parameters.
-        """
-        super().load_params_from_file(fname)  # sets self.params & self.aux_params
-        self.module.set_params(arg_params=self.params,
-                               aux_params=self.aux_params,
-                               allow_missing=allow_missing_params)
-
 
 class Scorer:
+    """
+    Scorer class takes a ScoringModel and uses it to score a stream of parallel sentences.
+    It also takes the vocabularies so that the original sentences can be printed out, if desired.
+
+    :param model: The model to score with.
+    :param source_vocabs: The source vocabularies.
+    :param target_vocab: The target vocabulary.
+    """
     def __init__(self,
                  model: ScoringModel,
                  source_vocabs: List[vocab.Vocab],
@@ -261,7 +244,7 @@ class Scorer:
 
                 sentence_no += 1
 
-                # Transform arguments
+                # Transform arguments in preparation for printing
                 source_ids = [int(x) for x in source[:, 0].asnumpy().tolist()]
                 source_tokens = data_io.ids2tokens(source_ids, self.source_vocab_inv, self.exclude_list)
                 target_ids = [int(x) for x in target.asnumpy().tolist()]
@@ -269,6 +252,7 @@ class Scorer:
                     data_io.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
                 score = score.asscalar()
 
+                # Output handling routines require us to make use of inference classes.
                 output_handler.handle(TranslatorInput(sentence_no, source_tokens),
                                       TranslatorOutput(sentence_no, target_string, None, None, score),
                                       batch_time)
