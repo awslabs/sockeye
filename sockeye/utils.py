@@ -957,4 +957,4 @@ def inflect(word: str,
     elif word == 'was':
         return 'was' if count == 1 else 'were'
     else:
-        return noun + '(s)'
+        return word + '(s)'
