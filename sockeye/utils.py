@@ -943,7 +943,7 @@ def split(data: mx.nd.NDArray,
     return ndarray_or_list
 
 
-def inflect(noun: str,
+def inflect(word: str,
             count: int):
     """
     Minimal inflection module.
@@ -952,7 +952,9 @@ def inflect(noun: str,
     :param count: The count.
     :return: The noun, perhaps inflected for number.
     """
-    if noun in ['time']:
-        return noun if count == 1 else noun + 's'
+    if word in ['time', 'sentence']:
+        return word if count == 1 else word + 's'
+    elif word == 'was':
+        return 'was' if count == 1 else 'were'
     else:
         return noun + '(s)'

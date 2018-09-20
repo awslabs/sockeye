@@ -64,8 +64,12 @@ def score(args: argparse.Namespace):
         logger.info("Scoring Device(s): %s", ", ".join(str(c) for c in context))
 
         model_config = model.SockeyeModel.load_config(os.path.join(args.model, C.CONFIG_NAME))
-        max_seq_len_source = model_config.config_data.max_seq_len_source
-        max_seq_len_target = model_config.config_data.max_seq_len_target
+
+        if args.max_seq_len is None:
+            max_seq_len_source = model_config.config_data.max_seq_len_source
+            max_seq_len_target = model_config.config_data.max_seq_len_target
+        else:
+            max_seq_len_source, max_seq_len_target = args.max_seq_len
 
         score_iter, _, config_data, source_vocabs, target_vocab, data_info = train.create_data_iters_and_vocabs(
             args=args,
@@ -94,6 +98,16 @@ def score(args: argparse.Namespace):
         scorer.score(score_iter=score_iter,
                      score_type=args.score_type,
                      output_handler=get_output_handler(args.output_type))
+
+        if config_data.data_statistics.num_discarded != 0:
+            num_discarded = config_data.data_statistics.num_discarded
+            logger.warning('Warning: %d %s longer than %s %s skipped. '
+                           'As a result, the output won\'t be parallel with the input. '
+                           'Increase the maximum length (--max-seq-len M:N) or trim your training data.',
+                           num_discarded,
+                           utils.inflect('sentence', num_discarded),
+                           args.max_seq_len,
+                           utils.inflect('was', num_discarded))
 
 
 if __name__ == "__main__":

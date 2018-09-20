@@ -1091,21 +1091,30 @@ def add_score_cli_args(params):
     params.add_argument("--model", "-m", required=True,
                         help="Model directory containing trained model.")
 
+    params.add_argument('--max-seq-len',
+                        type=multiple_values(num_values=2, greater_or_equal=1),
+                        default=None,
+                        help='Maximum sequence length in tokens.'
+                             'Use "x:x" to specify separate values for src&tgt. Default: Read from model.')
+
     params.add_argument('--length-penalty-alpha',
                         default=1.0,
                         type=float,
                         help='Alpha factor for the length penalty used in beam search: '
                         '(beta + len(Y))**alpha/(beta + 1)**alpha. A value of 0.0 will therefore turn off '
                         'length normalization. Default: %(default)s')
+
     params.add_argument('--length-penalty-beta',
                         default=0.0,
                         type=float,
                         help='Beta factor for the length penalty used in beam search: '
                         '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
+
     params.add_argument('--output-type',
                         default=C.OUTPUT_HANDLER_SCORE,
                         choices=C.OUTPUT_HANDLERS_SCORING,
                         help='Output type. Default: %(default)s.')
+
     params.add_argument('--score-type',
                         choices=C.SCORING_TYPE_CHOICES,
                         default=C.SCORING_TYPE_DEFAULT,
