@@ -37,30 +37,6 @@ from .utils import check_condition, log_basic_info
 logger = setup_main_logger(__name__, file_logging=False, console=True)
 
 
-def create_scoring_model(config: model.ModelConfig,
-                         model_dir: str,
-                         context: List[mx.Context],
-                         score_iter: data_io.BaseParallelSampleIter,
-                         bucketing: bool = False) -> scoring.ScoringModel:
-    """
-    Create a scoring model and load the parameters from disk if needed.
-
-    :param config: The configuration for the model.
-    :param context: The context(s) to run on.
-    :param output_dir: Output folder.
-    :param train_iter: The training data iterator.
-    :param args: Arguments as returned by argparse.
-s    :return: The training model.
-    """
-    scoring_model = scoring.ScoringModel(config=config,
-                                         model_dir=model_dir,
-                                         context=context,
-                                         provide_data=score_iter.provide_data,
-                                         default_bucket_key=score_iter.default_bucket_key,
-                                         bucketing=False)
-
-    return scoring_model
-
 def main():
     params = arguments.ConfigArgumentParser(description='Score data with an existing model.')
     arguments.add_score_cli_args(params)
@@ -101,15 +77,18 @@ def score(args: argparse.Namespace):
             fill_up='zeros',
             no_permute=True)
 
-        scoring_model = create_scoring_model(config=model_config,
+        scoring_model = scoring.ScoringModel(config=model_config,
                                              model_dir=args.model,
                                              context=context,
+                                             provide_data=score_iter.provide_data,
+                                             provide_label=score_iter.provide_label,
+                                             default_bucket_key=score_iter.default_bucket_key,
+                                             score_type=args.score_type,
                                              bucketing=False,
-                                             score_iter=score_iter)
+                                             length_penalty=inference.LengthPenalty(alpha=args.length_penalty_alpha,
+                                                                                    beta=args.length_penalty_beta))
 
-        scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab,
-                                length_penalty=inference.LengthPenalty(alpha=args.length_penalty_alpha,
-                                                                       beta=args.length_penalty_beta))
+        scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab)
 
         scorer.score(score_iter=score_iter, score_type=args.score_type, output=args.output)
 

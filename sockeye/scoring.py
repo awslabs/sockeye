@@ -59,13 +59,21 @@ class ScoringModel(model.SockeyeModel):
                  model_dir: str,
                  context: List[mx.context.Context],
                  provide_data: List[mx.io.DataDesc],
+                 provide_label: List[mx.io.DataDesc],
                  bucketing: bool,
-                 default_bucket_key: Tuple[int, int]) -> None:
+                 default_bucket_key: Tuple[int, int],
+                 score_type: str,
+                 length_penalty: inference.LengthPenalty) -> None:
         super().__init__(config)
         self.context = context
         self.bucketing = bucketing
-        self._initialize(provide_data, default_bucket_key)
+        self.score_type = score_type
+        self.length_penalty = length_penalty
 
+        # Create the computation graph
+        self._initialize(provide_data, provide_label, default_bucket_key)
+
+        # Load model parameters into graph
         params_fname = os.path.join(model_dir, C.PARAMS_BEST_NAME)
         self.load_params_from_file(params_fname)
         self.module.set_params(arg_params=self.params,
@@ -74,9 +82,14 @@ class ScoringModel(model.SockeyeModel):
 
     def _initialize(self,
                     provide_data: List[mx.io.DataDesc],
-                    default_bucket_key: Tuple[int, int]):
+                    provide_label: List[mx.io.DataDesc],
+                    default_bucket_key: Tuple[int, int]) -> None:
         """
         Initializes model components, creates training symbol and module, and binds it.
+
+        :param provide_data: List of data descriptors.
+        :param provide_label: List of label descriptors.
+        :param default_bucket_key: The default maximum (source, target) lengths.
         """
         source = mx.sym.Variable(C.SOURCE_NAME)
         source_words = source.split(num_outputs=self.config.config_embed_source.num_factors,
@@ -85,16 +98,23 @@ class ScoringModel(model.SockeyeModel):
         target = mx.sym.Variable(C.TARGET_NAME)
         target_length = utils.compute_lengths(target)
 
+        # labels shape: (batch_size, target_length) (usually the maximum target sequence length)
+        labels = mx.sym.Variable(C.TARGET_LABEL_NAME)
+
         data_names = [C.SOURCE_NAME, C.TARGET_NAME]
+        label_names = [C.TARGET_LABEL_NAME]
 
         # check provide_{data,label} names
         provide_data_names = [d[0] for d in provide_data]
         utils.check_condition(provide_data_names == data_names,
                               "incompatible provide_data: %s, names should be %s" % (provide_data_names, data_names))
+        provide_label_names = [d[0] for d in provide_label]
+        utils.check_condition(provide_label_names == label_names,
+                              "incompatible provide_label: %s, names should be %s" % (provide_label_names, label_names))
 
         def sym_gen(seq_lens):
             """
-            Returns a (grouped) softmax symbol given source & target input lengths.
+            Returns a (grouped) symbol containing the summed score for each sentence, as well as the entire target distributions for each word.
             Also returns data and label names for the BucketingModule.
             """
             source_seq_len, target_seq_len = seq_lens
@@ -122,16 +142,30 @@ class ScoringModel(model.SockeyeModel):
             target_decoded = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
                                                           target_embed, target_embed_length, target_embed_seq_len)
 
-            # target_decoded: (batch_size * target_seq_len, decoder_depth)
-            target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
-
             # output layer
             # logits: (batch_size * target_seq_len, target_vocab_size)
-            logits = self.output_layer(target_decoded)
-            outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
+            logits = self.output_layer(mx.sym.reshape(data=target_decoded, shape=(-3, 0)))
+            # logits after reshape: (batch_size, target_seq_len, target_vocab_size)
+            logits = mx.sym.reshape(data=logits, shape=(-4,-1,target_embed_seq_len,0))
 
-            # return the outputs and the data names (we don't need the labels)
-            return outputs, data_names, None
+            # Compute the softmax along the final dimension.
+            # target_dists: (batch_size, target_seq_len, target_vocab_size)
+            target_dists = mx.sym.softmax(data=logits, axis=2, name=C.SOFTMAX_NAME)
+
+            # Select the label probability, then take their logs.
+            probs = mx.sym.pick(target_dists, labels)
+            scores = mx.sym.log(probs)
+            if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
+                scores = -1 * scores
+
+            # Sum and normalize
+            # sums: (batch_size,)
+            zeros = mx.sym.zeros_like(scores)
+            sums = mx.sym.sum(mx.sym.where(labels != 0, scores, zeros), axis=1) / (self.length_penalty(target_length) - 1)
+
+            # Return the sums and the target distributions
+            # sums: (batch_size,) target_dists: (batch_size, target_seq_len, target_vocab_size)
+            return mx.sym.Group([sums, target_dists]), data_names, label_names
 
         if self.bucketing:
             logger.info("Using bucketing. Default max_seq_len=%s", default_bucket_key)
@@ -143,16 +177,15 @@ class ScoringModel(model.SockeyeModel):
             symbol, _, __ = sym_gen(default_bucket_key)
             self.module = mx.mod.Module(symbol=symbol,
                                         data_names=data_names,
-                                        label_names=None,
+                                        label_names=label_names,
                                         logger=logger,
                                         context=self.context)
 
         self.module.bind(data_shapes=provide_data,
-                         label_shapes=None,
+                         label_shapes=provide_label,
                          for_training=False,
                          force_rebind=False,
                          grad_req=None)
-
 
     def run_forward(self, batch: mx.io.DataBatch):
         """
@@ -193,12 +226,10 @@ class Scorer:
     def __init__(self,
                  model: ScoringModel,
                  source_vocabs: List[vocab.Vocab],
-                 target_vocab: vocab.Vocab,
-                 length_penalty: Optional[inference.LengthPenalty] = None) -> None:
+                 target_vocab: vocab.Vocab) -> None:
         self.source_vocab_inv = vocab.reverse_vocab(source_vocabs[0])
         self.target_vocab_inv = vocab.reverse_vocab(target_vocab)
         self.model = model
-        self.length_penalty = length_penalty
 
         self.exclude_list = set([source_vocabs[0][C.BOS_SYMBOL], target_vocab[C.EOS_SYMBOL], C.PAD_ID])
 
@@ -209,26 +240,11 @@ class Scorer:
 
         sentence_no = 0
         for i, batch in enumerate(score_iter):
-            # data_io generates labels, too, which aren't needed in the computation graph
-            batch.provide_label = None
-            labels = batch.label[0].as_in_context(self.model.context[0])
-            batch.label = None
+
             self.model.run_forward(batch)
-            outputs = self.model.get_outputs()
+            scores, __ = self.model.get_outputs()
 
-            batch_size, target_seq_len, _ = batch.provide_data[0][1]
-            outputs = mx.nd.reshape(data=outputs[0], shape=(-4, batch_size, target_seq_len, -2))
-
-            probs = mx.nd.pick(outputs, labels)
-            ones = mx.nd.ones_like(probs, ctx=self.model.context)
-            lengths = mx.nd.sum(labels != 0, axis=1) - 1
-
-            scores = mx.nd.log(mx.nd.where(labels != 0, probs, ones, ctx=self.model.context), ctx=self.model.context)
-            if score_type == C.SCORING_TYPE_NEGLOGPROB:
-                scores = -1 * scores
-            sums = mx.nd.sum(scores, axis=1) / self.length_penalty(lengths)
-            sums = sums.asnumpy().tolist()
-            for source, target, score in zip(batch.data[0], batch.data[1], sums):
+            for source, target, score in zip(batch.data[0], batch.data[1], scores):
 
                 # The "zeros" padding method will have filled remainder batches with zeros, so we can skip them here
                 if source[0] == 0:
@@ -236,10 +252,12 @@ class Scorer:
 
                 sentence_no += 1
 
-                outputs = []
+                score = score.asscalar()
+
+                outputs = []  # type: List[str]
                 for output_type in output:
                     if output_type == C.SCORING_OUTPUT_ID:
-                        outputs.append(sentence_no)
+                        outputs.append(str(sentence_no))
                     elif output_type == C.SCORING_OUTPUT_SOURCE:
                         source_ids = [int(x) for x in source[:, 0].asnumpy().tolist()]
                         source_string = C.TOKEN_SEPARATOR.join(
@@ -251,7 +269,7 @@ class Scorer:
                             data_io.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
                         outputs.append(target_string)
                     elif output_type == C.SCORING_OUTPUT_SCORE:
-                        outputs.append(score)
+                        outputs.append(str(score))
                     else:
                         outputs.append(C.SCORING_OUTPUT_UNKNOWN)
 
