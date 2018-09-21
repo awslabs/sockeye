@@ -12,11 +12,11 @@
 # permissions and limitations under the License.
 
 import argparse
-import collections
-import operator
 import os
 import sys
 import time
+from itertools import groupby
+from operator import itemgetter
 from typing import Dict, Generator, Tuple, Optional
 
 import mxnet as mx
@@ -110,6 +110,7 @@ class TopKLexicon:
     :param vocab_source: Trained model source vocabulary.
     :param vocab_target: Trained mode target vocabulary.
     """
+
     def __init__(self,
                  vocab_source: Dict[str, int],
                  vocab_target: Dict[str, int]) -> None:
@@ -128,22 +129,25 @@ class TopKLexicon:
         :param k: Number of target entries per source to keep.
         """
         self.lex = np.zeros((len(self.vocab_source), k), dtype=np.int)
-        # Read lexicon
         src_unk_id = self.vocab_source[C.UNK_SYMBOL]
         trg_unk_id = self.vocab_target[C.UNK_SYMBOL]
-        _lex = collections.defaultdict(dict)  # type: Dict[int, Dict[int, float]]
-        for src_id, trg_id, prob in lexicon_iterator(path, self.vocab_source, self.vocab_target):
+        num_insufficient = 0  # number of source tokens with insufficient number of translations given k
+        for src_id, group in groupby(lexicon_iterator(path, self.vocab_source, self.vocab_target), key=itemgetter(0)):
             # Unk token will always be part of target vocab, so no need to track it here
-            if src_id == src_unk_id or trg_id == trg_unk_id:
+            if src_id == src_unk_id:
                 continue
-            _lex[src_id][trg_id] = prob
-        # Sort and copy top-k trg_ids to lex array row src_id
-        for src_id, trg_entries in _lex.items():
-            top_k = list(sorted(trg_entries.items(), key=operator.itemgetter(1), reverse=True))[:k]
-            self.lex[src_id, :len(top_k)] = list(trg_id for trg_id, _ in top_k)
-            # Free memory after copy
-            trg_entries.clear()
-        logger.info("Created top-k lexicon from \"%s\", k=%d.", path, k)
+
+            # filter trg_unk_id
+            filtered_group = ((trg_id, prob) for src_id, trg_id, prob in group if trg_id != trg_unk_id)
+            # sort by prob and take top k
+            top_k = [trg_id for trg_id, prob in sorted(filtered_group, key=itemgetter(1), reverse=True)[:k]]
+            if len(top_k) < k:
+                num_insufficient += 1
+
+            self.lex[src_id, :len(top_k)] = top_k
+
+        logger.info("Created top-k lexicon from \"%s\", k=%d. %d source tokens with fewer than %d translations",
+                    path, k, num_insufficient, k)
 
     def save(self, path: str):
         """
@@ -237,8 +241,8 @@ def main():
     subparams = params.add_subparsers(title="Commands")
 
     params_create = subparams.add_parser('create', description="Create top-k lexicon for use during decoding. "
-                                                               "See contrib/fast_align/README.md for information "
-                                                               "on creating input lexical tables.")
+                                                               "See sockeye_contrib/fast_align/README.md "
+                                                               "for information on creating input lexical tables.")
     arguments.add_lexicon_args(params_create)
     arguments.add_lexicon_create_args(params_create)
     arguments.add_logging_args(params_create)

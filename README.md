@@ -36,6 +36,8 @@ archivePrefix = "arXiv",
 }
 ```
 
+In addition, this framework provides an experimental [image-to-description module](https://github.com/awslabs/sockeye/tree/master/sockeye/image_captioning) that can be used for image captioning.
+
 If you are interested in collaborating or have any questions, please submit a pull request or issue. [Click to find our developer guidelines](docs/development.md).
 You can also send questions to *sockeye-dev-at-amazon-dot-com*.
 
@@ -45,7 +47,7 @@ Recent developments and changes are tracked in our [changelog](https://github.co
 
 Sockeye requires:
 - **Python3**
-- [MXNet 1.2.1](https://github.com/apache/incubator-mxnet/tree/1.2.1)
+- [MXNet 1.3.0](https://github.com/apache/incubator-mxnet/tree/1.3.0)
 - numpy
 
 ## Installation
@@ -83,7 +85,7 @@ Depending on your version of CUDA, you can do this by running the following:
 > pip install sockeye --no-deps -r requirements.gpu-cu${CUDA_VERSION}.txt
 > rm requirements.gpu-cu${CUDA_VERSION}.txt
 ```
-where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), `90` (9.0), or `91` (9.1).
+where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), `90` (9.0), `91` (9.1), or `92` (9.2).
 
 ### Or: From Source
 
@@ -106,7 +108,7 @@ running the following:
 > pip install -r requirements/requirements.gpu-cu${CUDA_VERSION}.txt
 > pip install .
 ```
-where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), `90` (9.0), or `91` (9.1).
+where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), `90` (9.0), `91` (9.1), or `92` (9.2).
 
 ### Optional dependencies
 In order to write training statistics to a Tensorboard event file for visualization, you can optionally install mxboard
@@ -131,7 +133,7 @@ For example *sockeye-train* can also be invoked as
 
 ## First Steps
 
-For easily training popular model types on known data sets, see the [Sockeye Autopilot documentation](https://github.com/awslabs/sockeye/tree/master/contrib/autopilot).
+For easily training popular model types on known data sets, see the [Sockeye Autopilot documentation](https://github.com/awslabs/sockeye/tree/master/sockeye_contrib/autopilot).
 For manually training and running translation models on your data, read on.
 
 ### Train

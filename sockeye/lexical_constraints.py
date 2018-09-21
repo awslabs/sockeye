@@ -116,10 +116,21 @@ class AvoidState:
         """
         Consumes a word, and updates the state based on it. Returns new objects on a state change.
 
+        The next state for a word can be tricky. Here are the cases:
+        (1) If the word is found in our set of outgoing child arcs, we take that transition.
+        (2) If the word is not found, and we are not in the root state, we need to reset.
+            This means we pretend we were in the root state, and see if we can take a step
+        (3) Otherwise, if we are not already in the root state (i.e., we were partially through
+            the trie), we need to create a new object whose state is the root state
+        (4) Finally, if we couldn't advance and were already in the root state, we can reuse
+            this object.
+
         :param word_id: The word that was just generated.
         """
         if word_id in self.state.children:
             return AvoidState(self.root, self.state.step(word_id))
+        elif word_id in self.root.children:
+            return AvoidState(self.root, self.root.step(word_id))
         elif self.state != self.root:
             return AvoidState(self.root, self.root)
         else:
@@ -230,7 +241,10 @@ class ConstrainedHypothesis:
     This is represented internally as:
 
         constraints: [14 19 35 14]
-        is_sequence: [ 1  1  0  0]
+        is_sequence: [False False True True]
+        
+    That is, the constraints are simply concatenated, and we maintain a parallel array indicating whether each
+    token ID must be followed by the next token ID. The same token ID can be present any number of times.
 
     :param constraint_list: A list of zero or raw constraints (each represented as a list of integers).
     :param avoid_list: A list of zero or raw constraints that must *not* appear in the output.

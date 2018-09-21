@@ -14,6 +14,7 @@
 """
 A set of utility methods.
 """
+import binascii
 import errno
 import fcntl
 import glob
@@ -32,8 +33,8 @@ from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Opt
 import mxnet as mx
 import numpy as np
 
-from sockeye import __version__, constants as C
-from sockeye.log import log_sockeye_version, log_mxnet_version
+from . import __version__, constants as C
+from .log import log_sockeye_version, log_mxnet_version
 
 logger = logging.getLogger(__name__)
 
@@ -251,9 +252,30 @@ class OnlineMeanAndVariance:
             return self._M2 / self._count
 
 
+def top1(scores: mx.nd.NDArray,
+         offset: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
+    """
+    Get the single lowest element per sentence from a `scores` matrix. Expects that
+    beam size is 1, for greedy decoding.
+
+    NOTE(mathmu): The current implementation of argmin in MXNet much slower than topk with k=1.
+
+    :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+    :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+    :return: The row indices, column indices and values of the smallest items in matrix.
+    """
+    best_word_indices = mx.nd.cast(mx.nd.argmin(scores, axis=1), dtype='int32')
+    values = scores[mx.nd.arange(scores.shape[0], dtype='int32', ctx=scores.context), best_word_indices]
+
+    values = values.reshape((-1, 1))
+
+    # for top1, the best hyp indices are equal to the plain offset
+
+    return offset, best_word_indices, values
+
+
 def topk(scores: mx.nd.NDArray,
          k: int,
-         batch_size: int,
          offset: mx.nd.NDArray,
          use_mxnet_topk: bool) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
     """
@@ -261,21 +283,19 @@ def topk(scores: mx.nd.NDArray,
 
     :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
     :param k: The number of smallest scores to return.
-    :param batch_size: Number of sentences being decoded at once.
     :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
     :param use_mxnet_topk: True to use the mxnet implementation or False to use the numpy one.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
     # (batch_size, beam_size * target_vocab_size)
-    folded_scores = scores.reshape((batch_size, k * scores.shape[-1]))
+    folded_scores = scores.reshape((-1, k * scores.shape[-1]))
+    batch_size = folded_scores.shape[0]
 
     if use_mxnet_topk:
         # pylint: disable=unbalanced-tuple-unpacking
         values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
-        best_hyp_indices, best_word_indices = mx.nd.array(np.unravel_index(indices.astype(np.int32).asnumpy().ravel(),
-                                                                           scores.shape),
-                                                          dtype='int32',
-                                                          ctx=scores.context)
+        indices = mx.nd.cast(indices, 'int32').reshape((-1,))
+        best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, scores.shape)
 
     else:
         folded_scores = folded_scores.asnumpy()
@@ -313,22 +333,31 @@ def get_tokens(line: str) -> Iterator[str]:
             yield token
 
 
+def is_gzip_file(filename: str) -> bool:
+    # check for magic gzip number
+    with open(filename, 'rb') as test_f:
+        return binascii.hexlify(test_f.read(2)) == b'1f8b'
+
+
 def smart_open(filename: str, mode: str = "rt", ftype: str = "auto", errors: str = 'replace'):
     """
     Returns a file descriptor for filename with UTF-8 encoding.
     If mode is "rt", file is opened read-only.
     If ftype is "auto", uses gzip iff filename endswith .gz.
     If ftype is {"gzip","gz"}, uses gzip.
+    If ftype is "auto" and read mode requested, uses gzip iff is_gzip_file(filename).
 
     Note: encoding error handling defaults to "replace"
 
     :param filename: The filename to open.
     :param mode: Reader mode.
-    :param ftype: File type. If 'auto' checks filename suffix for gz to try gzip.open
-    :param errors: Encoding error handling during reading. Defaults to 'replace'
-    :return: File descriptor
+    :param ftype: File type. If 'auto' checks filename suffix for gz to try gzip.open.
+    :param errors: Encoding error handling during reading. Defaults to 'replace'.
+    :return: File descriptor.
     """
-    if ftype == 'gzip' or ftype == 'gz' or (ftype == 'auto' and filename.endswith(".gz")):
+    if ftype in ('gzip', 'gz') \
+            or (ftype == 'auto' and filename.endswith(".gz")) \
+            or (ftype == 'auto' and 'r' in mode and is_gzip_file(filename)):
         return gzip.open(filename, mode=mode, encoding='utf-8', errors=errors)
     else:
         return open(filename, mode=mode, encoding='utf-8', errors=errors)
@@ -423,29 +452,21 @@ def average_arrays(arrays: List[mx.nd.NDArray]) -> mx.nd.NDArray:
     :param arrays: A list of NDArrays with the same shape that will be averaged.
     :return: The average of the NDArrays in the same context as arrays[0].
     """
+    if not arrays:
+        raise ValueError("arrays is empty.")
     if len(arrays) == 1:
         return arrays[0]
     check_condition(all(arrays[0].shape == a.shape for a in arrays), "nd array shapes do not match")
-    new_array = mx.nd.zeros(arrays[0].shape, dtype=arrays[0].dtype, ctx=arrays[0].context)
-    for a in arrays:
-        new_array += a.as_in_context(new_array.context)
-    new_array /= len(arrays)
-    return new_array
+    return mx.nd.add_n(*arrays) / len(arrays)
 
 
 def get_num_gpus() -> int:
     """
-    Gets the number of GPUs available on the host (depends on nvidia-smi).
+    Gets the number of GPUs available on the host.
 
     :return: The number of GPUs on the system.
     """
-    if shutil.which("nvidia-smi") is None:
-        logger.warning("Couldn't find nvidia-smi, therefore we assume no GPUs are available.")
-        return 0
-    sp = subprocess.Popen(['nvidia-smi', '-L'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    out_str = sp.communicate()[0].decode("utf-8")
-    num_gpus = len(out_str.rstrip("\n").split("\n"))
-    return num_gpus
+    return mx.context.num_gpus()
 
 
 def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, int]]:
@@ -465,10 +486,14 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, 
         return {}
     ids = [str(c.device_id) for c in ctx]
     query = "--query-gpu=index,memory.used,memory.total"
-    format = "--format=csv,noheader,nounits"
-    sp = subprocess.Popen(['nvidia-smi', query, format, "-i", ",".join(ids)],
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    result = sp.communicate()[0].decode("utf-8").rstrip().split("\n")
+    format_arg = "--format=csv,noheader,nounits"
+    try:
+        sp = subprocess.Popen(['nvidia-smi', query, format_arg, "-i", ",".join(ids)],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        result = sp.communicate()[0].decode("utf-8").rstrip().split("\n")
+    except OSError:
+        logger.exception("Failed calling nvidia-smi to query memory usage.")
+        return {}
     memory_data = {}
     for line in result:
         gpu_id, mem_used, mem_total = line.split(",")
@@ -502,9 +527,7 @@ def determine_context(device_ids: List[int],
     else:
         num_gpus = get_num_gpus()
         check_condition(num_gpus >= 1,
-                        "No GPUs found, consider running on the CPU with --use-cpu "
-                        "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
-                        "binary isn't on the path).")
+                        "No GPUs found, consider running on the CPU with --use-cpu ")
         if disable_device_locking:
             context = expand_requested_device_ids(device_ids)
         else:
@@ -817,8 +840,8 @@ class PrintValueProp(mx.operator.CustomOpProp):
 
     def create_operator(self, ctx, shapes, dtypes):
         return PrintValue(self.print_name,
-                          print_grad=self.print_grad,
-                          use_logger=self.use_logger)
+                          print_grad=str(self.print_grad),
+                          use_logger=str(self.use_logger))
 
 
 def grouper(iterable: Iterable, size: int) -> Iterable:

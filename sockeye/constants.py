@@ -399,3 +399,8 @@ PREPARED_DATA_VERSION = 2
 
 SEQUENCE_LENGTH_MUST_NOT_CHANGE_MSG = "Sequence length may not change within the residual layers."
 
+
+# reranking
+RERANK_BLEU = "bleu"
+RERANK_CHRF = "chrf"
+RERANK_METRICS = [RERANK_BLEU, RERANK_CHRF]

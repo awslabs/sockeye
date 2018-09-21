@@ -335,7 +335,7 @@ class ImageTextSampleIter(ParallelSampleIter):
                 for bucket in self.data.source:
                     for k in bucket:
                         if k not in self.loaded_source:  # avoid to load twice
-                            self.loaded_source[k] = load_feature(k, self.image_size)
+                            self.loaded_source[k] = load_feature(k)
                 logger.info("Feature loaded in {} seconds.".format(time.time() - start))
         else:
             self.data_loader = functools.partial(load_preprocess_images,

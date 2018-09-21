@@ -182,7 +182,7 @@ class StringWithAlignmentMatrixOutputHandler(StringOutputHandler):
         :param t_output: Translator output.
         :param t_walltime: Total wall-clock time for translation.
         """
-        line = "{sent_id:d} ||| {target} ||| {score:f} ||| {source} ||| {source_len:d} ||| {target_len:d}\n"
+        line = "{sent_id} ||| {target} ||| {score:f} ||| {source} ||| {source_len:d} ||| {target_len:d}\n"
         self.stream.write(line.format(sent_id=t_input.sentence_id,
                                       target=" ".join(t_output.tokens),
                                       score=t_output.score,
@@ -244,7 +244,7 @@ class AlignPlotHandler(OutputHandler):
         plot_attention(t_output.attention_matrix,
                        t_input.tokens,
                        t_output.tokens,
-                       "%s_%d.png" % (self.plot_prefix, t_input.sentence_id))
+                       "%s_%s.png" % (self.plot_prefix, t_input.sentence_id))
 
 
 class AlignTextHandler(OutputHandler):
@@ -297,6 +297,6 @@ class BeamStoringHandler(OutputHandler):
             # Add the number of steps in each beam
             h["number_steps"] = len(h["predicted_tokens"])  # type: ignore
             # Some outputs can have more than one beam, add the id for bookkeeping
-            h["id"] = t_output.id  # type: ignore
+            h["id"] = t_output.sentence_id  # type: ignore
             self.stream.write("%s\n" % json.dumps(h, sort_keys=True))
         self.stream.flush()

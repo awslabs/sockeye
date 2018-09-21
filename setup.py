@@ -54,6 +54,7 @@ def get_requirements(filename):
     with open(os.path.join(ROOT, filename)) as f:
         return [line.rstrip() for line in f]
 
+
 try:
     from sphinx.setup_command import BuildDoc
     cmdclass = {'build_sphinx': BuildDoc}
@@ -83,7 +84,8 @@ entry_points={
         'sockeye-prepare-data = sockeye.prepare_data:main',
         'sockeye-train = sockeye.train:main',
         'sockeye-translate = sockeye.translate:main',
-        'sockeye-vocab = sockeye.vocab:main'
+        'sockeye-vocab = sockeye.vocab:main',
+        'sockeye-rerank = sockeye.rerank:main',
     ],
 }
 
@@ -106,7 +108,7 @@ args = dict(
 
     python_requires='>=3',
 
-    packages=find_packages(exclude=("test",)),
+    packages=find_packages(exclude=("test", "test.*")),
 
     setup_requires=['pytest-runner'],
     tests_require=['pytest', 'pytest-cov', 'pillow'],
@@ -120,7 +122,7 @@ args = dict(
 
     entry_points=entry_points,
 
-    classifiers = [
+    classifiers=[
         'License :: OSI Approved :: Apache Software License',
         'Programming Language :: Python :: 3 :: Only',
 

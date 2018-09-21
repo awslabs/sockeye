@@ -15,7 +15,7 @@ If Sockeye is installed via pip or source, Autopilot can be run directly:
 This is equivalent to:
 
 ```bash
-> python -m contrib.autopilot.autopilot
+> python -m sockeye_contrib.autopilot.autopilot
 ```
 
 With a single command, Autopilot can download and pre-process training data, then train and evaluate a translation model.
@@ -129,4 +129,4 @@ Provide the following outputs to the user under "results":
 
 - test.N.MODEL.SETTINGS.bpe.bleu: BLEU score of raw decoder output against byte-pair encoded references
 - test.N.MODEL.SETTINGS.tok.bleu: BLEU score of word-level decoder output against tokenized references
-- test.N.MODEL.SETTINGS.detok.sacrebleu: BLEU score of detokenized decoder output against raw references using [SacreBLEU](https://github.com/awslabs/sockeye/tree/master/contrib/sacrebleu).  These scores are directly comparable to those reported in WMT evaluations.
+- test.N.MODEL.SETTINGS.detok.sacrebleu: BLEU score of detokenized decoder output against raw references using [SacreBLEU](https://github.com/awslabs/sockeye/tree/master/sockeye_contrib/sacrebleu).  These scores are directly comparable to those reported in WMT evaluations.
