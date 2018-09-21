@@ -147,7 +147,7 @@ class ScoreOutputHandler(OutputHandler):
 
 class PairWithScoreOutputHandler(OutputHandler):
     """
-    Output handler to write translation score along with sntence input and output (tab-delimited).
+    Output handler to write translation score along with sentence input and output (tab-delimited).
 
     :param stream: Stream to write translations to (e.g., sys.stdout).
     """

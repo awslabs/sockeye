@@ -789,7 +789,8 @@ def add_training_args(params):
                                     'Default: %(default)s.')
     train_params.add_argument('--fill-up',
                               type=str,
-                              default=C.DEFAULT_FILL_UP_STRATEGY,
+                              default=C.FILL_UP_DEFAULT,
+                              choices=C.FILL_UP_CHOICES,
                               help=argparse.SUPPRESS)
 
     train_params.add_argument('--loss',
@@ -1100,14 +1101,14 @@ def add_score_cli_args(params):
     params.add_argument('--length-penalty-alpha',
                         default=1.0,
                         type=float,
-                        help='Alpha factor for the length penalty used in beam search: '
+                        help='Alpha factor for the length penalty used in scoring: '
                         '(beta + len(Y))**alpha/(beta + 1)**alpha. A value of 0.0 will therefore turn off '
                         'length normalization. Default: %(default)s')
 
     params.add_argument('--length-penalty-beta',
                         default=0.0,
                         type=float,
-                        help='Beta factor for the length penalty used in beam search: '
+                        help='Beta factor for the length penalty used in scoring: '
                         '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
 
     params.add_argument('--output-type',

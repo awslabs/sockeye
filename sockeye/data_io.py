@@ -769,7 +769,7 @@ def get_training_data_iters(sources: List[str],
                             bucketing: bool,
                             bucket_width: int,
                             no_permute: bool = False) -> Tuple['BaseParallelSampleIter',
-                                                               'BaseParallelSampleIter',
+                                                               Optional['BaseParallelSampleIter'],
                                                                'DataConfig', 'DataInfo']:
     """
     Returns data iterators for training and validation data.
@@ -1027,18 +1027,18 @@ def ids2strids(ids: Iterable[int]) -> str:
 
 def ids2tokens(token_ids: Iterable[int],
                vocab_inv: Dict[int, str],
-               exclude_list: Set[int] = set()) -> List[str]:
+               exclude_set: Set[int] = set()) -> List[str]:
     """
-    Transforms a list of token IDs into a list of words, exluding any IDs in `exclude_list`.
+    Transforms a list of token IDs into a list of words, exluding any IDs in `exclude_set`.
 
     :param token_ids: The list of token IDs.
     :param vocab_inv: The inverse vocabulary.
-    :param exclude_list: The list of token IDs to exclude.
+    :param exclude_set: The list of token IDs to exclude.
     :return: The list of words.
 """
 
     tokens = [vocab_inv[token] for token in token_ids]
-    return [tok for token_id, tok in zip(token_ids, tokens) if token_id not in exclude_list]
+    return [tok for token_id, tok in zip(token_ids, tokens) if token_id not in exclude_set]
 
 
 class SequenceReader(Iterable):
@@ -1283,16 +1283,19 @@ class ParallelDataSet(Sized):
             # 'zeros' instead repeats the last element and then writes zeros over everything.
             if num_samples % bucket_batch_size != 0:
                 rest = bucket_batch_size - num_samples % bucket_batch_size
-                if fill_up == 'replicate':
+                if fill_up == C.FILL_UP_REPLICATE:
                     logger.info("Filling bucket %s from size %d to %d by sampling with replacement",
                                 bucket, num_samples, bucket_batch_size)
                     desired_indices_np = rs.randint(num_samples, size=rest)
                     desired_indices = mx.nd.array(desired_indices_np)
 
-                elif fill_up == 'zeros':
-                    logger.info("Filling bucket %s from size %d to %d by repeating the last element %d %s",
-                                bucket, num_samples, bucket_batch_size, rest, inflect('time', rest))
-                    desired_indices_np = np.array([num_samples-1] * rest)
+                elif fill_up == C.FILL_UP_ZEROS:
+                    logger.info("Filling bucket %s from size %d to %d with zeros",
+                                bucket, num_samples, bucket_batch_size)
+                    desired_indices_np = np.full((rest), num_samples - 1)
+                       #      data_source = [np.full((num_samples, source_len, num_factors), self.pad_id, dtype=self.dtype)
+                       # for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
+
                     desired_indices = mx.nd.array(desired_indices_np)
 
                 else:
@@ -1306,9 +1309,9 @@ class ParallelDataSet(Sized):
                 label[bucket_idx] = mx.nd.concat(bucket_label, bucket_label.take(desired_indices), dim=0)
 
                 if fill_up == 'zeros':
-                    source[bucket_idx][num_samples:,:,:] = C.PAD_ID
-                    target[bucket_idx][num_samples:,:] = C.PAD_ID
-                    label[bucket_idx][num_samples:,:] = C.PAD_ID
+                    source[bucket_idx][num_samples:, :, :] = C.PAD_ID
+                    target[bucket_idx][num_samples:, :] = C.PAD_ID
+                    label[bucket_idx][num_samples:, :] = C.PAD_ID
 
         return ParallelDataSet(source, target, label)
 
@@ -1391,6 +1394,8 @@ class MetaBaseParallelSampleIter(ABC):
 class BaseParallelSampleIter(mx.io.DataIter):
     """
     Base parallel sample iterator.
+
+    :param no_permute: Turn off random shuffling of parallel data.
     """
     __metaclass__ = MetaBaseParallelSampleIter
 
@@ -1402,6 +1407,7 @@ class BaseParallelSampleIter(mx.io.DataIter):
                  target_data_name,
                  label_name,
                  num_factors: int = 1,
+                 no_permute: bool = False,
                  dtype='float32') -> None:
         super().__init__(batch_size=batch_size)
 
@@ -1412,6 +1418,7 @@ class BaseParallelSampleIter(mx.io.DataIter):
         self.target_data_name = target_data_name
         self.label_name = label_name
         self.num_factors = num_factors
+        self.no_permute = no_permute
         self.dtype = dtype
 
         # "Staging area" that needs to fit any size batch we're using by total number of elements.
@@ -1478,12 +1485,11 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                  dtype='float32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          source_data_name=source_data_name, target_data_name=target_data_name,
-                         label_name=label_name, num_factors=num_factors, dtype=dtype)
+                         label_name=label_name, num_factors=num_factors, no_permute=no_permute, dtype=dtype)
         assert len(shards_fnames) > 0
         self.shards_fnames = list(shards_fnames)
         self.shard_index = -1
         self.fill_up = fill_up
-        self.no_permute = no_permute
 
         self.reset()
 
@@ -1572,7 +1578,7 @@ class ParallelSampleIter(BaseParallelSampleIter):
                  dtype='float32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          source_data_name=source_data_name, target_data_name=target_data_name,
-                         label_name=label_name, num_factors=num_factors, dtype=dtype)
+                         label_name=label_name, num_factors=num_factors, no_permute=no_permute, dtype=dtype)
 
         # create independent lists to be shuffled
         self.data = ParallelDataSet(list(data.source), list(data.target), list(data.label))
@@ -1585,8 +1591,6 @@ class ParallelSampleIter(BaseParallelSampleIter):
                                           for i in range(len(self.data))]
         self.data_permutations = [mx.nd.arange(0, max(1, self.data.source[i].shape[0]))
                                   for i in range(len(self.data))]
-
-        self.no_permute = no_permute
 
         self.reset()
 

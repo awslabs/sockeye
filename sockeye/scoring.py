@@ -224,6 +224,7 @@ class Scorer:
               score_type: str,
               output_handler: OutputHandler):
 
+        total_time = 0.
         tic = time.time()
         sentence_no = 0
         for i, batch in enumerate(score_iter):
@@ -233,8 +234,8 @@ class Scorer:
             self.model.run_forward(batch)
             scores, __ = self.model.get_outputs()
 
-            total_time = time.time() - tic
             batch_time = time.time() - batch_tic
+            total_time += batch_time
 
             for source, target, score in zip(batch.data[0], batch.data[1], scores):
 
