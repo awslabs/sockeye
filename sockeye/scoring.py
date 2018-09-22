@@ -191,13 +191,14 @@ class ScoringModel(model.SockeyeModel):
                          force_rebind=False,
                          grad_req=None)
 
-    def run_forward(self, batch: mx.io.DataBatch):
+    def run(self, batch: mx.io.DataBatch) -> Tuple[mx.sym.Symbol, List[str], List[str]]:
         """
-        Runs the forward pass.
+        Runs the forward pass and returns the outputs.
+
+        :param batch: The batch to run.
+        :return: The grouped symbol (probs and target dists) and lists containing the data names and label names.
         """
         self.module.forward(batch, is_train=False)
-
-    def get_outputs(self):
         return self.module.get_outputs()
 
 
@@ -232,8 +233,8 @@ class Scorer:
 
             batch_tic = time.time()
 
-            self.model.run_forward(batch)
-            scores, __ = self.model.get_outputs()
+            # Run the model and get the outputs
+            scores, _, _ = self.model.run(batch)
 
             batch_time = time.time() - batch_tic
             total_time += batch_time
