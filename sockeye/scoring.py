@@ -165,7 +165,7 @@ class ScoringModel(model.SockeyeModel):
             # Sum, then apply length penalty. The call to `mx.sym.where` masks out invalid values from scores.
             # zeros and sums: (batch_size,)
             zeros = mx.sym.zeros_like(scores)
-            sums = mx.sym.sum(mx.sym.where(labels != 0, scores, zeros), axis=1) / (self.length_penalty(target_length) - 1)
+            sums = mx.sym.sum(mx.sym.where(labels != 0, scores, zeros), axis=1) / (self.length_penalty(target_length - 1))
 
             # Return the sums and the target distributions
             # sums: (batch_size,) target_dists: (batch_size, target_seq_len, target_vocab_size)
