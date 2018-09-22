@@ -1284,7 +1284,7 @@ class ParallelDataSet(Sized):
                 if policy == C.FILL_UP_ZEROS:
                     logger.info("Filling bucket %s from size %d to %d with zeros",
                                 bucket, num_samples, bucket_batch_size)
-                elif policy == C.FILL_UP_REPLACEMENT:
+                elif policy == C.FILL_UP_REPLICATE:
                     logger.info("Filling bucket %s from size %d to %d by sampling with replacement",
                                 bucket, num_samples, bucket_batch_size)
                 else:
