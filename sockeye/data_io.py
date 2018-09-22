@@ -31,7 +31,7 @@ import numpy as np
 from . import config
 from . import constants as C
 from . import vocab
-from .utils import check_condition, smart_open, get_tokens, OnlineMeanAndVariance, inflect
+from .utils import check_condition, smart_open, get_tokens, OnlineMeanAndVariance
 
 logger = logging.getLogger(__name__)
 
@@ -1254,13 +1254,13 @@ class ParallelDataSet(Sized):
 
     def fill_up(self,
                 bucket_batch_sizes: List[BucketBatchSize],
-                fill_up: str,
+                policy: str,
                 seed: int = 42) -> 'ParallelDataSet':
         """
         Returns a new dataset with buckets filled up using the specified fill-up strategy.
 
         :param bucket_batch_sizes: Bucket batch sizes.
-        :param fill_up: Fill-up strategy.
+        :param policy: Fill-up strategy.
         :param seed: The random seed used for sampling sentences to fill up.
         :return: New dataset with buckets filled up to the next multiple of batch size
         """
@@ -1278,28 +1278,21 @@ class ParallelDataSet(Sized):
             bucket_label = self.label[bucket_idx]
             num_samples = bucket_source.shape[0]
 
-            # Fill up the last batch according to the fill up policy.
-            # 'replicate' randomly samples to populate the remaining spots.
-            # 'zeros' instead repeats the last element and then writes zeros over everything.
+            # Fill up the last batch by randomly sampling from the extant items.
+            # If we're using the 'zeros' policy, these are overwritten later below.
             if num_samples % bucket_batch_size != 0:
-                rest = bucket_batch_size - num_samples % bucket_batch_size
-                if fill_up == C.FILL_UP_REPLICATE:
-                    logger.info("Filling bucket %s from size %d to %d by sampling with replacement",
-                                bucket, num_samples, bucket_batch_size)
-                    desired_indices_np = rs.randint(num_samples, size=rest)
-                    desired_indices = mx.nd.array(desired_indices_np)
-
-                elif fill_up == C.FILL_UP_ZEROS:
+                if policy == C.FILL_UP_ZEROS:
                     logger.info("Filling bucket %s from size %d to %d with zeros",
                                 bucket, num_samples, bucket_batch_size)
-                    desired_indices_np = np.full((rest), num_samples - 1)
-                       #      data_source = [np.full((num_samples, source_len, num_factors), self.pad_id, dtype=self.dtype)
-                       # for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
-
-                    desired_indices = mx.nd.array(desired_indices_np)
-
+                elif policy == C.FILL_UP_REPLACEMENT:
+                    logger.info("Filling bucket %s from size %d to %d by sampling with replacement",
+                                bucket, num_samples, bucket_batch_size)
                 else:
                     raise NotImplementedError('Unknown fill-up strategy')
+
+                rest = bucket_batch_size - num_samples % bucket_batch_size
+                desired_indices_np = rs.randint(num_samples, size=rest)
+                desired_indices = mx.nd.array(desired_indices_np)
 
                 if isinstance(source[bucket_idx], np.ndarray):
                     source[bucket_idx] = np.concatenate((bucket_source, bucket_source.take(desired_indices_np)), axis=0)
@@ -1308,7 +1301,7 @@ class ParallelDataSet(Sized):
                 target[bucket_idx] = mx.nd.concat(bucket_target, bucket_target.take(desired_indices), dim=0)
                 label[bucket_idx] = mx.nd.concat(bucket_label, bucket_label.take(desired_indices), dim=0)
 
-                if fill_up == 'zeros':
+                if policy == 'zeros':
                     source[bucket_idx][num_samples:, :, :] = C.PAD_ID
                     target[bucket_idx][num_samples:, :] = C.PAD_ID
                     label[bucket_idx][num_samples:, :] = C.PAD_ID

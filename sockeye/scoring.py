@@ -88,7 +88,7 @@ class ScoringModel(model.SockeyeModel):
                     provide_label: List[mx.io.DataDesc],
                     default_bucket_key: Tuple[int, int]) -> None:
         """
-        Initializes model components, creates training symbol and module, and binds it.
+        Initializes model components, creates scoring symbol and module, and binds it.
 
         :param provide_data: List of data descriptors.
         :param provide_label: List of label descriptors.
@@ -149,20 +149,21 @@ class ScoringModel(model.SockeyeModel):
             # logits: (batch_size * target_seq_len, target_vocab_size)
             logits = self.output_layer(mx.sym.reshape(data=target_decoded, shape=(-3, 0)))
             # logits after reshape: (batch_size, target_seq_len, target_vocab_size)
-            logits = mx.sym.reshape(data=logits, shape=(-4,-1,target_embed_seq_len,0))
+            logits = mx.sym.reshape(data=logits, shape=(-4, -1, target_embed_seq_len, 0))
 
             # Compute the softmax along the final dimension.
             # target_dists: (batch_size, target_seq_len, target_vocab_size)
             target_dists = mx.sym.softmax(data=logits, axis=2, name=C.SOFTMAX_NAME)
 
             # Select the label probability, then take their logs.
+            # probs and scores: (batch_size, target_seq_len)
             probs = mx.sym.pick(target_dists, labels)
             scores = mx.sym.log(probs)
             if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
                 scores = -1 * scores
 
-            # Sum and normalize
-            # sums: (batch_size,)
+            # Sum, then apply length penalty. The call to `mx.sym.where` masks out invalid values from scores.
+            # zeros and sums: (batch_size,)
             zeros = mx.sym.zeros_like(scores)
             sums = mx.sym.sum(mx.sym.where(labels != 0, scores, zeros), axis=1) / (self.length_penalty(target_length) - 1)
 
@@ -240,7 +241,7 @@ class Scorer:
             for source, target, score in zip(batch.data[0], batch.data[1], scores):
 
                 # The "zeros" padding method will have filled remainder batches with zeros, so we can skip them here
-                if source[0] == 0:
+                if source[0] == C.PAD_ID:
                     break
 
                 sentence_no += 1
