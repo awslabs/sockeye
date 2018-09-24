@@ -1301,7 +1301,7 @@ class ParallelDataSet(Sized):
                 target[bucket_idx] = mx.nd.concat(bucket_target, bucket_target.take(desired_indices), dim=0)
                 label[bucket_idx] = mx.nd.concat(bucket_label, bucket_label.take(desired_indices), dim=0)
 
-                if policy == 'zeros':
+                if policy == C.FILL_UP_ZEROS:
                     source[bucket_idx][num_samples:, :, :] = C.PAD_ID
                     target[bucket_idx][num_samples:, :] = C.PAD_ID
                     label[bucket_idx][num_samples:, :] = C.PAD_ID

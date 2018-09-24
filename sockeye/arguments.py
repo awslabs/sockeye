@@ -1154,7 +1154,7 @@ def add_inference_args(params):
                                     "Optionally, a list of factors can be provided: "
                                     "{'text': 'some input string', 'factors': ['C C C', 'X X X']}.")
 
-    decode_params.add_argument('--output', '-o',
+    decode_params.add_argument(C.INFERENCE_ARG_OUTPUT_LONG, C.INFERENCE_ARG_OUTPUT_SHORT,
                                default=None,
                                help='Output file to write translations to. '
                                     'If not given, will write to stdout.')
