@@ -82,6 +82,7 @@ class ConvolutionBlock:
         self.conv_weight = mx.sym.Variable("%sconv_weight" % prefix,
                                            shape=(
                                                self._pre_activation_num_hidden(),
+                                               # TODO: the next parameter should be input_num_hidden
                                                self.config.num_hidden,
                                                self.config.kernel_width)
                                            )
