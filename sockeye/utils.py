@@ -33,8 +33,8 @@ from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Opt
 import mxnet as mx
 import numpy as np
 
-from sockeye import __version__, constants as C
-from sockeye.log import log_sockeye_version, log_mxnet_version
+from . import __version__, constants as C
+from .log import log_sockeye_version, log_mxnet_version
 
 logger = logging.getLogger(__name__)
 
@@ -276,7 +276,6 @@ def top1(scores: mx.nd.NDArray,
 
 def topk(scores: mx.nd.NDArray,
          k: int,
-         batch_size: int,
          offset: mx.nd.NDArray,
          use_mxnet_topk: bool) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
     """
@@ -284,21 +283,19 @@ def topk(scores: mx.nd.NDArray,
 
     :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
     :param k: The number of smallest scores to return.
-    :param batch_size: Number of sentences being decoded at once.
     :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
     :param use_mxnet_topk: True to use the mxnet implementation or False to use the numpy one.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
     # (batch_size, beam_size * target_vocab_size)
-    folded_scores = scores.reshape((batch_size, k * scores.shape[-1]))
+    folded_scores = scores.reshape((-1, k * scores.shape[-1]))
+    batch_size = folded_scores.shape[0]
 
     if use_mxnet_topk:
         # pylint: disable=unbalanced-tuple-unpacking
         values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
-        best_hyp_indices, best_word_indices = mx.nd.array(np.unravel_index(indices.astype(np.int32).asnumpy().ravel(),
-                                                                           scores.shape),
-                                                          dtype='int32',
-                                                          ctx=scores.context)
+        indices = mx.nd.cast(indices, 'int32').reshape((-1,))
+        best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, scores.shape)
 
     else:
         folded_scores = folded_scores.asnumpy()
@@ -484,14 +481,12 @@ def average_arrays(arrays: List[mx.nd.NDArray]) -> mx.nd.NDArray:
     :param arrays: A list of NDArrays with the same shape that will be averaged.
     :return: The average of the NDArrays in the same context as arrays[0].
     """
+    if not arrays:
+        raise ValueError("arrays is empty.")
     if len(arrays) == 1:
         return arrays[0]
     check_condition(all(arrays[0].shape == a.shape for a in arrays), "nd array shapes do not match")
-    new_array = mx.nd.zeros(arrays[0].shape, dtype=arrays[0].dtype, ctx=arrays[0].context)
-    for a in arrays:
-        new_array += a.as_in_context(new_array.context)
-    new_array /= len(arrays)
-    return new_array
+    return mx.nd.add_n(*arrays) / len(arrays)
 
 
 def get_num_gpus() -> int:
@@ -500,14 +495,7 @@ def get_num_gpus() -> int:
 
     :return: The number of GPUs on the system.
     """
-    # TODO (domhant): Switch to mx.context.num_gpus() with mxnet version 1.3
-    for device_id in itertools.count():
-        try:
-            mx.nd.zeros((1,), ctx=mx.gpu(device_id))
-        except mx.MXNetError:
-            return device_id
-    # Note: Return statement to make mypy happy, the for loop is infinite, so an exception is the only way out.
-    return device_id + 1
+    return mx.context.num_gpus()
 
 
 def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, int]]:
@@ -881,8 +869,8 @@ class PrintValueProp(mx.operator.CustomOpProp):
 
     def create_operator(self, ctx, shapes, dtypes):
         return PrintValue(self.print_name,
-                          print_grad=self.print_grad,
-                          use_logger=self.use_logger)
+                          print_grad=str(self.print_grad),
+                          use_logger=str(self.use_logger))
 
 
 def grouper(iterable: Iterable, size: int) -> Iterable:

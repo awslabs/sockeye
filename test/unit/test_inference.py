@@ -390,12 +390,29 @@ def test_topk_func(batch_size, beam_size, target_vocab_size):
     # offset for batch sizes > 1
     offset = mx.nd.array(np.repeat(np.arange(0, batch_size * beam_size, beam_size), beam_size), dtype='int32')
 
-    np_hyp, np_word, np_values = sockeye.utils.topk(scores, k=beam_size, batch_size=batch_size,
+    np_hyp, np_word, np_values = sockeye.utils.topk(scores, k=beam_size,
                                                     offset=offset, use_mxnet_topk=False)
     np_hyp, np_word, np_values = np_hyp.asnumpy(), np_word.asnumpy(), np_values.asnumpy()
 
-    mx_hyp, mx_word, mx_values = sockeye.utils.topk(scores, k=beam_size, batch_size=batch_size,
+    mx_hyp, mx_word, mx_values = sockeye.utils.topk(scores, k=beam_size,
                                                     offset=offset, use_mxnet_topk=True)
+    mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
+    assert all(mx_hyp == np_hyp)
+    assert all(mx_word == np_word)
+    assert all(mx_values == np_values)
+
+    topk = sockeye.inference.TopK(k=beam_size, batch_size=batch_size, vocab_size=target_vocab_size)
+    topk.initialize()
+    assert all(topk.offset.data() == offset)
+
+    mx_hyp, mx_word, mx_values = topk(scores)
+    mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
+    assert all(mx_hyp == np_hyp)
+    assert all(mx_word == np_word)
+    assert all(mx_values == np_values)
+
+    topk.hybridize()
+    mx_hyp, mx_word, mx_values = topk(scores)
     mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
     assert all(mx_hyp == np_hyp)
     assert all(mx_word == np_word)
@@ -428,6 +445,7 @@ def test_get_best_word_indices_for_kth_hypotheses():
     result = sockeye.inference.Translator._get_best_word_indices_for_kth_hypotheses(ks, all_hyp_indices)
     assert result.shape == expected_indices.shape
     assert (result == expected_indices).all()
+
 
 @pytest.mark.parametrize("raw_constraints, beam_histories, expected_best_ids, expected_best_indices",
                         [([[], [], [], []], [None, None], np.array([0, 2], dtype='int32'), np.array([[1, 1, 1], [3, 3, 3]], dtype='int32')),

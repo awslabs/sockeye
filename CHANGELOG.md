@@ -10,9 +10,20 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [1.18.54]
+## [1.18.57]
 ### Added
 - Added nbest translation, exposed as `--nbest-size`. Nbest translation means to not only output the most probable translation according to a model, but the top n most probable hypotheses. If `--nbest-size > 1` and the option `--output-type` is not explicitly specified, the output type will be changed to one JSON list of nbest translations per line. `--nbest-size` can never be higher than `--beam-size`.
+
+## [1.18.56]
+### Changed
+- Update to MXNet 1.3.0.post0
+
+## [1.18.55]
+- Renamed `contrib` to less-generic `sockeye_contrib`
+
+## [1.18.54]
+### Added
+- `--source-factor-vocabs` can be set to provide source factor vocabularies.
 
 ## [1.18.53]
 ### Added
