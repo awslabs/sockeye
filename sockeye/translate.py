@@ -59,9 +59,9 @@ def run_translate(args: argparse.Namespace):
     if args.nbest_size > 1:
         check_condition(args.beam_size >= args.nbest_size,
                         "Size of nbest list (--nbest-size) must be smaller or equal to beam size (--beam-size).")
-        if args.output_type not in C.OUTPUT_HANDLERS_NBEST:
-            logger.warning("For nbest translation, output handler must be one of %s, overriding option --output-type to '%s'.",
-                       C.OUTPUT_HANDLERS_NBEST, C.OUTPUT_HANDLER_NBEST)
+        if args.output_type != C.OUTPUT_HANDLER_NBEST:
+            logger.warning("For nbest translation, output handler must be '%s', overriding option --output-type.",
+                       C.OUTPUT_HANDLER_NBEST)
 
     log_basic_info(args)
 
