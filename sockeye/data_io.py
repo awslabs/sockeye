@@ -599,17 +599,20 @@ def prepare_data(source_fnames: List[str],
         version_out.write(str(C.PREPARED_DATA_VERSION))
 
 
-def get_data_statistics(source_readers: Sequence[Iterable],
+def get_data_statistics(source_readers: Optional[Sequence[Iterable]],
                         target_reader: Iterable,
                         buckets: List[Tuple[int, int]],
                         length_ratio_mean: float,
                         length_ratio_std: float,
-                        source_vocabs: List[vocab.Vocab],
+                        source_vocabs: Optional[List[vocab.Vocab]],
                         target_vocab: vocab.Vocab) -> 'DataStatistics':
-    data_stats_accumulator = DataStatisticsAccumulator(buckets, source_vocabs[0], target_vocab,
-                                                       length_ratio_mean, length_ratio_std)
+    data_stats_accumulator = DataStatisticsAccumulator(buckets,
+                                                       source_vocabs[0] if source_vocabs is not None else None,
+                                                       target_vocab,
+                                                       length_ratio_mean,
+                                                       length_ratio_std)
 
-    if source_readers is not None and target_reader is not None:
+    if source_readers is not None:
         for sources, target in parallel_iter(source_readers, target_reader):
             buck_idx, buck = get_parallel_bucket(buckets, len(sources[0]), len(target))
             data_stats_accumulator.sequence_pair(sources[0], target, buck_idx)
@@ -1049,7 +1052,7 @@ class SequenceReader(Iterable):
     Empty sequences are yielded as None.
 
     :param path: Path to read data from.
-    :param vocab: Optional mapping from strings to integer ids.
+    :param vocabulary: Optional mapping from strings to integer ids.
     :param add_bos: Whether to add Beginning-Of-Sentence (BOS) symbol.
     :param limit: Read limit.
     """
