@@ -424,10 +424,9 @@ def run_train_translate(train_params: str,
                             # for negative constraints, ensure the constraints is *not* in the constrained output
                             assert restriction not in constrained_out
 
-
         # Test scoring. We make sure that we can score the (input, translation output) and get the same
         # model score.
-        if not use_prepared_data and '--skip-topk' not in translate_params:
+        if not use_prepared_data and not '--skip-topk' in translate_params:
             ## Score
             # We use the translation parameters, but have to remove irrelevant arguments from it.
             # Currently, the only relevant flag passed is the --softmax-temperature flag.
@@ -452,6 +451,10 @@ def run_train_translate(train_params: str,
 
             with patch.object(sys, "argv", params.split()):
                 sockeye.score.main()
+
+            print('PARAMS', params)
+            print('TRANSLATE SCORES', open(translate_score_path).readlines())
+            print('SCORE SCORES', open(scores_output_file).readlines())
 
             ## Compare scored output to original translation output. First remove -inf lines from the translate_score_path
             ## file. These correspond to blank lines in translate, which are skipped in sockeye.score.
