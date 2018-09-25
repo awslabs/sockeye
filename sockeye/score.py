@@ -30,6 +30,7 @@ from . import model
 from . import scoring
 from . import train
 from . import utils
+from . import vocab
 from .log import setup_main_logger
 from .output_handler import get_output_handler, OutputHandler
 from .utils import check_condition, log_basic_info
@@ -43,6 +44,68 @@ def main():
     arguments.add_score_cli_args(params)
     args = params.parse_args()
     score(args)
+
+
+def get_data_iters_and_vocabs(args: argparse.Namespace,
+                              model_folder: Optional[str]) -> Tuple['data_io.BaseParallelSampleIter',
+                                                                    'data_io.DataConfig',
+                              List[vocab.Vocab], vocab.Vocab, Optional[data_io.DataInfo]]:
+    """
+    Loads the data iterators and vocabularies.
+
+    :param args: Arguments as returned by argparse.
+    :param max_seq_len_source: Source maximum sequence length.
+    :param max_seq_len_target: Target maximum sequence length.
+    :param shared_vocab: Whether to create a shared vocabulary.
+    :param resume_training: Whether to resume training.
+    :param model_folder: Output folder.
+    :return: The data iterators (train, validation, config_data) as well as the source and target vocabularies, and data_info if not using prepared data.
+    """
+
+    model_config = model.SockeyeModel.load_config(os.path.join(args.model, C.CONFIG_NAME))
+
+    if args.max_seq_len is None:
+        max_seq_len_source = model_config.config_data.max_seq_len_source
+        max_seq_len_target = model_config.config_data.max_seq_len_target
+    else:
+        max_seq_len_source, max_seq_len_target = args.max_seq_len
+
+    num_words_source, num_words_target = args.num_words
+    num_words_source = num_words_source if num_words_source > 0 else None
+    num_words_target = num_words_target if num_words_target > 0 else None
+
+    word_min_count_source, word_min_count_target = args.word_min_count
+    batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
+    batch_by_words = args.batch_type == C.BATCH_TYPE_WORD
+
+    # Load the existing vocabs created when starting the training run.
+    source_vocabs = vocab.load_source_vocabs(model_folder)
+    target_vocab = vocab.load_target_vocab(model_folder)
+
+    sources = [args.source] + args.source_factors
+    sources = [str(os.path.abspath(source)) for source in sources]
+
+    train_iter, _, config_data, data_info = data_io.get_training_data_iters(
+        sources=sources,
+        target=os.path.abspath(args.target),
+        validation_sources=None,
+        validation_target=None,
+        source_vocabs=source_vocabs,
+        target_vocab=target_vocab,
+        source_vocab_paths=None,
+        target_vocab_path=None,
+        shared_vocab=False,
+        batch_size=args.batch_size,
+        batch_by_words=batch_by_words,
+        batch_num_devices=batch_num_devices,
+        fill_up=C.FILL_UP_ZEROS,
+        permute=False,
+        max_seq_len_source=max_seq_len_source,
+        max_seq_len_target=max_seq_len_target,
+        bucketing=False,
+        bucket_width=args.bucket_width)
+
+    return train_iter, config_data, source_vocabs, target_vocab, model_config
 
 
 def score(args: argparse.Namespace):
@@ -63,14 +126,6 @@ def score(args: argparse.Namespace):
                                                                  "size that is a multiple of %d." % len(context))
         logger.info("Scoring Device(s): %s", ", ".join(str(c) for c in context))
 
-        model_config = model.SockeyeModel.load_config(os.path.join(args.model, C.CONFIG_NAME))
-
-        if args.max_seq_len is None:
-            max_seq_len_source = model_config.config_data.max_seq_len_source
-            max_seq_len_target = model_config.config_data.max_seq_len_target
-        else:
-            max_seq_len_source, max_seq_len_target = args.max_seq_len
-
         # This call has a number of different parameters compared to training which reflect our need to get scores
         # one-for-one and in the same order as the input data.
         # To enable code reuse, we stuff the `args` parameter with some values.
@@ -80,14 +135,9 @@ def score(args: argparse.Namespace):
         args.no_bucketing = True
         args.fill_up = 'zeros'
         args.bucket_width = 10
-        score_iter, _, config_data, source_vocabs, target_vocab, data_info = train.create_data_iters_and_vocabs(
+        score_iter, config_data, source_vocabs, target_vocab, model_config = get_data_iters_and_vocabs(
             args=args,
-            max_seq_len_source=max_seq_len_source,
-            max_seq_len_target=max_seq_len_target,
-            shared_vocab=args.shared_vocab,
-            resume_training=True,
-            output_folder=args.model,
-            permute=False)
+            model_folder=args.model)
 
         scoring_model = scoring.ScoringModel(config=model_config,
                                              model_dir=args.model,
