@@ -427,7 +427,7 @@ def run_train_translate(train_params: str,
 
         # Test scoring. We make sure that we can score the (input, translation output) and get the same
         # model score.
-        if not use_prepared_data:
+        if not use_prepared_data and '--skip-topk' not in translate_params:
             ## Score
             # We use the translation parameters, but have to remove irrelevant arguments from it.
             # Currently, the only relevant flag passed is the --softmax-temperature flag.
