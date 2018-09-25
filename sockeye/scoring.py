@@ -66,12 +66,14 @@ class ScoringModel(model.SockeyeModel):
                  bucketing: bool,
                  default_bucket_key: Tuple[int, int],
                  score_type: str,
-                 length_penalty: inference.LengthPenalty) -> None:
+                 length_penalty: inference.LengthPenalty,
+                 softmax_temperature: Optional[float] = None) -> None:
         super().__init__(config)
         self.context = context
         self.bucketing = bucketing
         self.score_type = score_type
         self.length_penalty = length_penalty
+        self.softmax_temperature = softmax_temperature
 
         # Create the computation graph
         self._initialize(provide_data, provide_label, default_bucket_key)
@@ -150,6 +152,9 @@ class ScoringModel(model.SockeyeModel):
             logits = self.output_layer(mx.sym.reshape(data=target_decoded, shape=(-3, 0)))
             # logits after reshape: (batch_size, target_seq_len, target_vocab_size)
             logits = mx.sym.reshape(data=logits, shape=(-4, -1, target_embed_seq_len, 0))
+
+            if self.softmax_temperature is not None:
+                logits = logits / self.softmax_temperature
 
             # Compute the softmax along the final dimension.
             # target_dists: (batch_size, target_seq_len, target_vocab_size)

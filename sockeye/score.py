@@ -98,13 +98,15 @@ def score(args: argparse.Namespace):
                                              score_type=args.score_type,
                                              bucketing=False,
                                              length_penalty=inference.LengthPenalty(alpha=args.length_penalty_alpha,
-                                                                                    beta=args.length_penalty_beta))
+                                                                                    beta=args.length_penalty_beta),
+                                             softmax_temperature=args.softmax_temperature)
 
         scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab)
 
         scorer.score(score_iter=score_iter,
                      score_type=args.score_type,
-                     output_handler=get_output_handler(args.output_type))
+                     output_handler=get_output_handler(output_type=args.output_type,
+                                                       output_fname=args.output))
 
         if config_data.data_statistics.num_discarded != 0:
             num_discarded = config_data.data_statistics.num_discarded

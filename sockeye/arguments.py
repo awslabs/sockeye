@@ -1111,6 +1111,15 @@ def add_score_cli_args(params):
                         help='Beta factor for the length penalty used in scoring: '
                         '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
 
+    params.add_argument('--softmax-temperature',
+                        type=float,
+                        default=None,
+                        help='Controls peakiness of model predictions. Values < 1.0 produce '
+                        'peaked predictions, values > 1.0 produce smoothed distributions.')
+
+    params.add_argument("--output", "-o", default=None,
+                        help="File to write output to. Default: STDOUT.")
+
     params.add_argument('--output-type',
                         default=C.OUTPUT_HANDLER_SCORE,
                         choices=C.OUTPUT_HANDLERS_SCORING,
