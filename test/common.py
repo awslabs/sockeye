@@ -30,6 +30,7 @@ import sockeye.constants as C
 import sockeye.evaluate
 import sockeye.extract_parameters
 import sockeye.lexicon
+import sockeye.model
 import sockeye.prepare_data
 import sockeye.score
 import sockeye.train
@@ -211,7 +212,7 @@ _TRANSLATE_WITH_FACTORS_COMMON = " --input-factors {input_factors}"
 
 _TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {lexicon} --restrict-lexicon-topk {topk}"
 
-_SCORE_PARAMS_COMMON = "--use-cpu --model {model} --source {source} --target {target} --output {output} --max-seq-len 20:20"
+_SCORE_PARAMS_COMMON = "--use-cpu --model {model} --source {source} --target {target} --output {output}"
 
 _SCORE_WITH_FACTORS_COMMON = " --source-factors {source_factors}"
 
@@ -452,19 +453,29 @@ def run_train_translate(train_params: str,
             with patch.object(sys, "argv", params.split()):
                 sockeye.score.main()
 
-            print('PARAMS', params)
-            print('TRANSLATE SCORES', open(translate_score_path).readlines())
-            print('SCORE SCORES', open(scores_output_file).readlines())
+            # Compare scored output to original translation output. There are a few tricks: for blank source sentences,
+            # inference will report a score of -inf, so skip these. Second, we don't know if the scores include the
+            # generation of </s> and have had length normalization applied. So, skip all sentences that are as long
+            # as the maximum length, in order to safely exclude them.
+            with open(translate_score_path) as in_translate, open(out_path) as in_words, open(scores_output_file) as in_score:
+                model_config = sockeye.model.SockeyeModel.load_config(os.path.join(model_path, C.CONFIG_NAME))
+                max_len = model_config.config_data.max_seq_len_target
 
-            ## Compare scored output to original translation output. First remove -inf lines from the translate_score_path
-            ## file. These correspond to blank lines in translate, which are skipped in sockeye.score.
-            with open(translate_score_path) as in_translate, open(scores_output_file) as in_score:
-                scores = in_score.readlines()
-                assert len(scores) > 0
-                for translate_score, score_score in zip(filter(lambda x: x != '-inf\n', in_translate.readlines()),
-                                                        in_score.readlines()):
+                model_config = sockeye.model.SockeyeModel.load_config(os.path.join(model_path, C.CONFIG_NAME))
+                max_len = model_config.config_data.max_seq_len_target
+
+                # Filter out sockeye.translate sentences that had -inf or were too long to know whether they were normalized
+                translate_scores = []
+                score_scores = in_score.readlines()
+                for score, sent in zip(in_translate.readlines(), in_words.readlines()):
+                    if score != '-inf\n' and len(sent.split()) < max_len:
+                        translate_scores.append(score)
+
+                # Compare scores (using 0.002 which covers common noise comparing e.g., 1.234 and 1.235)
+                for translate_score, score_score in zip(translate_scores, score_scores):
                     translate_score = float(translate_score)
                     score_score = float(score_score)
+
                     assert abs(translate_score - score_score) < 0.002
 
         # Translate corpus with the 2nd params
