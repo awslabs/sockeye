@@ -455,11 +455,12 @@ def run_train_translate(train_params: str,
 
             ## Compare scored output to original translation output. First remove -inf lines from the translate_score_path
             ## file. These correspond to blank lines in translate, which are skipped in sockeye.score.
-            for translate_score, score_score in zip(filter(lambda x: x != '-inf\n', open(translate_score_path).readlines()),
-                                                    open(scores_output_file).readlines()):
-                translate_score = float(translate_score)
-                score_score = float(score_score)
-                assert abs(translate_score - score_score) < 0.002
+            with open(translate_score_path) as in_translate, open(scores_output_file) as in_score:
+                for translate_score, score_score in zip(filter(lambda x: x != '-inf\n', in_translate.readlines()),
+                                                        in_score.readlines()):
+                    translate_score = float(translate_score)
+                    score_score = float(score_score)
+                    assert abs(translate_score - score_score) < 0.002
 
         # Translate corpus with the 2nd params
         if translate_params_equiv is not None:
