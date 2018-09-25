@@ -247,7 +247,7 @@ class Scorer:
             for source, target, score in zip(batch.data[0], batch.data[1], scores):
 
                 # The "zeros" padding method will have filled remainder batches with zeros, so we can skip them here
-                if source[0] == C.PAD_ID:
+                if source[0][0] == C.PAD_ID:
                     break
 
                 sentence_no += 1

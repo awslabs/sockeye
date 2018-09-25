@@ -31,6 +31,7 @@ import sockeye.evaluate
 import sockeye.extract_parameters
 import sockeye.lexicon
 import sockeye.prepare_data
+import sockeye.score
 import sockeye.train
 import sockeye.translate
 import sockeye.utils
@@ -210,6 +211,10 @@ _TRANSLATE_WITH_FACTORS_COMMON = " --input-factors {input_factors}"
 
 _TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {lexicon} --restrict-lexicon-topk {topk}"
 
+_SCORE_PARAMS_COMMON = "--use-cpu --model {model} --source {source} --target {target} --output {output}"
+
+_SCORE_WITH_FACTORS_COMMON = " --source-factors {source_factors}"
+
 _EVAL_PARAMS_COMMON = "--hypotheses {hypotheses} --references {references} --metrics {metrics} {quiet}"
 
 _EXTRACT_PARAMS = "--input {input} --names target_output_bias --list-all --output {output}"
@@ -331,21 +336,38 @@ def run_train_translate(train_params: str,
         cp_metrics = cp_decoder.decode_and_evaluate()
         logger.info("Checkpoint decoder metrics: %s", cp_metrics)
 
+        # import shutil
+        # shutil.copytree(model_path, "/Users/post/code/sockeye/t/model")
+
         logger.info("Translating with parameters %s.", translate_params)
         # Translate corpus with the 1st params
         out_path = os.path.join(work_dir, "out.txt")
-        params = "{} {} {}".format(sockeye.translate.__file__,
-                                   _TRANSLATE_PARAMS_COMMON.format(model=model_path,
-                                                                   input=test_source_path,
-                                                                   output=out_path,
-                                                                   quiet=quiet_arg),
-                                   translate_params)
+        translate_score_path = os.path.join(work_dir, "out.scores.txt")
+        params = "{} {} {} --output-type translation_with_score".format(sockeye.translate.__file__,
+                                                                        _TRANSLATE_PARAMS_COMMON.format(model=model_path,
+                                                                                                        input=test_source_path,
+                                                                                                        output=out_path,
+                                                                                                        quiet=quiet_arg),
+                                                                        translate_params)
 
         if test_source_factor_paths is not None:
             params += _TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(test_source_factor_paths))
 
         with patch.object(sys, "argv", params.split()):
             sockeye.translate.main()
+
+        # Break out translation and score
+        outputs = open(out_path).readlines()
+        with open(out_path, 'w') as out_translate, open(translate_score_path, 'w') as out_scores:
+            for output in outputs:
+                output = output.strip()
+                try:
+                    score, translation = output.split('\t')
+                except:
+                    score = output
+                    translation = ""
+                print(translation, file=out_translate)
+                print(score, file=out_scores)
 
         # Test target constraints
         if use_target_constraints:
@@ -402,6 +424,44 @@ def run_train_translate(train_params: str,
                         else:
                             # for negative constraints, ensure the constraints is *not* in the constrained output
                             assert restriction not in constrained_out
+
+
+        # Test scoring. We make sure that we can score the (input, translation output) and get the same
+        # model score.
+        if not use_prepared_data:
+            ## Score
+            # We use the translation parameters, but have to remove irrelevant arguments from it.
+            # Currently, the only relevant flag passed is the --softmax-temperature flag.
+            score_params = ''
+            if 'softmax-temperature' in translate_params:
+                tokens = translate_params.split(C.TOKEN_SEPARATOR)
+                for i, token in enumerate(tokens):
+                    if token == '--softmax-temperature':
+                        score_params = '--softmax-temperature {}'.format(tokens[i + 1])
+                        break
+
+            scores_output_file = out_path + '.score'
+            params = "{} {} {}".format(sockeye.score.__file__,
+                                       _SCORE_PARAMS_COMMON.format(model=model_path,
+                                                                   source=test_source_path,
+                                                                   target=out_path,
+                                                                   output=scores_output_file),
+                                       score_params)
+
+            if test_source_factor_paths is not None:
+                params += _SCORE_WITH_FACTORS_COMMON.format(source_factors=" ".join(test_source_factor_paths))
+
+            with patch.object(sys, "argv", params.split()):
+                sockeye.score.main()
+
+            ## Compare scored output to original translation output. First remove -inf lines from the translate_score_path
+            ## file. These correspond to blank lines in translate, which are skipped in sockeye.score.
+            for translate_score, score_score in zip(filter(lambda x: x != '-inf\n', open(translate_score_path).readlines()),
+                                                    open(scores_output_file).readlines()):
+                translate_score = float(translate_score)
+                score_score = float(score_score)
+                print('SCORES', translate_score, score_score)
+                assert abs(translate_score - score_score) < 0.002
 
         # Translate corpus with the 2nd params
         if translate_params_equiv is not None:
