@@ -49,7 +49,7 @@ def main():
 def get_data_iters_and_vocabs(args: argparse.Namespace,
                               model_folder: Optional[str]) -> Tuple['data_io.BaseParallelSampleIter',
                                                                     'data_io.DataConfig',
-                              List[vocab.Vocab], vocab.Vocab, Optional[data_io.DataInfo]]:
+                                                                    List[vocab.Vocab], vocab.Vocab, model.ModelConfig]:
     """
     Loads the data iterators and vocabularies.
 

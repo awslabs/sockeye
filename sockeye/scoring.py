@@ -196,7 +196,7 @@ class ScoringModel(model.SockeyeModel):
                          force_rebind=False,
                          grad_req=None)
 
-    def run(self, batch: mx.io.DataBatch) -> Tuple[mx.sym.Symbol, List[str], List[str]]:
+    def run(self, batch: mx.io.DataBatch) -> mx.sym.Symbol:
         """
         Runs the forward pass and returns the outputs.
 

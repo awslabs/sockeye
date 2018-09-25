@@ -1415,7 +1415,7 @@ class BaseParallelSampleIter(mx.io.DataIter):
     def __init__(self,
                  buckets: List[Tuple[int, int]],
                  batch_size: int,
-                 bucket_batch_sizes: List[int],
+                 bucket_batch_sizes: List[BucketBatchSize],
                  source_data_name: str,
                  target_data_name: str,
                  label_name: str,
