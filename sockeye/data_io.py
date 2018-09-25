@@ -676,9 +676,9 @@ def get_prepared_data_iters(prepared_data_dir: str,
                             batch_by_words: bool,
                             batch_num_devices: int,
                             fill_up: str,
-                            no_permute: bool = False) -> Tuple['BaseParallelSampleIter',
-                                                               'BaseParallelSampleIter',
-                                                               'DataConfig', List[vocab.Vocab], vocab.Vocab]:
+                            permute: bool = True) -> Tuple['BaseParallelSampleIter',
+                                                           'BaseParallelSampleIter',
+                                                           'DataConfig', List[vocab.Vocab], vocab.Vocab]:
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
@@ -733,7 +733,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                            bucket_batch_sizes,
                                            fill_up,
                                            num_factors=len(data_info.sources),
-                                           no_permute=no_permute)
+                                           permute=permute)
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=target_vocab[C.EOS_SYMBOL],
@@ -771,9 +771,9 @@ def get_training_data_iters(sources: List[str],
                             max_seq_len_target: int,
                             bucketing: bool,
                             bucket_width: int,
-                            no_permute: bool = False) -> Tuple['BaseParallelSampleIter',
-                                                               Optional['BaseParallelSampleIter'],
-                                                               'DataConfig', 'DataInfo']:
+                            permute: bool = True) -> Tuple['BaseParallelSampleIter',
+                                                           Optional['BaseParallelSampleIter'],
+                                                           'DataConfig', 'DataInfo']:
     """
     Returns data iterators for training and validation data.
 
@@ -809,7 +809,7 @@ def get_training_data_iters(sources: List[str],
 
     sources_sentences, target_sentences = create_sequence_readers(sources, target, source_vocabs, target_vocab)
 
-    # 2. pass: Get data statistics
+    # Pass 2: Get data statistics and determine the number of data points for each bucket.
     data_statistics = get_data_statistics(sources_sentences, target_sentences, buckets,
                                           length_statistics.length_ratio_mean, length_statistics.length_ratio_std,
                                           source_vocabs, target_vocab)
@@ -822,6 +822,7 @@ def get_training_data_iters(sources: List[str],
 
     data_statistics.log(bucket_batch_sizes)
 
+    # Pass 3: Load the data into memory and return the iterator.
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=target_vocab[C.EOS_SYMBOL],
                                            pad_id=C.PAD_ID)
@@ -847,7 +848,7 @@ def get_training_data_iters(sources: List[str],
                                     batch_size=batch_size,
                                     bucket_batch_sizes=bucket_batch_sizes,
                                     num_factors=len(sources),
-                                    no_permute=no_permute)
+                                    permute=permute)
 
     validation_iter = None
     if validation_sources is not None and validation_target is not None:
@@ -1312,6 +1313,13 @@ class ParallelDataSet(Sized):
         return ParallelDataSet(source, target, label)
 
     def permute(self, permutations: List[mx.nd.NDArray]) -> 'ParallelDataSet':
+        """
+        Permutes the data within each bucket. The permutation is received as an argument,
+        allowing the data to be unpermuted (i.e., restored) later on.
+
+        :param permutations: For each bucket, a permutation of the data within that bucket.
+        :return: A new, permuted ParallelDataSet.
+        """
         assert len(self) == len(permutations)
         source = []
         target = []
@@ -1365,6 +1373,8 @@ def get_batch_indices(data: ParallelDataSet,
     Returns a list of index tuples that index into the bucket and the start index inside a bucket given
     the batch size for a bucket. These indices are valid for the given dataset.
 
+    Put another way, this returns the starting points for all batches within the dataset, across all buckets.
+
     :param data: Data to create indices for.
     :param bucket_batch_sizes: Bucket batch sizes.
     :return: List of 2d indices.
@@ -1391,19 +1401,26 @@ class BaseParallelSampleIter(mx.io.DataIter):
     """
     Base parallel sample iterator.
 
-    :param no_permute: Turn off random shuffling of parallel data.
+    :param buckets: The list of buckets.
+    :param bucket_batch_sizes: A list, parallel to `buckets`, containing the number of samples in each bucket.
+    :param source_data_name: The source data name.
+    :param target_data_name: The target data name.
+    :param label_name: The label name.
+    :param num_factors: The number of source factors.
+    :param permute: Randomly shuffle the parallel data.
+    :param dtype: The MXNet data type.
     """
     __metaclass__ = MetaBaseParallelSampleIter
 
     def __init__(self,
-                 buckets,
-                 batch_size,
-                 bucket_batch_sizes,
-                 source_data_name,
-                 target_data_name,
-                 label_name,
+                 buckets: List[Tuple[int, int]],
+                 batch_size: int,
+                 bucket_batch_sizes: List[int],
+                 source_data_name: str,
+                 target_data_name: str,
+                 label_name: str,
                  num_factors: int = 1,
-                 no_permute: bool = False,
+                 permute: bool = True,
                  dtype='float32') -> None:
         super().__init__(batch_size=batch_size)
 
@@ -1414,7 +1431,7 @@ class BaseParallelSampleIter(mx.io.DataIter):
         self.target_data_name = target_data_name
         self.label_name = label_name
         self.num_factors = num_factors
-        self.no_permute = no_permute
+        self.permute = permute
         self.dtype = dtype
 
         # "Staging area" that needs to fit any size batch we're using by total number of elements.
@@ -1477,11 +1494,11 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
                  num_factors: int = 1,
-                 no_permute: bool = False,
+                 permute: bool = True,
                  dtype='float32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          source_data_name=source_data_name, target_data_name=target_data_name,
-                         label_name=label_name, num_factors=num_factors, no_permute=no_permute, dtype=dtype)
+                         label_name=label_name, num_factors=num_factors, permute=permute, dtype=dtype)
         assert len(shards_fnames) > 0
         self.shards_fnames = list(shards_fnames)
         self.shard_index = -1
@@ -1493,7 +1510,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
         shard_fname = self.shards_fnames[self.shard_index]
         logger.info("Loading shard %s.", shard_fname)
         dataset = ParallelDataSet.load(self.shards_fnames[self.shard_index]).fill_up(self.bucket_batch_sizes,
-                                                                                     self.fill_up,
+                                                                                     policy=self.fill_up,
                                                                                      seed=self.shard_index)
         self.shard_iter = ParallelSampleIter(data=dataset,
                                              buckets=self.buckets,
@@ -1502,7 +1519,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                                              source_data_name=self.source_data_name,
                                              target_data_name=self.target_data_name,
                                              num_factors=self.num_factors,
-                                             no_permute=self.no_permute)
+                                             permute=self.permute)
 
     def reset(self):
         if len(self.shards_fnames) > 1:
@@ -1570,19 +1587,21 @@ class ParallelSampleIter(BaseParallelSampleIter):
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
                  num_factors: int = 1,
-                 no_permute: bool = False,
+                 permute: bool = True,
                  dtype='float32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          source_data_name=source_data_name, target_data_name=target_data_name,
-                         label_name=label_name, num_factors=num_factors, no_permute=no_permute, dtype=dtype)
+                         label_name=label_name, num_factors=num_factors, permute=permute, dtype=dtype)
 
         # create independent lists to be shuffled
         self.data = ParallelDataSet(list(data.source), list(data.target), list(data.label))
 
-        # create index tuples (buck_idx, batch_start_pos) into buckets. These will be shuffled.
+        # create index tuples (buck_idx, batch_start_pos) into buckets.
+        # This is the list of all batches across all buckets in the dataset. These will be shuffled.
         self.batch_indices = get_batch_indices(self.data, bucket_batch_sizes)
         self.curr_batch_index = 0
 
+        # Produces a permutation of the batches within each bucket, along with the permutation that inverts it.
         self.inverse_data_permutations = [mx.nd.arange(0, max(1, self.data.source[i].shape[0]))
                                           for i in range(len(self.data))]
         self.data_permutations = [mx.nd.arange(0, max(1, self.data.source[i].shape[0]))
@@ -1595,11 +1614,11 @@ class ParallelSampleIter(BaseParallelSampleIter):
         Resets and reshuffles the data.
         """
         self.curr_batch_index = 0
-        if not self.no_permute:
+        if self.permute:
             # shuffle batch start indices
             random.shuffle(self.batch_indices)
 
-            # restore
+            # restore the data permutation
             self.data = self.data.permute(self.inverse_data_permutations)
 
             # permute the data within each batch

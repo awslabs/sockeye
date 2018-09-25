@@ -72,10 +72,14 @@ def score(args: argparse.Namespace):
             max_seq_len_source, max_seq_len_target = args.max_seq_len
 
         # This call has a number of different parameters compared to training which reflect our need to get scores
-        # one-for-one and in order with the input data.
+        # one-for-one and in the same order as the input data.
+        # To enable code reuse, we stuff the `args` parameter with some values.
         # Bucketing and permuting need to be turned off in order to preserve the ordering of sentences.
         # The 'zeros' fill_up strategy fills underfilled buckets with zeros which can then be used to find the last item.
         # Finally, 'resume_training' needs to be set to True because it causes the model to be loaded instead of initialized.
+        args.no_bucketing = True
+        args.fill_up = 'zeros'
+        args.bucket_width = 10
         score_iter, _, config_data, source_vocabs, target_vocab, data_info = train.create_data_iters_and_vocabs(
             args=args,
             max_seq_len_source=max_seq_len_source,
@@ -83,9 +87,7 @@ def score(args: argparse.Namespace):
             shared_vocab=args.shared_vocab,
             resume_training=True,
             output_folder=args.model,
-            bucketing=False,
-            fill_up='zeros',
-            no_permute=True)
+            permute=False)
 
         scoring_model = scoring.ScoringModel(config=model_config,
                                              model_dir=args.model,
