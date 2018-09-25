@@ -336,9 +336,6 @@ def run_train_translate(train_params: str,
         cp_metrics = cp_decoder.decode_and_evaluate()
         logger.info("Checkpoint decoder metrics: %s", cp_metrics)
 
-        # import shutil
-        # shutil.copytree(model_path, "/Users/post/code/sockeye/t/model")
-
         logger.info("Translating with parameters %s.", translate_params)
         # Translate corpus with the 1st params
         out_path = os.path.join(work_dir, "out.txt")
@@ -357,13 +354,15 @@ def run_train_translate(train_params: str,
             sockeye.translate.main()
 
         # Break out translation and score
-        outputs = open(out_path).readlines()
+        with open(out_path) as out_fh:
+            outputs = out_fh.readlines()
         with open(out_path, 'w') as out_translate, open(translate_score_path, 'w') as out_scores:
             for output in outputs:
                 output = output.strip()
+                # blank lines on test input will have only one field output (-inf for the score)
                 try:
                     score, translation = output.split('\t')
-                except:
+                except ValueError:
                     score = output
                     translation = ""
                 print(translation, file=out_translate)
@@ -434,10 +433,10 @@ def run_train_translate(train_params: str,
             # Currently, the only relevant flag passed is the --softmax-temperature flag.
             score_params = ''
             if 'softmax-temperature' in translate_params:
-                tokens = translate_params.split(C.TOKEN_SEPARATOR)
-                for i, token in enumerate(tokens):
-                    if token == '--softmax-temperature':
-                        score_params = '--softmax-temperature {}'.format(tokens[i + 1])
+                params = translate_params.split(C.TOKEN_SEPARATOR)
+                for i, param in enumerate(params):
+                    if param == '--softmax-temperature':
+                        score_params = '--softmax-temperature {}'.format(params[i + 1])
                         break
 
             scores_output_file = out_path + '.score'
@@ -460,7 +459,6 @@ def run_train_translate(train_params: str,
                                                     open(scores_output_file).readlines()):
                 translate_score = float(translate_score)
                 score_score = float(score_score)
-                print('SCORES', translate_score, score_score)
                 assert abs(translate_score - score_score) < 0.002
 
         # Translate corpus with the 2nd params

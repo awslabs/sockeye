@@ -177,7 +177,7 @@ sockeye.rnn_attention module
     :show-inheritance:
 
 sockeye.score module
-----------------------------
+--------------------
 
 .. automodule:: sockeye.score
     :members:

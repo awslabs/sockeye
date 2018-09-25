@@ -789,7 +789,7 @@ def get_training_data_iters(sources: List[str],
     :param batch_size: Batch size.
     :param batch_by_words: Size batches by words rather than sentences.
     :param batch_num_devices: Number of devices batches will be parallelized across.
-    :param fill_up: Fill-up strategy for buckets.
+    :param fill_up: Fill-up policy for buckets.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
     :param bucketing: Whether to use bucketing.
@@ -1031,7 +1031,7 @@ def ids2strids(ids: Iterable[int]) -> str:
 
 def ids2tokens(token_ids: Iterable[int],
                vocab_inv: Dict[int, str],
-               exclude_set: Set[int] = set()) -> List[str]:
+               exclude_set: Set[int] = set()) -> Iterator[str]:
     """
     Transforms a list of token IDs into a list of words, exluding any IDs in `exclude_set`.
 
@@ -1042,7 +1042,7 @@ def ids2tokens(token_ids: Iterable[int],
 """
 
     tokens = [vocab_inv[token] for token in token_ids]
-    return [tok for token_id, tok in zip(token_ids, tokens) if token_id not in exclude_set]
+    return (tok for token_id, tok in zip(token_ids, tokens) if token_id not in exclude_set)
 
 
 class SequenceReader(Iterable):
@@ -1261,10 +1261,10 @@ class ParallelDataSet(Sized):
                 policy: str,
                 seed: int = 42) -> 'ParallelDataSet':
         """
-        Returns a new dataset with buckets filled up using the specified fill-up strategy.
+        Returns a new dataset with buckets filled up using the specified fill-up policy.
 
         :param bucket_batch_sizes: Bucket batch sizes.
-        :param policy: Fill-up strategy.
+        :param policy: Fill-up policy.
         :param seed: The random seed used for sampling sentences to fill up.
         :return: New dataset with buckets filled up to the next multiple of batch size
         """
@@ -1292,7 +1292,7 @@ class ParallelDataSet(Sized):
                     logger.info("Filling bucket %s from size %d to %d by sampling with replacement",
                                 bucket, num_samples, bucket_batch_size)
                 else:
-                    raise NotImplementedError('Unknown fill-up strategy')
+                    raise NotImplementedError('Unknown fill-up policy')
 
                 rest = bucket_batch_size - num_samples % bucket_batch_size
                 desired_indices_np = rs.randint(num_samples, size=rest)
@@ -1652,7 +1652,7 @@ class ParallelSampleIter(BaseParallelSampleIter):
         provide_label = [mx.io.DataDesc(name=n, shape=x.shape, layout=C.BATCH_MAJOR) for n, x in
                          zip(self.label_names, label)]
 
-        # TODO: num pad examples is not set here if fillup strategy would be padding
+        # TODO: num pad examples is not set here if fillup policy would be padding
         return mx.io.DataBatch(data, label,
                                pad=0, index=None, bucket_key=self.buckets[i],
                                provide_data=provide_data, provide_label=provide_label)

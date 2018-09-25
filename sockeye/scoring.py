@@ -194,9 +194,9 @@ class ScoringModel(model.SockeyeModel):
                          label_shapes=provide_label,
                          for_training=False,
                          force_rebind=False,
-                         grad_req=None)
+                         grad_req='null')
 
-    def run(self, batch: mx.io.DataBatch) -> mx.sym.Symbol:
+    def run(self, batch: mx.io.DataBatch) -> List[mx.nd.NDArray]:
         """
         Runs the forward pass and returns the outputs.
 
@@ -254,7 +254,7 @@ class Scorer:
 
                 # Transform arguments in preparation for printing
                 source_ids = [int(x) for x in source[:, 0].asnumpy().tolist()]
-                source_tokens = data_io.ids2tokens(source_ids, self.source_vocab_inv, self.exclude_list)
+                source_tokens = list(data_io.ids2tokens(source_ids, self.source_vocab_inv, self.exclude_list))
                 target_ids = [int(x) for x in target.asnumpy().tolist()]
                 target_string = C.TOKEN_SEPARATOR.join(
                     data_io.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
