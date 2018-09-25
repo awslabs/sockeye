@@ -239,7 +239,7 @@ class Scorer:
             batch_tic = time.time()
 
             # Run the model and get the outputs
-            scores, __ = self.model.run(batch)
+            scores = self.model.run(batch)[0]
 
             batch_time = time.time() - batch_tic
             total_time += batch_time
