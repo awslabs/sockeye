@@ -211,7 +211,7 @@ _TRANSLATE_WITH_FACTORS_COMMON = " --input-factors {input_factors}"
 
 _TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {lexicon} --restrict-lexicon-topk {topk}"
 
-_SCORE_PARAMS_COMMON = "--use-cpu --model {model} --source {source} --target {target} --output {output}"
+_SCORE_PARAMS_COMMON = "--use-cpu --model {model} --source {source} --target {target} --output {output} --max-seq-len 20:20"
 
 _SCORE_WITH_FACTORS_COMMON = " --source-factors {source_factors}"
 
@@ -426,7 +426,7 @@ def run_train_translate(train_params: str,
 
         # Test scoring. We make sure that we can score the (input, translation output) and get the same
         # model score.
-        if not use_prepared_data and not '--skip-topk' in translate_params:
+        if not use_prepared_data and '--skip-topk' not in translate_params:
             ## Score
             # We use the translation parameters, but have to remove irrelevant arguments from it.
             # Currently, the only relevant flag passed is the --softmax-temperature flag.
@@ -459,6 +459,8 @@ def run_train_translate(train_params: str,
             ## Compare scored output to original translation output. First remove -inf lines from the translate_score_path
             ## file. These correspond to blank lines in translate, which are skipped in sockeye.score.
             with open(translate_score_path) as in_translate, open(scores_output_file) as in_score:
+                scores = in_score.readlines()
+                assert len(scores) > 0
                 for translate_score, score_score in zip(filter(lambda x: x != '-inf\n', in_translate.readlines()),
                                                         in_score.readlines()):
                     translate_score = float(translate_score)
