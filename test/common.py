@@ -448,7 +448,6 @@ def run_train_translate(train_params: str,
         # - translate splits up too-long sentences and translates them in sequence, invalidating the score, so skip that
         # - scoring requires valid translation output to compare against
         if not use_prepared_data \
-           and '--skip-topk' not in translate_params \
            and '--beam-size 1' not in translate_params \
            and '--max-input-len' not in translate_params \
            and translate_output_is_valid:
