@@ -425,14 +425,28 @@ def run_train_translate(train_params: str,
                             # for negative constraints, ensure the constraints is *not* in the constrained output
                             assert restriction not in constrained_out
 
-        # Test scoring. We make sure that we can score the (input, translation output) and get the same
-        # model score.
-        # Skip if there are invalid tokens in the output
-        bad_tokens = False
+        # Test scoring by ensuring that the sockeye.scoring module produces the same scores when scoring the output
+        # of sockeye.translate. However, since this training is on very small datasets, the output of sockeye.translate
+        # is often pure garbage or empty and cannot be scored. So we only try to score if we have some valid output
+        # to work with.
+
+        # Skip if there are invalid tokens in the output, or if no valid outputs were found
+        translate_output_is_valid = True
         with open(out_path) as out_fh:
-            outputs = [word for sentence in out_fh.readlines() for word in sentence.rstrip().split()]
-            bad_tokens = set(C.VOCAB_SYMBOLS).intersection(outputs)
-        if not use_prepared_data and '--skip-topk' not in translate_params and not bad_tokens:
+            sentences = list(map(lambda x: x.rstrip(), out_fh.readlines()))
+            # At least one output must be non-empty
+            found_valid_output = any(sentences)
+
+            # There must be no bad tokens
+            found_bad_tokens = any([bad_token in ' '.join(sentences) for bad_token in C.VOCAB_SYMBOLS])
+
+            print('SENTENCES', ' '.join(sentences))
+            print('BAD', [bad_token in ' '.join(sentences) for bad_token in C.VOCAB_SYMBOLS])
+            print('RESULT', not any([bad_token in ' '.join(sentences) for bad_token in C.VOCAB_SYMBOLS]))
+
+            translate_output_is_valid = found_valid_output and not found_bad_tokens
+
+        if not use_prepared_data and '--skip-topk' not in translate_params and translate_output_is_valid:
 
             ## Score
             # We use the translation parameters, but have to remove irrelevant arguments from it.
