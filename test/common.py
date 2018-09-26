@@ -427,7 +427,13 @@ def run_train_translate(train_params: str,
 
         # Test scoring. We make sure that we can score the (input, translation output) and get the same
         # model score.
-        if not use_prepared_data and '--skip-topk' not in translate_params:
+        # Skip if there are invalid tokens in the output
+        bad_tokens = False
+        with open(out_path) as out_fh:
+            outputs = [word for sentence in out_fh.readlines() for word in sentence.rstrip().split()]
+            bad_tokens = set(C.VOCAB_SYMBOLS).intersection(outputs)
+        if not use_prepared_data and '--skip-topk' not in translate_params and not bad_tokens:
+
             ## Score
             # We use the translation parameters, but have to remove irrelevant arguments from it.
             # Currently, the only relevant flag passed is the --softmax-temperature flag.
@@ -453,13 +459,6 @@ def run_train_translate(train_params: str,
             with patch.object(sys, "argv", params.split()):
                 sockeye.score.main()
 
-            print('TRANSLATE PARAMS', translate_params)
-            print('PARAMS', params)
-            print('SOURCE', open(test_source_path).readlines())
-            print('TARGET', open(out_path).readlines())
-            print('TRANSLATE SCORES', open(translate_score_path).readlines())
-            print('SCORE SCORES', open(scores_output_file).readlines())
-
             # Compare scored output to original translation output. There are a few tricks: for blank source sentences,
             # inference will report a score of -inf, so skip these. Second, we don't know if the scores include the
             # generation of </s> and have had length normalization applied. So, skip all sentences that are as long
@@ -471,12 +470,14 @@ def run_train_translate(train_params: str,
                 model_config = sockeye.model.SockeyeModel.load_config(os.path.join(model_path, C.CONFIG_NAME))
                 max_len = model_config.config_data.max_seq_len_target
 
-                # Filter out sockeye.translate sentences that had -inf or were too long to know whether they were normalized
+                # Filter out sockeye.translate sentences that had -inf or were too long (which sockeye.score will have skipped)
                 translate_scores = []
                 score_scores = in_score.readlines()
                 for score, sent in zip(in_translate.readlines(), in_words.readlines()):
                     if score != '-inf\n' and len(sent.split()) < max_len:
                         translate_scores.append(score)
+
+                assert len(translate_scores) == len(score_scores)
 
                 # Compare scores (using 0.002 which covers common noise comparing e.g., 1.234 and 1.235)
                 for translate_score, score_score in zip(translate_scores, score_scores):
