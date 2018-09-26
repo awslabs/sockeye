@@ -440,13 +440,18 @@ def run_train_translate(train_params: str,
             # There must be no bad tokens
             found_bad_tokens = any([bad_token in ' '.join(sentences) for bad_token in C.VOCAB_SYMBOLS])
 
-            print('SENTENCES', ' '.join(sentences))
-            print('BAD', [bad_token in ' '.join(sentences) for bad_token in C.VOCAB_SYMBOLS])
-            print('RESULT', not any([bad_token in ' '.join(sentences) for bad_token in C.VOCAB_SYMBOLS]))
-
             translate_output_is_valid = found_valid_output and not found_bad_tokens
 
-        if not use_prepared_data and '--skip-topk' not in translate_params and translate_output_is_valid:
+        # Only run scoring under these conditions. Why?
+        # - scoring isn't compatible with prepared data because that loses the source ordering
+        # - scoring doesn't support skipping softmax (which can be enabled explicitly or implicitly by using a beam size of 1)
+        # - translate splits up too-long sentences and translates them in sequence, invalidating the score, so skip that
+        # - scoring requires valid translation output to compare against
+        if not use_prepared_data \
+           and '--skip-topk' not in translate_params \
+           and '--beam-size 1' not in translate_params \
+           and '--max-input-len' not in translate_params \
+           and translate_output_is_valid:
 
             ## Score
             # We use the translation parameters, but have to remove irrelevant arguments from it.
@@ -473,13 +478,6 @@ def run_train_translate(train_params: str,
             with patch.object(sys, "argv", params.split()):
                 sockeye.score.main()
 
-            print('TRANSLATE PARAMS', translate_params)
-            print('PARAMS', params)
-            print('SOURCE', open(test_source_path).readlines())
-            print('TARGET', open(out_path).readlines())
-            print('TRANSLATE SCORES', open(translate_score_path).readlines())
-            print('SCORE SCORES', open(scores_output_file).readlines())
-
             # Compare scored output to original translation output. There are a few tricks: for blank source sentences,
             # inference will report a score of -inf, so skip these. Second, we don't know if the scores include the
             # generation of </s> and have had length normalization applied. So, skip all sentences that are as long
@@ -488,20 +486,24 @@ def run_train_translate(train_params: str,
                 model_config = sockeye.model.SockeyeModel.load_config(os.path.join(model_path, C.CONFIG_NAME))
                 max_len = model_config.config_data.max_seq_len_target
 
-                model_config = sockeye.model.SockeyeModel.load_config(os.path.join(model_path, C.CONFIG_NAME))
-                max_len = model_config.config_data.max_seq_len_target
-
                 # Filter out sockeye.translate sentences that had -inf or were too long (which sockeye.score will have skipped)
                 translate_scores = []
+                translate_lens = []
                 score_scores = in_score.readlines()
                 for score, sent in zip(in_translate.readlines(), in_words.readlines()):
                     if score != '-inf\n' and len(sent.split()) < max_len:
                         translate_scores.append(score)
+                        translate_lens.append(len(sent.split()))
 
                 assert len(translate_scores) == len(score_scores)
 
                 # Compare scores (using 0.002 which covers common noise comparing e.g., 1.234 and 1.235)
-                for translate_score, score_score in zip(translate_scores, score_scores):
+                for translate_score, translate_len, score_score in zip(translate_scores, translate_lens, score_scores):
+                    # Skip sentences that are close to the maximum length to avoid confusion about whether
+                    # the length penalty was applied
+                    if translate_len >= max_len - 2:
+                        continue
+
                     translate_score = float(translate_score)
                     score_score = float(score_score)
 
