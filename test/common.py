@@ -459,6 +459,13 @@ def run_train_translate(train_params: str,
             with patch.object(sys, "argv", params.split()):
                 sockeye.score.main()
 
+            print('TRANSLATE PARAMS', translate_params)
+            print('PARAMS', params)
+            print('SOURCE', open(test_source_path).readlines())
+            print('TARGET', open(out_path).readlines())
+            print('TRANSLATE SCORES', open(translate_score_path).readlines())
+            print('SCORE SCORES', open(scores_output_file).readlines())
+
             # Compare scored output to original translation output. There are a few tricks: for blank source sentences,
             # inference will report a score of -inf, so skip these. Second, we don't know if the scores include the
             # generation of </s> and have had length normalization applied. So, skip all sentences that are as long
