@@ -13,6 +13,8 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ## [1.18.57]
 ### Added
 - Added `sockeye.score` CLI for quickly scoring existing translations ([documentation](tutorials/scoring.md)).
+### Fixed
+- Entry-point clean-up after the contrib/ rename
 
 ## [1.18.56]
 ### Changed
