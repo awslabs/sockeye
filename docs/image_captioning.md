@@ -1,3 +1,6 @@
+---
+layout: default
+---
 # Image Captioning
 
 This module extends Sockeye to perform image captioning. It follows the same logic of sequence-to-sequence frameworks, which consist of encoder-decoder models.

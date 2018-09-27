@@ -1,7 +1,15 @@
-# User documentation
+---
+layout: default
+---
+
+# Training
+
+## Autopilot
+
+For easily training popular model types on known data sets, see the [Sockeye Autopilot documentation](https://github.com/awslabs/sockeye/tree/master/sockeye_contrib/autopilot).
+For manually training and running translation models on your data, read on.
 
 ## Training
-
 
 Training is carried out by the `sockeye.train` module. Basic usage is given by
 
@@ -106,43 +114,3 @@ This can be done as follows:
 > python -m sockeye.average <model_dir> -o <model_dir>/model.best.avg.params
 ```
 
-## Translation
-
-Translating is handled by the `sockeye.translate` module:
-```bash
-> python -m sockeye.translate
-```
-
-The only required argument is `--models`, which should point to an `<model_dir>`
-folder of trained models.  By default, sockeye chooses the parameters from the
-best checkpoint and uses these for translation.  You can specify parameters
-from a specific checkpoint by using `--checkpoints X`.
-
-You can control the size of the beam using `--beam-size` and the maximum input
-length by `--max-input-length`.  Sentences that are longer than
-`max-input-length` are stripped.
-
-Input is read from the standard input and the output is written to the standard
-output.  The CLI will log translation speed once the input is consumed. Like in
-the training module, the first GPU device is used by default. Note however that
-multi-GPU translation is not currently supported. For CPU decoding use
-`--use-cpu`.
-
-Use the `--help` option to see a full list of options for translation.
-
-### Ensemble Decoding
-Sockeye supports ensemble decoding by specifying multiple model directories and
-multiple checkpoints. The given lists must have the same length, such that the
-first given checkpoint will be taken from the first model directory, the second
-specified checkpoint from the second directory, etc.
-```bash
-> python -m sockeye.translate --models [<m1prefix> <m2prefix>] --checkpoints [<cp1> <cp2>]
-```
-
-### Visualization
-The default mode of the translate CLI is to output translations to STDOUT. You
-can also print out an ASCII matrix of the alignments using `--output-type
-align_text`, or save the alignment matrix as a PNG plot using `--output-type
-align_plot`. The PNG files will be written to files beginning with the prefix
-given by the `--align-plot-prefix` option, one for each input sentence, indexed
-by the sentence id.
