@@ -1506,21 +1506,25 @@ class HighwayLayerConfig(LayerConfig):
         self.gated = gated
 
     def create_encoder_layer(self, input_num_hidden: int, prefix: str) -> EncoderLayer:
+        original_input_num_hidden = input_num_hidden
         layers = []
         for idx, layer_config in enumerate(self.layer_configs):
             layer = layer_config.create_encoder_layer(input_num_hidden, "%shighway%d_" % (prefix, idx))
             input_num_hidden = layer.get_num_hidden()
             layers.append(layer)
+        assert original_input_num_hidden == layers[-1].get_num_hidden(), "The number of hidden units of the output of the highway must be equal to its input."
         return HighwayEncoderLayer(layers=layers, gate_input=self.gate_input,
                                    gated=self.gated,
                                    prefix=prefix + "highway_")
 
     def create_decoder_layer(self, input_num_hidden: int, prefix: str) -> DecoderLayer:
+        original_input_num_hidden = input_num_hidden
         layers = []
         for idx, layer_config in enumerate(self.layer_configs):
             layer = layer_config.create_decoder_layer(input_num_hidden, "%s_highway%d" % (prefix, idx))
             input_num_hidden = layer.get_num_hidden()
             layers.append(layer)
+        assert original_input_num_hidden == layers[-1].get_num_hidden(), "The number of hidden units of the output of the highway must be equal to its input."
         return HighwayDecoderLayer(layers=layers, gate_input=self.gate_input,
                                    gated=self.gated,
                                    prefix=prefix + "highway_")
