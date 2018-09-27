@@ -74,7 +74,7 @@ else:
 
 entry_points={
     'console_scripts': [
-        'sockeye-autopilot = contrib.autopilot.autopilot:main',
+        'sockeye-autopilot = sockeye_contrib.autopilot.autopilot:main',
         'sockeye-average = sockeye.average:main',
         'sockeye-embeddings = sockeye.embeddings:main',
         'sockeye-evaluate = sockeye.evaluate:main',
