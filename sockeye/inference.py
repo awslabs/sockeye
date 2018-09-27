@@ -1211,12 +1211,7 @@ class Translator:
                     logger.warning("Global avoid phrase '%s' contains an %s; this may indicate improper preprocessing.", ' '.join(phrase), C.UNK_SYMBOL)
                 self.global_avoid_trie.add_phrase(phrase_ids)
 
-        if self.nbest_size > 1:
-            self._concat_translations_function = partial(_concat_nbest_translations,
-                                            stop_ids=self.stop_ids,
-                                            length_penalty=self.length_penalty)
-        else:
-            self._concat_translations_function = partial(_concat_translations,
+        self._concat_translations = partial(_concat_nbest_translations if self.nbest_size > 1 else _concat_translations,
                                             stop_ids=self.stop_ids,
                                             length_penalty=self.length_penalty)
 
@@ -1366,7 +1361,7 @@ class Translator:
             else:
                 translations_to_concat = [translated_chunk.translation
                                           for translated_chunk in translations_for_input_idx]
-                translation = self._concat_translations_function(translations_to_concat)
+                translation = self._concat_translations(translations_to_concat)
 
             results.append(self._make_result(trans_input, translation))
 
