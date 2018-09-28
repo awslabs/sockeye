@@ -1431,7 +1431,7 @@ class Translator:
         :return: TranslatorOutput.
         """
         target_ids = translation.target_ids
-        target_tokens = utils.ids_to_tokens(translation.target_ids, self.vocab_target_inv)
+        target_tokens = data_io.ids2tokens(translation.target_ids, self.vocab_target_inv)
         target_string = utils.tokens_to_string(target_ids, target_tokens, self.strip_ids)
 
         attention_matrix = translation.attention_matrix
@@ -1447,8 +1447,7 @@ class Translator:
         else:
 
             nbest_target_ids = translation.nbest_translations.target_ids_list
-            target_tokens_list = [utils.ids_to_tokens(ids, self.vocab_target_inv) for ids in nbest_target_ids ]
-
+            target_tokens_list = [data_io.ids2tokens(ids, self.vocab_target_inv) for ids in nbest_target_ids]
             target_strings = [utils.tokens_to_string(ids, tokens, self.strip_ids) for ids, tokens in zip(nbest_target_ids, target_tokens_list)]
 
             attention_matrices = [matrix[:, :len(trans_input.tokens)] for matrix in translation.nbest_translations.attention_matrices]

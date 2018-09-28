@@ -29,7 +29,6 @@ _BOS = 0
 _EOS = -1
 
 
-@pytest.fixture
 def mock_translator(batch_size: int = 1,
                     beam_size: int = 5,
                     nbest_size: int = 1,

@@ -74,7 +74,7 @@ else:
 
 entry_points={
     'console_scripts': [
-        'sockeye-autopilot = contrib.autopilot.autopilot:main',
+        'sockeye-autopilot = sockeye_contrib.autopilot.autopilot:main',
         'sockeye-average = sockeye.average:main',
         'sockeye-embeddings = sockeye.embeddings:main',
         'sockeye-evaluate = sockeye.evaluate:main',
@@ -82,6 +82,7 @@ entry_points={
         'sockeye-lexicon = sockeye.lexicon:main',
         'sockeye-init-embed = sockeye.init_embedding:main',
         'sockeye-prepare-data = sockeye.prepare_data:main',
+        'sockeye-score = sockeye.score:main',
         'sockeye-train = sockeye.train:main',
         'sockeye-translate = sockeye.translate:main',
         'sockeye-vocab = sockeye.vocab:main',
