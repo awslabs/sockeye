@@ -389,7 +389,7 @@ def test_get_batch_indices():
         assert 0 <= start_pos < len(dataset.source[buck_idx]) - batch_size + 1
 
     # check that all indices are used for a filled-up dataset
-    dataset = dataset.fill_up(bucket_batch_sizes, fill_up='replicate')
+    dataset = dataset.fill_up(bucket_batch_sizes, policy='replicate')
     indices = data_io.get_batch_indices(dataset, bucket_batch_sizes=bucket_batch_sizes)
     all_bucket_indices = set(list(range(len(dataset))))
     computed_bucket_indices = set([i for i, j in indices])

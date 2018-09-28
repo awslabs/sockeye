@@ -26,6 +26,8 @@ sockeye/output_handler.py
 sockeye/prepare_data.py
 sockeye/rnn.py
 sockeye/rnn_attention.py
+sockeye/score.py
+sockeye/scoring.py
 sockeye/train.py
 sockeye/training.py
 sockeye/transformer.py

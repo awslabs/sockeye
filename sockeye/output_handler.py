@@ -23,8 +23,8 @@ from sockeye.utils import plot_attention, print_attention_text, get_alignments
 
 
 def get_output_handler(output_type: str,
-                       output_fname: Optional[str],
-                       sure_align_threshold: float) -> 'OutputHandler':
+                       output_fname: Optional[str] = None,
+                       sure_align_threshold: float = 1.0) -> 'OutputHandler':
     """
 
     :param output_type: Type of output handler.
@@ -36,6 +36,10 @@ def get_output_handler(output_type: str,
     output_stream = sys.stdout if output_fname is None else data_io.smart_open(output_fname, mode='w')
     if output_type == C.OUTPUT_HANDLER_TRANSLATION:
         return StringOutputHandler(output_stream)
+    elif output_type == C.OUTPUT_HANDLER_SCORE:
+        return ScoreOutputHandler(output_stream)
+    elif output_type == C.OUTPUT_HANDLER_PAIR_WITH_SCORE:
+        return PairWithScoreOutputHandler(output_stream)
     elif output_type == C.OUTPUT_HANDLER_TRANSLATION_WITH_SCORE:
         return StringWithScoreOutputHandler(output_stream)
     elif output_type == C.OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENTS:
@@ -116,6 +120,54 @@ class StringWithScoreOutputHandler(OutputHandler):
         :param t_walltime: Total walltime for translation.
         """
         self.stream.write("{:.3f}\t{}\n".format(t_output.score, t_output.translation))
+        self.stream.flush()
+
+
+class ScoreOutputHandler(OutputHandler):
+    """
+    Output handler to write translation score to a stream.
+
+    :param stream: Stream to write translations to (e.g., sys.stdout).
+    """
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    def handle(self,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
+               t_walltime: float = 0.):
+        """
+        :param t_input: Translator input.
+        :param t_output: Translator output.
+        :param t_walltime: Total walltime for translation.
+        """
+        self.stream.write("{:.3f}\n".format(t_output.score))
+        self.stream.flush()
+
+
+class PairWithScoreOutputHandler(OutputHandler):
+    """
+    Output handler to write translation score along with sentence input and output (tab-delimited).
+
+    :param stream: Stream to write translations to (e.g., sys.stdout).
+    """
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    def handle(self,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
+               t_walltime: float = 0.):
+        """
+        :param t_input: Translator input.
+        :param t_output: Translator output.
+        :param t_walltime: Total walltime for translation.
+        """
+        self.stream.write("{:.3f}\t{}\t{}\n".format(t_output.score,
+                                                    C.TOKEN_SEPARATOR.join(t_input.tokens),
+                                                    t_output.translation))
         self.stream.flush()
 
 

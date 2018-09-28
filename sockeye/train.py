@@ -244,6 +244,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 
     validation_sources = [args.validation_source] + args.validation_source_factors
     validation_sources = [str(os.path.abspath(source)) for source in validation_sources]
+    validation_target = str(os.path.abspath(args.validation_target))
 
     either_raw_or_prepared_error_msg = "Either specify a raw training corpus with %s and %s or a preprocessed corpus " \
                                        "with %s." % (C.TRAINING_ARG_SOURCE,
@@ -258,7 +259,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         train_iter, validation_iter, data_config, source_vocabs, target_vocab = data_io.get_prepared_data_iters(
             prepared_data_dir=args.prepared_data,
             validation_sources=validation_sources,
-            validation_target=str(os.path.abspath(args.validation_target)),
+            validation_target=validation_target,
             shared_vocab=shared_vocab,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
@@ -332,7 +333,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             sources=sources,
             target=os.path.abspath(args.target),
             validation_sources=validation_sources,
-            validation_target=os.path.abspath(args.validation_target),
+            validation_target=validation_target,
             source_vocabs=source_vocabs,
             target_vocab=target_vocab,
             source_vocab_paths=source_vocab_paths,
