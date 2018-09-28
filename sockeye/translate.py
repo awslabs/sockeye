@@ -62,6 +62,7 @@ def run_translate(args: argparse.Namespace):
         if args.output_type != C.OUTPUT_HANDLER_NBEST:
             logger.warning("For nbest translation, output handler must be '%s', overriding option --output-type.",
                        C.OUTPUT_HANDLER_NBEST)
+            args.output_type = C.OUTPUT_HANDLER_NBEST
 
     log_basic_info(args)
 
