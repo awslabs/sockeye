@@ -145,6 +145,7 @@ class ScoreOutputHandler(OutputHandler):
         self.stream.write("{:.3f}\n".format(t_output.score))
         self.stream.flush()
 
+
 class PairWithScoreOutputHandler(OutputHandler):
     """
     Output handler to write translation score along with sentence input and output (tab-delimited).
@@ -168,6 +169,7 @@ class PairWithScoreOutputHandler(OutputHandler):
                                                     C.TOKEN_SEPARATOR.join(t_input.tokens),
                                                     t_output.translation))
         self.stream.flush()
+
 
 class StringWithAlignmentsOutputHandler(StringOutputHandler):
     """
