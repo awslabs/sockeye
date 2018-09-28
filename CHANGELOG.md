@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.58]
+### Fixed
+- Fixed scores from single-model, greedy decoding:
+The new behaviour is to skip softmax only if the output handler does not output the scores.
+
 ## [1.18.57]
 ### Added
 - Added `sockeye.score` CLI for quickly scoring existing translations ([documentation](tutorials/scoring.md)).
