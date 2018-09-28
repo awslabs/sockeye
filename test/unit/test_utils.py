@@ -385,3 +385,11 @@ def test_smart_open_without_suffix():
         _touch_file(fname, compressed=False, empty=False)
         with utils.smart_open(fname) as fin:
             assert len(fin.readlines()) == 10
+
+
+@pytest.mark.parametrize("data,expected_lengths", [
+    (mx.nd.array([[1, 2, 0], [1, 0, 0], [0, 0, 0]]), mx.nd.array([2, 1, 0]))
+])
+def test_compute_lengths(data, expected_lengths):
+    lengths = utils.compute_lengths(mx.sym.Variable('data')).eval(data=data)[0]
+    assert (lengths.asnumpy() == expected_lengths.asnumpy()).all()
