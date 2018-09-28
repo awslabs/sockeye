@@ -15,18 +15,11 @@
 Code for scoring.
 """
 import logging
-import multiprocessing as mp
 import os
-import pickle
-import random
-import shutil
 import time
-from functools import reduce
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple
 
 import mxnet as mx
-import numpy as np
-from math import sqrt
 
 from . import constants as C
 from . import data_io
@@ -34,9 +27,8 @@ from . import inference
 from . import model
 from . import utils
 from . import vocab
-
-from .output_handler import OutputHandler
 from .inference import TranslatorInput, TranslatorOutput
+from .output_handler import OutputHandler
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +36,8 @@ logger = logging.getLogger(__name__)
 class ScoringModel(model.SockeyeModel):
     """
     ScoringModel is a TrainingModel (which is in turn a SockeyeModel) that scores a pair of sentences.
-    That is, it full unrolls over source and target sequences, running the encoder and decoder, but stopping short of computing a loss and backpropagating.
+    That is, it full unrolls over source and target sequences, running the encoder and decoder,
+    but stopping short of computing a loss and backpropagating.
     It is analogous to TrainingModel, but more limited.
 
     :param config: Configuration object holding details about the model.
@@ -119,7 +112,8 @@ class ScoringModel(model.SockeyeModel):
 
         def sym_gen(seq_lens):
             """
-            Returns a (grouped) symbol containing the summed score for each sentence, as well as the entire target distributions for each word.
+            Returns a (grouped) symbol containing the summed score for each sentence, as well as the entire target
+            distributions for each word.
             Also returns data and label names for the BucketingModule.
             """
             source_seq_len, target_seq_len = seq_lens
@@ -223,16 +217,13 @@ class Scorer:
         self.source_vocab_inv = vocab.reverse_vocab(source_vocabs[0])
         self.target_vocab_inv = vocab.reverse_vocab(target_vocab)
         self.model = model
-
-        self.exclude_list = set([source_vocabs[0][C.BOS_SYMBOL], target_vocab[C.EOS_SYMBOL], C.PAD_ID])
+        self.exclude_list = {source_vocabs[0][C.BOS_SYMBOL], target_vocab[C.EOS_SYMBOL], C.PAD_ID}
 
     def score(self,
               score_iter,
-              score_type: str,
               output_handler: OutputHandler):
 
         total_time = 0.
-        tic = time.time()
         sentence_no = 0
         for i, batch in enumerate(score_iter):
 

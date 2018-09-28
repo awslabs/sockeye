@@ -15,18 +15,19 @@
 CLI to rerank an nbest list of translations.
 """
 
+import argparse
 import json
 import sys
-import argparse
-import numpy as np
-from typing import List, Tuple
 from collections import namedtuple
+from typing import List
 
-from . import log
-from . import utils
+import numpy as np
+
+from sockeye_contrib import sacrebleu
 from . import arguments
 from . import constants as C
-from sockeye_contrib import sacrebleu
+from . import log
+from . import utils
 
 logger = log.setup_main_logger(__name__, console=True, file_logging=False)
 
@@ -86,7 +87,7 @@ class Reranker:
         :return: The single best hypothesis, possibly with its score.
         """
         scores = [self.scoring_function(hypothesis, reference) for hypothesis in hypotheses]
-        best_index = np.argmax(scores)
+        best_index = np.argmax(scores)  # type: int
 
         if self.return_score:
             return RerankOutput(hypotheses=[hypotheses[best_index]],
