@@ -321,35 +321,6 @@ def chunks(some_list: List, n: int) -> Iterable[List]:
         yield some_list[i:i + n]
 
 
-def ids_to_tokens(ids: List[int],
-                  inverse_vocab: Dict[int, str]) -> List[str]:
-    """
-    Converts a list of vocab ids back to token strings.
-
-    :param ids: A list of vocab id integers.
-    :param inverse_vocab: A dictionary with ids as keys, and token strings as values.
-    :return: A list of tokens as strings.
-    """
-    return [inverse_vocab[id] for id in ids]
-
-def tokens_to_string(ids: List[int],
-                     tokens: List[str],
-                     strip_ids: Optional[Set[int]] = None) -> str:
-    """
-    Concatenates a list of tokens, removing tokens that correspond to stop ids.
-
-    :param ids: A list of vocab ids as integers.
-    :param tokens: A list of tokens as strings.
-    :param strip_ids: An optional set of ids that should be stripped from the list
-        before concatenation.
-    :return: Returns
-    """
-    strip_ids = strip_ids if strip_ids is not None else set()
-
-    return C.TOKEN_SEPARATOR.join(
-        tok for target_id, tok in zip(ids, tokens) if target_id not in strip_ids)
-
-
 def get_tokens(line: str) -> Iterator[str]:
     """
     Yields tokens from input string.
