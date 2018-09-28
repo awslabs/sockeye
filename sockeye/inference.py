@@ -371,7 +371,8 @@ def load_models(context: mx.context.Context,
                 decoder_return_logit_inputs: bool = False,
                 cache_output_layer_w_b: bool = False,
                 forced_max_output_len: Optional[int] = None,
-                override_dtype: Optional[str] = None) -> Tuple[List[InferenceModel],
+                override_dtype: Optional[str] = None,
+                output_scores: bool = False) -> Tuple[List[InferenceModel],
                                                                List[vocab.Vocab],
                                                                vocab.Vocab]:
     """
@@ -392,6 +393,7 @@ def load_models(context: mx.context.Context,
                                    restrict lexicon).
     :param forced_max_output_len: An optional overwrite of the maximum output length.
     :param override_dtype: Overrides dtype of encoder and decoder defined at training time to a different one.
+    :param output_scores: Whether the scores will be needed as outputs.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
@@ -404,11 +406,11 @@ def load_models(context: mx.context.Context,
         checkpoints = [None] * len(model_folders)
 
     # skip softmax for a single model,
-    if len(model_folders) == 1 and beam_size == 1:
+    if len(model_folders) == 1 and beam_size == 1 and not output_scores:
         skip_softmax = True
         logger.info("Enabled skipping softmax for a single model and greedy decoding.")
     else:
-        # but not for an ensemble or beam search
+        # but not for an ensemble or beam search, or if accurate scores are needed as outputs
         skip_softmax = False
 
     for model_folder, checkpoint in zip(model_folders, checkpoints):
