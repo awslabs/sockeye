@@ -23,10 +23,10 @@ import pytest
 from sockeye import constants as C
 from sockeye import data_io
 from sockeye import vocab
-from sockeye.utils import SockeyeError, get_tokens, seedRNGs
+from sockeye.utils import SockeyeError, get_tokens, seed_rngs
 from test.common import tmp_digits_dataset
 
-seedRNGs(12)
+seed_rngs(12)
 
 define_bucket_tests = [(50, 10, [10, 20, 30, 40, 50]),
                        (50, 20, [20, 40, 50]),
@@ -389,7 +389,7 @@ def test_get_batch_indices():
         assert 0 <= start_pos < len(dataset.source[buck_idx]) - batch_size + 1
 
     # check that all indices are used for a filled-up dataset
-    dataset = dataset.fill_up(bucket_batch_sizes, fill_up='replicate')
+    dataset = dataset.fill_up(bucket_batch_sizes, policy='replicate')
     indices = data_io.get_batch_indices(dataset, bucket_batch_sizes=bucket_batch_sizes)
     all_bucket_indices = set(list(range(len(dataset))))
     computed_bucket_indices = set([i for i, j in indices])

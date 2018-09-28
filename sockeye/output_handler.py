@@ -23,8 +23,8 @@ from sockeye.utils import plot_attention, print_attention_text, get_alignments
 
 
 def get_output_handler(output_type: str,
-                       output_fname: Optional[str],
-                       sure_align_threshold: float) -> 'OutputHandler':
+                       output_fname: Optional[str] = None,
+                       sure_align_threshold: float = 1.0) -> 'OutputHandler':
     """
 
     :param output_type: Type of output handler.
@@ -36,6 +36,10 @@ def get_output_handler(output_type: str,
     output_stream = sys.stdout if output_fname is None else data_io.smart_open(output_fname, mode='w')
     if output_type == C.OUTPUT_HANDLER_TRANSLATION:
         return StringOutputHandler(output_stream)
+    elif output_type == C.OUTPUT_HANDLER_SCORE:
+        return ScoreOutputHandler(output_stream)
+    elif output_type == C.OUTPUT_HANDLER_PAIR_WITH_SCORE:
+        return PairWithScoreOutputHandler(output_stream)
     elif output_type == C.OUTPUT_HANDLER_TRANSLATION_WITH_SCORE:
         return StringWithScoreOutputHandler(output_stream)
     elif output_type == C.OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENTS:
@@ -119,6 +123,54 @@ class StringWithScoreOutputHandler(OutputHandler):
         self.stream.flush()
 
 
+class ScoreOutputHandler(OutputHandler):
+    """
+    Output handler to write translation score to a stream.
+
+    :param stream: Stream to write translations to (e.g., sys.stdout).
+    """
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    def handle(self,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
+               t_walltime: float = 0.):
+        """
+        :param t_input: Translator input.
+        :param t_output: Translator output.
+        :param t_walltime: Total walltime for translation.
+        """
+        self.stream.write("{:.3f}\n".format(t_output.score))
+        self.stream.flush()
+
+
+class PairWithScoreOutputHandler(OutputHandler):
+    """
+    Output handler to write translation score along with sentence input and output (tab-delimited).
+
+    :param stream: Stream to write translations to (e.g., sys.stdout).
+    """
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    def handle(self,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
+               t_walltime: float = 0.):
+        """
+        :param t_input: Translator input.
+        :param t_output: Translator output.
+        :param t_walltime: Total walltime for translation.
+        """
+        self.stream.write("{:.3f}\t{}\t{}\n".format(t_output.score,
+                                                    C.TOKEN_SEPARATOR.join(t_input.tokens),
+                                                    t_output.translation))
+        self.stream.flush()
+
+
 class StringWithAlignmentsOutputHandler(StringOutputHandler):
     """
     Output handler to write translations and alignments to a stream. Translation and alignment string
@@ -182,7 +234,7 @@ class StringWithAlignmentMatrixOutputHandler(StringOutputHandler):
         :param t_output: Translator output.
         :param t_walltime: Total wall-clock time for translation.
         """
-        line = "{sent_id:d} ||| {target} ||| {score:f} ||| {source} ||| {source_len:d} ||| {target_len:d}\n"
+        line = "{sent_id} ||| {target} ||| {score:f} ||| {source} ||| {source_len:d} ||| {target_len:d}\n"
         self.stream.write(line.format(sent_id=t_input.sentence_id,
                                       target=" ".join(t_output.tokens),
                                       score=t_output.score,
@@ -244,7 +296,7 @@ class AlignPlotHandler(OutputHandler):
         plot_attention(t_output.attention_matrix,
                        t_input.tokens,
                        t_output.tokens,
-                       "%s_%d.png" % (self.plot_prefix, t_input.sentence_id))
+                       "%s_%s.png" % (self.plot_prefix, t_input.sentence_id))
 
 
 class AlignTextHandler(OutputHandler):
@@ -297,6 +349,6 @@ class BeamStoringHandler(OutputHandler):
             # Add the number of steps in each beam
             h["number_steps"] = len(h["predicted_tokens"])  # type: ignore
             # Some outputs can have more than one beam, add the id for bookkeeping
-            h["id"] = t_output.id  # type: ignore
+            h["id"] = t_output.sentence_id  # type: ignore
             self.stream.write("%s\n" % json.dumps(h, sort_keys=True))
         self.stream.flush()

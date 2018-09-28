@@ -10,6 +10,152 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.57]
+### Added
+- Added `sockeye.score` CLI for quickly scoring existing translations ([documentation](tutorials/scoring.md)).
+### Fixed
+- Entry-point clean-up after the contrib/ rename
+
+## [1.18.56]
+### Changed
+- Update to MXNet 1.3.0.post0
+
+## [1.18.55]
+- Renamed `contrib` to less-generic `sockeye_contrib`
+
+## [1.18.54]
+### Added
+- `--source-factor-vocabs` can be set to provide source factor vocabularies.
+
+## [1.18.53]
+### Added
+- Always skipping softmax for greedy decoding by default, only for single models.
+- Added option `--skip-topk` for greedy decoding.
+
+## [1.18.52]
+### Fixed
+- Fixed bug in constrained decoding to make sure best hypothesis satifies all constraints.
+
+## [1.18.51]
+### Added
+- Added a CLI for reranking of an nbest list of translations.
+
+## [1.18.50]
+### Fixed
+- Check for equivalency of training and validation source factors was incorrectly indented.
+
+## [1.18.49]
+### Changed
+- Removed dependence on the nvidia-smi tool. The number of GPUs is now determined programatically.
+
+## [1.18.48]
+### Changed
+- Translator.max_input_length now reports correct maximum input length for TranslatorInput objects, independent of the internal representation, where an additional EOS gets added. 
+
+## [1.18.47]
+### Changed
+- translate CLI: no longer rely on external, user-given input id for sorting translations. Also allow string ids for sentences.
+
+## [1.18.46]
+### Fixed
+- Fixed issue with `--num-words 0:0` in image captioning and another issue related to loading all features to memory with variable length.
+
+## [1.18.45]
+### Added
+- Added an 8 layer LSTM model similar (but not exactly identical) to the 'GNMT' architecture to autopilot.
+
+## [1.18.44]
+### Fixed
+- Fixed an issue with `--max-num-epochs` causing training to stop before the update/batch that actually completes the epoch was made.
+
+## [1.18.43]
+### Added
+- `<s>` now supported as the first token in a multi-word negative constraint
+  (e.g., `<s> I think` to prevent a sentence from starting with `I think`)
+### Fixed
+- Bugfix in resetting the state of a multiple-word negative constraint
+
+## [1.18.42]
+### Changed
+- Simplified gluon blocks for length calculation
+
+## [1.18.41]
+### Changed
+- Require numpy 1.14 or later to avoid MKL conflicts between numpy as mxnet-mkl.
+
+## [1.18.40]
+### Fixed
+- Fixed bad check for existence of negative constraints.
+- Resolved conflict for phrases that are both positive and negative constraints.
+- Fixed softmax temperature at inference time.
+
+## [1.18.39]
+### Added
+- Image Captioning now supports constrained decoding.
+- Image Captioning: zero padding of features now allows input features of different shape for each image.
+
+## [1.18.38]
+### Fixed
+- Fixed issue with the incorrect order of translations when empty inputs are present and translating in chunks.
+
+## [1.18.37]
+### Fixed
+- Determining the max output length for each sentence in a batch by the bucket length rather than the actual in order to match the behavior of a single sentence translation.
+
+## [1.18.36]
+### Changed
+- Updated to [MXNet 1.2.1](https://github.com/apache/incubator-mxnet/tree/1.2.1)
+
+## [1.18.35]
+### Added
+- ROUGE scores are now available in `sockeye-evaluate`.
+- Enabled CHRF as an early-stopping metric.
+
+## [1.18.34]
+### Added
+- Added support for `--beam-search-stop first` for decoding jobs with `--batch-size > 1`.
+
+## [1.18.33]
+### Added
+- Now supports negative constraints, which are phrases that must *not* appear in the output.
+   - Global constraints can be listed in a (pre-processed) file, one per line: `--avoid-list FILE`
+   - Per-sentence constraints are passed using the `avoid` keyword in the JSON object, with a list of strings as its field value.
+
+## [1.18.32]
+### Added
+- Added option to pad vocabulary to a multiple of x: e.g. `--pad-vocab-to-multiple-of 16`.
+
+## [1.18.31]
+### Added
+- Pre-training the RNN decoder. Usage:
+  1. Train with flag `--decoder-only`.
+  2. Feed identical source/target training data.
+
+## [1.18.30]
+### Fixed
+- Preserving max output length for each sentence to allow having identical translations for both with and without batching.
+
+## [1.18.29]
+### Changed
+- No longer restrict the vocabulary to 50,000 words by default, but rather create the vocabulary from all words which occur at least `--word-min-count` times. Specifying `--num-words` explicitly will still lead to a restricted
+  vocabulary.
+
+## [1.18.28]
+### Changed
+- Temporarily fixing the pyyaml version to 3.12 as version 4.1 introduced some backwards incompatible changes.
+
+## [1.18.27]
+### Fixed
+- Fix silent failing of NDArray splits during inference by using a version that always returns a list. This was causing incorrect behavior when using lexicon restriction and batch inference with a single source factor.
+
+## [1.18.26]
+### Added
+- ROUGE score evaluation. It can be used as the stopping criterion for tasks such as summarization.
+
+## [1.18.25]
+### Changed
+- Update requirements to use MKL versions of MXNet for fast CPU operation.
+
 ## [1.18.24]
 ### Added
 - Dockerfiles and convenience scripts for running `fast_align` to generate lexical tables.
@@ -30,7 +176,7 @@ there was an edge case where the memory usage was sub-optimal with word based ba
 
 ## [1.18.21]
 ### Fixed
-- Constrained decoding was missed a crucial cast
+- Constrained decoding was missing a crucial cast
 - Fixed test cases that should have caught this
 
 ## [1.18.20]
@@ -485,4 +631,5 @@ sockeye.evaluate now accepts `bleu` and `chrf` as values for `--metrics`
 ### Changed
  - `--attention-*` CLI params renamed to `--rnn-attention-*`.
  - `--transformer-no-positional-encodings` generalized to `--transformer-positional-embedding-type`.
+
 

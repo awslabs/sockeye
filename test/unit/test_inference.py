@@ -22,13 +22,13 @@ import pytest
 import sockeye.constants as C
 import sockeye.data_io
 import sockeye.inference
+import sockeye.lexical_constraints
 import sockeye.utils
 
 _BOS = 0
 _EOS = -1
 
 
-@pytest.fixture
 def mock_translator(batch_size: int = 1,
                     beam_size: int = 5,
                     beam_prune: float = 0,
@@ -73,7 +73,7 @@ def test_concat_translations():
     beam_history2 = {"id": [2]}
     beam_history3 = {"id": [3]}
     expected_beam_histories = [beam_history1, beam_history2, beam_history3]
-    expected_target_ids = [0, 1, 2, 8, 9, 3, 4, 5, -1]
+    expected_target_ids = [0, 1, 2, 0, 8, 9, 0, 3, 4, 5, -1]
     num_src = 7
 
     length_penalty = sockeye.inference.LengthPenalty()
@@ -87,8 +87,7 @@ def test_concat_translations():
                                                   [beam_history2]),
                     sockeye.inference.Translation([0, 3, 4, 5, -1], np.zeros((5, num_src)), 3.0 / length_penalty.get(5),
                                                   [beam_history3])]
-    combined = sockeye.inference._concat_translations(translations, start_id=_BOS, stop_ids={_EOS},
-                                                      length_penalty=length_penalty)
+    combined = sockeye.inference._concat_translations(translations, stop_ids={_EOS}, length_penalty=length_penalty)
 
     assert combined.target_ids == expected_target_ids
     assert combined.attention_matrix.shape == (len(expected_target_ids), len(translations) * num_src)
@@ -144,13 +143,11 @@ def test_translator_input(sentence_id, sentence, factors, chunk_size):
     if factors is not None:
         for factor in trans_input.factors:
             assert len(factor) == len(tokens)
-    assert trans_input.chunk_id == -1
 
     chunked_inputs = list(trans_input.chunks(chunk_size))
     assert len(chunked_inputs) == ceil(len(tokens) / chunk_size)
     for chunk_id, chunk_input in enumerate(chunked_inputs):
         assert chunk_input.sentence_id == sentence_id
-        assert chunk_input.chunk_id == chunk_id
         assert chunk_input.tokens == trans_input.tokens[chunk_id * chunk_size: (chunk_id + 1) * chunk_size]
         if factors:
             assert len(chunk_input.factors) == len(factors)
@@ -229,7 +226,6 @@ def test_make_input_from_factored_string(sentence, num_expected_factors, delimit
                                                             translator=translator, delimiter=delimiter)
     assert isinstance(inp, sockeye.inference.TranslatorInput)
     assert inp.sentence_id == sentence_id
-    assert inp.chunk_id == -1
     assert inp.tokens == expected_tokens
     assert inp.factors == expected_factors
     if num_expected_factors > 1:
@@ -390,13 +386,133 @@ def test_topk_func(batch_size, beam_size, target_vocab_size):
     # offset for batch sizes > 1
     offset = mx.nd.array(np.repeat(np.arange(0, batch_size * beam_size, beam_size), beam_size), dtype='int32')
 
-    np_hyp, np_word, np_values = sockeye.utils.topk(scores, k=beam_size, batch_size=batch_size,
+    np_hyp, np_word, np_values = sockeye.utils.topk(scores, k=beam_size,
                                                     offset=offset, use_mxnet_topk=False)
     np_hyp, np_word, np_values = np_hyp.asnumpy(), np_word.asnumpy(), np_values.asnumpy()
 
-    mx_hyp, mx_word, mx_values = sockeye.utils.topk(scores, k=beam_size, batch_size=batch_size,
+    mx_hyp, mx_word, mx_values = sockeye.utils.topk(scores, k=beam_size,
                                                     offset=offset, use_mxnet_topk=True)
     mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
     assert all(mx_hyp == np_hyp)
     assert all(mx_word == np_word)
     assert all(mx_values == np_values)
+
+    topk = sockeye.inference.TopK(k=beam_size, batch_size=batch_size, vocab_size=target_vocab_size)
+    topk.initialize()
+    assert all(topk.offset.data() == offset)
+
+    mx_hyp, mx_word, mx_values = topk(scores)
+    mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
+    assert all(mx_hyp == np_hyp)
+    assert all(mx_word == np_word)
+    assert all(mx_values == np_values)
+
+    topk.hybridize()
+    mx_hyp, mx_word, mx_values = topk(scores)
+    mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
+    assert all(mx_hyp == np_hyp)
+    assert all(mx_word == np_word)
+    assert all(mx_values == np_values)
+
+
+def test_get_best_word_indeces_for_kth_hypotheses():
+    # data
+    all_hyp_indices = np.array([[0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 2, 0, 0, 4, 3],
+                                [0, 2, 2, 0, 1, 0, 0, 2, 1, 1, 3, 1, 1, 0, 1, 4, 0, 4],
+                                [0, 1, 0, 1, 2, 1, 4, 3, 2, 3, 0, 4, 3, 1, 2, 1, 1, 0],
+                                [0, 1, 0, 0, 3, 2, 2, 1, 3, 4, 4, 2, 2, 3, 3, 2, 2, 1],
+                                [0, 2, 4, 1, 4, 2, 3, 4, 4, 2, 0, 3, 4, 4, 4, 3, 3, 2]], dtype='int32')
+    ks = [np.array([0]), np.array([1]), np.array([2]), np.array([3]), np.array([4])]
+    expected_indices = [np.array([[2, 1, 0, 0, 0, 0, 1, 3, 3, 2, 0, 0, 0, 1, 1, 2, 3]], dtype='int32'),
+                        np.array([[1, 2, 1, 2, 2, 3, 4, 4, 4, 3, 1, 1, 1, 2, 2, 3, 4]], dtype='int32'),
+                        np.array([[2, 1, 0, 0, 0, 1, 0, 0, 0, 0, 4, 2, 3, 3, 3, 4, 0]], dtype='int32'),
+                        np.array([[2, 1, 0, 0, 0, 1, 0, 0, 0, 0, 2, 3, 2, 0, 0, 0, 1]], dtype='int32'),
+                        np.array([[2, 1, 0, 1, 1, 2, 3, 2, 2, 4, 3, 4, 4, 4, 4, 1, 2]], dtype='int32')]
+
+    # extract individually
+    for k, expected_result in zip(ks, expected_indices):
+        result = sockeye.inference.Translator._get_best_word_indeces_for_kth_hypotheses(k, all_hyp_indices)
+        assert result.shape == expected_result.shape
+        assert (result == expected_result).all()
+
+    # extract all at once
+    ks = np.concatenate(ks, axis=0)
+    expected_indices = np.concatenate(expected_indices, axis=0)
+    result = sockeye.inference.Translator._get_best_word_indeces_for_kth_hypotheses(ks, all_hyp_indices)
+    assert result.shape == expected_indices.shape
+    assert (result == expected_indices).all()
+
+
+@pytest.mark.parametrize("raw_constraints, beam_histories, expected_best_ids, expected_best_indices",
+                        [([[], [], [], []], [None, None], np.array([0, 2], dtype='int32'), np.array([[1, 1, 1], [3, 3, 3]], dtype='int32')),
+                         ([[[1]], [], [[3]], []], [None, None], np.array([1, 3], dtype='int32'), np.array([[1, 0, 0], [3, 2, 2]], dtype='int32'))
+                         ])
+def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, expected_best_indices):
+    best_hyp_indices = np.array([[0, 1, 0, 1],
+                                 [0, 1, 1, 0],
+                                 [2, 3, 2, 3],
+                                 [2, 3, 3, 2]],
+                                dtype='int32')
+    best_word_indices = np.array([[3, 3, 0],
+                                  [4, 4, 3],
+                                  [3, 3, 0],
+                                  [4, 5, 3]],
+                                 dtype='int32')
+    attentions = np.array([[[0.1748407 , 0.17223692, 0.153318  , 0.16618672, 0.15373373,
+                             0.1796839 , 0.        , 0.        , 0.        , 0.        ],
+                            [0.17484048, 0.17223585, 0.15332589, 0.16618879, 0.15374145,
+                             0.17966755, 0.        , 0.        , 0.        , 0.        ],
+                            [0.17483611, 0.17222905, 0.15335034, 0.16619477, 0.15375796,
+                             0.17963174, 0.        , 0.        , 0.        , 0.        ]],
+                           [[0.1748407 , 0.17223692, 0.153318  , 0.16618672, 0.15373373,
+                             0.1796839 , 0.        , 0.        , 0.        , 0.        ],
+                            [0.17484048, 0.17223585, 0.15332589, 0.16618879, 0.15374145,
+                             0.17966755, 0.        , 0.        , 0.        , 0.        ],
+                            [0.1748425 , 0.17223647, 0.15333334, 0.16618758, 0.15375413,
+                             0.17964599, 0.        , 0.        , 0.        , 0.        ]],
+                           [[0.20974289, 0.1808782 , 0.18161033, 0.20220006, 0.22556852,
+                             0.        , 0.        , 0.        , 0.        , 0.        ],
+                            [0.20973803, 0.18088503, 0.18162282, 0.20220187, 0.22555229,
+                             0.        , 0.        , 0.        , 0.        , 0.        ],
+                            [0.20973288, 0.18088858, 0.1816678 , 0.20219383, 0.2255169 ,
+                             0.        , 0.        , 0.        , 0.        , 0.        ]],
+                           [[0.20974289, 0.1808782 , 0.18161033, 0.20220006, 0.22556852,
+                             0.        , 0.        , 0.        , 0.        , 0.        ],
+                            [0.20973803, 0.18088503, 0.18162282, 0.20220187, 0.22555229,
+                             0.        , 0.        , 0.        , 0.        , 0.        ],
+                            [0.20972022, 0.1809091 , 0.18161656, 0.20222935, 0.22552474,
+                             0.        , 0.        , 0.        , 0.        , 0.        ]]],
+                           dtype='float32')
+    seq_scores = np.array([[3.8197377],
+                           [5.081118 ],
+                           [3.8068485],
+                           [5.0746527]],
+                          dtype='float32')
+    lengths = np.array([[3], [2], [3], [2]], dtype='int32')
+
+    translator = mock_translator(beam_size=2, batch_size=2)
+
+    expected_result = [sockeye.inference.Translator._assemble_translation(*x) for x in zip(
+                            best_word_indices[expected_best_indices, np.arange(expected_best_indices.shape[1])],
+                            lengths[expected_best_ids],
+                            attentions[expected_best_ids],
+                            seq_scores[expected_best_ids],
+                            beam_histories)]
+
+    constraints = [sockeye.lexical_constraints.ConstrainedHypothesis(rc, _EOS) for rc in raw_constraints]
+
+    actual_result = sockeye.inference.Translator._get_best_from_beam(translator,
+                                                                     best_hyp_indices,
+                                                                     best_word_indices,
+                                                                     attentions,
+                                                                     seq_scores,
+                                                                     lengths,
+                                                                     constraints,
+                                                                     beam_histories)
+
+    for expected_translation, actual_translation in zip(expected_result, actual_result):
+        assert expected_translation.target_ids == actual_translation.target_ids
+        assert np.array_equal(expected_translation.attention_matrix,
+                              actual_translation.attention_matrix)
+        assert expected_translation.score == actual_translation.score
+        assert expected_translation.beam_histories == actual_translation.beam_histories

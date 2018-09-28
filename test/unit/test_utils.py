@@ -11,10 +11,12 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import gzip
 import math
 import os
 import re
 import tempfile
+from tempfile import TemporaryDirectory
 
 import mxnet as mx
 import numpy as np
@@ -338,4 +340,48 @@ def test_metric_value_is_better(new, old, metric, result):
     assert utils.metric_value_is_better(new, old, metric) == result
 
 
+@pytest.mark.parametrize("num_factors", [1, 2, 3])
+def test_split(num_factors):
+    batch_size = 4
+    bucket_key = 10
+    # Simulates splitting factored input
+    data = mx.nd.random.normal(shape=(batch_size, bucket_key, num_factors))
+    result = utils.split(data, num_outputs=num_factors, axis=2, squeeze_axis=True)
+    assert isinstance(result, list)
+    assert result[0].shape == (batch_size, bucket_key)
 
+
+def test_get_num_gpus():
+    assert utils.get_num_gpus() >= 0
+
+
+def _touch_file(fname, compressed: bool, empty: bool) -> str:
+    if compressed:
+        open_func = gzip.open
+    else:
+        open_func = open
+    with open_func(fname, encoding='utf8', mode='wt') as f:
+        if not empty:
+            for i in range(10):
+                print(str(i), file=f)
+    return fname
+
+
+def test_is_gzip_file():
+    with TemporaryDirectory() as temp:
+        fname = os.path.join(temp, 'test')
+        assert utils.is_gzip_file(_touch_file(fname, compressed=True, empty=True))
+        assert utils.is_gzip_file(_touch_file(fname, compressed=True, empty=False))
+        assert not utils.is_gzip_file(_touch_file(fname, compressed=False, empty=True))
+        assert not utils.is_gzip_file(_touch_file(fname, compressed=False, empty=False))
+
+
+def test_smart_open_without_suffix():
+    with TemporaryDirectory() as temp:
+        fname = os.path.join(temp, 'test')
+        _touch_file(fname, compressed=True, empty=False)
+        with utils.smart_open(fname) as fin:
+            assert len(fin.readlines()) == 10
+        _touch_file(fname, compressed=False, empty=False)
+        with utils.smart_open(fname) as fin:
+            assert len(fin.readlines()) == 10

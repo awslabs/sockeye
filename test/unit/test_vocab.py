@@ -18,6 +18,8 @@ from sockeye.vocab import build_vocab, get_ordered_tokens_from_vocab
 
 test_vocab = [
         # Example 1
+        (["one two three", "one two three"], None, 1,
+         {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "two": 4, "three": 5, "one": 6}),
         (["one two three", "one two three"], 3, 1,
          {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "two": 4, "three": 5, "one": 6}),
         (["one two three", "one two three"], 3, 2,
@@ -38,8 +40,18 @@ test_vocab = [
 
 @pytest.mark.parametrize("data,size,min_count,expected", test_vocab)
 def test_build_vocab(data, size, min_count, expected):
-    vocab = build_vocab(data, size, min_count)
+    vocab = build_vocab(data=data, num_words=size, min_count=min_count)
     assert vocab == expected
+
+
+@pytest.mark.parametrize("num_types,pad_to_multiple_of,expected_vocab_size",
+                         [(4, None, 8), (2, 8, 8), (4, 8, 8), (8, 8, 16), (10, 16, 16), (13, 16, 32)])
+def test_padded_build_vocab(num_types, pad_to_multiple_of, expected_vocab_size):
+    data = [" ".join('word%d' % i for i in range(num_types))]
+    size = None
+    min_count = 1
+    vocab = build_vocab(data, size, min_count, pad_to_multiple_of=pad_to_multiple_of)
+    assert len(vocab) == expected_vocab_size
 
 
 test_constants = [

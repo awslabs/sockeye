@@ -23,7 +23,7 @@ from typing import List
 
 # Make sure the version of sockeye being tested is first on the system path
 try:
-    import contrib.autopilot.autopilot as autopilot
+    import sockeye_contrib.autopilot.autopilot as autopilot
 except ImportError:
     SOCKEYE_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     PYTHONPATH = "PYTHONPATH"
@@ -32,7 +32,7 @@ except ImportError:
     else:
         os.environ[PYTHONPATH] = SOCKEYE_ROOT
     sys.path.append(SOCKEYE_ROOT)
-    import contrib.autopilot.autopilot as autopilot
+    import sockeye_contrib.autopilot.autopilot as autopilot
 
 
 # Test-specific constants
@@ -81,40 +81,53 @@ def main():
     with tempfile.TemporaryDirectory(prefix="sockeye.autopilot.") as tmp_dir:
         work_dir = os.path.join(tmp_dir, "workspace")
 
-        # WNMT task with pre-tokenized data
+        # WMT task with raw data (Transformer)
         command = [sys.executable,
                    "-m",
-                   "contrib.autopilot.autopilot",
-                   "--task={}".format(WNMT_TASK),
-                   "--model=transformer",
-                   "--gpus=0",
-                   "--test"]
-        run_test(command, workspace=work_dir)
-
-        # WMT task, prepare data only
-        command = [sys.executable,
-                   "-m",
-                   "contrib.autopilot.autopilot",
-                   "--task={}".format(DATA_ONLY_TASK),
-                   "--model=none",
-                   "--gpus=0",
-                   "--test"]
-        run_test(command, workspace=work_dir)
-
-        # WMT task with raw data
-        command = [sys.executable,
-                   "-m",
-                   "contrib.autopilot.autopilot",
+                   "sockeye_contrib.autopilot.autopilot",
                    "--task={}".format(WMT_TASK),
                    "--model=transformer",
                    "--gpus=0",
                    "--test"]
         run_test(command, workspace=work_dir)
 
-        # Custom task (raw data)
+        # WMT task with raw data (GNMT)
         command = [sys.executable,
                    "-m",
-                   "contrib.autopilot.autopilot",
+                   "sockeye_contrib.autopilot.autopilot",
+                   "--task={}".format(WMT_TASK),
+                   "--model=gnmt_like",
+                   "--decode-settings=gnmt_like",
+                   "--gpus=0",
+                   "--test"]
+        run_test(command, workspace=work_dir)
+
+        # TODO: Currently disabled due to periodic outages of nlp.stanford.edu
+        #       preventing downloading data.
+        # WNMT task with pre-tokenized data (Transformer)
+        # command = [sys.executable,
+        #            "-m",
+        #            "sockeye_contrib.autopilot.autopilot",
+        #            "--task={}".format(WNMT_TASK),
+        #            "--model=transformer",
+        #            "--gpus=0",
+        #            "--test"]
+        # run_test(command, workspace=work_dir)
+
+        # WMT task, prepare data only
+        command = [sys.executable,
+                   "-m",
+                   "sockeye_contrib.autopilot.autopilot",
+                   "--task={}".format(DATA_ONLY_TASK),
+                   "--model=none",
+                   "--gpus=0",
+                   "--test"]
+        run_test(command, workspace=work_dir)
+
+        # Custom task (raw data, Transformer)
+        command = [sys.executable,
+                   "-m",
+                   "sockeye_contrib.autopilot.autopilot",
                    "--custom-task=custom_raw",
                    "--custom-train",
                    os.path.join(work_dir, autopilot.DIR_SYSTEMS, WMT_TASK + autopilot.SUFFIX_TEST, autopilot.DIR_DATA,
@@ -140,10 +153,10 @@ def main():
                    "--test"]
         run_test(command, workspace=work_dir)
 
-        # Custom task (tokenized data)
+        # Custom task (tokenized data, Transformer)
         command = [sys.executable,
                    "-m",
-                   "contrib.autopilot.autopilot",
+                   "sockeye_contrib.autopilot.autopilot",
                    "--custom-task=custom_tok",
                    "--custom-train",
                    os.path.join(work_dir, autopilot.DIR_SYSTEMS, WMT_TASK + autopilot.SUFFIX_TEST, autopilot.DIR_DATA,
@@ -167,10 +180,10 @@ def main():
                    "--test"]
         run_test(command, workspace=work_dir)
 
-        # Custom task (byte-pair encoded data)
+        # Custom task (byte-pair encoded data, Transformer)
         command = [sys.executable,
                    "-m",
-                   "contrib.autopilot.autopilot",
+                   "sockeye_contrib.autopilot.autopilot",
                    "--custom-task=custom_bpe",
                    "--custom-train",
                    os.path.join(work_dir, autopilot.DIR_SYSTEMS, WMT_TASK + autopilot.SUFFIX_TEST, autopilot.DIR_DATA,
@@ -192,6 +205,7 @@ def main():
                    "--gpus=0",
                    "--test"]
         run_test(command, workspace=work_dir)
+
 
 if __name__ == "__main__":
     main()

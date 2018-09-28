@@ -37,15 +37,15 @@ except ImportError:
     raise RuntimeError("Please install the sockeye module or add the sockeye root directory to your Python path. Ex: export PYTHONPATH=%s"
                        % SOCKEYE_ROOT)
 
-from contrib.autopilot.tasks import ARCHIVE_NONE, ARCHIVE_TAR, ARCHIVE_ZIP
-from contrib.autopilot.tasks import TEXT_UTF8_RAW, TEXT_UTF8_RAW_SGML, TEXT_UTF8_RAW_BITEXT
-from contrib.autopilot.tasks import TEXT_UTF8_RAW_BITEXT_REVERSE, TEXT_REQUIRES_TOKENIZATION
-from contrib.autopilot.tasks import TEXT_UTF8_TOKENIZED
-from contrib.autopilot.tasks import RAW_FILES
-from contrib.autopilot.tasks import Task, TASKS
-from contrib.autopilot.models import MODELS, MODEL_NONE, MODEL_TEST_ARGS
-from contrib.autopilot.models import DECODE_ARGS, DECODE_STANDARD
-from contrib.autopilot import third_party
+from sockeye_contrib.autopilot.tasks import ARCHIVE_NONE, ARCHIVE_TAR, ARCHIVE_ZIP
+from sockeye_contrib.autopilot.tasks import TEXT_UTF8_RAW, TEXT_UTF8_RAW_SGML, TEXT_UTF8_RAW_BITEXT
+from sockeye_contrib.autopilot.tasks import TEXT_UTF8_RAW_BITEXT_REVERSE, TEXT_REQUIRES_TOKENIZATION
+from sockeye_contrib.autopilot.tasks import TEXT_UTF8_TOKENIZED
+from sockeye_contrib.autopilot.tasks import RAW_FILES
+from sockeye_contrib.autopilot.tasks import Task, TASKS
+from sockeye_contrib.autopilot.models import MODELS, MODEL_NONE, MODEL_GNMT, MODEL_TEST_ARGS
+from sockeye_contrib.autopilot.models import DECODE_ARGS, DECODE_STANDARD, DECODE_GNMT
+from sockeye_contrib.autopilot import third_party
 
 
 # Formats for custom files
@@ -325,7 +325,7 @@ def renew_step_dir(step_dir: str):
     os.makedirs(step_dir)
 
 
-def call_sockeye_train(args: List[str],
+def call_sockeye_train(model: str,
                        bpe_dir: str,
                        model_dir: str,
                        log_fname: str,
@@ -336,7 +336,7 @@ def call_sockeye_train(args: List[str],
     partial training or skip training if model is already finished.  Record
     command for future use.
 
-    :param args: Command line arguments for sockeye.train.
+    :param model: Type of translation model to train.
     :param bpe_dir: Directory of BPE-encoded input data.
     :param model_dir: Model output directory.
     :param log_fname: Location to write log file.
@@ -351,7 +351,7 @@ def call_sockeye_train(args: List[str],
               "--validation-target={}".format(os.path.join(bpe_dir, PREFIX_DEV + SUFFIX_TRG_GZ)),
               "--output={}".format(model_dir)]
     # Assemble command
-    command = [sys.executable, "-m", "sockeye.train"] + fnames + args
+    command = [sys.executable, "-m", "sockeye.train"] + fnames + MODELS[model]
     # Request GPUs or specify CPU
     if num_gpus > 0:
         command.append("--device-ids=-{}".format(num_gpus))
@@ -359,7 +359,7 @@ def call_sockeye_train(args: List[str],
         command.append("--use-cpu")
     # Test mode trains a smaller model for a small number of steps
     if test_mode:
-        command += MODEL_TEST_ARGS
+        command += MODEL_TEST_ARGS[model]
     command_fname = os.path.join(model_dir, FILE_COMMAND.format("sockeye.train"))
     # Run unless training already finished
     if not os.path.exists(command_fname):
@@ -457,7 +457,7 @@ def call_sockeye_translate(args: List[str],
 
 def call_sacrebleu(input_fname: str, ref_fname: str, output_fname: str, log_fname: str, tokenized: bool = False):
     """
-    Call contrib.sacrebleu.sacrebleu on tokenized or detokenized inputs.
+    Call sockeye_contrib.sacrebleu.sacrebleu on tokenized or detokenized inputs.
 
     :param input_fname: Input translation file.
     :param ref_fname: Reference translation file.
@@ -468,7 +468,7 @@ def call_sacrebleu(input_fname: str, ref_fname: str, output_fname: str, log_fnam
     # Assemble command
     command = [sys.executable,
                "-m",
-               "contrib.sacrebleu.sacrebleu",
+               "sockeye_contrib.sacrebleu.sacrebleu",
                "--score-only",
                "--input={}".format(input_fname),
                ref_fname]
@@ -477,7 +477,7 @@ def call_sacrebleu(input_fname: str, ref_fname: str, output_fname: str, log_fnam
         command.append("--tokenize=none")
     # Call sacrebleu
     with open(log_fname, "wb") as log:
-        logging.info("contrib.sacrebleu.sacrebleu: %s -> %s", input_fname, output_fname)
+        logging.info("sockeye_contrib.sacrebleu.sacrebleu: %s -> %s", input_fname, output_fname)
         logging.info("Log: %s", log_fname)
         score = subprocess.check_output(command, stderr=log)
     # Record successful score
@@ -721,6 +721,8 @@ def run_steps(args: argparse.Namespace):
 
     logging.info("=== Train translation model ===")
     logging.info("Model: %s", args.model)
+    if args.model == MODEL_GNMT:
+        logging.info("NOTE: This is an 8 layer LSTM model similar (but not exactly identical) to the 'GNMT' architecture.")
     step_dir_model = os.path.join(dir_task, DIR_PREFIX_MODEL + args.model)
     complete_fname = os.path.join(step_dir_model, FILE_COMPLETE)
     if os.path.exists(complete_fname):
@@ -729,7 +731,7 @@ def run_steps(args: argparse.Namespace):
         log_fname = os.path.join(args.workspace,
                                  DIR_LOGS,
                                  "sockeye.{{}}.{}.{}.{}.log".format(task_name, args.model, os.getpid()))
-        call_sockeye_train(MODELS[args.model],
+        call_sockeye_train(args.model,
                            step_dir_bpe,
                            step_dir_model,
                            log_fname.format("train"),
@@ -794,7 +796,7 @@ def run_steps(args: argparse.Namespace):
         else:
             fname_log = os.path.join(args.workspace,
                          DIR_LOGS,
-                         "contrib.sacrebleu.sacrebleu.{}.{}.{}.{}.log".format(task_name,
+                         "sockeye_contrib.sacrebleu.sacrebleu.{}.{}.{}.{}.log".format(task_name,
                                                                               args.model,
                                                                               fname_base + SUFFIX_BPE,
                                                                               os.getpid()))
@@ -815,7 +817,7 @@ def run_steps(args: argparse.Namespace):
             third_party.merge_bpe(input_fname=fname_bpe, output_fname=fname_tok)
             fname_log = os.path.join(args.workspace,
                          DIR_LOGS,
-                         "contrib.sacrebleu.sacrebleu.{}.{}.{}.{}.log".format(task_name,
+                         "sockeye_contrib.sacrebleu.sacrebleu.{}.{}.{}.{}.log".format(task_name,
                                                                               args.model,
                                                                               fname_base + SUFFIX_TOK,
                                                                               os.getpid()))
@@ -842,7 +844,7 @@ def run_steps(args: argparse.Namespace):
                                                lang_code=lang_code)
             fname_log = os.path.join(args.workspace,
                          DIR_LOGS,
-                         "contrib.sacrebleu.sacrebleu.{}.{}.{}.{}.log".format(task_name,
+                         "sockeye_contrib.sacrebleu.sacrebleu.{}.{}.{}.{}.log".format(task_name,
                                                                               args.model,
                                                                               fname_base + SUFFIX_DETOK,
                                                                               os.getpid()))

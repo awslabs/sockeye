@@ -85,7 +85,7 @@ def _test_activation_coverage(act_type):
     assert new_coverage.shape == prev_coverage_shape
     # this is needed to modulate the 0 input. The output changes according to the activation type used.
     modulated = mx.nd.Activation(mx.nd.zeros((1, 1)), act_type=act_type).asnumpy()
-    assert (np.sum(np.sum(new_coverage == modulated, axis=2) != 0, axis=1) == source_length_data).all()
+    assert (np.sum(np.sum(np.isclose(new_coverage, modulated, atol=1.e-6), axis=2) != 0, axis=1) == source_length_data).all()
 
 
 def _test_gru_coverage():

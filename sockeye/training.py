@@ -526,12 +526,9 @@ class EarlyStoppingTrainer:
         next_data_batch = train_iter.next()
         while True:
 
-            if not train_iter.iter_next():
-                self.state.epoch += 1
-                train_iter.reset()
-                if max_epochs is not None and self.state.epoch == max_epochs:
-                    logger.info("Maximum # of epochs (%s) reached.", max_epochs)
-                    break
+            if max_epochs is not None and self.state.epoch == max_epochs:
+                logger.info("Maximum # of epochs (%s) reached.", max_epochs)
+                break
 
             if max_updates is not None and self.state.updates == max_updates:
                 logger.info("Maximum # of updates (%s) reached.", max_updates)
@@ -546,13 +543,18 @@ class EarlyStoppingTrainer:
             ######
             batch = next_data_batch
             self._step(self.model, batch, checkpoint_frequency, metric_train, metric_loss)
-            if train_iter.iter_next():
-                next_data_batch = train_iter.next()
-                self.model.prepare_batch(next_data_batch)
             batch_num_samples = batch.data[0].shape[0]
             batch_num_tokens = batch.data[0].shape[1] * batch_num_samples
             self.state.updates += 1
             self.state.samples += batch_num_samples
+
+            if not train_iter.iter_next():
+                self.state.epoch += 1
+                train_iter.reset()
+
+            next_data_batch = train_iter.next()
+            self.model.prepare_batch(next_data_batch)
+
             speedometer(self.state.epoch, self.state.updates, batch_num_samples, batch_num_tokens, metric_train)
 
             ############
@@ -722,8 +724,7 @@ class EarlyStoppingTrainer:
                               "gradient-norm": self.state.gradient_norm,
                               "time-elapsed": time.time() - self.state.start_tic}
         gpu_memory_usage = utils.get_gpu_memory_usage(self.model.context)
-        if gpu_memory_usage is not None:
-            checkpoint_metrics['used-gpu-memory'] = sum(v[0] for v in gpu_memory_usage.values())
+        checkpoint_metrics['used-gpu-memory'] = sum(v[0] for v in gpu_memory_usage.values())
 
         for name, value in metric_train.get_name_value():
             checkpoint_metrics["%s-train" % name] = value
@@ -905,8 +906,8 @@ class EarlyStoppingTrainer:
 
         utils.check_condition(early_stopping_metric in C.METRICS,
                               "Unsupported early-stopping metric: %s" % early_stopping_metric)
-        if early_stopping_metric == C.BLEU:
-            utils.check_condition(cp_decoder is not None, "%s requires CheckpointDecoder" % C.BLEU)
+        if early_stopping_metric in C.METRICS_REQUIRING_DECODER:
+            utils.check_condition(cp_decoder is not None, "%s requires CheckpointDecoder" % early_stopping_metric)
 
     def _save_params(self):
         """
@@ -927,8 +928,10 @@ class EarlyStoppingTrainer:
 
         # (1) Parameters: link current file
         params_base_fname = C.PARAMS_NAME % self.state.checkpoint
-        os.symlink(os.path.join("..", params_base_fname),
-                   os.path.join(training_state_dirname, C.TRAINING_STATE_PARAMS_NAME))
+        params_file = os.path.join(training_state_dirname, C.TRAINING_STATE_PARAMS_NAME)
+        if os.path.exists(params_file):
+            os.unlink(params_file)
+        os.symlink(os.path.join("..", params_base_fname), params_file)
 
         # (2) Optimizer states
         opt_state_fname = os.path.join(training_state_dirname, C.OPT_STATES_LAST)
