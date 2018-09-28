@@ -78,12 +78,13 @@ class InferenceModel(model.SockeyeModel):
                               'The beam size must be smaller than the target vocabulary size.')
         if skip_softmax:
             assert beam_size == 1, 'Skipping softmax does not have any effect for beam size > 1'
+        self.skip_softmax = skip_softmax
+
         self.batch_size = batch_size
         self.softmax_temperature = softmax_temperature
         self.max_input_length, self.get_max_output_length = models_max_input_output_length([self],
                                                                                            max_output_length_num_stds,
                                                                                            forced_max_output_len=forced_max_output_len)
-        self.skip_softmax = skip_softmax
 
         self.encoder_module = None  # type: Optional[mx.mod.BucketingModule]
         self.encoder_default_bucket_key = None  # type: Optional[int]
@@ -372,9 +373,10 @@ def load_models(context: mx.context.Context,
                 decoder_return_logit_inputs: bool = False,
                 cache_output_layer_w_b: bool = False,
                 forced_max_output_len: Optional[int] = None,
-                override_dtype: Optional[str] = None) -> Tuple[List[InferenceModel],
-                                                               List[vocab.Vocab],
-                                                               vocab.Vocab]:
+                override_dtype: Optional[str] = None,
+                output_scores: bool = False) -> Tuple[List[InferenceModel],
+                                                      List[vocab.Vocab],
+                                                      vocab.Vocab]:
     """
     Loads a list of models for inference.
 
@@ -393,6 +395,9 @@ def load_models(context: mx.context.Context,
                                    restrict lexicon).
     :param forced_max_output_len: An optional overwrite of the maximum output length.
     :param override_dtype: Overrides dtype of encoder and decoder defined at training time to a different one.
+    :param output_scores: Whether the scores will be needed as outputs. If True, scores will be normalized, negative
+           log probabilities. If False, scores will be negative, raw logit activations if decoding with beam size 1
+           and a single model.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
@@ -404,13 +409,11 @@ def load_models(context: mx.context.Context,
     if checkpoints is None:
         checkpoints = [None] * len(model_folders)
 
-    # skip softmax for a single model,
-    if len(model_folders) == 1 and beam_size == 1:
+    skip_softmax = False
+    # performance tweak: skip softmax for a single model, decoding with beam size 1, and no scores required in output.
+    if len(model_folders) == 1 and beam_size == 1 and not output_scores:
         skip_softmax = True
         logger.info("Enabled skipping softmax for a single model and greedy decoding.")
-    else:
-        # but not for an ensemble or beam search
-        skip_softmax = False
 
     for model_folder, checkpoint in zip(model_folders, checkpoints):
         model_source_vocabs = vocab.load_source_vocabs(model_folder)
@@ -1144,10 +1147,10 @@ class Translator:
         utils.check_condition(self.beam_size >= nbest_size,
                               'Nbest size must be smaller or equal to beam size.')
         self.batch_size = self.models[0].batch_size
-        # skip softmax for a single model, but not for an ensemble
-        self.skip_softmax = self.models[0].skip_softmax
-        if self.skip_softmax:
-            utils.check_condition(len(self.models) == 1 and self.beam_size == 1, "Skipping softmax cannot be enabled for several models, or a beam size > 1.")
+
+        if any(m.skip_softmax for m in self.models):
+            utils.check_condition(len(self.models) == 1 and self.beam_size == 1,
+                                  "Skipping softmax cannot be enabled for ensembles or beam sizes > 1.")
 
         self.skip_topk = skip_topk
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
@@ -1457,9 +1460,12 @@ class Translator:
             nbest_target_ids = translation.nbest_translations.target_ids_list
             target_tokens_list = [[self.vocab_target_inv[id] for id in ids] for ids in nbest_target_ids]
             target_strings = [C.TOKEN_SEPARATOR.join(
-                                data_io.ids2tokens(target_ids, self.vocab_target_inv, self.strip_ids)) for target_ids in nbest_target_ids]
+                                data_io.ids2tokens(target_ids,
+                                                   self.vocab_target_inv,
+                                                   self.strip_ids)) for target_ids in nbest_target_ids]
 
-            attention_matrices = [matrix[:, :len(trans_input.tokens)] for matrix in translation.nbest_translations.attention_matrices]
+            attention_matrices = [matrix[:, :len(trans_input.tokens)] for matrix in
+                                  translation.nbest_translations.attention_matrices]
 
             scores = translation.nbest_translations.scores
 
@@ -1523,55 +1529,58 @@ class Translator:
         :param states: List of model states.
         :param models_output_layer_w: Custom model weights for logit computation (empty for none).
         :param models_output_layer_b: Custom model biases for logit computation (empty for none).
-        :return: (probs, attention scores, list of model states)
+        :return: (scores, attention scores, list of model states)
         """
         bucket_key = (source_length, step)
 
-        model_probs, model_attention_probs, model_states = [], [], []
+        model_outs, model_attention_probs, model_states = [], [], []
         # We use zip_longest here since we'll have empty lists when not using restrict_lexicon
         for model, out_w, out_b, state in itertools.zip_longest(
                 self.models, models_output_layer_w, models_output_layer_b, states):
-            decoder_outputs, attention_probs, state = model.run_decoder(prev_word, bucket_key, state)
+            decoder_out, attention_probs, state = model.run_decoder(prev_word, bucket_key, state)
             # Compute logits and softmax with restricted vocabulary
             if self.restrict_lexicon:
-                logits = model.output_layer(decoder_outputs, out_w, out_b)
-                if self.skip_softmax:
-                    # skip softmax for greedy decoding and single model
-                    probs = logits
+                # Apply output layer outside decoder module.
+                logits = model.output_layer(decoder_out, out_w, out_b)
+                if model.skip_softmax:
+                    model_out = logits  # raw logits
                 else:
-                    probs = mx.nd.softmax(logits)
+                    model_out = mx.nd.softmax(logits)  # normalized probabilities
             else:
-                # Otherwise decoder outputs are already target vocab probs,
-                # or logits if beam size is 1
-                probs = decoder_outputs
-            model_probs.append(probs)
+                # Output layer is applied inside decoder module.
+                # if model.skip_softmax decoder_out represents logits, normalized probabilities else.
+                model_out = decoder_out
+            model_outs.append(model_out)
             model_attention_probs.append(attention_probs)
             model_states.append(state)
-        neg_logprobs, attention_probs = self._combine_predictions(model_probs, model_attention_probs)
-        return neg_logprobs, attention_probs, model_states
+        scores, attention_probs = self._combine_predictions(model_outs, model_attention_probs)
+        return scores, attention_probs, model_states
 
     def _combine_predictions(self,
-                             probs: List[mx.nd.NDArray],
+                             model_outputs: List[mx.nd.NDArray],
                              attention_probs: List[mx.nd.NDArray]) -> Tuple[mx.nd.NDArray, mx.nd.NDArray]:
         """
-        Returns combined predictions of models as negative log probabilities and averaged attention prob scores.
+        Returns combined predictions of models and averaged attention prob scores.
+        If model_outputs are probabilities, they are converted to negative log probabilities before combination.
+        If model_outputs are logits (and no ensembling is used),
+        no combination is applied and logits are converted to negative logits.
 
-        :param probs: List of Shape(beam_size, target_vocab_size).
+        :param model_outputs: List of Shape(beam_size, target_vocab_size).
         :param attention_probs: List of Shape(beam_size, bucket_key).
-        :return: Combined negative log probabilities, averaged attention scores.
+        :return: Combined scores, averaged attention scores.
         """
         # average attention prob scores. TODO: is there a smarter way to do this?
         attention_prob_score = utils.average_arrays(attention_probs)
 
         # combine model predictions and convert to neg log probs
         if len(self.models) == 1:
-            if self.skip_softmax:
-                neg_probs = -probs[0]
+            if self.models[0].skip_softmax:
+                scores = -model_outputs[0]
             else:
-                neg_probs = -mx.nd.log(probs[0])  # pylint: disable=invalid-unary-operand-type
+                scores = -mx.nd.log(model_outputs[0])  # pylint: disable=invalid-unary-operand-type
         else:
-            neg_probs = self.interpolation_func(probs)
-        return neg_probs, attention_prob_score
+            scores = self.interpolation_func(model_outputs)
+        return scores, attention_prob_score
 
     def _beam_search(self,
                      source: mx.nd.NDArray,
@@ -2049,7 +2058,6 @@ class Top1(mx.gluon.HybridBlock):
         """
         :param k: The number of smallest scores to return.
         :param batch_size: Number of sentences being decoded at once.
-        :param vocab_size: Vocabulary size.
         """
         super().__init__()
         with self.name_scope():

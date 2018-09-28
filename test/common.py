@@ -413,7 +413,7 @@ def run_train_translate(train_params: str,
                                                                           open(out_path_constrained),
                                                                           open(out_path)):
                     jobj = json.loads(json_input)
-                    if jobj.get(constraint_type, None) == None:
+                    if jobj.get(constraint_type) is None:
                         # if there were no constraints, make sure the output is the same as the unconstrained output
                         assert constrained_out == unconstrained_out
                     else:
@@ -444,15 +444,13 @@ def run_train_translate(train_params: str,
 
         # Only run scoring under these conditions. Why?
         # - scoring isn't compatible with prepared data because that loses the source ordering
-        # - scoring doesn't support skipping softmax (which can be enabled explicitly or implicitly by using a beam size of 1)
         # - translate splits up too-long sentences and translates them in sequence, invalidating the score, so skip that
         # - scoring requires valid translation output to compare against
         if not use_prepared_data \
-           and '--beam-size 1' not in translate_params \
            and '--max-input-len' not in translate_params \
            and translate_output_is_valid:
 
-            ## Score
+            # Score
             # We use the translation parameters, but have to remove irrelevant arguments from it.
             # Currently, the only relevant flag passed is the --softmax-temperature flag.
             score_params = ''
