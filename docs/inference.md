@@ -36,10 +36,30 @@ The given lists must have the same length, such that the first given checkpoint 
 ## Visualization
 
 The default mode of the translate CLI is to output translations to STDOUT.
-You can also print out an ASCII matrix of the alignments using `--output-type align_text`, or save the alignment matrix as a PNG plot using `--output-type align_plot`. 
+You can also print out an ASCII matrix of the alignments using `--output-type align_text`, or save the alignment matrix as a PNG plot using `--output-type align_plot`.
 The PNG files will be written to files beginning with the prefix given by the `--align-plot-prefix` option, one for each input sentence, indexed by the sentence id.
 
-## Decoding with lexical constraints
+## Source factors
+
+If your [model was trained with source factors](training.html#source-factors), you will need to supply them at test-time, too.
+Factors can be provided as direct annotations on words, or via separate, token-parallel files.
+
+### Direct annotations
+
+Factors are appended to each token and delimited with a `|` symbol.
+For example:
+
+> The|O boy|O ate|O the|O waff@@|B le|E .|O
+
+Any number of factors can be supplied.
+Factor representation are dense; each word must be annotated for all factors.
+
+### Parallel files
+
+You can also provide parallel files, [in the same style as training](training.html#source-factors).
+Factor files are token-parallel to the source and are passed in to `sockeye.translate` via the `--input-factors` flag.
+
+## Lexical constraints
 
 Lexical constraints provide a way to force the model to include certain words in the output.
 Given a set of constraints, the decoder will find the best output that includes the constraints.
