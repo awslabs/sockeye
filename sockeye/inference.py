@@ -393,7 +393,9 @@ def load_models(context: mx.context.Context,
                                    restrict lexicon).
     :param forced_max_output_len: An optional overwrite of the maximum output length.
     :param override_dtype: Overrides dtype of encoder and decoder defined at training time to a different one.
-    :param output_scores: Whether the scores will be needed as outputs.
+    :param output_scores: Whether the scores will be needed as outputs. If True, scores will be normalized, negative
+           log probabilities. If False, scores will be negative, raw logit activations if decoding with beam size 1
+           and a single model.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
