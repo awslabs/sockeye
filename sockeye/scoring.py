@@ -232,7 +232,6 @@ class Scorer:
               output_handler: OutputHandler):
 
         total_time = 0.
-        tic = time.time()
         sentence_no = 0
         for i, batch in enumerate(score_iter):
 

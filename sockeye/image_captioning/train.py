@@ -29,7 +29,6 @@ from . import arguments as arguments_image
 from . import checkpoint_decoder
 from . import data_io as data_io_image
 from . import encoder as encoder_image
-# Sockeye
 from .. import arguments
 from .. import constants as C
 from .. import data_io
@@ -90,14 +89,14 @@ def create_checkpoint_decoder(args: argparse.Namespace,
         context = train_context[-1]
 
     return checkpoint_decoder.CheckpointDecoderImageModel(context=context,
-                                                inputs=[args.validation_source] + args.validation_source_factors,
-                                                references=args.validation_target,
-                                                model=args.output,
-                                                sample_size=sample_size,
-                                                source_image_size=args.source_image_size,
-                                                image_root=args.validation_source_root,
-                                                max_output_length=args.max_output_length,
-                                                use_feature_loader=args.image_preextracted_features)
+                                                          inputs=[args.validation_source] + args.validation_source_factors,
+                                                          references=args.validation_target,
+                                                          model=args.output,
+                                                          sample_size=sample_size,
+                                                          source_image_size=args.source_image_size,
+                                                          image_root=args.validation_source_root,
+                                                          max_output_length=args.max_output_length,
+                                                          use_feature_loader=args.image_preextracted_features)
 
 
 def create_data_iters_and_vocab(args: argparse.Namespace,
@@ -178,19 +177,18 @@ def create_data_iters_and_vocab(args: argparse.Namespace,
 
 
 def create_encoder_config(args: argparse.Namespace) -> Tuple[Config, int]:
-
     if args.encoder == C.IMAGE_PRETRAIN_TYPE:
         number_of_kernels = args.source_image_size[0]
         encoded_seq_len = np.prod(args.source_image_size[1:])
         config_encoder = encoder_image.ImageLoadedCnnEncoderConfig(model_path=args.image_encoder_model_path,
-                                                          epoch=args.image_encoder_model_epoch,
-                                                          layer_name=args.image_encoder_layer,
-                                                          encoded_seq_len=encoded_seq_len,
-                                                          num_embed=args.image_encoder_num_hidden,
-                                                          no_global_descriptor=args.no_image_encoder_global_descriptor,
-                                                          preextracted_features=args.image_preextracted_features,
-                                                          number_of_kernels=number_of_kernels,
-                                                          positional_embedding_type=args.image_positional_embedding_type)
+                                                                   epoch=args.image_encoder_model_epoch,
+                                                                   layer_name=args.image_encoder_layer,
+                                                                   encoded_seq_len=encoded_seq_len,
+                                                                   num_embed=args.image_encoder_num_hidden,
+                                                                   no_global_descriptor=args.no_image_encoder_global_descriptor,
+                                                                   preextracted_features=args.image_preextracted_features,
+                                                                   number_of_kernels=number_of_kernels,
+                                                                   positional_embedding_type=args.image_positional_embedding_type)
         encoder_num_hidden = args.image_encoder_num_hidden
     else:
         raise ValueError("Image encoder must be provided. (current: {}, "
@@ -358,11 +356,12 @@ def train(args: argparse.Namespace):
 
         # Get initialization from encoders (useful for pretrained models)
         extra_initializers = get_preinit_encoders(training_model.encoder.encoders)
-        if len(extra_initializers)==0:
+        if len(extra_initializers) == 0:
             extra_initializers = None
 
         trainer = training.EarlyStoppingTrainer(model=training_model,
-                                                optimizer_config=create_optimizer_config(args, [1.0], extra_initializers),
+                                                optimizer_config=create_optimizer_config(args, [1.0],
+                                                                                         extra_initializers),
                                                 max_params_files_to_keep=args.keep_last_params,
                                                 source_vocabs=[None],
                                                 target_vocab=target_vocab)

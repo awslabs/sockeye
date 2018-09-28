@@ -14,7 +14,7 @@
 import copy
 import logging
 from operator import attrgetter
-from typing import Dict, List, Optional, Set, Tuple, Set
+from typing import Dict, List, Optional, Tuple, Set
 
 import mxnet as mx
 import numpy as np
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Represents a list of raw constraints for a sentence. Each constraint is a list of target-word IDs.
 RawConstraintList = List[List[int]]
+
 
 class AvoidTrie:
     """
@@ -242,12 +243,11 @@ class ConstrainedHypothesis:
 
         constraints: [14 19 35 14]
         is_sequence: [False False True True]
-        
+
     That is, the constraints are simply concatenated, and we maintain a parallel array indicating whether each
     token ID must be followed by the next token ID. The same token ID can be present any number of times.
 
     :param constraint_list: A list of zero or raw constraints (each represented as a list of integers).
-    :param avoid_list: A list of zero or raw constraints that must *not* appear in the output.
     :param eos_id: The end-of-sentence ID.
     """
 
@@ -530,7 +530,7 @@ def topk(batch_size: int,
             # the same, except we need to mark all hypotheses as active
             inactive[rows] = 0
 
-    return (best_ids, best_word_ids, seq_scores, hypotheses, inactive)
+    return best_ids, best_word_ids, seq_scores, hypotheses, inactive
 
 
 def _topk(beam_size: int,

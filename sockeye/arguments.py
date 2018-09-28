@@ -784,8 +784,8 @@ def add_training_args(params):
     add_batch_args(train_params)
 
     train_params.add_argument('--decoder-only',
-                               action='store_true',
-                               help='Pre-train a decoder. This is currently for RNN decoders only. '
+                              action='store_true',
+                              help='Pre-train a decoder. This is currently for RNN decoders only. '
                                     'Default: %(default)s.')
     train_params.add_argument('--fill-up',
                               type=str,
@@ -1128,6 +1128,7 @@ def add_score_cli_args(params):
                         choices=C.SCORING_TYPE_CHOICES,
                         default=C.SCORING_TYPE_DEFAULT,
                         help='Score type to output. Default: %(default)s')
+
 
 def add_max_output_cli_args(params):
     params.add_argument('--max-output-length',
