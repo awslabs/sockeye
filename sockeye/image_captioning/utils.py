@@ -181,7 +181,7 @@ def zero_pad_features(features: List[np.ndarray],
         feature_shape = feature.shape
         if len(feature_shape) < len(target_shape):  # add extra dimensions
             for i in range(len(target_shape) - len(feature_shape)):
-                feature = np.expand_dims(feature, axis=len(feature.shape)+1)
+                feature = np.expand_dims(feature, axis=len(feature.shape) + 1)
                 feature_shape = feature.shape
         elif len(feature_shape) > len(target_shape):
             raise ValueError("Provided target shape must be bigger then the original "

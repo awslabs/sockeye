@@ -36,9 +36,9 @@ logger = setup_main_logger(__name__, file_logging=False, console=True)
 
 
 def batching(iterable, n=1):
-    l = len(iterable)
-    for ndx in range(0, l, n):
-        yield iterable[ndx:min(ndx + n, l)]
+    length = len(iterable)
+    for ndx in range(0, length, n):
+        yield iterable[ndx:min(ndx + n, length)]
 
 
 def get_pretrained_net(args: argparse.Namespace, context: mx.Context) -> Tuple[mx.mod.Module, Tuple[int]]:

@@ -25,10 +25,11 @@ except ImportError as e:
 
 try:  # Try to import matplotlib
     import matplotlib  # pylint: disable=import-error
+    import matplotlib.pyplot as plt
+
+    matplotlib.use('Agg')
 except ImportError as e:
     raise RuntimeError("Please install matplotlib.")
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 
 
 def format_text_for_visualization(c, n):
@@ -37,7 +38,7 @@ def format_text_for_visualization(c, n):
     out = ""
     for j in range(0, len(c)):
         out += c[j]
-        if j == len(c)-1:
+        if j == len(c) - 1:
             out += "."
         else:
             if (j + 1) % n == 0:
@@ -45,6 +46,7 @@ def format_text_for_visualization(c, n):
             else:
                 out += " "
     return out
+
 
 def main():
     params = argparse.ArgumentParser(
@@ -119,40 +121,40 @@ def main():
     i = 0
     ii = 1
     for s in predictions.keys():  # Go over images (dict[image]=caption)
-        if ii%skip==0: # maybe you do not want to display all images
+        if ii % skip == 0:  # maybe you do not want to display all images
             c = predictions[s]
-            if len(ground_truth)>0:
-                gts = ground_truth[s] # list
+            if len(ground_truth) > 0:
+                gts = ground_truth[s]  # list
             s = s.split("\n")[0]
             c = c.split("\n")[0]
             # Display image
             image = Image.open(os.path.join(args.image_root, s))
             if 'RGB' not in image.mode:
-                axs[i//N%M, i%N].imshow(image, cmap='gray')
+                axs[i // N % M, i % N].imshow(image, cmap='gray')
             else:
-                axs[i//N%M, i%N].imshow(image)
+                axs[i // N % M, i % N].imshow(image)
             # Display predicted caption
-            axs[i//N%M, i%N].axis("off")
-            axs[(i+1)//N%M, (i+1)%N].text(0, 0.9,
-                                  format_text_for_visualization(c, len_newline),
-                                  fontsize=fontsize,
-                                  bbox={'facecolor': 'white',
-                                        'alpha': 0.85,
-                                        'pad': 2})
+            axs[i // N % M, i % N].axis("off")
+            axs[(i + 1) // N % M, (i + 1) % N].text(0, 0.9,
+                                                    format_text_for_visualization(c, len_newline),
+                                                    fontsize=fontsize,
+                                                    bbox={'facecolor': 'white',
+                                                          'alpha': 0.85,
+                                                          'pad': 2})
             # Display ground-truth caption(s) optionally
-            if len(ground_truth)>0:
+            if len(ground_truth) > 0:
                 gt_vis = ""
                 for j, gt in enumerate(gts):
                     gt = gt.split("\n")[0]
                     gt_vis += \
                         "* " + format_text_for_visualization(gt, len_newline) \
                         + "\n"
-                axs[(i+1)//N%M, (i+1)%N].text(0, 0, gt_vis,
-                                              fontsize=fontsize,
-                                              bbox={'facecolor': 'green',
-                                                    'alpha': 0.3,
-                                                    'pad': 2})
-            axs[(i+1)//N%M, (i+1)%N].axis("off")
+                axs[(i + 1) // N % M, (i + 1) % N].text(0, 0, gt_vis,
+                                                        fontsize=fontsize,
+                                                        bbox={'facecolor': 'green',
+                                                              'alpha': 0.3,
+                                                              'pad': 2})
+            axs[(i + 1) // N % M, (i + 1) % N].axis("off")
             i += 2
 
             # Show or save to disk
@@ -174,5 +176,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

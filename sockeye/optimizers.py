@@ -15,11 +15,11 @@
 Extra optimizers not included in MXNet.
 """
 
+import math
 from abc import abstractmethod
 from collections import namedtuple
 from typing import Any, Dict, Optional, Tuple
 
-import math
 import mxnet as mx
 
 from . import config
@@ -63,10 +63,11 @@ class SockeyeOptimizer(mx.optimizer.Optimizer):
     :param request_optimized_metric: Whether to request the optimized metric (e.g. perplexity) in
                                      place of optimizer loss (e.g. cross-entropy).
     """
+
     def __init__(self, request_optimized_metric: bool = False, **kwargs) -> None:
         self.request_optimized_metric = request_optimized_metric
-        self.batch_state = None # type: Optional[BatchState]
-        self.checkpoint_state = None # type: Optional[CheckpointState]
+        self.batch_state = None  # type: Optional[BatchState]
+        self.checkpoint_state = None  # type: Optional[CheckpointState]
         super().__init__(**kwargs)
 
     def pre_update_batch(self, batch_state: BatchState):
@@ -93,6 +94,7 @@ class EveState:
     """
     Storage class for Eve optimizer state information.
     """
+
     def __init__(self, weight: mx.nd.NDArray) -> None:
         # Mean and variance for Adam
         self.mean = mx.nd.zeros_like(weight, ctx=weight.context)
@@ -135,6 +137,7 @@ class Eve(SockeyeOptimizer):
     :param use_nesterov_momentum: Use Nesterov-accelerated adaptive moment estimation (update rules
                                   used by "Nadam" optimizer).
     """
+
     def __init__(self,
                  learning_rate: float = 0.001,
                  beta1: float = 0.9,
@@ -222,7 +225,7 @@ class Eve(SockeyeOptimizer):
         if self.use_checkpoint_objective:
             # Only need to recompute if we've seen a new checkpoint since the previous batch update
             if (isinstance(self.checkpoint_state, CheckpointState) and
-                self.checkpoint_state.checkpoint != state.checkpoint_prev):
+                    self.checkpoint_state.checkpoint != state.checkpoint_prev):
                 checkpoint = self.checkpoint_state.checkpoint
                 checkpoint_f_hat, checkpoint_d = compute_d(checkpoint,
                                                            self.checkpoint_state.metric_val,
@@ -254,21 +257,21 @@ class Eve(SockeyeOptimizer):
         # Finally apply either Adam or Nadam update
         if self.use_nesterov_momentum:
             # Nadam warming momentum schedule
-            momentum_t = self.beta1 * (1. - 0.5 * 0.96**(t * self.schedule_decay))
-            momentum_t_1 = self.beta1 * (1. - 0.5 * 0.96**((t + 1) * self.schedule_decay))
+            momentum_t = self.beta1 * (1. - 0.5 * 0.96 ** (t * self.schedule_decay))
+            momentum_t_1 = self.beta1 * (1. - 0.5 * 0.96 ** ((t + 1) * self.schedule_decay))
             state.m_schedule = state.m_schedule * momentum_t
             m_schedule_next = state.m_schedule * momentum_t_1
             # Nadam update terms
             grad_prime = grad / (1. - state.m_schedule)
             m_t_prime = m_t / (1. - m_schedule_next)
-            v_t_prime = v_t / (1. - self.beta2**t)
+            v_t_prime = v_t / (1. - self.beta2 ** t)
             m_t_bar = (1. - momentum_t) * grad_prime + momentum_t_1 * m_t_prime
             # Final weight update with extra d term
             weight[:] -= lr * m_t_bar / (d * mx.nd.sqrt(v_t_prime) + self.epsilon)
         else:
             # Adam warmup
-            coef1 = 1. - self.beta1**t
-            coef2 = 1. - self.beta2**t
+            coef1 = 1. - self.beta1 ** t
+            coef2 = 1. - self.beta2 ** t
             lr *= math.sqrt(coef2) / coef1
             # Final weight update with extra d term
             weight[:] = weight - lr * m_t / (d * mx.nd.sqrt(v_t) + self.epsilon)
