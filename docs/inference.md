@@ -49,7 +49,7 @@ Factors can be provided as direct annotations on words, or via separate, token-p
 Factors are appended to each token and delimited with a `|` symbol.
 For example:
 
-> The|O boy|O ate|O the|O waff@@|B le|E .|O
+    The|O boy|O ate|O the|O waff@@|B le|E .|O
 
 Any number of factors can be supplied.
 Factor representation are dense; each word must be annotated for all factors.
