@@ -8,6 +8,10 @@
     <!-- Bootstrap CSS -->
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css" integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
 
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+
+
     <title>{{ site.title }}</title>
   </head>
   <body>
@@ -16,21 +20,28 @@
         <div class="col-2">
           <h3 class="text-center">Sockeye</h3>
 
-          <img width="100%" src="{{ site.not_a_logo }}" alt="Not a logo">
+          <img width="100%" src="{{ site.baseurl }}/{{ site.not_a_logo }}" alt="Not a logo">
 
-          <p class="text-center">A toolkit for neural sequence-to-sequence transduction.</p>
+          <p class="text-center">A toolkit for neural sequence-to-sequence transduction</p>
 
           <ul>
-            <li><a href="index.html">Home</a>
-            <li><a href="setup.html">Installation</a>
-            <li><a href="training.html">Training</a>
-            <li><a href="inference.html">Inference</a>
-            <li><a href="scoring.html">Scoring</a>
-            <li><a href="development.html">Development</a>
-            <li><a href="tutorials.html">Tutorials</a>
-            <li><a href="image_captioning.html">Image Captioning</a>
-            <li><a href="faq.html">FAQ</a>
+            <li><a href="{{ site.baseurl }}/index.html">Home</a>
+            <li><a href="{{ site.baseurl }}/setup.html">Installation</a>
+            <li><a href="{{ site.baseurl }}/training.html">Training</a>
+            <li><a href="{{ site.baseurl }}/inference.html">Inference</a>
+            <li><a href="{{ site.baseurl }}/scoring.html">Scoring</a>
+            <li><a href="{{ site.baseurl }}/development.html">Development</a>
+            <li><a href="{{ site.baseurl }}/tutorials.html">Tutorials</a>
+            <li><a href="{{ site.baseurl }}/image_captioning.html">Image Captioning</a>
+            <li><a href="{{ site.baseurl }}/faq.html">FAQ</a>
           </ul>
+
+          <hr />
+
+          <center>
+            <a class="btn btn-primary" role="button" href="https://github.com/awslabs/sockeye">
+              <span class="fa fa-github">&nbsp; Source</span>
+            </a>
         </div>
 
         <div class="col-8">

@@ -15,7 +15,7 @@ If you have a GPU available you can simply remove `--use-cpu`.
 ## 1. Generating the data
 As a first step we will generate a synthetic data set consisting of random sequences of digits.
 These sequences are then split into disjoint training and development sets.
-Run [the following command](tutorials/genseqcopy.py) to create the data set:
+Run the following command to create the data set:
 
 ```bash
 python genseqcopy.py
