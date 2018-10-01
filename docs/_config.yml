@@ -1,8 +1,6 @@
 theme: jekyll-theme-minimal
 title: Sockeye
 description: A tool for sequence-to-sequence modeling
-not_a_logo: images/sockeye.png
-show_downloads: true
 repository: awslabs/sockeye
 highlighter: rouge
 url: https://awslabs.github.io
