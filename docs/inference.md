@@ -65,17 +65,9 @@ Lexical constraints provide a way to force the model to include certain words in
 Given a set of constraints, the decoder will find the best output that includes the constraints.
 This file describes how to use lexical constraints; for more technical information, please see our paper:
 
-> @InProceedings{post2018:fast,
->     author = "Post, Matt and Vilar, David",
->    title = "Fast Lexically Constrained Decoding with Dynamic Beam Allocation for Neural Machine Translation",
->    booktitle = "Proceedings of the 2018 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies, Volume 1 (Long Papers)",
->    year = "2018",
->    publisher = "Association for Computational Linguistics",
->    pages = "1314--1324",
->    location = "New Orleans, Louisiana",
->    url = "http://aclweb.org/anthology/N18-1119",
->}
-
+> Matt Post and David Vilar. 2018.
+> [Fast Lexically Constrained Decoding with Dynamic Beam Allocation for Neural Machine Translation](http://aclweb.org/anthology/N18-1119).
+> Proceedings of the 2018 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies, Volume 1 (Long Papers).
 
 ### Example
 
