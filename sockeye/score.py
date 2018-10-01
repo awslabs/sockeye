@@ -70,7 +70,6 @@ def get_data_iters_and_vocabs(args: argparse.Namespace,
     else:
         max_seq_len_source, max_seq_len_target = args.max_seq_len
 
-
     batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
     batch_by_words = args.batch_type == C.BATCH_TYPE_WORD
 

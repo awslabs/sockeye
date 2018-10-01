@@ -87,6 +87,7 @@ class Decoder(ABC):
 
     @abstractmethod
     def __init__(self, dtype):
+        logger.info('{}.{} dtype: {}'.format(self.__module__, self.__class__.__name__, dtype))
         self.dtype = dtype
 
     @abstractmethod
@@ -586,9 +587,9 @@ class RecurrentDecoder(Decoder):
         enc_last_hidden = None
         if self.config.enc_last_hidden_concat_to_embedding:
             enc_last_hidden = mx.sym.SequenceLast(data=source_encoded,
-                                     sequence_length=source_encoded_lengths,
-                                     axis=1,
-                                     use_sequence_length=True)
+                                                  sequence_length=source_encoded_lengths,
+                                                  axis=1,
+                                                  use_sequence_length=True)
 
         # get recurrent attention function conditioned on source
         attention_func = self.attention.on(source_encoded, source_encoded_lengths,

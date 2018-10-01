@@ -32,7 +32,6 @@ def main():
 
 
 def prepare_data(args: argparse.Namespace):
-
     output_folder = os.path.abspath(args.output)
     os.makedirs(output_folder, exist_ok=True)
     global logger
@@ -92,4 +91,3 @@ def prepare_data(args: argparse.Namespace):
 
 if __name__ == "__main__":
     main()
-

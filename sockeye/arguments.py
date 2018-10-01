@@ -784,8 +784,8 @@ def add_training_args(params):
     add_batch_args(train_params)
 
     train_params.add_argument('--decoder-only',
-                               action='store_true',
-                               help='Pre-train a decoder. This is currently for RNN decoders only. '
+                              action='store_true',
+                              help='Pre-train a decoder. This is currently for RNN decoders only. '
                                     'Default: %(default)s.')
     train_params.add_argument('--fill-up',
                               type=str,
@@ -1129,6 +1129,7 @@ def add_score_cli_args(params):
                         default=C.SCORING_TYPE_DEFAULT,
                         help='Score type to output. Default: %(default)s')
 
+
 def add_max_output_cli_args(params):
     params.add_argument('--max-output-length',
                         type=int,
@@ -1276,6 +1277,11 @@ def add_inference_args(params):
                                type=float,
                                help='Beta factor for the length penalty used in beam search: '
                                     '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
+    decode_params.add_argument('--override-dtype',
+                               default=None,
+                               type=str,
+                               help='EXPERIMENTAL: may be changed or removed in future. Overrides training dtype of '
+                                    'encoders and decoders during inference. Default: %(default)s')
 
 
 def add_evaluate_args(params):
