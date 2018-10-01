@@ -129,8 +129,10 @@ class ImageCaptioner(Translator):
     def _get_inference_input(self,
                              trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray,
                                                                            int,
-                                                                           List[Optional[constrained.RawConstraintList]],
-                                                                           List[Optional[constrained.RawConstraintList]],                                                                           
+                                                                           List[
+                                                                               Optional[constrained.RawConstraintList]],
+                                                                           List[
+                                                                               Optional[constrained.RawConstraintList]],
                                                                            mx.nd.NDArray]:
         """
         Returns NDArray of images and corresponding bucket_key and an NDArray of maximum output lengths
@@ -158,12 +160,13 @@ class ImageCaptioner(Translator):
 
         # Read data and zero pad if necessary
         images = self.data_loader(image_paths)
-        images = utils_image.zero_pad_features(images,self.source_image_size)
+        images = utils_image.zero_pad_features(images, self.source_image_size)
 
         max_input_length = 0
         max_output_lengths = [self.models[0].get_max_output_length(max_input_length)] * len(image_paths)
-        return mx.nd.array(images), max_input_length, raw_constraints, raw_avoid_list, \
-               mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
+        return mx.nd.array(images), max_input_length, raw_constraints, raw_avoid_list, mx.nd.array(max_output_lengths,
+                                                                                                   ctx=self.context,
+                                                                                                   dtype='int32')
 
 
 def load_models(context: mx.context.Context,

@@ -382,7 +382,7 @@ class AutoRegressiveBias(mx.operator.CustomOp):
     0 0 0 0
     """
 
-    def __init__(self, length: int, dtype:str, ctx: mx.Context) -> None:
+    def __init__(self, length: int, dtype: str, ctx: mx.Context) -> None:
         super().__init__()
         self.bias = self.get_bias(length, dtype, ctx)
 

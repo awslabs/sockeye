@@ -278,11 +278,12 @@ class InferenceModel(model.SockeyeModel):
         :return: List of data descriptions.
         """
         source_max_length, target_max_length = bucket_key
-        return [mx.io.DataDesc(name=C.TARGET_NAME, shape=(self.batch_size * self.beam_size,), layout="NT")] + \
-               self.decoder.state_shapes(self.batch_size * self.beam_size,
-                                         target_max_length,
-                                         self.encoder.get_encoded_seq_len(source_max_length),
-                                         self.encoder.get_num_hidden())
+        return [mx.io.DataDesc(name=C.TARGET_NAME, shape=(self.batch_size * self.beam_size,),
+                               layout="NT")] + self.decoder.state_shapes(self.batch_size * self.beam_size,
+                                                                         target_max_length,
+                                                                         self.encoder.get_encoded_seq_len(
+                                                                             source_max_length),
+                                                                         self.encoder.get_num_hidden())
 
     def run_encoder(self,
                     source: mx.nd.NDArray,
@@ -444,8 +445,6 @@ def load_models(context: mx.context.Context,
                               "number of source factors for model '%s' (%d)" % (len(model_source_vocabs), model_folder,
                                                                                 inference_model.num_source_factors))
         models.append(inference_model)
-
-
 
     utils.check_condition(vocab.are_identical(*target_vocabs), "Target vocabulary ids do not match")
     first_model_vocabs = source_vocabs[0]
@@ -703,7 +702,7 @@ def make_input_from_json_string(sentence_id: SentenceId, json_string: str) -> Tr
         if isinstance(factors, list):
             factors = [list(data_io.get_tokens(factor)) for factor in factors]
             lengths = [len(f) for f in factors]
-            if not all(l == len(tokens) for l in lengths):
+            if not all(length == len(tokens) for length in lengths):
                 logger.error("Factors have different length than input text: %d vs. %s", len(tokens), str(lengths))
                 return _bad_input(sentence_id, reason=json_string)
 
@@ -1582,16 +1581,16 @@ class Translator:
 
             # Constraints for constrained decoding are processed sentence by sentence
             if any(raw_constraint_list):
-                best_hyp_indices, best_word_indices, scores_accumulated, \
-                constraints, inactive = constrained.topk(self.batch_size,
-                                                         self.beam_size,
-                                                         inactive,
-                                                         scores,
-                                                         constraints,
-                                                         best_hyp_indices,
-                                                         best_word_indices,
-                                                         scores_accumulated,
-                                                         self.context)
+                best_hyp_indices, best_word_indices, scores_accumulated, constraints, inactive = constrained.topk(
+                    self.batch_size,
+                    self.beam_size,
+                    inactive,
+                    scores,
+                    constraints,
+                    best_hyp_indices,
+                    best_word_indices,
+                    scores_accumulated,
+                    self.context)
 
             else:
                 # All rows are now active (after special treatment of start state at t=1)

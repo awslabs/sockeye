@@ -15,8 +15,9 @@
 Encoders for sequence-to-sequence models.
 """
 import logging
-import mxnet as mx
 from typing import List, Tuple
+
+import mxnet as mx
 
 from .. import constants as C
 from ..config import Config
@@ -115,8 +116,8 @@ class ImageLoadedCnnEncoder(Encoder):
                 self.sym = all_layers[self.layer_name + "_output"]
             except ValueError:
                 raise ValueError("Layer {} not found in the architecure located at "
-                               "{}. Make sure that you choose an existing layer."\
-                               .format(self.layer_name, self.model_path))
+                                 "{}. Make sure that you choose an existing layer.".format(self.layer_name,
+                                                                                           self.model_path))
             # throws away fc weights
             self.args = dict({k: args[k] for k in args if 'fc1' not in k})
             self.auxs = auxs
@@ -159,14 +160,14 @@ class ImageLoadedCnnEncoder(Encoder):
         embedding = mx.sym.Reshape(data=embedding, shape=(0, -3, self.n_kernels))
         # Feature projection layer: (batch, height*width, num_embed)
         embedding = mx.sym.FullyConnected(data=embedding, weight=self.other_weights[self.names[0]],
-                                   num_hidden=self.num_embed, no_bias=True, flatten=False)
+                                          num_hidden=self.num_embed, no_bias=True, flatten=False)
         embedding = mx.sym.Activation(data=embedding, act_type='relu')
 
         # Visual global description: average pooling
         if not self.no_global_descriptor:
-            glob_embedding = mx.sym.mean(data=embedding, axis=1) # (batch, n_kernels)
+            glob_embedding = mx.sym.mean(data=embedding, axis=1)  # (batch, n_kernels)
             glob_embedding = mx.sym.FullyConnected(data=glob_embedding, weight=self.other_weights[self.names[1]],
-                                       num_hidden=self.num_embed, no_bias=True)
+                                                   num_hidden=self.num_embed, no_bias=True)
             glob_embedding = mx.sym.Activation(data=glob_embedding, act_type='relu')
             glob_embedding = mx.sym.expand_dims(glob_embedding, axis=1)
             # Concatenate embeddings with global embedding: (batch, height*width+1, num_embed)
@@ -176,7 +177,7 @@ class ImageLoadedCnnEncoder(Encoder):
         d = mx.sym.slice_axis(data=embedding, axis=2, begin=0, end=1)  # (batch, height*width, num_embed)
         d = mx.sym.clip(data=d, a_min=1.0, a_max=1.0)  # matrix of all ones
         encoded_data_length = mx.sym.sum(mx.sym.broadcast_equal(d, mx.sym.ones((1,))), axis=1)  # (batch, 1)
-        encoded_data_length = mx.sym.reshape(data=encoded_data_length, shape= (-1,)) # (batch, )
+        encoded_data_length = mx.sym.reshape(data=encoded_data_length, shape=(-1,))  # (batch, )
 
         return embedding, encoded_data_length, self.encoded_seq_len
 

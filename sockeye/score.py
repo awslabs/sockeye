@@ -16,11 +16,8 @@ Simple Training CLI.
 """
 import argparse
 import os
-import sys
 from contextlib import ExitStack
-from typing import Any, cast, Optional, Dict, List, Tuple
-
-import mxnet as mx
+from typing import Optional, List, Tuple
 
 from . import arguments
 from . import constants as C
@@ -28,12 +25,11 @@ from . import data_io
 from . import inference
 from . import model
 from . import scoring
-from . import train
 from . import utils
 from . import vocab
 from .log import setup_main_logger
-from .output_handler import get_output_handler, OutputHandler
-from .utils import check_condition, log_basic_info
+from .output_handler import get_output_handler
+from .utils import check_condition
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
 logger = setup_main_logger(__name__, file_logging=False, console=True)
@@ -54,12 +50,9 @@ def get_data_iters_and_vocabs(args: argparse.Namespace,
     Loads the data iterators and vocabularies.
 
     :param args: Arguments as returned by argparse.
-    :param max_seq_len_source: Source maximum sequence length.
-    :param max_seq_len_target: Target maximum sequence length.
-    :param shared_vocab: Whether to create a shared vocabulary.
-    :param resume_training: Whether to resume training.
     :param model_folder: Output folder.
-    :return: The data iterators (train, validation, config_data) as well as the source and target vocabularies, and data_info if not using prepared data.
+    :return: The data iterators (train, validation, config_data) as well as the source and target vocabularies,
+        and data_info if not using prepared data.
     """
 
     model_config = model.SockeyeModel.load_config(os.path.join(args.model, C.CONFIG_NAME))
@@ -69,7 +62,6 @@ def get_data_iters_and_vocabs(args: argparse.Namespace,
         max_seq_len_target = model_config.config_data.max_seq_len_target
     else:
         max_seq_len_source, max_seq_len_target = args.max_seq_len
-
 
     batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
     batch_by_words = args.batch_type == C.BATCH_TYPE_WORD
@@ -88,7 +80,7 @@ def get_data_iters_and_vocabs(args: argparse.Namespace,
         validation_target=None,
         source_vocabs=source_vocabs,
         target_vocab=target_vocab,
-        source_vocab_paths=None,
+        source_vocab_paths=[None],
         target_vocab_path=None,
         shared_vocab=False,
         batch_size=args.batch_size,
@@ -150,7 +142,6 @@ def score(args: argparse.Namespace):
         scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab)
 
         scorer.score(score_iter=score_iter,
-                     score_type=args.score_type,
                      output_handler=get_output_handler(output_type=args.output_type,
                                                        output_fname=args.output))
 
