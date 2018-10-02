@@ -96,17 +96,6 @@ We also recommend that you increase the beam a little bit and enable beam prunin
 
 You will get a translation with the required constraints as part of the output.
 
-## Scoring
-
-Lexical constraints can also be used as a rudimentary scoring mechanism, by providing the entire reference (with `<s>` and `</s>` tokens) as a constraint.
-For example:
-
-    echo '{ "text": "This is a test", "constraints": ["<s> Dies ist ein Test </s>"] }' \
-      python3 -m sockeye.translate -m /path/to/model --json-input --beam-size 1 --output-type translation_with_score
-
-This will output tab-delimited pairs of (score, translation).
-As always, don't forget to apply source- and target-side preprocessing to your input and your constraint.
-
 ### Negative constraints
 
 Negative constraints---phrases that must *not* appear in the output---are also supported.
@@ -118,6 +107,18 @@ An example JSON object:
 Multiple negative constraints and multi-word negative constraints are supported, just like for positive constraints.
 You can also add `<s>` and `</s>` to constraints, to specify that phrases that must not start or end a sentence.
 Don't forget to apply your preprocessing!
+
+### Scoring
+
+Lexical constraints can also be used as a rudimentary scoring mechanism, by providing the entire reference (with `<s>` and `</s>` tokens) as a constraint.
+(However, you'll get significantly faster results with [Sockeye's scoring module](scoring.html)).
+For example:
+
+    echo '{ "text": "This is a test", "constraints": ["<s> Dies ist ein Test </s>"] }' \
+      python3 -m sockeye.translate -m /path/to/model --json-input --beam-size 1 --output-type translation_with_score
+
+This will output tab-delimited pairs of (score, translation).
+As always, don't forget to apply source- and target-side preprocessing to your input and your constraint.
 
 ## CPU process per core translation
 
