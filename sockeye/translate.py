@@ -144,9 +144,10 @@ def make_inputs(input_file: Optional[str],
     else:
         input_factors = [] if input_factors is None else input_factors
         inputs = [input_file] + input_factors
-        check_condition(translator.num_source_factors == len(inputs),
-                        "Model(s) require %d factors, but %d given (through --input and --input-factors)." % (
-                            translator.num_source_factors, len(inputs)))
+        if not input_is_json:
+            check_condition(translator.num_source_factors == len(inputs),
+                            "Model(s) require %d factors, but %d given (through --input and --input-factors)." % (
+                                translator.num_source_factors, len(inputs)))
         with ExitStack() as exit_stack:
             streams = [exit_stack.enter_context(data_io.smart_open(i)) for i in inputs]
             for sentence_id, inputs in enumerate(zip(*streams), 1):
