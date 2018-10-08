@@ -42,22 +42,33 @@ The PNG files will be written to files beginning with the prefix given by the `-
 ## Source factors
 
 If your [model was trained with source factors](training.html#source-factors), you will need to supply them at test-time, too.
-Factors can be provided as direct annotations on words, or via separate, token-parallel files.
-
-### Direct annotations
-
-Factors are appended to each token and delimited with a `|` symbol.
-For example:
-
-    The|O boy|O ate|O the|O waff@@|B le|E .|O
-
-Any number of factors can be supplied.
-Factor representation are dense; each word must be annotated for all factors.
+Factors can be provided in three formats: (a) separate, token-parallel files (as in training), (b) direct annotations on words, or (c) in a JSON object.
 
 ### Parallel files
 
 You can also provide parallel files, [in the same style as training](training.html#source-factors).
 Factor files are token-parallel to the source and are passed in to `sockeye.translate` via the `--input-factors` flag.
+(In this scenario, the source is another file, passed via `--input`).
+
+### Direct annotations
+
+Here, factors are appended to each token and delimited with a `|` symbol.
+For example:
+
+    The|O boy|O ate|O the|O waff@@|B le|E .|O
+
+Any number of factors can be supplied; just delimit them with `|`.
+Factor representation are dense; each word must be annotated for all factors.
+
+### JSON format
+
+Sockeye supports a JSON input format with the text to translate in the "text" field (`sockeye.translate --json-input`).
+Each sentence is encoded in a single-line JSON object.
+This object can also specify the source factors as a list of token-parallel strings, e.g.,
+
+```python
+{ "text": "The boy ate the waff@@ le .", "factors": ["O O O O B E O"] }
+```
 
 ## Lexical constraints
 

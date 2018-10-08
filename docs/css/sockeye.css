@@ -8,6 +8,11 @@ h1 {
   font-size: 22pt;
 }
 
+h1.title {
+    font-weight: bold;
+    letter-spacing: 3px;
+}
+
 h2 {
   font-size: 18pt;
 }
