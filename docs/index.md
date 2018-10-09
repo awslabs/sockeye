@@ -18,11 +18,11 @@ It implements state-of-the-art encoder-decoder architectures, such as
 - Fully convolutional sequence-to-sequence models [[Gehring et al, '17](https://arxiv.org/abs/1705.03122)]
 
 In addition, this framework provides an experimental [image-to-description module](https://github.com/awslabs/sockeye/tree/master/sockeye/image_captioning) that can be used for image captioning.
-
-If you are interested in collaborating or have any questions, please submit a pull request or issue. [Click to find our developer guidelines](development.html).
-You can also send questions to *sockeye-dev-at-amazon-dot-com*.
-
 Recent developments and changes are tracked in our [CHANGELOG](https://github.com/awslabs/sockeye/blob/master/CHANGELOG.md).
+
+If you are interested in collaborating or have any questions, please submit a pull request or [issue](https://github.com/awslabs/sockeye/issues/new). 
+You can also send questions to *sockeye-dev-at-amazon-dot-com*.
+Developers may be interested in [our developer guidelines](development.html).
 
 ## Citation
 

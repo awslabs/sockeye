@@ -136,12 +136,14 @@ As always, don't forget to apply source- and target-side preprocessing to your i
 On multi-core computers, translation per core separately can speedup translation performance, due to some operation can't be handled parallel in one process.
 Using this method, translation on each core can be parallel.
 
-One [python script example](tutorials/cpu_process_per_core_translation.py] is given and you can run it as follows:
+One [python script example](https://raw.githubusercontent.com/awslabs/sockeye/master/tutorials/process_per_core_translation/cpu_process_per_core_translation.py) is given and you can run it as follows:
 
 ```bash
 > python cpu_process_per_core_translation.py -m model -i input_file_name -o output_file_name -bs batch_size -t true
 ```
 
--t true: each core translate the whole input file.
+Options:
 
--t false: each core translate (input file line/core number) lines , then merge the translated file into one complete output file.
+- `-t true`: each core translate the whole input file.
+
+- `-t false`: each core translate (input file line/core number) lines , then merge the translated file into one complete output file.

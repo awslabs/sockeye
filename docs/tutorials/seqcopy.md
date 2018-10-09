@@ -6,7 +6,7 @@ The task is then to train a model that copies the sequence from the source to th
 This task is on the one hand difficult enough to be interesting and on the other and allows for quickly training a model.
 
 ## Setup
-For this tutorial we assume that you have successfully [installed](../../README.md#installation) Sockeye.
+For this tutorial we assume that you have successfully [installed](../setup.html) Sockeye.
 We will be using scripts from the Sockeye repository, so you should either clone the repository or manually download the scripts.
 Just as a reminder: Everything is run using Python 3, so depending on your setup you may have to replace `python` with `python3` below.
 All of the commands below assume you are running on a CPU.
@@ -18,6 +18,7 @@ These sequences are then split into disjoint training and development sets.
 Run the following command to create the data set:
 
 ```bash
+wget https://raw.githubusercontent.com/awslabs/sockeye/master/tutorials/seqcopy/genseqcopy.py
 python genseqcopy.py
 ```
 
@@ -89,7 +90,7 @@ The trained model can be found in the folder `seqcopy_model`.
 The folder contains everything necessary to run the model after training.
 Most importantly `params.best` contains the parameters with the best validation score.
 During training `param.best` will continously be updated to point to the currently best parameters.
-This means that even while the model is still training you can use the model folder for translation, as described in the [next section](#3-translation).
+This means that even while the model is still training you can use the model folder for translation, as described in the next section.
 
 All other parameters can be found in files named `param.$NUM_CHECKPOINT`.
 The `config` contains all model parameters as well as a reference to the data sets used during training.
