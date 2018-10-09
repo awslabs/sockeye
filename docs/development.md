@@ -5,6 +5,7 @@
 There are three types of dependencies: core dependencies, development dependencies and dependencies for generating the documentation.
 
 Install them via
+
 ```bash
 > pip install -r requirements/requirements.txt
 > pip install -r requirements/requirements.dev.txt
@@ -21,48 +22,38 @@ If you want to develop sockeye, please adhere to the following development guide
 - Functions should be documented with Sphinx-style docstrings and
    should include type hints for static code analyzers.
 
-    ```python
-    def foo(bar: <type of bar>) -> <returnType>:
-        """
-        <Docstring for foo method, followed by a period>.
+```python
+def foo(bar: <type of bar>) -> <returnType>:
+    """
+    <Docstring for foo method, followed by a period>.
 
-        :param bar: <Description of bar argument followed by a period>.
-        :return: <Description of the return value followed by a period>.
-        """
-    ```
+    :param bar: <Description of bar argument followed by a period>.
+    :return: <Description of the return value followed by a period>.
+    """
+```
 
-- When using MXNet operators, preceding symbolic statements
-   in the code with the resulting, expected shape of the tensor greatly improves readability of the code:
-    ```python
-    # (batch_size, num_hidden)
-    data = mx.sym.Variable('data')
-    # (batch_size * num_hidden,)
-    data = mx.sym.reshape(data=data, shape=(-1))
-    ```
+- When using MXNet operators, preceding symbolic statements in the code with the resulting, expected shape of the tensor greatly improves readability of the code:
+
+```python
+# (batch_size, num_hidden)
+data = mx.sym.Variable('data')
+# (batch_size * num_hidden,)
+data = mx.sym.reshape(data=data, shape=(-1))
+```
 
 - The desired line length of Python modules should not exceed 120 characters.
 
-- When writing symbol-generating classes (such as encoders/decoders), initialize variables in the constructor of the
-   class and re-use them in the class methods.
+- When writing symbol-generating classes (such as encoders/decoders), initialize variables in the constructor of the class and re-use them in the class methods.
 
 - Make sure to pass unit tests before submitting a pull request.
 
 - Whenever reasonable, write py.test unit tests covering your contribution.
 
-- When importing other sockeye modules import the entire module instead of individual functions and classes using
-   relative imports:
-    ```python
-    from . import attention
-    ```
+- When importing other sockeye modules import the entire module instead of individual functions and classes using relative imports:
 
-
-## Building the Documentation
-
-Full documentation, including a code reference, can be generated using Sphinx with the following command:
-```bash
-> python setup.py docs
+```python
+from . import attention
 ```
-The results are written to ```docs/_build/html/index.html```.
 
 ## Unit & Integration Tests
 
