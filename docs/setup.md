@@ -47,7 +47,7 @@ running the following:
 > pip install -r requirements/requirements.gpu-cu${CUDA_VERSION}.txt
 > pip install .
 ```
-where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), `90` (9.0), or `91` (9.1).
+where `${CUDA_VERSION}` can be `75` (7.5), `80` (8.0), `90` (9.0), or `91` (9.1), or `92` (9.2).
 
 Developers will be better served by pointing `$PYTHONPATH` to the root of the git-cloned source.
 
