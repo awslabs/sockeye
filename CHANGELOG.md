@@ -10,6 +10,28 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.57]
+### Added
+- Added `sockeye.score` CLI for quickly scoring existing translations ([documentation](tutorials/scoring.md)).
+### Fixed
+- Entry-point clean-up after the contrib/ rename
+
+## [1.18.56]
+### Changed
+- Update to MXNet 1.3.0.post0
+
+## [1.18.55]
+- Renamed `contrib` to less-generic `sockeye_contrib`
+
+## [1.18.54]
+### Added
+- `--source-factor-vocabs` can be set to provide source factor vocabularies.
+
+## [1.18.53]
+### Added
+- Always skipping softmax for greedy decoding by default, only for single models.
+- Added option `--skip-topk` for greedy decoding.
+
 ## [1.18.52]
 ### Fixed
 - Fixed bug in constrained decoding to make sure best hypothesis satifies all constraints.

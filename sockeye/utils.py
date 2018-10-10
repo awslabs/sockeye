@@ -33,8 +33,8 @@ from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Opt
 import mxnet as mx
 import numpy as np
 
-from sockeye import __version__, constants as C
-from sockeye.log import log_sockeye_version, log_mxnet_version
+from . import __version__, constants as C
+from .log import log_sockeye_version, log_mxnet_version
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +137,7 @@ def compute_lengths(sequence_data: mx.sym.Symbol) -> mx.sym.Symbol:
     :param sequence_data: Input data. Shape: (batch_size, seq_len).
     :return: Length data. Shape: (batch_size,).
     """
-    return mx.sym.sum(mx.sym.broadcast_not_equal(sequence_data, mx.sym.zeros((1,))), axis=1)
+    return mx.sym.sum(sequence_data != C.PAD_ID, axis=1)
 
 
 def save_params(arg_params: Mapping[str, mx.nd.NDArray], fname: str,
@@ -252,9 +252,30 @@ class OnlineMeanAndVariance:
             return self._M2 / self._count
 
 
+def top1(scores: mx.nd.NDArray,
+         offset: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
+    """
+    Get the single lowest element per sentence from a `scores` matrix. Expects that
+    beam size is 1, for greedy decoding.
+
+    NOTE(mathmu): The current implementation of argmin in MXNet much slower than topk with k=1.
+
+    :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+    :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+    :return: The row indices, column indices and values of the smallest items in matrix.
+    """
+    best_word_indices = mx.nd.cast(mx.nd.argmin(scores, axis=1), dtype='int32')
+    values = scores[mx.nd.arange(scores.shape[0], dtype='int32', ctx=scores.context), best_word_indices]
+
+    values = values.reshape((-1, 1))
+
+    # for top1, the best hyp indices are equal to the plain offset
+
+    return offset, best_word_indices, values
+
+
 def topk(scores: mx.nd.NDArray,
          k: int,
-         batch_size: int,
          offset: mx.nd.NDArray,
          use_mxnet_topk: bool) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
     """
@@ -262,21 +283,19 @@ def topk(scores: mx.nd.NDArray,
 
     :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
     :param k: The number of smallest scores to return.
-    :param batch_size: Number of sentences being decoded at once.
     :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
     :param use_mxnet_topk: True to use the mxnet implementation or False to use the numpy one.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
     # (batch_size, beam_size * target_vocab_size)
-    folded_scores = scores.reshape((batch_size, k * scores.shape[-1]))
+    folded_scores = scores.reshape((-1, k * scores.shape[-1]))
+    batch_size = folded_scores.shape[0]
 
     if use_mxnet_topk:
         # pylint: disable=unbalanced-tuple-unpacking
         values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
-        best_hyp_indices, best_word_indices = mx.nd.array(np.unravel_index(indices.astype(np.int32).asnumpy().ravel(),
-                                                                           scores.shape),
-                                                          dtype='int32',
-                                                          ctx=scores.context)
+        indices = mx.nd.cast(indices, 'int32').reshape((-1,))
+        best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, scores.shape)
 
     else:
         folded_scores = folded_scores.asnumpy()
@@ -433,14 +452,12 @@ def average_arrays(arrays: List[mx.nd.NDArray]) -> mx.nd.NDArray:
     :param arrays: A list of NDArrays with the same shape that will be averaged.
     :return: The average of the NDArrays in the same context as arrays[0].
     """
+    if not arrays:
+        raise ValueError("arrays is empty.")
     if len(arrays) == 1:
         return arrays[0]
     check_condition(all(arrays[0].shape == a.shape for a in arrays), "nd array shapes do not match")
-    new_array = mx.nd.zeros(arrays[0].shape, dtype=arrays[0].dtype, ctx=arrays[0].context)
-    for a in arrays:
-        new_array += a.as_in_context(new_array.context)
-    new_array /= len(arrays)
-    return new_array
+    return mx.nd.add_n(*arrays) / len(arrays)
 
 
 def get_num_gpus() -> int:
@@ -449,14 +466,7 @@ def get_num_gpus() -> int:
 
     :return: The number of GPUs on the system.
     """
-    # TODO (domhant): Switch to mx.context.num_gpus() with mxnet version 1.3
-    for device_id in itertools.count():
-        try:
-            mx.nd.zeros((1,), ctx=mx.gpu(device_id))
-        except mx.MXNetError:
-            return device_id
-    # Note: Return statement to make mypy happy, the for loop is infinite, so an exception is the only way out.
-    return device_id + 1
+    return mx.context.num_gpus()
 
 
 def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, int]]:
@@ -493,7 +503,8 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, 
 
 
 def log_gpu_memory_usage(memory_data: Dict[int, Tuple[int, int]]):
-    log_str = " ".join("GPU %d: %d/%d MB (%.2f%%)" % (k, v[0], v[1], v[0] * 100.0/v[1]) for k, v in memory_data.items())
+    log_str = " ".join(
+        "GPU %d: %d/%d MB (%.2f%%)" % (k, v[0], v[1], v[0] * 100.0 / v[1]) for k, v in memory_data.items())
     logger.info(log_str)
 
 
@@ -782,6 +793,7 @@ class PrintValue(mx.operator.CustomOp):
     the system logger and 'print_grad=True' for printing information about the
     gradient (out_grad, i.e. "upper part" of the graph).
     """
+
     def __init__(self, print_name, print_grad: str, use_logger: str) -> None:
         super().__init__()
         self.print_name = print_name
@@ -830,8 +842,8 @@ class PrintValueProp(mx.operator.CustomOpProp):
 
     def create_operator(self, ctx, shapes, dtypes):
         return PrintValue(self.print_name,
-                          print_grad=self.print_grad,
-                          use_logger=self.use_logger)
+                          print_grad=str(self.print_grad),
+                          use_logger=str(self.use_logger))
 
 
 def grouper(iterable: Iterable, size: int) -> Iterable:
@@ -931,3 +943,20 @@ def split(data: mx.nd.NDArray,
     if num_outputs == 1:
         return [ndarray_or_list]
     return ndarray_or_list
+
+
+def inflect(word: str,
+            count: int):
+    """
+    Minimal inflection module.
+
+    :param word: The word to inflect.
+    :param count: The count.
+    :return: The word, perhaps inflected for number.
+    """
+    if word in ['time', 'sentence']:
+        return word if count == 1 else word + 's'
+    elif word == 'was':
+        return 'was' if count == 1 else 'were'
+    else:
+        return word + '(s)'

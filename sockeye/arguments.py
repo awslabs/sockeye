@@ -489,6 +489,12 @@ def add_vocab_args(params):
                         required=False,
                         default=None,
                         help='Existing target vocabulary (JSON).')
+    params.add_argument('--source-factor-vocabs',
+                        required=False,
+                        nargs='+',
+                        type=regular_file(),
+                        default=[],
+                        help='Existing source factor vocabulary (-ies) (JSON).')
     params.add_argument(C.VOCAB_ARG_SHARED_VOCAB,
                         action='store_true',
                         default=False,
@@ -754,33 +760,37 @@ def add_model_parameters(params):
                                    "(and all convolutional weight matrices for CNN decoders). Default: %(default)s.")
 
 
+def add_batch_args(params, default_batch_size=4096):
+    params.add_argument('--batch-size', '-b',
+                        type=int_greater_or_equal(1),
+                        default=default_batch_size,
+                        help='Mini-batch size. Note that depending on the batch-type this either refers to '
+                             'words or sentences.'
+                             'Sentence: each batch contains X sentences, number of words varies. '
+                             'Word: each batch contains (approximately) X words, number of sentences varies. '
+                             'Default: %(default)s.')
+    params.add_argument("--batch-type",
+                        type=str,
+                        default=C.BATCH_TYPE_WORD,
+                        choices=[C.BATCH_TYPE_SENTENCE, C.BATCH_TYPE_WORD],
+                        help="Sentence: each batch contains X sentences, number of words varies."
+                             "Word: each batch contains (approximately) X target words, "
+                             "number of sentences varies. Default: %(default)s.")
+
+
 def add_training_args(params):
     train_params = params.add_argument_group("Training parameters")
 
+    add_batch_args(train_params)
+
     train_params.add_argument('--decoder-only',
-                               action='store_true',
-                               help='Pre-train a decoder. This is currently for RNN decoders only. '
+                              action='store_true',
+                              help='Pre-train a decoder. This is currently for RNN decoders only. '
                                     'Default: %(default)s.')
-
-    train_params.add_argument('--batch-size', '-b',
-                              type=int_greater_or_equal(1),
-                              default=4096,
-                              help='Mini-batch size. Note that depending on the batch-type this either refers to '
-                                   'words or sentences.'
-                                   'Sentence: each batch contains X sentences, number of words varies. '
-                                   'Word: each batch contains (approximately) X words, number of sentences varies. '
-                                   'Default: %(default)s.')
-    train_params.add_argument("--batch-type",
-                              type=str,
-                              default=C.BATCH_TYPE_WORD,
-                              choices=[C.BATCH_TYPE_SENTENCE, C.BATCH_TYPE_WORD],
-                              help="Sentence: each batch contains X sentences, number of words varies."
-                                   "Word: each batch contains (approximately) X target words, "
-                                   "number of sentences varies. Default: %(default)s.")
-
     train_params.add_argument('--fill-up',
                               type=str,
-                              default='replicate',
+                              default=C.FILL_UP_DEFAULT,
+                              choices=C.FILL_UP_CHOICES,
                               help=argparse.SUPPRESS)
 
     train_params.add_argument('--loss',
@@ -1069,6 +1079,57 @@ def add_translate_cli_args(params):
     add_logging_args(params)
 
 
+def add_score_cli_args(params):
+    add_training_data_args(params, required=False)
+    add_vocab_args(params)
+    add_device_args(params)
+    add_logging_args(params)
+    add_batch_args(params, default_batch_size=500)
+
+    params = params.add_argument_group("Scoring parameters")
+
+    params.add_argument("--model", "-m", required=True,
+                        help="Model directory containing trained model.")
+
+    params.add_argument('--max-seq-len',
+                        type=multiple_values(num_values=2, greater_or_equal=1),
+                        default=None,
+                        help='Maximum sequence length in tokens.'
+                             'Use "x:x" to specify separate values for src&tgt. Default: Read from model.')
+
+    params.add_argument('--length-penalty-alpha',
+                        default=1.0,
+                        type=float,
+                        help='Alpha factor for the length penalty used in scoring: '
+                        '(beta + len(Y))**alpha/(beta + 1)**alpha. A value of 0.0 will therefore turn off '
+                        'length normalization. Default: %(default)s')
+
+    params.add_argument('--length-penalty-beta',
+                        default=0.0,
+                        type=float,
+                        help='Beta factor for the length penalty used in scoring: '
+                        '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
+
+    params.add_argument('--softmax-temperature',
+                        type=float,
+                        default=None,
+                        help='Controls peakiness of model predictions. Values < 1.0 produce '
+                        'peaked predictions, values > 1.0 produce smoothed distributions.')
+
+    params.add_argument("--output", "-o", default=None,
+                        help="File to write output to. Default: STDOUT.")
+
+    params.add_argument('--output-type',
+                        default=C.OUTPUT_HANDLER_SCORE,
+                        choices=C.OUTPUT_HANDLERS_SCORING,
+                        help='Output type. Default: %(default)s.')
+
+    params.add_argument('--score-type',
+                        choices=C.SCORING_TYPE_CHOICES,
+                        default=C.SCORING_TYPE_DEFAULT,
+                        help='Score type to output. Default: %(default)s')
+
+
 def add_max_output_cli_args(params):
     params.add_argument('--max-output-length',
                         type=int,
@@ -1148,6 +1209,11 @@ def add_inference_args(params):
                                     ' Default: %d without batching '
                                     'and %d * batch_size with batching.' % (C.CHUNK_SIZE_NO_BATCHING,
                                                                             C.CHUNK_SIZE_PER_BATCH_SEGMENT))
+    decode_params.add_argument('--skip-topk',
+                               default=False,
+                               action='store_true',
+                               help='Use argmax instead of topk for greedy decoding (when --beam-size 1).'
+                                    'Default: %(default)s.')
     decode_params.add_argument('--ensemble-mode',
                                type=str,
                                default='linear',

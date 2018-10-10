@@ -55,6 +55,7 @@ class InferenceModel(model.SockeyeModel):
     :param decoder_return_logit_inputs: Decoder returns inputs to logit computation instead of softmax over target
                                         vocabulary.  Used when logits/softmax are handled separately.
     :param cache_output_layer_w_b: Cache weights and biases for logit computation.
+    :param skip_softmax: If True, does not compute softmax for greedy decoding.
     """
 
     def __init__(self,
@@ -67,18 +68,22 @@ class InferenceModel(model.SockeyeModel):
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  decoder_return_logit_inputs: bool = False,
                  cache_output_layer_w_b: bool = False,
-                 forced_max_output_len: Optional[int] = None) -> None:
+                 forced_max_output_len: Optional[int] = None,
+                 skip_softmax: bool = False) -> None:
         super().__init__(config)
         self.params_fname = params_fname
         self.context = context
         self.beam_size = beam_size
         utils.check_condition(beam_size < self.config.vocab_target_size,
                               'The beam size must be smaller than the target vocabulary size.')
+        if skip_softmax:
+            assert beam_size == 1, 'Skipping softmax does not have any effect for beam size > 1'
         self.batch_size = batch_size
         self.softmax_temperature = softmax_temperature
         self.max_input_length, self.get_max_output_length = models_max_input_output_length([self],
                                                                                            max_output_length_num_stds,
                                                                                            forced_max_output_len=forced_max_output_len)
+        self.skip_softmax = skip_softmax
 
         self.encoder_module = None  # type: Optional[mx.mod.BucketingModule]
         self.encoder_default_bucket_key = None  # type: Optional[int]
@@ -236,7 +241,11 @@ class InferenceModel(model.SockeyeModel):
                 logits = self.output_layer(target_decoded)
                 if self.softmax_temperature is not None:
                     logits = logits / self.softmax_temperature
-                outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
+                if self.skip_softmax:
+                    # skip softmax for greedy decoding
+                    outputs = logits
+                else:
+                    outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
 
             data_names = [C.TARGET_NAME] + state_names
             label_names = []  # type: List[str]
@@ -269,11 +278,12 @@ class InferenceModel(model.SockeyeModel):
         :return: List of data descriptions.
         """
         source_max_length, target_max_length = bucket_key
-        return [mx.io.DataDesc(name=C.TARGET_NAME, shape=(self.batch_size * self.beam_size,), layout="NT")] + \
-               self.decoder.state_shapes(self.batch_size * self.beam_size,
-                                         target_max_length,
-                                         self.encoder.get_encoded_seq_len(source_max_length),
-                                         self.encoder.get_num_hidden())
+        return [mx.io.DataDesc(name=C.TARGET_NAME, shape=(self.batch_size * self.beam_size,),
+                               layout="NT")] + self.decoder.state_shapes(self.batch_size * self.beam_size,
+                                                                         target_max_length,
+                                                                         self.encoder.get_encoded_seq_len(
+                                                                             source_max_length),
+                                                                         self.encoder.get_num_hidden())
 
     def run_encoder(self,
                     source: mx.nd.NDArray,
@@ -394,6 +404,14 @@ def load_models(context: mx.context.Context,
     if checkpoints is None:
         checkpoints = [None] * len(model_folders)
 
+    # skip softmax for a single model,
+    if len(model_folders) == 1 and beam_size == 1:
+        skip_softmax = True
+        logger.info("Enabled skipping softmax for a single model and greedy decoding.")
+    else:
+        # but not for an ensemble or beam search
+        skip_softmax = False
+
     for model_folder, checkpoint in zip(model_folders, checkpoints):
         model_source_vocabs = vocab.load_source_vocabs(model_folder)
         model_target_vocab = vocab.load_target_vocab(model_folder)
@@ -420,7 +438,8 @@ def load_models(context: mx.context.Context,
                                          batch_size=batch_size,
                                          softmax_temperature=softmax_temperature,
                                          decoder_return_logit_inputs=decoder_return_logit_inputs,
-                                         cache_output_layer_w_b=cache_output_layer_w_b)
+                                         cache_output_layer_w_b=cache_output_layer_w_b,
+                                         skip_softmax=skip_softmax)
         utils.check_condition(inference_model.num_source_factors == len(model_source_vocabs),
                               "Number of loaded source vocabularies (%d) does not match "
                               "number of source factors for model '%s' (%d)" % (len(model_source_vocabs), model_folder,
@@ -683,7 +702,7 @@ def make_input_from_json_string(sentence_id: SentenceId, json_string: str) -> Tr
         if isinstance(factors, list):
             factors = [list(data_io.get_tokens(factor)) for factor in factors]
             lengths = [len(f) for f in factors]
-            if not all(l == len(tokens) for l in lengths):
+            if not all(length == len(tokens) for length in lengths):
                 logger.error("Factors have different length than input text: %d vs. %s", len(tokens), str(lengths))
                 return _bad_input(sentence_id, reason=json_string)
 
@@ -966,6 +985,7 @@ class Translator:
     :param avoid_list: Global list of phrases to exclude from the output.
     :param store_beam: If True, store the beam search history and return it in the TranslatorOutput.
     :param strip_unknown_words: If True, removes any <unk> symbols from outputs.
+    :param skip_topk: If True, uses argmax instead of topk for greedy decoding.
     """
 
     def __init__(self,
@@ -981,7 +1001,8 @@ class Translator:
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
                  avoid_list: Optional[str] = None,
                  store_beam: bool = False,
-                 strip_unknown_words: bool = False) -> None:
+                 strip_unknown_words: bool = False,
+                 skip_topk: bool = False) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
@@ -1005,6 +1026,12 @@ class Translator:
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
         self.batch_size = self.models[0].batch_size
+        # skip softmax for a single model, but not for an ensemble
+        self.skip_softmax = self.models[0].skip_softmax
+        if self.skip_softmax:
+            utils.check_condition(len(self.models) == 1 and self.beam_size == 1, "Skipping softmax cannot be enabled for several models, or a beam size > 1.")
+
+        self.skip_topk = skip_topk
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         self._max_input_length = self.models[0].max_input_length
         if bucket_source_width > 0:
@@ -1024,28 +1051,46 @@ class Translator:
 
         self._update_scores = UpdateScores()
         self._update_scores.initialize(ctx=self.context)
-        self._update_scores.hybridize()
+        self._update_scores.hybridize(static_alloc=True, static_shape=True)
 
-        # topk function used in beam search
-        self._topk = partial(utils.topk,
-                             k=self.beam_size,
-                             batch_size=self.batch_size,
-                             offset=self.offset,
-                             use_mxnet_topk=self.context != mx.cpu())  # MXNet implementation is faster on GPUs
+        # Vocabulary selection leads to different vocabulary sizes across requests. Hence, we cannot use a
+        # statically-shaped HybridBlock for the topk operation in this case; resorting to imperative topk
+        # function in this case.
+        if self.restrict_lexicon:
+            if self.skip_topk:
+                self._top = partial(utils.top1, offset=self.offset)  # type: Callable
+            else:
+                self._top = partial(utils.topk,
+                                    k=self.beam_size,
+                                    offset=self.offset,
+                                    use_mxnet_topk=True)  # type: Callable
+        else:
+            if self.skip_topk:
+                self._top = Top1(k=self.beam_size,
+                                 batch_size=self.batch_size)  # type: mx.gluon.HybridBlock
+                self._top.initialize(ctx=self.context)
+                self._top.hybridize(static_alloc=True, static_shape=True)
+            else:
+                self._top = TopK(k=self.beam_size,
+                                 batch_size=self.batch_size,
+                                 vocab_size=len(self.vocab_target))  # type: mx.gluon.HybridBlock
+                self._top.initialize(ctx=self.context)
+                self._top.hybridize(static_alloc=True, static_shape=True)
 
         self._sort_by_index = SortByIndex()
         self._sort_by_index.initialize(ctx=self.context)
-        self._sort_by_index.hybridize()
+        self._sort_by_index.hybridize(static_alloc=True, static_shape=True)
 
         self._update_finished = NormalizeAndUpdateFinished(pad_id=C.PAD_ID,
                                                            eos_id=self.vocab_target[C.EOS_SYMBOL],
                                                            length_penalty_alpha=self.length_penalty.alpha,
                                                            length_penalty_beta=self.length_penalty.beta)
         self._update_finished.initialize(ctx=self.context)
-        self._update_finished.hybridize()
+        self._update_finished.hybridize(static_alloc=True, static_shape=True)
+
         self._prune_hyps = PruneHypotheses(threshold=self.beam_prune, beam_size=self.beam_size)
         self._prune_hyps.initialize(ctx=self.context)
-        self._prune_hyps.hybridize()
+        self._prune_hyps.hybridize(static_alloc=True, static_shape=True)
 
         self.global_avoid_trie = None
         if avoid_list is not None:
@@ -1274,9 +1319,8 @@ class Translator:
         attention_matrix = translation.attention_matrix
 
         target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
+        target_string = C.TOKEN_SEPARATOR.join(data_io.ids2tokens(target_ids, self.vocab_target_inv, self.strip_ids))
 
-        target_string = C.TOKEN_SEPARATOR.join(
-            tok for target_id, tok in zip(target_ids, target_tokens) if target_id not in self.strip_ids)
         attention_matrix = attention_matrix[:, :len(trans_input.tokens)]
 
         return TranslatorOutput(sentence_id=trans_input.sentence_id,
@@ -1352,9 +1396,14 @@ class Translator:
             # Compute logits and softmax with restricted vocabulary
             if self.restrict_lexicon:
                 logits = model.output_layer(decoder_outputs, out_w, out_b)
-                probs = mx.nd.softmax(logits)
+                if self.skip_softmax:
+                    # skip softmax for greedy decoding and single model
+                    probs = logits
+                else:
+                    probs = mx.nd.softmax(logits)
             else:
-                # Otherwise decoder outputs are already target vocab probs
+                # Otherwise decoder outputs are already target vocab probs,
+                # or logits if beam size is 1
                 probs = decoder_outputs
             model_probs.append(probs)
             model_attention_probs.append(attention_probs)
@@ -1377,10 +1426,13 @@ class Translator:
 
         # combine model predictions and convert to neg log probs
         if len(self.models) == 1:
-            neg_logprobs = -mx.nd.log(probs[0])  # pylint: disable=invalid-unary-operand-type
+            if self.skip_softmax:
+                neg_probs = -probs[0]
+            else:
+                neg_probs = -mx.nd.log(probs[0])  # pylint: disable=invalid-unary-operand-type
         else:
-            neg_logprobs = self.interpolation_func(probs)
-        return neg_logprobs, attention_prob_score
+            neg_probs = self.interpolation_func(probs)
+        return neg_probs, attention_prob_score
 
     def _beam_search(self,
                      source: mx.nd.NDArray,
@@ -1525,20 +1577,20 @@ class Translator:
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
-            best_hyp_indices, best_word_indices, scores_accumulated = self._topk(scores)
+            best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores)
 
             # Constraints for constrained decoding are processed sentence by sentence
             if any(raw_constraint_list):
-                best_hyp_indices, best_word_indices, scores_accumulated, \
-                constraints, inactive = constrained.topk(self.batch_size,
-                                                         self.beam_size,
-                                                         inactive,
-                                                         scores,
-                                                         constraints,
-                                                         best_hyp_indices,
-                                                         best_word_indices,
-                                                         scores_accumulated,
-                                                         self.context)
+                best_hyp_indices, best_word_indices, scores_accumulated, constraints, inactive = constrained.topk(
+                    self.batch_size,
+                    self.beam_size,
+                    inactive,
+                    scores,
+                    constraints,
+                    best_hyp_indices,
+                    best_word_indices,
+                    scores_accumulated,
+                    self.context)
 
             else:
                 # All rows are now active (after special treatment of start state at t=1)
@@ -1623,11 +1675,8 @@ class Translator:
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
         folded_accumulated_scores = scores_accumulated.reshape((self.batch_size,
                                                                 self.beam_size * scores_accumulated.shape[-1]))
-        indices = mx.nd.argsort(folded_accumulated_scores, axis=1)
-        best_hyp_indices = mx.nd.array(np.unravel_index(indices.astype(np.int32).asnumpy().ravel(),
-                                                        scores_accumulated.shape),
-                                       dtype='int32',
-                                       ctx=self.offset.context)[0] + self.offset
+        indices = mx.nd.cast(mx.nd.argsort(folded_accumulated_scores, axis=1), dtype='int32').reshape((-1,))
+        best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated.shape) + self.offset
         best_hyp_indices_list.append(best_hyp_indices)
         lengths = lengths.take(best_hyp_indices)
         scores_accumulated = scores_accumulated.take(best_hyp_indices)
@@ -1804,6 +1853,82 @@ class SortByIndex(mx.gluon.HybridBlock):
         return [F.take(arg, indices) for arg in args]
 
 
+class TopK(mx.gluon.HybridBlock):
+    """
+    A HybridBlock for a statically-shaped batch-wise topk operation.
+    """
+
+    def __init__(self, k: int, batch_size: int, vocab_size: int) -> None:
+        """
+        :param k: The number of smallest scores to return.
+        :param batch_size: Number of sentences being decoded at once.
+        :param vocab_size: Vocabulary size.
+        """
+        super().__init__()
+        self.k = k
+        self.batch_size = batch_size
+        self.vocab_size = vocab_size
+        with self.name_scope():
+            offset = mx.nd.repeat(mx.nd.arange(0, batch_size * k, k, dtype='int32'), k)
+            self.offset = self.params.get_constant(name='offset', value=offset)
+
+    def hybrid_forward(self, F, scores, offset):
+        """
+        Get the lowest k elements per sentence from a `scores` matrix.
+
+        :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+        :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+        :return: The row indices, column indices and values of the k smallest items in matrix.
+        """
+        folded_scores = F.reshape(scores, shape=(self.batch_size, self.k * self.vocab_size))
+        values, indices = F.topk(folded_scores, axis=1, k=self.k, ret_typ='both', is_ascend=True)
+        indices = F.reshape(F.cast(indices, 'int32'), shape=(-1,))
+        unraveled = F.unravel_index(indices, shape=(self.batch_size * self.k, self.vocab_size))
+        best_hyp_indices, best_word_indices = F.split(unraveled, axis=0, num_outputs=2, squeeze_axis=True)
+        best_hyp_indices = best_hyp_indices + offset
+        values = F.reshape(values, shape=(-1, 1))
+        return best_hyp_indices, best_word_indices, values
+
+
+class Top1(mx.gluon.HybridBlock):
+    """
+    A HybridBlock for a statically-shaped batch-wise first-best operation.
+
+    Get the single lowest element per sentence from a `scores` matrix. Expects that
+    beam size is 1, for greedy decoding.
+
+    NOTE(mathmu): The current implementation of argmin in MXNet much slower than topk with k=1.
+    """
+    def __init__(self, k: int, batch_size: int) -> None:
+        """
+        :param k: The number of smallest scores to return.
+        :param batch_size: Number of sentences being decoded at once.
+        :param vocab_size: Vocabulary size.
+        """
+        super().__init__()
+        with self.name_scope():
+            offset = mx.nd.repeat(mx.nd.arange(0, batch_size * k, k, dtype='int32'), k)
+            self.offset = self.params.get_constant(name='offset', value=offset)
+
+    def hybrid_forward(self, F, scores, offset):
+        """
+        Get the single lowest element per sentence from a `scores` matrix. Expects that
+        beam size is 1, for greedy decoding.
+
+        :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+        :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+        :return: The row indices, column indices and values of the smallest items in matrix.
+        """
+        best_word_indices = F.cast(F.argmin(scores, axis=1), dtype='int32')
+        values = F.pick(scores, best_word_indices, axis=1)
+        values = F.reshape(values, shape=(-1, 1))
+
+        # for top1, the best hyp indices are equal to the plain offset
+        best_hyp_indices = offset
+
+        return best_hyp_indices, best_word_indices, values
+
+
 class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
     """
     A HybridBlock for normalizing newly finished hypotheses scores with LengthPenalty.
@@ -1820,8 +1945,8 @@ class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
             self.length_penalty = LengthPenalty(alpha=length_penalty_alpha, beta=length_penalty_beta)
 
     def hybrid_forward(self, F, best_word_indices, max_output_lengths, finished, scores_accumulated, lengths):
-        all_finished = ((best_word_indices == self.pad_id) + (best_word_indices == self.eos_id))
-        newly_finished = all_finished - finished
+        all_finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
+        newly_finished = F.broadcast_logical_xor(all_finished, finished)
         scores_accumulated = F.where(newly_finished,
                                      scores_accumulated / self.length_penalty(lengths),
                                      scores_accumulated)
@@ -1834,11 +1959,9 @@ class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
         # - extended with <pad>, or
         # - extended with <eos>, or
         # - at their maximum length.
-        finished = F.clip(
-            (best_word_indices == self.pad_id) +
-            (best_word_indices == self.eos_id) +
-            (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') >= max_output_lengths),
-            a_min=0, a_max=1)
+        finished = F.broadcast_logical_or(F.broadcast_logical_or(best_word_indices == self.pad_id,
+                                                                 best_word_indices == self.eos_id),
+                                          (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') >= max_output_lengths))
 
         return finished, scores_accumulated, lengths
 
@@ -1861,10 +1984,8 @@ class UpdateScores(mx.gluon.HybridBlock):
         # infinity otherwise.
         scores = F.broadcast_add(scores, scores_accumulated)
         # pylint: disable=invalid-sequence-index
-        pad_id_scores = F.where(F.clip(finished - inactive, 0, 1),
-                                scores_accumulated,
-                                inf_array)
+        pad_id_scores = F.where(F.broadcast_logical_and(finished, F.logical_not(inactive)), scores_accumulated, inf_array)
         # pad_dist. Shape: (batch*beam, vocab_size)
         pad_dist = F.concat(pad_id_scores, pad_dist)
-        scores = F.where(finished + inactive, pad_dist, scores)
+        scores = F.where(F.broadcast_logical_or(finished, inactive), pad_dist, scores)
         return scores

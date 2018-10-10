@@ -16,8 +16,6 @@ import unittest
 import unittest.mock
 from tempfile import TemporaryDirectory
 
-import pytest
-
 import sockeye.constants
 import sockeye.inference
 import sockeye.output_handler
@@ -25,16 +23,6 @@ import sockeye.translate
 
 TEST_DATA = "Test file line 1\n" \
             "Test file line 2\n"
-
-
-@pytest.fixture
-def mock_translator():
-    return unittest.mock.Mock(spec=sockeye.inference.Translator)
-
-
-@pytest.fixture
-def mock_output_handler():
-    return unittest.mock.Mock(spec=sockeye.output_handler.OutputHandler)
 
 
 def mock_open(*args, **kargs):
@@ -45,7 +33,9 @@ def mock_open(*args, **kargs):
     return f_open
 
 
-def test_translate_by_file(mock_translator, mock_output_handler):
+def test_translate_by_file():
+    mock_output_handler = unittest.mock.Mock(spec=sockeye.output_handler.OutputHandler)
+    mock_translator = unittest.mock.Mock(spec=sockeye.inference.Translator)
     mock_translator.translate.return_value = ['', '']
     mock_translator.num_source_factors = 1
     mock_translator.batch_size = 1
@@ -63,7 +53,9 @@ def test_translate_by_file(mock_translator, mock_output_handler):
 
 
 @unittest.mock.patch("sys.stdin", io.StringIO(TEST_DATA))
-def test_translate_by_stdin_chunk2(mock_translator, mock_output_handler):
+def test_translate_by_stdin_chunk2():
+    mock_output_handler = unittest.mock.Mock(spec=sockeye.output_handler.OutputHandler)
+    mock_translator = unittest.mock.Mock(spec=sockeye.inference.Translator)
     mock_translator.translate.return_value = ['', '']
     mock_translator.num_source_factors = 1
     mock_translator.batch_size = 1

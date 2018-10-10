@@ -32,7 +32,6 @@ def main():
 
 
 def prepare_data(args: argparse.Namespace):
-
     output_folder = os.path.abspath(args.output)
     os.makedirs(output_folder, exist_ok=True)
     global logger
@@ -46,8 +45,8 @@ def prepare_data(args: argparse.Namespace):
     bucket_width = args.bucket_width
 
     source_paths = [args.source] + args.source_factors
-    # NOTE: Pre-existing source factor vocabularies not yet supported for prepare data
-    source_factor_vocab_paths = [None] * len(args.source_factors)
+    source_factor_vocab_paths = [args.source_factor_vocabs[i] if i < len(args.source_factor_vocabs)
+                                 else None for i in range(len(args.source_factors))]
     source_vocab_paths = [args.source_vocab] + source_factor_vocab_paths
 
     num_words_source, num_words_target = args.num_words
@@ -92,4 +91,3 @@ def prepare_data(args: argparse.Namespace):
 
 if __name__ == "__main__":
     main()
-

@@ -23,7 +23,7 @@ from typing import Callable, Iterable, Dict, List, Tuple, Optional
 
 import numpy as np
 
-from contrib import sacrebleu, rouge
+from sockeye_contrib import sacrebleu, rouge
 from . import arguments
 from . import constants as C
 from . import data_io
