@@ -17,7 +17,7 @@ It implements state-of-the-art encoder-decoder architectures, such as
 - Transformer Models with self-attention [[Vaswani et al, '17](https://arxiv.org/abs/1706.03762)]
 - Fully convolutional sequence-to-sequence models [[Gehring et al, '17](https://arxiv.org/abs/1705.03122)]
 
-In addition, this framework provides an experimental [image-to-description module](https://github.com/awslabs/sockeye/tree/master/sockeye/image_captioning) that can be used for image captioning.
+In addition, this framework provides an experimental [image-to-description module](https://github.com/awslabs/sockeye/tree/master/sockeye/image_captioning) that can be used for [image captioning](image_captioning.html).
 Recent developments and changes are tracked in our [CHANGELOG](https://github.com/awslabs/sockeye/blob/master/CHANGELOG.md).
 
 If you are interested in collaborating or have any questions, please submit a pull request or [issue](https://github.com/awslabs/sockeye/issues/new). 

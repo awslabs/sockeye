@@ -151,7 +151,7 @@ tensorboard --logdir .
 
 Once tensorboard is up and running you can check out the learning curves by opening [http://localhost:6006](http://localhost:6006).
 
-![screenshot of tensorboard](tb_screenshot.png "Screenshot of tensorboard")
+![screenshot of tensorboard](wmt/tb_screenshot.png "Screenshot of tensorboard")
 
 Now even before training finishes you can already start translating with the model if at least one checkpoint has been written to disk.
 
@@ -195,7 +195,7 @@ echo "er ist so ein toller Kerl und ein Familienvater ." | \
 
 This will create a file `align_1.png` that looks similar to this:
 
-![Alignment plot](align.png "Alignment plot")
+![Alignment plot](wmt/align.png "Alignment plot")
 
 Note that the alignment plot shows the subword units instead of tokens, as this is the representation used by Sockeye during translation.
 Additionally you can see the special end-of-sentence symbol `</s>` being added to the target sentence.

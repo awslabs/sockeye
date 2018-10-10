@@ -82,7 +82,7 @@ This file describes how to use lexical constraints; for more technical informati
 
 ### Example
 
-You need a [trained model](../wmt/README.md).
+You need a [trained model](tutorials/wmt.html).
 
 You need to be careful to apply the same preprocessing to your test data that you applied at training time, including
 any [subword processing](http://github.com/rsennrich/subword-nmt), since Sockeye itself does not do this.
