@@ -804,39 +804,80 @@ class TranslatorOutput:
     :param score: Negative log probability of generated translation.
     :param beam_histories: List of beam histories. The list will contain more than one
            history if it was split due to exceeding max_length.
+    :param nbest_translations: List of nbest translations as strings.
+    :param nbest_tokens: List of nbest translations as lists of tokens.
+    :param nbest_attention_matrices: List of attention matrices, one for each nbest translation.
+    :param nbest_scores: List of nbest scores, one for each nbest translation.
     """
-    __slots__ = ('sentence_id', 'translation', 'tokens', 'attention_matrix', 'score', 'beam_histories')
+    __slots__ = ('sentence_id',
+                 'translation',
+                 'tokens',
+                 'attention_matrix',
+                 'score',
+                 'beam_histories',
+                 'nbest_translations',
+                 'nbest_tokens',
+                 'nbest_attention_matrices',
+                 'nbest_scores')
 
     def __init__(self,
                  sentence_id: SentenceId,
                  translation: str,
-                 tokens: List[str],
+                 tokens: Tokens,
                  attention_matrix: np.ndarray,
                  score: float,
-                 beam_histories: Optional[List[BeamHistory]] = None) -> None:
+                 beam_histories: Optional[List[BeamHistory]] = None,
+                 nbest_translations: Optional[List[str]] = None,
+                 nbest_tokens: Optional[List[Tokens]] = None,
+                 nbest_attention_matrices: Optional[List[np.ndarray]] = None,
+                 nbest_scores: Optional[List[float]] = None) -> None:
         self.sentence_id = sentence_id
         self.translation = translation
         self.tokens = tokens
         self.attention_matrix = attention_matrix
         self.score = score
         self.beam_histories = beam_histories
+        self.nbest_translations = nbest_translations
+        self.nbest_tokens = nbest_tokens
+        self.nbest_attention_matrices = nbest_attention_matrices
+        self.nbest_scores = nbest_scores
 
 
 TokenIds = List[int]
 
 
+class NBestTranslations:
+    __slots__ = ('target_ids_list',
+                 'attention_matrices',
+                 'scores')
+    def __init__(self,
+                 target_ids_list: List[TokenIds],
+                 attention_matrices: List[np.ndarray],
+                 scores: List[float]) -> None:
+
+        self.target_ids_list = target_ids_list
+        self.attention_matrices = attention_matrices
+        self.scores = scores
+
+
 class Translation:
-    __slots__ = ('target_ids', 'attention_matrix', 'score', 'beam_histories')
+    __slots__ = ('target_ids',
+                 'attention_matrix',
+                 'score',
+                 'beam_histories',
+                 'nbest_translations')
 
     def __init__(self,
                  target_ids: TokenIds,
                  attention_matrix: np.ndarray,
                  score: float,
-                 beam_history: List[BeamHistory] = None) -> None:
+                 beam_histories: List[BeamHistory] = None,
+                 nbest_translations: NBestTranslations = None) -> None:
         self.target_ids = target_ids
         self.attention_matrix = attention_matrix
         self.score = score
-        self.beam_histories = beam_history if beam_history is not None else []
+        self.beam_histories = beam_histories if beam_histories is not None else []
+        self.nbest_translations = nbest_translations
 
 
 def empty_translation() -> Translation:
@@ -860,7 +901,7 @@ Translation of a chunk of a sentence.
 IndexedTranslation = NamedTuple('IndexedTranslation', [
     ('input_idx', int),
     ('chunk_idx', int),
-    ('translation', Translation),
+    ('translation', Translation)
 ])
 """
 Translation of a chunk of a sentence.
@@ -925,6 +966,68 @@ class LengthPenalty(mx.gluon.HybridBlock):
         return self.hybrid_forward(None, lengths)
 
 
+def _concat_nbest_translations(translations: List[Translation], stop_ids: Set[int],
+                               length_penalty: LengthPenalty) -> Translation:
+    """
+    Combine nbest translations through concatenation.
+
+    :param translations: A list of translations (sequence starting with BOS symbol,
+        attention_matrix), score and length.
+    :param translations: The EOS symbols.
+    :return: A concatenation of the translations with a score.
+    """
+    expanded_translations = [_expand_nbest_translation(translation) for translation in translations]
+
+    concatenated_translations = []  # type: List[Translation]
+
+    for translations_to_concat in zip(*expanded_translations):
+        concatenated_translations.append(_concat_translations(translations=list(translations_to_concat),
+                                                              stop_ids=stop_ids,
+                                                              length_penalty=length_penalty))
+
+    return _reduce_nbest_translations(concatenated_translations)
+
+
+def _reduce_nbest_translations(nbest_translations_list: List[Translation]) -> Translation:
+    """
+    Combines Translation objects that are nbest translations of the same sentence.
+
+    :param nbest_translations: A list of Translation objects, all of them translations of
+        the same source sentence.
+    :return: A single Translation object where nbest lists are collapsed.
+    """
+    best_translation = nbest_translations_list[0]
+
+    sequences = [translation.target_ids for translation in nbest_translations_list]
+    attention_matrices = [translation.attention_matrix for translation in nbest_translations_list]
+    scores = [translation.score for translation in nbest_translations_list]
+
+    nbest_translations = NBestTranslations(sequences, attention_matrices, scores)
+
+    return Translation(best_translation.target_ids,
+                       best_translation.attention_matrix,
+                       best_translation.score,
+                       best_translation.beam_histories,
+                       nbest_translations)
+
+
+def _expand_nbest_translation(translation: Translation) -> List[Translation]:
+    """
+    Expand nbest translations in a single Translation object to one Translation
+        object per nbest translation.
+
+    :param translation: A Translation object.
+    :return: A list of Translation objects.
+    """
+    nbest_list = []  # type = List[Translation]
+    for target_ids, attention_matrix, score in zip(translation.nbest_translations.target_ids_list,
+                                                   translation.nbest_translations.attention_matrices,
+                                                   translation.nbest_translations.scores):
+        nbest_list.append(Translation(target_ids, attention_matrix, score, translation.beam_histories))
+
+    return nbest_list
+
+
 def _concat_translations(translations: List[Translation], stop_ids: Set[int],
                          length_penalty: LengthPenalty) -> Translation:
     """
@@ -932,12 +1035,13 @@ def _concat_translations(translations: List[Translation], stop_ids: Set[int],
 
     :param translations: A list of translations (sequence starting with BOS symbol, attention_matrix), score and length.
     :param translations: The EOS symbols.
-    :return: A concatenation if the translations with a score.
+    :return: A concatenation of the translations with a score.
     """
     # Concatenation of all target ids without BOS and EOS
     target_ids = []
     attention_matrices = []
     beam_histories = []  # type: List[BeamHistory]
+
     for idx, translation in enumerate(translations):
         if idx == len(translations) - 1:
             target_ids.extend(translation.target_ids)
@@ -977,7 +1081,8 @@ class Translator:
     :param ensemble_mode: Ensemble mode: linear or log_linear combination.
     :param length_penalty: Length penalty instance.
     :param beam_prune: Beam pruning difference threshold.
-    :param beam_search_stop: The stopping criterium.
+    :param beam_search_stop: The stopping criterion.
+    :param nbest_size: Size of nbest list of translations.
     :param models: List of models.
     :param source_vocabs: Source vocabularies.
     :param target_vocab: Target vocabulary.
@@ -995,6 +1100,7 @@ class Translator:
                  length_penalty: LengthPenalty,
                  beam_prune: float,
                  beam_search_stop: str,
+                 nbest_size: int,
                  models: List[InferenceModel],
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
@@ -1025,6 +1131,9 @@ class Translator:
         self.source_with_eos = models[0].source_with_eos
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
+        self.nbest_size = nbest_size
+        utils.check_condition(self.beam_size >= nbest_size,
+                              'Nbest size must be smaller or equal to beam size.')
         self.batch_size = self.models[0].batch_size
         # skip softmax for a single model, but not for an ensemble
         self.skip_softmax = self.models[0].skip_softmax
@@ -1101,12 +1210,17 @@ class Translator:
                     logger.warning("Global avoid phrase '%s' contains an %s; this may indicate improper preprocessing.", ' '.join(phrase), C.UNK_SYMBOL)
                 self.global_avoid_trie.add_phrase(phrase_ids)
 
+        self._concat_translations = partial(_concat_nbest_translations if self.nbest_size > 1 else _concat_translations,
+                                            stop_ids=self.stop_ids,
+                                            length_penalty=self.length_penalty)
+
         logger.info("Translator (%d model(s) beam_size=%d beam_prune=%s beam_search_stop=%s "
-                    "ensemble_mode=%s batch_size=%d buckets_source=%s avoiding=%d)",
+                    "nbest_size=%s ensemble_mode=%s batch_size=%d buckets_source=%s avoiding=%d)",
                     len(self.models),
                     self.beam_size,
                     'off' if not self.beam_prune else "%.2f" % self.beam_prune,
                     self.beam_search_stop,
+                    self.nbest_size,
                     "None" if len(self.models) == 1 else ensemble_mode,
                     self.batch_size,
                     self.buckets_source,
@@ -1308,7 +1422,7 @@ class Translator:
                      trans_input: TranslatorInput,
                      translation: Translation) -> TranslatorOutput:
         """
-        Returns a translator result from generated target-side word ids, attention matrix, and score.
+        Returns a translator result from generated target-side word ids, attention matrices and scores.
         Strips stop ids from translation string.
 
         :param trans_input: Translator input.
@@ -1316,28 +1430,40 @@ class Translator:
         :return: TranslatorOutput.
         """
         target_ids = translation.target_ids
-        attention_matrix = translation.attention_matrix
-
         target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
         target_string = C.TOKEN_SEPARATOR.join(data_io.ids2tokens(target_ids, self.vocab_target_inv, self.strip_ids))
 
+        attention_matrix = translation.attention_matrix
         attention_matrix = attention_matrix[:, :len(trans_input.tokens)]
 
-        return TranslatorOutput(sentence_id=trans_input.sentence_id,
-                                translation=target_string,
-                                tokens=target_tokens,
-                                attention_matrix=attention_matrix,
-                                score=translation.score,
-                                beam_histories=translation.beam_histories)
+        if translation.nbest_translations is None:
+            return TranslatorOutput(sentence_id=trans_input.sentence_id,
+                                    translation=target_string,
+                                    tokens=target_tokens,
+                                    attention_matrix=attention_matrix,
+                                    score=translation.score,
+                                    beam_histories=translation.beam_histories)
+        else:
 
-    def _concat_translations(self, translations: List[Translation]) -> Translation:
-        """
-        Combine translations through concatenation.
+            nbest_target_ids = translation.nbest_translations.target_ids_list
+            target_tokens_list = [[self.vocab_target_inv[id] for id in ids] for ids in nbest_target_ids]
+            target_strings = [C.TOKEN_SEPARATOR.join(
+                                data_io.ids2tokens(target_ids, self.vocab_target_inv, self.strip_ids)) for target_ids in nbest_target_ids]
 
-        :param translations: A list of translations (sequence, attention_matrix), score and length.
-        :return: A concatenation if the translations with a score.
-        """
-        return _concat_translations(translations, self.stop_ids, self.length_penalty)
+            attention_matrices = [matrix[:, :len(trans_input.tokens)] for matrix in translation.nbest_translations.attention_matrices]
+
+            scores = translation.nbest_translations.scores
+
+            return TranslatorOutput(sentence_id=trans_input.sentence_id,
+                                    translation=target_string,
+                                    tokens=target_tokens,
+                                    attention_matrix=attention_matrix,
+                                    score=translation.score,
+                                    beam_histories=translation.beam_histories,
+                                    nbest_translations=target_strings,
+                                    nbest_tokens=target_tokens_list,
+                                    nbest_attention_matrices=attention_matrices,
+                                    nbest_scores=scores)
 
     def _translate_nd(self,
                       source: mx.nd.NDArray,
@@ -1715,32 +1841,43 @@ class Translator:
         :param beam_histories: The beam histories for each sentence in the batch.
         :return: List of Translation objects containing all relevant information.
         """
-        # Initialize the best_ids to the first item in each batch
-        best_ids = np.arange(0, self.batch_size * self.beam_size, self.beam_size, dtype='int32')
-
-        if any(constraints):
-            # For constrained decoding, select from items that have met all constraints (might not be finished)
-            unmet = np.array([c.num_needed() if c is not None else 0 for c in constraints])
-            filtered = np.where(unmet == 0, seq_scores.flatten(), np.inf)
-            filtered = filtered.reshape((self.batch_size, self.beam_size))
-            best_ids += np.argmin(filtered, axis=1).astype('int32')
-
-        # Obtain sequences for all best hypotheses in the batch
-        indices = self._get_best_word_indeces_for_kth_hypotheses(best_ids, best_hyp_indices)
-
+        nbest_translations = []  # type: List[List[Translation]]
         histories = beam_histories if beam_histories is not None else [None] * self.batch_size  # type: List
-        return [self._assemble_translation(*x) for x in zip(best_word_indices[indices, np.arange(indices.shape[1])],
-                                                            lengths[best_ids],
-                                                            attentions[best_ids],
-                                                            seq_scores[best_ids],
-                                                            histories)]
+
+        for n in range(0, self.nbest_size):
+
+            # Initialize the best_ids to the first item in each batch, plus current nbest index
+            best_ids = np.arange(n, self.batch_size * self.beam_size, self.beam_size, dtype='int32')
+
+            # only check for constraints for 1-best translation for each sequence in batch
+            if n == 0 and any(constraints):
+                # For constrained decoding, select from items that have met all constraints (might not be finished)
+                unmet = np.array([c.num_needed() if c is not None else 0 for c in constraints])
+                filtered = np.where(unmet == 0, seq_scores.flatten(), np.inf)
+                filtered = filtered.reshape((self.batch_size, self.beam_size))
+                best_ids += np.argmin(filtered, axis=1).astype('int32')
+
+            # Obtain sequences for all best hypotheses in the batch
+            indices = self._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)
+
+            nbest_translations.append([self._assemble_translation(*x) for x in zip(best_word_indices[indices, np.arange(indices.shape[1])],
+                                                                                   lengths[best_ids],
+                                                                                   attentions[best_ids],
+                                                                                   seq_scores[best_ids],
+                                                                                   histories)])
+        # reorder and regroup lists
+        reduced_translations = []  # type: List[Translation]
+        for grouped_nbest in zip(*nbest_translations):
+            reduced_translations.append(_reduce_nbest_translations(grouped_nbest))
+
+        return reduced_translations
 
     @staticmethod
-    def _get_best_word_indeces_for_kth_hypotheses(ks: np.ndarray, all_hyp_indices: np.ndarray) -> np.ndarray:
+    def _get_best_word_indices_for_kth_hypotheses(ks: np.ndarray, all_hyp_indices: np.ndarray) -> np.ndarray:
         """
         Traverses the matrix of best hypotheses indices collected during beam search in reversed order by
-        by using the kth hypotheses index as a backpointer.
-        Returns and array containing the indices into the best_word_indices collected during beam search to extract
+        using the kth hypotheses index as a backpointer.
+        Returns an array containing the indices into the best_word_indices collected during beam search to extract
         the kth hypotheses.
 
         :param ks: The kth-best hypotheses to extract. Supports multiple for batch_size > 1. Shape: (batch,).
@@ -1769,7 +1906,6 @@ class Translator:
         """
         Takes a set of data pertaining to a single translated item, performs slightly different
         processing on each, and merges it into a Translation object.
-
         :param sequence: Array of word ids. Shape: (batch_size, bucket_key).
         :param length: The length of the translated segment.
         :param attention_lists: Array of attentions over source words.
@@ -1968,14 +2104,14 @@ class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
 
 class UpdateScores(mx.gluon.HybridBlock):
     """
-    A HybridBlock that updates the scores from the decoder step with acumulated scores.
+    A HybridBlock that updates the scores from the decoder step with accumulated scores.
     Inactive hypotheses receive score inf. Finished hypotheses receive their accumulated score for C.PAD_ID.
     All other options are set to infinity.
     """
 
     def __init__(self):
         super().__init__()
-        assert C.PAD_ID == 0, "This blocks only works with PAD_ID == 0"
+        assert C.PAD_ID == 0, "This block only works with PAD_ID == 0"
 
     def hybrid_forward(self, F, scores, finished, inactive, scores_accumulated, inf_array, pad_dist):
         # Special treatment for finished and inactive rows. Inactive rows are inf everywhere;

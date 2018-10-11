@@ -1029,7 +1029,7 @@ def ids2strids(ids: Iterable[int]) -> str:
     return " ".join(map(str, ids))
 
 
-def ids2tokens(token_ids: Iterable[int],
+def ids2tokens(token_ids: List[int],
                vocab_inv: Dict[int, str],
                exclude_set: Set[int] = set()) -> Iterator[str]:
     """
@@ -1039,9 +1039,9 @@ def ids2tokens(token_ids: Iterable[int],
     :param vocab_inv: The inverse vocabulary.
     :param exclude_set: The list of token IDs to exclude.
     :return: The list of words.
-"""
+    """
 
-    tokens = [vocab_inv[token] for token in token_ids]
+    tokens = (vocab_inv[token] for token in token_ids)
     return (tok for token_id, tok in zip(token_ids, tokens) if token_id not in exclude_set)
 
 
