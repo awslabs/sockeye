@@ -32,9 +32,7 @@ Optionally you can also install matplotlib for visualization:
 ```
 
 
-## First Steps
-
-### Train
+## Train
 
 In order to train your first image captioning model you will need two sets of parallel files: one for training
 and one for validation. The latter will be used for computing various metrics during training.
@@ -101,7 +99,7 @@ There is an initial overhead to load the feature (training does not start immedi
 
 You can add the options `--decode-and-evaluate 200 --max-output-length 60` to perform captioning of the part of the validation set (200 samples in this case) during training.
 
-### Image to Text
+## Image to Text
 
 Assuming that features were pre-extracted, you can do image captioning as follows:
 
@@ -136,7 +134,7 @@ You can also caption directly from image with the option `--extract-image-featur
 ```
 
 
-#### Using Lexical Constrains
+### Using Lexical Constrains
 
 It is also possible to use lexical constraints during inference as described [here](inference.html#lexical-constraints).
 The input JSON object needs to have the following form, with the image path in the `text` field, and constraints specified as usual:
@@ -149,7 +147,7 @@ The input JSON object needs to have the following form, with the image path in t
 You can use the `sockeye.lexical_constraints` module to generate this (for usage, run `python3 -m sockeye.lexical_constraints`).
 Once the file is generated, the CLI option `--json-input` needs to be passed to `sockeye.image_captioning.captioner`.
 
-### Visualization
+## Visualization
 
 You can now visualize the results in a nice format as follows:
 
