@@ -3,9 +3,19 @@ layout: default
 ---
 # Image Captioning
 
-This module extends Sockeye to perform image captioning. It follows the same logic of sequence-to-sequence frameworks, which consist of encoder-decoder models.
+Sockeye provides also a module to perform image captioning.
+It follows the same logic of sequence-to-sequence frameworks, which consist of encoder-decoder models.
 In this case the encoder takes an image instead of a sentence and encodes it in a feature representation.
 This is decoded with attention (optionally) using exactly the same models of Sockeye (RNNs, transformers, or CNNs).
+This tutorial explains how to train image captioning models.
+
+
+## Citation
+
+For technical information about the image captioning module, see our paper on the arXiv ([BibTeX](sockeye_captioning.bib)):
+
+> Loris Bazzani, Tobias Domhan, and Felix Hieber. 2018.
+> [Image Captioning as Neural Machine Translation Task in SOCKEYE](https://arxiv.org/abs/1810.04101). ArXiv e-prints.
 
 
 ## Installation
