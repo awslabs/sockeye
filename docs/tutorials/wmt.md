@@ -1,7 +1,6 @@
 # WMT German to English news translation
 
-In this tutorial we will train a German to English Sockeye model on a dataset from the
-[Conference on Machine Translation (WMT) 2017](http://www.statmt.org/wmt17/).
+In this tutorial we will train a German to English Sockeye model on a dataset from the [Conference on Machine Translation (WMT) 2017](http://www.statmt.org/wmt17/).
 
 ## Setup
 
@@ -23,7 +22,8 @@ If you haven't installed the library yet you can do so by running:
 pip install matplotlib
 ```
 
-We will visualize training progress using Tensorboard and its MXNet adaptor, `mxboard`. Install it using:
+We will visualize training progress using Tensorboard and its MXNet adaptor, `mxboard`. 
+Install it using:
 ```bash
 pip install tensorboard mxboard
 ```
@@ -121,19 +121,16 @@ various RNN (`--rnn-cell-type`) and attention (`--attention-type`) types and mor
 
 There are also several parameters controlling training itself.
 Unless you specify a different optimizer (`--optimizer`) [Adam](https://arxiv.org/abs/1412.6980) will be used.
-Additionally, you can control the batch size (`--batch-size`), the learning rate schedule (`--learning-rate-schedule`)
-and other parameters relevant for training.
+Additionally, you can control the batch size (`--batch-size`), the learning rate schedule (`--learning-rate-schedule`) and other parameters relevant for training.
 
 Training will run until the validation perplexity stops improving.
 Sockeye starts a decoder in a separate process at every checkpoint running on the same device as training in order to evaluate metrics such as BLEU.
 Note that these scores are calculated on the tokens provided to Sockeye, e.g. in this tutorial BLEU will be calculated on the sub-words we created above.
 As an alternative to validation perplexity based early stopping you can stop early based on BLEU scores (`--optimized-metric bleu`).
 
-To make sure the decoder finishes before the next checkpoint one can subsample the validation set for
-BLEU score calculation.
+To make sure the decoder finishes before the next checkpoint one can subsample the validation set for BLEU score calculation.
 For example `--decode-and-evaluate 500` will decode and evaluate BLEU on a random subset of 500 sentences.
-We sample the random subset once and keep it the same during training and also across trainings by
-fixing the random seed.
+We sample the random subset once and keep it the same during training and also across trainings by fixing the random seed.
 Therefore, validation BLEU scores across training runs are comparable.
 Perplexity will not be affected by this and still be calculated on the full validation set.
 
@@ -142,38 +139,31 @@ In the next section we discuss how you can monitor the training progress.
 
 ### Monitoring training progress
 
-There are basically three ways of tracking the training progress: the training log and log file,
-the metrics file and tensorboard.
-In addition to printing training and validation metrics on stdout Sockeye also keeps track of them in
-the file `wmt_model/metrics`. Here you find all relevant metrics that were calculated during checkpointing.
+There are basically three ways of tracking the training progress: the training log and log file, the metrics file and tensorboard.
+In addition to printing training and validation metrics on stdout Sockeye also keeps track of them in the file `wmt_model/metrics`. Here you find all relevant metrics that were calculated during checkpointing.
 
 [tensorboard](https://github.com/awslabs/mxboard) allows for monitoring training and validation metrics in a browser.
-If you have installed it (`pip install mxboard`), Sockeye will log training events in a Tensorboard file that can be
-visualized with Tensorboard (`pip install tensorboard`)
+If you have installed it (`pip install mxboard`), Sockeye will log training events in a Tensorboard file that can be visualized with Tensorboard (`pip install tensorboard`)
 
 ```bash
 tensorboard --logdir .
 ```
 
-Once tensorboard is up and running you can check out the learning curves by
-opening [http://localhost:6006](http://localhost:6006).
+Once tensorboard is up and running you can check out the learning curves by opening [http://localhost:6006](http://localhost:6006).
 
-![screenshot of tensorboard](tb_screenshot.png "Screenshot of tensorboard")
+![screenshot of tensorboard](wmt/tb_screenshot.png "Screenshot of tensorboard")
 
-Now even before training finishes you can already start translating with the model if at least one checkpoint has been
-written to disk.
+Now even before training finishes you can already start translating with the model if at least one checkpoint has been written to disk.
 
 ## Translation
 
-When translating with Sockeye it is important to keep in mind that it expects the same types of input as seen during
-training. For this tutorial we fed in subword units that were obtained through a Byte Pair Encoding.
+When translating with Sockeye it is important to keep in mind that it expects the same types of input as seen during training.
+For this tutorial we fed in subword units that were obtained through a Byte Pair Encoding.
 Therefore, we need to apply the same type of preprocessing before feeding a sentence into Sockeye.
 All symbols that have not been seen during training will be replaced by an `<unk>` symbol.
 When the `<unk>` symbol was observed during training one can that the model will also produce this symbol on the output.
-Note though that because of the way we do the preprocessing with BPE above, the model will not actually observe any
-`<unk>` symbols.
-In the following example we will use a sentence from the development set that is already tokenized and byte pair
-encode it.
+Note though that because of the way we do the preprocessing with BPE above, the model will not actually observe any `<unk>` symbols.
+In the following example we will use a sentence from the development set that is already tokenized and byte pair encode it.
 After translation we merge consecutive byte pairs, resulting in a tokenized translated sentence.
 This can be done by the following command:
 
@@ -188,8 +178,7 @@ he is a great guy and a family father .
 ```
 
 At decoding time Sockeye will run a beam search.
-You can set the size of the beam (`--beam-size`) or change other decoding parameters such as `--softmax-temperature`
-and `--length-penalty-alpha`.
+You can set the size of the beam (`--beam-size`) or change other decoding parameters such as `--softmax-temperature` and `--length-penalty-alpha`.
 
 ### Alignment visualization
 
@@ -206,18 +195,16 @@ echo "er ist so ein toller Kerl und ein Familienvater ." | \
 
 This will create a file `align_1.png` that looks similar to this:
 
-![Alignment plot](align.png "Alignment plot")
+![Alignment plot](wmt/align.png "Alignment plot")
 
-Note that the alignment plot shows the subword units instead of tokens, as this is the representation used by Sockeye
-during translation.
+Note that the alignment plot shows the subword units instead of tokens, as this is the representation used by Sockeye during translation.
 Additionally you can see the special end-of-sentence symbol `</s>` being added to the target sentence.
 
 
 ### Embedding inspection
 
-You can inspect the embeddings learned by the model during training. Sockeye includes a tool to compute pairwise
-similarities (Euclidean distance) for all types in the embeddings space. Given a query token, it returns the nearest
-neighbors in the space.
+You can inspect the embeddings learned by the model during training. Sockeye includes a tool to compute pairwise similarities (Euclidean distance) for all types in the embeddings space.
+Given a query token, it returns the nearest neighbors in the space.
 You can run it like this:
 
 ```
@@ -260,20 +247,15 @@ he is a great guy and a family father .
 ```
 
 Internally Sockeye will run each one of the models and combine the predictions.
-If all the models are the same you will of course get the same predictions at the expense of running the same model
-multiple times. However, the point is mainly to show how one would run an ensemble model.
-
-
+If all the models are the same you will of course get the same predictions at the expense of running the same model multiple times. However, the point is mainly to show how one would run an ensemble model.
 
 ## Checkpoint averaging
 
-An alternative to model ensembling that does not require training multiple models is to average parameters from
-different checkpoints.
+An alternative to model ensembling that does not require training multiple models is to average parameters from different checkpoints.
 While unlike ensembling basically coming at no cost, this usually leads to smaller gains.
 Of course you could also create an ensemble of checkpoint averaged models.
 Sockeye provides a CLI that combines the parameter files of a trained model.
-In the following we create a copy of the model directory and then replace the link to the best parameters
-with an checkpointed averaged parameter file:
+In the following we create a copy of the model directory and then replace the link to the best parameters with an checkpointed averaged parameter file:
 
 ```bash
 cp -r wmt_model wmt_model_avg
@@ -283,5 +265,4 @@ python -m sockeye.average -o wmt_model_avg/param.best wmt_model
 ## Summary
 
 Congratulations! You have successfully trained your first real Sockeye translation model.
-On top of that you know how to track training progress, how to translate, how to combine models through checkpointing
-or ensembling and more.
+On top of that you know how to track training progress, how to translate, how to combine models through checkpointing or ensembling and more.

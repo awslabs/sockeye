@@ -1,1 +1,8 @@
-theme: jekyll-theme-slate
+theme: jekyll-theme-minimal
+title: Sockeye
+description: A tool for sequence-to-sequence modeling
+repository: awslabs/sockeye
+markdown: kramdown
+highlighter: rouge
+url: https://awslabs.github.io
+base_url: /sockeye

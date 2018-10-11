@@ -1,3 +1,6 @@
+---
+layout: default
+---
 # Image Captioning
 
 This module extends Sockeye to perform image captioning. It follows the same logic of sequence-to-sequence frameworks, which consist of encoder-decoder models.
@@ -125,16 +128,16 @@ You can also caption directly from image with the option `--extract-image-featur
 
 #### Using Lexical Constrains
 
-It is also possible to use lexical constrains during inference as described in the tutorial [decoding with lexical constraints](../constraints/README.md).
-As described in that tutorial, first we need to covert the `validation_set.images` file (containing the relative paths to the images) to JSON objects with the following format:
+It is also possible to use lexical constraints during inference as described [here](inference.html#lexical-constraints).
+The input JSON object needs to have the following form, with the image path in the `text` field, and constraints specified as usual:
 
     { 'text': 'relative/path/of/image/given/in/validation_set/file/filename.jpg',
       'constraints': ['constr@@ aint',
                       'multi@@ word constr@@ aint'] }
 
-For that it is possible to use the module `sockeye.lexical_constraints`.
-Once the file is generated, the option `--json-input` should be used as argument of `sockeye.image_captioning.captioner`.
-
+(*Note: Sockeye expects this text to be present on a single line*).
+You can use the `sockeye.lexical_constraints` module to generate this (for usage, run `python3 -m sockeye.lexical_constraints`).
+Once the file is generated, the CLI option `--json-input` needs to be passed to `sockeye.image_captioning.captioner`.
 
 ### Visualization
 

@@ -1,7 +1,48 @@
-# User documentation
+---
+layout: default
+---
+
+# Training
+
+## Autopilot
+
+For easily training popular model types on known data sets, see the [Sockeye Autopilot documentation](https://github.com/awslabs/sockeye/tree/master/sockeye_contrib/autopilot).
+For manually training and running translation models on your data, read on.
+
+## Data preparation
+
+Sockeye can read the raw data at training time in two sentence-parallel files via the `--source` and `--target` command-line options.
+You can also prepare the data ahead of time and dump it to disk as MXNet NDArrays.
+This basically eliminates the data loading time when running training (since three passes over the raw data are required), and also reduces memory consumption, since prepared data is also placed into random shards (which have one million lines each, by default).
+To run data preparation, you can use the following command:
+
+```bash
+> python -m sockeye.prepare_data
+usage: prepare_data.py [-h] --source SOURCE
+                       [--source-factors SOURCE_FACTORS [SOURCE_FACTORS ...]]
+                       --target TARGET [--source-vocab SOURCE_VOCAB]
+                       [--target-vocab TARGET_VOCAB]
+                       [--source-factor-vocabs SOURCE_FACTOR_VOCABS [SOURCE_FACTOR_VOCABS ...]]
+                       [--shared-vocab] [--num-words NUM_WORDS]
+                       [--word-min-count WORD_MIN_COUNT]
+                       [--pad-vocab-to-multiple-of PAD_VOCAB_TO_MULTIPLE_OF]
+                       [--no-bucketing] [--bucket-width BUCKET_WIDTH]
+                       [--max-seq-len MAX_SEQ_LEN]
+                       [--num-samples-per-shard NUM_SAMPLES_PER_SHARD]
+                       [--min-num-shards MIN_NUM_SHARDS] [--seed SEED]
+                       --output OUTPUT
+prepare_data.py: error: the following arguments are required: --source/-s, --target/-t, --output/-o
+```
+
+The main arguments are the required ones above (`--source`, `--target`, and `--output` to specify the directory to write the prepared data to).
+Some other important ones are:
+
+- `--shared-vocab`: to produce a shared vocabulary between the source and target sides of the corpora.
+- `--num-samples-per-shard`: to control the shard size.
+
+At training time (see next section), you then specify `--prepared-data` instead of `--source` and `--target`.
 
 ## Training
-
 
 Training is carried out by the `sockeye.train` module. Basic usage is given by
 
@@ -25,18 +66,14 @@ For a complete list of supported options use the `--help` option.
 
 All input files files should be UTF-8 encoded, tokenized with standard whitespaces.
 Each line should contain a single sentence and the source and target files should have the same number of lines.
-Vocabularies will automatically be created from the training data and vocabulary 
-coverage on the validation set during initialization will be reported.
+Vocabularies will automatically be created from the training data and vocabulary coverage on the validation set during initialization will be reported.
 
 ### Checkpointing and early-stopping
 
-Training is governed by the concept of "checkpoints", rather than epochs. You
-can specify the checkpoint frequency in terms of updates/batches with
-`--checkpoint-frequency`.  Training performs early-stopping to prevent
-overfitting, i.e. training is stopped once a defined evaluation metric computed
-on the held-out validation data does not improve for a number of checkpoints
-given by the parameter `--max-num-checkpoint-not-improved`.  You can specify a
-maximum number of updates/batches using `--max-updates`.
+Training is governed by the concept of "checkpoints", rather than epochs.
+You can specify the checkpoint frequency in terms of updates/batches with `--checkpoint-frequency`.
+Training performs early-stopping to prevent overfitting, i.e., training is stopped once a defined evaluation metric computed on the held-out validation data does not improve for a number of checkpoints given by the parameter `--max-num-checkpoint-not-improved`.
+You can specify a maximum number of updates/batches using `--max-updates`.
 
 Perplexity is the default metric to be considered for early-stopping, but you
 can also choose to optimize accuracy or BLEU using the `--optimized-metric`
@@ -106,43 +143,32 @@ This can be done as follows:
 > python -m sockeye.average <model_dir> -o <model_dir>/model.best.avg.params
 ```
 
-## Translation
+## Source factors
 
-Translating is handled by the `sockeye.translate` module:
-```bash
-> python -m sockeye.translate
-```
+Sockeye supports source factors, which are described in:
 
-The only required argument is `--models`, which should point to an `<model_dir>`
-folder of trained models.  By default, sockeye chooses the parameters from the
-best checkpoint and uses these for translation.  You can specify parameters
-from a specific checkpoint by using `--checkpoints X`.
+> Rico Sennrich and Barry Haddow. 2016.
+> [Linguistic Input Features Improve Neural Machine Translation](http://www.aclweb.org/anthology/W16-2209)
+> Proceedings of the First Conference on Machine Translation: Volume 1, Research Papers.
 
-You can control the size of the beam using `--beam-size` and the maximum input
-length by `--max-input-length`.  Sentences that are longer than
-`max-input-length` are stripped.
+Factors are enabled with two flags: `--source-factors` and `--source-factors-num-embed`.
+The `--source-factors` argument takes one or more files that are token-parallel to the source.
+This means that each line has the exact same number of whitespace-delimited tokens as the source file (`--source`).
+For example, if you have the following line of a source sentence:
 
-Input is read from the standard input and the output is written to the standard
-output.  The CLI will log translation speed once the input is consumed. Like in
-the training module, the first GPU device is used by default. Note however that
-multi-GPU translation is not currently supported. For CPU decoding use
-`--use-cpu`.
+> the boy ate the waff@@ le .
 
-Use the `--help` option to see a full list of options for translation.
+You need a corresponding feature line of the following form:
 
-### Ensemble Decoding
-Sockeye supports ensemble decoding by specifying multiple model directories and
-multiple checkpoints. The given lists must have the same length, such that the
-first given checkpoint will be taken from the first model directory, the second
-specified checkpoint from the second directory, etc.
-```bash
-> python -m sockeye.translate --models [<m1prefix> <m2prefix>] --checkpoints [<cp1> <cp2>]
-```
+> O O O O B E O
 
-### Visualization
-The default mode of the translate CLI is to output translations to STDOUT. You
-can also print out an ASCII matrix of the alignments using `--output-type
-align_text`, or save the alignment matrix as a PNG plot using `--output-type
-align_plot`. The PNG files will be written to files beginning with the prefix
-given by the `--align-plot-prefix` option, one for each input sentence, indexed
-by the sentence id.
+(Same number of tokens).
+
+This flag can also be supplied to [the data preparation step](#data-preparation).
+
+Each source factor has its own vocabulary and learned embedding.
+At training time, you need to specifiy the embedding sizes for each factor.
+This is done with `--source-factors-num-embed X1 X2 ...`.
+These embedding sizes are *added* to those of the word embeddings, so the total source embedding size will be the sum of the word embeddings and all source factor embeddings.
+
+You then also have to apply factors for the source side [at inference time](inference.html#source-factors).
