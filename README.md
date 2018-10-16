@@ -22,7 +22,7 @@ You can also send questions to *sockeye-dev-at-amazon-dot-com*.
 ## Documentation
 
 For information on how to use Sockeye, please visit [our documentation](https://awslabs.github.io/sockeye/).
-Developers may be interested in our [developer guidelines](development.html).
+Developers may be interested in our [developer guidelines](https://awslabs.github.io/sockeye/development.html).
 
 ## Citation
 
