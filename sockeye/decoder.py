@@ -234,6 +234,11 @@ class TransformerDecoder(Decoder):
                                                               fixed_pos_embed_scale_down_positions=False,
                                                               prefix=C.TARGET_POSITIONAL_EMBEDDING_PREFIX)
 
+        if self.config.use_soft_act:
+            self.act_weights = mx.sym.Variable("%sact_select_weight" % self.prefix)
+            self.act_bias = mx.sym.Variable("%sact_select_bias" % self.prefix)
+
+
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
                         source_encoded_lengths: mx.sym.Symbol,
@@ -272,11 +277,33 @@ class TransformerDecoder(Decoder):
         if self.config.dropout_prepost > 0.0:
             target = mx.sym.Dropout(data=target, p=self.config.dropout_prepost)
 
-        for layer in self.layers:
-            target = layer(target=target,
+        if self.config.use_soft_act:
+            outputs, act_probs = [], []
+            for i, layer in enumerate(self.layers):
+                y_i = layer(target=target,
                            target_bias=target_bias,
                            source=source_encoded,
                            source_bias=source_bias)
+                p_i = mx.sym.FullyConnected(y_i, weight=self.act_weights, bias=self.act_bias, num_hidden=1, flatten=False, name='%sact_end_prob_%d' % (self.prefix, i))
+                p_i = mx.sym.sigmoid(p_i)
+
+                outputs.append(y_i)    # outputs (states) of the decoder
+                act_probs.append(p_i)  # likelihood of using this state's output
+                target = y_i
+
+            act_probs = mx.sym.stack(*act_probs, axis=-2)
+            act_probs = mx.sym.softmax(act_probs, axis=-2, name="%ssoft_act_softmax" % self.prefix)
+            enc_states = mx.sym.stack(*outputs, axis=-2)
+
+            target = mx.sym.broadcast_mul(enc_states, act_probs)
+            target = mx.sym.sum(target, axis=-2, name="%ssoft_act_sum" % self.prefix)
+        else:
+            for layer in self.layers:
+                target = layer(target=target,
+                           target_bias=target_bias,
+                           source=source_encoded,
+                           source_bias=source_bias)
+
         target = self.final_process(data=target, prev=None)
 
         return target

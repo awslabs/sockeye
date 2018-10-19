@@ -43,6 +43,7 @@ class TransformerConfig(config.Config):
                  conv_config: Optional['encoder.ConvolutionalEmbeddingConfig'] = None,
                  lhuc: bool = False,
                  universal: bool = False,
+                 use_soft_act: bool = False,
                  dtype: str = C.DTYPE_FP32) -> None:  # type: ignore
         super().__init__()
         self.model_size = model_size
@@ -61,6 +62,7 @@ class TransformerConfig(config.Config):
         self.conv_config = conv_config
         self.use_lhuc = lhuc
         self.universal = universal
+        self.use_soft_act = use_soft_act
         self.dtype = dtype
 
 

@@ -668,6 +668,12 @@ def add_model_parameters(params):
                               action="store_true",
                               help="Define a universal transformer, as in Dehghani et al. 2018. Default: %(default)s.")
 
+    model_params.add_argument('--use-soft-act',
+                              action="store_true",
+                              help="Enables soft version of Adaptive Computation Time for Recurrent Neural Networks, "
+                                   "as in (Graves, 2017)."
+                              )
+
     # LHUC
     # TODO: The convolutional model does not support lhuc yet
     model_params.add_argument('--lhuc',

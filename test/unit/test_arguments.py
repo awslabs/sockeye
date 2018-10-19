@@ -96,6 +96,8 @@ def test_device_args(test_params, expected_params):
               transformer_positional_embedding_type="fixed",
               transformer_preprocess=('n', 'n'),
               transformer_postprocess=('dr', 'dr'),
+              universal_transformer=False,
+              use_soft_act=False,
               rnn_attention_use_prev_word=False,
               rnn_decoder_state_init="last",
               rnn_encoder_reverse_input=False,
