@@ -1629,7 +1629,7 @@ class Translator:
 
             # (8) optionally save beam history
             if self.store_beam:
-                finished_or_inactive = mx.nd.clip(data=finished + inactive, a_min=0, a_max=1)
+                finished_or_inactive = mx.nd.clip(data=finished + inactive, a_min=0, a_max=1).reshape(-1,1)
                 unnormalized_scores = mx.nd.where(finished_or_inactive,
                                                   scores_accumulated * self.length_penalty(lengths),
                                                   scores_accumulated)
