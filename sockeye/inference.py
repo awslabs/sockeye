@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import time
+import re
 from collections import defaultdict
 from functools import lru_cache, partial
 from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set
@@ -1101,6 +1102,12 @@ class Translator:
                     logger.warning("Global avoid phrase '%s' contains an %s; this may indicate improper preprocessing.", ' '.join(phrase), C.UNK_SYMBOL)
                 self.global_avoid_trie.add_phrase(phrase_ids)
 
+        self._named_entities_tgt = dict()
+        named_entity_pattern = re.compile(r'(PERSON|LOCATION|ORGANIZATION)@\d')
+        for token, token_id in self.vocab_target.items():
+            if re.fullmatch(named_entity_pattern, token):
+                self._named_entities_tgt[token] = token_id
+
         logger.info("Translator (%d model(s) beam_size=%d beam_prune=%s beam_search_stop=%s "
                     "ensemble_mode=%s batch_size=%d buckets_source=%s avoiding=%d)",
                     len(self.models),
@@ -1295,9 +1302,12 @@ class Translator:
                 raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
                                       trans_input.constraints]
 
+            raw_avoid_list[j] = [[token_id] for token, token_id in self._named_entities_tgt.items()
+                                 if token not in frozenset(trans_input.tokens)]
+
             if trans_input.avoid_list is not None:
-                raw_avoid_list[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
-                                     trans_input.avoid_list]
+                raw_avoid_list[j].extend([data_io.tokens2ids(phrase, self.vocab_target) for phrase in
+                                         trans_input.avoid_list])
                 if any(self.unk_id in phrase for phrase in raw_avoid_list[j]):
                     logger.warning("Sentence %s: %s was found in the list of phrases to avoid; "
                                    "this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
