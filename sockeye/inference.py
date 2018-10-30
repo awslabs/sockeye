@@ -966,6 +966,27 @@ def _concat_translations(translations: List[Translation], stop_ids: Set[int],
     score = score / length_penalty.get(len(target_ids))
     return Translation(target_ids, attention_matrix_combined, score, beam_histories)
 
+samplek_batch_size = None
+samplek_k = None
+samplek_vocab_size = None
+samplek_temp_ = None
+samplek_ctx = None
+mx.random.seed(int(time.time()))
+def _samplek(scores):
+    folded_scores = scores.reshape((samplek_batch_size, samplek_k * samplek_vocab_size))
+    normalized_scores = mx.nd.softmax(-folded_scores, axis=1, temperature=samplek_temp_)
+    indices = mx.nd.sample_multinomial(normalized_scores, shape=samplek_k)
+    values = mx.nd.array(folded_scores.asnumpy()[np.arange(indices.shape[0])[:, None], indices.asnumpy()], ctx=samplek_ctx)
+
+    indices = mx.nd.reshape(mx.nd.cast(indices, 'int32'), shape=(-1,))
+    unraveled = mx.nd.unravel_index(indices, shape=(samplek_batch_size * samplek_k, samplek_vocab_size))
+    
+    offset = mx.nd.repeat(mx.nd.arange(0, samplek_batch_size * samplek_k, samplek_k, dtype='int32', ctx=samplek_ctx), samplek_k)
+    best_hyp_indices, best_word_indices = mx.nd.split(unraveled, axis=0, num_outputs=2, squeeze_axis=True)
+    best_hyp_indices = best_hyp_indices + offset
+    values = mx.nd.reshape(values, shape=(-1, 1))
+    return best_hyp_indices, best_word_indices, values
+
 
 class Translator:
     """
@@ -986,6 +1007,7 @@ class Translator:
     :param store_beam: If True, store the beam search history and return it in the TranslatorOutput.
     :param strip_unknown_words: If True, removes any <unk> symbols from outputs.
     :param skip_topk: If True, uses argmax instead of topk for greedy decoding.
+    :param samplek: If True, uses multinomial instead of topk for decoding by sampling.
     """
 
     def __init__(self,
@@ -1002,7 +1024,9 @@ class Translator:
                  avoid_list: Optional[str] = None,
                  store_beam: bool = False,
                  strip_unknown_words: bool = False,
-                 skip_topk: bool = False) -> None:
+                 skip_topk: bool = False,
+                 samplek: bool = False,
+                 samplek_temp: float = 1) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
@@ -1032,6 +1056,8 @@ class Translator:
             utils.check_condition(len(self.models) == 1 and self.beam_size == 1, "Skipping softmax cannot be enabled for several models, or a beam size > 1.")
 
         self.skip_topk = skip_topk
+        self.samplek = samplek
+        self.samplek_temp = samplek_temp
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         self._max_input_length = self.models[0].max_input_length
         if bucket_source_width > 0:
@@ -1070,6 +1096,18 @@ class Translator:
                                  batch_size=self.batch_size)  # type: mx.gluon.HybridBlock
                 self._top.initialize(ctx=self.context)
                 self._top.hybridize(static_alloc=True, static_shape=True)
+            elif self.samplek:
+                self._top = _samplek
+                global samplek_batch_size
+                global samplek_vocab_size
+                global samplek_k
+                global samplek_temp_
+                global samplek_ctx
+                samplek_batch_size = self.batch_size
+                samplek_vocab_size = len(self.vocab_target)
+                samplek_k = self.beam_size
+                samplek_temp_ = self.samplek_temp
+                samplek_ctx = self.context
             else:
                 self._top = TopK(k=self.beam_size,
                                  batch_size=self.batch_size,
@@ -1882,12 +1920,59 @@ class TopK(mx.gluon.HybridBlock):
         """
         folded_scores = F.reshape(scores, shape=(self.batch_size, self.k * self.vocab_size))
         values, indices = F.topk(folded_scores, axis=1, k=self.k, ret_typ='both', is_ascend=True)
+                
         indices = F.reshape(F.cast(indices, 'int32'), shape=(-1,))
         unraveled = F.unravel_index(indices, shape=(self.batch_size * self.k, self.vocab_size))
+        
         best_hyp_indices, best_word_indices = F.split(unraveled, axis=0, num_outputs=2, squeeze_axis=True)
         best_hyp_indices = best_hyp_indices + offset
         values = F.reshape(values, shape=(-1, 1))
         return best_hyp_indices, best_word_indices, values
+
+class SampleK(mx.gluon.HybridBlock):
+    """
+    A HybridBlock for a statically-shaped batch-wise topk operation.
+    """
+
+    def __init__(self, k: int, batch_size: int, vocab_size: int) -> None:
+        """
+        :param k: The number of smallest scores to return.
+        :param batch_size: Number of sentences being decoded at once.
+        :param vocab_size: Vocabulary size.
+        """
+        super().__init__()
+        self.k = k
+        self.batch_size = batch_size
+        self.vocab_size = vocab_size
+        with self.name_scope():
+            offset = mx.nd.repeat(mx.nd.arange(0, batch_size * k, k, dtype='int32'), k)
+            self.offset = self.params.get_constant(name='offset', value=offset)
+
+    def hybrid_forward(self, F, scores, offset):
+        """
+        Get the lowest k elements per sentence from a `scores` matrix.
+
+        :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+        :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+        :return: The row indices, column indices and values of the k smallest items in matrix.
+        """
+        folded_scores = F.reshape(scores, shape=(self.batch_size, self.k * self.vocab_size))
+        normalized_scores = F.softmax(folded_scores, axis=1)
+        indices = F.random.multinomial(normalized_scores, shape=self.k)
+        #print(indices[:2])
+        values = F.take(folded_scores, indices)
+
+
+        indices = F.reshape(F.cast(indices, 'int32'), shape=(-1,))
+        unraveled = F.unravel_index(indices, shape=(self.batch_size * self.k, self.vocab_size))
+        
+        #values = folded_scores[unraveled]
+        
+        best_hyp_indices, best_word_indices = F.split(unraveled, axis=0, num_outputs=2, squeeze_axis=True)
+        best_hyp_indices = best_hyp_indices + offset
+        values = F.reshape(values, shape=(-1, 1))
+        return best_hyp_indices, best_word_indices, values
+
 
 
 class Top1(mx.gluon.HybridBlock):

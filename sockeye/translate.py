@@ -107,7 +107,9 @@ def run_translate(args: argparse.Namespace):
                                           avoid_list=args.avoid_list,
                                           store_beam=store_beam,
                                           strip_unknown_words=args.strip_unknown_words,
-                                          skip_topk=args.skip_topk)
+                                          skip_topk=args.skip_topk,
+                                          samplek=args.samplek,
+                                          samplek_temp=args.samplek_temp)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
