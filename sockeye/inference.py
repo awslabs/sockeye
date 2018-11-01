@@ -20,7 +20,7 @@ import logging
 import os
 import time
 import re
-from collections import defaultdict
+from collections import defaultdict, Counter
 from functools import lru_cache, partial
 from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set
 
@@ -1003,11 +1003,13 @@ class Translator:
                  avoid_list: Optional[str] = None,
                  store_beam: bool = False,
                  strip_unknown_words: bool = False,
-                 skip_topk: bool = False) -> None:
+                 skip_topk: bool = False,
+                 beam_block_ngram: int = 0) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
         self.beam_search_stop = beam_search_stop
+        self.beam_block_ngram = beam_block_ngram
         self.source_vocabs = source_vocabs
         self.vocab_target = target_vocab
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
@@ -1444,6 +1446,38 @@ class Translator:
             neg_probs = self.interpolation_func(probs)
         return neg_probs, attention_prob_score
 
+    def _get_ngram_block_indices(self,
+                                 beam_histories: List[BeamHistory]) -> List[int]:
+        block_indices = []
+        for sentence_idx in range(self.batch_size):
+            num_finished_hyps = 0
+            sentence_block_indices = []
+            tokens = beam_histories[sentence_idx]['predicted_tokens']
+            parent_ids = beam_histories[sentence_idx]['parent_ids']
+            for hyp_idx in range(self.beam_size):
+                current_hyp = []
+                current_id = hyp_idx
+                # Reconstruct each hyp from the tail
+                for token_idx in range(len(tokens)-1, -1, -1):
+                    token = tokens[token_idx][current_id]
+                    if token == '</s>':
+                        num_finished_hyps += 1
+                        break
+                    elif token != '<pad>':
+                        current_hyp.append(token)
+                    current_id = parent_ids[token_idx][current_id]
+                if len(current_hyp) < self.beam_block_ngram:
+                    continue
+                ngrams = zip(*[current_hyp[i:] for i in range(self.beam_block_ngram)])
+                counts = Counter(ngrams)
+                if any(v > 1 for k, v in counts.items()):
+                    sentence_block_indices.append(sentence_idx*self.beam_size + hyp_idx)
+            # Do not block if these are the only hyps remaining
+            if num_finished_hyps + len(sentence_block_indices) < self.beam_size:
+                block_indices.extend(sentence_block_indices)
+
+        return block_indices
+
     def _beam_search(self,
                      source: mx.nd.NDArray,
                      source_length: int,
@@ -1574,6 +1608,11 @@ class Translator:
                                                                        states=model_states,
                                                                        models_output_layer_w=models_output_layer_w,
                                                                        models_output_layer_b=models_output_layer_b)
+
+            if self.store_beam and self.beam_block_ngram > 0:
+                block_indices = self._get_ngram_block_indices(beam_histories)
+                if len(block_indices) > 0:
+                    scores[block_indices] = np.inf
 
             # (2) Update scores. Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
