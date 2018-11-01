@@ -1282,6 +1282,10 @@ def add_inference_args(params):
                                type=str,
                                help='EXPERIMENTAL: may be changed or removed in future. Overrides training dtype of '
                                     'encoders and decoders during inference. Default: %(default)s')
+    decode_params.add_argument('--beam-block-ngram',
+                               default=0,
+                               type=int,
+                               help='Block all repeating ngrams up to length n')
 
 
 def add_evaluate_args(params):
