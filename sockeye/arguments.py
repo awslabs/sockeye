@@ -1214,18 +1214,15 @@ def add_inference_args(params):
                                action='store_true',
                                help='Use argmax instead of topk for greedy decoding (when --beam-size 1).'
                                     'Default: %(default)s.')
-    decode_params.add_argument('--samplek',
+    decode_params.add_argument('--sample',
                                default=False,
                                action='store_true',
-                               help='Use multinomial instead of topk for decoding by sampling.'
+                               help='Sample from softmax instead of taking best.'
                                     'Default: %(default)s.')
-    decode_params.add_argument('--samplek-temp',
-                               default=1,
-                               type=float,
-                               help='The sampling temperature.'
-                                    'Default: %(default)s.')
-
-
+    decode_params.add_argument('--seed',
+                               type=int,
+                               default=C.DEFAULT_RANDOM_SEED,
+                               help='Random seed used if sampling. Default: %(default)s.')
     decode_params.add_argument('--ensemble-mode',
                                type=str,
                                default='linear',
