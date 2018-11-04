@@ -16,6 +16,7 @@ Defines various constants used througout the project
 """
 import mxnet as mx
 import numpy as np
+import time
 
 BOS_SYMBOL = "<s>"
 EOS_SYMBOL = "</s>"
@@ -27,6 +28,9 @@ TOKEN_SEPARATOR = " "
 VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
 # reserve extra space for the EOS or BOS symbol that is added to both source and target
 SPACE_FOR_XOS = 1
+
+# Defined once here so the value used can be retrieved elsewhere (e.g., for unit tests)
+DEFAULT_RANDOM_SEED = int(time.time())
 
 ARG_SEPARATOR = ":"
 

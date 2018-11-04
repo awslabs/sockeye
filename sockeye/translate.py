@@ -29,6 +29,7 @@ from . import arguments
 from . import constants as C
 from . import data_io
 from . import inference
+from . import utils
 
 logger = setup_main_logger(__name__, file_logging=False)
 
@@ -41,6 +42,8 @@ def main():
 
 
 def run_translate(args: argparse.Namespace):
+
+    utils.seed_rngs(args.seed)
 
     if args.output is not None:
         global logger
@@ -76,6 +79,12 @@ def run_translate(args: argparse.Namespace):
                            'This feature may be removed or change its behaviour in future. '
                            'DO NOT USE IT IN PRODUCTION!')
 
+        # Skip softmax for a single model when not doing ensembling or beam search or sampling
+        skip_softmax = False
+        if len(args.models) == 1 and args.beam_size == 1 and not args.sample:
+            skip_softmax = True
+            logger.info("Enabled skipping softmax for a single model and greedy decoding.")
+
         models, source_vocabs, target_vocab = inference.load_models(
             context=context,
             max_input_len=args.max_input_len,
@@ -108,8 +117,7 @@ def run_translate(args: argparse.Namespace):
                                           store_beam=store_beam,
                                           strip_unknown_words=args.strip_unknown_words,
                                           skip_topk=args.skip_topk,
-                                          samplek=args.samplek,
-                                          samplek_temp=args.samplek_temp)
+                                          sample=args.sample)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
