@@ -16,13 +16,12 @@ recursive-exclude sockeye_contrib *
 include pytest.ini
 recursive-include test *.py
 recursive-include test *.ini
-recursive-include docs *.bat
+recursive-include docs *.bib
+recursive-include docs *.html
+recursive-include docs *.png
 recursive-include docs *.md
 recursive-include docs *.py
-recursive-include docs *.rst
 recursive-include docs *.yml
-recursive-include docs Makefile
-recursive-include tutorials *.md
-recursive-include tutorials *.png
-recursive-include tutorials *.py
+recursive-include docs *.ico
+recursive-include docs *.css
 recursive-include test *.txt
