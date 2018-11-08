@@ -18,7 +18,7 @@ These sequences are then split into disjoint training and development sets.
 Run the following command to create the data set:
 
 ```bash
-wget https://raw.githubusercontent.com/awslabs/sockeye/master/tutorials/seqcopy/genseqcopy.py
+wget https://raw.githubusercontent.com/awslabs/sockeye/master/docs/tutorials/seqcopy/genseqcopy.py
 python genseqcopy.py
 ```
 
