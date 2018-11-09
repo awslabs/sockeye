@@ -176,7 +176,7 @@ def create_checkpoint_decoder(args: argparse.Namespace,
     if args.use_cpu or args.decode_and_evaluate_use_cpu:
         context = mx.cpu()
     elif args.decode_and_evaluate_device_id is not None:
-        context = utils.determine_context(device_ids=args.decode_and_evaluate_device_id,
+        context = utils.determine_context(device_ids=[args.decode_and_evaluate_device_id],
                                           use_cpu=False,
                                           disable_device_locking=args.disable_device_locking,
                                           lock_dir=args.lock_dir,
