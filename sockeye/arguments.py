@@ -1286,6 +1286,10 @@ def add_inference_args(params):
                                default=0,
                                type=int,
                                help='Block all repeating ngrams up to length n')
+    decode_params.add_argument('--single-hyp-max',
+                               default=0,
+                               type=int,
+                               help='Limit the number of continuations that can come from a single hypothesis.')
 
 
 def add_evaluate_args(params):

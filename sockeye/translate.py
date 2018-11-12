@@ -56,6 +56,9 @@ def run_translate(args: argparse.Namespace):
         check_condition(args.beam_size == 1, "--skip-topk has no effect if beam size is larger than 1")
         check_condition(len(args.models) == 1, "--skip-topk has no effect for decoding with more than 1 model")
 
+    if args.single_hyp_max:
+        check_condition(args.single_hyp_max <= args.beam_size, "--single-hyp-max should be at most the beam size")
+
     log_basic_info(args)
 
     output_handler = get_output_handler(args.output_type,
@@ -108,7 +111,8 @@ def run_translate(args: argparse.Namespace):
                                           store_beam=store_beam,
                                           strip_unknown_words=args.strip_unknown_words,
                                           skip_topk=args.skip_topk,
-                                          beam_block_ngram=args.beam_block_ngram)
+                                          beam_block_ngram=args.beam_block_ngram,
+                                          single_hyp_max=args.single_hyp_max)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
