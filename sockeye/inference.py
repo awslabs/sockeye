@@ -1004,12 +1004,14 @@ class Translator:
                  store_beam: bool = False,
                  strip_unknown_words: bool = False,
                  skip_topk: bool = False,
-                 beam_block_ngram: int = 0) -> None:
+                 beam_block_ngram: int = 0,
+                 single_hyp_max: int = 0) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
         self.beam_search_stop = beam_search_stop
         self.beam_block_ngram = beam_block_ngram
+        self.single_hyp_max = single_hyp_max
         self.source_vocabs = source_vocabs
         self.vocab_target = target_vocab
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
@@ -1626,6 +1628,12 @@ class Translator:
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
+            if self.single_hyp_max and t > 1:
+                mask = mx.nd.topk(scores, axis=1, k=self.single_hyp_max, ret_typ='mask', is_ascend=True)
+                infs = np.inf * mx.nd.ones_like(scores)
+                infs = mx.nd.where(mask == 1, mask, infs)
+                scores = mx.nd.multiply(infs, scores)
+
             best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores)
 
             # Constraints for constrained decoding are processed sentence by sentence
