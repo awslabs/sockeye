@@ -291,7 +291,8 @@ def add_rerank_args(params):
     rerank_params.add_argument("--hypotheses", "-hy",
                                type=str,
                                required=True,
-                               help="File with nbest translations, one nbest list per line, in JSON format.")
+                               help="File with nbest translations, one nbest list per line,"
+                                    "in JSON format as returned by sockeye.translate with --nbest-size x.")
     rerank_params.add_argument("--metric", "-m",
                                type=str,
                                required=False,
@@ -302,6 +303,9 @@ def add_rerank_args(params):
     rerank_params.add_argument("--output-best",
                                action="store_true",
                                help="Output only the best hypothesis from each nbest list.")
+    rerank_params.add_argument("--return-score",
+                               action="store_true",
+                               help="Returns the reranking scores as scores in output JSON objects.")
 
 
 def add_lexicon_args(params):
