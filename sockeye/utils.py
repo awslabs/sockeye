@@ -718,7 +718,7 @@ class GpuFileLock:
             except portalocker.LockException as e:
                 # portalocker packages the original exception,
                 # we dig it out and raise if unrelated to us
-                if e.args[0].errno != errno.EAGAIN:
+                if e.args[0].errno != errno.EAGAIN:  # pylint: disable=no-member
                     logger.error("Failed acquiring GPU lock.", exc_info=True)
                     raise e.args[0]
                 else:
