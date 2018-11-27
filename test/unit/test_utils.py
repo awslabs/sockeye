@@ -64,7 +64,7 @@ def test_expand_requested_device_ids(requested_device_ids, num_gpus_available, e
 
 
 @pytest.mark.parametrize("requested_device_ids, num_gpus_available, expected", device_params)
-def test_aquire_gpus(tmpdir, requested_device_ids, num_gpus_available, expected):
+def test_acquire_gpus(tmpdir, requested_device_ids, num_gpus_available, expected):
     with utils.acquire_gpus(requested_device_ids, lock_dir=str(tmpdir),
                             num_gpus_available=num_gpus_available) as acquired_gpus:
         assert set(acquired_gpus) == set(expected)
@@ -91,7 +91,7 @@ def test_expand_requested_device_ids_exception(requested_device_ids, num_gpus_av
 
 
 @pytest.mark.parametrize("requested_device_ids, num_gpus_available", device_params_expected_exception)
-def test_aquire_gpus_exception(tmpdir, requested_device_ids, num_gpus_available):
+def test_acquire_gpus_exception(tmpdir, requested_device_ids, num_gpus_available):
     with pytest.raises(ValueError):
         with utils.acquire_gpus(requested_device_ids, lock_dir=str(tmpdir),
                                 num_gpus_available=num_gpus_available) as _:
@@ -104,7 +104,7 @@ device_params_1_locked = [([-4, 3, 5], 7, [0, 2, 3, 4, 5, 6]),
 
 
 @pytest.mark.parametrize("requested_device_ids, num_gpus_available, expected", device_params_1_locked)
-def test_aquire_gpus_1_locked(tmpdir, requested_device_ids, num_gpus_available, expected):
+def test_acquire_gpus_1_locked(tmpdir, requested_device_ids, num_gpus_available, expected):
     gpu_1 = 1
     with utils.GpuFileLock([gpu_1], str(tmpdir)) as lock:
         with utils.acquire_gpus(requested_device_ids, lock_dir=str(tmpdir),
