@@ -763,7 +763,7 @@ def main():
     train(args)
 
 
-def train(args: argparse.Namespace):
+def train(args: argparse.Namespace) -> training.TrainState:
     if args.dry_run:
         # Modify arguments so that we write to a temporary directory and
         # perform 0 training iterations
@@ -863,26 +863,26 @@ def train(args: argparse.Namespace):
                                                 source_vocabs=source_vocabs,
                                                 target_vocab=target_vocab)
 
-        trainer.fit(train_iter=train_iter,
-                    validation_iter=eval_iter,
-                    early_stopping_metric=args.optimized_metric,
-                    metrics=args.metrics,
-                    checkpoint_frequency=args.checkpoint_frequency,
-                    max_num_not_improved=max_num_checkpoint_not_improved,
-                    min_samples=min_samples,
-                    max_samples=max_samples,
-                    min_updates=min_updates,
-                    max_updates=max_updates,
-                    min_epochs=min_epochs,
-                    max_epochs=max_epochs,
-                    lr_decay_param_reset=args.learning_rate_decay_param_reset,
-                    lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset,
-                    decoder=create_checkpoint_decoder(args, exit_stack, context),
-                    mxmonitor_pattern=args.monitor_pattern,
-                    mxmonitor_stat_func=args.monitor_stat_func,
-                    allow_missing_parameters=args.allow_missing_params or model_config.lhuc,
-                    existing_parameters=args.params)
-
+        training_state = trainer.fit(train_iter=train_iter,
+                                     validation_iter=eval_iter,
+                                     early_stopping_metric=args.optimized_metric,
+                                     metrics=args.metrics,
+                                     checkpoint_frequency=args.checkpoint_frequency,
+                                     max_num_not_improved=max_num_checkpoint_not_improved,
+                                     min_samples=min_samples,
+                                     max_samples=max_samples,
+                                     min_updates=min_updates,
+                                     max_updates=max_updates,
+                                     min_epochs=min_epochs,
+                                     max_epochs=max_epochs,
+                                     lr_decay_param_reset=args.learning_rate_decay_param_reset,
+                                     lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset,
+                                     decoder=create_checkpoint_decoder(args, exit_stack, context),
+                                     mxmonitor_pattern=args.monitor_pattern,
+                                     mxmonitor_stat_func=args.monitor_stat_func,
+                                     allow_missing_parameters=args.allow_missing_params or model_config.lhuc,
+                                     existing_parameters=args.params)
+        return training_state
 
 if __name__ == "__main__":
     main()

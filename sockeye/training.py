@@ -377,7 +377,7 @@ class TrainState:
 
     __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint',
                  'updates', 'samples', 'gradient_norm', 'gradients', 'metrics', 'start_tic',
-                 'early_stopping_metric', 'best_metric', 'best_checkpoint']
+                 'early_stopping_metric', 'best_metric', 'best_checkpoint', 'converged']
 
     def __init__(self, early_stopping_metric: str) -> None:
         self.num_not_improved = 0
@@ -394,6 +394,7 @@ class TrainState:
         self.early_stopping_metric = early_stopping_metric
         self.best_metric = C.METRIC_WORST[early_stopping_metric]
         self.best_checkpoint = 0
+        self.converged = False
 
     def save(self, fname: str):
         """
@@ -455,7 +456,7 @@ class EarlyStoppingTrainer:
             mxmonitor_pattern: Optional[str] = None,
             mxmonitor_stat_func: Optional[str] = None,
             allow_missing_parameters: bool = False,
-            existing_parameters: Optional[str] = None):
+            existing_parameters: Optional[str] = None) -> TrainState:
         """
         Fits model to data given by train_iter using early-stopping w.r.t data given by val_iter.
         Saves all intermediate and final output to output_folder.
@@ -488,7 +489,7 @@ class EarlyStoppingTrainer:
         :param allow_missing_parameters: Allow missing parameters when initializing model parameters from file.
         :param existing_parameters: Optional filename of existing/pre-trained parameters to initialize from.
 
-        :return: Best score on validation data observed during training.
+        :return: Training state.
         """
         self._check_args(metrics, early_stopping_metric, lr_decay_opt_states_reset, lr_decay_param_reset, decoder)
         logger.info("Early stopping by optimizing '%s'", early_stopping_metric)
@@ -619,31 +620,34 @@ class EarlyStoppingTrainer:
                 if 0 <= max_num_not_improved <= self.state.num_not_improved:
                     logger.info("Maximum number of not improved checkpoints (%d) reached: %d",
                                 max_num_not_improved, self.state.num_not_improved)
-                    stop_fit = True
+                    self.state.converged = True
 
                     if min_epochs is not None and self.state.epoch < min_epochs:
                         logger.info("Minimum number of epochs (%d) not reached yet: %d",
                                     min_epochs, self.state.epoch)
-                        stop_fit = False
+                        self.state.converged = False
 
                     if min_updates is not None and self.state.updates < min_updates:
                         logger.info("Minimum number of updates (%d) not reached yet: %d",
                                     min_updates, self.state.updates)
-                        stop_fit = False
+                        self.state.converged = False
 
                     if min_samples is not None and self.state.samples < min_samples:
                         logger.info("Minimum number of samples (%d) not reached yet: %d",
                                     min_samples, self.state.samples)
 
-                    if stop_fit:
+                    if self.state.converged:
                         break
 
                 tic = time.time()
 
-        self._cleanup(lr_decay_opt_states_reset, process_manager=process_manager)
-        logger.info("Training finished. Best checkpoint: %d. Best validation %s: %.6f",
+        self._cleanup(lr_decay_opt_states_reset, process_manager=process_manager,
+                      keep_training_state=not self.state.converged)
+        logger.info("Training finished%s. Best checkpoint: %d. Best validation %s: %.6f",
+                    ", can be continued later" if not self.state.converged else "",
                     self.state.best_checkpoint, early_stopping_metric, self.state.best_metric)
-        return self.state.best_metric
+
+        return self.state
 
     def _step(self,
               model: TrainingModel,
@@ -747,7 +751,8 @@ class EarlyStoppingTrainer:
         tf_metrics.update(self.model.params)
         self.tflogger.log_metrics(metrics=tf_metrics, checkpoint=self.state.checkpoint)
 
-    def _cleanup(self, lr_decay_opt_states_reset: str, process_manager: Optional['DecoderProcessManager'] = None):
+    def _cleanup(self, lr_decay_opt_states_reset: str, process_manager: Optional['DecoderProcessManager'] = None,
+                 keep_training_state = False):
         """
         Cleans parameter files, training state directory and waits for remaining decoding processes.
         """
@@ -761,13 +766,14 @@ class EarlyStoppingTrainer:
                 self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
             utils.write_metrics_file(self.state.metrics, self.metrics_fname)
 
-        final_training_state_dirname = os.path.join(self.model.output_dir, C.TRAINING_STATE_DIRNAME)
-        if os.path.exists(final_training_state_dirname):
-            shutil.rmtree(final_training_state_dirname)
-        if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
-            best_opt_states_fname = os.path.join(self.model.output_dir, C.OPT_STATES_BEST)
-            if os.path.exists(best_opt_states_fname):
-                os.remove(best_opt_states_fname)
+        if not keep_training_state:
+            final_training_state_dirname = os.path.join(self.model.output_dir, C.TRAINING_STATE_DIRNAME)
+            if os.path.exists(final_training_state_dirname):
+                shutil.rmtree(final_training_state_dirname)
+            if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_BEST:
+                best_opt_states_fname = os.path.join(self.model.output_dir, C.OPT_STATES_BEST)
+                if os.path.exists(best_opt_states_fname):
+                    os.remove(best_opt_states_fname)
 
     def _initialize_parameters(self, params: Optional[str], allow_missing_params: bool):
         self.model.initialize_parameters(self.optimizer_config.initializer, allow_missing_params)

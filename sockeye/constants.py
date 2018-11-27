@@ -238,7 +238,10 @@ ARGS_STATE_NAME = "args.yaml"
 # Arguments that may differ and still resume training
 ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet",
                    "align_plot_prefix", "sure_align_threshold",
-                   "keep_last_params"]
+                   "keep_last_params", "seed",
+                   "max-updates", "min-updates",
+                   "max-num-epochs", "min-num-epochs",
+                   "max-samples", "min-samples"]
 
 # Other argument constants
 TRAINING_ARG_SOURCE = "--source"
