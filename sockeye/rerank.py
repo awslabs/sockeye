@@ -88,7 +88,8 @@ def rerank(args: argparse.Namespace):
             # Expects a JSON object with keys containing at least 'translations',
             # as returned by sockeye.translate's nbest output
             hypotheses = json.loads(hypothesis_line.strip())
-            assert 'translations' in hypotheses
+            utils.check_condition('translations' in hypotheses,
+                                  "Reranking requires nbest JSON input with 'translations' key present.")
             num_hypotheses = len(hypotheses['translations'])
 
             if not num_hypotheses > 1:
