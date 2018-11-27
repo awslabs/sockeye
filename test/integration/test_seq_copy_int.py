@@ -41,6 +41,14 @@ ENCODER_DECODER_SETTINGS = [
      " --decode-and-evaluate 0",
      "--beam-size 1 --softmax-temperature 0.01 --skip-topk",
      True, False, False),
+    # "Vanilla" LSTM encoder-decoder with attention, higher nbest size
+    ("--encoder rnn --decoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 8 --num-embed 4 "
+     " --rnn-attention-type mlp"
+     " --rnn-attention-num-hidden 8 --batch-size 2 --loss cross-entropy --optimized-metric perplexity --max-updates 2"
+     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01 --batch-type sentence "
+     " --decode-and-evaluate 0",
+     "--beam-size 2 --softmax-temperature 0.01 --nbest-size 2",
+     True, False, False),
     # "Kitchen sink" LSTM encoder-decoder with attention
     ("--encoder rnn --decoder rnn --num-layers 3:2 --rnn-cell-type lstm --rnn-num-hidden 8"
      " --rnn-residual-connections"
@@ -89,7 +97,7 @@ ENCODER_DECODER_SETTINGS = [
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01",
-     "--beam-size 2",
+     "--beam-size 2 --nbest-size 2",
      True, False, False),
     # Full transformer with source factor
     ("--encoder transformer --decoder transformer"
@@ -110,14 +118,13 @@ ENCODER_DECODER_SETTINGS = [
      True, False, False),
     # Vanilla LSTM like above but activating LHUC. In the normal case you would
     # start with a trained system instead of a random initialized one like here.
-    (
-     "--encoder rnn --decoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 8 --num-embed 4 "
+    ("--encoder rnn --decoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 8 --num-embed 4 "
      " --rnn-attention-num-hidden 8 --rnn-attention-type mlp"
      " --batch-size 2 --batch-type sentence"
      " --loss cross-entropy --optimized-metric perplexity --max-updates 2"
      " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
-     "--beam-size 2",
-    True, False, False),
+     "--beam-size 2 --nbest-size 2",
+     True, False, False),
     # Full transformer with LHUC
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -160,7 +167,14 @@ def test_seq_copy(train_params: str,
             test_source_factor_paths = [data['test_source']]
 
         # Test model configuration, including the output equivalence of batch and no-batch decoding
-        translate_params_batch = translate_params + " --batch-size 2"
+        if "--nbest-size" not in translate_params.split():
+            translate_params_batch = translate_params + " --batch-size 2"
+        else:
+            # nbest produces json output, which doesn't work with the splitting
+            # of translations and scores in run_train_translate, which in turn
+            # makes the comparison with the batch decoding fail.
+            # TODO: Refactor the run_train_translate function!
+            translate_params_batch = None
 
         # Ignore return values (perplexity and BLEU) for integration test
         run_train_translate(train_params=train_params,

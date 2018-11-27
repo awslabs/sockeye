@@ -70,6 +70,17 @@ This object can also specify the source factors as a list of token-parallel stri
 { "text": "The boy ate the waff@@ le .", "factors": ["O O O O B E O"] }
 ```
 
+## N-best translations
+
+Sockeye can return the n best hypotheses per input (*nbest lists*).
+Such nbest lists can for example be used in reranking (`python -m sockeye.rerank`).
+
+When `--nbest-size > 1`, each line in the output of `translate` will contain the following JSON object:
+```python
+{"alignments": [<1st alignment>, <2nd alignment>, ...], "scores": [<1st score>, <2nd score>, ...], "translations": ["<1st hypothesis>", "<2nd hypothesis>", ...]}
+```
+Note that `--nbest-size` must be smaller or equal to `--beam-size` and `--beam-search-stop` must be set to `all`.
+
 ## Lexical constraints
 
 Lexical constraints provide a way to force the model to include certain words in the output.
@@ -136,7 +147,7 @@ As always, don't forget to apply source- and target-side preprocessing to your i
 On multi-core computers, translation per core separately can speedup translation performance, due to some operation can't be handled parallel in one process.
 Using this method, translation on each core can be parallel.
 
-One [python script example](https://raw.githubusercontent.com/awslabs/sockeye/master/tutorials/process_per_core_translation/cpu_process_per_core_translation.py) is given and you can run it as follows:
+One [python script example](https://raw.githubusercontent.com/awslabs/sockeye/master/docs/tutorials/cpu_process_per_core_translation.py) is given and you can run it as follows:
 
 ```bash
 > python cpu_process_per_core_translation.py -m model -i input_file_name -o output_file_name -bs batch_size -t true

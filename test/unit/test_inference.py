@@ -31,6 +31,7 @@ _EOS = -1
 
 def mock_translator(batch_size: int = 1,
                     beam_size: int = 5,
+                    nbest_size: int = 1,
                     beam_prune: float = 0,
                     num_source_factors: int = 1):
     """
@@ -44,6 +45,7 @@ def mock_translator(batch_size: int = 1,
                                                   length_penalty=None,
                                                   beam_prune=None,
                                                   beam_search_stop=None,
+                                                  nbest_size=None,
                                                   models=None,
                                                   source_vocabs=None,
                                                   target_vocab=None,
@@ -61,6 +63,7 @@ def mock_translator(batch_size: int = 1,
 
         translator.batch_size = batch_size
         translator.beam_size = beam_size
+        translator.nbest_size = nbest_size
         translator.beam_prune = beam_prune
         translator.zeros_array = mx.nd.zeros((beam_size,), dtype='int32')
         translator.inf_array = mx.nd.full((batch_size * beam_size,), val=np.inf, dtype='float32')
