@@ -456,7 +456,7 @@ class EarlyStoppingTrainer:
             mxmonitor_pattern: Optional[str] = None,
             mxmonitor_stat_func: Optional[str] = None,
             allow_missing_parameters: bool = False,
-            existing_parameters: Optional[str] = None) -> 'TrainState':
+            existing_parameters: Optional[str] = None) -> TrainState:
         """
         Fits model to data given by train_iter using early-stopping w.r.t data given by val_iter.
         Saves all intermediate and final output to output_folder.

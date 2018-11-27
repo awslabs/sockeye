@@ -14,7 +14,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Added
 - Full training state is now returned from EarlyStoppingTrainer's fit().
 ### Changed
-- Training state cleanup will not be performed for training runs that did not converge.
+- Training state cleanup will not be performed for training runs that did not converge yet.
 
 ## [1.18.58]
 ### Added
