@@ -38,11 +38,9 @@ import sockeye.rerank as rerank
 ])
 def test_rerank_hypotheses(hypotheses, reference, expected_output, metric):
     reranker = rerank.Reranker(metric=metric, return_score=False)
-
-    reranked = reranker.rerank_hypotheses(hypotheses, reference)
-    actual_list = reranked.hypotheses
-
-    assert actual_list == expected_output
+    hypotheses = {'translations': hypotheses}
+    reranked_hypotheses = reranker.rerank(hypotheses, reference)
+    assert reranked_hypotheses['translations'] == expected_output
 
 
 @pytest.mark.parametrize("hypotheses, reference, expected_scores", [
@@ -53,46 +51,8 @@ def test_rerank_hypotheses(hypotheses, reference, expected_output, metric):
 ])
 def test_rerank_return_score(hypotheses, reference, expected_scores):
     reranker = rerank.Reranker(metric="bleu", return_score=True)
-
-    reranked_with_scores = reranker.rerank_hypotheses(hypotheses, reference)
-
-    actual_scores = reranked_with_scores.scores
-
+    hypotheses = {'translations': hypotheses}
+    reranked_hypotheses = reranker.rerank(hypotheses, reference)
+    assert 'scores' in reranked_hypotheses
+    actual_scores = reranked_hypotheses['scores']
     assert np.allclose(actual_scores, expected_scores)
-
-
-@pytest.mark.parametrize("hypotheses, reference, expected_best", [
-    (["Completely different",
-      "No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament"],
-     "Parliament Does Not Support Amendment Fre@@ eing Ty@@ mo@@ sh@@ en@@ ko",
-     "No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament")
-])
-def test_rerank_top1(hypotheses, reference, expected_best):
-    reranker = rerank.Reranker(metric="bleu", return_score=False)
-
-    reranked = reranker.rerank_top1(hypotheses, reference)
-
-    assert len(reranked.hypotheses) == 1, "Rerank top1 should not return more than 1 hypothesis."
-    actual_hypothesis = reranked.hypotheses[0]
-
-    assert actual_hypothesis == expected_best
-
-
-@pytest.mark.parametrize("hypotheses, reference, expected_best, expected_score", [
-    (["Completely different",
-      "No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament"],
-     "Parliament Does Not Support Amendment Fre@@ eing Ty@@ mo@@ sh@@ en@@ ko",
-     "No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament",
-     60.26404810093175)
-])
-def test_rerank_top1_score(hypotheses, reference, expected_best, expected_score):
-    reranker = rerank.Reranker(metric="bleu", return_score=True)
-
-    reranked_with_scores = reranker.rerank_top1(hypotheses, reference)
-
-    assert len(reranked_with_scores.hypotheses) == 1, "Rerank top1 should not return more than 1 hypothesis."
-    actual_hypothesis = reranked_with_scores.hypotheses[0]
-    actual_score = reranked_with_scores.scores[0]
-
-    assert actual_hypothesis == expected_best
-    assert np.isclose(actual_score, expected_score)
