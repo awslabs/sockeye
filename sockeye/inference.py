@@ -1185,7 +1185,8 @@ class Translator:
                                  batch_size=self.batch_size)  # type: mx.gluon.HybridBlock
             elif self.sample:
                 self._top = SampleK(k=self.beam_size,
-                                    batch_size=self.batch_size)  # type: mx.gluon.HybridBlock
+                                    batch_size=self.batch_size,
+                                    context=self.context)  # type: mx.gluon.HybridBlock
             else:
                 self._top = TopK(k=self.beam_size,
                                  batch_size=self.batch_size,
@@ -1689,8 +1690,7 @@ class Translator:
 
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
         # item on the beam for each sentence
-        inactive = mx.nd.ones((self.batch_size * self.beam_size), dtype='int32', ctx=self.context)
-        inactive[::self.beam_size] = 0
+        inactive = mx.nd.zeros((self.batch_size * self.beam_size), dtype='int32', ctx=self.context)
         t = 1
         for t in range(1, max_output_length):
             # (1) obtain next predictions and advance models' state
@@ -1706,7 +1706,7 @@ class Translator:
             # (2) Produces the accumulated cost of target words in each row.
             # There is special treatment for finished and inactive rows: inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
-            scores = self._update_scores.forward(target_dists, finished, inactive, scores_accumulated, self.inf_array, pad_dist)
+            scores = self._update_scores.forward(target_dists, finished, inactive, scores_accumulated, pad_dist)
 
             # Mark entries that should be blocked as having a score of np.inf
             if self.global_avoid_trie or any(raw_avoid_list):
@@ -1721,21 +1721,20 @@ class Translator:
 
             # When sampling, manually set the chosen word to C.PAD_ID for finished hypotheses
             if self.sample:
-                best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, target_dists)
-                best_word_indices = mx.nd.where(finished, self.zeros_array, best_word_indices)
+                best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, target_dists, finished)
             else:
-                best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores)
-
-            # print('T={}'.format(t))
-            # for i in range(self.beam_size):
-            #     chosen = best_word_indices[i].asscalar()
-            #     max_ = mx.nd.max(mx.nd.exp(-target_dists[i, :])).asscalar()
-            #     argmax_ = int(mx.nd.argmax(mx.nd.exp(-target_dists[i, :]), axis=0).asscalar())
-            #     print('  i={} chosen={} max={} word={}'.format(i, chosen, max_, argmax_))
+                # On the first timestep, all hypotheses have identical histories, so force topk() to choose extensions
+                # of the first row only
+                if t == 1 and not self.skip_topk:
+                    batch_indices = mx.nd.array(np.arange(0, self.batch_size * self.beam_size, self.beam_size), dtype='int32', ctx=self.context)
+                    best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores[batch_indices,:])
+                else:
+                    best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores)
 
             # Constraints for constrained decoding are processed sentence by sentence
             if any(raw_constraint_list):
                 best_hyp_indices, best_word_indices, scores_accumulated, constraints, inactive = constrained.topk(
+                    t,
                     self.batch_size,
                     self.beam_size,
                     inactive,
@@ -1745,10 +1744,6 @@ class Translator:
                     best_word_indices,
                     scores_accumulated,
                     self.context)
-
-            else:
-                # All rows are now active (after special treatment of start state at t=1)
-                inactive[:] = 0
 
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
@@ -2041,11 +2036,12 @@ class TopK(mx.gluon.HybridBlock):
         :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
         :return: The row indices, column indices and values of the k smallest items in matrix.
         """
-        folded_scores = F.reshape(scores, shape=(self.batch_size, self.k * self.vocab_size))
+        folded_scores = F.reshape(scores, shape=(self.batch_size, -1))
+
         values, indices = F.topk(folded_scores, axis=1, k=self.k, ret_typ='both', is_ascend=True)
 
         indices = F.reshape(F.cast(indices, 'int32'), shape=(-1,))
-        unraveled = F.unravel_index(indices, shape=(self.batch_size * self.k, self.vocab_size))
+        unraveled = F.unravel_index(indices, shape=(-1, self.vocab_size))
 
         best_hyp_indices, best_word_indices = F.split(unraveled, axis=0, num_outputs=2, squeeze_axis=True)
         best_hyp_indices = best_hyp_indices + offset
@@ -2058,7 +2054,7 @@ class SampleK(mx.gluon.HybridBlock):
     A HybridBlock for selecting a random word from each hypothesis according to its distribution.
     """
 
-    def __init__(self, k: int, batch_size: int) -> None:
+    def __init__(self, k: int, batch_size: int, context: mx.context.Context) -> None:
         """
         :param batch_size: Number of sentences being decoded at once.
         :param beam_size: The size of the beam.
@@ -2067,21 +2063,26 @@ class SampleK(mx.gluon.HybridBlock):
         super().__init__()
         self.beam_size = k
         self.batch_size = batch_size
+        self.context = context
+
         with self.name_scope():
             self.best_hyp_indices = self.params.get_constant(name='best_hyp_indices',
                                                              value=mx.nd.arange(0, batch_size * k, dtype='int32'))
+            self.zeros_array = self.params.get_constant(name="zeros_array",
+                                                        value=mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32'))
 
-    def hybrid_forward(self, F, scores, target_dists, best_hyp_indices):
+    def hybrid_forward(self, F, scores, target_dists, finished, best_hyp_indices, zeros_array):
         """
         Choose an extension of each hypothesis from its softmax distribution.
 
         :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
         :param target_dists: The non-cumulative target distributions (ignored).
+        :param finished: The list of finished hypotheses.
         :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
         :return: The row indices, column indices, and values of the sampled words.
         """
-        # Sample from the target distributions over words
-        best_word_indices = F.random.multinomial(F.exp(-target_dists), get_prob=False)
+        # Sample from the target distributions over words, then get the corresponding
+        best_word_indices = F.where(finished, zeros_array, F.random.multinomial(F.exp(-target_dists), get_prob=False))
         values = F.pick(scores, best_word_indices, axis=1, keepdims=True)
         return best_hyp_indices, best_word_indices, values
 
@@ -2172,14 +2173,12 @@ class UpdateScores(mx.gluon.HybridBlock):
         super().__init__()
         assert C.PAD_ID == 0, "This block only works with PAD_ID == 0"
 
-    def hybrid_forward(self, F, target_dists, finished, inactive, scores_accumulated, inf_array, pad_dist):
+    def hybrid_forward(self, F, target_dists, finished, inactive, scores_accumulated, pad_dist):
         # Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
         # finished rows are inf everywhere except column zero (pad_id), which holds the accumulated model score.
         # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
         # infinity otherwise.
         scores = F.broadcast_add(target_dists, scores_accumulated)
-        # pylint: disable=invalid-sequence-index
-        pad_id_scores = F.where(F.broadcast_logical_and(finished, F.logical_not(inactive)), scores_accumulated, inf_array)
         # pad_dist. Shape: (batch*beam, vocab_size)
-        scores = F.where(F.broadcast_logical_or(finished, inactive), F.concat(pad_id_scores, pad_dist), scores)
+        scores = F.where(F.broadcast_logical_or(finished, inactive), F.concat(scores_accumulated, pad_dist), scores)
         return scores

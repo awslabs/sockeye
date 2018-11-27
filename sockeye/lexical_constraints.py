@@ -483,7 +483,8 @@ class ConstrainedCandidate:
         return '({}, {}, {}, {})'.format(self.row, self.col, self.score, self.hypothesis.num_met())
 
 
-def topk(batch_size: int,
+def topk(timestep: int,
+         batch_size: int,
          beam_size: int,
          inactive: mx.nd.NDArray,
          scores: mx.nd.NDArray,
@@ -514,7 +515,8 @@ def topk(batch_size: int,
         rows = slice(sentno * beam_size, (sentno + 1) * beam_size)
         if hypotheses[rows.start] is not None and hypotheses[rows.start].size() > 0:
             best_ids[rows], best_word_ids[rows], seq_scores[rows], \
-            hypotheses[rows], inactive[rows] = _topk(beam_size,
+            hypotheses[rows], inactive[rows] = _topk(timestep,
+                                                     beam_size,
                                                      inactive[rows],
                                                      scores[rows],
                                                      hypotheses[rows],
@@ -533,7 +535,8 @@ def topk(batch_size: int,
     return best_ids, best_word_ids, seq_scores, hypotheses, inactive
 
 
-def _topk(beam_size: int,
+def _topk(timestep,
+          beam_size: int,
           inactive: mx.nd.NDArray,
           scores: mx.nd.NDArray,
           hypotheses: List[ConstrainedHypothesis],
@@ -575,7 +578,7 @@ def _topk(beam_size: int,
     # (3) the best item (constrained or not) in that row
     best_next = mx.nd.NDArray.argmin(scores, axis=1)
     for row in range(beam_size):
-        if inactive[row]:
+        if inactive[row] or (timestep == 1 and row > 0):
             continue
 
         hyp = hypotheses[row]
