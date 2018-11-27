@@ -280,6 +280,8 @@ def topk(scores: mx.nd.NDArray,
          use_mxnet_topk: bool) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
     """
     Get the lowest k elements per sentence from a `scores` matrix.
+    At the first timestep, the shape of scores is (batch, target_vocabulary_size).
+    At subsequent steps, the shape is (batch * k, target_vocabulary_size).
 
     :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
     :param k: The number of smallest scores to return.
@@ -287,15 +289,17 @@ def topk(scores: mx.nd.NDArray,
     :param use_mxnet_topk: True to use the mxnet implementation or False to use the numpy one.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
+    # Compute the batch size from the offsets. We don't know the batch size because it is
+    # either 1 (timestep 1) or k (timestep 2+).
     # (batch_size, beam_size * target_vocab_size)
-    folded_scores = scores.reshape((-1, k * scores.shape[-1]))
-    batch_size = folded_scores.shape[0]
+    batch_size = int(offset[-1].asscalar() / k) + 1
+    folded_scores = scores.reshape((batch_size, -1))
 
     if use_mxnet_topk:
         # pylint: disable=unbalanced-tuple-unpacking
         values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
         indices = mx.nd.cast(indices, 'int32').reshape((-1,))
-        best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, scores.shape)
+        best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, shape=(batch_size * k, -1))
 
     else:
         folded_scores = folded_scores.asnumpy()
