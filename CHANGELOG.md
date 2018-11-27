@@ -12,7 +12,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.59]
 ### Added
-- A flag is returned alongside the best metric indicating if training converged.
+- Full training state is now returned from EarlyStoppingTrainer's fit().
 ### Changed
 - Training state cleanup will not be performed for training runs that did not converge.
 
