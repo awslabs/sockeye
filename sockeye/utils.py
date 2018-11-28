@@ -299,7 +299,7 @@ def topk(scores: mx.nd.NDArray,
         # pylint: disable=unbalanced-tuple-unpacking
         values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
         indices = mx.nd.cast(indices, 'int32').reshape((-1,))
-        best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, shape=(batch_size * k, -1))
+        best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, shape=(batch_size * k, scores.shape[-1]))
 
     else:
         folded_scores = folded_scores.asnumpy()
