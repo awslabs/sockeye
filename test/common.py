@@ -352,7 +352,6 @@ def run_train_translate(train_params: str,
             params += _TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(test_source_factor_paths))
 
         with patch.object(sys, "argv", params.split()):
-            print('PARAMS', params)
             sockeye.translate.main()
 
         # Break out translation and score
