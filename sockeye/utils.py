@@ -16,7 +16,7 @@ A set of utility methods.
 """
 import binascii
 import errno
-import fcntl
+import portalocker
 import glob
 import gzip
 import itertools
@@ -706,7 +706,7 @@ class GpuFileLock:
                     continue
             try:
                 # exclusive non-blocking lock
-                fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                portalocker.lock(lock_file, portalocker.LOCK_EX | portalocker.LOCK_NB)
                 # got the lock, let's write our PID into it:
                 lock_file.write("%d\n" % os.getpid())
                 lock_file.flush()
@@ -719,11 +719,12 @@ class GpuFileLock:
                 logger.info("Acquired GPU {}.".format(gpu_id))
 
                 return gpu_id
-            except IOError as e:
-                # raise on unrelated IOErrors
-                if e.errno != errno.EAGAIN:
+            except portalocker.LockException as e:
+                # portalocker packages the original exception,
+                # we dig it out and raise if unrelated to us
+                if e.args[0].errno != errno.EAGAIN:  # pylint: disable=no-member
                     logger.error("Failed acquiring GPU lock.", exc_info=True)
-                    raise
+                    raise e.args[0]
                 else:
                     logger.debug("GPU {} is currently locked.".format(gpu_id))
         return None
@@ -733,7 +734,7 @@ class GpuFileLock:
             logger.info("Releasing GPU {}.".format(self.gpu_id))
         if self.lock_file is not None:
             if self._acquired_lock:
-                fcntl.flock(self.lock_file, fcntl.LOCK_UN)
+                portalocker.lock(self.lock_file, portalocker.LOCK_UN)
             self.lock_file.close()
             os.remove(self.lockfile_path)
 
