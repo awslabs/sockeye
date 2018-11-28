@@ -1173,15 +1173,7 @@ class Translator:
         # Vocabulary selection leads to different vocabulary sizes across requests. Hence, we cannot use a
         # statically-shaped HybridBlock for the topk operation in this case; resorting to imperative topk
         # function in this case.
-        if self.restrict_lexicon:
-            if self.skip_topk:
-                self._top = partial(utils.top1, offset=self.offset)  # type: Callable
-            else:
-                self._top = partial(utils.topk,
-                                    k=self.beam_size,
-                                    offset=self.offset,
-                                    use_mxnet_topk=True)  # type: Callable
-        else:
+        if not self.restrict_lexicon:
             if self.skip_topk:
                 self._top = Top1(k=self.beam_size,
                                  batch_size=self.batch_size)  # type: mx.gluon.HybridBlock
@@ -1195,8 +1187,17 @@ class Translator:
                                  batch_size=self.batch_size,
                                  vocab_size=len(self.vocab_target))  # type: mx.gluon.HybridBlock
 
+
             self._top.initialize(ctx=self.context)
             self._top.hybridize(static_alloc=True, static_shape=True)
+        else:
+            if self.skip_topk:
+                self._top = partial(utils.top1, offset=self.offset)  # type: Callable
+            else:
+                self._top = partial(utils.topk,
+                                    k=self.beam_size,
+                                    offset=self.offset,
+                                    use_mxnet_topk=True)  # type: Callable
 
         self._sort_by_index = SortByIndex()
         self._sort_by_index.initialize(ctx=self.context)
