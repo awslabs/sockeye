@@ -220,7 +220,7 @@ def test_training_arg(test_params, expected_params):
                       strip_unknown_words=False,
                       override_dtype=None,
                       sample=None,
-                      seed=C.DEFAULT_RANDOM_SEED,
+                      seed=None,
                       skip_topk=False)),
 ])
 def test_inference_args(test_params, expected_params):

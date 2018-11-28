@@ -43,7 +43,8 @@ def main():
 
 def run_translate(args: argparse.Namespace):
 
-    utils.seed_rngs(args.seed)
+    # Seed randomly unless a seed has been passed
+    utils.seed_rngs(args.seed if args.seed is not None else int(time.time()))
 
     if args.output is not None:
         global logger

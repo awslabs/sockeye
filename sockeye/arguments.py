@@ -1231,7 +1231,7 @@ def add_inference_args(params):
                                     'sampling to top N vocabulary items at each step. Default: %(default)s.')
     decode_params.add_argument('--seed',
                                type=int,
-                               default=C.DEFAULT_RANDOM_SEED,
+                               default=None,
                                help='Random seed used if sampling. Default: %(default)s.')
     decode_params.add_argument('--ensemble-mode',
                                type=str,
