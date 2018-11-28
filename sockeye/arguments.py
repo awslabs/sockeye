@@ -1219,10 +1219,12 @@ def add_inference_args(params):
                                help='Use argmax instead of topk for greedy decoding (when --beam-size 1).'
                                     'Default: %(default)s.')
     decode_params.add_argument('--sample',
-                               default=False,
-                               action='store_true',
-                               help='Sample from softmax instead of taking best.'
-                                    'Default: %(default)s.')
+                               type=int_greater_or_equal(0),
+                               default=None,
+                               nargs='?',
+                               const=0,
+                               help='Sample from softmax instead of taking best. Optional argument will restrict '
+                                    'sampling to top N vocabulary items at each step. Default: %(default)s.')
     decode_params.add_argument('--seed',
                                type=int,
                                default=C.DEFAULT_RANDOM_SEED,

@@ -1112,7 +1112,7 @@ class Translator:
                  store_beam: bool = False,
                  strip_unknown_words: bool = False,
                  skip_topk: bool = False,
-                 sample: bool = False) -> None:
+                 sample: int = None) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
@@ -1183,8 +1183,9 @@ class Translator:
             if self.skip_topk:
                 self._top = Top1(k=self.beam_size,
                                  batch_size=self.batch_size)  # type: mx.gluon.HybridBlock
-            elif self.sample:
+            elif self.sample is not None:
                 self._top = SampleK(k=self.beam_size,
+                                    n=self.sample,
                                     batch_size=self.batch_size,
                                     context=self.context)  # type: mx.gluon.HybridBlock
             else:
@@ -1720,7 +1721,7 @@ class Translator:
             # far as the active beam size for each sentence.
 
             # When sampling, manually set the chosen word to C.PAD_ID for finished hypotheses
-            if self.sample:
+            if self.sample is not None:
                 best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, target_dists, finished)
             else:
                 # On the first timestep, all hypotheses have identical histories, so force topk() to choose extensions
@@ -2054,14 +2055,16 @@ class SampleK(mx.gluon.HybridBlock):
     A HybridBlock for selecting a random word from each hypothesis according to its distribution.
     """
 
-    def __init__(self, k: int, batch_size: int, context: mx.context.Context) -> None:
+    def __init__(self, k: int, n: int, batch_size: int, context: mx.context.Context) -> None:
         """
+        :param k: The size of the beam.
+        :param n: Sample from the top-N words in the vocab at each timestep.
         :param batch_size: Number of sentences being decoded at once.
-        :param beam_size: The size of the beam.
         :param vocab_size: Vocabulary size.
         """
         super().__init__()
         self.beam_size = k
+        self.n = n
         self.batch_size = batch_size
         self.context = context
 
@@ -2081,9 +2084,22 @@ class SampleK(mx.gluon.HybridBlock):
         :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
         :return: The row indices, column indices, and values of the sampled words.
         """
-        # Sample from the target distributions over words, then get the corresponding
-        best_word_indices = F.where(finished, zeros_array, F.random.multinomial(F.exp(-target_dists), get_prob=False))
+        # Map the negative logprobs to probabilities so as to have a distribution
+        target_dists = F.exp(-target_dists)
+
+        # n == 0 means sample from the full vocabulary. Otherwise, we sample from the top n.
+        if self.n != 0:
+            # select the top n in each row, via a mask
+            masked_items = F.topk(target_dists, k=self.n, ret_typ='mask', axis=1, is_ascend=False)
+            # set unmasked items to 0
+            masked_items = F.where(masked_items, target_dists, masked_items)
+            # renormalize
+            target_dists = F.broadcast_div(masked_items, F.sum(masked_items, axis=1, keepdims=True))
+
+        # Sample from the target distributions over words, then get the corresponding values from the cumulative scores
+        best_word_indices = F.where(finished, zeros_array, F.random.multinomial(target_dists, get_prob=False))
         values = F.pick(scores, best_word_indices, axis=1, keepdims=True)
+
         return best_hyp_indices, best_word_indices, values
 
 
