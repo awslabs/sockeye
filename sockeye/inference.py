@@ -1717,6 +1717,7 @@ class Translator:
                 block_indices = avoid_states.avoid()
                 if len(block_indices) > 0:
                     scores[block_indices] = np.inf
+                    target_dists[block_indices] = np.inf
 
             # finished_on_prev_step = (best_word_indices == self.vocab_target[C.EOS_SYMBOL]) + (best_word_indices == C.PAD_ID)
 
