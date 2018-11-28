@@ -1163,6 +1163,8 @@ class Translator:
         # offset for hypothesis indices in batch decoding
         self.offset = mx.nd.array(np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size),
                                   dtype='int32', ctx=self.context)
+        # locations of each batch item when first dimension is (batch * beam)
+        self.batch_indices = mx.nd.array(np.arange(0, self.batch_size * self.beam_size, self.beam_size), dtype='int32', ctx=self.context)
 
         self._update_scores = UpdateScores()
         self._update_scores.initialize(ctx=self.context)
@@ -1727,8 +1729,7 @@ class Translator:
                 # On the first timestep, all hypotheses have identical histories, so force topk() to choose extensions
                 # of the first row only
                 if t == 1 and not self.skip_topk:
-                    batch_indices = mx.nd.array(np.arange(0, self.batch_size * self.beam_size, self.beam_size), dtype='int32', ctx=self.context)
-                    best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores[batch_indices,:])
+                    best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores[self.batch_indices, :])
                 else:
                     best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores)
 
