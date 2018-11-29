@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.60]
+### Fixed
+- Performance optimization to skip the softmax operation for single model greedy decoding is now only applied if no translation scores are required in the output.
+
 ## [1.18.59]
 ### Added
 - Full training state is now returned from EarlyStoppingTrainer's fit().
