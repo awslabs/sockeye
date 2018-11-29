@@ -93,7 +93,7 @@ def run_translate(args: argparse.Namespace):
 
         # Skip softmax for a single model when not doing ensembling or beam search or sampling
         skip_softmax = False
-        if len(args.models) == 1 and args.beam_size == 1 and not args.sample:
+        if len(args.models) == 1 and args.beam_size == 1 and not args.sample and not output_handler.reports_score():
             skip_softmax = True
             logger.info("Enabled skipping softmax for a single model and greedy decoding.")
 
@@ -108,7 +108,8 @@ def run_translate(args: argparse.Namespace):
             max_output_length_num_stds=args.max_output_length_num_stds,
             decoder_return_logit_inputs=args.restrict_lexicon is not None,
             cache_output_layer_w_b=args.restrict_lexicon is not None,
-            override_dtype=args.override_dtype)
+            override_dtype=args.override_dtype,
+            skip_softmax=skip_softmax)
         restrict_lexicon = None  # type: Optional[TopKLexicon]
         if args.restrict_lexicon:
             restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
