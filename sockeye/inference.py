@@ -1190,7 +1190,6 @@ class Translator:
                                  batch_size=self.batch_size,
                                  vocab_size=len(self.vocab_target))  # type: mx.gluon.HybridBlock
 
-
             self._top.initialize(ctx=self.context)
             self._top.hybridize(static_alloc=True, static_shape=True)
         else:
@@ -2050,10 +2049,13 @@ class TopK(mx.gluon.HybridBlock):
         :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
         :return: The row indices, column indices and values of the k smallest items in matrix.
         """
+
+        # Shape: t==1 => (batch size, vocab_size) t>1 => (batch size * beam size, vocab size)
         folded_scores = F.reshape(scores, shape=(self.batch_size, -1))
 
         values, indices = F.topk(folded_scores, axis=1, k=self.k, ret_typ='both', is_ascend=True)
 
+        # Project indices back into original shape (which is different for t==1 and t>1)
         indices = F.reshape(F.cast(indices, 'int32'), shape=(-1,))
         unraveled = F.unravel_index(indices, shape=(-1, self.vocab_size))
 

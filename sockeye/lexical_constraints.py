@@ -498,6 +498,7 @@ def topk(timestep: int,
     These items are built from three different types: (1) the best items across the whole
     scores matrix, (2) the set of words that must follow existing constraints, and (3) k-best items from each row.
 
+    :param timestep: The current decoder timestep.
     :param batch_size: The number of segments in the batch.
     :param beam_size: The length of the beam for each segment.
     :param inactive: Array listing inactive rows (shape: (beam_size,)).
@@ -535,7 +536,7 @@ def topk(timestep: int,
     return best_ids, best_word_ids, seq_scores, hypotheses, inactive
 
 
-def _topk(timestep,
+def _topk(timestep: int,
           beam_size: int,
           inactive: mx.nd.NDArray,
           scores: mx.nd.NDArray,
@@ -549,6 +550,7 @@ def _topk(timestep,
     These items are built from three different types: (1) the best items across the whole
     scores matrix, (2) the set of words that must follow existing constraints, and (3) k-best items from each row.
 
+    :param timestep: The current decoder timestep.
     :param beam_size: The length of the beam for each segment.
     :param inactive: Array listing inactive rows (shape: (beam_size,)).
     :param scores: The scores array (shape: (beam_size, target_vocab_size)).
@@ -576,7 +578,7 @@ def _topk(timestep,
 
     # For each hypothesis, we add (2) all the constraints that could follow it and
     # (3) the best item (constrained or not) in that row
-    best_next = mx.nd.NDArray.argmin(scores, axis=1)
+    best_next = mx.nd.argmin(scores, axis=1)
     for row in range(beam_size):
         if inactive[row] or (timestep == 1 and row > 0):
             continue
