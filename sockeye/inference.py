@@ -1196,10 +1196,7 @@ class Translator:
             if self.skip_topk:
                 self._top = partial(utils.top1, offset=self.offset)  # type: Callable
             else:
-                self._top = partial(utils.topk,
-                                    k=self.beam_size,
-                                    offset=self.offset,
-                                    use_mxnet_topk=True)  # type: Callable
+                self._top = partial(utils.topk, k=self.beam_size, offset=self.offset)  # type: Callable
 
         self._sort_by_index = SortByIndex()
         self._sort_by_index.initialize(ctx=self.context)
