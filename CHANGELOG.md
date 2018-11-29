@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.61]
+### Changed
+- Update to MXNet 1.3.1. Removed requirements/requirements.gpu-cu{75,91}.txt as CUDA 7.5 and 9.1 are deprecated.
+
 ## [1.18.60]
 ### Fixed
 - Performance optimization to skip the softmax operation for single model greedy decoding is now only applied if no translation scores are required in the output.
