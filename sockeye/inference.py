@@ -1730,7 +1730,6 @@ class Translator:
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
 
-            # When sampling, manually set the chosen word to C.PAD_ID for finished hypotheses
             if self.sample is not None:
                 best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, target_dists, finished)
             else:
