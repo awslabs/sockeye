@@ -276,36 +276,23 @@ def top1(scores: mx.nd.NDArray,
 
 def topk(scores: mx.nd.NDArray,
          k: int,
-         offset: mx.nd.NDArray,
-         use_mxnet_topk: bool) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
+         offset: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
     """
     Get the lowest k elements per sentence from a `scores` matrix.
 
     :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
     :param k: The number of smallest scores to return.
     :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
-    :param use_mxnet_topk: True to use the mxnet implementation or False to use the numpy one.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
     # (batch_size, beam_size * target_vocab_size)
     folded_scores = scores.reshape((-1, k * scores.shape[-1]))
     batch_size = folded_scores.shape[0]
 
-    if use_mxnet_topk:
-        # pylint: disable=unbalanced-tuple-unpacking
-        values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
-        indices = mx.nd.cast(indices, 'int32').reshape((-1,))
-        best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, scores.shape)
-
-    else:
-        folded_scores = folded_scores.asnumpy()
-        # Get the scores
-        # Indexes into folded_scores: (batch_size, beam_size)
-        flat_idxs = np.argpartition(folded_scores, range(k))[:, :k]
-        # Score values: (batch_size, beam_size)
-        values = mx.nd.array(folded_scores[np.arange(folded_scores.shape[0])[:, None], flat_idxs], ctx=scores.context)
-        best_hyp_indices, best_word_indices = mx.nd.array(np.unravel_index(flat_idxs.ravel(), scores.shape),
-                                                          dtype='int32', ctx=scores.context)
+    # pylint: disable=unbalanced-tuple-unpacking
+    values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
+    indices = mx.nd.cast(indices, 'int32').reshape((-1,))
+    best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, scores.shape)
 
     if batch_size > 1:
         # Offsetting the indices to match the shape of the scores matrix

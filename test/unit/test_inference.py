@@ -13,6 +13,7 @@
 
 import json
 from math import ceil
+from typing import Tuple
 from unittest.mock import patch, Mock
 
 import mxnet as mx
@@ -377,6 +378,39 @@ def test_sort_by_index():
         assert (o.asnumpy() == e).all()
 
 
+def numpy_topk(scores: mx.nd.NDArray,
+               k: int,
+               offset: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
+    """
+    Get the lowest k elements per sentence from a `scores` matrix using an intermediary Numpy conversion.
+    This should be equivalent to sockeye.utils.topk() and is used as a comparative implementation in testing.
+
+    :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+    :param k: The number of smallest scores to return.
+    :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+    :return: The row indices, column indices and values of the k smallest items in matrix.
+    """
+    # (batch_size, beam_size * target_vocab_size)
+    folded_scores = scores.reshape((-1, k * scores.shape[-1]))
+    batch_size = folded_scores.shape[0]
+
+    folded_scores = folded_scores.asnumpy()
+    # Get the scores
+    # Indexes into folded_scores: (batch_size, beam_size)
+    flat_idxs = np.argpartition(folded_scores, range(k))[:, :k]
+    # Score values: (batch_size, beam_size)
+    values = mx.nd.array(folded_scores[np.arange(folded_scores.shape[0])[:, None], flat_idxs], ctx=scores.context)
+    best_hyp_indices, best_word_indices = mx.nd.array(np.unravel_index(flat_idxs.ravel(), scores.shape),
+                                                      dtype='int32', ctx=scores.context)
+
+    if batch_size > 1:
+        # Offsetting the indices to match the shape of the scores matrix
+        best_hyp_indices += offset
+
+    values = values.reshape((-1, 1))
+    return best_hyp_indices, best_word_indices, values
+
+
 @pytest.mark.parametrize("batch_size, beam_size, target_vocab_size",
                         [(1, 5, 200),
                          (5, 5, 200),
@@ -389,12 +423,10 @@ def test_topk_func(batch_size, beam_size, target_vocab_size):
     # offset for batch sizes > 1
     offset = mx.nd.array(np.repeat(np.arange(0, batch_size * beam_size, beam_size), beam_size), dtype='int32')
 
-    np_hyp, np_word, np_values = sockeye.utils.topk(scores, k=beam_size,
-                                                    offset=offset, use_mxnet_topk=False)
+    np_hyp, np_word, np_values = numpy_topk(scores, k=beam_size, offset=offset)
     np_hyp, np_word, np_values = np_hyp.asnumpy(), np_word.asnumpy(), np_values.asnumpy()
 
-    mx_hyp, mx_word, mx_values = sockeye.utils.topk(scores, k=beam_size,
-                                                    offset=offset, use_mxnet_topk=True)
+    mx_hyp, mx_word, mx_values = sockeye.utils.topk(scores, k=beam_size, offset=offset)
     mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
     assert all(mx_hyp == np_hyp)
     assert all(mx_word == np_word)
@@ -447,9 +479,9 @@ def test_get_best_word_indices_for_kth_hypotheses():
 
 
 @pytest.mark.parametrize("raw_constraints, beam_histories, expected_best_ids, expected_best_indices",
-                        [([[], [], [], []], [None, None], np.array([0, 2], dtype='int32'), np.array([[1, 1, 1], [3, 3, 3]], dtype='int32')),
-                         ([[[1]], [], [[3]], []], [None, None], np.array([1, 3], dtype='int32'), np.array([[1, 0, 0], [3, 2, 2]], dtype='int32'))
-                         ])
+                         [([[], [], [], []], [None, None], np.array([0, 2], dtype='int32'), np.array([[1, 1, 1], [3, 3, 3]], dtype='int32')),
+                          ([[[1]], [], [[3]], []], [None, None], np.array([1, 3], dtype='int32'), np.array([[1, 0, 0], [3, 2, 2]], dtype='int32'))
+                          ])
 def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, expected_best_indices):
     best_hyp_indices = np.array([[0, 1, 0, 1],
                                  [0, 1, 1, 0],
