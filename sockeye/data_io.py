@@ -533,6 +533,9 @@ def prepare_data(source_fnames: List[str],
     length_statistics = analyze_sequence_lengths(source_fnames, target_fname, source_vocabs, target_vocab,
                                                  max_seq_len_source, max_seq_len_target)
 
+    check_condition(length_statistics.num_sents > 0, "0 training sentence within maximum length, consider increasing "
+                                                     "the %s." % C.TRAINING_ARG_MAX_SEQ_LEN)
+
     # define buckets
     buckets = define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width,
                                       length_statistics.length_ratio_mean) if bucketing else [
@@ -644,6 +647,10 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
     validation_length_statistics = analyze_sequence_lengths(validation_sources, validation_target,
                                                             source_vocabs, target_vocab,
                                                             max_seq_len_source, max_seq_len_target)
+
+    check_condition(validation_length_statistics.num_sents > 0, "0 validation sentence within maximum length, consider"
+                                                                " increasing the %s." % C.TRAINING_ARG_MAX_SEQ_LEN)
+
     validation_sources_sentences, validation_target_sentences = create_sequence_readers(validation_sources,
                                                                                         validation_target,
                                                                                         source_vocabs, target_vocab)
@@ -802,6 +809,10 @@ def get_training_data_iters(sources: List[str],
     # Pass 1: get target/source length ratios.
     length_statistics = analyze_sequence_lengths(sources, target, source_vocabs, target_vocab,
                                                  max_seq_len_source, max_seq_len_target)
+
+    check_condition(length_statistics.num_sents > 0, "0 training sentence within maximum length, consider increasing "
+                                                     "the %s." % C.TRAINING_ARG_MAX_SEQ_LEN)
+
     # define buckets
     buckets = define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width,
                                       length_statistics.length_ratio_mean) if bucketing else [
