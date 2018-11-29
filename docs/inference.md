@@ -158,3 +158,14 @@ Options:
 - `-t true`: each core translate the whole input file.
 
 - `-t false`: each core translate (input file line/core number) lines , then merge the translated file into one complete output file.
+
+## Sampling
+
+Instead of filling the beam with the best items at each step of the decoder, Sockeye can sample from the target distributions of each hypothesis using `--sample [N]`.
+If the optional parameter `N` is specified, the sampling will be limited to the top `N` vocabulary items.
+The default, `N = 0`, which means to sample from the full distribution over all target vocabulary items.
+Limiting `N` to a value that is much smaller than the target vocabulary size (say, 5%) can lead to much more sensible samples.
+
+You can use this with `--nbest-size` to output multiple samples for each input.
+However, note that since each beam item is sampled independently, there is no guarantee that sampled items will be unique.
+You can use `--softmax-temperature T` to make the target distributions more peaked (`T < 1.0`) or smoother (`T > 1.0`).
