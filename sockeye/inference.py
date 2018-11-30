@@ -694,7 +694,7 @@ def make_input_from_json_string(sentence_id: SentenceId, json_string: str) -> Tr
     :param sentence_id: Sentence id.
     :param json_string: A JSON object serialized as a string that must contain a key "text", mapping to the input text,
            and optionally a key "factors" that maps to a list of strings, each of which representing a factor sequence
-           for the input text. Constraints and an avoid list can also be added through the "constraints" and "avoid" 
+           for the input text. Constraints and an avoid list can also be added through the "constraints" and "avoid"
            keys.
     :return: A TranslatorInput.
     """
@@ -726,7 +726,7 @@ def make_input_from_dict(sentence_id: SentenceId, input_dict: Dict) -> Translato
             lengths = [len(f) for f in factors]
             if not all(length == len(tokens) for length in lengths):
                 logger.error("Factors have different length than input text: %d vs. %s", len(tokens), str(lengths))
-                return _bad_input(sentence_id, reason=json_string)
+                return _bad_input(sentence_id, reason=input_dict)
 
         # List of phrases to prevent from occuring in the output
         avoid_list = input_dict.get(C.JSON_AVOID_KEY)
@@ -753,7 +753,7 @@ def make_input_from_dict(sentence_id: SentenceId, input_dict: Dict) -> Translato
 
     except Exception as e:
         logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
-        return _bad_input(sentence_id, reason=json_string)
+        return _bad_input(sentence_id, reason=input_dict)
 
 
 def make_input_from_factored_string(sentence_id: SentenceId,
