@@ -308,6 +308,32 @@ def test_failed_make_input_from_valid_json_string(text, text_key, factors, facto
     assert isinstance(inp, sockeye.inference.BadTranslatorInput)
 
 
+@pytest.mark.parametrize("text, factors",
+                         [("this is a test without factors", None),
+                          ("", None),
+                          ("test", ["X", "X"]),
+                          ("a b c", ["x y z"]),
+                          ("a", [])])
+def test_make_input_from_valid_dict(text, factors):
+    sentence_id = 1
+    expected_tokens = list(sockeye.data_io.get_tokens(text))
+    inp = sockeye.inference.make_input_from_dict(sentence_id, {C.JSON_TEXT_KEY: text,
+                                                               C.JSON_FACTORS_KEY: factors})
+    assert len(inp) == len(expected_tokens)
+    assert inp.tokens == expected_tokens
+    if factors is not None:
+        assert len(inp.factors) == len(factors)
+    else:
+        assert inp.factors is None
+
+
+@pytest.mark.parametrize("text, text_key, factors, factors_key", [("a", "blub", None, "")])
+def test_failed_make_input_from_valid_dict(text, text_key, factors, factors_key):
+    sentence_id = 1
+    inp = sockeye.inference.make_input_from_dict(sentence_id, {text_key: text, factors_key: factors})
+    assert isinstance(inp, sockeye.inference.BadTranslatorInput)
+
+
 @pytest.mark.parametrize("strings",
                          [
                              ["a b c"],
