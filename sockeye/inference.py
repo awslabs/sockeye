@@ -726,7 +726,7 @@ def make_input_from_dict(sentence_id: SentenceId, input_dict: Dict) -> Translato
             lengths = [len(f) for f in factors]
             if not all(length == len(tokens) for length in lengths):
                 logger.error("Factors have different length than input text: %d vs. %s", len(tokens), str(lengths))
-                return _bad_input(sentence_id, reason=input_dict)
+                return _bad_input(sentence_id, reason=str(input_dict))
 
         # List of phrases to prevent from occuring in the output
         avoid_list = input_dict.get(C.JSON_AVOID_KEY)
@@ -753,7 +753,7 @@ def make_input_from_dict(sentence_id: SentenceId, input_dict: Dict) -> Translato
 
     except Exception as e:
         logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
-        return _bad_input(sentence_id, reason=input_dict)
+        return _bad_input(sentence_id, reason=str(input_dict))
 
 
 def make_input_from_factored_string(sentence_id: SentenceId,
