@@ -700,7 +700,7 @@ def make_input_from_json_string(sentence_id: SentenceId, json_string: str) -> Tr
     """
     try:
         jobj = json.loads(json_string, encoding=C.JSON_ENCODING)
-        return make_input_from_dict(jobj)
+        return make_input_from_dict(sentence_id, jobj)
 
     except Exception as e:
         logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
