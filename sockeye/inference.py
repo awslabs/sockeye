@@ -687,26 +687,45 @@ def make_input_from_json_string(sentence_id: SentenceId, json_string: str) -> Tr
     :param sentence_id: Sentence id.
     :param json_string: A JSON object serialized as a string that must contain a key "text", mapping to the input text,
            and optionally a key "factors" that maps to a list of strings, each of which representing a factor sequence
-           for the input text.
+           for the input text. Constraints and an avoid list can also be added through the "constraints" and "avoid"
+           keys.
     :return: A TranslatorInput.
     """
     try:
         jobj = json.loads(json_string, encoding=C.JSON_ENCODING)
-        tokens = jobj[C.JSON_TEXT_KEY]
+        return make_input_from_dict(sentence_id, jobj)
+
+    except Exception as e:
+        logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
+        return _bad_input(sentence_id, reason=json_string)
+
+
+def make_input_from_dict(sentence_id: SentenceId, input_dict: Dict) -> TranslatorInput:
+    """
+    Returns a TranslatorInput object from a JSON object, serialized as a string.
+
+    :param sentence_id: Sentence id.
+    :param input_dict: A dict that must contain a key "text", mapping to the input text, and optionally a key "factors"
+           that maps to a list of strings, each of which representing a factor sequence for the input text.
+           Constraints and an avoid list can also be added through the "constraints" and "avoid" keys.
+    :return: A TranslatorInput.
+    """
+    try:
+        tokens = input_dict[C.JSON_TEXT_KEY]
         tokens = list(data_io.get_tokens(tokens))
-        factors = jobj.get(C.JSON_FACTORS_KEY)
+        factors = input_dict.get(C.JSON_FACTORS_KEY)
         if isinstance(factors, list):
             factors = [list(data_io.get_tokens(factor)) for factor in factors]
             lengths = [len(f) for f in factors]
             if not all(length == len(tokens) for length in lengths):
                 logger.error("Factors have different length than input text: %d vs. %s", len(tokens), str(lengths))
-                return _bad_input(sentence_id, reason=json_string)
+                return _bad_input(sentence_id, reason=str(input_dict))
 
         # List of phrases to prevent from occuring in the output
-        avoid_list = jobj.get(C.JSON_AVOID_KEY)
+        avoid_list = input_dict.get(C.JSON_AVOID_KEY)
 
         # List of phrases that must appear in the output
-        constraints = jobj.get(C.JSON_CONSTRAINTS_KEY)
+        constraints = input_dict.get(C.JSON_CONSTRAINTS_KEY)
 
         # If there is overlap between positive and negative constraints, assume the user wanted
         # the words, and so remove them from the avoid_list (negative constraints)
@@ -714,6 +733,7 @@ def make_input_from_json_string(sentence_id: SentenceId, json_string: str) -> Tr
             avoid_set = set(avoid_list)
             overlap = set(constraints).intersection(avoid_set)
             if len(overlap) > 0:
+                logger.warning("Overlap between constraints and avoid set, dropping the overlapping avoids")
                 avoid_list = list(avoid_set.difference(overlap))
 
         # Convert to a list of tokens
@@ -726,7 +746,7 @@ def make_input_from_json_string(sentence_id: SentenceId, json_string: str) -> Tr
 
     except Exception as e:
         logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
-        return _bad_input(sentence_id, reason=json_string)
+        return _bad_input(sentence_id, reason=str(input_dict))
 
 
 def make_input_from_factored_string(sentence_id: SentenceId,
