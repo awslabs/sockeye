@@ -16,7 +16,6 @@ A set of utility methods.
 """
 import binascii
 import errno
-import portalocker
 import glob
 import gzip
 import itertools
@@ -32,6 +31,7 @@ from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Opt
 
 import mxnet as mx
 import numpy as np
+import portalocker
 
 from . import __version__, constants as C
 from .log import log_sockeye_version, log_mxnet_version

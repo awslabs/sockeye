@@ -49,26 +49,13 @@ def run_translate(args: argparse.Namespace):
                                    file_logging=True,
                                    path="%s.%s" % (args.output, C.LOG_NAME))
 
-    if args.checkpoints is not None:
-        check_condition(len(args.checkpoints) == len(args.models), "must provide checkpoints for each model")
-
-    if args.skip_topk:
-        check_condition(args.beam_size == 1, "--skip-topk has no effect if beam size is larger than 1")
-        check_condition(len(args.models) == 1, "--skip-topk has no effect for decoding with more than 1 model")
-
-    if args.nbest_size > 1:
-        check_condition(args.beam_size >= args.nbest_size,
-                        "Size of nbest list (--nbest-size) must be smaller or equal to beam size (--beam-size).")
-        check_condition(args.beam_search_stop == C.BEAM_SEARCH_STOP_ALL,
-                        "--nbest-size > 1 requires beam search to only stop after all hypotheses are finished "
-                        "(--beam-search-stop all)")
-        if args.output_type != C.OUTPUT_HANDLER_NBEST:
-            logger.warning("For nbest translation, output handler must be '%s', overriding option --output-type.",
-                       C.OUTPUT_HANDLER_NBEST)
-            args.output_type = C.OUTPUT_HANDLER_NBEST
-
     log_basic_info(args)
 
+    if args.nbest_size > 1:
+        if args.output_type != C.OUTPUT_HANDLER_NBEST:
+            logger.warning("For nbest translation, output handler must be '%s', overriding option --output-type.",
+                           C.OUTPUT_HANDLER_NBEST)
+            args.output_type = C.OUTPUT_HANDLER_NBEST
     output_handler = get_output_handler(args.output_type,
                                         args.output,
                                         args.sure_align_threshold)
@@ -81,11 +68,6 @@ def run_translate(args: argparse.Namespace):
                                     lock_dir=args.lock_dir,
                                     exit_stack=exit_stack)[0]
         logger.info("Translate Device: %s", context)
-
-        if args.override_dtype == C.DTYPE_FP16:
-            logger.warning('Experimental feature \'--override-dtype float16\' has been used. '
-                           'This feature may be removed or change its behaviour in future. '
-                           'DO NOT USE IT IN PRODUCTION!')
 
         models, source_vocabs, target_vocab = inference.load_models(
             context=context,
