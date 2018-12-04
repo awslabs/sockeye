@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -134,7 +134,6 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
                                                                     test_target_path=data['test_target'],
                                                                     use_prepared_data=use_prepared_data,
                                                                     max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
-                                                                    restrict_lexicon=True,
                                                                     work_dir=data['work_dir'],
                                                                     seed=seed)
         logger.info("test: %s", name)
@@ -249,7 +248,6 @@ def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                                                                         'test_source_factors'),
                                                                     use_prepared_data=use_prepared_data,
                                                                     max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
-                                                                    restrict_lexicon=True,
                                                                     work_dir=data['work_dir'],
                                                                     seed=seed)
         logger.info("test: %s", name)

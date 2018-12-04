@@ -12,7 +12,6 @@
 # permissions and limitations under the License.
 
 import pytest
-import random
 
 import sockeye.constants as C
 from test.common import run_train_translate, tmp_digits_dataset
@@ -166,15 +165,8 @@ def test_seq_copy(train_params: str,
             dev_source_factor_paths = [data['validation_source']]
             test_source_factor_paths = [data['test_source']]
 
-        # Test model configuration, including the output equivalence of batch and no-batch decoding
-        if "--nbest-size" not in translate_params.split():
-            translate_params_batch = translate_params + " --batch-size 2"
-        else:
-            # nbest produces json output, which doesn't work with the splitting
-            # of translations and scores in run_train_translate, which in turn
-            # makes the comparison with the batch decoding fail.
-            # TODO: Refactor the run_train_translate function!
-            translate_params_batch = None
+        # Test equivalence of batch decoding
+        translate_params_batch = translate_params + " --batch-size 2"
 
         # Ignore return values (perplexity and BLEU) for integration test
         run_train_translate(train_params=train_params,
@@ -190,7 +182,6 @@ def test_seq_copy(train_params: str,
                             dev_source_factor_paths=dev_source_factor_paths,
                             test_source_factor_paths=test_source_factor_paths,
                             max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
-                            restrict_lexicon=restrict_lexicon,
                             work_dir=data['work_dir'],
                             use_prepared_data=use_prepared_data,
                             use_target_constraints=False)

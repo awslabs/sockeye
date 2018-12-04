@@ -81,5 +81,4 @@ def test_constraints(train_params: str,
                             max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
                             work_dir=data['work_dir'],
                             use_prepared_data=False,
-                            restrict_lexicon=False,
                             use_target_constraints=True)
