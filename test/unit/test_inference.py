@@ -476,6 +476,42 @@ def test_topk_func(batch_size, beam_size, target_vocab_size):
     assert all(mx_values == np_values)
 
 
+@pytest.mark.parametrize("batch_size, beam_size, target_vocab_size, top_n",
+                        [(1, 5, 200, 0),
+                         (5, 5, 200, 0),
+                         (1, 100, 200, 5),
+                         (5, 100, 200, 5)])
+def test_samplek_func(batch_size, beam_size, target_vocab_size, top_n):
+    # arrange scores increasing values from left to right, so the best item is always index 0, next-best 1, and so on
+    scores = mx.nd.array([list(range(1, target_vocab_size + 1)) for x in range(batch_size * beam_size)])
+    # normalize
+    target_dists = mx.nd.broadcast_div(scores, mx.nd.sum(scores, axis=1, keepdims=True))
+
+    samplek = sockeye.inference.SampleK(k=beam_size, n=top_n, batch_size=batch_size, context=mx.context.cpu())
+    samplek.initialize()
+
+    # 0..(batch_size * beam_size)-1
+    expected_hyps = mx.nd.array(range(batch_size * beam_size), dtype='int32')
+    finished = mx.nd.array(mx.nd.random.uniform(0, 1, (batch_size * beam_size)) > 0.5, dtype='int32')
+
+    for i in [1, 2]:
+        if i == 1:
+            samplek.hybridize()
+        hyps, words, values = samplek(scores, scores, finished)
+        assert hyps.shape[0] == batch_size * beam_size
+        # The indices should always be the integers from 0 to batch*beam-1
+        assert sum(hyps == expected_hyps).asscalar() == (batch_size * beam_size)
+        if top_n != 0:
+            # Scores are increasing left-to-right, so best items are all the lowest word IDs.
+            # No word id greater than the cap (top_n) should be selected
+            assert mx.nd.sum(words >= top_n)[0].asscalar() == 0
+        # word index should be zero for all finished hypotheses
+        print("finished", finished)
+        print("words", words)
+
+        assert mx.nd.sum(mx.nd.where(finished, words, finished))[0].asscalar() == 0
+
+
 def test_get_best_word_indices_for_kth_hypotheses():
     # data
     all_hyp_indices = np.array([[0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 2, 0, 0, 4, 3],
