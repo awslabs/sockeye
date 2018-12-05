@@ -1747,8 +1747,6 @@ class Translator:
                     if self.sample is not None:
                         target_dists[block_indices] = np.inf
 
-            # finished_on_prev_step = (best_word_indices == self.vocab_target[C.EOS_SYMBOL]) + (best_word_indices == C.PAD_ID)
-
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
 
@@ -1758,9 +1756,9 @@ class Translator:
                 # On the first timestep, all hypotheses have identical histories, so force topk() to choose extensions
                 # of the first row only
                 if t == 1 and not self.skip_topk:
-                    best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores[self.batch_indices, :])
-                else:
-                    best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores)
+                    scores = scores[self.batch_indices, :]
+
+                best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores)
 
             # Constraints for constrained decoding are processed sentence by sentence
             if any(raw_constraint_list):

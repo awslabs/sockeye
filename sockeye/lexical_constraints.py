@@ -502,7 +502,7 @@ def topk(timestep: int,
     :param batch_size: The number of segments in the batch.
     :param beam_size: The length of the beam for each segment.
     :param inactive: Array listing inactive rows (shape: (beam_size,)).
-    :param scores: The scores array (shape: (beam_size, target_vocab_size)).
+    :param scores: The scores array (shape: (batch_size if t==1 else beam_size, target_vocab_size)).
     :param hypotheses: The list of hypothesis objects.
     :param best_ids: The current list of best hypotheses (shape: (beam_size,)).
     :param best_word_ids: The parallel list of best word IDs (shape: (beam_size,)).
@@ -511,6 +511,9 @@ def topk(timestep: int,
     :return: A tuple containing the best hypothesis rows, the best hypothesis words, the scores,
         the updated constrained hypotheses, and the updated set of inactive hypotheses.
     """
+
+    if timestep == 1:
+        beam_size = 1
 
     for sentno in range(batch_size):
         rows = slice(sentno * beam_size, (sentno + 1) * beam_size)
