@@ -1169,6 +1169,8 @@ class Translator:
 
         self.skip_topk = skip_topk
         self.sample = sample
+        utils.check_condition(not self.sample or self.restrict_lexicon is None,
+                              "Sampling is not available when working with a restricted lexicon.")
 
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         self._max_input_length = self.models[0].max_input_length
