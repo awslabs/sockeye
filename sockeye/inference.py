@@ -374,9 +374,10 @@ def load_models(context: mx.context.Context,
                 cache_output_layer_w_b: bool = False,
                 forced_max_output_len: Optional[int] = None,
                 override_dtype: Optional[str] = None,
-                skip_softmax: bool = False) -> Tuple[List[InferenceModel],
-                                                     List[vocab.Vocab],
-                                                     vocab.Vocab]:
+                output_scores: bool = False,
+                sampling: bool = False) -> Tuple[List[InferenceModel],
+                                                 List[vocab.Vocab],
+                                                 vocab.Vocab]:
     """
     Loads a list of models for inference.
 
@@ -395,8 +396,10 @@ def load_models(context: mx.context.Context,
                                    restrict lexicon).
     :param forced_max_output_len: An optional overwrite of the maximum output length.
     :param override_dtype: Overrides dtype of encoder and decoder defined at training time to a different one.
-    :param skip_softmax: If False, scores will be returned by the decoder step as normalized negative log probabilities.
-           If True, scores will be negative, raw logit activations.
+    :param output_scores: Whether the scores will be needed as outputs. If True, scores will be normalized, negative
+           log probabilities. If False, scores will be negative, raw logit activations if decoding with beam size 1
+           and a single model.
+    :param sampling: True if the model is sampling instead of doing normal topk().
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
@@ -407,6 +410,12 @@ def load_models(context: mx.context.Context,
 
     if checkpoints is None:
         checkpoints = [None] * len(model_folders)
+
+    skip_softmax = False
+    # performance tweak: skip softmax for a single model, decoding with beam size 1, when not sampling and no scores are required in output.
+    if len(model_folders) == 1 and beam_size == 1 and not output_scores and not sampling:
+        skip_softmax = True
+        logger.info("Enabled skipping softmax for a single model and greedy decoding.")
 
     for model_folder, checkpoint in zip(model_folders, checkpoints):
         model_source_vocabs = vocab.load_source_vocabs(model_folder)
