@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import time
+import sockeye.multiprocessing_utils as mp
 from contextlib import contextmanager, ExitStack
 from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
 
@@ -456,6 +457,26 @@ def get_num_gpus() -> int:
     return mx.context.num_gpus()
 
 
+def query_nvidia_smi(device_ids, result_queue):
+    query = "--query-gpu=index,memory.used,memory.total"
+    format_arg = "--format=csv,noheader,nounits"
+    try:
+        sp = subprocess.Popen(['nvidia-smi', query, format_arg, "-i", ",".join(device_ids)],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        result = sp.communicate()[0].decode("utf-8").rstrip().split("\n")
+    except OSError:
+        logger.exception("Failed calling nvidia-smi to query memory usage.")
+        result_queue.put({})
+        return
+    memory_data = {}
+    for line in result:
+        gpu_id, mem_used, mem_total = line.split(",")
+        memory_data[int(gpu_id)] = (int(mem_used), int(mem_total))
+    log_gpu_memory_usage(memory_data)
+
+    result_queue.put(memory_data)
+
+
 def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, int]]:
     """
     Returns used and total memory for GPUs identified by the given context list.
@@ -471,22 +492,18 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, 
     if shutil.which("nvidia-smi") is None:
         logger.warning("Couldn't find nvidia-smi, therefore we assume no GPUs are available.")
         return {}
-    ids = [str(c.device_id) for c in ctx]
-    query = "--query-gpu=index,memory.used,memory.total"
-    format_arg = "--format=csv,noheader,nounits"
-    try:
-        sp = subprocess.Popen(['nvidia-smi', query, format_arg, "-i", ",".join(ids)],
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        result = sp.communicate()[0].decode("utf-8").rstrip().split("\n")
-    except OSError:
-        logger.exception("Failed calling nvidia-smi to query memory usage.")
-        return {}
-    memory_data = {}
-    for line in result:
-        gpu_id, mem_used, mem_total = line.split(",")
-        memory_data[int(gpu_id)] = (int(mem_used), int(mem_total))
-    log_gpu_memory_usage(memory_data)
-    return memory_data
+
+    device_ids = [str(c.device_id) for c in ctx]
+
+    # Run from clean forkserver process to not leak any CUDA resources
+
+    mp_context = mp.get_context()
+    result_queue = mp_context.Queue()
+    nvidia_smi_process = mp_context.Process(target=query_nvidia_smi, args=(device_ids, result_queue,))
+    nvidia_smi_process.start()
+    nvidia_smi_process.join()
+
+    return result_queue.get()
 
 
 def log_gpu_memory_usage(memory_data: Dict[int, Tuple[int, int]]):
