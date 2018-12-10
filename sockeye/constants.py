@@ -247,6 +247,7 @@ ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet",
 TRAINING_ARG_SOURCE = "--source"
 TRAINING_ARG_TARGET = "--target"
 TRAINING_ARG_PREPARED_DATA = "--prepared-data"
+TRAINING_ARG_MAX_SEQ_LEN = "--max-seq-len"
 
 VOCAB_ARG_SHARED_VOCAB = "--shared-vocab"
 

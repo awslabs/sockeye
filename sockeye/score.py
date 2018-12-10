@@ -91,7 +91,8 @@ def get_data_iters_and_vocabs(args: argparse.Namespace,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target,
         bucketing=False,
-        bucket_width=args.bucket_width)
+        bucket_width=args.bucket_width,
+        allow_empty=True)
 
     return train_iter, config_data, source_vocabs, target_vocab, model_config
 
