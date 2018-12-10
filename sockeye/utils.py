@@ -284,13 +284,14 @@ def topk(scores: mx.nd.NDArray,
 
     :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
     :param k: The number of smallest scores to return.
-    :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+    :param offset: Array (shape: batch_size * k) containing offsets to add to the hypothesis indices in batch decoding.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
-    # Compute the batch size from the offsets. We don't know the batch size because it is
-    # either 1 (timestep 1) or k (timestep 2+).
+
+    # Compute the batch size from the offsets and k. We don't know the batch size because it is
+    # either 1 (at timestep 1) or k (at timesteps 2+).
     # (batch_size, beam_size * target_vocab_size)
-    batch_size = int(offset[-1].asscalar() / k) + 1
+    batch_size = int(offset.shape[-1] / k)
     folded_scores = scores.reshape((batch_size, -1))
 
     # pylint: disable=unbalanced-tuple-unpacking
