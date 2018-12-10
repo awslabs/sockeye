@@ -780,7 +780,8 @@ def get_training_data_iters(sources: List[str],
                             max_seq_len_target: int,
                             bucketing: bool,
                             bucket_width: int,
-                            permute: bool = True) -> Tuple['BaseParallelSampleIter',
+                            permute: bool = True,
+                            allow_empty: bool = False) -> Tuple['BaseParallelSampleIter',
                                                            Optional['BaseParallelSampleIter'],
                                                            'DataConfig', 'DataInfo']:
     """
@@ -803,6 +804,7 @@ def get_training_data_iters(sources: List[str],
     :param max_seq_len_target: Maximum target sequence length.
     :param bucketing: Whether to use bucketing.
     :param bucket_width: Size of buckets.
+    :param allow_empty: Unless True if no sentences are below or equal to the maximum length an exception is raised.
     :return: Tuple of (training data iterator, validation data iterator, data config).
     """
     logger.info("===============================")
@@ -812,9 +814,10 @@ def get_training_data_iters(sources: List[str],
     length_statistics = analyze_sequence_lengths(sources, target, source_vocabs, target_vocab,
                                                  max_seq_len_source, max_seq_len_target)
 
-    check_condition(length_statistics.num_sents > 0,
-                    "No training sequences found with length smaller or equal than the maximum sequence length."
-                    "Consider increasing %s" % C.TRAINING_ARG_MAX_SEQ_LEN)
+    if not allow_empty:
+        check_condition(length_statistics.num_sents > 0,
+                        "No training sequences found with length smaller or equal than the maximum sequence length."
+                        "Consider increasing %s" % C.TRAINING_ARG_MAX_SEQ_LEN)
 
     # define buckets
     buckets = define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width,
