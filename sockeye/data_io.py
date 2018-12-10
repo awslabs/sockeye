@@ -533,8 +533,9 @@ def prepare_data(source_fnames: List[str],
     length_statistics = analyze_sequence_lengths(source_fnames, target_fname, source_vocabs, target_vocab,
                                                  max_seq_len_source, max_seq_len_target)
 
-    check_condition(length_statistics.num_sents > 0, "0 training sentence within maximum length, consider increasing "
-                                                     "the %s." % C.TRAINING_ARG_MAX_SEQ_LEN)
+    check_condition(length_statistics.num_sents > 0,
+                    "No training sequences found with length smaller or equal than the maximum sequence length."
+                    "Consider increasing %s" % C.TRAINING_ARG_MAX_SEQ_LEN)
 
     # define buckets
     buckets = define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width,
@@ -648,8 +649,9 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
                                                             source_vocabs, target_vocab,
                                                             max_seq_len_source, max_seq_len_target)
 
-    check_condition(validation_length_statistics.num_sents > 0, "0 validation sentence within maximum length, consider"
-                                                                " increasing the %s." % C.TRAINING_ARG_MAX_SEQ_LEN)
+    check_condition(validation_length_statistics.num_sents > 0,
+                    "No validation sequences found with length smaller or equal than the maximum sequence length."
+                    "Consider increasing %s" % C.TRAINING_ARG_MAX_SEQ_LEN)
 
     validation_sources_sentences, validation_target_sentences = create_sequence_readers(validation_sources,
                                                                                         validation_target,
@@ -810,8 +812,9 @@ def get_training_data_iters(sources: List[str],
     length_statistics = analyze_sequence_lengths(sources, target, source_vocabs, target_vocab,
                                                  max_seq_len_source, max_seq_len_target)
 
-    check_condition(length_statistics.num_sents > 0, "0 training sentence within maximum length, consider increasing "
-                                                     "the %s." % C.TRAINING_ARG_MAX_SEQ_LEN)
+    check_condition(length_statistics.num_sents > 0,
+                    "No training sequences found with length smaller or equal than the maximum sequence length."
+                    "Consider increasing %s" % C.TRAINING_ARG_MAX_SEQ_LEN)
 
     # define buckets
     buckets = define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width,
