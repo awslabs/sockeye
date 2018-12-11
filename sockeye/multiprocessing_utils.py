@@ -56,8 +56,8 @@ def initialize():
                 # before mxnet was imported from anywhere.
                 all_imported_modules = sys.modules.keys()
 
-                assert 'mxnet' not in all_imported_modules, "sockeye.multiprocessing_utils.initialize must be called " \
-                                                            "before mxnet is imported"
+                assert 'mxnet' not in all_imported_modules, ("sockeye.multiprocessing_utils.initialize must be called "
+                                                             "before mxnet is imported.")
 
                 p = mp.Process(target=__dummy_function_to_start_semaphore_tracker)
                 p.start()
@@ -68,6 +68,6 @@ def initialize():
 
 
 def get_context():
-    assert __context is not None, "Multiprocessing context not initialized. " \
-                                  "Please call sockeye.multiprocessing_utils.initialize()."
+    assert __context is not None, ("Multiprocessing context not initialized. Please call "
+                                   "sockeye.multiprocessing_utils.initialize() right after interpreter startup.")
     return __context
