@@ -464,11 +464,11 @@ def query_nvidia_smi(device_ids: List[int], result_queue: multiprocessing.Queue)
     :param result_queue: The queue to which the result dictionary of device id mapping to a tuple of
     (memory used, memory total) is added.
     """
-    device_ids = [str(device_id) for device_id in device_ids]
+    device_id_strs = [str(device_id) for device_id in device_ids]
     query = "--query-gpu=index,memory.used,memory.total"
     format_arg = "--format=csv,noheader,nounits"
     try:
-        sp = subprocess.Popen(['nvidia-smi', query, format_arg, "-i", ",".join(device_ids)],
+        sp = subprocess.Popen(['nvidia-smi', query, format_arg, "-i", ",".join(device_id_strs)],
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         result = sp.communicate()[0].decode("utf-8").rstrip().split("\n")
     except OSError:
@@ -476,12 +476,10 @@ def query_nvidia_smi(device_ids: List[int], result_queue: multiprocessing.Queue)
         result_queue.put({})
         return
     try:
-        raise ValueError()
         memory_data = {}
         for line in result:
             gpu_id, mem_used, mem_total = line.split(",")
             memory_data[int(gpu_id)] = (int(mem_used), int(mem_total))
-        log_gpu_memory_usage(memory_data)
 
         result_queue.put(memory_data)
     except:
@@ -515,7 +513,11 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, 
     nvidia_smi_process.start()
     nvidia_smi_process.join()
 
-    return result_queue.get()
+    memory_data = result_queue.get()
+
+    log_gpu_memory_usage(memory_data)
+
+    return memory_data
 
 
 def log_gpu_memory_usage(memory_data: Dict[int, Tuple[int, int]]):
