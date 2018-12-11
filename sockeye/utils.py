@@ -459,7 +459,9 @@ def get_num_gpus() -> int:
 
 
 def query_nvidia_smi(device_ids: List[int], result_queue: multiprocessing.Queue) -> None:
-    """ Runs nvidia-smi to determine the memory usage.
+    """
+    Runs nvidia-smi to determine the memory usage.
+
     :param device_ids: A list of devices for which the the memory usage will be queried.
     :param result_queue: The queue to which the result dictionary of device id mapping to a tuple of
     (memory used, memory total) is added.
