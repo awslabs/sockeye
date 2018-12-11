@@ -40,6 +40,10 @@ __context = None
 def initialize():
     global __context
 
+    if __context is not None:
+        # Already initialized
+        return
+
     if not __context:
         if os.name == 'nt':
             # Windows does not support the forkserver spawn method, we use the default instead
