@@ -14,7 +14,7 @@
 import pytest
 
 import sockeye.constants as C
-from sockeye.vocab import build_vocab, get_ordered_tokens_from_vocab
+from sockeye.vocab import build_vocab, get_ordered_tokens_from_vocab, is_valid_vocab
 
 test_vocab = [
         # Example 1
@@ -79,3 +79,24 @@ def test_constants_in_vocab(data, size, min_count, constants):
 def test_get_ordered_tokens_from_vocab(vocab, expected_output):
     assert get_ordered_tokens_from_vocab(vocab) == expected_output
 
+
+@pytest.mark.parametrize(
+    "vocab, expected_result",
+    [
+        ({symbol: idx for idx, symbol in enumerate(C.VOCAB_SYMBOLS + ["w1", "w2"])}, True),
+        # A vocabulary with just the valid symbols doesn't make much sense but is technically valid
+        ({symbol: idx for idx, symbol in enumerate(C.VOCAB_SYMBOLS)}, True),
+        # Manually specifying the list of required special symbol so that we avoid making a backwards-incompatible
+        # change by adding a new symbol to C.VOCAB_SYMBOLS
+        ({symbol: idx for idx, symbol in enumerate([C.PAD_SYMBOL, C.UNK_SYMBOL, C.BOS_SYMBOL, C.EOS_SYMBOL])}, True),
+        # PAD_ID must have word id 0
+        ({symbol: idx for idx, symbol in enumerate(reversed(C.VOCAB_SYMBOLS))}, False),
+        ({symbol: idx for idx, symbol in enumerate(list(reversed(C.VOCAB_SYMBOLS)) + ["w1", "w2"])}, False),
+        # If there is a gap the vocabulary is not valid:
+        ({symbol: idx if symbol != "w2" else idx + 1 for idx, symbol in enumerate(C.VOCAB_SYMBOLS + ["w1", "w2"])}, False),
+        # There shouldn't be any duplicate word ids
+        ({symbol: idx if symbol != "w2" else idx - 1 for idx, symbol in enumerate(C.VOCAB_SYMBOLS + ["w1", "w2"])}, False),
+    ]
+)
+def test_verify_valid_vocab(vocab, expected_result):
+    assert is_valid_vocab(vocab) == expected_result
