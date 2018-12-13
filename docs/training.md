@@ -176,3 +176,11 @@ You can also sum the embeddings (`--source-factors-combine sum`).
 In this case, you do not need to specify `--source-factors-num-embed`, since they are automatically all set to the size of the word embeddings (`--num-embed`).
 
 You then also have to apply factors for the source side [at inference time](inference.html#source-factors).
+
+## Length ratio prediction
+
+Sockeye supports an auxiliary training objective that predicts length ratio (|reference|/|input|) or the reference length for each input,
+that can be enabled by setting `--length-task`, respectively, to `ratio` or to `length`.
+Specify `--length-task-layers` to set the number of layers in the prediction MLP.
+The weight of the loss in the global training objective is controlled with `--length-task-weight` (standard cross-entropy loss has weight 1.0).
+During inference the predictions can be used to reward longer translations by enabling `--brevity-penalty-type`.

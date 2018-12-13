@@ -68,6 +68,8 @@ def get_pretrained_caption_net(args: argparse.Namespace,
                                                 length_penalty=inference.LengthPenalty(
                                                     args.length_penalty_alpha,
                                                     args.length_penalty_beta),
+                                                brevity_penalty=inference.BrevityPenalty(
+                                                    weight=0.0),
                                                 beam_prune=args.beam_prune,
                                                 beam_search_stop=args.beam_search_stop,
                                                 nbest_size=1,

@@ -59,6 +59,8 @@ class ModelConfig(Config):
                  config_encoder: encoder.EncoderConfig,
                  config_decoder: decoder.DecoderConfig,
                  config_loss: loss.LossConfig,
+                 config_length_task_loss: Optional[loss.LossConfig] = None,
+                 config_length_task: layers.LengthRatioConfig = None,
                  weight_tying: bool = False,
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
                  weight_normalization: bool = False,
@@ -72,6 +74,8 @@ class ModelConfig(Config):
         self.config_encoder = config_encoder
         self.config_decoder = config_decoder
         self.config_loss = config_loss
+        self.config_length_task_loss = config_length_task_loss
+        self.config_length_task = config_length_task
         self.weight_tying = weight_tying
         self.weight_tying_type = weight_tying_type
         self.weight_normalization = weight_normalization
@@ -127,6 +131,16 @@ class SockeyeModel:
                                                weight=out_weight_target,
                                                weight_normalization=self.config.weight_normalization,
                                                prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
+
+        # create length ratio prediction layer(s)
+        self.length_ratio = None
+        if self.config.config_length_task is not None:
+            if self.config.config_length_task.weight > 0.0:
+                self.length_ratio = layers.LengthRatio(hidden_size=self.encoder.get_num_hidden(),
+                                                       num_layers=self.config.config_length_task.num_layers,
+                                                       prefix=self.prefix + C.LENRATIOS_OUTPUT_LAYER_PREFIX)
+            else:
+                logger.warning("Auxiliary length task requested, but its loss weight is zero -- this will have no effect.")
 
         self.params = None  # type: Optional[Dict]
         self.aux_params = None  # type: Optional[Dict]
@@ -208,7 +222,7 @@ class SockeyeModel:
                                          shape=(self.config.config_embed_target.vocab_size,
                                                 self.config.config_embed_target.num_embed))
 
-        w_out_target = mx.sym.Variable(prefix + "target_output_weight",
+        w_out_target = mx.sym.Variable(prefix + "target_output_weight", dtype='float32',
                                        shape=(self.config.vocab_target_size, self.decoder.get_num_hidden()))
 
         if self.config.weight_tying:

@@ -18,6 +18,7 @@ from unittest.mock import patch, Mock
 
 import mxnet as mx
 import numpy as np
+import itertools
 import pytest
 
 import sockeye.constants as C
@@ -45,6 +46,7 @@ def mock_translator(batch_size: int = 1,
                                                   ensemble_mode=None,
                                                   bucket_source_width=None,
                                                   length_penalty=None,
+                                                  brevity_penalty=None,
                                                   beam_prune=None,
                                                   beam_search_stop=None,
                                                   nbest_size=None,
@@ -74,7 +76,12 @@ def mock_translator(batch_size: int = 1,
         return translator
 
 
-def test_concat_translations():
+@pytest.mark.parametrize("lp_alpha, lp_beta, bp_weight",
+                         [(1.0, 0.0, 0.0),  # no LP and no BP (default)
+                          (1.0, 2.0, 0.0),  # LP and no BP
+                          (1.0, 2.0, 4.0),  # LP and BP
+                          (1.0, 0.0, 5.0)]) # no LP and BP
+def test_concat_translations(lp_alpha: float, lp_beta: float, bp_weight: float):
     beam_history1 = {"id": [1]}
     beam_history2 = {"id": [2]}
     beam_history3 = {"id": [3]}
@@ -82,18 +89,32 @@ def test_concat_translations():
     expected_target_ids = [0, 1, 2, 0, 8, 9, 0, 3, 4, 5, -1]
     num_src = 7
 
-    length_penalty = sockeye.inference.LengthPenalty()
+    length_penalty = sockeye.inference.LengthPenalty(lp_alpha, lp_beta)
+    brevity_penalty = sockeye.inference.BrevityPenalty(bp_weight)
 
-    expected_score = (1 + 2 + 3) / length_penalty.get(len(expected_target_ids))
-
-    translations = [sockeye.inference.Translation([0, 1, 2, -1], np.zeros((4, num_src)), 1.0 / length_penalty.get(4),
-                                                  [beam_history1]),
+    expected_score = (1 + 2 + 3) / length_penalty.get(len(expected_target_ids)) - \
+                     brevity_penalty.get(len(expected_target_ids), 10 + 11 + 12)
+    translations = [sockeye.inference.Translation([0, 1, 2, -1],
+                                                  np.zeros((4, num_src)),
+                                                  1.0 / length_penalty.get(4) - brevity_penalty.get(4, 10),
+                                                  [beam_history1],
+                                                  None,
+                                                  10),
                     # Translation without EOS
-                    sockeye.inference.Translation([0, 8, 9], np.zeros((3, num_src)), 2.0 / length_penalty.get(3),
-                                                  [beam_history2]),
-                    sockeye.inference.Translation([0, 3, 4, 5, -1], np.zeros((5, num_src)), 3.0 / length_penalty.get(5),
-                                                  [beam_history3])]
-    combined = sockeye.inference._concat_translations(translations, stop_ids={_EOS}, length_penalty=length_penalty)
+                    sockeye.inference.Translation([0, 8, 9],
+                                                  np.zeros((3, num_src)),
+                                                  2.0 / length_penalty.get(3) - brevity_penalty.get(3, 11),
+                                                  [beam_history2],
+                                                  None,
+                                                  11),
+                    sockeye.inference.Translation([0, 3, 4, 5, -1],
+                                                  np.zeros((5, num_src)),
+                                                  3.0 / length_penalty.get(5) - brevity_penalty.get(5, 12),
+                                                  [beam_history3],
+                                                  None,
+                                                  12)]
+    combined = sockeye.inference._concat_translations(translations, stop_ids={_EOS},
+                                                      length_penalty=length_penalty, brevity_penalty=brevity_penalty)
 
     assert combined.target_ids == expected_target_ids
     assert combined.attention_matrix.shape == (len(expected_target_ids), len(translations) * num_src)
@@ -130,6 +151,46 @@ def test_length_penalty_int_input():
 
     assert np.isclose(np.asarray([length_penalty.get(length)]), np.asarray(expected_lp)).all()
 
+
+def test_brevity_penalty_default():
+    hyp_lengths = mx.nd.array([[1], [2], [3]])
+    ref_lengths = mx.nd.array([[2], [3], [2]])
+    brevity_penalty = sockeye.inference.BrevityPenalty(0.0)
+    expected_bp = 0.0
+
+    assert np.isclose(brevity_penalty.get(hyp_lengths, ref_lengths), expected_bp).all()
+    assert np.isclose(brevity_penalty(hyp_lengths, ref_lengths).asnumpy(), expected_bp).all()
+    brevity_penalty.hybridize()
+    assert np.isclose(brevity_penalty(hyp_lengths, ref_lengths).asnumpy(), expected_bp).all()
+
+
+def test_brevity_penalty():
+    hyp_lengths = mx.nd.array([[1], [2], [3]])
+    ref_lengths = mx.nd.array([[7], [2], [91]])
+    brevity_penalty = sockeye.inference.BrevityPenalty(3.5)
+    expected_bp = np.array([[3.5 * (1 - 7 / 1)], [0.0], [3.5 * (1 - 91 / 3)]])
+
+    assert np.isclose(brevity_penalty(hyp_lengths, ref_lengths).asnumpy(), expected_bp).all()
+    brevity_penalty.hybridize()
+    assert np.isclose(brevity_penalty(hyp_lengths, ref_lengths).asnumpy(), expected_bp).all()
+
+
+def test_brevity_penalty_int_input():
+    hyp_length = 3
+    ref_length = 5
+    brevity_penalty = sockeye.inference.BrevityPenalty(2.0)
+    expected_bp = [2.0 * (1 - 5 / 3)]
+
+    assert np.isclose(np.asarray([brevity_penalty.get(hyp_length, ref_length)]), np.asarray(expected_bp)).all()
+
+
+def test_brevity_penalty_empty_ref():
+    hyp_length = 3
+    ref_length = None
+    brevity_penalty = sockeye.inference.BrevityPenalty(2.0)
+    expected_bp = 0.0
+
+    assert np.isclose(np.asarray([brevity_penalty.get(hyp_length, ref_length)]), np.asarray(expected_bp)).all()
 
 @pytest.mark.parametrize("sentence_id, sentence, factors, chunk_size",
                          [(1, "a test", None, 4),
@@ -628,7 +689,8 @@ def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, 
                             lengths[expected_best_ids],
                             attentions[expected_best_ids],
                             seq_scores[expected_best_ids],
-                            beam_histories)]
+                            beam_histories,
+                            itertools.repeat(None))]
 
     constraints = [sockeye.lexical_constraints.ConstrainedHypothesis(rc, _EOS) for rc in raw_constraints]
 
@@ -638,6 +700,7 @@ def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, 
                                                                      attentions,
                                                                      seq_scores,
                                                                      lengths,
+                                                                     None,
                                                                      constraints,
                                                                      beam_histories)
 

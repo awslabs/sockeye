@@ -160,6 +160,14 @@ For example:
 This will output tab-delimited pairs of (score, translation).
 As always, don't forget to apply source- and target-side preprocessing to your input and your constraint.
 
+## Decoding with brevity penalty
+
+To nudge Sockeye towards longer translations, you can enable a penalty for short translations by setting `--brevity-penalty-type` to `learned` or `constant`.
+With the former setting, provided the training was done with `--length-task`, Sockeye will predict the reference length individually for each sentence
+and use it to calculate the (logarithmic) brevity penalty `weight * min(0.0, 1 - |ref|/|hyp|)` that will be subtracted from the scores to reward longer sentences.
+The latter setting, by default, will use a constant length ratio for all sentences that was estimated on the training data.
+The value of the constant can be changed with `--brevity-penalty-constant-length-ratio`.
+
 ## CPU process per core translation
 
 On multi-core computers, translation per core separately can speedup translation performance, due to some operation can't be handled parallel in one process.

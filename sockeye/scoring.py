@@ -49,7 +49,8 @@ class ScoringModel(model.SockeyeModel):
     :param provide_label: List of label descriptions.
     :param default_bucket_key: Default bucket key.
     :param score_type: The type of score to output (negative logprob or logprob).
-    :param length_penalty: The length penalty class to use.
+    :param length_penalty: The length penalty instance to use.
+    :param brevity_penalty: The brevity penalty instance to use.
     """
 
     def __init__(self,
@@ -61,12 +62,24 @@ class ScoringModel(model.SockeyeModel):
                  default_bucket_key: Tuple[int, int],
                  score_type: str,
                  length_penalty: inference.LengthPenalty,
-                 softmax_temperature: Optional[float] = None) -> None:
+                 brevity_penalty: inference.BrevityPenalty,
+                 softmax_temperature: Optional[float] = None,
+                 brevity_penalty_type: str = '',
+                 constant_length_ratio: float = 0.0) -> None:
         super().__init__(config)
         self.context = context
         self.score_type = score_type
         self.length_penalty = length_penalty
+        self.brevity_penalty = brevity_penalty
         self.softmax_temperature = softmax_temperature
+
+        if brevity_penalty_type == C.BREVITY_PENALTY_CONSTANT:
+            if constant_length_ratio <= 0.0:
+                self.constant_length_ratio = self.length_ratio_mean
+                logger.info("Using constant length ratio saved in the model config: %f",
+                            self.constant_length_ratio)
+        else:
+            self.constant_length_ratio = -1.0
 
         # Create the computation graph
         self._initialize(provide_data, provide_label, default_bucket_key)
@@ -77,6 +90,10 @@ class ScoringModel(model.SockeyeModel):
         self.module.set_params(arg_params=self.params,
                                aux_params=self.aux_params,
                                allow_missing=False)
+
+    @property
+    def length_ratio_mean(self) -> float:
+        return self.config.config_data.data_statistics.length_ratio_mean
 
     def _initialize(self,
                     provide_data: List[mx.io.DataDesc],
@@ -166,6 +183,17 @@ class ScoringModel(model.SockeyeModel):
             zeros = mx.sym.zeros_like(scores)
             sums = mx.sym.sum(mx.sym.where(labels != 0, scores, zeros), axis=1) / (self.length_penalty(target_length - 1))
 
+            # Deal with the potential presence of brevity penalty
+            # length_ratio: (batch_size,)
+            if self.constant_length_ratio > 0.0:
+                # override all ratios with the constant value
+                length_ratio = self.constant_length_ratio * mx.sym.ones_like(sums)
+            else:
+                # predict length ratio if supported
+                length_ratio = self.length_ratio(source_encoded, source_encoded_length).reshape((-1,)) \
+                                    if self.length_ratio is not None else mx.sym.zeros_like(sums)
+            sums = sums - self.brevity_penalty(target_length - 1, length_ratio * source_encoded_length)
+
             # Return the sums and the target distributions
             # sums: (batch_size,) target_dists: (batch_size, target_seq_len, target_vocab_size)
             return mx.sym.Group([sums, target_dists]), data_names, label_names
@@ -206,11 +234,13 @@ class Scorer:
     def __init__(self,
                  model: ScoringModel,
                  source_vocabs: List[vocab.Vocab],
-                 target_vocab: vocab.Vocab) -> None:
+                 target_vocab: vocab.Vocab,
+                 constant_length_ratio: float = -1.0) -> None:
         self.source_vocab_inv = vocab.reverse_vocab(source_vocabs[0])
         self.target_vocab_inv = vocab.reverse_vocab(target_vocab)
         self.model = model
         self.exclude_list = {source_vocabs[0][C.BOS_SYMBOL], target_vocab[C.EOS_SYMBOL], C.PAD_ID}
+        self.constant_length_ratio = constant_length_ratio
 
     def score(self,
               score_iter,

@@ -301,7 +301,7 @@ class ImageTextSampleIter(ParallelSampleIter):
                  use_feature_loader: bool = False,
                  preload_features: bool = False) -> None:
         super().__init__(data, buckets, batch_size, bucket_batch_sizes,
-                         source_data_name, target_data_name, label_name, dtype)
+                         source_data_name, target_data_name, label_name, dtype=dtype)
 
         self.with_text = not source_only
         self.image_size = tuple(image_size)

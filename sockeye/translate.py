@@ -107,11 +107,30 @@ def run_translate(args: argparse.Namespace):
                     restrict_lexicon[key] = lexicon
 
         store_beam = args.output_type == C.OUTPUT_HANDLER_BEAM_STORE
+
+        brevity_penalty_weight = args.brevity_penalty_weight
+        if args.brevity_penalty_type == C.BREVITY_PENALTY_CONSTANT:
+            if args.brevity_penalty_constant_length_ratio > 0.0:
+                constant_length_ratio = args.brevity_penalty_constant_length_ratio
+            else:
+                constant_length_ratio = sum(model.length_ratio_mean for model in models) / len(models)
+                logger.info("Using average of constant length ratios saved in the model configs: %f",
+                            constant_length_ratio)
+        elif args.brevity_penalty_type == C.BREVITY_PENALTY_LEARNED:
+            constant_length_ratio = -1.0
+        elif args.brevity_penalty_type is None:
+            brevity_penalty_weight = 0.0
+            constant_length_ratio = -1.0
+        else:
+            raise ValueError("Unknown brevity penalty type %s" % args.brevity_penalty_type)
+
+
         translator = inference.Translator(context=context,
                                           ensemble_mode=args.ensemble_mode,
                                           bucket_source_width=args.bucket_width,
                                           length_penalty=inference.LengthPenalty(args.length_penalty_alpha,
                                                                                  args.length_penalty_beta),
+                                          brevity_penalty=inference.BrevityPenalty(brevity_penalty_weight),
                                           beam_prune=args.beam_prune,
                                           beam_search_stop=args.beam_search_stop,
                                           nbest_size=args.nbest_size,
@@ -123,7 +142,8 @@ def run_translate(args: argparse.Namespace):
                                           store_beam=store_beam,
                                           strip_unknown_words=args.strip_unknown_words,
                                           skip_topk=args.skip_topk,
-                                          sample=args.sample)
+                                          sample=args.sample,
+                                          constant_length_ratio=constant_length_ratio)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
