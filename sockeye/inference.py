@@ -1116,10 +1116,10 @@ class Translator:
     :param length_penalty: Length penalty instance.
     :param beam_prune: Beam pruning difference threshold.
     :param beam_search_stop: The stopping criterion.
-    :param nbest_size: Size of nbest list of translations.
     :param models: List of models.
     :param source_vocabs: Source vocabularies.
     :param target_vocab: Target vocabulary.
+    :param nbest_size: Size of nbest list of translations.
     :param restrict_lexicon: Top-k lexicon to use for target vocabulary restriction.
     :param avoid_list: Global list of phrases to exclude from the output.
     :param store_beam: If True, store the beam search history and return it in the TranslatorOutput.
@@ -1135,10 +1135,10 @@ class Translator:
                  length_penalty: LengthPenalty,
                  beam_prune: float,
                  beam_search_stop: str,
-                 nbest_size: int,
                  models: List[InferenceModel],
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
+                 nbest_size: int = 1,
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
                  avoid_list: Optional[str] = None,
                  store_beam: bool = False,
