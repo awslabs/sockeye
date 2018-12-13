@@ -81,6 +81,7 @@ def test_device_args(test_params, expected_params):
               num_layers=(6, 6),
               num_embed=(512, 512),
               source_factors_num_embed=[],
+              source_factors_combine=C.SOURCE_FACTORS_COMBINE_DEFAULT,
               rnn_attention_type='mlp',
               rnn_attention_num_hidden=None,
               rnn_scale_dot_attention=False,
