@@ -112,6 +112,36 @@ def vocab_to_json(vocab: Vocab, path: str):
         logger.info('Vocabulary saved to "%s"', path)
 
 
+def is_valid_vocab(vocab: Vocab) -> bool:
+    """
+    Checks if a vocabulary is valid. We define valid as:
+    1. All indices from 0 to num_words - 1 are present without duplicates.
+    2. All special symbols C.PAD_SYMBOL, C.UNK_SYMBOL, C.BOS_SYMBOL, C.EOS_SYMBOL are present.
+    3. PAD_ID has word id 0.
+    """
+    for symbol in [C.PAD_SYMBOL, C.UNK_SYMBOL, C.BOS_SYMBOL, C.EOS_SYMBOL]:
+        if symbol not in vocab:
+            logger.warning("%s missing from vocabulary.", symbol)
+            return False
+    if vocab[C.PAD_SYMBOL] != 0:
+        logger.warning("PAD_ID does not have word id 0 in vocabulary.")
+        return False
+    word_ids = []
+    for word, word_id in vocab.items():
+        word_ids.append(word_id)
+    word_ids_set = set(word_ids)
+    if len(word_ids_set) != len(word_ids):
+        logger.warning("Duplicate word_ids in vocabulary.")
+        return False
+
+    expected_word_ids = set(range(0, len(vocab)))
+    if expected_word_ids != word_ids_set:
+        logger.warning("Not all word_ids from 0 to len(vocabulary) present in vocabulary.")
+        return False
+
+    return True
+
+
 def vocab_from_json(path: str, encoding: str = C.VOCAB_ENCODING) -> Vocab:
     """
     Saves vocabulary in json format.
@@ -122,6 +152,7 @@ def vocab_from_json(path: str, encoding: str = C.VOCAB_ENCODING) -> Vocab:
     """
     with open(path, encoding=encoding) as inp:
         vocab = json.load(inp)
+        utils.check_condition(is_valid_vocab(vocab), "Vocabulary %s not valid." % path)
         logger.info('Vocabulary (%d words) loaded from "%s"', len(vocab), path)
         return vocab
 

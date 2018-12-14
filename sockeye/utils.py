@@ -26,6 +26,8 @@ import shutil
 import subprocess
 import sys
 import time
+import sockeye.multiprocessing_utils as mp_utils
+import multiprocessing
 from contextlib import contextmanager, ExitStack
 from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
 
@@ -279,20 +281,25 @@ def topk(scores: mx.nd.NDArray,
          offset: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
     """
     Get the lowest k elements per sentence from a `scores` matrix.
+    At the first timestep, the shape of scores is (batch, target_vocabulary_size).
+    At subsequent steps, the shape is (batch * k, target_vocabulary_size).
 
     :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
     :param k: The number of smallest scores to return.
-    :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+    :param offset: Array (shape: batch_size * k) containing offsets to add to the hypothesis indices in batch decoding.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
+
+    # Compute the batch size from the offsets and k. We don't know the batch size because it is
+    # either 1 (at timestep 1) or k (at timesteps 2+).
     # (batch_size, beam_size * target_vocab_size)
-    folded_scores = scores.reshape((-1, k * scores.shape[-1]))
-    batch_size = folded_scores.shape[0]
+    batch_size = int(offset.shape[-1] / k)
+    folded_scores = scores.reshape((batch_size, -1))
 
     # pylint: disable=unbalanced-tuple-unpacking
     values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
     indices = mx.nd.cast(indices, 'int32').reshape((-1,))
-    best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, scores.shape)
+    best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, shape=(batch_size * k, scores.shape[-1]))
 
     if batch_size > 1:
         # Offsetting the indices to match the shape of the scores matrix
@@ -456,6 +463,37 @@ def get_num_gpus() -> int:
     return mx.context.num_gpus()
 
 
+def query_nvidia_smi(device_ids: List[int], result_queue: multiprocessing.Queue) -> None:
+    """
+    Runs nvidia-smi to determine the memory usage.
+
+    :param device_ids: A list of devices for which the the memory usage will be queried.
+    :param result_queue: The queue to which the result dictionary of device id mapping to a tuple of
+    (memory used, memory total) is added.
+    """
+    device_id_strs = [str(device_id) for device_id in device_ids]
+    query = "--query-gpu=index,memory.used,memory.total"
+    format_arg = "--format=csv,noheader,nounits"
+    try:
+        sp = subprocess.Popen(['nvidia-smi', query, format_arg, "-i", ",".join(device_id_strs)],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        result = sp.communicate()[0].decode("utf-8").rstrip().split("\n")
+    except OSError:
+        logger.exception("Failed calling nvidia-smi to query memory usage.")
+        result_queue.put({})
+        return
+    try:
+        memory_data = {}
+        for line in result:
+            gpu_id, mem_used, mem_total = line.split(",")
+            memory_data[int(gpu_id)] = (int(mem_used), int(mem_total))
+
+        result_queue.put(memory_data)
+    except:
+        logger.exception("Failed parsing nvidia-smi output %s", "\n".join(result))
+        result_queue.put({})
+
+
 def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, int]]:
     """
     Returns used and total memory for GPUs identified by the given context list.
@@ -471,21 +509,21 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, 
     if shutil.which("nvidia-smi") is None:
         logger.warning("Couldn't find nvidia-smi, therefore we assume no GPUs are available.")
         return {}
-    ids = [str(c.device_id) for c in ctx]
-    query = "--query-gpu=index,memory.used,memory.total"
-    format_arg = "--format=csv,noheader,nounits"
-    try:
-        sp = subprocess.Popen(['nvidia-smi', query, format_arg, "-i", ",".join(ids)],
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        result = sp.communicate()[0].decode("utf-8").rstrip().split("\n")
-    except OSError:
-        logger.exception("Failed calling nvidia-smi to query memory usage.")
-        return {}
-    memory_data = {}
-    for line in result:
-        gpu_id, mem_used, mem_total = line.split(",")
-        memory_data[int(gpu_id)] = (int(mem_used), int(mem_total))
+
+    device_ids = [c.device_id for c in ctx]
+
+    # Run from clean forkserver process to not leak any CUDA resources
+
+    mp_context = mp_utils.get_context()
+    result_queue = mp_context.Queue()
+    nvidia_smi_process = mp_context.Process(target=query_nvidia_smi, args=(device_ids, result_queue,))
+    nvidia_smi_process.start()
+    nvidia_smi_process.join()
+
+    memory_data = result_queue.get()
+
     log_gpu_memory_usage(memory_data)
+
     return memory_data
 
 
