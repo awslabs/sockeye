@@ -29,6 +29,7 @@ from . import arguments
 from . import constants as C
 from . import data_io
 from . import inference
+from . import utils
 
 logger = setup_main_logger(__name__, file_logging=False)
 
@@ -41,6 +42,9 @@ def main():
 
 
 def run_translate(args: argparse.Namespace):
+
+    # Seed randomly unless a seed has been passed
+    utils.seed_rngs(args.seed if args.seed is not None else int(time.time()))
 
     if args.output is not None:
         global logger
@@ -99,7 +103,8 @@ def run_translate(args: argparse.Namespace):
             decoder_return_logit_inputs=args.restrict_lexicon is not None,
             cache_output_layer_w_b=args.restrict_lexicon is not None,
             override_dtype=args.override_dtype,
-            output_scores=output_handler.reports_score())
+            output_scores=output_handler.reports_score(),
+            sampling=args.sample)
         restrict_lexicon = None  # type: Optional[TopKLexicon]
         if args.restrict_lexicon:
             restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
@@ -120,7 +125,8 @@ def run_translate(args: argparse.Namespace):
                                           avoid_list=args.avoid_list,
                                           store_beam=store_beam,
                                           strip_unknown_words=args.strip_unknown_words,
-                                          skip_topk=args.skip_topk)
+                                          skip_topk=args.skip_topk,
+                                          sample=args.sample)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,

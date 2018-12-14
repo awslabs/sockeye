@@ -10,6 +10,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.64]
+### Added
+- Adding translation sampling via `--sample [N]`. This causes the decoder to sample each next step from the target distribution probabilities at each
+  timestep. An optional value of `N` causes the decoder to sample only from the top `N` vocabulary items for each hypothesis at each timestep (the
+  default is 0, meaning to sample from the entire vocabulary).
+
 ## [1.18.63]
 ### Changed
 - The checkpoint decoder and nvidia-smi subprocess are now launched from a forkserver, allowing for a better separation between processes.
