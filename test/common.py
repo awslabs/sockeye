@@ -533,7 +533,7 @@ def test_scoring(model_path, work_dir, test_source_factor_paths, test_source_pat
         # the length penalty was applied
         if len(translate_tokens) >= max_len - 2:
             continue
-        assert abs(translate_score - score_score) < 0.01
+        assert abs(translate_score - score_score) < 0.02
 
 
 def _translate_output_is_valid(translate_outputs: List[str]) -> bool:
