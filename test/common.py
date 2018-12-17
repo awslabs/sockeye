@@ -572,7 +572,7 @@ def _collect_translate_output_and_scores(out_path) -> Tuple[List[str], List[floa
                     score = output['scores'][0]
                 except IndexError:
                     pass
-            except (ValueError, json.JSONDecodeError):
+            except:
                 try:
                     score, translation = output.split('\t', 1)
                 except ValueError:
