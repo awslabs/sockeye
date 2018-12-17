@@ -410,6 +410,8 @@ def load_models(context: mx.context.Context,
 
     if checkpoints is None:
         checkpoints = [None] * len(model_folders)
+    else:
+        utils.check_condition(len(checkpoints) == len(model_folders), "Must provide checkpoints for each model")
 
     skip_softmax = False
     # performance tweak: skip softmax for a single model, decoding with beam size 1, when not sampling and no scores are required in output.
@@ -430,6 +432,10 @@ def load_models(context: mx.context.Context,
         if override_dtype is not None:
             model_config.config_encoder.dtype = override_dtype
             model_config.config_decoder.dtype = override_dtype
+            if override_dtype == C.DTYPE_FP16:
+                logger.warning('Experimental feature \'override_dtype=float16\' has been used. '
+                               'This feature may be removed or change its behaviour in future. '
+                               'DO NOT USE IT IN PRODUCTION!')
 
         if checkpoint is None:
             params_fname = os.path.join(model_folder, C.PARAMS_BEST_NAME)
@@ -751,7 +757,8 @@ def make_input_from_dict(sentence_id: SentenceId, input_dict: Dict) -> Translato
         if isinstance(constraints, list):
             constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
 
-        return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors, constraints=constraints, avoid_list=avoid_list)
+        return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors,
+                               constraints=constraints, avoid_list=avoid_list)
 
     except Exception as e:
         logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
@@ -875,6 +882,7 @@ class NBestTranslations:
     __slots__ = ('target_ids_list',
                  'attention_matrices',
                  'scores')
+
     def __init__(self,
                  target_ids_list: List[TokenIds],
                  attention_matrices: List[np.ndarray],
@@ -1168,8 +1176,10 @@ class Translator:
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
         self.nbest_size = nbest_size
-        utils.check_condition(self.beam_size >= nbest_size,
-                              'Nbest size must be smaller or equal to beam size.')
+        utils.check_condition(self.beam_size >= nbest_size, 'nbest_size must be smaller or equal to beam_size.')
+        if self.nbest_size > 1:
+            utils.check_condition(self.beam_search_stop == C.BEAM_SEARCH_STOP_ALL,
+                                  "nbest_size > 1 requires beam_search_stop to be set to 'all'")
         self.batch_size = self.models[0].batch_size
 
         if any(m.skip_softmax for m in self.models):
@@ -1177,6 +1187,10 @@ class Translator:
                                   "Skipping softmax cannot be enabled for ensembles or beam sizes > 1.")
 
         self.skip_topk = skip_topk
+        if self.skip_topk:
+            utils.check_condition(self.beam_size == 1, "skip_topk has no effect if beam size is larger than 1")
+            utils.check_condition(len(self.models) == 1, "skip_topk has no effect for decoding with more than 1 model")
+
         self.sample = sample
         utils.check_condition(not self.sample or self.restrict_lexicon is None,
                               "Sampling is not available when working with a restricted lexicon.")
@@ -1195,7 +1209,8 @@ class Translator:
                                     ctx=self.context, dtype='float32')
 
         # offset for hypothesis indices in batch decoding
-        self.offset = mx.nd.array(np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size),
+        self.offset = mx.nd.array(np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size),
+                                            self.beam_size),
                                   dtype='int32', ctx=self.context)
         # locations of each batch item when first dimension is (batch * beam)
         self.batch_indices = mx.nd.array(np.arange(0, self.batch_size * self.beam_size, self.beam_size), dtype='int32', ctx=self.context)
@@ -1250,7 +1265,8 @@ class Translator:
             for phrase in data_io.read_content(avoid_list):
                 phrase_ids = data_io.tokens2ids(phrase, self.vocab_target)
                 if self.unk_id in phrase_ids:
-                    logger.warning("Global avoid phrase '%s' contains an %s; this may indicate improper preprocessing.", ' '.join(phrase), C.UNK_SYMBOL)
+                    logger.warning("Global avoid phrase '%s' contains an %s; this may indicate improper preprocessing.",
+                                   ' '.join(phrase), C.UNK_SYMBOL)
                 self.global_avoid_trie.add_phrase(phrase_ids)
 
         self._concat_translations = partial(_concat_nbest_translations if self.nbest_size > 1 else _concat_translations,
@@ -1416,9 +1432,9 @@ class Translator:
                                                                            List[Optional[constrained.RawConstraintList]],
                                                                            mx.nd.NDArray]:
         """
-        Assembles the numerical data for the batch.
-        This comprises an NDArray for the source sentences, the bucket key (padded source length), and a list of
-        raw constraint lists, one for each sentence in the batch, an NDArray of maximum output lengths for each sentence in the batch.
+        Assembles the numerical data for the batch. This comprises an NDArray for the source sentences,
+        the bucket key (padded source length), and a list of raw constraint lists, one for each sentence in the batch,
+        an NDArray of maximum output lengths for each sentence in the batch.
         Each raw constraint list contains phrases in the form of lists of integers in the target language vocabulary.
 
         :param trans_inputs: List of TranslatorInputs.
@@ -1780,8 +1796,7 @@ class Translator:
                     constraints,
                     best_hyp_indices,
                     best_word_indices,
-                    scores_accumulated,
-                    self.context)
+                    scores_accumulated)
 
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
