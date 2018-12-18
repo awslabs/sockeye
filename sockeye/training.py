@@ -15,7 +15,6 @@
 Code for training
 """
 import logging
-import multiprocessing as mp
 import os
 import pickle
 import random
@@ -37,6 +36,8 @@ from . import model
 from . import utils
 from . import vocab
 from .optimizers import BatchState, CheckpointState, SockeyeOptimizer, OptimizerConfig
+import multiprocessing
+import sockeye.multiprocessing_utils as mp_utils
 
 logger = logging.getLogger(__name__)
 
@@ -1122,9 +1123,9 @@ class DecoderProcessManager(object):
                  decoder: checkpoint_decoder.CheckpointDecoder) -> None:
         self.output_folder = output_folder
         self.decoder = decoder
-        self.ctx = mp.get_context('spawn')  # type: ignore
+        self.ctx = mp_utils.get_context()  # type: ignore
         self.decoder_metric_queue = self.ctx.Queue()
-        self.decoder_process = None  # type: Optional[mp.Process]
+        self.decoder_process = None  # type: Optional[multiprocessing.Process]
 
     def start_decoder(self, checkpoint: int):
         """
@@ -1174,7 +1175,7 @@ class DecoderProcessManager(object):
 def _decode_and_evaluate(decoder: checkpoint_decoder.CheckpointDecoder,
                          checkpoint: int,
                          output_name: str,
-                         queue: mp.Queue):
+                         queue: multiprocessing.Queue):
     """
     Decodes and evaluates using given checkpoint_decoder and puts result in the queue,
     indexed by the checkpoint.

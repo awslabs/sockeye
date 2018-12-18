@@ -533,6 +533,10 @@ def prepare_data(source_fnames: List[str],
     length_statistics = analyze_sequence_lengths(source_fnames, target_fname, source_vocabs, target_vocab,
                                                  max_seq_len_source, max_seq_len_target)
 
+    check_condition(length_statistics.num_sents > 0,
+                    "No training sequences found with length smaller or equal than the maximum sequence length."
+                    "Consider increasing %s" % C.TRAINING_ARG_MAX_SEQ_LEN)
+
     # define buckets
     buckets = define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width,
                                       length_statistics.length_ratio_mean) if bucketing else [
@@ -644,6 +648,11 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
     validation_length_statistics = analyze_sequence_lengths(validation_sources, validation_target,
                                                             source_vocabs, target_vocab,
                                                             max_seq_len_source, max_seq_len_target)
+
+    check_condition(validation_length_statistics.num_sents > 0,
+                    "No validation sequences found with length smaller or equal than the maximum sequence length."
+                    "Consider increasing %s" % C.TRAINING_ARG_MAX_SEQ_LEN)
+
     validation_sources_sentences, validation_target_sentences = create_sequence_readers(validation_sources,
                                                                                         validation_target,
                                                                                         source_vocabs, target_vocab)
@@ -793,6 +802,7 @@ def get_training_data_iters(sources: List[str],
     :param max_seq_len_target: Maximum target sequence length.
     :param bucketing: Whether to use bucketing.
     :param bucket_width: Size of buckets.
+    :param allow_empty: Unless True if no sentences are below or equal to the maximum length an exception is raised.
     :return: Tuple of (training data iterator, validation data iterator, data config).
     """
     logger.info("===============================")
@@ -801,6 +811,12 @@ def get_training_data_iters(sources: List[str],
     # Pass 1: get target/source length ratios.
     length_statistics = analyze_sequence_lengths(sources, target, source_vocabs, target_vocab,
                                                  max_seq_len_source, max_seq_len_target)
+
+    if not allow_empty:
+        check_condition(length_statistics.num_sents > 0,
+                        "No training sequences found with length smaller or equal than the maximum sequence length."
+                        "Consider increasing %s" % C.TRAINING_ARG_MAX_SEQ_LEN)
+
     # define buckets
     buckets = define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width,
                                       length_statistics.length_ratio_mean) if bucketing else [

@@ -29,6 +29,7 @@ from . import arguments
 from . import constants as C
 from . import data_io
 from . import inference
+from . import utils
 
 logger = setup_main_logger(__name__, file_logging=False)
 
@@ -42,6 +43,9 @@ def main():
 
 def run_translate(args: argparse.Namespace):
 
+    # Seed randomly unless a seed has been passed
+    utils.seed_rngs(args.seed if args.seed is not None else int(time.time()))
+
     if args.output is not None:
         global logger
         logger = setup_main_logger(__name__,
@@ -49,26 +53,13 @@ def run_translate(args: argparse.Namespace):
                                    file_logging=True,
                                    path="%s.%s" % (args.output, C.LOG_NAME))
 
-    if args.checkpoints is not None:
-        check_condition(len(args.checkpoints) == len(args.models), "must provide checkpoints for each model")
-
-    if args.skip_topk:
-        check_condition(args.beam_size == 1, "--skip-topk has no effect if beam size is larger than 1")
-        check_condition(len(args.models) == 1, "--skip-topk has no effect for decoding with more than 1 model")
-
-    if args.nbest_size > 1:
-        check_condition(args.beam_size >= args.nbest_size,
-                        "Size of nbest list (--nbest-size) must be smaller or equal to beam size (--beam-size).")
-        check_condition(args.beam_search_stop == C.BEAM_SEARCH_STOP_ALL,
-                        "--nbest-size > 1 requires beam search to only stop after all hypotheses are finished "
-                        "(--beam-search-stop all)")
-        if args.output_type != C.OUTPUT_HANDLER_NBEST:
-            logger.warning("For nbest translation, output handler must be '%s', overriding option --output-type.",
-                       C.OUTPUT_HANDLER_NBEST)
-            args.output_type = C.OUTPUT_HANDLER_NBEST
-
     log_basic_info(args)
 
+    if args.nbest_size > 1:
+        if args.output_type != C.OUTPUT_HANDLER_NBEST:
+            logger.warning("For nbest translation, output handler must be '%s', overriding option --output-type.",
+                           C.OUTPUT_HANDLER_NBEST)
+            args.output_type = C.OUTPUT_HANDLER_NBEST
     output_handler = get_output_handler(args.output_type,
                                         args.output,
                                         args.sure_align_threshold)
@@ -82,11 +73,6 @@ def run_translate(args: argparse.Namespace):
                                     exit_stack=exit_stack)[0]
         logger.info("Translate Device: %s", context)
 
-        if args.override_dtype == C.DTYPE_FP16:
-            logger.warning('Experimental feature \'--override-dtype float16\' has been used. '
-                           'This feature may be removed or change its behaviour in future. '
-                           'DO NOT USE IT IN PRODUCTION!')
-
         models, source_vocabs, target_vocab = inference.load_models(
             context=context,
             max_input_len=args.max_input_len,
@@ -99,7 +85,8 @@ def run_translate(args: argparse.Namespace):
             decoder_return_logit_inputs=args.restrict_lexicon is not None,
             cache_output_layer_w_b=args.restrict_lexicon is not None,
             override_dtype=args.override_dtype,
-            output_scores=output_handler.reports_score())
+            output_scores=output_handler.reports_score(),
+            sampling=args.sample)
         restrict_lexicon = None  # type: Optional[TopKLexicon]
         if args.restrict_lexicon:
             restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
@@ -120,7 +107,8 @@ def run_translate(args: argparse.Namespace):
                                           avoid_list=args.avoid_list,
                                           store_beam=store_beam,
                                           strip_unknown_words=args.strip_unknown_words,
-                                          skip_topk=args.skip_topk)
+                                          skip_topk=args.skip_topk,
+                                          sample=args.sample)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,

@@ -424,7 +424,7 @@ def add_bucketing_args(params):
                         default=10,
                         help='Width of buckets in tokens. Default: %(default)s.')
 
-    params.add_argument('--max-seq-len',
+    params.add_argument(C.TRAINING_ARG_MAX_SEQ_LEN,
                         type=multiple_values(num_values=2, greater_or_equal=1),
                         default=(99, 99),
                         help='Maximum sequence length in tokens.'
@@ -1222,6 +1222,17 @@ def add_inference_args(params):
                                action='store_true',
                                help='Use argmax instead of topk for greedy decoding (when --beam-size 1).'
                                     'Default: %(default)s.')
+    decode_params.add_argument('--sample',
+                               type=int_greater_or_equal(0),
+                               default=None,
+                               nargs='?',
+                               const=0,
+                               help='Sample from softmax instead of taking best. Optional argument will restrict '
+                                    'sampling to top N vocabulary items at each step. Default: %(default)s.')
+    decode_params.add_argument('--seed',
+                               type=int,
+                               default=None,
+                               help='Random seed used if sampling. Default: %(default)s.')
     decode_params.add_argument('--ensemble-mode',
                                type=str,
                                default='linear',

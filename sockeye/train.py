@@ -14,6 +14,14 @@
 """
 Simple Training CLI.
 """
+
+# Start the forkserver. It is important that this is done before any other imports so that the forkserver is in a clean
+# state.
+if __name__ == "__main__":
+    import sockeye.multiprocessing_utils as mp
+    mp.initialize()
+
+
 import argparse
 import os
 import shutil
@@ -23,6 +31,7 @@ from contextlib import ExitStack
 from typing import Any, cast, Optional, Dict, List, Tuple
 
 import mxnet as mx
+
 
 from . import arguments
 from . import checkpoint_decoder
