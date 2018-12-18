@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.65]
+### Changed
+- More informative error message about inconsistent --shared-vocab setting.
+
 ## [1.18.64]
 ### Added
 - Adding translation sampling via `--sample [N]`. This causes the decoder to sample each next step from the target distribution probabilities at each
