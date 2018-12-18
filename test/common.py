@@ -487,11 +487,15 @@ def run_train_translate(train_params: str,
                 translate_scores = []
                 translate_lens = []
                 score_scores = in_score.readlines()
-                for score, sent in zip(in_translate.readlines(), in_words.readlines()):
+                t = in_translate.readlines()
+                for score, sent in zip(t, in_words.readlines()):
                     if score != '-inf\n' and len(sent.split()) < max_len:
                         translate_scores.append(score)
                         translate_lens.append(len(sent.split()))
 
+                print('TRANSLATE SCORES BEFORE', t)
+                print('TRANSLATE SCORES', translate_scores)
+                print('SCORING SCORES', score_scores)
                 assert len(translate_scores) == len(score_scores)
 
                 # Compare scores (using 0.002 which covers common noise comparing e.g., 1.234 and 1.235)

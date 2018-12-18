@@ -377,7 +377,7 @@ class Embedding(Encoder):
 
         self.embed_factor_weights = []  # type: List[mx.sym.Symbol]
         if self.config.factor_configs is not None:
-            # Factors weights aren't shared so they're not passed in and we create them here.
+            # Factor weights aren't shared so they're not passed in and we create them here.
             for i, fc in enumerate(self.config.factor_configs):
                 self.embed_factor_weights.append(mx.sym.Variable(prefix + "factor%d_weight" % i,
                                                                  shape=(fc.vocab_size, fc.num_embed)))

@@ -56,14 +56,12 @@ class ScoringModel(model.SockeyeModel):
                  context: List[mx.context.Context],
                  provide_data: List[mx.io.DataDesc],
                  provide_label: List[mx.io.DataDesc],
-                 bucketing: bool,
                  default_bucket_key: Tuple[int, int],
                  score_type: str,
                  length_penalty: inference.LengthPenalty,
                  softmax_temperature: Optional[float] = None) -> None:
         super().__init__(config)
         self.context = context
-        self.bucketing = bucketing
         self.score_type = score_type
         self.length_penalty = length_penalty
         self.softmax_temperature = softmax_temperature
@@ -170,19 +168,12 @@ class ScoringModel(model.SockeyeModel):
             # sums: (batch_size,) target_dists: (batch_size, target_seq_len, target_vocab_size)
             return mx.sym.Group([sums, target_dists]), data_names, label_names
 
-        if self.bucketing:
-            logger.info("Using bucketing. Default max_seq_len=%s", default_bucket_key)
-            self.module = mx.mod.BucketingModule(sym_gen=sym_gen,
-                                                 logger=logger,
-                                                 default_bucket_key=default_bucket_key,
-                                                 context=self.context)
-        else:
-            symbol, _, __ = sym_gen(default_bucket_key)
-            self.module = mx.mod.Module(symbol=symbol,
-                                        data_names=data_names,
-                                        label_names=label_names,
-                                        logger=logger,
-                                        context=self.context)
+        symbol, _, __ = sym_gen(default_bucket_key)
+        self.module = mx.mod.Module(symbol=symbol,
+                                    data_names=data_names,
+                                    label_names=label_names,
+                                    logger=logger,
+                                    context=self.context)
 
         self.module.bind(data_shapes=provide_data,
                          label_shapes=provide_label,
