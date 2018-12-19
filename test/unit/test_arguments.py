@@ -15,6 +15,7 @@ import argparse
 import pytest
 import tempfile
 import os
+import re
 import yaml
 
 import sockeye.arguments as arguments
@@ -509,3 +510,7 @@ def test_config_file_required(config_command_line, config_contents):
             # Parse args and cast to dicts directly
             config_file_argparse.parse_args(
                 args=(config_command_line + (" --config %s" % fp.name)).split())
+
+def test_arguments_allowed_to_differ():
+    for arg in C.ARGS_MAY_DIFFER:
+        assert re.match(r'^[a-zA-Z0-9_]*$', arg)
