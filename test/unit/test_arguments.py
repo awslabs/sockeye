@@ -513,4 +513,4 @@ def test_config_file_required(config_command_line, config_contents):
 
 def test_arguments_allowed_to_differ():
     for arg in C.ARGS_MAY_DIFFER:
-        assert re.match(r'^[a-zA-z0-9_]*$', arg)
+        assert re.match(r'^[a-zA-Z0-9_]*$', arg)
