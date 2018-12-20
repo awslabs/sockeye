@@ -720,12 +720,18 @@ def add_model_parameters(params):
                                    '[Vaswani et al, 2017]')
 
     model_params.add_argument('--rnn-attention-coverage-type',
-                              choices=["tanh", "sigmoid", "relu", "softrelu", "gru", "count"],
-                              default="count",
+                              choices=C.COVERAGE_TYPES,
+                              default=C.COVERAGE_COUNT,
                               help="Type of model for updating coverage vectors. 'count' refers to an update method "
-                                   "that accumulates attention scores. 'tanh', 'sigmoid', 'relu', 'softrelu' "
+                                   "that accumulates attention scores. 'fertility' accumulates attention scores as well "
+                                   "but also computes a fertility value for every source word. "
+                                   "'tanh', 'sigmoid', 'relu', 'softrelu' "
                                    "use non-linear layers with the respective activation type, and 'gru' uses a "
                                    "GRU to update the coverage vectors. Default: %(default)s.")
+    model_params.add_argument('--rnn-attention-coverage-max-fertility',
+                              type=int,
+                              default=2,
+                              help="Maximum fertility for individual source words. Default: %(default)s.")
     model_params.add_argument('--rnn-attention-coverage-num-hidden',
                               type=int,
                               default=1,

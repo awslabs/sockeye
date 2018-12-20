@@ -71,6 +71,7 @@ def test_step(cell_type, context_gating,
     states_shape = (batch_size, decoder_num_hidden)
 
     config_coverage = sockeye.coverage.CoverageConfig(type="tanh",
+                                                      max_fertility=2,
                                                       num_hidden=2,
                                                       layer_normalization=False)
     config_attention = sockeye.rnn_attention.AttentionConfig(type="coverage",

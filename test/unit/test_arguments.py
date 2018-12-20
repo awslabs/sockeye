@@ -87,6 +87,7 @@ def test_device_args(test_params, expected_params):
               rnn_scale_dot_attention=False,
               rnn_attention_coverage_type='count',
               rnn_attention_coverage_num_hidden=1,
+              rnn_attention_coverage_max_fertility=2,
               weight_tying=False,
               weight_tying_type="trg_softmax",
               rnn_attention_mhdot_heads=None,

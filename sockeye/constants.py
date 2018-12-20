@@ -156,6 +156,17 @@ CNN_ACTIVATION_TYPES = [GLU, RELU, SIGMOID, SOFT_RELU, TANH]
 CNN_PAD_LEFT = "left"
 CNN_PAD_CENTERED = "centered"
 
+# coverage types
+COVERAGE_COUNT = "count"
+COVERAGE_FERTILITY = "fertility"
+COVERAGE_TYPES = [TANH,
+                  SIGMOID,
+                  RELU,
+                  SOFT_RELU,
+                  GRU_TYPE,
+                  COVERAGE_COUNT,
+                  COVERAGE_FERTILITY]
+
 # default I/O variable names
 SOURCE_NAME = "source"
 SOURCE_LENGTH_NAME = "source_length"
