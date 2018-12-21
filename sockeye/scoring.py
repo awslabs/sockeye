@@ -15,6 +15,7 @@
 Code for scoring.
 """
 import logging
+import math
 import os
 import time
 from typing import List, Optional, Tuple
@@ -216,7 +217,8 @@ class Scorer:
 
         total_time = 0.
         sentence_no = 0
-        for i, batch in enumerate(score_iter):
+        batch_no = 0
+        for batch_no, batch in enumerate(score_iter, 1):
 
             batch_tic = time.time()
 
@@ -246,3 +248,7 @@ class Scorer:
                 output_handler.handle(TranslatorInput(sentence_no, source_tokens),
                                       TranslatorOutput(sentence_no, target_string, None, None, score),
                                       batch_time)
+
+        logger.info("Processed %d lines in %d batches. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",
+                    sentence_no, math.ceil(sentence_no / batch_no), total_time,
+                    total_time / sentence_no, sentence_no / total_time)
