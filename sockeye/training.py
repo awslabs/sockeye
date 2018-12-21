@@ -420,6 +420,7 @@ class EarlyStoppingTrainer:
     :param model: TrainingModel instance.
     :param optimizer_config: The optimizer configuration.
     :param max_params_files_to_keep: Maximum number of params files to keep in the output folder (last n are kept).
+    :param keep_initializations: Regardless of number of params to keep, never delete the first checkpoint.
     :param source_vocabs: Source vocabulary (and optional source factor vocabularies).
     :param target_vocab: Target vocabulary.
     """
@@ -428,11 +429,13 @@ class EarlyStoppingTrainer:
                  model: TrainingModel,
                  optimizer_config: OptimizerConfig,
                  max_params_files_to_keep: int,
+                 keep_initializations: bool,
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab) -> None:
         self.model = model
         self.optimizer_config = optimizer_config
         self.max_params_files_to_keep = max_params_files_to_keep
+        self.keep_initializations = keep_initializations
         self.tflogger = TensorboardLogger(logdir=os.path.join(model.output_dir, C.TENSORBOARD_NAME),
                                           source_vocab=source_vocabs[0],
                                           target_vocab=target_vocab)
@@ -758,7 +761,7 @@ class EarlyStoppingTrainer:
         Cleans parameter files, training state directory and waits for remaining decoding processes.
         """
         utils.cleanup_params_files(self.model.output_dir, self.max_params_files_to_keep,
-                                   self.state.checkpoint, self.state.best_checkpoint)
+                                   self.state.checkpoint, self.state.best_checkpoint, self.keep_initializations)
         if process_manager is not None:
             result = process_manager.collect_results()
             if result is not None:
@@ -922,7 +925,7 @@ class EarlyStoppingTrainer:
         """
         self.model.save_params_to_file(self.current_params_fname)
         utils.cleanup_params_files(self.model.output_dir, self.max_params_files_to_keep, self.state.checkpoint,
-                                   self.state.best_checkpoint)
+                                   self.state.best_checkpoint, self.keep_initializations)
 
     def _save_training_state(self, train_iter: data_io.BaseParallelSampleIter):
         """

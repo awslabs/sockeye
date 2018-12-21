@@ -371,6 +371,7 @@ def train(args: argparse.Namespace):
                                                 optimizer_config=create_optimizer_config(args, [1.0],
                                                                                          extra_initializers),
                                                 max_params_files_to_keep=args.keep_last_params,
+                                                keep_initializations=args.keep_initializations,
                                                 source_vocabs=[None],
                                                 target_vocab=target_vocab)
 

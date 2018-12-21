@@ -870,6 +870,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
         trainer = training.EarlyStoppingTrainer(model=training_model,
                                                 optimizer_config=create_optimizer_config(args, source_vocab_sizes),
                                                 max_params_files_to_keep=args.keep_last_params,
+                                                keep_initializations=args.keep_initializations,
                                                 source_vocabs=source_vocabs,
                                                 target_vocab=target_vocab)
 

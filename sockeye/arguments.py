@@ -1069,6 +1069,10 @@ def add_training_args(params):
                               default=-1,
                               help='Keep only the last n params files, use -1 to keep all files. Default: %(default)s')
 
+    train_params.add_argument('--keep-initializations',
+                              action="store_true",
+                              help='In addition to keeping the last n params files, also keep params from checkpoint 0.')
+
     train_params.add_argument('--dry-run',
                               action='store_true',
                               help="Do not perform any actual training, but print statistics about the model"
