@@ -522,6 +522,7 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
         config_coverage = None
         if args.rnn_attention_type == C.ATT_COV:
             config_coverage = coverage.CoverageConfig(type=args.rnn_attention_coverage_type,
+                                                      max_fertility=args.rnn_attention_coverage_max_fertility,
                                                       num_hidden=args.rnn_attention_coverage_num_hidden,
                                                       layer_normalization=args.layer_normalization)
         config_attention = rnn_attention.AttentionConfig(type=args.rnn_attention_type,

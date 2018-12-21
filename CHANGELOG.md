@@ -12,6 +12,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.67]
 ### Added
+- Added `fertility` as a further type of attention coverage.
 - Added an option for training to keep the initializations of the model via `--keep-initializations`. When set, the trainer will avoid deleting the params file for the first checkpoint, no matter what `--keep-last-params` is set to.
 
 ## [1.18.66]
