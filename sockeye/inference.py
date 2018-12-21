@@ -2160,7 +2160,7 @@ class SampleK(mx.gluon.HybridBlock):
         :param k: The size of the beam.
         :param n: Sample from the top-N words in the vocab at each timestep.
         :param batch_size: Number of sentences being decoded at once.
-        :param vocab_size: Vocabulary size.
+        :param context: Context for block constants.
         """
         super().__init__()
         self.beam_size = k
@@ -2181,7 +2181,8 @@ class SampleK(mx.gluon.HybridBlock):
         :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
         :param target_dists: The non-cumulative target distributions (ignored).
         :param finished: The list of finished hypotheses.
-        :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+        :param best_hyp_indices: Best hypothesis indices constant.
+        :param zeros_array: Zeros array constant.
         :return: The row indices, column indices, and values of the sampled words.
         """
         # Map the negative logprobs to probabilities so as to have a distribution
