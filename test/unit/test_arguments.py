@@ -186,6 +186,7 @@ def test_model_parameters(test_params, expected_params):
               decode_and_evaluate_device_id=None,
               seed=13,
               keep_last_params=-1,
+              keep_initializations=False,
               rnn_enc_last_hidden_concat_to_embedding=False,
               dry_run=False)),
 ])
