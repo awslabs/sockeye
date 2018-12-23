@@ -128,7 +128,7 @@ def test_sequence_reader(sequences, use_vocab, add_bos, add_eos):
 
         if vocabulary is None:
             with pytest.raises(SockeyeError) as e:
-                _ = data_io.SequenceReader(path, vocabulary=vocabulary, add_bos=True)
+                data_io.SequenceReader(path, vocabulary=vocabulary, add_bos=True)
             assert str(e.value) == "Adding a BOS or EOS symbol requires a vocabulary"
 
             expected_sequences = [data_io.strids2ids(get_tokens(s)) if s else None for s in sequences]
@@ -138,7 +138,7 @@ def test_sequence_reader(sequences, use_vocab, add_bos, add_eos):
             if add_bos:
                 expected_sequences = [[vocabulary[C.BOS_SYMBOL]] + s if s else None for s in expected_sequences]
             if add_eos:
-                expected_sequences = [s + [vocabulary[C.EOS_SYMBOL]]  if s else None for s in expected_sequences]
+                expected_sequences = [s + [vocabulary[C.EOS_SYMBOL]] if s else None for s in expected_sequences]
             assert read_sequences == expected_sequences
 
 
@@ -465,15 +465,13 @@ def test_get_training_data_iters():
                             test_line_count, test_line_count_empty,
                             test_max_length - C.SPACE_FOR_XOS) as data:
         # tmp common vocab
-        vcb = vocab.build_from_paths([data['source'], data['target']])
+        vcb = vocab.build_from_paths([data['train_source'], data['train_target']])
 
         train_iter, val_iter, config_data, data_info = data_io.get_training_data_iters(
-            sources=[data['source']],
-            target=data['target'],
-            validation_sources=[
-                data['validation_source']],
-            validation_target=data[
-                'validation_target'],
+            sources=[data['train_source']],
+            target=data['train_target'],
+            validation_sources=[data['dev_source']],
+            validation_target=data['dev_target'],
             source_vocabs=[vcb],
             target_vocab=vcb,
             source_vocab_paths=[None],
@@ -490,8 +488,8 @@ def test_get_training_data_iters():
         assert isinstance(train_iter, data_io.ParallelSampleIter)
         assert isinstance(val_iter, data_io.ParallelSampleIter)
         assert isinstance(config_data, data_io.DataConfig)
-        assert data_info.sources == [data['source']]
-        assert data_info.target == data['target']
+        assert data_info.sources == [data['train_source']]
+        assert data_info.target == data['train_target']
         assert data_info.source_vocabs == [None]
         assert data_info.target_vocab is None
         assert config_data.data_statistics.max_observed_len_source == train_max_length
