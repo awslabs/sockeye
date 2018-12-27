@@ -79,20 +79,6 @@ def uniform_vector(shape, min_value=0, max_value=1, return_symbol=False):
         else np.random.uniform(low=min_value, high=max_value, size=shape)
 
 
-def generate_random_sentence(vocab_size, max_len):
-    """
-    Generates a random "sentence" as a list of integers.
-
-    :param vocab_size: Number of words in the "vocabulary". Note that due to
-                       the inclusion of special words (BOS, EOS, UNK) this does *not*
-                       correspond to the maximum possible value.
-    :param max_len: maximum sentence length.
-    """
-    length = random.randint(1, max_len)
-    # Due to the special words, the actual words start at index 3 and go up to vocab_size+2
-    return [random.randint(3, vocab_size + 2) for _ in range(length)]
-
-
 _DIGITS = "0123456789"
 _MID = 5
 
@@ -129,7 +115,7 @@ def generate_low_high_factors(source_path: str,
     with open(source_path, 'r') as fin, open(output_path, 'w') as fout:
         for line in fin:
             digits = map(int, line.rstrip().split())
-            factors = ["l" if digit < _MID else "h" for digit in digits]
+            factors = ("l" if digit < _MID else "h" for digit in digits)
             print(" ".join(factors), file=fout)
 
 
