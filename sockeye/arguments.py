@@ -259,8 +259,8 @@ def add_average_args(params):
         "--output", "-o", required=True, type=str, help="File to write averaged parameters to.")
     average_params.add_argument(
         "--strategy",
-        choices=["best", "last", "lifespan"],
-        default="best",
+        choices=C.AVERAGE_CHOICES,
+        default=C.AVERAGE_BEST,
         help="selection method. Default: %(default)s.")
 
 

@@ -153,8 +153,8 @@ ENCODER_DECODER_SETTINGS = [
 
 TINY_TEST_MODEL = [(" --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 4 --num-embed 4"
                     " --transformer-feed-forward-num-hidden 4 --weight-tying --weight-tying-type src_trg_softmax"
-                    " --batch-size 2 --batch-type sentence --max-updates 2 --decode-and-evaluate 0"
-                    " --checkpoint-frequency 2",
+                    " --batch-size 2 --batch-type sentence --max-updates 4 --decode-and-evaluate 0"
+                    " --checkpoint-frequency 4",
                     "--beam-size 1")]
 
 
@@ -165,7 +165,9 @@ def test_seq_copy(train_params: str,
                   translate_params: str,
                   use_prepared_data: bool,
                   use_source_factors: bool):
-    """Task: copy short sequences of digits"""
+    """
+    Task: copy short sequences of digits
+    """
 
     with tmp_digits_dataset(prefix="test_seq_copy",
                             train_line_count=_TRAIN_LINE_COUNT,
@@ -187,7 +189,7 @@ def test_seq_copy(train_params: str,
 @pytest.mark.parametrize("train_params, translate_params", TINY_TEST_MODEL)
 def test_other_clis(train_params: str, translate_params: str):
     """
-    Task: test clis and core features other than train & translate.
+    Task: test CLIs and core features other than train & translate.
     """
     with tmp_digits_dataset(prefix="test_other_clis",
                             train_line_count=_TRAIN_LINE_COUNT,
@@ -241,17 +243,24 @@ def _test_extract_parameters_cli(model_path: str):
         assert "target_output_bias" in data
 
 
-def _test_parameter_averaging(model_path):
-    points = sockeye.average.find_checkpoints(model_path=model_path,
-                                              size=1,
-                                              strategy='best',
-                                              metric=C.PERPLEXITY)
-    assert len(points) > 0
-    averaged_params = sockeye.average.average(points)
-    assert averaged_params
+def _test_parameter_averaging(model_path: str):
+    """
+    Runs parameter averaging with all available strategies
+    """
+    for strategy in C.AVERAGE_CHOICES:
+        points = sockeye.average.find_checkpoints(model_path=model_path,
+                                                  size=4,
+                                                  strategy=strategy,
+                                                  metric=C.PERPLEXITY)
+        assert len(points) > 0
+        averaged_params = sockeye.average.average(points)
+        assert averaged_params
 
 
-def _test_checkpoint_decoder(dev_source_path, dev_target_path, model_path):
+def _test_checkpoint_decoder(dev_source_path: str, dev_target_path: str, model_path: str):
+    """
+    Runs checkpoint decoder on 10% of the dev data and checks whether metric keys are present in the result dict.
+    """
     with open(dev_source_path) as dev_fd:
         num_dev_sent = sum(1 for _ in dev_fd)
     sample_size = min(1, int(num_dev_sent * 0.1))
