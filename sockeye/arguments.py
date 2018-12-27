@@ -18,8 +18,9 @@ import argparse
 import os
 import sys
 import types
-import yaml
 from typing import Any, Callable, Dict, List, Tuple, Optional
+
+import yaml
 
 from . import constants as C
 from . import data_io
