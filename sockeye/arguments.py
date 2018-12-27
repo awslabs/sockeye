@@ -799,7 +799,7 @@ def add_training_args(params):
     train_params.add_argument('--decoder-only',
                               action='store_true',
                               help='Pre-train a decoder. This is currently for RNN decoders only. '
-                                    'Default: %(default)s.')
+                                   'Default: %(default)s.')
     train_params.add_argument('--fill-up',
                               type=str,
                               default=C.FILL_UP_DEFAULT,
