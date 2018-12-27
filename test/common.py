@@ -18,7 +18,7 @@ import random
 import sys
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
-from typing import List, Optional, Tuple, Dict, Any
+from typing import Any, Dict, List, Tuple
 from unittest.mock import patch
 
 import mxnet as mx
@@ -155,6 +155,10 @@ def tmp_digits_dataset(prefix: str,
                        sort_target: bool = False,
                        seed_train: int = 13, seed_dev: int = 13,
                        with_source_factors: bool = False):
+    """
+    Creates a temporary dataset with train, dev, and test. Returns a dictionary with paths to the respective temporary
+    files.
+    """
     with TemporaryDirectory(prefix=prefix) as work_dir:
         # Simple digits files for train/dev data
         train_source_path = os.path.join(work_dir, "train.src")
@@ -223,6 +227,9 @@ def check_core_features(train_params: str,
                         use_prepared_data: bool,
                         max_seq_len: int,
                         seed: int = 13) -> Dict[str, Any]:
+    """
+    Tests core features (training, inference).
+    """
     # train model and translate test set
     data = run_train_translate(train_params=train_params,
                                translate_params=translate_params,
@@ -257,7 +264,8 @@ def run_train_translate(train_params: str,
                         max_seq_len: int = 10,
                         seed: int = 13) -> Dict[str, Any]:
     """
-    Train a model and translate a test set.
+    Train a model and translate a test set. Returns the updated data dictionary containing paths to translation outputs
+    and scores.
 
     :param train_params: Command line args for model training.
     :param translate_params: First command line args for translation.
