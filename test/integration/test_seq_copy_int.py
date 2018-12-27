@@ -151,14 +151,6 @@ ENCODER_DECODER_SETTINGS = [
      False, False)]
 
 
-TINY_TEST_MODEL = [(" --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 4 --num-embed 4"
-                    " --transformer-feed-forward-num-hidden 4 --weight-tying --weight-tying-type src_trg_softmax"
-                    " --batch-size 2 --batch-type sentence --max-updates 4 --decode-and-evaluate 0"
-                    " --checkpoint-frequency 4",
-                    "--beam-size 1")]
-
-
-# Tiny default-type model for testing CLIs other than train & translate
 @pytest.mark.parametrize("train_params, translate_params, use_prepared_data, use_source_factors",
                          ENCODER_DECODER_SETTINGS)
 def test_seq_copy(train_params: str,
@@ -184,6 +176,13 @@ def test_seq_copy(train_params: str,
                             data=data,
                             use_prepared_data=use_prepared_data,
                             max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS)
+
+
+TINY_TEST_MODEL = [(" --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 4 --num-embed 4"
+                    " --transformer-feed-forward-num-hidden 4 --weight-tying --weight-tying-type src_trg_softmax"
+                    " --batch-size 2 --batch-type sentence --max-updates 4 --decode-and-evaluate 0"
+                    " --checkpoint-frequency 4",
+                    "--beam-size 1")]
 
 
 @pytest.mark.parametrize("train_params, translate_params", TINY_TEST_MODEL)
