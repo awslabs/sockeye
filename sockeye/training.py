@@ -56,6 +56,8 @@ class TrainingModel(model.SockeyeModel):
             unrolled to the full length.
     :param gradient_compression_params: Optional dictionary of gradient compression parameters.
     :param fixed_param_names: Optional list of params to fix during training (i.e. their values will not be trained).
+    :param param_masks: Optional dictionary of param names to weight masks. Falsey values in a mask will pin
+            those values to zero during training via element-wise matrix multiplication.
     """
 
     def __init__(self,
@@ -67,11 +69,13 @@ class TrainingModel(model.SockeyeModel):
                  default_bucket_key: Tuple[int, int],
                  bucketing: bool,
                  gradient_compression_params: Optional[Dict[str, Any]] = None,
-                 fixed_param_names: Optional[List[str]] = None) -> None:
+                 fixed_param_names: Optional[List[str]] = None,
+                 param_masks: Optional[Dict[str, mx.ndarray.array]] = None) -> None:
         super().__init__(config)
         self.context = context
         self.output_dir = output_dir
         self.fixed_param_names = fixed_param_names
+        self.param_masks = param_masks
         self._bucketing = bucketing
         self._gradient_compression_params = gradient_compression_params
         self._initialize(provide_data, provide_label, default_bucket_key)
@@ -195,6 +199,12 @@ class TrainingModel(model.SockeyeModel):
         Updates parameters of the module.
         """
         self.module.update()
+        if self.param_masks:
+            params = self.module.get_weights()
+            for param_name, mask in self.param_masks.items():
+                if param_name in params:
+                    params[param_name] = params[param_name] * mask
+            self.module.set_weights(params)
 
     def get_gradients(self) -> Dict[str, List[mx.nd.NDArray]]:
         """
