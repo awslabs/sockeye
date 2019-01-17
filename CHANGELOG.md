@@ -10,6 +10,19 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.67]
+### Added
+- Added `fertility` as a further type of attention coverage.
+- Added an option for training to keep the initializations of the model via `--keep-initializations`. When set, the trainer will avoid deleting the params file for the first checkpoint, no matter what `--keep-last-params` is set to.
+
+## [1.18.66]
+### Fixed
+- Fix to argument names that are allowed to differ for resuming training.
+
+## [1.18.65]
+### Changed
+- More informative error message about inconsistent --shared-vocab setting.
+
 ## [1.18.64]
 ### Added
 - Adding translation sampling via `--sample [N]`. This causes the decoder to sample each next step from the target distribution probabilities at each

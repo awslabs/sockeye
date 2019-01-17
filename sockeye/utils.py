@@ -16,7 +16,6 @@ A set of utility methods.
 """
 import binascii
 import errno
-import portalocker
 import glob
 import gzip
 import itertools
@@ -34,6 +33,7 @@ from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Opt
 
 import mxnet as mx
 import numpy as np
+import portalocker
 
 from . import __version__, constants as C
 from .log import log_sockeye_version, log_mxnet_version
@@ -898,7 +898,7 @@ def metric_value_is_better(new: float, old: float, metric: str) -> bool:
         return new < old
 
 
-def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int):
+def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int, keep_first: bool):
     """
     Deletes oldest parameter files from a model folder.
 
@@ -906,12 +906,13 @@ def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, 
     :param max_to_keep: Maximum number of files to keep, negative to keep all.
     :param checkpoint: Current checkpoint (i.e. index of last params file created).
     :param best_checkpoint: Best checkpoint. The parameter file corresponding to this checkpoint will not be deleted.
+    :param keep_first: Don't delete the first checkpoint.
     """
     if max_to_keep <= 0:
         return
     existing_files = glob.glob(os.path.join(output_folder, C.PARAMS_PREFIX + "*"))
     params_name_with_dir = os.path.join(output_folder, C.PARAMS_NAME)
-    for n in range(0, max(1, checkpoint - max_to_keep + 1)):
+    for n in range(1 if keep_first else 0, max(1, checkpoint - max_to_keep + 1)):
         if n != best_checkpoint:
             param_fname_n = params_name_with_dir % n
             if param_fname_n in existing_files:

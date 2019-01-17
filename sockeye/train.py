@@ -529,6 +529,7 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
         config_coverage = None
         if args.rnn_attention_type == C.ATT_COV:
             config_coverage = coverage.CoverageConfig(type=args.rnn_attention_coverage_type,
+                                                      max_fertility=args.rnn_attention_coverage_max_fertility,
                                                       num_hidden=args.rnn_attention_coverage_num_hidden,
                                                       layer_normalization=args.layer_normalization)
         config_attention = rnn_attention.AttentionConfig(type=args.rnn_attention_type,
@@ -877,6 +878,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
         trainer = training.EarlyStoppingTrainer(model=training_model,
                                                 optimizer_config=create_optimizer_config(args, source_vocab_sizes),
                                                 max_params_files_to_keep=args.keep_last_params,
+                                                keep_initializations=args.keep_initializations,
                                                 source_vocabs=source_vocabs,
                                                 target_vocab=target_vocab)
 

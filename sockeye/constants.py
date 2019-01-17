@@ -162,6 +162,17 @@ CNN_ACTIVATION_TYPES = [GLU, RELU, SIGMOID, SOFT_RELU, TANH]
 CNN_PAD_LEFT = "left"
 CNN_PAD_CENTERED = "centered"
 
+# coverage types
+COVERAGE_COUNT = "count"
+COVERAGE_FERTILITY = "fertility"
+COVERAGE_TYPES = [TANH,
+                  SIGMOID,
+                  RELU,
+                  SOFT_RELU,
+                  GRU_TYPE,
+                  COVERAGE_COUNT,
+                  COVERAGE_FERTILITY]
+
 # default I/O variable names
 SOURCE_NAME = "source"
 SOURCE_LENGTH_NAME = "source_length"
@@ -242,12 +253,12 @@ TRAINING_STATE_PARAMS_NAME = "params"
 ARGS_STATE_NAME = "args.yaml"
 
 # Arguments that may differ and still resume training
-ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet",
+ARGS_MAY_DIFFER = ["overwrite_output", "use_tensorboard", "quiet",
                    "align_plot_prefix", "sure_align_threshold",
                    "keep_last_params", "seed",
-                   "max-updates", "min-updates",
-                   "max-num-epochs", "min-num-epochs",
-                   "max-samples", "min-samples"]
+                   "max_updates", "min_updates",
+                   "max_num_epochs", "min_num_epochs",
+                   "max_samples", "min_samples"]
 
 # Other argument constants
 TRAINING_ARG_SOURCE = "--source"

@@ -593,7 +593,9 @@ def run_train_translate(train_params: str,
 
         bleu_restrict = None
         if restrict_lexicon:
-            bleu_restrict = raw_corpus_bleu(hypotheses=hypotheses, references=references, offset=0.01)
+            with open(out_restrict_path) as out:
+                hypotheses_restrict = out.readlines()
+            bleu_restrict = raw_corpus_bleu(hypotheses=hypotheses_restrict, references=references, offset=0.01)
 
         # Run evaluate cli
         eval_params = "{} {} ".format(sockeye.evaluate.__file__,
