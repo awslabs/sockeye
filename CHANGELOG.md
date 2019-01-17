@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.68]
+### Added
+- Source factors can now be added to the embeddings instead of concatenated (`--source-factors-combine sum`)
+- Options are 'sum' (the default) or 'concat"
+
 ## [1.18.67]
 ### Added
 - Added `fertility` as a further type of attention coverage.
