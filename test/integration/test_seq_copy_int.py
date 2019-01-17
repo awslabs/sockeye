@@ -59,7 +59,7 @@ ENCODER_DECODER_SETTINGS = [
      " --rnn-dropout-inputs 0.5:0.1 --rnn-dropout-states 0.5:0.1 --embed-dropout 0.1 --rnn-decoder-hidden-dropout 0.01"
      " --rnn-decoder-state-init avg --rnn-encoder-reverse-input --rnn-dropout-recurrent 0.1:0.0"
      " --rnn-h2h-init orthogonal_stacked --batch-type sentence --decode-and-evaluate 0"
-     " --learning-rate-decay-param-reset --weight-normalization --source-factors-num-embed 5",
+     " --learning-rate-decay-param-reset --weight-normalization --source-factors-num-embed 5 --source-factors-combine concat",
      "--beam-size 2 --beam-search-stop first",
      False, True, True),
     # Convolutional embedding encoder + LSTM encoder-decoder with attention
@@ -106,7 +106,7 @@ ENCODER_DECODER_SETTINGS = [
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying --weight-tying-type src_trg_softmax"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
-     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01 --source-factors-num-embed 4",
+     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01 --source-factors-combine sum",
      "--beam-size 2",
      True, False, True),
     # 2-layer cnn

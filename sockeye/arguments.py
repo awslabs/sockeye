@@ -701,7 +701,7 @@ def add_model_parameters(params):
                                    '(validation) source factor files. Default: %(default)s.')
     model_params.add_argument('--source-factors-combine', '-sfc',
                               choices=C.SOURCE_FACTORS_COMBINE_CHOICES,
-                              default=C.SOURCE_FACTORS_COMBINE_DEFAULT,
+                              default=C.SOURCE_FACTORS_COMBINE_SUM,
                               help='How to combine source factors. Default: %(default)s')
 
     # attention arguments

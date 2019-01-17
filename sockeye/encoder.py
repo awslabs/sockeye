@@ -338,7 +338,7 @@ class EmbeddingConfig(config.Config):
                  num_embed: int,
                  dropout: float,
                  factor_configs: Optional[List[FactorConfig]] = None,
-                 combine: str = C.SOURCE_FACTORS_COMBINE_DEFAULT,
+                 combine: str = C.SOURCE_FACTORS_COMBINE_SUM,
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.vocab_size = vocab_size
