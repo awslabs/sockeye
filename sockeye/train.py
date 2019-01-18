@@ -329,7 +329,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
         # If factors are being added instead of concatenated, set all dimensions to the embedding dimensions
-        if args.source_factors_combine != C.SOURCE_FACTORS_COMBINE_CONCAT:
+        if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM:
+            logger.info("Setting all source factor embedding sizes to `num_embed` ('%d') for summing", args.num_embed[0])
             args.source_factors_num_embed = [args.num_embed[0]] * len(args.source_factors)
 
         check_condition(len(args.source_factors) == len(args.source_factors_num_embed),
@@ -644,7 +645,7 @@ def create_model_config(args: argparse.Namespace,
                                                   num_embed=num_embed_source,
                                                   dropout=embed_dropout_source,
                                                   factor_configs=source_factor_configs,
-                                                  combine=args.source_factors_combine)
+                                                  source_factors_combine=args.source_factors_combine)
 
     config_embed_target = encoder.EmbeddingConfig(vocab_size=target_vocab_size,
                                                   num_embed=num_embed_target,

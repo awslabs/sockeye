@@ -338,7 +338,7 @@ class EmbeddingConfig(config.Config):
                  num_embed: int,
                  dropout: float,
                  factor_configs: Optional[List[FactorConfig]] = None,
-                 combine: str = C.SOURCE_FACTORS_COMBINE_SUM,
+                 source_factors_combine: str = C.SOURCE_FACTORS_COMBINE_SUM,
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.vocab_size = vocab_size
@@ -348,7 +348,7 @@ class EmbeddingConfig(config.Config):
         self.num_factors = 1
         if self.factor_configs is not None:
             self.num_factors += len(self.factor_configs)
-        self.combine = combine
+        self.source_factors_combine = source_factors_combine
         self.dtype = dtype
 
 
@@ -420,10 +420,10 @@ class Embedding(Encoder):
                                      name=self.prefix + "embed")
 
         if self.config.factor_configs is not None:
-            if self.config.combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+            if self.config.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
                 embedding = mx.sym.concat(embedding, *factor_embeddings, dim=2, name=self.prefix + "embed_plus_factors")
             else:
-                embedding = mx.sym.ElementWiseSum(embedding, *factor_embeddings, name=self.prefix + "embed_plus_factors")
+                embedding = mx.sym.add_n(embedding, *factor_embeddings, name=self.prefix + "embed_plus_factors")
 
         if self.config.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.config.dropout, name="source_embed_dropout")
