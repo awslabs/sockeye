@@ -512,6 +512,7 @@ class EarlyStoppingTrainer:
             self._save_params()
             self._update_best_params_link()
             self._save_training_state(train_iter)
+            self._save_initial_optimizer_states(lr_decay_opt_states_reset)
             self._update_best_optimizer_states(lr_decay_opt_states_reset)
             self.tflogger.log_graph(self.model.current_module.symbol)
             logger.info("Training started.")
@@ -778,6 +779,10 @@ class EarlyStoppingTrainer:
                 best_opt_states_fname = os.path.join(self.model.output_dir, C.OPT_STATES_BEST)
                 if os.path.exists(best_opt_states_fname):
                     os.remove(best_opt_states_fname)
+            if lr_decay_opt_states_reset == C.LR_DECAY_OPT_STATES_RESET_INITIAL:
+                initial_opt_states_fname = os.path.join(self.model.output_dir, C.OPT_STATES_INITIAL)
+                if os.path.exists(initial_opt_states_fname):
+                    os.remove(initial_opt_states_fname)
 
     def _initialize_parameters(self, params: Optional[str], allow_missing_params: bool):
         self.model.initialize_parameters(self.optimizer_config.initializer, allow_missing_params)
