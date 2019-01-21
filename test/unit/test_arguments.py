@@ -15,6 +15,7 @@ import argparse
 import pytest
 import tempfile
 import os
+import re
 import yaml
 
 import sockeye.arguments as arguments
@@ -81,11 +82,13 @@ def test_device_args(test_params, expected_params):
               num_layers=(6, 6),
               num_embed=(512, 512),
               source_factors_num_embed=[],
+              source_factors_combine=C.SOURCE_FACTORS_COMBINE_CONCAT,
               rnn_attention_type='mlp',
               rnn_attention_num_hidden=None,
               rnn_scale_dot_attention=False,
               rnn_attention_coverage_type='count',
               rnn_attention_coverage_num_hidden=1,
+              rnn_attention_coverage_max_fertility=2,
               weight_tying=False,
               weight_tying_type="trg_softmax",
               rnn_attention_mhdot_heads=None,
@@ -185,6 +188,7 @@ def test_model_parameters(test_params, expected_params):
               decode_and_evaluate_device_id=None,
               seed=13,
               keep_last_params=-1,
+              keep_initializations=False,
               rnn_enc_last_hidden_concat_to_embedding=False,
               dry_run=False)),
 ])
@@ -509,3 +513,7 @@ def test_config_file_required(config_command_line, config_contents):
             # Parse args and cast to dicts directly
             config_file_argparse.parse_args(
                 args=(config_command_line + (" --config %s" % fp.name)).split())
+
+def test_arguments_allowed_to_differ():
+    for arg in C.ARGS_MAY_DIFFER:
+        assert re.match(r'^[a-zA-Z0-9_]*$', arg)

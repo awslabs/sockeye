@@ -352,7 +352,6 @@ def add_training_data_args(params, required=False):
                         type=regular_file(),
                         help='Target side of parallel training data.')
 
-
 def add_validation_data_params(params):
     params.add_argument('--validation-source', '-vs',
                         required=True,
@@ -700,6 +699,10 @@ def add_model_parameters(params):
                               help='Embedding size for additional source factors. '
                                    'You must provide as many dimensions as '
                                    '(validation) source factor files. Default: %(default)s.')
+    model_params.add_argument('--source-factors-combine', '-sfc',
+                              choices=C.SOURCE_FACTORS_COMBINE_CHOICES,
+                              default=C.SOURCE_FACTORS_COMBINE_CONCAT,
+                              help='How to combine source factors. Default: %(default)s.')
 
     # attention arguments
     model_params.add_argument('--rnn-attention-type',
@@ -720,12 +723,18 @@ def add_model_parameters(params):
                                    '[Vaswani et al, 2017]')
 
     model_params.add_argument('--rnn-attention-coverage-type',
-                              choices=["tanh", "sigmoid", "relu", "softrelu", "gru", "count"],
-                              default="count",
+                              choices=C.COVERAGE_TYPES,
+                              default=C.COVERAGE_COUNT,
                               help="Type of model for updating coverage vectors. 'count' refers to an update method "
-                                   "that accumulates attention scores. 'tanh', 'sigmoid', 'relu', 'softrelu' "
+                                   "that accumulates attention scores. 'fertility' accumulates attention scores as well "
+                                   "but also computes a fertility value for every source word. "
+                                   "'tanh', 'sigmoid', 'relu', 'softrelu' "
                                    "use non-linear layers with the respective activation type, and 'gru' uses a "
                                    "GRU to update the coverage vectors. Default: %(default)s.")
+    model_params.add_argument('--rnn-attention-coverage-max-fertility',
+                              type=int,
+                              default=2,
+                              help="Maximum fertility for individual source words. Default: %(default)s.")
     model_params.add_argument('--rnn-attention-coverage-num-hidden',
                               type=int,
                               default=1,
@@ -1062,6 +1071,10 @@ def add_training_args(params):
                               type=int,
                               default=-1,
                               help='Keep only the last n params files, use -1 to keep all files. Default: %(default)s')
+
+    train_params.add_argument('--keep-initializations',
+                              action="store_true",
+                              help='In addition to keeping the last n params files, also keep params from checkpoint 0.')
 
     train_params.add_argument('--dry-run',
                               action='store_true',

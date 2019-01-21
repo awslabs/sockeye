@@ -713,9 +713,10 @@ def get_prepared_data_iters(prepared_data_dir: str,
     for shard_fname in shard_fnames:
         check_condition(os.path.exists(shard_fname), "Shard %s does not exist." % shard_fname)
 
-    check_condition(shared_vocab == data_info.shared_vocab, "Shared config needed (e.g. for weight tying), but "
-                                                            "data was prepared without a shared vocab. Use %s when "
-                                                            "preparing the data." % C.VOCAB_ARG_SHARED_VOCAB)
+    check_condition(shared_vocab == data_info.shared_vocab, "Shared vocabulary settings need to match these "
+                                                            "of the prepared data (e.g. for weight tying). "
+                                                            "Specify or omit %s consistently when training "
+                                                            "and preparing the data." % C.VOCAB_ARG_SHARED_VOCAB)
 
     source_vocabs = vocab.load_source_vocabs(prepared_data_dir)
     target_vocab = vocab.load_target_vocab(prepared_data_dir)

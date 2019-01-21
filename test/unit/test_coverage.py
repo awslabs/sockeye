@@ -42,7 +42,7 @@ def test_gru_coverage():
 
 
 def _test_activation_coverage(act_type):
-    config_coverage = sockeye.coverage.CoverageConfig(type=act_type, num_hidden=2, layer_normalization=False)
+    config_coverage = sockeye.coverage.CoverageConfig(type=act_type, max_fertility=2, num_hidden=2, layer_normalization=False)
     encoder_num_hidden, decoder_num_hidden, source_seq_len, batch_size = 5, 5, 10, 4
     # source: (batch_size, source_seq_len, encoder_num_hidden)
     source = mx.sym.Variable("source")
@@ -89,7 +89,7 @@ def _test_activation_coverage(act_type):
 
 
 def _test_gru_coverage():
-    config_coverage = sockeye.coverage.CoverageConfig(type="gru", num_hidden=2, layer_normalization=False)
+    config_coverage = sockeye.coverage.CoverageConfig(type="gru", num_hidden=2,  max_fertility=2, layer_normalization=False)
     encoder_num_hidden, decoder_num_hidden, source_seq_len, batch_size = 5, 5, 10, 4
     # source: (batch_size, source_seq_len, encoder_num_hidden)
     source = mx.sym.Variable("source")
