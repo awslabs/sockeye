@@ -186,7 +186,7 @@ def zero_pad_features(features: List[np.ndarray],
         elif len(feature_shape) > len(target_shape):
             raise ValueError("Provided target shape must be bigger then the original "
                              "shape. (provided: {}, original {})".format(len(target_shape), len(feature_shape)))
-        diff_shape = np.subtract(target_shape, feature_shape)
+        diff_shape = np.subtract(target_shape, feature_shape)  # pylint: disable=assignment-from-no-return
         if np.any(diff_shape < 0):
             raise ValueError("Provided target values must be bigger then the original "
                              "values for each dimension. (provided: {}, original {})".format(target_shape, feature_shape))
