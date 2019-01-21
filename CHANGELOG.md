@@ -15,7 +15,6 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 - Source factors can now be added to the embeddings instead of concatenated with `--source-factors-combine sum` (default: concat)
 
 ## [1.18.68]
-### Fixed
 - Fixed training crashes with `--learning-rate-decay-optimizer-states-reset initial` option.
 
 ## [1.18.67]
