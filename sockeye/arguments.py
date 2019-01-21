@@ -352,7 +352,6 @@ def add_training_data_args(params, required=False):
                         type=regular_file(),
                         help='Target side of parallel training data.')
 
-
 def add_validation_data_params(params):
     params.add_argument('--validation-source', '-vs',
                         required=True,
@@ -700,6 +699,10 @@ def add_model_parameters(params):
                               help='Embedding size for additional source factors. '
                                    'You must provide as many dimensions as '
                                    '(validation) source factor files. Default: %(default)s.')
+    model_params.add_argument('--source-factors-combine', '-sfc',
+                              choices=C.SOURCE_FACTORS_COMBINE_CHOICES,
+                              default=C.SOURCE_FACTORS_COMBINE_CONCAT,
+                              help='How to combine source factors. Default: %(default)s.')
 
     # attention arguments
     model_params.add_argument('--rnn-attention-type',
