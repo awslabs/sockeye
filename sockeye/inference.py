@@ -600,15 +600,20 @@ SentenceId = Union[int, str]
 class TranslatorInput:
     """
     Object required by Translator.translate().
+    If not None, `pass_through_dict` is an arbitrary dictionary instantiated from a JSON object
+    via `make_input_from_dict()`, and it contains extra fields found in an input JSON object.
+    If `--output-type json` is selected, all such fields that are not fields used or changed by
+    Sockeye will be included in the output JSON object. This provides a mechanism for passing
+    fields through the call to Sockeye.
 
     :param sentence_id: Sentence id.
     :param tokens: List of input tokens.
     :param factors: Optional list of additional factor sequences.
     :param constraints: Optional list of target-side constraints.
-    :param raw_dict: Optional raw dictionary of arbitrary input data.
+    :param pass_through_dict: Optional raw dictionary of arbitrary input data.
     """
 
-    __slots__ = ('sentence_id', 'tokens', 'factors', 'constraints', 'avoid_list', 'raw_dict')
+    __slots__ = ('sentence_id', 'tokens', 'factors', 'constraints', 'avoid_list', 'pass_through_dict')
 
     def __init__(self,
                  sentence_id: SentenceId,
@@ -616,13 +621,13 @@ class TranslatorInput:
                  factors: Optional[List[Tokens]] = None,
                  constraints: Optional[List[Tokens]] = None,
                  avoid_list: Optional[List[Tokens]] = None,
-                 raw_dict: Optional[Dict] = None) -> None:
+                 pass_through_dict: Optional[Dict] = None) -> None:
         self.sentence_id = sentence_id
         self.tokens = tokens
         self.factors = factors
         self.constraints = constraints
         self.avoid_list = avoid_list
-        self.raw_dict = raw_dict
+        self.pass_through_dict = pass_through_dict
 
     def __str__(self):
         return 'TranslatorInput(%s, %s, factors=%s, constraints=%s, avoid=%s)' \
@@ -658,13 +663,13 @@ class TranslatorInput:
             # Constrained decoding is not supported for chunked TranslatorInputs. As a fall-back, constraints are
             # assigned to the first chunk
             constraints = self.constraints if chunk_id == 0 else None
-            raw_dict = self.raw_dict if chunk_id == 0 else None
+            pass_through_dict = self.pass_through_dict if chunk_id == 0 else None
             yield TranslatorInput(sentence_id=self.sentence_id,
                                   tokens=self.tokens[i:i + chunk_size],
                                   factors=factors,
                                   constraints=constraints,
                                   avoid_list=self.avoid_list,
-                                  raw_dict=raw_dict)
+                                  pass_through_dict=pass_through_dict)
 
     def with_eos(self) -> 'TranslatorInput':
         """
@@ -676,7 +681,7 @@ class TranslatorInput:
                                         self.factors] if self.factors is not None else None,
                                constraints=self.constraints,
                                avoid_list=self.avoid_list,
-                               raw_dict=self.raw_dict)
+                               pass_through_dict=self.pass_through_dict)
 
 
 class BadTranslatorInput(TranslatorInput):
@@ -764,7 +769,7 @@ def make_input_from_dict(sentence_id: SentenceId, input_dict: Dict) -> Translato
             constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
 
         return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors,
-                               constraints=constraints, avoid_list=avoid_list, raw_dict=input_dict)
+                               constraints=constraints, avoid_list=avoid_list, pass_through_dict=input_dict)
 
     except Exception as e:
         logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
@@ -842,7 +847,6 @@ class TranslatorOutput:
     :param score: Negative log probability of generated translation.
     :param beam_histories: List of beam histories. The list will contain more than one
            history if it was split due to exceeding max_length.
-    :param raw_dict: Raw dictionary to append when outputting JSON.
     :param nbest_translations: List of nbest translations as strings.
     :param nbest_tokens: List of nbest translations as lists of tokens.
     :param nbest_attention_matrices: List of attention matrices, one for each nbest translation.
@@ -889,9 +893,9 @@ class TranslatorOutput:
         :param align_threshold: If alignments are defined, only print ones over this threshold.
         :return: A dictionary.
         """
-        _d = { 'id': self.sentence_id,
-               'translated_text': self.translation,
-               'score': self.score }  # type: Dict[str, Any]
+        _d = {'sentence_id': self.sentence_id,
+              'translation': self.translation,
+              'score': self.score }  # type: Dict[str, Any]
 
         if self.nbest_translations is not None and len(self.nbest_translations) > 1:
             _d['translations'] = self.nbest_translations

@@ -12,7 +12,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.70]
 ### Added
-- Extra JSON input fields not used by Sockeye are now passed through to the output when `--output-type json` is selected.
+- Sockeye now outputs fields found in a JSON input object, if they are not overwritten by Sockeye. This behavior can be enabled by selecting `--json-input` (to read input as a JSON object) and `--output-type json` (to write a JSON object to output).
 
 ## [1.18.69]
 ### Added
