@@ -60,14 +60,32 @@ For example:
 Any number of factors can be supplied; just delimit them with `|`.
 Factor representation are dense; each word must be annotated for all factors.
 
-### JSON format
+### Input and output with JSON
 
-Sockeye supports a JSON input format with the text to translate in the "text" field (`sockeye.translate --json-input`).
-Each sentence is encoded in a single-line JSON object.
-This object can also specify the source factors as a list of token-parallel strings, e.g.,
+Sockeye supports JSON for both input and output.
+JSON input is enabled by adding the `--json-input` to the call to `sockeye.translate`.
+In this case, Sockeye will take the text to translate from the "text" field.
+Sockeye expects a complete JSON object on each line of input.
+This JSON object can also specify the source factors as a list of token-parallel strings, e.g.,
 
 ```python
 { "text": "The boy ate the waff@@ le .", "factors": ["O O O O B E O"] }
+```
+
+JSON output is enabled with the `--output-type json` flag.
+The translation itself will appear in a `translation` field, along with other fields such as `sentence_id`.
+
+If both JSON input and output are enabled, Sockeye will push through all fields in the input object that it doesn't overwrite.
+For example, if your input is:
+
+```json
+{ "text": "The boy ate the waff@@ le .", "sentiment_id": "positive" }
+```
+
+The output may be:
+
+```json
+{ "sentence_id": 1, "sentiment_id": "positive", "text": "The boy ate the waff@@ le .", "translation": "Der Junge aß die Waffel." }
 ```
 
 ## N-best translations
