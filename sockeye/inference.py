@@ -21,7 +21,7 @@ import os
 import time
 from collections import defaultdict
 from functools import lru_cache, partial
-from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set
+from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set, Any
 
 import mxnet as mx
 import numpy as np
@@ -891,7 +891,7 @@ class TranslatorOutput:
         """
         _d = { 'id': self.sentence_id,
                'translated_text': self.translation,
-               'score': self.score }
+               'score': self.score }  # type: Dict[str, Any]
 
         if self.nbest_translations is not None and len(self.nbest_translations) > 1:
             _d['translations'] = self.nbest_translations

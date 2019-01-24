@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.70]
+### Added
+- Extra JSON input fields not used by Sockeye are now passed through to the output when `--output-type json` is selected.
+
 ## [1.18.69]
 ### Added
 - Source factors can now be added to the embeddings instead of concatenated with `--source-factors-combine sum` (default: concat)
