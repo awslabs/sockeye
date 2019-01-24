@@ -408,17 +408,9 @@ class JSONOutputHandler(OutputHandler):
                t_walltime: float = 0.):
         """
         Outputs a JSON object of the fields in the `TranslatorOutput` object.
-        It also copies over all keys from the `TranslatorInput`'s pass-through dictionary
-        that are not set by the `TranslatorOutput`.
         """
 
         d_ = t_output.json(self.align_threshold)
-
-        # copy over keys from the input that aren't present in the output
-        if t_input.pass_through_dict is not None:
-            for key, value in t_input.pass_through_dict.items():
-                if not key in d_:
-                    d_[key] = value
 
         self.stream.write("%s\n" % json.dumps(d_, sort_keys=True))
 

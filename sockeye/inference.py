@@ -14,6 +14,7 @@
 """
 Code for inference/translation
 """
+import copy
 import itertools
 import json
 import logging
@@ -845,6 +846,7 @@ class TranslatorOutput:
     :param tokens: List of translated tokens.
     :param attention_matrix: Attention matrix. Shape: (target_length, source_length).
     :param score: Negative log probability of generated translation.
+    :param pass_through_dict: Dictionary of key/value pairs to pass through when working with JSON.
     :param beam_histories: List of beam histories. The list will contain more than one
            history if it was split due to exceeding max_length.
     :param nbest_translations: List of nbest translations as strings.
@@ -857,6 +859,7 @@ class TranslatorOutput:
                  'tokens',
                  'attention_matrix',
                  'score',
+                 'pass_through_dict',
                  'beam_histories',
                  'nbest_translations',
                  'nbest_tokens',
@@ -869,6 +872,7 @@ class TranslatorOutput:
                  tokens: Tokens,
                  attention_matrix: np.ndarray,
                  score: float,
+                 pass_through_dict: Optional[Dict[str,Any]] = None,
                  beam_histories: Optional[List[BeamHistory]] = None,
                  nbest_translations: Optional[List[str]] = None,
                  nbest_tokens: Optional[List[Tokens]] = None,
@@ -879,6 +883,7 @@ class TranslatorOutput:
         self.tokens = tokens
         self.attention_matrix = attention_matrix
         self.score = score
+        self.pass_through_dict = copy.deepcopy(pass_through_dict) if pass_through_dict else {}
         self.beam_histories = beam_histories
         self.nbest_translations = nbest_translations
         self.nbest_tokens = nbest_tokens
@@ -888,14 +893,18 @@ class TranslatorOutput:
     def json(self, align_threshold: float = 0.0) -> Dict:
         """
         Returns a dictionary suitable for json.dumps() representing all
-        the information in the class.
+        the information in the class. It is initialized with any keys
+        present in the corresponding `TranslatorInput` object's pass_through_dict.
+        Keys from here that are not overwritten by Sockeye will thus be passed
+        through to the output.
 
         :param align_threshold: If alignments are defined, only print ones over this threshold.
         :return: A dictionary.
         """
-        _d = {'sentence_id': self.sentence_id,
-              'translation': self.translation,
-              'score': self.score }  # type: Dict[str, Any]
+        _d = self.pass_through_dict  # type: Dict[str, Any]
+        _d['sentence_id'] = self.sentence_id
+        _d['translation'] = self.translation
+        _d['score'] = self.score
 
         if self.nbest_translations is not None and len(self.nbest_translations) > 1:
             _d['translations'] = self.nbest_translations
@@ -1535,6 +1544,7 @@ class Translator:
                                     tokens=target_tokens,
                                     attention_matrix=attention_matrix,
                                     score=translation.score,
+                                    pass_through_dict=trans_input.pass_through_dict,
                                     beam_histories=translation.beam_histories)
         else:
 
@@ -1555,6 +1565,7 @@ class Translator:
                                     tokens=target_tokens,
                                     attention_matrix=attention_matrix,
                                     score=translation.score,
+                                    pass_through_dict=trans_input.pass_through_dict,
                                     beam_histories=translation.beam_histories,
                                     nbest_translations=target_strings,
                                     nbest_tokens=target_tokens_list,
