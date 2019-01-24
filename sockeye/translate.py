@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -56,10 +56,10 @@ def run_translate(args: argparse.Namespace):
     log_basic_info(args)
 
     if args.nbest_size > 1:
-        if args.output_type != C.OUTPUT_HANDLER_NBEST:
-            logger.warning("For nbest translation, output handler must be '%s', overriding option --output-type.",
-                           C.OUTPUT_HANDLER_NBEST)
-            args.output_type = C.OUTPUT_HANDLER_NBEST
+        if args.output_type != C.OUTPUT_HANDLER_JSON:
+            logger.warning("For nbest translation, you must specify `--output-type '%s'; overriding your setting of '%s'.",
+                           C.OUTPUT_HANDLER_JSON, args.output_type)
+            args.output_type = C.OUTPUT_HANDLER_JSON
     output_handler = get_output_handler(args.output_type,
                                         args.output,
                                         args.sure_align_threshold)

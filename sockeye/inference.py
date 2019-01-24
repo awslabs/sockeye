@@ -1,4 +1,4 @@
-# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -605,21 +605,24 @@ class TranslatorInput:
     :param tokens: List of input tokens.
     :param factors: Optional list of additional factor sequences.
     :param constraints: Optional list of target-side constraints.
+    :param raw_dict: Optional raw dictionary of arbitrary input data.
     """
 
-    __slots__ = ('sentence_id', 'tokens', 'factors', 'constraints', 'avoid_list')
+    __slots__ = ('sentence_id', 'tokens', 'factors', 'constraints', 'avoid_list', 'raw_dict')
 
     def __init__(self,
                  sentence_id: SentenceId,
                  tokens: Tokens,
                  factors: Optional[List[Tokens]] = None,
                  constraints: Optional[List[Tokens]] = None,
-                 avoid_list: Optional[List[Tokens]] = None) -> None:
+                 avoid_list: Optional[List[Tokens]] = None,
+                 raw_dict: Optional[Dict] = None) -> None:
         self.sentence_id = sentence_id
         self.tokens = tokens
         self.factors = factors
         self.constraints = constraints
         self.avoid_list = avoid_list
+        self.raw_dict = raw_dict
 
     def __str__(self):
         return 'TranslatorInput(%s, %s, factors=%s, constraints=%s, avoid=%s)' \
@@ -655,11 +658,13 @@ class TranslatorInput:
             # Constrained decoding is not supported for chunked TranslatorInputs. As a fall-back, constraints are
             # assigned to the first chunk
             constraints = self.constraints if chunk_id == 0 else None
+            raw_dict = self.raw_dict if chunk_id == 0 else None
             yield TranslatorInput(sentence_id=self.sentence_id,
                                   tokens=self.tokens[i:i + chunk_size],
                                   factors=factors,
                                   constraints=constraints,
-                                  avoid_list=self.avoid_list)
+                                  avoid_list=self.avoid_list,
+                                  raw_dict=raw_dict)
 
     def with_eos(self) -> 'TranslatorInput':
         """
@@ -670,7 +675,8 @@ class TranslatorInput:
                                factors=[factor + [C.EOS_SYMBOL] for factor in
                                         self.factors] if self.factors is not None else None,
                                constraints=self.constraints,
-                               avoid_list=self.avoid_list)
+                               avoid_list=self.avoid_list,
+                               raw_dict=self.raw_dict)
 
 
 class BadTranslatorInput(TranslatorInput):
@@ -758,7 +764,7 @@ def make_input_from_dict(sentence_id: SentenceId, input_dict: Dict) -> Translato
             constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
 
         return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors,
-                               constraints=constraints, avoid_list=avoid_list)
+                               constraints=constraints, avoid_list=avoid_list, raw_dict=input_dict)
 
     except Exception as e:
         logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
@@ -836,6 +842,7 @@ class TranslatorOutput:
     :param score: Negative log probability of generated translation.
     :param beam_histories: List of beam histories. The list will contain more than one
            history if it was split due to exceeding max_length.
+    :param raw_dict: Raw dictionary to append when outputting JSON.
     :param nbest_translations: List of nbest translations as strings.
     :param nbest_tokens: List of nbest translations as lists of tokens.
     :param nbest_attention_matrices: List of attention matrices, one for each nbest translation.
@@ -873,6 +880,29 @@ class TranslatorOutput:
         self.nbest_tokens = nbest_tokens
         self.nbest_attention_matrices = nbest_attention_matrices
         self.nbest_scores = nbest_scores
+
+    def json(self, align_threshold: float = 0.0) -> Dict:
+        """
+        Returns a dictionary suitable for json.dumps() representing all
+        the information in the class.
+
+        :param align_threshold: If alignments are defined, only print ones over this threshold.
+        :return: A dictionary.
+        """
+        _d = { 'id': self.sentence_id,
+               'translated_text': self.translation,
+               'score': self.score }
+
+        if self.nbest_translations is not None and len(self.nbest_translations) > 1:
+            _d['translations'] = self.nbest_translations
+            _d['scores'] = self.nbest_scores
+            if self.nbest_attention_matrices:
+                extracted_alignments = []
+                for alignment_matrix in self.nbest_attention_matrices:
+                    extracted_alignments.append(list(utils.get_alignments(alignment_matrix, threshold=align_threshold)))
+                _d['alignments'] = extracted_alignments
+
+        return _d
 
 
 TokenIds = List[int]

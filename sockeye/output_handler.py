@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -54,8 +54,8 @@ def get_output_handler(output_type: str,
         return AlignTextHandler(sure_align_threshold)
     elif output_type == C.OUTPUT_HANDLER_BEAM_STORE:
         return BeamStoringHandler(output_stream)
-    elif output_type == C.OUTPUT_HANDLER_NBEST:
-        return NBestOutputHandler(output_stream, sure_align_threshold)
+    elif output_type == C.OUTPUT_HANDLER_JSON:
+        return JSONOutputHandler(output_stream, sure_align_threshold)
     else:
         raise ValueError("unknown output type")
 
@@ -393,32 +393,26 @@ class BeamStoringHandler(OutputHandler):
     def reports_score(self) -> bool:
         return False
 
-
-class NBestOutputHandler(OutputHandler):
+class JSONOutputHandler(OutputHandler):
     """
-    Output handler to output nbest translations together with alignments,
-    as JSON.
-
-    :param stream: Stream to write translations and alignments to.
-    :param threshold: Threshold for including alignment links.
+    Output single-line JSON objects.
+    Carries over extra fields from the input.
     """
-
-    def __init__(self, stream, threshold: float) -> None:
+    def __init__(self, stream, threshold: float = 0.0) -> None:
         self.stream = stream
-        self.threshold = threshold
+        self.align_threshold = threshold
 
     def handle(self,
                t_input: inference.TranslatorInput,
                t_output: inference.TranslatorOutput,
                t_walltime: float = 0.):
 
-        extracted_alignments = []
-        for alignment_matrix in t_output.nbest_attention_matrices:
-            extracted_alignments.append(list(get_alignments(alignment_matrix, threshold=self.threshold)))
-
-        d_ = {"translations": t_output.nbest_translations,
-              "scores": t_output.nbest_scores,
-              "alignments": extracted_alignments}
+        d_ = t_output.json(self.align_threshold)
+        # copy over keys from the input that aren't present in the output
+        if t_input.raw_dict is not None:
+            for key, value in t_input.raw_dict.items():
+                if not key in d_:
+                    d_[key] = value
 
         self.stream.write("%s\n" % json.dumps(d_, sort_keys=True))
 
