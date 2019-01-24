@@ -1547,7 +1547,6 @@ class Translator:
                                     pass_through_dict=trans_input.pass_through_dict,
                                     beam_histories=translation.beam_histories)
         else:
-
             nbest_target_ids = translation.nbest_translations.target_ids_list
             target_tokens_list = [[self.vocab_target_inv[id] for id in ids] for ids in nbest_target_ids]
             target_strings = [C.TOKEN_SEPARATOR.join(

@@ -490,8 +490,8 @@ def collect_translate_output_and_scores(out_path: str) -> Tuple[List[str], List[
             try:
                 output = json.loads(output)
                 try:
-                    translation = output['translations'][0]
-                    score = output['scores'][0]
+                    translation = output['translation']
+                    score = output['score']
                 except IndexError:
                     pass
             except:
