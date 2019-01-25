@@ -29,7 +29,7 @@ ENCODER_DECODER_SETTINGS = [
     ("--encoder rnn --decoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 8 --num-embed 4 "
      " --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 8 --batch-size 2 --loss cross-entropy --optimized-metric perplexity --max-updates 2"
-     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01 --batch-type sentence "
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --batch-type sentence "
      " --decode-and-evaluate 0",
      "--beam-size 2 --softmax-temperature 0.01",
      True, False, False),
@@ -37,7 +37,7 @@ ENCODER_DECODER_SETTINGS = [
     ("--encoder rnn --decoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 8 --num-embed 4 "
      " --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 8 --batch-size 2 --loss cross-entropy --optimized-metric perplexity --max-updates 2"
-     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01 --batch-type sentence "
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --batch-type sentence "
      " --decode-and-evaluate 0",
      "--beam-size 1 --softmax-temperature 0.01 --skip-topk",
      True, False, False),
@@ -45,7 +45,7 @@ ENCODER_DECODER_SETTINGS = [
     ("--encoder rnn --decoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 8 --num-embed 4 "
      " --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 8 --batch-size 2 --loss cross-entropy --optimized-metric perplexity --max-updates 2"
-     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01 --batch-type sentence "
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --batch-type sentence "
      " --decode-and-evaluate 0",
      "--beam-size 2 --softmax-temperature 0.01 --nbest-size 2",
      True, False, False),
@@ -55,7 +55,7 @@ ENCODER_DECODER_SETTINGS = [
      " --num-embed 8 --rnn-attention-type coverage --rnn-attention-num-hidden 8 --weight-tying "
      "--rnn-attention-use-prev-word --rnn-context-gating --layer-normalization --batch-size 2 "
      "--loss cross-entropy --label-smoothing 0.1 --loss-normalization-type batch --optimized-metric perplexity"
-     " --max-updates 2 --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01"
+     " --max-updates 2 --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
      " --rnn-dropout-inputs 0.5:0.1 --rnn-dropout-states 0.5:0.1 --embed-dropout 0.1 --rnn-decoder-hidden-dropout 0.01"
      " --rnn-decoder-state-init avg --rnn-encoder-reverse-input --rnn-dropout-recurrent 0.1:0.0"
      " --rnn-h2h-init orthogonal_stacked --batch-type sentence --decode-and-evaluate 0"
@@ -66,7 +66,7 @@ ENCODER_DECODER_SETTINGS = [
     ("--encoder rnn-with-conv-embed --decoder rnn --conv-embed-max-filter-width 3 --conv-embed-num-filters 4:4:8"
      " --conv-embed-pool-stride 2 --conv-embed-num-highway-layers 1 --num-layers 1 --rnn-cell-type lstm"
      " --rnn-num-hidden 8 --num-embed 4 --rnn-attention-num-hidden 8 --batch-size 2 --loss cross-entropy"
-     " --optimized-metric perplexity --max-updates 2 --checkpoint-frequency 2 --optimizer adam --batch-type sentence"
+     " --optimized-metric perplexity --max-updates 2 --checkpoint-interval 2 --optimizer adam --batch-type sentence"
      " --initial-learning-rate 0.01 --decode-and-evaluate 0",
      "--beam-size 2",
      False, False, False),
@@ -75,7 +75,7 @@ ENCODER_DECODER_SETTINGS = [
      " --transformer-attention-heads 2 --transformer-model-size 4"
      " --transformer-feed-forward-num-hidden 16 --transformer-activation-type gelu"
      " --rnn-attention-type mhdot --rnn-attention-mhdot-heads 4 --rnn-attention-num-hidden 8 --batch-size 2 "
-     " --max-updates 2 --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01"
+     " --max-updates 2 --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
      " --weight-init-xavier-factor-type avg --weight-init-scale 3.0 --embed-weight-init normal --batch-type sentence"
      " --decode-and-evaluate 0",
      "--beam-size 2",
@@ -85,7 +85,7 @@ ENCODER_DECODER_SETTINGS = [
      " --transformer-attention-heads 2 --transformer-model-size 8"
      " --transformer-feed-forward-num-hidden 16 --transformer-activation-type swish1"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
-     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01",
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 3",
      False, True, False),
     # Full transformer
@@ -96,7 +96,7 @@ ENCODER_DECODER_SETTINGS = [
      " --weight-tying --weight-tying-type src_trg_softmax"
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
-     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01",
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 2 --nbest-size 2",
      True, False, False),
     # Full transformer with source factor
@@ -106,12 +106,12 @@ ENCODER_DECODER_SETTINGS = [
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying --weight-tying-type src_trg_softmax"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
-     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01 --source-factors-combine sum",
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --source-factors-combine sum",
      "--beam-size 2",
      True, False, True),
     # 2-layer cnn
     ("--encoder cnn --decoder cnn "
-     " --batch-size 2 --num-layers 2 --max-updates 2 --checkpoint-frequency 2"
+     " --batch-size 2 --num-layers 2 --max-updates 2 --checkpoint-interval 2"
      " --cnn-num-hidden 32 --cnn-positional-embedding-type fixed"
      " --optimizer adam --initial-learning-rate 0.001 --batch-type sentence --decode-and-evaluate 0",
      "--beam-size 2",
@@ -122,7 +122,7 @@ ENCODER_DECODER_SETTINGS = [
      " --rnn-attention-num-hidden 8 --rnn-attention-type mlp"
      " --batch-size 2 --batch-type sentence"
      " --loss cross-entropy --optimized-metric perplexity --max-updates 2"
-     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
      "--beam-size 2 --nbest-size 2",
      True, False, False),
     # Full transformer with LHUC
@@ -133,7 +133,7 @@ ENCODER_DECODER_SETTINGS = [
      " --weight-tying --weight-tying-type src_trg_softmax"
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
      " --batch-size 2 --max-updates 2 --batch-type sentence  --decode-and-evaluate 0"
-     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
      "--beam-size 2 --beam-prune 1",
      True, False, False)]
 

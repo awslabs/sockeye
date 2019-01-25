@@ -57,7 +57,7 @@ MODELS = {
         "--max-num-checkpoint-not-improved=32",
         "--batch-type=word",
         "--batch-size=4096",
-        "--checkpoint-frequency=2000",
+        "--checkpoint-interval=2000",
         "--decode-and-evaluate=500",
         "--keep-last-params=60",
     ],
@@ -84,7 +84,7 @@ MODELS = {
         "--max-num-checkpoint-not-improved=32",
         "--batch-type=sentence",
         "--batch-size=128",
-        "--checkpoint-frequency=2000",
+        "--checkpoint-interval=2000",
         "--decode-and-evaluate=500",
         "--keep-last-params=60",
     ],
@@ -103,7 +103,7 @@ MODEL_TEST_ARGS = {
         "--batch-type=sentence",
         "--batch-size=1",
         "--max-updates=4",
-        "--checkpoint-frequency=2",
+        "--checkpoint-interval=2",
     ],
 
     MODEL_GNMT: [
@@ -114,7 +114,7 @@ MODEL_TEST_ARGS = {
         "--batch-type=sentence",
         "--batch-size=1",
         "--max-updates=4",
-        "--checkpoint-frequency=2",
+        "--checkpoint-interval=2",
     ],
 }
 

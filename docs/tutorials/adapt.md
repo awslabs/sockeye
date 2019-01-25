@@ -39,7 +39,7 @@ Assuming the trained model resides in `ood`, a possible invocation could be
         --params ood/params.best \
         -o id_continuation
 
-Depending on the size of your training data you may want to adjust the parameters of the learning algorithm (learning rate, decay, etc.) and perhaps the checkpoint frequency.
+Depending on the size of your training data you may want to adjust the parameters of the learning algorithm (learning rate, decay, etc.) and perhaps the checkpoint interval.
 
 ## Learning Hidden Unit Contribution
 
