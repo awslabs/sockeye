@@ -26,7 +26,7 @@ import sockeye.checkpoint_decoder
 import sockeye.evaluate
 import sockeye.extract_parameters
 from sockeye import constants as C
-from test.common import check_core_features, run_train_translate, tmp_digits_dataset
+from test.common import check_train_translate, run_train_translate, tmp_digits_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -171,11 +171,11 @@ def test_seq_copy(train_params: str,
                             test_max_length=_TEST_MAX_LENGTH,
                             sort_target=False,
                             with_source_factors=use_source_factors) as data:
-        check_core_features(train_params=train_params,
-                            translate_params=translate_params,
-                            data=data,
-                            use_prepared_data=use_prepared_data,
-                            max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS)
+        check_train_translate(train_params=train_params,
+                              translate_params=translate_params,
+                              data=data,
+                              use_prepared_data=use_prepared_data,
+                              max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS)
 
 
 TINY_TEST_MODEL = [(" --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 4 --num-embed 4"

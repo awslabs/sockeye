@@ -20,7 +20,7 @@ import pytest
 import sockeye.constants as C
 import sockeye.evaluate
 import sockeye.utils
-from test.common import check_core_features, tmp_digits_dataset
+from test.common import check_train_translate, tmp_digits_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -132,12 +132,12 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
                             test_max_length=_TEST_MAX_LENGTH,
                             sort_target=False,
                             with_source_factors=False) as data:
-        data = check_core_features(train_params=train_params,
-                                   translate_params=translate_params,
-                                   data=data,
-                                   use_prepared_data=use_prepared_data,
-                                   max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
-                                   seed=seed)
+        data = check_train_translate(train_params=train_params,
+                                     translate_params=translate_params,
+                                     data=data,
+                                     use_prepared_data=use_prepared_data,
+                                     max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
+                                     seed=seed)
 
         # get best validation perplexity
         metrics = sockeye.utils.read_metrics_file(os.path.join(data['model'], C.METRICS_NAME))
@@ -243,12 +243,12 @@ def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                             _TEST_LINE_COUNT, _TEST_LINE_COUNT_EMPTY, _TEST_MAX_LENGTH,
                             sort_target=True, seed_train=_SEED_TRAIN_DATA, seed_dev=_SEED_DEV_DATA,
                             with_source_factors=use_source_factor) as data:
-        data = check_core_features(train_params=train_params,
-                                   translate_params=translate_params,
-                                   data=data,
-                                   use_prepared_data=use_prepared_data,
-                                   max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
-                                   seed=seed)
+        data = check_train_translate(train_params=train_params,
+                                     translate_params=translate_params,
+                                     data=data,
+                                     use_prepared_data=use_prepared_data,
+                                     max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
+                                     seed=seed)
 
         # get best validation perplexity
         metrics = sockeye.utils.read_metrics_file(os.path.join(data['model'], C.METRICS_NAME))

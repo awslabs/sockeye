@@ -140,7 +140,7 @@ def tmp_digits_dataset(prefix: str,
                        test_line_count: int, test_line_count_empty: int, test_max_length: int,
                        sort_target: bool = False,
                        seed_train: int = 13, seed_dev: int = 13,
-                       with_source_factors: bool = False):
+                       with_source_factors: bool = False) -> Dict[str, Any]:
     """
     Creates a temporary dataset with train, dev, and test. Returns a dictionary with paths to the respective temporary
     files.
@@ -207,12 +207,12 @@ _SCORE_PARAMS_COMMON = "--use-cpu --model {model} --source {source} --target {ta
 _SCORE_WITH_FACTORS_COMMON = " --source-factors {source_factors}"
 
 
-def check_core_features(train_params: str,
-                        translate_params: str,
-                        data: Dict[str, Any],
-                        use_prepared_data: bool,
-                        max_seq_len: int,
-                        seed: int = 13) -> Dict[str, Any]:
+def check_train_translate(train_params: str,
+                          translate_params: str,
+                          data: Dict[str, Any],
+                          use_prepared_data: bool,
+                          max_seq_len: int,
+                          seed: int = 13) -> Dict[str, Any]:
     """
     Tests core features (training, inference).
     """
@@ -305,7 +305,7 @@ def run_train_translate(train_params: str,
                                    train_params)
 
         if 'train_source_factors' in data:
-            params += _TRAIN_WITH_FACTORS_COMMON.format(source_factors=" ".join( data['train_source_factors']))
+            params += _TRAIN_WITH_FACTORS_COMMON.format(source_factors=" ".join(data['train_source_factors']))
         if 'dev_source_factors' in data:
             params += _DEV_WITH_FACTORS_COMMON.format(dev_source_factors=" ".join(data['dev_source_factors']))
 
