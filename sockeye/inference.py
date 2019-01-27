@@ -1547,7 +1547,6 @@ class Translator:
                                     pass_through_dict=trans_input.pass_through_dict,
                                     beam_histories=translation.beam_histories)
         else:
-
             nbest_target_ids = translation.nbest_translations.target_ids_list
             target_tokens_list = [[self.vocab_target_inv[id] for id in ids] for ids in nbest_target_ids]
             target_strings = [C.TOKEN_SEPARATOR.join(
@@ -2160,7 +2159,7 @@ class SampleK(mx.gluon.HybridBlock):
         :param k: The size of the beam.
         :param n: Sample from the top-N words in the vocab at each timestep.
         :param batch_size: Number of sentences being decoded at once.
-        :param vocab_size: Vocabulary size.
+        :param context: Context for block constants.
         """
         super().__init__()
         self.beam_size = k
@@ -2181,7 +2180,8 @@ class SampleK(mx.gluon.HybridBlock):
         :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
         :param target_dists: The non-cumulative target distributions (ignored).
         :param finished: The list of finished hypotheses.
-        :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+        :param best_hyp_indices: Best hypothesis indices constant.
+        :param zeros_array: Zeros array constant.
         :return: The row indices, column indices, and values of the sampled words.
         """
         # Map the negative logprobs to probabilities so as to have a distribution
