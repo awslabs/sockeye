@@ -272,8 +272,15 @@ def broadcast_to_heads(x: mx.sym.Symbol, num_heads: int, ndim: int, fold_heads: 
              Shape: (batch * heads, d1 ... dn-1) if fold_heads == True, (batch, heads, d1 ... dn-1) else.
     """
     dims = [0] * (ndim - 1)
-    # x: (batch, 1)
-    x = mx.sym.expand_dims(x, axis=1)
+    if ndim == 1:
+        # x: (batch, 1)
+        x = mx.sym.reshape(x, shape=(-1, 1))
+    elif ndim == 2:
+        # x: (batch, 1, d1)
+        x = mx.sym.reshape(x, shape=(0, 1, -1))
+    else:
+        # x: (batch, 1, d1 ... dn - 1)
+        x = mx.sym.reshape(x, shape=(0, 1, -2))
     # x: (batch, heads, dims...)
     x = mx.sym.broadcast_to(x, shape=[0, num_heads] + dims)
     if fold_heads:

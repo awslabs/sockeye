@@ -155,7 +155,7 @@ class ConvolutionBlock:
                                           bias=self.conv_bias,
                                           num_hidden=num_hidden)
         # (batch_size, num_hidden, 1)
-        data_conv = mx.sym.expand_dims(data_conv, axis=2)
+        data_conv = mx.sym.reshape(data_conv, shape=(-2, 1))
         return self._post_convolution(data_conv)
 
     def _post_convolution(self, data_conv):
