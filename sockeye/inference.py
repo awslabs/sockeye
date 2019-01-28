@@ -2265,7 +2265,7 @@ class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
 
         # Update lengths of all items, except those that were already finished. This updates
         # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
-        lengths = lengths + F.cast(1 - F.expand_dims(finished, axis=1), dtype='float32')
+        lengths = lengths + F.cast(1 - F.reshape(finished, shape=(-1, 1)), dtype='float32')
 
         # Now, recompute finished. Hypotheses are finished if they are
         # - extended with <pad>, or
