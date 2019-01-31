@@ -328,12 +328,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 word_min_count_target=word_min_count_target,
                 pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
-        # If factors are being added instead of concatenated, set all dimensions to the embedding dimensions
-        if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM:
-            logger.info("Setting all source factor embedding sizes to `num_embed` ('%d') for summing", args.num_embed[0])
-            args.source_factors_num_embed = [args.num_embed[0]] * len(args.source_factors)
-
-        check_condition(len(args.source_factors) == len(args.source_factors_num_embed),
+        check_condition(args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM \
+                        or len(args.source_factors) == len(args.source_factors_num_embed),
                         "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (
                             len(args.source_factors), len(args.source_factors_num_embed)))
 
@@ -638,8 +634,15 @@ def create_model_config(args: argparse.Namespace,
 
     source_factor_configs = None
     if len(source_vocab_sizes) > 1:
+        source_factors_num_embed = args.source_factors_num_embed
+        if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM:
+            # If factors are being added instead of concatenated, set all dimensions to the embedding dimensions
+            logger.info("Setting all source factor embedding sizes to `num_embed` ('%d') for summing",
+                        num_embed_source)
+            source_factors_num_embed = [num_embed_source] * len(source_factor_vocab_sizes)
+
         source_factor_configs = [encoder.FactorConfig(size, dim) for size, dim in zip(source_factor_vocab_sizes,
-                                                                                      args.source_factors_num_embed)]
+                                                                                      source_factors_num_embed)]
 
     config_embed_source = encoder.EmbeddingConfig(vocab_size=source_vocab_size,
                                                   num_embed=num_embed_source,
