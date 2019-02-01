@@ -15,6 +15,7 @@ import argparse
 import os
 import sys
 import time
+import logging
 from itertools import groupby
 from operator import itemgetter
 from typing import Dict, Generator, Tuple, Optional
@@ -28,7 +29,7 @@ from . import vocab
 from .data_io import smart_open, get_tokens, tokens2ids
 from .log import setup_main_logger, log_sockeye_version
 
-logger = setup_main_logger(__name__, console=True, file_logging=False)
+logger = logging.getLogger(__name__)
 
 
 def lexicon_iterator(path: str,
@@ -197,8 +198,9 @@ class TopKLexicon:
 
 
 def create(args):
+    setup_main_logger(console=not args.quiet, file_logging=True, path=args.output + ".log")
     global logger
-    logger = setup_main_logger('create', console=not args.quiet, file_logging=True, path=args.output + ".log")
+    logger = logging.getLogger('create')
     log_sockeye_version(logger)
     logger.info("Creating top-k lexicon from \"%s\"", args.input)
     logger.info("Reading source and target vocab from \"%s\"", args.model)
@@ -211,8 +213,9 @@ def create(args):
 
 
 def inspect(args):
+    setup_main_logger(console=True, file_logging=False)
     global logger
-    logger = setup_main_logger('inspect', console=True, file_logging=False)
+    logger = logging.getLogger('inspect')
     log_sockeye_version(logger)
     logger.info("Inspecting top-k lexicon at \"%s\"", args.lexicon)
     vocab_source = vocab.load_source_vocabs(args.model)[0]

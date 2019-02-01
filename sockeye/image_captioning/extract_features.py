@@ -17,6 +17,7 @@ CLI for extracting image features.
 import argparse
 import os
 import pickle
+import logging
 from contextlib import ExitStack
 from typing import List, Tuple
 
@@ -32,7 +33,7 @@ from ..utils import check_condition, determine_context
 
 # Temporary logger, the real one (logging to a file probably, will be created
 # in the main function)
-logger = setup_main_logger(__name__, file_logging=False, console=True)
+logger = logging.getLogger(__name__)
 
 
 def batching(iterable, n=1):
@@ -96,6 +97,7 @@ def read_list_file(inp: str) -> List[str]:
 
 
 def main():
+    setup_main_logger(file_logging=False, console=True)
     params = argparse.ArgumentParser(description='CLI to extract features from images.')
     arguments.add_image_extract_features_cli_args(params)
     args = params.parse_args()

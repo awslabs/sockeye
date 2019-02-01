@@ -102,11 +102,10 @@ def is_python34() -> bool:
     return version[0] == 3 and version[1] == 4
 
 
-def setup_main_logger(name: str, file_logging=True, console=True, path: Optional[str] = None) -> logging.Logger:
+def setup_main_logger(file_logging=True, console=True, path: Optional[str] = None):
     """
-    Return a logger that configures logging for the main application.
+    Configures logging for the main application.
 
-    :param name: Name of the returned logger.
     :param file_logging: Whether to log to a file.
     :param console: Whether to log to the console.
     :param path: Optional path to write logfile to.
@@ -122,20 +121,17 @@ def setup_main_logger(name: str, file_logging=True, console=True, path: Optional
         log_config["handlers"]["rotating"]["filename"] = path  # type: ignore
 
     logging.config.dictConfig(log_config)
-    logger = logging.getLogger(name)
 
     def exception_hook(exc_type, exc_value, exc_traceback):
         if is_python34():
             # Python3.4 does not seem to handle logger.exception() well
             import traceback
             traceback = "".join(traceback.format_tb(exc_traceback)) + exc_type.name
-            logger.error("Uncaught exception\n%s", traceback)
+            logging.error("Uncaught exception\n%s", traceback)
         else:
-            logger.exception("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+            logging.exception("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
 
     sys.excepthook = exception_hook
-
-    return logger
 
 
 def log_sockeye_version(logger):

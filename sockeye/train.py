@@ -27,6 +27,7 @@ import os
 import shutil
 import sys
 import tempfile
+import logging
 from contextlib import ExitStack
 from typing import Any, cast, Optional, Dict, List, Tuple
 
@@ -57,7 +58,7 @@ from .optimizers import OptimizerConfig
 from .utils import check_condition
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
-logger = setup_main_logger(__name__, file_logging=False, console=True)
+logger = logging.getLogger(__name__)
 
 
 def none_if_negative(val):
@@ -799,10 +800,8 @@ def train(args: argparse.Namespace) -> training.TrainState:
     output_folder = os.path.abspath(args.output)
     resume_training = check_resume(args, output_folder)
 
-    global logger
-    logger = setup_main_logger(__name__,
-                               file_logging=True,
-                               console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
+    setup_main_logger(file_logging=True,
+                      console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
     utils.log_basic_info(args)
     arguments.save_args(args, os.path.join(output_folder, C.ARGS_STATE_NAME))
 
