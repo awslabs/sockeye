@@ -17,6 +17,7 @@ Translation CLI.
 import argparse
 import sys
 import time
+import logging
 from contextlib import ExitStack
 from math import ceil
 from typing import Generator, Optional, List
@@ -31,7 +32,7 @@ from . import data_io
 from . import inference
 from . import utils
 
-logger = setup_main_logger(__name__, file_logging=False)
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -47,11 +48,11 @@ def run_translate(args: argparse.Namespace):
     utils.seed_rngs(args.seed if args.seed is not None else int(time.time()))
 
     if args.output is not None:
-        global logger
-        logger = setup_main_logger(__name__,
-                                   console=not args.quiet,
+        setup_main_logger(console=not args.quiet,
                                    file_logging=True,
                                    path="%s.%s" % (args.output, C.LOG_NAME))
+    else:
+        setup_main_logger(file_logging=False)
 
     log_basic_info(args)
 

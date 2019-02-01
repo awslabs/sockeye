@@ -17,6 +17,7 @@ CLI to rerank an nbest list of translations.
 
 import argparse
 import json
+import logging
 from typing import Any, Dict, List
 
 import numpy as np
@@ -27,7 +28,7 @@ from . import constants as C
 from . import log
 from . import utils
 
-logger = log.setup_main_logger(__name__, console=True, file_logging=False)
+logger = logging.getLogger(__name__)
 
 
 class Reranker:
@@ -111,6 +112,7 @@ def main():
     """
     Commandline interface to rerank nbest lists.
     """
+    log.setup_main_logger(console=True, file_logging=False)
     log.log_sockeye_version(logger)
 
     params = argparse.ArgumentParser(description="Rerank nbest lists of translations."
