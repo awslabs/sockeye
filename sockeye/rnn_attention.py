@@ -269,7 +269,7 @@ class BilinearAttention(Attention):
             :return: Updated attention state.
             """
             # (batch_size, decoder_num_hidden, 1)
-            query = mx.sym.reshape(att_input.query, shape=(-2, 1))
+            query = mx.sym.expand_dims(att_input.query, axis=2)
 
             # in:  (batch_size, source_seq_len, self.num_hidden) X (batch_size, self.num_hidden, 1)
             # out: (batch_size, source_seq_len, 1).
@@ -368,7 +368,7 @@ class DotAttention(Attention):
                 query = query * self.scale
 
             # (batch_size, decoder_num_hidden, 1)
-            expanded_decoder_state = mx.sym.reshape(query, shape=(-2, 1))
+            expanded_decoder_state = mx.sym.expand_dims(query, axis=2)
 
             # batch_dot: (batch, M, K) X (batch, K, N) –> (batch, M, N).
             # (batch_size, seq_len, 1)
@@ -479,7 +479,7 @@ class MultiHeadDotAttention(Attention):
 
             # combine heads
             # (batch*heads, 1, num_hidden/head)
-            context = mx.sym.reshape(context, shape=(0, 1, -1))
+            context = mx.sym.expand_dims(context, axis=1)
             # (batch, 1, num_hidden)
             context = layers.combine_heads(context, self.num_hidden_per_head, heads=self.heads)
             # (batch, num_hidden)
@@ -585,7 +585,7 @@ class LocationAttention(Attention):
                                                  end=source_seq_len)
 
             # attention_scores: (batch_size, seq_len, 1)
-            attention_scores = mx.sym.reshape(data=attention_scores, shape=(-2, 1))
+            attention_scores = mx.sym.expand_dims(data=attention_scores, axis=2)
 
             context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores,
                                                                        self.dtype)
@@ -687,9 +687,9 @@ class MlpAttention(Attention):
                                                  name="%squery_hidden" % self.prefix)
 
             # (batch_size, 1, attention_num_hidden)
-            query_hidden = mx.sym.reshape(data=query_hidden,
-                                          shape=(0, 1, -1),
-                                          name="%squery_hidden_expanded" % self.prefix)
+            query_hidden = mx.sym.expand_dims(data=query_hidden,
+                                              axis=1,
+                                              name="%squery_hidden_expanded" % self.prefix)
 
             attention_hidden_lhs = source_hidden
             if self.coverage:

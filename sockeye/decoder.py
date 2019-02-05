@@ -257,7 +257,7 @@ class TransformerDecoder(Decoder):
                                                            fold_heads=True,
                                                            name="%ssource_bias" % self.prefix)
         # (batch_size * heads, 1, max_length)
-        source_bias = mx.sym.reshape(source_bias, shape=(0, 1, -1))
+        source_bias = mx.sym.expand_dims(source_bias, axis=1)
 
         # (1, target_max_length, target_max_length)
         target_bias = transformer.get_autoregressive_bias(target_embed_max_length, name="%starget_bias" % self.prefix)
@@ -302,7 +302,7 @@ class TransformerDecoder(Decoder):
         # (batch_size, num_embed)
         target_embed_prev = self.pos_embedding.encode_positions(indices, target_embed_prev)
         # (batch_size, 1, num_embed)
-        target = mx.sym.reshape(target_embed_prev, shape=(0, 1, -1))
+        target = mx.sym.expand_dims(target_embed_prev, axis=1)
 
         # (batch_size * heads, max_length)
         source_bias = transformer.get_variable_length_bias(lengths=source_encoded_lengths,
@@ -311,7 +311,7 @@ class TransformerDecoder(Decoder):
                                                            fold_heads=True,
                                                            name="%ssource_bias" % self.prefix)
         # (batch_size * heads, 1, max_length)
-        source_bias = mx.sym.reshape(source_bias, shape=(0, 1, -1))
+        source_bias = mx.sym.expand_dims(source_bias, axis=1)
 
         # auto-regressive bias for last position in sequence
         # (1, target_max_length, target_max_length)
@@ -779,7 +779,7 @@ class RecurrentDecoder(Decoder):
         # we derive the shape of hidden and layer_states from some input to enable
         # shape inference for the batch dimension during inference.
         # (batch_size, 1)
-        zeros = mx.sym.reshape(mx.sym.zeros_like(source_encoded_length), shape=(-1, 1))
+        zeros = mx.sym.expand_dims(mx.sym.zeros_like(source_encoded_length), axis=1)
         # last encoder state: (batch, num_hidden)
         source_encoded_last = mx.sym.SequenceLast(data=source_encoded,
                                                   axis=1,
@@ -807,7 +807,7 @@ class RecurrentDecoder(Decoder):
                 elif self.config.state_init == C.RNN_DEC_INIT_AVG:
                     # (batch_size, encoder_num_hidden)
                     init = mx.sym.broadcast_div(mx.sym.sum(source_masked, axis=1, keepdims=False),
-                                                mx.sym.reshape(source_encoded_length, shape=(-1, 1)))
+                                                mx.sym.expand_dims(source_encoded_length, axis=1))
                 else:
                     raise ValueError("Unknown decoder state init type '%s'" % self.config.state_init)
 
@@ -1139,7 +1139,7 @@ class ConvolutionalDecoder(Decoder):
                                                    weight=self.i2h_weight)
         # re-arrange outcoming layer to the dimensions of the output
         # (batch_size, 1, num_hidden)
-        target_hidden_step = mx.sym.reshape(target_hidden_step, shape=(0, 1, -1))
+        target_hidden_step = mx.sym.expand_dims(target_hidden_step, axis=1)
         # (batch_size, kernel_width, num_hidden)
         target_hidden = mx.sym.concat(embed_layer_state, target_hidden_step, dim=1)
 
