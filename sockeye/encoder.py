@@ -548,11 +548,11 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
         :return: (batch_size, num_embed)
         """
         # (batch_size, 1)
-        positions = mx.sym.reshape(positions, shape=(-1, 1))
+        positions = mx.sym.expand_dims(positions, axis=1)
         # (num_embed,)
         channels = mx.sym.arange(0, self.num_embed // 2)
-        # (1, num_embed)
-        scaling = mx.sym.reshape(1. / mx.sym.pow(10000, (2 * channels) / self.num_embed), shape=(1, -1))
+        # (1, num_embed,)
+        scaling = mx.sym.expand_dims(1. / mx.sym.pow(10000, (2 * channels) / self.num_embed), axis=0)
 
         # (batch_size, num_embed/2)
         scaled_positions = mx.sym.dot(positions, scaling)
@@ -614,7 +614,7 @@ class AddLearnedPositionalEmbeddings(PositionalEncoder):
         """
 
         # (1, source_seq_len)
-        positions = mx.sym.reshape(data=mx.sym.arange(start=0, stop=seq_len, step=1), shape=(1, -1))
+        positions = mx.sym.expand_dims(data=mx.sym.arange(start=0, stop=seq_len, step=1), axis=0)
 
         # (1, source_seq_len, num_embed)
         pos_embedding = mx.sym.Embedding(data=positions,
@@ -1043,11 +1043,11 @@ class TransformerEncoder(Encoder):
             data = mx.sym.Dropout(data=data, p=self.config.dropout_prepost)
 
         # (batch_size * heads, 1, max_length)
-        bias = mx.sym.reshape(transformer.get_variable_length_bias(lengths=data_length,
-                                                                   max_length=seq_len,
-                                                                   num_heads=self.config.attention_heads,
-                                                                   fold_heads=True,
-                                                                   name="%sbias" % self.prefix), shape=(0, 1, -1))
+        bias = mx.sym.expand_dims(transformer.get_variable_length_bias(lengths=data_length,
+                                                                       max_length=seq_len,
+                                                                       num_heads=self.config.attention_heads,
+                                                                       fold_heads=True,
+                                                                       name="%sbias" % self.prefix), axis=1)
         bias = utils.cast_conditionally(bias, self.dtype)
         for i, layer in enumerate(self.layers):
             # (batch_size, seq_len, config.model_size)

@@ -129,7 +129,7 @@ class CountCoverage(Coverage):
             :param prev_coverage: Shape: (batch_size, source_seq_len, coverage_num_hidden).
             :return: Updated coverage matrix . Shape: (batch_size, source_seq_len, coverage_num_hidden).
             """
-            return prev_coverage + mx.sym.reshape(attention_prob_scores, shape=(-2, 1))
+            return prev_coverage + mx.sym.expand_dims(attention_prob_scores, axis=2)
 
         return update_coverage
 
@@ -183,8 +183,9 @@ class FertilityCoverage(Coverage):
             """
 
             # (batch_size, source_seq_len, 1)
-            expanded_att_scores = mx.sym.reshape(attention_prob_scores, shape=(-2, 1),
-                                                 name="%sexpand_attention_scores" % self.prefix)
+            expanded_att_scores = mx.sym.expand_dims(data=attention_prob_scores,
+                                                     axis=2,
+                                                     name="%sexpand_attention_scores" % self.prefix)
 
             # (batch_size, source_seq_len, 1)
             new_coverage = scaled_fertility * expanded_att_scores
@@ -236,13 +237,13 @@ class GRUCoverage(Coverage):
 
             # (batch_size, source_seq_len, decoder_num_hidden)
             expanded_decoder = mx.sym.broadcast_axis(
-                data=mx.sym.reshape(data=prev_hidden, shape=(0, 1, -1), name="%sexpand_decoder" % self.prefix),
+                data=mx.sym.expand_dims(data=prev_hidden, axis=1, name="%sexpand_decoder" % self.prefix),
                 axis=1, size=source_seq_len, name="%sbroadcast_decoder" % self.prefix)
 
             # (batch_size, source_seq_len, 1)
-            expanded_att_scores = mx.sym.reshape(data=attention_prob_scores,
-                                                 shape=(-2, 1),
-                                                 name="%sexpand_attention_scores" % self.prefix)
+            expanded_att_scores = mx.sym.expand_dims(data=attention_prob_scores,
+                                                     axis=2,
+                                                     name="%sexpand_attention_scores" % self.prefix)
 
             # (batch_size, source_seq_len, encoder_num_hidden + decoder_num_hidden + 1)
             # +1 for the attention_prob_score for the source word
@@ -331,7 +332,7 @@ class ActivationCoverage(Coverage):
                                                     name="%sprevious_hidden_fc" % self.prefix)
 
             # (batch_size, source_seq_len, 1)
-            attention_prob_scores = mx.sym.reshape(attention_prob_scores, shape=(-2, 1))
+            attention_prob_scores = mx.sym.expand_dims(attention_prob_scores, axis=2)
 
             # (batch_size, source_seq_len, coverage_num_hidden)
             attention_hidden = mx.sym.FullyConnected(data=attention_prob_scores,
@@ -346,8 +347,8 @@ class ActivationCoverage(Coverage):
                                                 num_hidden=self.num_hidden, name="%sdecoder_hidden")
 
             # (batch_size, 1, coverage_num_hidden)
-            prev_hidden = mx.sym.reshape(data=prev_hidden, shape=(0, 1, -1),
-                                         name="%sinput_decoder_hidden_expanded" % self.prefix)
+            prev_hidden = mx.sym.expand_dims(data=prev_hidden, axis=1,
+                                             name="%sinput_decoder_hidden_expanded" % self.prefix)
 
             # (batch_size, source_seq_len, coverage_num_hidden)
             intermediate = mx.sym.broadcast_add(lhs=source_hidden, rhs=prev_hidden,
