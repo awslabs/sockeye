@@ -1,4 +1,4 @@
-# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -345,7 +345,7 @@ OUTPUT_HANDLER_BENCHMARK = "benchmark"
 OUTPUT_HANDLER_ALIGN_PLOT = "align_plot"
 OUTPUT_HANDLER_ALIGN_TEXT = "align_text"
 OUTPUT_HANDLER_BEAM_STORE = "beam_store"
-OUTPUT_HANDLER_NBEST = "nbest_translation"
+OUTPUT_HANDLER_JSON = "json"
 OUTPUT_HANDLERS = [OUTPUT_HANDLER_TRANSLATION,
                    OUTPUT_HANDLER_SCORE,
                    OUTPUT_HANDLER_TRANSLATION_WITH_SCORE,
@@ -355,7 +355,7 @@ OUTPUT_HANDLERS = [OUTPUT_HANDLER_TRANSLATION,
                    OUTPUT_HANDLER_ALIGN_PLOT,
                    OUTPUT_HANDLER_ALIGN_TEXT,
                    OUTPUT_HANDLER_BEAM_STORE,
-                   OUTPUT_HANDLER_NBEST]
+                   OUTPUT_HANDLER_JSON]
 OUTPUT_HANDLERS_SCORING = [OUTPUT_HANDLER_SCORE,
                            OUTPUT_HANDLER_PAIR_WITH_SCORE]
 
@@ -437,3 +437,10 @@ SCORING_TYPE_NEGLOGPROB = 'neglogprob'
 SCORING_TYPE_LOGPROB = 'logprob'
 SCORING_TYPE_DEFAULT = SCORING_TYPE_NEGLOGPROB
 SCORING_TYPE_CHOICES = [SCORING_TYPE_NEGLOGPROB, SCORING_TYPE_LOGPROB]
+
+
+# parameter averaging
+AVERAGE_BEST = 'best'
+AVERAGE_LAST = 'last'
+AVERAGE_LIFESPAN = 'lifespan'
+AVERAGE_CHOICES = [AVERAGE_BEST, AVERAGE_LAST, AVERAGE_LIFESPAN]

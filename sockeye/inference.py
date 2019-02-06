@@ -1,4 +1,4 @@
-# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -14,6 +14,7 @@
 """
 Code for inference/translation
 """
+import copy
 import itertools
 import json
 import logging
@@ -21,7 +22,7 @@ import os
 import time
 from collections import defaultdict
 from functools import lru_cache, partial
-from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set
+from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set, Any
 
 import mxnet as mx
 import numpy as np
@@ -600,26 +601,34 @@ SentenceId = Union[int, str]
 class TranslatorInput:
     """
     Object required by Translator.translate().
+    If not None, `pass_through_dict` is an arbitrary dictionary instantiated from a JSON object
+    via `make_input_from_dict()`, and it contains extra fields found in an input JSON object.
+    If `--output-type json` is selected, all such fields that are not fields used or changed by
+    Sockeye will be included in the output JSON object. This provides a mechanism for passing
+    fields through the call to Sockeye.
 
     :param sentence_id: Sentence id.
     :param tokens: List of input tokens.
     :param factors: Optional list of additional factor sequences.
     :param constraints: Optional list of target-side constraints.
+    :param pass_through_dict: Optional raw dictionary of arbitrary input data.
     """
 
-    __slots__ = ('sentence_id', 'tokens', 'factors', 'constraints', 'avoid_list')
+    __slots__ = ('sentence_id', 'tokens', 'factors', 'constraints', 'avoid_list', 'pass_through_dict')
 
     def __init__(self,
                  sentence_id: SentenceId,
                  tokens: Tokens,
                  factors: Optional[List[Tokens]] = None,
                  constraints: Optional[List[Tokens]] = None,
-                 avoid_list: Optional[List[Tokens]] = None) -> None:
+                 avoid_list: Optional[List[Tokens]] = None,
+                 pass_through_dict: Optional[Dict] = None) -> None:
         self.sentence_id = sentence_id
         self.tokens = tokens
         self.factors = factors
         self.constraints = constraints
         self.avoid_list = avoid_list
+        self.pass_through_dict = pass_through_dict
 
     def __str__(self):
         return 'TranslatorInput(%s, %s, factors=%s, constraints=%s, avoid=%s)' \
@@ -655,11 +664,13 @@ class TranslatorInput:
             # Constrained decoding is not supported for chunked TranslatorInputs. As a fall-back, constraints are
             # assigned to the first chunk
             constraints = self.constraints if chunk_id == 0 else None
+            pass_through_dict = self.pass_through_dict if chunk_id == 0 else None
             yield TranslatorInput(sentence_id=self.sentence_id,
                                   tokens=self.tokens[i:i + chunk_size],
                                   factors=factors,
                                   constraints=constraints,
-                                  avoid_list=self.avoid_list)
+                                  avoid_list=self.avoid_list,
+                                  pass_through_dict=pass_through_dict)
 
     def with_eos(self) -> 'TranslatorInput':
         """
@@ -670,7 +681,8 @@ class TranslatorInput:
                                factors=[factor + [C.EOS_SYMBOL] for factor in
                                         self.factors] if self.factors is not None else None,
                                constraints=self.constraints,
-                               avoid_list=self.avoid_list)
+                               avoid_list=self.avoid_list,
+                               pass_through_dict=self.pass_through_dict)
 
 
 class BadTranslatorInput(TranslatorInput):
@@ -758,7 +770,7 @@ def make_input_from_dict(sentence_id: SentenceId, input_dict: Dict) -> Translato
             constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
 
         return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors,
-                               constraints=constraints, avoid_list=avoid_list)
+                               constraints=constraints, avoid_list=avoid_list, pass_through_dict=input_dict)
 
     except Exception as e:
         logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
@@ -834,6 +846,7 @@ class TranslatorOutput:
     :param tokens: List of translated tokens.
     :param attention_matrix: Attention matrix. Shape: (target_length, source_length).
     :param score: Negative log probability of generated translation.
+    :param pass_through_dict: Dictionary of key/value pairs to pass through when working with JSON.
     :param beam_histories: List of beam histories. The list will contain more than one
            history if it was split due to exceeding max_length.
     :param nbest_translations: List of nbest translations as strings.
@@ -846,6 +859,7 @@ class TranslatorOutput:
                  'tokens',
                  'attention_matrix',
                  'score',
+                 'pass_through_dict',
                  'beam_histories',
                  'nbest_translations',
                  'nbest_tokens',
@@ -858,6 +872,7 @@ class TranslatorOutput:
                  tokens: Tokens,
                  attention_matrix: np.ndarray,
                  score: float,
+                 pass_through_dict: Optional[Dict[str,Any]] = None,
                  beam_histories: Optional[List[BeamHistory]] = None,
                  nbest_translations: Optional[List[str]] = None,
                  nbest_tokens: Optional[List[Tokens]] = None,
@@ -868,11 +883,39 @@ class TranslatorOutput:
         self.tokens = tokens
         self.attention_matrix = attention_matrix
         self.score = score
+        self.pass_through_dict = copy.deepcopy(pass_through_dict) if pass_through_dict else {}
         self.beam_histories = beam_histories
         self.nbest_translations = nbest_translations
         self.nbest_tokens = nbest_tokens
         self.nbest_attention_matrices = nbest_attention_matrices
         self.nbest_scores = nbest_scores
+
+    def json(self, align_threshold: float = 0.0) -> Dict:
+        """
+        Returns a dictionary suitable for json.dumps() representing all
+        the information in the class. It is initialized with any keys
+        present in the corresponding `TranslatorInput` object's pass_through_dict.
+        Keys from here that are not overwritten by Sockeye will thus be passed
+        through to the output.
+
+        :param align_threshold: If alignments are defined, only print ones over this threshold.
+        :return: A dictionary.
+        """
+        _d = self.pass_through_dict  # type: Dict[str, Any]
+        _d['sentence_id'] = self.sentence_id
+        _d['translation'] = self.translation
+        _d['score'] = self.score
+
+        if self.nbest_translations is not None and len(self.nbest_translations) > 1:
+            _d['translations'] = self.nbest_translations
+            _d['scores'] = self.nbest_scores
+            if self.nbest_attention_matrices:
+                extracted_alignments = []
+                for alignment_matrix in self.nbest_attention_matrices:
+                    extracted_alignments.append(list(utils.get_alignments(alignment_matrix, threshold=align_threshold)))
+                _d['alignments'] = extracted_alignments
+
+        return _d
 
 
 TokenIds = List[int]
@@ -1501,9 +1544,9 @@ class Translator:
                                     tokens=target_tokens,
                                     attention_matrix=attention_matrix,
                                     score=translation.score,
+                                    pass_through_dict=trans_input.pass_through_dict,
                                     beam_histories=translation.beam_histories)
         else:
-
             nbest_target_ids = translation.nbest_translations.target_ids_list
             target_tokens_list = [[self.vocab_target_inv[id] for id in ids] for ids in nbest_target_ids]
             target_strings = [C.TOKEN_SEPARATOR.join(
@@ -1521,6 +1564,7 @@ class Translator:
                                     tokens=target_tokens,
                                     attention_matrix=attention_matrix,
                                     score=translation.score,
+                                    pass_through_dict=trans_input.pass_through_dict,
                                     beam_histories=translation.beam_histories,
                                     nbest_translations=target_strings,
                                     nbest_tokens=target_tokens_list,
@@ -2115,7 +2159,7 @@ class SampleK(mx.gluon.HybridBlock):
         :param k: The size of the beam.
         :param n: Sample from the top-N words in the vocab at each timestep.
         :param batch_size: Number of sentences being decoded at once.
-        :param vocab_size: Vocabulary size.
+        :param context: Context for block constants.
         """
         super().__init__()
         self.beam_size = k
@@ -2136,7 +2180,8 @@ class SampleK(mx.gluon.HybridBlock):
         :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
         :param target_dists: The non-cumulative target distributions (ignored).
         :param finished: The list of finished hypotheses.
-        :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+        :param best_hyp_indices: Best hypothesis indices constant.
+        :param zeros_array: Zeros array constant.
         :return: The row indices, column indices, and values of the sampled words.
         """
         # Map the negative logprobs to probabilities so as to have a distribution

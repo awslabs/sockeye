@@ -20,8 +20,8 @@ from contextlib import ExitStack
 from itertools import chain, islice
 from typing import Dict, Iterable, List, Optional, Tuple
 
+from sockeye.log import setup_main_logger
 from . import constants as C
-from . import log
 from . import utils
 
 logger = logging.getLogger(__name__)
@@ -328,9 +328,8 @@ def main():
     utils.check_condition(word_min_count == word_min_count_other,
                           "Vocabulary CLI only allows a common value for --word-min-count")
 
-    global logger
-    logger = log.setup_main_logger("build_vocab", file_logging=True, console=True,
-                                   path="%s.%s" % (args.output, C.LOG_NAME))
+    setup_main_logger(file_logging=True, console=True,
+                      path="%s.%s" % (args.output, C.LOG_NAME))
 
     vocab = build_from_paths(args.inputs,
                              num_words=num_words,

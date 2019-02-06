@@ -10,6 +10,27 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.74]
+### Changed
+- Revert change in 1.18.72 as no memory saving could be observed.
+
+## [1.18.73]
+### Fixed
+- Fixed a bug where `source-factors-num-embed` was not correctly adjusted to `num-embed` 
+  when using prepared data & `source-factor-combine` sum.
+
+## [1.18.72]
+### Changed
+- Removed use of `expand_dims` in favor of `reshape` to save memory.
+
+## [1.18.71]
+### Fixed
+- Fixed default setting of source factor combination to be 'concat' for backwards compatibility.
+
+## [1.18.70]
+### Added
+- Sockeye now outputs fields found in a JSON input object, if they are not overwritten by Sockeye. This behavior can be enabled by selecting `--json-input` (to read input as a JSON object) and `--output-type json` (to write a JSON object to output).
+
 ## [1.18.69]
 ### Added
 - Source factors can now be added to the embeddings instead of concatenated with `--source-factors-combine sum` (default: concat)

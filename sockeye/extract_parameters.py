@@ -17,6 +17,7 @@ Extract specific parameters.
 
 import argparse
 import os
+import logging
 from typing import Dict, List
 
 import mxnet as mx
@@ -27,7 +28,7 @@ from . import constants as C
 from . import utils
 from .log import setup_main_logger, log_sockeye_version
 
-logger = setup_main_logger(__name__, console=True, file_logging=False)
+logger = logging.getLogger(__name__)
 
 
 def _extract(param_names: List[str],
@@ -92,6 +93,7 @@ def main():
     """
     Commandline interface to extract parameters.
     """
+    setup_main_logger(console=True, file_logging=False)
     params = argparse.ArgumentParser(description="Extract specific parameters.")
     arguments.add_extract_args(params)
     args = params.parse_args()

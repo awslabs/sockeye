@@ -13,6 +13,7 @@
 
 import argparse
 import os
+import logging
 
 from . import arguments
 from . import constants as C
@@ -21,7 +22,7 @@ from . import utils
 from . import vocab
 from .log import setup_main_logger
 
-logger = setup_main_logger(__name__, file_logging=False, console=True)
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -34,8 +35,7 @@ def main():
 def prepare_data(args: argparse.Namespace):
     output_folder = os.path.abspath(args.output)
     os.makedirs(output_folder, exist_ok=True)
-    global logger
-    logger = setup_main_logger(__name__, file_logging=True, path=os.path.join(output_folder, C.LOG_NAME))
+    setup_main_logger(file_logging=True, path=os.path.join(output_folder, C.LOG_NAME))
 
     utils.seed_rngs(args.seed)
 
