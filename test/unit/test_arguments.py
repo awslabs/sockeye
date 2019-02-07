@@ -133,7 +133,6 @@ def test_model_parameters(test_params, expected_params):
     ('', dict(decoder_only=False,
               batch_size=4096,
               batch_type="word",
-              fill_up='replicate',
               loss=C.CROSS_ENTROPY,
               label_smoothing=0.1,
               loss_normalization_type='valid',

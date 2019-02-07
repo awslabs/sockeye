@@ -647,8 +647,7 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
                              target_vocab: vocab.Vocab,
                              max_seq_len_source: int,
                              max_seq_len_target: int,
-                             batch_size: int,
-                             fill_up: str) -> 'ParallelSampleIter':
+                             batch_size: int) -> 'ParallelSampleIter':
     """
     Returns a ParallelSampleIter for the validation data.
     """
@@ -677,8 +676,7 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
     validation_data_statistics.log(bucket_batch_sizes)
 
     validation_data = data_loader.load(validation_sources_sentences, validation_target_sentences,
-                                       validation_data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes,
-                                                                                                fill_up)
+                                       validation_data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes)
 
     return ParallelSampleIter(data=validation_data,
                               buckets=buckets,
@@ -694,7 +692,6 @@ def get_prepared_data_iters(prepared_data_dir: str,
                             batch_size: int,
                             batch_by_words: bool,
                             batch_num_devices: int,
-                            fill_up: str,
                             permute: bool = True) -> Tuple['BaseParallelSampleIter',
                                                            'BaseParallelSampleIter',
                                                            'DataConfig', List[vocab.Vocab], vocab.Vocab]:
@@ -751,7 +748,6 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                            buckets,
                                            batch_size,
                                            bucket_batch_sizes,
-                                           fill_up,
                                            num_factors=len(data_info.sources),
                                            permute=permute)
 
@@ -768,8 +764,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                                target_vocab=target_vocab,
                                                max_seq_len_source=max_seq_len_source,
                                                max_seq_len_target=max_seq_len_target,
-                                               batch_size=batch_size,
-                                               fill_up=fill_up)
+                                               batch_size=batch_size)
 
     return train_iter, validation_iter, config_data, source_vocabs, target_vocab
 
@@ -786,7 +781,6 @@ def get_training_data_iters(sources: List[str],
                             batch_size: int,
                             batch_by_words: bool,
                             batch_num_devices: int,
-                            fill_up: str,
                             max_seq_len_source: int,
                             max_seq_len_target: int,
                             bucketing: bool,
@@ -809,7 +803,6 @@ def get_training_data_iters(sources: List[str],
     :param batch_size: Batch size.
     :param batch_by_words: Size batches by words rather than sentences.
     :param batch_num_devices: Number of devices batches will be parallelized across.
-    :param fill_up: Fill-up policy for buckets.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
     :param bucketing: Whether to use bucketing.
@@ -855,7 +848,7 @@ def get_training_data_iters(sources: List[str],
                                            pad_id=C.PAD_ID)
 
     training_data = data_loader.load(sources_sentences, target_sentences,
-                                     data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes, fill_up)
+                                     data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes)
 
     data_info = DataInfo(sources=sources,
                          target=target,
@@ -886,8 +879,7 @@ def get_training_data_iters(sources: List[str],
                                                target_vocab=target_vocab,
                                                max_seq_len_source=max_seq_len_source,
                                                max_seq_len_target=max_seq_len_target,
-                                               batch_size=batch_size,
-                                               fill_up=fill_up)
+                                               batch_size=batch_size)
 
     return train_iter, validation_iter, config_data, data_info
 
@@ -898,7 +890,6 @@ def get_scoring_data_iters(sources: List[str],
                            target_vocab: vocab.Vocab,
                            batch_size: int,
                            batch_num_devices: int,
-                           fill_up: str,
                            max_seq_len_source: int,
                            max_seq_len_target: int) -> Tuple['BaseParallelSampleIter',
                                                              'DataConfig', 'DataInfo']:
@@ -915,7 +906,6 @@ def get_scoring_data_iters(sources: List[str],
     :param target_vocab_path: Path to target vocabulary.
     :param batch_size: Batch size.
     :param batch_num_devices: Number of devices batches will be parallelized across.
-    :param fill_up: Fill-up policy for buckets.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
     :return: The scoring data iterator.
@@ -943,7 +933,6 @@ def get_scoring_data_iters(sources: List[str],
                                                 batch_size=batch_size,
                                                 bucket_batch_size=BucketBatchSize(bucket, batch_size, None),
                                                 max_lens=(max_seq_len_source, max_seq_len_target),
-                                                fill_up=fill_up,
                                                 num_factors=len(sources))
 
     # and with the model appraise them.
@@ -1370,13 +1359,11 @@ class ParallelDataSet(Sized):
 
     def fill_up(self,
                 bucket_batch_sizes: List[BucketBatchSize],
-                policy: str,
                 seed: int = 42) -> 'ParallelDataSet':
         """
-        Returns a new dataset with buckets filled up using the specified fill-up policy.
+        Returns a new dataset with buckets filled up.
 
         :param bucket_batch_sizes: Bucket batch sizes.
-        :param policy: Fill-up policy.
         :param seed: The random seed used for sampling sentences to fill up.
         :return: New dataset with buckets filled up to the next multiple of batch size
         """
@@ -1395,17 +1382,7 @@ class ParallelDataSet(Sized):
             num_samples = bucket_source.shape[0]
 
             # Fill up the last batch by randomly sampling from the extant items.
-            # If we're using the 'zeros' policy, these are overwritten later below.
             if num_samples % bucket_batch_size != 0:
-                if policy == C.FILL_UP_ZEROS:
-                    logger.info("Filling bucket %s from size %d to %d with zeros",
-                                bucket, num_samples, bucket_batch_size)
-                elif policy == C.FILL_UP_REPLICATE:
-                    logger.info("Filling bucket %s from size %d to %d by sampling with replacement",
-                                bucket, num_samples, bucket_batch_size)
-                else:
-                    raise NotImplementedError('Unknown fill-up policy')
-
                 rest = bucket_batch_size - num_samples % bucket_batch_size
                 desired_indices_np = rs.randint(num_samples, size=rest)
                 desired_indices = mx.nd.array(desired_indices_np)
@@ -1416,11 +1393,6 @@ class ParallelDataSet(Sized):
                     source[bucket_idx] = mx.nd.concat(bucket_source, bucket_source.take(desired_indices), dim=0)
                 target[bucket_idx] = mx.nd.concat(bucket_target, bucket_target.take(desired_indices), dim=0)
                 label[bucket_idx] = mx.nd.concat(bucket_label, bucket_label.take(desired_indices), dim=0)
-
-                if policy == C.FILL_UP_ZEROS:
-                    source[bucket_idx][num_samples:, :, :] = C.PAD_ID
-                    target[bucket_idx][num_samples:, :] = C.PAD_ID
-                    label[bucket_idx][num_samples:, :] = C.PAD_ID
 
         return ParallelDataSet(source, target, label)
 
@@ -1607,7 +1579,6 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
                  batch_size: int,
                  bucket_batch_size: BucketBatchSize,
                  max_lens: Tuple[int, int],
-                 fill_up: str,
                  num_factors: int = 1,
                  source_data_name=C.SOURCE_NAME,
                  target_data_name=C.TARGET_NAME,
@@ -1621,7 +1592,6 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
         self.sources_iters = [iter(s) for s in self.sources_sentences]
         self.target_iter = iter(self.target_sentences)
         self.max_len_source, self.max_len_target = max_lens
-        self.fill_up = fill_up
         self.next_batch = None
         self.sentno = 1
 
@@ -1664,7 +1634,7 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
 
         dataset = self.data_loader.load(sources_sentences,
                                         target_sentences,
-                                        [num_read]).fill_up(self.bucket_batch_sizes, self.fill_up)
+                                        [num_read]).fill_up(self.bucket_batch_sizes)
 
         data = [dataset.source[0], dataset.target[0]]
         label = dataset.label
@@ -1706,7 +1676,6 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                  buckets,
                  batch_size,
                  bucket_batch_sizes,
-                 fill_up: str,
                  source_data_name=C.SOURCE_NAME,
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
@@ -1719,7 +1688,6 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
         assert len(shards_fnames) > 0
         self.shards_fnames = list(shards_fnames)
         self.shard_index = -1
-        self.fill_up = fill_up
 
         self.reset()
 
@@ -1727,7 +1695,6 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
         shard_fname = self.shards_fnames[self.shard_index]
         logger.info("Loading shard %s.", shard_fname)
         dataset = ParallelDataSet.load(self.shards_fnames[self.shard_index]).fill_up(self.bucket_batch_sizes,
-                                                                                     policy=self.fill_up,
                                                                                      seed=self.shard_index)
         self.shard_iter = ParallelSampleIter(data=dataset,
                                              buckets=self.buckets,

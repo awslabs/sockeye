@@ -79,7 +79,6 @@ def get_data_iters_and_vocabs(args: argparse.Namespace,
         target_vocab=target_vocab,
         batch_size=args.batch_size,
         batch_num_devices=batch_num_devices,
-        fill_up=C.FILL_UP_ZEROS,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target)
 
@@ -108,10 +107,8 @@ def score(args: argparse.Namespace):
         # one-for-one and in the same order as the input data.
         # To enable code reuse, we stuff the `args` parameter with some values.
         # Bucketing and permuting need to be turned off in order to preserve the ordering of sentences.
-        # The 'zeros' fill_up strategy fills underfilled buckets with zeros which can then be used to find the last item.
         # Finally, 'resume_training' needs to be set to True because it causes the model to be loaded instead of initialized.
         args.no_bucketing = True
-        args.fill_up = 'zeros'
         args.bucket_width = 10
         score_iter, source_vocabs, target_vocab, model_config = get_data_iters_and_vocabs(
             args=args,
