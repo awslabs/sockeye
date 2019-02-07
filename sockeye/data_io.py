@@ -423,6 +423,7 @@ class RawParallelDatasetLoader:
     :param eos_id: End-of-sentence id.
     :param pad_id: Padding id.
     :param eos_id: Unknown id.
+    :param skip_blanks: Skip blank lines.
     :param dtype: Data type.
     """
 
@@ -430,10 +431,12 @@ class RawParallelDatasetLoader:
                  buckets: List[Tuple[int, int]],
                  eos_id: int,
                  pad_id: int,
+                 skip_blanks: bool = True,
                  dtype: str = 'float32') -> None:
         self.buckets = buckets
         self.eos_id = eos_id
         self.pad_id = pad_id
+        self.skip_blanks = skip_blanks
         self.dtype = dtype
 
     def load(self,
@@ -460,12 +463,19 @@ class RawParallelDatasetLoader:
         num_pad_target = 0
 
         # Bucket sentences as padded np arrays
-        for sources, target in parallel_iter(source_iterables, target_iterable):
+        for sentno, (sources, target) in enumerate(parallel_iter(source_iterables, target_iterable, skip_blanks=False), 1):
+            sources = [[] if stream is None else stream for stream in sources]
+            if target is None:
+                target = []
             source_len = len(sources[0])
             target_len = len(target)
             buck_index, buck = get_parallel_bucket(self.buckets, source_len, target_len)
             if buck is None:
-                continue  # skip this sentence pair
+                if self.skip_blanks:
+                    continue  # skip this sentence pair
+                else:
+                    buck_index = len(self.buckets)
+                    buck = self.buckets[buck_index]
 
             num_tokens_source += buck[0]
             num_tokens_target += buck[1]
@@ -780,9 +790,10 @@ def get_training_data_iters(sources: List[str],
                             max_seq_len_source: int,
                             max_seq_len_target: int,
                             bucketing: bool,
-                            bucket_width: int) -> Tuple['BaseParallelSampleIter',
-                                                        Optional['BaseParallelSampleIter'],
-                                                        'DataConfig', 'DataInfo']:
+                            bucket_width: int,
+                            allow_empty: bool = False) -> Tuple['BaseParallelSampleIter',
+                                                                Optional['BaseParallelSampleIter'],
+                                                                'DataConfig', 'DataInfo']:
     """
     Returns data iterators for training and validation data.
 
@@ -916,18 +927,18 @@ def get_scoring_data_iters(sources: List[str],
     # One bucket to hold them all,
     bucket = (max_seq_len_source, max_seq_len_target)
 
-    # ...One iterator to raise them,
-    sources_sentences, target_sentences = create_sequence_readers(sources, target, source_vocabs, target_vocab)
-
-    # ...One loader to mold them all,
+    # ...One loader to raise them,
     data_loader = RawParallelDatasetLoader(buckets=[bucket],
                                            eos_id=target_vocab[C.EOS_SYMBOL],
-                                           pad_id=C.PAD_ID)
+                                           pad_id=C.PAD_ID,
+                                           skip_blanks=False)
 
-    # ...and with the model appraise them.
+    # ...one iterator to traverse them all,
     scoring_iter = BatchedRawParallelSampleIter(data_loader=data_loader,
-                                                sources_sentences=sources_sentences,
-                                                target_sentences=target_sentences,
+                                                sources=sources,
+                                                target=target,
+                                                source_vocabs=source_vocabs,
+                                                target_vocab=target_vocab,
                                                 bucket=bucket,
                                                 batch_size=batch_size,
                                                 bucket_batch_size=BucketBatchSize(bucket, batch_size, None),
@@ -935,6 +946,7 @@ def get_scoring_data_iters(sources: List[str],
                                                 fill_up=fill_up,
                                                 num_factors=len(sources))
 
+    # and with the model appraise them.
     return scoring_iter
 
 
@@ -1185,9 +1197,27 @@ def create_sequence_readers(sources: List[str], target: str,
     return source_sequence_readers, target_sequence_reader
 
 
-def parallel_iter(source_iters: Sequence[Iterable[Optional[Any]]],
+def parallel_iter(source_iterables: Sequence[Iterable[Optional[Any]]],
                   target_iterable: Iterable[Optional[Any]],
-                  reiterate: bool = True):
+                  skip_blanks: bool = True):
+    """
+    Creates iterators over parallel iteratables by calling iter() on the iterables
+    and chaining to parallel_iterate(). The purpose of the separation is to allow
+    the caller to save iterator state between calls, if desired.
+
+    :param source_iterables: A list of source iterables.
+    :param target_iterable: A target iterable.
+    :param skip_blanks: Whether to skip empty target lines.
+    :return: Iterators over sources and target.
+    """
+    source_iterators = [iter(s) for s in source_iterables]
+    target_iterator = iter(target_iterable)
+    return parallel_iterate(source_iterators, target_iterator, skip_blanks)
+
+
+def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
+                     target_iterator: Iterator[Optional[Any]],
+                     skip_blanks: bool = True):
     """
     Yields parallel source(s), target sequences from iterables.
     Checks for token parallelism in source sequences.
@@ -1195,23 +1225,20 @@ def parallel_iter(source_iters: Sequence[Iterable[Optional[Any]]],
     Checks that all iterables have the same number of elements.
     Can optionally continue from an already-begun iterator.
 
-    :param reiterate: True if the iter() should be called on the sequences (resetting the iterators).
+    :param source_iterators: A list of source iterators.
+    :param target_iterator: A target iterator.
+    :param skip_blanks: Whether to skip empty target lines.
+    :return: Iterators over sources and target.
     """
     num_skipped = 0
-    if reiterate:
-        source_iters = [iter(s) for s in source_iters]
-        target_iter = iter(target_iterable)
-    else:
-        source_iters = [s for s in source_iters]
-        target_iter = target_iterable
-
     while True:
         try:
-            sources = [next(source_iter) for source_iter in source_iters]
-            target = next(target_iter)
+            sources = [next(source_iter) for source_iter in source_iterators]
+            target = next(target_iterator)
         except StopIteration:
             break
-        if any((s is None for s in sources)) or target is None:
+        if skip_blanks and (any((s is None for s in sources)) or target is None):
+            print('SKIPPING!')
             num_skipped += 1
             continue
         check_condition(are_token_parallel(sources), "Source sequences are not token-parallel: %s" % (str(sources)))
@@ -1221,8 +1248,8 @@ def parallel_iter(source_iters: Sequence[Iterable[Optional[Any]]],
         logger.warning("Parallel reading of sequences skipped %d elements", num_skipped)
 
     check_condition(
-        all(next(cast(Iterator, s), None) is None for s in source_iters) and next(cast(Iterator, target_iter),
-                                                                                  None) is None,
+        all(next(cast(Iterator, s), None) is None for s in source_iterators) and next(cast(Iterator, target_iterator),
+                                                                                      None) is None,
         "Different number of lines in source(s) and target iterables.")
 
 
@@ -1268,9 +1295,10 @@ def get_parallel_bucket(buckets: List[Tuple[int, int]],
                         length_target: int) -> Tuple[Optional[int], Optional[Tuple[int, int]]]:
     """
     Returns bucket index and bucket from a list of buckets, given source and target length.
+    Algorithm assumes buckets are sorted from shortest to longest.
     Returns (None, None) if no bucket fits.
 
-    :param buckets: List of buckets.
+    :param buckets: List of buckets, in sorted order, shortest to longest.
     :param length_source: Length of source sequence.
     :param length_target: Length of target sequence.
     :return: Tuple of (bucket index, bucket), or (None, None) if not fitting.
@@ -1572,8 +1600,10 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
 
     def __init__(self,
                  data_loader: RawParallelDatasetLoader,
-                 sources_sentences: List[SequenceReader],
-                 target_sentences: SequenceReader,
+                 sources: List[str],
+                 target: str,
+                 source_vocabs: List[vocab.Vocab],
+                 target_vocab: vocab.Vocab,
                  bucket: Tuple[int, int],
                  batch_size: int,
                  bucket_batch_size: BucketBatchSize,
@@ -1588,8 +1618,9 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
                          source_data_name=source_data_name, target_data_name=target_data_name,
                          label_name=label_name, num_factors=num_factors, permute=False, dtype=dtype)
         self.data_loader = data_loader
-        self.sources_sentences = [iter(s) for s in sources_sentences]
-        self.target_sentences = iter(target_sentences)
+        self.sources_sentences, self.target_sentences = create_sequence_readers(sources, target, source_vocabs, target_vocab)
+        self.sources_iters = [iter(s) for s in self.sources_sentences]
+        self.target_iter = iter(self.target_sentences)
         self.max_len_source, self.max_len_target = max_lens
         self.fill_up = fill_up
         self.next_batch = None
@@ -1607,9 +1638,9 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
         sources_sentences = [[] for x in self.sources_sentences]
         target_sentences = []
         num_read = 0
-        for num_read, (sources, target) in enumerate(parallel_iter(self.sources_sentences, self.target_sentences, reiterate=False), 1):
-            source_len = len(sources[0])
-            target_len = len(target)
+        for num_read, (sources, target) in enumerate(parallel_iterate(self.sources_iters, self.target_iter, skip_blanks=False), 1):
+            source_len = 0 if sources[0] is None else len(sources[0])
+            target_len = 0 if target is None else len(target)
             if source_len > self.max_len_source:
                 logger.info("Trimming source sentence {} ({} -> {})".format(self.sentno + num_read, source_len, self.max_len_source))
                 sources = [source[0:self.max_len_source] for source in sources]
@@ -1665,7 +1696,7 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
 class ShardedParallelSampleIter(BaseParallelSampleIter):
     """
     Goes through the data one shard at a time. The memory consumption is limited by the memory consumption of the
-    largest shard. The order in whcirh shards are traversed is changed with each reset.
+    largest shard. The order in which shards are traversed is changed with each reset.
     """
 
     def __init__(self,
