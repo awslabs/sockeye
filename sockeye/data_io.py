@@ -1613,8 +1613,8 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
         """
 
         # Read batch_size lines from the source stream
-        sources_sentences = [[] for x in self.sources_sentences]
-        target_sentences = []
+        sources_sentences = [[] for x in self.sources_sentences]  # type: List[List[str]]
+        target_sentences = []  # type: List[str]
         num_read = 0
         for num_read, (sources, target) in enumerate(parallel_iterate(self.sources_iters, self.target_iter, skip_blanks=False), 1):
             source_len = 0 if sources[0] is None else len(sources[0])

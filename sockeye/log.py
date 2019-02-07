@@ -14,7 +14,7 @@
 import logging
 import logging.config
 import sys
-from typing import Optional
+from typing import Optional, Dict, Any
 
 FORMATTERS = {
     'verbose': {
@@ -116,6 +116,7 @@ def setup_main_logger(file_logging=True, console=True, path: Optional[str] = Non
     :param console: Whether to log to the console.
     :param path: Optional path to write logfile to.
     """
+    log_config = None  # type: Dict[str, Any]
     if file_logging and console:
         log_config = LOGGING_CONFIGS["file_console"]
     elif file_logging:
