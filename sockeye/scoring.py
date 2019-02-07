@@ -219,7 +219,6 @@ class Scorer:
         sentence_no = 0
         batch_no = 0
         for batch_no, batch in enumerate(score_iter, 1):
-
             batch_tic = time.time()
 
             # Run the model and get the outputs
@@ -228,10 +227,12 @@ class Scorer:
             batch_time = time.time() - batch_tic
             total_time += batch_time
 
-            for source, target, score in zip(batch.data[0], batch.data[1], scores):
+            batch_size = len(batch.data[0])
 
-                # The "zeros" padding method will have filled remainder batches with zeros, so we can skip them here
-                if source[0][0] == C.PAD_ID:
+            for sentno, (source, target, score) in enumerate(zip(batch.data[0], batch.data[1], scores), 1):
+
+                # The last batch may be underfilled, in which case batch.pad will be set
+                if sentno > (batch_size - batch.pad):
                     break
 
                 sentence_no += 1
@@ -242,13 +243,21 @@ class Scorer:
                 target_ids = [int(x) for x in target.asnumpy().tolist()]
                 target_string = C.TOKEN_SEPARATOR.join(
                     data_io.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
-                score = score.asscalar()
+
+                # Report a score of 0 for invalid sentence pairs (empty source and/or target)
+                if source[0][0] == C.PAD_ID and target[0] == C.PAD_ID:
+                    score = 0
+                else:
+                    score = score.asscalar()
 
                 # Output handling routines require us to make use of inference classes.
                 output_handler.handle(TranslatorInput(sentence_no, source_tokens),
                                       TranslatorOutput(sentence_no, target_string, None, None, score),
                                       batch_time)
 
-        logger.info("Processed %d lines in %d batches. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",
-                    sentence_no, math.ceil(sentence_no / batch_no), total_time,
-                    total_time / sentence_no, sentence_no / total_time)
+        if sentence_no != 0:
+            logger.info("Processed %d lines in %d batches. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",
+                        sentence_no, math.ceil(sentence_no / batch_no), total_time,
+                        total_time / sentence_no, sentence_no / total_time)
+        else:
+            logger.info("Processed 0 lines.")

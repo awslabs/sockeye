@@ -1238,7 +1238,6 @@ def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
         except StopIteration:
             break
         if skip_blanks and (any((s is None for s in sources)) or target is None):
-            print('SKIPPING!')
             num_skipped += 1
             continue
         check_condition(are_token_parallel(sources), "Source sequences are not token-parallel: %s" % (str(sources)))
@@ -1660,6 +1659,9 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
             self.next_batch = None
             return False
 
+        # The final batch may be underfilled, so mark it
+        num_pad = self.batch_size - num_read
+
         dataset = self.data_loader.load(sources_sentences,
                                         target_sentences,
                                         [num_read]).fill_up(self.bucket_batch_sizes, self.fill_up)
@@ -1673,7 +1675,7 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
                          zip(self.label_names, label)]
 
         self.next_batch = mx.io.DataBatch(data, label,
-                                          pad=0, index=None, bucket_key=self.buckets[0],
+                                          pad=num_pad, index=None, bucket_key=self.buckets[0],
                                           provide_data=provide_data, provide_label=provide_label)
 
         return True
