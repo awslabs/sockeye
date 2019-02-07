@@ -258,6 +258,15 @@ def analyze_sequence_lengths(sources: List[str],
     return length_statistics
 
 
+def are_none(sequences: Sequence[Sized]) -> bool:
+    """
+    Returns True if all sequences are None.
+    """
+    if not sequences:
+        return True
+    return all(s is None for s in sequences)
+
+
 def are_token_parallel(sequences: Sequence[Sized]) -> bool:
     """
     Returns True if all sequences in the list have the same length.
@@ -1229,7 +1238,7 @@ def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
         if skip_blanks and (any((s is None for s in sources)) or target is None):
             num_skipped += 1
             continue
-        check_condition(are_token_parallel(sources), "Source sequences are not token-parallel: %s" % (str(sources)))
+        check_condition(are_none(sources) or are_token_parallel(sources), "Source sequences are not token-parallel: %s" % (str(sources)))
         yield sources, target
 
     if num_skipped > 0:

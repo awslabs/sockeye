@@ -21,6 +21,7 @@ import time
 from typing import List, Optional, Tuple
 
 import mxnet as mx
+import numpy as np
 
 from . import constants as C
 from . import data_io
@@ -246,7 +247,7 @@ class Scorer:
 
                 # Report a score of 0 for invalid sentence pairs (empty source and/or target)
                 if source[0][0] == C.PAD_ID and target[0] == C.PAD_ID:
-                    score = 0
+                    score = -np.inf
                 else:
                     score = score.asscalar()
 

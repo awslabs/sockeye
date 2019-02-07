@@ -1,4 +1,4 @@
-# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -440,23 +440,21 @@ def test_scoring(data: Dict[str, Any], translate_params: str):
     with open(out_path) as score_out:
         score_scores = [float(line.strip()) for line in score_out]
 
-    # Compare scored output to original translation output. There are a few tricks: for blank source sentences,
-    # inference will report a score of -inf, so skip these. Second, we don't know if the scores include the
-    # generation of </s> and have had length normalization applied. So, skip all sentences that are as long
-    # as the maximum length, in order to safely exclude them.
+    # Compare scored output to original translation output. One problem is we don't know if scores from
+    # the translator include the cost of generating </s> (https://github.com/awslabs/sockeye/issues/545)
+    # and therefore have length normalization applied. So, we here skip all sentences that are as
+    # long as the maximum length, in order to safely exclude them from the comparison.
     model_config = sockeye.model.SockeyeModel.load_config(os.path.join(data['model'], C.CONFIG_NAME))
     max_len = model_config.config_data.max_seq_len_target
-    # Filter out sockeye.translate outputs that had -inf score or are too long (which sockeye.score will have skipped)
-    valid_outputs = list(filter(lambda x: len(x[0]) < max_len and not np.isinf(x[1]),
-                                zip(translate_tokens, data['test_scores'])))
-    assert len(valid_outputs) == len(score_scores)
 
-    for (translate_tokens, translate_score), score_score in zip(valid_outputs, score_scores):
+    valid_outputs = list(filter(lambda x: len(x[0]) < max_len,
+                                zip(translate_tokens, data['test_scores'], score_scores)))
+    valid_translate_scores = [x[1] for x in valid_outputs]
+    valid_score_scores = [x[2] for x in valid_outputs]
+    for translate_score, score_score in zip(valid_translate_scores, valid_score_scores):
         # Skip sentences that are close to the maximum length to avoid confusion about whether
         # the length penalty was applied
-        if len(translate_tokens) >= max_len - 2:
-            continue
-        assert abs(translate_score - score_score) < 0.02
+        assert (translate_score == -np.inf and score_score == -np.inf) or abs(translate_score - score_score) < 0.03
 
 
 def _translate_output_is_valid(translate_outputs: List[str]) -> bool:
