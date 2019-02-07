@@ -900,19 +900,16 @@ def get_scoring_data_iters(sources: List[str],
                            batch_size: int,
                            batch_num_devices: int,
                            max_seq_len_source: int,
-                           max_seq_len_target: int) -> Tuple['BaseParallelSampleIter',
-                                                             'DataConfig', 'DataInfo']:
+                           max_seq_len_target: int) -> 'BaseParallelSampleIter':
     """
-    Returns data iterators for training and validation data.
+    Returns a data iterator for scoring. The iterator loads data on demand,
+    batch by batch, and does not skip any lines. Lines that are too long
+    are truncated.
 
     :param sources: Path to source training data (with optional factor data paths).
     :param target: Path to target training data.
-    :param validation_sources: Path to source validation data (with optional factor data paths).
-    :param validation_target: Path to target validation data.
     :param source_vocabs: Source vocabulary and optional factor vocabularies.
     :param target_vocab: Target vocabulary.
-    :param source_vocab_paths: Path to source vocabulary.
-    :param target_vocab_path: Path to target vocabulary.
     :param batch_size: Batch size.
     :param batch_num_devices: Number of devices batches will be parallelized across.
     :param max_seq_len_source: Maximum source sequence length.

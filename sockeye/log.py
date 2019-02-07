@@ -116,9 +116,8 @@ def setup_main_logger(file_logging=True, console=True, path: Optional[str] = Non
     :param console: Whether to log to the console.
     :param path: Optional path to write logfile to.
     """
-    log_config = None  # type: Dict[str, Any]
     if file_logging and console:
-        log_config = LOGGING_CONFIGS["file_console"]
+        log_config = LOGGING_CONFIGS["file_console"]  # type: ignore
     elif file_logging:
         log_config = LOGGING_CONFIGS["file_only"]
     elif console:
@@ -129,7 +128,7 @@ def setup_main_logger(file_logging=True, console=True, path: Optional[str] = Non
     if path:
         log_config["handlers"]["rotating"]["filename"] = path  # type: ignore
 
-    logging.config.dictConfig(log_config)
+    logging.config.dictConfig(log_config)  # type: ignore
 
     def exception_hook(exc_type, exc_value, exc_traceback):
         if is_python34():
