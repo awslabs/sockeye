@@ -246,7 +246,7 @@ class Scorer:
                     data_io.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
 
                 # Report a score of 0 for invalid sentence pairs (empty source and/or target)
-                if source[0][0] == C.PAD_ID and target[0] == C.PAD_ID:
+                if source[0][0] == C.PAD_ID or target[0] == C.PAD_ID:
                     score = -np.inf
                 else:
                     score = score.asscalar()
