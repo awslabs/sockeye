@@ -447,14 +447,14 @@ def test_scoring(data: Dict[str, Any], translate_params: str):
     model_config = sockeye.model.SockeyeModel.load_config(os.path.join(data['model'], C.CONFIG_NAME))
     max_len = model_config.config_data.max_seq_len_target
 
-    valid_outputs = list(filter(lambda x: len(x[0]) < max_len,
+    valid_outputs = list(filter(lambda x: len(x[0]) < max_len - 1,
                                 zip(translate_tokens, data['test_scores'], score_scores)))
     valid_translate_scores = [x[1] for x in valid_outputs]
     valid_score_scores = [x[2] for x in valid_outputs]
     for translate_score, score_score in zip(valid_translate_scores, valid_score_scores):
         # Skip sentences that are close to the maximum length to avoid confusion about whether
         # the length penalty was applied
-        assert (translate_score == -np.inf and score_score == -np.inf) or abs(translate_score - score_score) < 0.03
+        assert (translate_score == -np.inf and score_score == -np.inf) or abs(translate_score - score_score) <= 0.01
 
 
 def _translate_output_is_valid(translate_outputs: List[str]) -> bool:
