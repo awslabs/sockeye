@@ -202,7 +202,7 @@ _TRANSLATE_WITH_FACTORS_COMMON = " --input-factors {input_factors}"
 
 _TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {lexicon} --restrict-lexicon-topk {topk}"
 
-_SCORE_PARAMS_COMMON = "--use-cpu --model {model} --source {source} --target {target} --output {output}"
+_SCORE_PARAMS_COMMON = "--use-cpu --model {model} --source {source} --target {target} --output {output} --max-seq-len 20:20"
 
 _SCORE_WITH_FACTORS_COMMON = " --source-factors {source_factors}"
 
@@ -231,15 +231,26 @@ def check_train_translate(train_params: str,
     # Run translate with restrict-lexicon
     data = run_translate_restrict(data, translate_params)
 
-    # Test scoring by ensuring that the sockeye.scoring module produces the same scores when scoring the output
-    # of sockeye.translate. However, since this training is on very small datasets, the output of sockeye.translate
-    # is often pure garbage or empty and cannot be scored. So we only try to score if we have some valid output
-    # to work with.
-    # Only run scoring under these conditions. Why?
-    # - translate splits up too-long sentences and translates them in sequence, invalidating the score, so skip that
-    # - scoring requires valid translation output to compare against
-    if '--max-input-len' not in translate_params and _translate_output_is_valid(data['test_outputs']):
-        test_scoring(data, translate_params)
+    # Test scoring. Inference does not guaranatee that </s> was generated, so we need to first
+    # force-decode against the output of the unconstrained system to get the real scores, that
+    # scoring will generate. Since it adds complexity to attach source factors to the input JSON
+    # object needed for constrained decoding, we only test scoring at the moment when not source
+    # factors are needed.
+    if 'test_source_factors' not in data:
+
+        # Run translate decoding against the reference
+        data = test_constrained_decoding_against_ref(data, translate_params)
+
+        # Test scoring by ensuring that the sockeye.scoring module produces the same scores when scoring the output
+        # of sockeye.translate. However, since this training is on very small datasets, the output of sockeye.translate
+        # is often pure garbage or empty and cannot be scored. So we only try to score if we have some valid output
+        # to work with.
+        # Only run scoring under these conditions. Why?
+        # - translate splits up too-long sentences and translates them in sequence, invalidating the score, so skip that
+        # - scoring requires valid translation output to compare against
+        if '--max-input-len' not in translate_params and _translate_output_is_valid(data['test_outputs']):
+            test_scoring(data, translate_params)
+
     return data
 
 
@@ -401,6 +412,39 @@ def test_translate_equivalence(data: Dict[str, Any], translate_params_equiv: str
     assert all(abs(a - b) < 0.01 or np.isnan(a - b) for a, b in zip(data['test_scores'], translate_scores_equiv))
 
 
+def _create_constrained_inputs(translate_inputs: List[str], translate_outputs: List[str]) -> List[Dict[str, Any]]:
+    constrained_inputs = []
+    for sentno, (source, translate_output) in enumerate(zip(translate_inputs, translate_outputs)):
+        constrained_inputs.append(json.dumps({'text': source, 'constraints': ['<s> {} </s>'.format(translate_output)]}, ensure_ascii=False))
+    return constrained_inputs
+
+
+def test_constrained_decoding_against_ref(data: Dict[str, Any], translate_params: str):
+    constrained_inputs = _create_constrained_inputs(data['test_inputs'], data['test_outputs'])
+    new_test_source_path = os.path.join(data['work_dir'], "test_constrained.txt")
+    with open(new_test_source_path, 'w') as out:
+        for json_line in constrained_inputs:
+            print(json_line, file=out)
+    out_path_constrained = os.path.join(data['work_dir'], "out_constrained.txt")
+    params = "{} {} {} --json-input --output-type translation_with_score --beam-size 1 --batch-size 1 --nbest-size 1 --max-input-len 20 --max-output-length 20".format(
+        sockeye.translate.__file__,
+        _TRANSLATE_PARAMS_COMMON.format(model=data['model'],
+                                        input=new_test_source_path,
+                                        output=out_path_constrained),
+        translate_params)
+    with patch.object(sys, "argv", params.split()):
+        sockeye.translate.main()
+    constrained_outputs, constrained_scores = collect_translate_output_and_scores(out_path_constrained)
+    assert len(constrained_outputs) == len(data['test_outputs']) == len(constrained_inputs)
+    for json_input, constrained_out, unconstrained_out in zip(constrained_inputs, constrained_outputs, data['test_outputs']):
+        # Make sure the constrained output is the same as we got when decoding unconstrained
+        assert constrained_out == unconstrained_out
+    data['test_constrained_inputs'] = constrained_inputs
+    data['test_constrained_outputs'] = constrained_outputs
+    data['test_constrained_scores'] = constrained_scores
+    return data
+
+
 def test_scoring(data: Dict[str, Any], translate_params: str):
     """
     Tests the scoring CLI and checks for score equivalence with previously generated translate scores.
@@ -440,15 +484,15 @@ def test_scoring(data: Dict[str, Any], translate_params: str):
     with open(out_path) as score_out:
         score_scores = [float(line.strip()) for line in score_out]
 
-    # Compare scored output to original translation output. One problem is we don't know if scores from
-    # the translator include the cost of generating </s> (https://github.com/awslabs/sockeye/issues/545)
-    # and therefore have length normalization applied. So, we here skip all sentences that are as
-    # long as the maximum length, in order to safely exclude them from the comparison.
+    # Compare scored output to original translation output. Unfortunately, sockeye.translate doesn't enforce
+    # that </s> was generated, and we can't know outside the decoder. So we use scores from force-decoding
+    # against the unconstrained output, which ensures that the sockeye.translate score includes the cost of
+    # generating </s>.
     model_config = sockeye.model.SockeyeModel.load_config(os.path.join(data['model'], C.CONFIG_NAME))
     max_len = model_config.config_data.max_seq_len_target
 
     valid_outputs = list(filter(lambda x: len(x[0]) < max_len - 1,
-                                zip(translate_tokens, data['test_scores'], score_scores)))
+                                zip(translate_tokens, data['test_constrained_scores'], score_scores)))
     valid_translate_scores = [x[1] for x in valid_outputs]
     valid_score_scores = [x[2] for x in valid_outputs]
     for translate_score, score_score in zip(valid_translate_scores, valid_score_scores):
