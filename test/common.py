@@ -202,7 +202,7 @@ _TRANSLATE_WITH_FACTORS_COMMON = " --input-factors {input_factors}"
 
 _TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {lexicon} --restrict-lexicon-topk {topk}"
 
-_SCORE_PARAMS_COMMON = "--use-cpu --model {model} --source {source} --target {target} --output {output} --max-seq-len 20:20"
+_SCORE_PARAMS_COMMON = "--use-cpu --model {model} --source {source} --target {target} --output {output}"
 
 _SCORE_WITH_FACTORS_COMMON = " --source-factors {source_factors}"
 
@@ -426,7 +426,7 @@ def test_constrained_decoding_against_ref(data: Dict[str, Any], translate_params
         for json_line in constrained_inputs:
             print(json_line, file=out)
     out_path_constrained = os.path.join(data['work_dir'], "out_constrained.txt")
-    params = "{} {} {} --json-input --output-type translation_with_score --beam-size 1 --batch-size 1 --nbest-size 1 --max-input-len 20 --max-output-length 20".format(
+    params = "{} {} {} --json-input --output-type translation_with_score --beam-size 1 --batch-size 1 --nbest-size 1".format(
         sockeye.translate.__file__,
         _TRANSLATE_PARAMS_COMMON.format(model=data['model'],
                                         input=new_test_source_path,
