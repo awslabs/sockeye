@@ -90,10 +90,16 @@ FILE_CONSOLE_LOGGING = {
     }
 }
 
+NO_LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': True,
+}
+
 LOGGING_CONFIGS = {
     "file_only": FILE_LOGGING,
     "console_only": CONSOLE_LOGGING,
     "file_console": FILE_CONSOLE_LOGGING,
+    "none": NO_LOGGING,
 }
 
 
@@ -114,8 +120,10 @@ def setup_main_logger(file_logging=True, console=True, path: Optional[str] = Non
         log_config = LOGGING_CONFIGS["file_console"]
     elif file_logging:
         log_config = LOGGING_CONFIGS["file_only"]
-    else:
+    elif console:
         log_config = LOGGING_CONFIGS["console_only"]
+    else:
+        log_config = LOGGING_CONFIGS["none"]
 
     if path:
         log_config["handlers"]["rotating"]["filename"] = path  # type: ignore

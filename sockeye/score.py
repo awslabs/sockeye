@@ -37,7 +37,6 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    setup_main_logger(file_logging=False, console=True)
     params = arguments.ConfigArgumentParser(description='Score data with an existing model.')
     arguments.add_score_cli_args(params)
     args = params.parse_args()
@@ -88,6 +87,8 @@ def get_data_iters_and_vocabs(args: argparse.Namespace,
 
 
 def score(args: argparse.Namespace):
+
+    setup_main_logger(file_logging=False, console=not args.quiet)
 
     utils.log_basic_info(args)
 
