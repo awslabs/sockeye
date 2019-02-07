@@ -937,7 +937,6 @@ def get_scoring_data_iters(sources: List[str],
                                                 target_vocab=target_vocab,
                                                 bucket=bucket,
                                                 batch_size=batch_size,
-                                                bucket_batch_size=BucketBatchSize(bucket, batch_size, None),
                                                 max_lens=(max_seq_len_source, max_seq_len_target),
                                                 num_factors=len(sources))
 
@@ -1583,14 +1582,13 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
                  target_vocab: vocab.Vocab,
                  bucket: Tuple[int, int],
                  batch_size: int,
-                 bucket_batch_size: BucketBatchSize,
                  max_lens: Tuple[int, int],
                  num_factors: int = 1,
                  source_data_name=C.SOURCE_NAME,
                  target_data_name=C.TARGET_NAME,
                  label_name=C.TARGET_LABEL_NAME,
                  dtype='float32') -> None:
-        super().__init__(buckets=[bucket], batch_size=batch_size, bucket_batch_sizes=[bucket_batch_size],
+        super().__init__(buckets=[bucket], batch_size=batch_size, bucket_batch_sizes=[BucketBatchSize(bucket, batch_size, None)],
                          source_data_name=source_data_name, target_data_name=target_data_name,
                          label_name=label_name, num_factors=num_factors, permute=False, dtype=dtype)
         self.data_loader = data_loader
