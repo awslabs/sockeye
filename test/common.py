@@ -432,13 +432,17 @@ def test_constrained_decoding_against_ref(data: Dict[str, Any], translate_params
                                         input=new_test_source_path,
                                         output=out_path_constrained),
         translate_params)
+    print("CONSTRAINED DECODING WITH", params)
     with patch.object(sys, "argv", params.split()):
         sockeye.translate.main()
     constrained_outputs, constrained_scores = collect_translate_output_and_scores(out_path_constrained)
     assert len(constrained_outputs) == len(data['test_outputs']) == len(constrained_inputs)
     for json_input, constrained_out, unconstrained_out in zip(constrained_inputs, constrained_outputs, data['test_outputs']):
         # Make sure the constrained output is the same as we got when decoding unconstrained
+        print('IZEQUAL', json_input, constrained_out, unconstrained_out, sep='\n')
         assert constrained_out == unconstrained_out
+
+    print("DUH SCOreZ", constrained_scores)
     data['test_constrained_inputs'] = constrained_inputs
     data['test_constrained_outputs'] = constrained_outputs
     data['test_constrained_scores'] = constrained_scores
@@ -495,6 +499,7 @@ def test_scoring(data: Dict[str, Any], translate_params: str):
                                 zip(translate_tokens, data['test_constrained_scores'], score_scores)))
     valid_translate_scores = [x[1] for x in valid_outputs]
     valid_score_scores = [x[2] for x in valid_outputs]
+    print("IZ DEM DUH SAMM?", max_len, valid_translate_scores, valid_score_scores, sep="\n")
     for translate_score, score_score in zip(valid_translate_scores, valid_score_scores):
         # Skip sentences that are close to the maximum length to avoid confusion about whether
         # the length penalty was applied
