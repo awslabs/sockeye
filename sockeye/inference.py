@@ -1377,11 +1377,12 @@ class Translator:
         :param trans_inputs: List of TranslatorInputs as returned by make_input().
         :return: List of translation results.
         """
+        batch_size = len(trans_inputs)
         if len(trans_inputs) > self.max_batch_size:
             logger.warning("You passed %d inputs, but the maximum batch size of this Translator is %d. "
                            "Your inputs will be translated in multiple batches in sequence, "
                            "decreasing translation speed", len(trans_inputs), self.max_batch_size)
-        batch_size = len(trans_inputs)
+            batch_size = self.max_batch_size
         translated_chunks = []  # type: List[IndexedTranslation]
 
         # split into chunks
