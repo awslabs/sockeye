@@ -144,7 +144,7 @@ class ImageCaptioner(Translator):
         :return: NDArray of images paths, bucket key, a list of raw constraint lists,
                 an NDArray of maximum output lengths.
         """
-        batch_size = trans_inputs
+        batch_size = len(trans_inputs)
         image_paths = [None for _ in range(batch_size)]  # type: List[Optional[str]]
         raw_constraints = [None for _ in range(batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
         raw_avoid_list = [None for _ in range(batch_size)]  # type: List[Optional[constrained.RawConstraintList]]

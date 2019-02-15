@@ -1488,11 +1488,11 @@ class Translator:
                 bucket key, list of raw constraint lists, and list of phrases to avoid,
                 and an NDArray of maximum output lengths.
         """
-
+        batch_size = len(trans_inputs)
         bucket_key = data_io.get_bucket(max(len(inp.tokens) for inp in trans_inputs), self.buckets_source)
-        source = mx.nd.zeros((len(trans_inputs), bucket_key, self.num_source_factors), ctx=self.context)
-        raw_constraints = [None] * len(trans_inputs)  # type: List[Optional[constrained.RawConstraintList]]
-        raw_avoid_list = [None] * len(trans_inputs)  # type: List[Optional[constrained.RawConstraintList]]
+        source = mx.nd.zeros((batch_size, bucket_key, self.num_source_factors), ctx=self.context)
+        raw_constraints = [None] * batch_size  # type: List[Optional[constrained.RawConstraintList]]
+        raw_avoid_list = [None] * batch_size  # type: List[Optional[constrained.RawConstraintList]]
 
         max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
