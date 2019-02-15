@@ -107,7 +107,7 @@ class InferenceModel(model.SockeyeModel):
         Delayed construction of modules to ensure multiple Inference models can agree on computing a common
         maximum output length.
 
-        :param max_batch_size: Default batch size.
+        :param max_batch_size: Maximum batch size.
         :param max_input_length: Maximum input length.
         :param get_max_output_length_function: Callable to compute maximum output length.
         """
