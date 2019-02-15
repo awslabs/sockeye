@@ -1234,6 +1234,8 @@ class Translator:
         if self.nbest_size > 1:
             utils.check_condition(self.beam_search_stop == C.BEAM_SEARCH_STOP_ALL,
                                   "nbest_size > 1 requires beam_search_stop to be set to 'all'")
+
+        # maximum allowed batch size of this translator instance
         self.batch_size = self.models[0].max_batch_size
 
         if any(m.skip_softmax for m in self.models):
@@ -1269,7 +1271,7 @@ class Translator:
             elif self.sample is not None:
                 self._top = SampleK(k=self.beam_size,
                                     n=self.sample,
-                                    max_batch_size=self.batch_size)  # type: mx.gluon.HybridBlock
+                                    max_batch_size=self.max_batch_size)  # type: mx.gluon.HybridBlock
             else:
                 self._top = TopK(k=self.beam_size,
                                  vocab_size=len(self.vocab_target))  # type: mx.gluon.HybridBlock
@@ -1312,14 +1314,14 @@ class Translator:
                                             length_penalty=self.length_penalty)
 
         logger.info("Translator (%d model(s) beam_size=%d beam_prune=%s beam_search_stop=%s "
-                    "nbest_size=%s ensemble_mode=%s batch_size=%d buckets_source=%s avoiding=%d)",
+                    "nbest_size=%s ensemble_mode=%s max_batch_size=%d buckets_source=%s avoiding=%d)",
                     len(self.models),
                     self.beam_size,
                     'off' if not self.beam_prune else "%.2f" % self.beam_prune,
                     self.beam_search_stop,
                     self.nbest_size,
                     "None" if len(self.models) == 1 else ensemble_mode,
-                    self.batch_size,
+                    self.max_batch_size,
                     self.buckets_source,
                     0 if self.global_avoid_trie is None else len(self.global_avoid_trie))
 
@@ -1332,6 +1334,13 @@ class Translator:
             return self._max_input_length - C.SPACE_FOR_XOS
         else:
             return self._max_input_length
+
+    @property
+    def max_batch_size(self) -> int:
+        """
+        Returns the maximum batch size allowed for this Translator.
+        """
+        return self.batch_size
 
     @property
     def num_source_factors(self) -> int:
@@ -1368,6 +1377,11 @@ class Translator:
         :param trans_inputs: List of TranslatorInputs as returned by make_input().
         :return: List of translation results.
         """
+        if len(trans_inputs) > self.max_batch_size:
+            logger.warning("You passed %d inputs, but the maximum batch size of this Translator is %d. "
+                           "Your inputs will be translated in multiple batches in sequence, "
+                           "decreasing translation speed", len(trans_inputs), self.max_batch_size)
+        batch_size = len(trans_inputs)
         translated_chunks = []  # type: List[IndexedTranslation]
 
         # split into chunks
@@ -1430,11 +1444,10 @@ class Translator:
         input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.translator_input.tokens), reverse=True)
 
         # translate in batch-sized blocks over input chunks
-        for batch_id, batch in enumerate(utils.grouper(input_chunks, self.batch_size)):
+        for batch_id, batch in enumerate(utils.grouper(input_chunks, batch_size)):
             logger.debug("Translating batch %d", batch_id)
-            rest = self.batch_size - len(batch)
-            if rest > 0:
-                logger.debug("Underfilled batch (%d)", len(batch))
+            if self.max_batch_size - len(batch) > 0:
+                logger.debug("Last batch has only %d elements", len(batch))
             translator_inputs = [indexed_translator_input.translator_input for indexed_translator_input in batch]
             batch_translations = self._translate_nd(*self._get_inference_input(translator_inputs))
             for chunk, translation in zip(batch, batch_translations):
