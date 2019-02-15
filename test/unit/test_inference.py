@@ -484,7 +484,7 @@ def test_samplek_func(batch_size, beam_size, target_vocab_size, top_n):
     # normalize
     target_dists = mx.nd.broadcast_div(scores, scores.sum(axis=1, keepdims=True))
 
-    samplek = sockeye.inference.SampleK(k=beam_size, n=top_n, default_batch_size=batch_size)
+    samplek = sockeye.inference.SampleK(k=beam_size, n=top_n, max_batch_size=batch_size)
     samplek.initialize()
 
     # 0..(batch_size * beam_size)-1

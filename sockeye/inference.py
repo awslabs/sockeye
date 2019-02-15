@@ -84,7 +84,7 @@ class InferenceModel(model.SockeyeModel):
                                                                                            max_output_length_num_stds,
                                                                                            forced_max_output_len=forced_max_output_len)
 
-        self.default_batch_size = None  # type: Optional[int]
+        self.max_batch_size = None  # type: Optional[int]
         self.encoder_module = None  # type: Optional[mx.mod.BucketingModule]
         self.encoder_default_bucket_key = None  # type: Optional[int]
         self.decoder_module = None  # type: Optional[mx.mod.BucketingModule]
@@ -102,16 +102,16 @@ class InferenceModel(model.SockeyeModel):
         """
         return self.config.config_data.num_source_factors
 
-    def initialize(self, default_batch_size: int, max_input_length: int, get_max_output_length_function: Callable):
+    def initialize(self, max_batch_size: int, max_input_length: int, get_max_output_length_function: Callable):
         """
         Delayed construction of modules to ensure multiple Inference models can agree on computing a common
         maximum output length.
 
-        :param default_batch_size: Default batch size.
+        :param max_batch_size: Default batch size.
         :param max_input_length: Maximum input length.
         :param get_max_output_length_function: Callable to compute maximum output length.
         """
-        self.default_batch_size = default_batch_size
+        self.max_batch_size = max_batch_size
         self.max_input_length = max_input_length
         if self.max_input_length > self.training_max_seq_len_source:
             logger.warning("Model was only trained with sentences up to a length of %d, "
@@ -135,9 +135,9 @@ class InferenceModel(model.SockeyeModel):
         self.decoder_module, self.decoder_default_bucket_key = self._get_decoder_module()
 
         max_encoder_data_shapes = self._get_encoder_data_shapes(self.encoder_default_bucket_key,
-                                                                self.default_batch_size)
+                                                                self.max_batch_size)
         max_decoder_data_shapes = self._get_decoder_data_shapes(self.decoder_default_bucket_key,
-                                                                self.default_batch_size * self.beam_size)
+                                                                self.max_batch_size * self.beam_size)
         self.encoder_module.bind(data_shapes=max_encoder_data_shapes, for_training=False, grad_req="null")
         self.decoder_module.bind(data_shapes=max_decoder_data_shapes, for_training=False, grad_req="null")
 
@@ -1234,7 +1234,7 @@ class Translator:
         if self.nbest_size > 1:
             utils.check_condition(self.beam_search_stop == C.BEAM_SEARCH_STOP_ALL,
                                   "nbest_size > 1 requires beam_search_stop to be set to 'all'")
-        self.batch_size = self.models[0].default_batch_size
+        self.batch_size = self.models[0].max_batch_size
 
         if any(m.skip_softmax for m in self.models):
             utils.check_condition(len(self.models) == 1 and self.beam_size == 1,
@@ -1269,7 +1269,7 @@ class Translator:
             elif self.sample is not None:
                 self._top = SampleK(k=self.beam_size,
                                     n=self.sample,
-                                    default_batch_size=self.batch_size)  # type: mx.gluon.HybridBlock
+                                    max_batch_size=self.batch_size)  # type: mx.gluon.HybridBlock
             else:
                 self._top = TopK(k=self.beam_size,
                                  vocab_size=len(self.vocab_target))  # type: mx.gluon.HybridBlock
@@ -1432,16 +1432,11 @@ class Translator:
         # translate in batch-sized blocks over input chunks
         for batch_id, batch in enumerate(utils.grouper(input_chunks, self.batch_size)):
             logger.debug("Translating batch %d", batch_id)
-            # underfilled batch will be filled to a full batch size with copies of the 1st input
             rest = self.batch_size - len(batch)
             if rest > 0:
-                logger.debug("Extending the last batch to the full batch size (%d)", self.batch_size)
-                batch = batch + [batch[0]] * rest
+                logger.debug("Underfilled batch (%d)", len(batch))
             translator_inputs = [indexed_translator_input.translator_input for indexed_translator_input in batch]
             batch_translations = self._translate_nd(*self._get_inference_input(translator_inputs))
-            # truncate to remove filler translations
-            if rest > 0:
-                batch_translations = batch_translations[:-rest]
             for chunk, translation in zip(batch, batch_translations):
                 translated_chunks.append(IndexedTranslation(chunk.input_idx, chunk.chunk_idx, translation))
         # Sort by input idx and then chunk id
@@ -1483,8 +1478,8 @@ class Translator:
 
         bucket_key = data_io.get_bucket(max(len(inp.tokens) for inp in trans_inputs), self.buckets_source)
         source = mx.nd.zeros((len(trans_inputs), bucket_key, self.num_source_factors), ctx=self.context)
-        raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
-        raw_avoid_list = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
+        raw_constraints = [None] * len(trans_inputs)  # type: List[Optional[constrained.RawConstraintList]]
+        raw_avoid_list = [None] * len(trans_inputs)  # type: List[Optional[constrained.RawConstraintList]]
 
         max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
@@ -1581,7 +1576,6 @@ class Translator:
 
         :return: Sequence of translations.
         """
-
         return self._get_best_from_beam(*self._beam_search(source,
                                                            source_length,
                                                            raw_constraints,
@@ -1693,7 +1687,8 @@ class Translator:
                 array of accumulated length-normalized negative log-probs, hypotheses lengths, constraints (if any),
                 beam histories (if any).
         """
-        batch_size = self.batch_size
+        batch_size = source.shape[0]
+        logger.debug("_beam_search batch size: %d", batch_size)
         # locations of each batch item when first dimension is (batch * beam)
         batch_indices = mx.nd.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32', ctx=self.context)
 
@@ -2154,17 +2149,17 @@ class SampleK(mx.gluon.HybridBlock):
     A HybridBlock for selecting a random word from each hypothesis according to its distribution.
     """
 
-    def __init__(self, k: int, n: int, default_batch_size: int) -> None:
+    def __init__(self, k: int, n: int, max_batch_size: int) -> None:
         """
         :param k: The size of the beam.
         :param n: Sample from the top-N words in the vocab at each timestep.
-        :param default_batch_size: Number of sentences being decoded at once.
+        :param max_batch_size: Number of sentences being decoded at once.
         """
         super().__init__()
         self.n = n
         with self.name_scope():
             self.best_hyp_indices = self.params.get_constant(name='best_hyp_indices',
-                                                             value=mx.nd.arange(0, default_batch_size * k, dtype='int32'))
+                                                             value=mx.nd.arange(0, max_batch_size * k, dtype='int32'))
 
     def hybrid_forward(self, F, scores, target_dists, finished, best_hyp_indices):
         """
