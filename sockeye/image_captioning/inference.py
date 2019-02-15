@@ -43,15 +43,16 @@ class ImageInferenceModel(InferenceModel):
         super().__init__(**kwargs)
         self.input_size = input_size
 
-    def _get_encoder_data_shapes(self, bucket_key: int = None) -> List[mx.io.DataDesc]:
+    def _get_encoder_data_shapes(self, bucket_key: int, batch_size: int) -> List[mx.io.DataDesc]:
         """
         Returns data shapes of the encoder module.
 
         :param bucket_key: Maximum input length.
+        :param batch_size: Batch size.
         :return: List of data descriptions.
         """
         return [mx.io.DataDesc(name=C.SOURCE_NAME,
-                               shape=(self.batch_size,) + self.input_size,
+                               shape=(batch_size,) + self.input_size,
                                layout=C.BATCH_MAJOR_IMAGE)]
 
     @property
@@ -224,7 +225,6 @@ def load_models(context: mx.context.Context,
                                               params_fname=params_fname,
                                               context=context,
                                               beam_size=beam_size,
-                                              batch_size=batch_size,
                                               softmax_temperature=softmax_temperature,
                                               decoder_return_logit_inputs=decoder_return_logit_inputs,
                                               cache_output_layer_w_b=cache_output_layer_w_b,
@@ -240,6 +240,6 @@ def load_models(context: mx.context.Context,
                                                                           forced_max_output_len=forced_max_output_len)
 
     for inference_model in models:
-        inference_model.initialize(max_input_len, get_max_output_length)
+        inference_model.initialize(batch_size, max_input_len, get_max_output_length)
 
     return models, target_vocabs[0]

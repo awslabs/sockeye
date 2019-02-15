@@ -368,19 +368,17 @@ prune_tests = [
 
 @pytest.mark.parametrize("batch, beam, prune, scores, finished, expected_inactive", prune_tests)
 def test_beam_prune(batch, beam, prune, scores, finished, expected_inactive):
-    scores = mx.nd.array(scores)
+    scores = mx.nd.array(scores).reshape((-1, 1))
     finished = mx.nd.array(finished, dtype='int32')
-    inf_array = mx.nd.full((batch * beam,), val=np.inf)
-    zeros_array = mx.nd.zeros((batch * beam,), dtype='int32')
     best_word_indices = mx.nd.zeros((batch * beam,), dtype='int32')
 
     prune_hyps = sockeye.inference.PruneHypotheses(prune, beam)
     prune_hyps.initialize()
-    inactive, _, _ = prune_hyps(best_word_indices, scores, finished, inf_array, zeros_array)
+    inactive, _, _ = prune_hyps(best_word_indices, scores, finished)
     assert inactive.asnumpy().tolist() == expected_inactive
 
     prune_hyps.hybridize()
-    inactive, _, _ = prune_hyps(best_word_indices, scores, finished, inf_array, zeros_array)
+    inactive, _, _ = prune_hyps(best_word_indices, scores, finished)
     assert inactive.asnumpy().tolist() == expected_inactive
 
 
@@ -447,7 +445,7 @@ def test_topk_func(batch_size, beam_size, target_vocab_size):
     # Random model scores. Shape: (batch_size * beam_size, target_vocab_size)
     scores = mx.nd.random.uniform(0, 1, (batch_size * beam_size, target_vocab_size))
     # offset for batch sizes > 1
-    offset = mx.nd.array(np.repeat(np.arange(0, batch_size * beam_size, beam_size), beam_size), dtype='int32')
+    offset = mx.nd.repeat(mx.nd.arange(0, batch_size * beam_size, beam_size, dtype='int32'), beam_size)
 
     np_hyp, np_word, np_values = numpy_topk(scores, k=beam_size, offset=offset)
     np_hyp, np_word, np_values = np_hyp.asnumpy(), np_word.asnumpy(), np_values.asnumpy()
@@ -458,18 +456,17 @@ def test_topk_func(batch_size, beam_size, target_vocab_size):
     assert all(mx_word == np_word)
     assert all(mx_values == np_values)
 
-    topk = sockeye.inference.TopK(k=beam_size, batch_size=batch_size, vocab_size=target_vocab_size)
+    topk = sockeye.inference.TopK(k=beam_size, vocab_size=target_vocab_size)
     topk.initialize()
-    assert all(topk.offset.data() == offset)
 
-    mx_hyp, mx_word, mx_values = topk(scores)
+    mx_hyp, mx_word, mx_values = topk(scores, offset)
     mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
     assert all(mx_hyp == np_hyp)
     assert all(mx_word == np_word)
     assert all(mx_values == np_values)
 
     topk.hybridize()
-    mx_hyp, mx_word, mx_values = topk(scores)
+    mx_hyp, mx_word, mx_values = topk(scores, offset)
     mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
     assert all(mx_hyp == np_hyp)
     assert all(mx_word == np_word)
@@ -483,11 +480,11 @@ def test_topk_func(batch_size, beam_size, target_vocab_size):
                          (5, 100, 200, 5)])
 def test_samplek_func(batch_size, beam_size, target_vocab_size, top_n):
     # arrange scores increasing values from left to right, so the best item is always index 0, next-best 1, and so on
-    scores = mx.nd.array([list(range(1, target_vocab_size + 1)) for x in range(batch_size * beam_size)])
+    scores = mx.nd.array([list(range(1, target_vocab_size + 1)) for _ in range(batch_size * beam_size)])
     # normalize
     target_dists = mx.nd.broadcast_div(scores, scores.sum(axis=1, keepdims=True))
 
-    samplek = sockeye.inference.SampleK(k=beam_size, n=top_n, batch_size=batch_size, context=mx.context.cpu())
+    samplek = sockeye.inference.SampleK(k=beam_size, n=top_n, default_batch_size=batch_size)
     samplek.initialize()
 
     # 0..(batch_size * beam_size)-1

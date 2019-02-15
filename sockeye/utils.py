@@ -277,16 +277,16 @@ def top1(scores: mx.nd.NDArray,
 
 
 def topk(scores: mx.nd.NDArray,
-         k: int,
-         offset: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
+         offset: mx.nd.NDArray,
+         k: int) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
     """
     Get the lowest k elements per sentence from a `scores` matrix.
     At the first timestep, the shape of scores is (batch, target_vocabulary_size).
     At subsequent steps, the shape is (batch * k, target_vocabulary_size).
 
     :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
-    :param k: The number of smallest scores to return.
     :param offset: Array (shape: batch_size * k) containing offsets to add to the hypothesis indices in batch decoding.
+    :param k: The number of smallest scores to return.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
 
