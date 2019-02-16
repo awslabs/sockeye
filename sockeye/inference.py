@@ -1377,12 +1377,8 @@ class Translator:
         :param trans_inputs: List of TranslatorInputs as returned by make_input().
         :return: List of translation results.
         """
-        batch_size = len(trans_inputs)
-        if len(trans_inputs) > self.max_batch_size:
-            logger.warning("You passed %d inputs, but the maximum batch size of this Translator is %d. "
-                           "Your inputs will be translated in multiple batches in sequence, "
-                           "decreasing translation speed", len(trans_inputs), self.max_batch_size)
-            batch_size = self.max_batch_size
+        num_inputs = len(trans_inputs)
+        batch_size = min(num_inputs, self.max_batch_size)
         translated_chunks = []  # type: List[IndexedTranslation]
 
         # split into chunks
@@ -1441,20 +1437,23 @@ class Translator:
                             "constraint" if len(trans_input.constraints) == 1 else "constraints",
                             ", ".join(" ".join(x) for x in trans_input.constraints))
 
+        num_bad_empty = len(translated_chunks)
+
         # Sort longest to shortest (to rather fill batches of shorter than longer sequences)
         input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.translator_input.tokens), reverse=True)
 
         # translate in batch-sized blocks over input chunks
+        num_batches = 0
         for batch_id, batch in enumerate(utils.grouper(input_chunks, batch_size)):
             logger.debug("Translating batch %d", batch_id)
-            if self.max_batch_size - len(batch) > 0:
-                logger.debug("Last batch has only %d elements", len(batch))
             translator_inputs = [indexed_translator_input.translator_input for indexed_translator_input in batch]
             batch_translations = self._translate_nd(*self._get_inference_input(translator_inputs))
             for chunk, translation in zip(batch, batch_translations):
                 translated_chunks.append(IndexedTranslation(chunk.input_idx, chunk.chunk_idx, translation))
+            num_batches += 1
         # Sort by input idx and then chunk id
         translated_chunks = sorted(translated_chunks)
+        num_chunks = len(translated_chunks)
 
         # Concatenate results
         results = []  # type: List[TranslatorOutput]
@@ -1469,6 +1468,11 @@ class Translator:
                 translation = self._concat_translations(translations_to_concat)
 
             results.append(self._make_result(trans_input, translation))
+
+        num_outputs = len(results)
+
+        logger.debug("Translated %d inputs (%d chunks) in %d batches to %d outputs. %d empty/bad inputs.",
+                     num_inputs, num_chunks, num_batches, num_outputs, num_bad_empty)
 
         return results
 

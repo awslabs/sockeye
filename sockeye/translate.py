@@ -198,9 +198,8 @@ def read_and_translate(translator: inference.Translator,
         total_time += chunk_time
 
     if total_lines != 0:
-        logger.info("Processed %d lines in %d batches. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",
-                    total_lines, ceil(total_lines / batch_size), total_time,
-                    total_time / total_lines, total_lines / total_time)
+        logger.info("Processed %d lines. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",
+                    total_lines, total_time, total_time / total_lines, total_lines / total_time)
     else:
         logger.info("Processed 0 lines.")
 
