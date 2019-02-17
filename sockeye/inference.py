@@ -1372,7 +1372,11 @@ class Translator:
     def translate(self, trans_inputs: List[TranslatorInput]) -> List[TranslatorOutput]:
         """
         Batch-translates a list of TranslatorInputs, returns a list of TranslatorOutputs.
-        Splits oversized sentences to sentence chunks of size less than max_input_length.
+        Empty or bad inputs are skipped.
+        Splits inputs larger than Translator.max_input_length into chunks of size max_input_length.
+        Translates in batches of Translator.max_batch_size or less if there are fewer inputs/chunks.
+        If there are more inputs/chunks than Translator.max_batch_size, multiple batches of size
+        min(len(remaining_chunks), max_batch_size) are translated in sequence.
 
         :param trans_inputs: List of TranslatorInputs as returned by make_input().
         :return: List of translation results.
