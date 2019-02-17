@@ -61,7 +61,7 @@ def test_io_args(test_params, expected_params):
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('', dict(quiet=False)),
+    ('', dict(quiet=False, loglevel='INFO')),
 ])
 def test_logging_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_logging_args)

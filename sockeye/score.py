@@ -15,8 +15,8 @@
 Simple Training CLI.
 """
 import argparse
-import os
 import logging
+import os
 from contextlib import ExitStack
 from typing import Optional, List, Tuple
 
@@ -37,10 +37,10 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    setup_main_logger(file_logging=False, console=True)
     params = arguments.ConfigArgumentParser(description='Score data with an existing model.')
     arguments.add_score_cli_args(params)
     args = params.parse_args()
+    setup_main_logger(file_logging=False, console=True, level=args.loglevel)
     score(args)
 
 

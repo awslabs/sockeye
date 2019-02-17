@@ -19,7 +19,6 @@ import sys
 import time
 import logging
 from contextlib import ExitStack
-from math import ceil
 from typing import Generator, Optional, List
 
 from sockeye.lexicon import TopKLexicon
@@ -49,10 +48,11 @@ def run_translate(args: argparse.Namespace):
 
     if args.output is not None:
         setup_main_logger(console=not args.quiet,
-                                   file_logging=True,
-                                   path="%s.%s" % (args.output, C.LOG_NAME))
+                          file_logging=True,
+                          path="%s.%s" % (args.output, C.LOG_NAME),
+                          level=args.loglevel)
     else:
-        setup_main_logger(file_logging=False)
+        setup_main_logger(file_logging=False, level=args.loglevel)
 
     log_basic_info(args)
 
