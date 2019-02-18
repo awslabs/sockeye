@@ -14,7 +14,7 @@
 import logging
 import logging.config
 import sys
-from typing import Optional
+from typing import Dict, Optional
 
 FORMATTERS = {
     'verbose': {
@@ -121,7 +121,7 @@ def setup_main_logger(file_logging=True, console=True, path: Optional[str] = Non
     if path:
         log_config["handlers"]["rotating"]["filename"] = path  # type: ignore
 
-    for _, handler_config in log_config['handlers'].items():
+    for _, handler_config in log_config['handlers'].items():  # type: ignore
         handler_config['level'] = level
 
     logging.config.dictConfig(log_config)
