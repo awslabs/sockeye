@@ -905,4 +905,6 @@ def train(args: argparse.Namespace) -> training.TrainState:
         return training_state
 
 if __name__ == "__main__":
+    if any([a == "--checkpoint-frequency" or a.startswith("--checkpoint-frequency=") for a in sys.argv]):
+        logger.warn("The '--checkpoint-frequency' switch is deprecated and should be replaced with '--checkpoint-interval'")
     main()

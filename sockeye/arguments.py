@@ -846,7 +846,8 @@ def add_training_args(params):
                               type=int,
                               default=None,
                               help='Maximum number of samples. Default: %(default)s.')
-    train_params.add_argument(C.TRAIN_ARGS_CHECKPOINT_FREQUENCY,
+    train_params.add_argument(C.TRAIN_ARGS_CHECKPOINT_INTERVAL,
+                              "--checkpoint-frequency",
                               type=int_greater_or_equal(1),
                               default=4000,
                               help='Checkpoint and evaluate every x updates/batches. Default: %(default)s.')

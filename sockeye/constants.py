@@ -274,7 +274,7 @@ INFERENCE_ARG_OUTPUT_SHORT = "-o"
 INFERENCE_ARG_INPUT_FACTORS_LONG = "--input-factors"
 INFERENCE_ARG_INPUT_FACTORS_SHORT = "-if"
 TRAIN_ARGS_MONITOR_BLEU = "--decode-and-evaluate"
-TRAIN_ARGS_CHECKPOINT_FREQUENCY = "--checkpoint-interval"
+TRAIN_ARGS_CHECKPOINT_INTERVAL = "--checkpoint-interval"
 
 # Used to delimit factors on STDIN for inference
 DEFAULT_FACTOR_DELIMITER = '|'

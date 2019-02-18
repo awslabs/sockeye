@@ -1176,7 +1176,7 @@ class DecoderProcessManager(object):
         logger.warning("Had to wait %d seconds for the Checkpoint %s to finish. Consider increasing the "
                        "checkpoint interval (updates between checkpoints, see %s) or reducing the size of the "
                        "validation samples that are decoded (see %s)." % (wait_time, name,
-                                                                          C.TRAIN_ARGS_CHECKPOINT_FREQUENCY,
+                                                                          C.TRAIN_ARGS_CHECKPOINT_INTERVAL,
                                                                           C.TRAIN_ARGS_MONITOR_BLEU))
 
 
