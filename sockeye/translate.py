@@ -87,7 +87,8 @@ def run_translate(args: argparse.Namespace):
             cache_output_layer_w_b=args.restrict_lexicon is not None,
             override_dtype=args.override_dtype,
             output_scores=output_handler.reports_score(),
-            sampling=args.sample)
+            sampling=args.sample,
+            disable_dropout=args.disable_dropout)
         restrict_lexicon = None  # type: Optional[TopKLexicon]
         if args.restrict_lexicon:
             restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)

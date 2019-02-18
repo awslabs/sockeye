@@ -223,6 +223,7 @@ def test_training_arg(test_params, expected_params):
                       length_penalty_beta=0.0,
                       strip_unknown_words=False,
                       override_dtype=None,
+                      disable_dropout=False,
                       sample=None,
                       seed=None,
                       skip_topk=False)),

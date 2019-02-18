@@ -376,9 +376,10 @@ def load_models(context: mx.context.Context,
                 forced_max_output_len: Optional[int] = None,
                 override_dtype: Optional[str] = None,
                 output_scores: bool = False,
-                sampling: bool = False) -> Tuple[List[InferenceModel],
-                                                 List[vocab.Vocab],
-                                                 vocab.Vocab]:
+                sampling: bool = False,
+                disable_dropout: bool = False) -> Tuple[List[InferenceModel],
+                                                        List[vocab.Vocab],
+                                                        vocab.Vocab]:
     """
     Loads a list of models for inference.
 
@@ -401,6 +402,7 @@ def load_models(context: mx.context.Context,
            log probabilities. If False, scores will be negative, raw logit activations if decoding with beam size 1
            and a single model.
     :param sampling: True if the model is sampling instead of doing normal topk().
+    :param disable_dropout: Disable dropout layers for performance improvement. Default: False.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
@@ -430,6 +432,9 @@ def load_models(context: mx.context.Context,
         logger.info("Model version: %s", model_version)
         utils.check_version(model_version)
         model_config = model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
+        if disable_dropout:
+            logger.info("Disabling dropout for performance")
+            model_config.disable_dropout()
         if override_dtype is not None:
             model_config.config_encoder.dtype = override_dtype
             model_config.config_decoder.dtype = override_dtype
