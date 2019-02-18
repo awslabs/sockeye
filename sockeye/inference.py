@@ -2299,6 +2299,6 @@ class UpdateScores(mx.gluon.HybridBlock):
         # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
         # infinity otherwise.
         scores = F.broadcast_add(target_dists, scores_accumulated)
-        # pad_dist. Shape: (batch*beam, vocab_size)
+        # pad_dist. Shape: (batch*beam, vocab_size-1)
         scores = F.where(F.broadcast_logical_or(finished, inactive), F.concat(scores_accumulated, pad_dist), scores)
         return scores
