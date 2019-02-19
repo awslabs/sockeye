@@ -1315,11 +1315,6 @@ def add_inference_args(params):
                                type=str,
                                help='EXPERIMENTAL: may be changed or removed in future. Overrides training dtype of '
                                     'encoders and decoders during inference. Default: %(default)s')
-    decode_params.add_argument('--disable-dropout',
-                               default=False,
-                               action='store_true',
-                               help='Disable dropout layers when loading the model for inference. With current MXNet, '
-                                    'this gives a small performance boost. Default: s(default)%s.')
 
 
 def add_evaluate_args(params):

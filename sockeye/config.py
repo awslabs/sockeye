@@ -139,12 +139,12 @@ class Config(yaml.YAMLObject, metaclass=TaggedYamlObjectMetaclass):
 
     def disable_dropout(self):
         """
-        Sets the value of all attributes that contain 'dropout' to 0.0.
+        Sets the value of all float-valued attributes that contain 'dropout' in their name to 0.0.
+        Causes model graph construction to skip dropout layers.
         """
         for attr, val in self.__dict__.items():
-            if 'dropout' in attr:
+            if isinstance(val, Config):
+                val.disable_dropout()
+            elif 'dropout' in attr and isinstance(val, float):
                 logger.debug("Setting %s to 0.0", attr)
                 setattr(self, attr, 0.0)
-
-            elif isinstance(val, Config):
-                val.disable_dropout()
