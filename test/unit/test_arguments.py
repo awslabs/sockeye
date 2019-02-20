@@ -186,6 +186,7 @@ def test_model_parameters(test_params, expected_params):
               decode_and_evaluate=500,
               decode_and_evaluate_use_cpu=False,
               decode_and_evaluate_device_id=None,
+              stop_training_on_decoder_failure=False,
               seed=13,
               keep_last_params=-1,
               keep_initializations=False,

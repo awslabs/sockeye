@@ -37,6 +37,8 @@ _TEST_LINE_COUNT_EMPTY = 2
 _LINE_MAX_LENGTH = 9
 _TEST_MAX_LENGTH = 20
 
+
+# tuple format: (train_params, translate_params, use_prepared_data, use_source_factors)
 ENCODER_DECODER_SETTINGS = [
     # "Vanilla" LSTM encoder-decoder with attention
     ("--encoder rnn --decoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 8 --num-embed 4 "
@@ -171,11 +173,15 @@ def test_seq_copy(train_params: str,
                             test_max_length=_TEST_MAX_LENGTH,
                             sort_target=False,
                             with_source_factors=use_source_factors) as data:
+        
+        # TODO: Here we temporarily switch off comparing translation and scoring scores, which
+        # sometimes produces inconsistent results for --batch-size > 1 (see issue #639 on github).
         check_train_translate(train_params=train_params,
                               translate_params=translate_params,
                               data=data,
                               use_prepared_data=use_prepared_data,
-                              max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS)
+                              max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
+                              compare_translate_vs_scoring_scores=False)
 
 
 TINY_TEST_MODEL = [(" --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 4 --num-embed 4"

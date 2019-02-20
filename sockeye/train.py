@@ -885,7 +885,8 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                                 max_params_files_to_keep=args.keep_last_params,
                                                 keep_initializations=args.keep_initializations,
                                                 source_vocabs=source_vocabs,
-                                                target_vocab=target_vocab)
+                                                target_vocab=target_vocab,
+                                                stop_training_on_decoder_failure=args.stop_training_on_decoder_failure)
 
         training_state = trainer.fit(train_iter=train_iter,
                                      validation_iter=eval_iter,
