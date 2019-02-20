@@ -432,8 +432,7 @@ class EarlyStoppingTrainer:
                  keep_initializations: bool,
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
-                 # TODO set to False
-                 stop_training_on_decoder_failure: bool = True) -> None:
+                 stop_training_on_decoder_failure: bool = False) -> None:
         self.model = model
         self.optimizer_config = optimizer_config
         self.max_params_files_to_keep = max_params_files_to_keep
