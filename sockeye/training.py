@@ -1031,7 +1031,7 @@ class TensorboardLogger:
                  target_vocab: Optional[vocab.Vocab] = None) -> None:
         self.logdir = logdir
         self.source_labels = vocab.get_ordered_tokens_from_vocab(source_vocab) if source_vocab is not None else None
-        self.target_labels = vocab.get_ordered_tokens_from_vocab(target_vocab) if source_vocab is not None else None
+        self.target_labels = vocab.get_ordered_tokens_from_vocab(target_vocab) if target_vocab is not None else None
         try:
             import mxboard
             logger.info("Logging training events for Tensorboard at '%s'", self.logdir)
