@@ -1066,7 +1066,7 @@ def add_training_args(params):
     train_params.add_argument(C.TRAIN_ARGS_STOP_ON_DECODER_FAILURE,
                               action="store_true",
                               help='Stop training as soon as any checkpoint decoder fails (e.g. because there is not '
-                                   'enough GPU memory).')
+                                   'enough GPU memory). Default: %(default)s.')
 
     train_params.add_argument('--seed',
                               type=int,

@@ -1173,12 +1173,10 @@ class DecoderProcessManager(object):
         """
         self.wait_to_finish()
         if self.decoder_metric_queue.empty():
-            print("queue empty! ", self._results_pending)
             if self._results_pending:
                 self._any_process_died = True
             self._results_pending = False
             return None
-        print("queue not empty")
         decoded_checkpoint, decoder_metrics = self.decoder_metric_queue.get()
         assert self.decoder_metric_queue.empty()
         self._results_pending = False
