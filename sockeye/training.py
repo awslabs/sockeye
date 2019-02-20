@@ -431,7 +431,9 @@ class EarlyStoppingTrainer:
                  max_params_files_to_keep: int,
                  keep_initializations: bool,
                  source_vocabs: List[vocab.Vocab],
-                 target_vocab: vocab.Vocab) -> None:
+                 target_vocab: vocab.Vocab,
+                 # TODO set to False
+                 stop_training_on_decoder_failure: bool = True) -> None:
         self.model = model
         self.optimizer_config = optimizer_config
         self.max_params_files_to_keep = max_params_files_to_keep
@@ -440,6 +442,7 @@ class EarlyStoppingTrainer:
                                           source_vocab=source_vocabs[0],
                                           target_vocab=target_vocab)
         self.state = None  # type: Optional[TrainState]
+        self.stop_training_on_decoder_failure = stop_training_on_decoder_failure
 
     def fit(self,
             train_iter: data_io.BaseParallelSampleIter,
@@ -522,6 +525,10 @@ class EarlyStoppingTrainer:
         process_manager = None
         if decoder is not None:
             process_manager = DecoderProcessManager(self.model.output_dir, decoder=decoder)
+
+            if self.stop_training_on_decoder_failure:
+                # Start an initial decoder process to fail early in case we run out of memory
+                process_manager.start_decoder(checkpoint=0)
 
         if mxmonitor_pattern is not None:
             self.model.install_monitor(mxmonitor_pattern, mxmonitor_stat_func)
@@ -646,6 +653,13 @@ class EarlyStoppingTrainer:
 
                 tic = time.time()
 
+            if process_manager is not None:
+                process_manager.update_process_died_status()
+                if self.stop_training_on_decoder_failure and process_manager.any_process_died:
+                    logger.info("A decoder process has died, will stop training as this was requested via %s",
+                                C.TRAIN_ARGS_STOP_ON_DECODER_FAILURE)
+                    break
+
         self._cleanup(lr_decay_opt_states_reset, process_manager=process_manager,
                       keep_training_state=not self.state.converged)
         logger.info("Training finished%s. Best checkpoint: %d. Best validation %s: %.6f",
@@ -744,8 +758,10 @@ class EarlyStoppingTrainer:
             result = process_manager.collect_results()
             if result is not None:
                 decoded_checkpoint, decoder_metrics = result
-                self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
-                self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
+                # The first checkpoint before any gradient updates is ignored
+                if decoded_checkpoint > 0:
+                    self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
+                    self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
             process_manager.start_decoder(self.state.checkpoint)
 
         self.state.metrics.append(checkpoint_metrics)
@@ -1134,6 +1150,8 @@ class DecoderProcessManager(object):
         self.ctx = mp_utils.get_context()  # type: ignore
         self.decoder_metric_queue = self.ctx.Queue()
         self.decoder_process = None  # type: Optional[multiprocessing.Process]
+        self._any_process_died = False
+        self._results_pending = False
 
     def start_decoder(self, checkpoint: int):
         """
@@ -1148,6 +1166,7 @@ class DecoderProcessManager(object):
         self.decoder_process.name = 'Decoder-%d' % checkpoint
         logger.info("Starting process: %s", self.decoder_process.name)
         self.decoder_process.start()
+        self._results_pending = True
 
     def collect_results(self) -> Optional[Tuple[int, Dict[str, float]]]:
         """
@@ -1155,9 +1174,15 @@ class DecoderProcessManager(object):
         """
         self.wait_to_finish()
         if self.decoder_metric_queue.empty():
+            print("queue empty! ", self._results_pending)
+            if self._results_pending:
+                self._any_process_died = True
+            self._results_pending = False
             return None
+        print("queue not empty")
         decoded_checkpoint, decoder_metrics = self.decoder_metric_queue.get()
         assert self.decoder_metric_queue.empty()
+        self._results_pending = False
         logger.info("Decoder-%d finished: %s", decoded_checkpoint, decoder_metrics)
         return decoded_checkpoint, decoder_metrics
 
@@ -1178,6 +1203,20 @@ class DecoderProcessManager(object):
                        "validation samples that are decoded (see %s)." % (wait_time, name,
                                                                           C.TRAIN_ARGS_CHECKPOINT_FREQUENCY,
                                                                           C.TRAIN_ARGS_MONITOR_BLEU))
+
+    @property
+    def any_process_died(self):
+        """ Returns true if any decoder process exited with a non-zero exit code. """
+        return self._any_process_died
+
+    def update_process_died_status(self):
+        """ Update the flag indicating whether any process exited with a non-zero exit code. """
+
+        # There is a result pending, the process is no longer alive, yet there is no result in the queue
+        # This means the decoder process has not succesfully produced metrics
+        queue_should_hold_result = self._results_pending and self.decoder_process is not None and not self.decoder_process.is_alive()
+        if queue_should_hold_result and self.decoder_metric_queue.empty():
+            self._any_process_died = True
 
 
 def _decode_and_evaluate(decoder: checkpoint_decoder.CheckpointDecoder,

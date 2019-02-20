@@ -1063,6 +1063,11 @@ def add_training_args(params):
                                    'Use a negative number to automatically acquire a GPU. '
                                    'Use a positive number to acquire a specific GPU. Default: %(default)s.')
 
+    train_params.add_argument(C.TRAIN_ARGS_STOP_ON_DECODER_FAILURE,
+                              action="store_true",
+                              help='Stop training as soon as any checkpoint decoder fails (e.g. because there is not '
+                                   'enough GPU memory).')
+
     train_params.add_argument('--seed',
                               type=int,
                               default=13,
