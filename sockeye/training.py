@@ -1207,7 +1207,7 @@ class DecoderProcessManager(object):
         return self._any_process_died
 
     def update_process_died_status(self):
-        """ Update the flag indicating whether any process exited  and did not provide a result. """
+        """ Update the flag indicating whether any process exited and did not provide a result. """
 
         # There is a result pending, the process is no longer alive, yet there is no result in the queue
         # This means the decoder process has not succesfully produced metrics
