@@ -212,6 +212,7 @@ def check_train_translate(train_params: str,
                           data: Dict[str, Any],
                           use_prepared_data: bool,
                           max_seq_len: int,
+                          compare_translate_vs_scoring_scores: bool = True,
                           seed: int = 13) -> Dict[str, Any]:
     """
     Tests core features (training, inference).
@@ -239,7 +240,7 @@ def check_train_translate(train_params: str,
     # - translate splits up too-long sentences and translates them in sequence, invalidating the score, so skip that
     # - scoring requires valid translation output to compare against
     if '--max-input-len' not in translate_params and _translate_output_is_valid(data['test_outputs']):
-        test_scoring(data, translate_params)
+        test_scoring(data, translate_params, compare_translate_vs_scoring_scores)
     return data
 
 
@@ -401,19 +402,18 @@ def test_translate_equivalence(data: Dict[str, Any], translate_params_equiv: str
     assert all(abs(a - b) < 0.01 or np.isnan(a - b) for a, b in zip(data['test_scores'], translate_scores_equiv))
 
 
-def test_scoring(data: Dict[str, Any], translate_params: str):
+def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_scores: bool):
     """
     Tests the scoring CLI and checks for score equivalence with previously generated translate scores.
     """
     # Translate params that affect the score need to be used for scoring as well.
     # Currently, the only relevant flag passed is the --softmax-temperature flag.
+    relevant_params = {'--softmax-temperature'}
     score_params = ''
-    if 'softmax-temperature' in translate_params:
-        params = translate_params.split()
-        for i, param in enumerate(params):
-            if param == '--softmax-temperature':
-                score_params = '--softmax-temperature {}'.format(params[i + 1])
-                break
+    params = translate_params.split()
+    for i, param in enumerate(params):
+        if param in relevant_params:
+            score_params = '{} {}'.format(param, params[i + 1])
     out_path = os.path.join(data['work_dir'], "score.out")
 
     # write translate outputs as target file for scoring and collect tokens
@@ -451,12 +451,13 @@ def test_scoring(data: Dict[str, Any], translate_params: str):
                                 zip(translate_tokens, data['test_scores'])))
     assert len(valid_outputs) == len(score_scores)
 
-    for (translate_tokens, translate_score), score_score in zip(valid_outputs, score_scores):
-        # Skip sentences that are close to the maximum length to avoid confusion about whether
-        # the length penalty was applied
-        if len(translate_tokens) >= max_len - 2:
-            continue
-        assert abs(translate_score - score_score) < 0.02
+    if test_similar_scores:
+        for (translate_tokens, translate_score), score_score in zip(valid_outputs, score_scores):
+            # Skip sentences that are close to the maximum length to avoid confusion about whether
+            # the length penalty was applied
+            if len(translate_tokens) >= max_len - 2:
+                continue
+            assert abs(translate_score - score_score) < 0.02
 
 
 def _translate_output_is_valid(translate_outputs: List[str]) -> bool:
