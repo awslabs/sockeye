@@ -14,6 +14,10 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Changed
 - Do not compare scores from translation and scoring in integration tests.
 
+### Added
+- Adding the option via the flag `--stop-training-on-decoder-failure` to stop training in case the checkpoint decoder dies (e.g. because there is not enough memory).
+In case this is turned on a checkpoint decoder is launched right when training starts in order to fail as early as possible.
+
 ## [1.18.75]
 ### Changed
 - Do not create dropout layers for inference models for performance reasons.
