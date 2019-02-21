@@ -489,7 +489,7 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
             # the length penalty was applied
             if len(translate_tokens) >= max_len - 2:
                 continue
-            assert abs(translate_score - score_score) < 0.02
+            assert (translate_score == -np.inf and score_score == -np.inf) or abs(translate_score - score_score) < 0.02
 
 
 def _translate_output_is_valid(translate_outputs: List[str]) -> bool:
