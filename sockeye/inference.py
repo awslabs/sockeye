@@ -430,6 +430,10 @@ def load_models(context: mx.context.Context,
         logger.info("Model version: %s", model_version)
         utils.check_version(model_version)
         model_config = model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
+
+        logger.info("Disabling dropout layers for performance reasons")
+        model_config.disable_dropout()
+
         if override_dtype is not None:
             model_config.config_encoder.dtype = override_dtype
             model_config.config_decoder.dtype = override_dtype

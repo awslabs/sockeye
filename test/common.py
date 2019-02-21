@@ -212,6 +212,7 @@ def check_train_translate(train_params: str,
                           data: Dict[str, Any],
                           use_prepared_data: bool,
                           max_seq_len: int,
+                          compare_translate_vs_scoring_scores: bool = True,
                           seed: int = 13) -> Dict[str, Any]:
     """
     Tests core features (training, inference).
@@ -249,7 +250,7 @@ def check_train_translate(train_params: str,
         # - translate splits up too-long sentences and translates them in sequence, invalidating the score, so skip that
         # - scoring requires valid translation output to compare against
         if '--max-input-len' not in translate_params and _translate_output_is_valid(data['test_outputs']):
-            test_scoring(data, translate_params)
+            test_scoring(data, translate_params, compare_translate_vs_scoring_scores)
 
     return data
 
@@ -432,36 +433,32 @@ def test_constrained_decoding_against_ref(data: Dict[str, Any], translate_params
                                         input=new_test_source_path,
                                         output=out_path_constrained),
         translate_params)
-    print("CONSTRAINED DECODING WITH", params)
     with patch.object(sys, "argv", params.split()):
         sockeye.translate.main()
     constrained_outputs, constrained_scores = collect_translate_output_and_scores(out_path_constrained)
     assert len(constrained_outputs) == len(data['test_outputs']) == len(constrained_inputs)
     for json_input, constrained_out, unconstrained_out in zip(constrained_inputs, constrained_outputs, data['test_outputs']):
         # Make sure the constrained output is the same as we got when decoding unconstrained
-        print('IZEQUAL', json_input, constrained_out, unconstrained_out, sep='\n')
         assert constrained_out == unconstrained_out
 
-    print("DUH SCOreZ", constrained_scores)
     data['test_constrained_inputs'] = constrained_inputs
     data['test_constrained_outputs'] = constrained_outputs
     data['test_constrained_scores'] = constrained_scores
     return data
 
 
-def test_scoring(data: Dict[str, Any], translate_params: str):
+def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_scores: bool):
     """
     Tests the scoring CLI and checks for score equivalence with previously generated translate scores.
     """
     # Translate params that affect the score need to be used for scoring as well.
     # Currently, the only relevant flag passed is the --softmax-temperature flag.
+    relevant_params = {'--softmax-temperature'}
     score_params = ''
-    if 'softmax-temperature' in translate_params:
-        params = translate_params.split()
-        for i, param in enumerate(params):
-            if param == '--softmax-temperature':
-                score_params = '--softmax-temperature {}'.format(params[i + 1])
-                break
+    params = translate_params.split()
+    for i, param in enumerate(params):
+        if param in relevant_params:
+            score_params = '{} {}'.format(param, params[i + 1])
     out_path = os.path.join(data['work_dir'], "score.out")
 
     # write translate outputs as target file for scoring and collect tokens
@@ -495,15 +492,13 @@ def test_scoring(data: Dict[str, Any], translate_params: str):
     model_config = sockeye.model.SockeyeModel.load_config(os.path.join(data['model'], C.CONFIG_NAME))
     max_len = model_config.config_data.max_seq_len_target
 
-    valid_outputs = list(filter(lambda x: len(x[0]) < max_len - 1,
-                                zip(translate_tokens, data['test_constrained_scores'], score_scores)))
-    valid_translate_scores = [x[1] for x in valid_outputs]
-    valid_score_scores = [x[2] for x in valid_outputs]
-    print("IZ DEM DUH SAMM?", max_len, valid_translate_scores, valid_score_scores, sep="\n")
-    for translate_score, score_score in zip(valid_translate_scores, valid_score_scores):
-        # Skip sentences that are close to the maximum length to avoid confusion about whether
-        # the length penalty was applied
-        assert (translate_score == -np.inf and score_score == -np.inf) or abs(translate_score - score_score) <= 0.01
+    if test_similar_scores:
+        for (translate_tokens, translate_score), score_score in zip(valid_outputs, score_scores):
+            # Skip sentences that are close to the maximum length to avoid confusion about whether
+            # the length penalty was applied
+            if len(translate_tokens) >= max_len - 2:
+                continue
+            assert abs(translate_score - score_score) < 0.02
 
 
 def _translate_output_is_valid(translate_outputs: List[str]) -> bool:
