@@ -26,6 +26,7 @@ import argparse
 import json
 import os
 import pickle
+import logging
 from contextlib import ExitStack
 from typing import cast, Dict, List, Tuple, Optional
 
@@ -53,7 +54,7 @@ from ..train import check_resume, check_arg_compatibility, create_decoder_config
 from ..utils import check_condition
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
-logger = setup_main_logger(__name__, file_logging=False, console=True)
+logger = logging.getLogger(__name__)
 
 
 def read_feature_shape(path):
@@ -282,10 +283,8 @@ def train(args: argparse.Namespace):
     output_folder = os.path.abspath(args.output)
     resume_training = check_resume(args, output_folder)
 
-    global logger
-    logger = setup_main_logger(__name__,
-                               file_logging=True,
-                               console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
+    setup_main_logger(file_logging=True,
+                      console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
     utils.log_basic_info(args)
     with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "w") as fp:
         json.dump(vars(args), fp)

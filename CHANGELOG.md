@@ -10,6 +10,35 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.76]
+### Changed
+- Do not compare scores from translation and scoring in integration tests.
+
+### Added
+- Adding the option via the flag `--stop-training-on-decoder-failure` to stop training in case the checkpoint decoder dies (e.g. because there is not enough memory).
+In case this is turned on a checkpoint decoder is launched right when training starts in order to fail as early as possible.
+
+## [1.18.75]
+### Changed
+- Do not create dropout layers for inference models for performance reasons.
+
+## [1.18.74]
+### Changed
+- Revert change in 1.18.72 as no memory saving could be observed.
+
+## [1.18.73]
+### Fixed
+- Fixed a bug where `source-factors-num-embed` was not correctly adjusted to `num-embed` 
+  when using prepared data & `source-factor-combine` sum.
+
+## [1.18.72]
+### Changed
+- Removed use of `expand_dims` in favor of `reshape` to save memory.
+
+## [1.18.71]
+### Fixed
+- Fixed default setting of source factor combination to be 'concat' for backwards compatibility.
+
 ## [1.18.70]
 ### Added
 - Sockeye now outputs fields found in a JSON input object, if they are not overwritten by Sockeye. This behavior can be enabled by selecting `--json-input` (to read input as a JSON object) and `--output-type json` (to write a JSON object to output).

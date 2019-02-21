@@ -18,8 +18,9 @@ import argparse
 import os
 import sys
 import types
-import yaml
 from typing import Any, Callable, Dict, List, Tuple, Optional
+
+import yaml
 
 from . import constants as C
 from . import data_io
@@ -259,8 +260,8 @@ def add_average_args(params):
         "--output", "-o", required=True, type=str, help="File to write averaged parameters to.")
     average_params.add_argument(
         "--strategy",
-        choices=["best", "last", "lifespan"],
-        default="best",
+        choices=C.AVERAGE_CHOICES,
+        default=C.AVERAGE_BEST,
         help="selection method. Default: %(default)s.")
 
 
@@ -799,7 +800,7 @@ def add_training_args(params):
     train_params.add_argument('--decoder-only',
                               action='store_true',
                               help='Pre-train a decoder. This is currently for RNN decoders only. '
-                                    'Default: %(default)s.')
+                                   'Default: %(default)s.')
     train_params.add_argument('--fill-up',
                               type=str,
                               default=C.FILL_UP_DEFAULT,
@@ -1062,6 +1063,11 @@ def add_training_args(params):
                               help='Separate device for decoding validation data. '
                                    'Use a negative number to automatically acquire a GPU. '
                                    'Use a positive number to acquire a specific GPU. Default: %(default)s.')
+
+    train_params.add_argument(C.TRAIN_ARGS_STOP_ON_DECODER_FAILURE,
+                              action="store_true",
+                              help='Stop training as soon as any checkpoint decoder fails (e.g. because there is not '
+                                   'enough GPU memory). Default: %(default)s.')
 
     train_params.add_argument('--seed',
                               type=int,

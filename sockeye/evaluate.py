@@ -30,7 +30,7 @@ from . import data_io
 from . import utils
 from .log import setup_main_logger, log_sockeye_version
 
-logger = setup_main_logger(__name__, file_logging=False)
+logger = logging.getLogger(__name__)
 
 
 def raw_corpus_bleu(hypotheses: Iterable[str], references: Iterable[str], offset: Optional[float] = 0.01) -> float:
@@ -91,6 +91,7 @@ def raw_corpus_rougel(hypotheses: Iterable[str], references: Iterable[str]) -> f
 
 
 def main():
+    setup_main_logger(file_logging=False)
     params = argparse.ArgumentParser(description='Evaluate translations by calculating metrics with '
                                                  'respect to a reference set. If multiple hypotheses files are given'
                                                  'the mean and standard deviation of the metrics are reported.')

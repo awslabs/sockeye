@@ -56,7 +56,7 @@ ENCODER_DECODER_SETTINGS = [
 def test_caption_random_features(train_params: str, translate_params: str):
     # generate random names
     source_list = [''.join(random.choice(string.ascii_uppercase) for _ in range(4)) for i in range(15)]
-    prefix = "tmp_caption_ramdom"
+    prefix = "tmp_caption_random"
     use_features = True
     with tmp_img_captioning_dataset(source_list,
                                     prefix,
