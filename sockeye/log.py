@@ -14,11 +14,7 @@
 import logging
 import logging.config
 import sys
-<<<<<<< HEAD
-from typing import Dict, Optional
-=======
-from typing import Optional, Dict, Any
->>>>>>> master
+from typing import Optional
 
 FORMATTERS = {
     'verbose': {
