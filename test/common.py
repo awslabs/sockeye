@@ -484,7 +484,7 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
 
         valid_outputs = list(filter(lambda x: len(x[0]) < max_len - 1,
                                     zip(translate_tokens, data['test_scores'], score_scores)))
-        for (translate_tokens, translate_score), score_score in zip(valid_outputs, score_scores):
+        for translate_tokens, translate_score, score_score in valid_outputs:
             # Skip sentences that are close to the maximum length to avoid confusion about whether
             # the length penalty was applied
             if len(translate_tokens) >= max_len - 2:
