@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+
+## [1.18.77]
+### Added
+- `sockeye.score` now loads data on demand and doesn't skip any input lines
+
 ## [1.18.76]
 ### Changed
 - Do not compare scores from translation and scoring in integration tests.
@@ -28,7 +33,7 @@ In case this is turned on a checkpoint decoder is launched right when training s
 
 ## [1.18.73]
 ### Fixed
-- Fixed a bug where `source-factors-num-embed` was not correctly adjusted to `num-embed` 
+- Fixed a bug where `source-factors-num-embed` was not correctly adjusted to `num-embed`
   when using prepared data & `source-factor-combine` sum.
 
 ## [1.18.72]

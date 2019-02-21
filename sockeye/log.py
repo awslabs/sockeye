@@ -14,7 +14,7 @@
 import logging
 import logging.config
 import sys
-from typing import Optional
+from typing import Optional, Dict, Any
 
 FORMATTERS = {
     'verbose': {
@@ -90,10 +90,16 @@ FILE_CONSOLE_LOGGING = {
     }
 }
 
+NO_LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': True,
+}
+
 LOGGING_CONFIGS = {
     "file_only": FILE_LOGGING,
     "console_only": CONSOLE_LOGGING,
     "file_console": FILE_CONSOLE_LOGGING,
+    "none": NO_LOGGING,
 }
 
 
@@ -111,16 +117,18 @@ def setup_main_logger(file_logging=True, console=True, path: Optional[str] = Non
     :param path: Optional path to write logfile to.
     """
     if file_logging and console:
-        log_config = LOGGING_CONFIGS["file_console"]
+        log_config = LOGGING_CONFIGS["file_console"]  # type: ignore
     elif file_logging:
         log_config = LOGGING_CONFIGS["file_only"]
-    else:
+    elif console:
         log_config = LOGGING_CONFIGS["console_only"]
+    else:
+        log_config = LOGGING_CONFIGS["none"]
 
     if path:
         log_config["handlers"]["rotating"]["filename"] = path  # type: ignore
 
-    logging.config.dictConfig(log_config)
+    logging.config.dictConfig(log_config)  # type: ignore
 
     def exception_hook(exc_type, exc_value, exc_traceback):
         if is_python34():
