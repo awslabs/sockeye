@@ -181,22 +181,22 @@ def test_nontoken_parallel_iter(source_iterables, target_iterable):
                              (
                                      [[[0], [1, 1]], [[0], [1, 1]]],
                                      [[0], [1]],
-                                     [(([0], [0]), [0]), (([1, 1], [1, 1]), [1])]
+                                     [([[0], [0]], [0]), ([[1, 1], [1, 1]], [1])]
                              ),
                              (
                                      [[[0], None], [[0], None]],
                                      [[0], [1]],
-                                     [(([0], [0]), [0])]
+                                     [([[0], [0]], [0])]
                              ),
                              (
                                      [[[0], [1, 1]], [[0], [1, 1]]],
                                      [[0], None],
-                                     [(([0], [0]), [0])]
+                                     [([[0], [0]], [0])]
                              ),
                              (
                                      [[None, [1, 1]], [None, [1, 1]]],
                                      [None, [1]],
-                                     [(([1, 1], [1, 1]), [1])]
+                                     [([[1, 1], [1, 1]], [1])]
                              ),
                              (
                                      [[None, [1, 1]], [None, [1, 1]]],
@@ -307,7 +307,7 @@ def test_parallel_data_set_fill_up():
                                                            data_target_average_len=[None] * len(buckets))
     dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=1, max_count=5))
 
-    dataset_filled_up = dataset.fill_up(bucket_batch_sizes, 'replicate')
+    dataset_filled_up = dataset.fill_up(bucket_batch_sizes)
     assert len(dataset_filled_up.source) == len(dataset.source)
     assert len(dataset_filled_up.target) == len(dataset.target)
     assert len(dataset_filled_up.label) == len(dataset.label)
@@ -349,7 +349,7 @@ def test_parallel_data_set_permute():
                                                            batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
     dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5)).fill_up(
-        bucket_batch_sizes, 'replicate')
+        bucket_batch_sizes)
 
     permutations, inverse_permutations = data_io.get_permutations(dataset.get_bucket_counts())
 
@@ -389,7 +389,7 @@ def test_get_batch_indices():
         assert 0 <= start_pos < len(dataset.source[buck_idx]) - batch_size + 1
 
     # check that all indices are used for a filled-up dataset
-    dataset = dataset.fill_up(bucket_batch_sizes, policy='replicate')
+    dataset = dataset.fill_up(bucket_batch_sizes)
     indices = data_io.get_batch_indices(dataset, bucket_batch_sizes=bucket_batch_sizes)
     all_bucket_indices = set(list(range(len(dataset))))
     computed_bucket_indices = set([i for i, j in indices])
@@ -480,7 +480,6 @@ def test_get_training_data_iters():
             batch_size=batch_size,
             batch_by_words=False,
             batch_num_devices=1,
-            fill_up="replicate",
             max_seq_len_source=train_max_length,
             max_seq_len_target=train_max_length,
             bucketing=True,

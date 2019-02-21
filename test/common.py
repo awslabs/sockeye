@@ -1,4 +1,4 @@
-# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -241,6 +241,7 @@ def check_train_translate(train_params: str,
     # - scoring requires valid translation output to compare against
     if '--max-input-len' not in translate_params and _translate_output_is_valid(data['test_outputs']):
         test_scoring(data, translate_params, compare_translate_vs_scoring_scores)
+
     return data
 
 
@@ -402,6 +403,40 @@ def test_translate_equivalence(data: Dict[str, Any], translate_params_equiv: str
     assert all(abs(a - b) < 0.01 or np.isnan(a - b) for a, b in zip(data['test_scores'], translate_scores_equiv))
 
 
+def _create_constrained_inputs(translate_inputs: List[str], translate_outputs: List[str]) -> List[Dict[str, Any]]:
+    constrained_inputs = []
+    for sentno, (source, translate_output) in enumerate(zip(translate_inputs, translate_outputs)):
+        constrained_inputs.append(json.dumps({'text': source, 'constraints': ['<s> {} </s>'.format(translate_output)]}, ensure_ascii=False))
+    return constrained_inputs
+
+
+def test_constrained_decoding_against_ref(data: Dict[str, Any], translate_params: str):
+    constrained_inputs = _create_constrained_inputs(data['test_inputs'], data['test_outputs'])
+    new_test_source_path = os.path.join(data['work_dir'], "test_constrained.txt")
+    with open(new_test_source_path, 'w') as out:
+        for json_line in constrained_inputs:
+            print(json_line, file=out)
+    out_path_constrained = os.path.join(data['work_dir'], "out_constrained.txt")
+    params = "{} {} {} --json-input --output-type translation_with_score --beam-size 1 --batch-size 1 --nbest-size 1".format(
+        sockeye.translate.__file__,
+        _TRANSLATE_PARAMS_COMMON.format(model=data['model'],
+                                        input=new_test_source_path,
+                                        output=out_path_constrained),
+        translate_params)
+    with patch.object(sys, "argv", params.split()):
+        sockeye.translate.main()
+    constrained_outputs, constrained_scores = collect_translate_output_and_scores(out_path_constrained)
+    assert len(constrained_outputs) == len(data['test_outputs']) == len(constrained_inputs)
+    for json_input, constrained_out, unconstrained_out in zip(constrained_inputs, constrained_outputs, data['test_outputs']):
+        # Make sure the constrained output is the same as we got when decoding unconstrained
+        assert constrained_out == unconstrained_out
+
+    data['test_constrained_inputs'] = constrained_inputs
+    data['test_constrained_outputs'] = constrained_outputs
+    data['test_constrained_scores'] = constrained_scores
+    return data
+
+
 def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_scores: bool):
     """
     Tests the scoring CLI and checks for score equivalence with previously generated translate scores.
@@ -440,24 +475,21 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
     with open(out_path) as score_out:
         score_scores = [float(line.strip()) for line in score_out]
 
-    # Compare scored output to original translation output. There are a few tricks: for blank source sentences,
-    # inference will report a score of -inf, so skip these. Second, we don't know if the scores include the
+    # Compare scored output to original translation output. Unfortunately, sockeye.translate doesn't enforce
     # generation of </s> and have had length normalization applied. So, skip all sentences that are as long
     # as the maximum length, in order to safely exclude them.
-    model_config = sockeye.model.SockeyeModel.load_config(os.path.join(data['model'], C.CONFIG_NAME))
-    max_len = model_config.config_data.max_seq_len_target
-    # Filter out sockeye.translate outputs that had -inf score or are too long (which sockeye.score will have skipped)
-    valid_outputs = list(filter(lambda x: len(x[0]) < max_len and not np.isinf(x[1]),
-                                zip(translate_tokens, data['test_scores'])))
-    assert len(valid_outputs) == len(score_scores)
-
     if test_similar_scores:
-        for (translate_tokens, translate_score), score_score in zip(valid_outputs, score_scores):
+        model_config = sockeye.model.SockeyeModel.load_config(os.path.join(data['model'], C.CONFIG_NAME))
+        max_len = model_config.config_data.max_seq_len_target
+
+        valid_outputs = list(filter(lambda x: len(x[0]) < max_len - 1,
+                                    zip(translate_tokens, data['test_scores'], score_scores)))
+        for translate_tokens, translate_score, score_score in valid_outputs:
             # Skip sentences that are close to the maximum length to avoid confusion about whether
             # the length penalty was applied
             if len(translate_tokens) >= max_len - 2:
                 continue
-            assert abs(translate_score - score_score) < 0.02
+            assert (translate_score == -np.inf and score_score == -np.inf) or abs(translate_score - score_score) < 0.02
 
 
 def _translate_output_is_valid(translate_outputs: List[str]) -> bool:

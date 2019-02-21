@@ -806,11 +806,6 @@ def add_training_args(params):
                               action='store_true',
                               help='Pre-train a decoder. This is currently for RNN decoders only. '
                                    'Default: %(default)s.')
-    train_params.add_argument('--fill-up',
-                              type=str,
-                              default=C.FILL_UP_DEFAULT,
-                              choices=C.FILL_UP_CHOICES,
-                              help=argparse.SUPPRESS)
 
     train_params.add_argument('--loss',
                               default=C.CROSS_ENTROPY,
