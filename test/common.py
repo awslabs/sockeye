@@ -232,25 +232,15 @@ def check_train_translate(train_params: str,
     # Run translate with restrict-lexicon
     data = run_translate_restrict(data, translate_params)
 
-    # Test scoring. Inference does not guaranatee that </s> was generated, so we need to first
-    # force-decode against the output of the unconstrained system to get the real scores, that
-    # scoring will generate. Since it adds complexity to attach source factors to the input JSON
-    # object needed for constrained decoding, we only test scoring at the moment when not source
-    # factors are needed.
-    if 'test_source_factors' not in data:
-
-        # Run translate decoding against the reference
-        data = test_constrained_decoding_against_ref(data, translate_params)
-
-        # Test scoring by ensuring that the sockeye.scoring module produces the same scores when scoring the output
-        # of sockeye.translate. However, since this training is on very small datasets, the output of sockeye.translate
-        # is often pure garbage or empty and cannot be scored. So we only try to score if we have some valid output
-        # to work with.
-        # Only run scoring under these conditions. Why?
-        # - translate splits up too-long sentences and translates them in sequence, invalidating the score, so skip that
-        # - scoring requires valid translation output to compare against
-        if '--max-input-len' not in translate_params and _translate_output_is_valid(data['test_outputs']):
-            test_scoring(data, translate_params, compare_translate_vs_scoring_scores)
+    # Test scoring by ensuring that the sockeye.scoring module produces the same scores when scoring the output
+    # of sockeye.translate. However, since this training is on very small datasets, the output of sockeye.translate
+    # is often pure garbage or empty and cannot be scored. So we only try to score if we have some valid output
+    # to work with.
+    # Only run scoring under these conditions. Why?
+    # - translate splits up too-long sentences and translates them in sequence, invalidating the score, so skip that
+    # - scoring requires valid translation output to compare against
+    if '--max-input-len' not in translate_params and _translate_output_is_valid(data['test_outputs']):
+        test_scoring(data, translate_params, compare_translate_vs_scoring_scores)
 
     return data
 
@@ -486,13 +476,12 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
         score_scores = [float(line.strip()) for line in score_out]
 
     # Compare scored output to original translation output. Unfortunately, sockeye.translate doesn't enforce
-    # that </s> was generated, and we can't know outside the decoder. So we use scores from force-decoding
-    # against the unconstrained output, which ensures that the sockeye.translate score includes the cost of
-    # generating </s>.
-    model_config = sockeye.model.SockeyeModel.load_config(os.path.join(data['model'], C.CONFIG_NAME))
-    max_len = model_config.config_data.max_seq_len_target
-
+    # generation of </s> and have had length normalization applied. So, skip all sentences that are as long
+    # as the maximum length, in order to safely exclude them.
     if test_similar_scores:
+        model_config = sockeye.model.SockeyeModel.load_config(os.path.join(data['model'], C.CONFIG_NAME))
+        max_len = model_config.config_data.max_seq_len_target
+
         valid_outputs = list(filter(lambda x: len(x[0]) < max_len - 1,
                                     zip(translate_tokens, data['test_scores'], score_scores)))
         for (translate_tokens, translate_score), score_score in zip(valid_outputs, score_scores):
