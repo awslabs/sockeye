@@ -1373,10 +1373,9 @@ class Translator:
         """
         Batch-translates a list of TranslatorInputs, returns a list of TranslatorOutputs.
         Empty or bad inputs are skipped.
-        Splits inputs larger than Translator.max_input_length into chunks of size max_input_length.
-        Translates in batches of Translator.max_batch_size or less if there are fewer inputs/chunks.
-        If there are more inputs/chunks than Translator.max_batch_size, multiple batches of size
-        min(len(remaining_chunks), max_batch_size) are translated in sequence.
+        Splits inputs longer than Translator.max_input_length into segments of size max_input_length,
+        and then groups segments into batches of at most Translator.max_batch_size.
+        Too-long segments that were split are reassembled into a single output after translation.
 
         :param trans_inputs: List of TranslatorInputs as returned by make_input().
         :return: List of translation results.
