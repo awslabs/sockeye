@@ -1711,8 +1711,6 @@ class Translator:
         """
         batch_size = source.shape[0]
         logger.debug("_beam_search batch size: %d", batch_size)
-        # locations of each batch item when first dimension is (batch * beam)
-        batch_indices = mx.nd.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32', ctx=self.context)
 
         # Length of encoded sequence (may differ from initial input length)
         encoded_source_length = self.models[0].encoder.get_encoded_seq_len(source_length)
@@ -1731,6 +1729,13 @@ class Translator:
         # offset for hypothesis indices in batch decoding
         offset = mx.nd.repeat(mx.nd.arange(0, batch_size * self.beam_size, self.beam_size,
                                            dtype='int32', ctx=self.context), self.beam_size)
+
+        # locations of each batch item when first dimension is (batch * beam)
+        batch_indices = mx.nd.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32', ctx=self.context)
+        first_step_mask = mx.nd.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context)
+        first_step_mask[batch_indices] = 1.0
+        pad_dist = mx.nd.full((batch_size * self.beam_size, len(self.vocab_target) - 1), val=np.inf,
+                              ctx=self.context)
 
         # Best word and hypotheses indices across beam search steps from topk operation.
         best_hyp_indices_list = []  # type: List[mx.nd.NDArray]
@@ -1757,8 +1762,6 @@ class Translator:
         # target vocab for this sentence.
         models_output_layer_w = list()
         models_output_layer_b = list()
-        pad_dist = mx.nd.full((batch_size * self.beam_size, len(self.vocab_target) - 1), val=np.inf,
-                              ctx=self.context)
         vocab_slice_ids = None  # type: mx.nd.NDArray
         if self.restrict_lexicon:
             source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
@@ -1842,9 +1845,7 @@ class Translator:
                 # On the first timestep, all hypotheses have identical histories, so force topk() to choose extensions
                 # of the first row only by setting all other rows to inf
                 if t == 1 and not self.skip_topk:
-                    first_rows = scores[batch_indices, :]
-                    scores += np.inf
-                    scores[batch_indices, :] = first_rows
+                    scores *= first_step_mask
 
                 best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, offset)
 
