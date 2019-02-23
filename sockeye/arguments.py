@@ -25,6 +25,7 @@ import yaml
 from . import constants as C
 from . import data_io
 from .lr_scheduler import LearningRateSchedulerFixedStep
+from . import utils
 
 
 class ConfigArgumentParser(argparse.ArgumentParser):
@@ -79,6 +80,17 @@ class ConfigArgumentParser(argparse.ArgumentParser):
                 if action.dest in initial_args:
                     action.required = False
         return super().parse_args(args=args, namespace=initial_args)
+
+
+class StoreDeprecatedAction(argparse.Action):
+
+    def __init__(self, option_strings, dest, deprecated_dest, nargs=None, **kwargs):
+        super(StoreDeprecatedAction, self).__init__(option_strings, dest, **kwargs)
+        self.deprecated_dest = deprecated_dest
+
+    def __call__(self, parser, namespace, value, option_string=None):
+        setattr(namespace, self.dest, value)
+        setattr(namespace, self.deprecated_dest, value)
 
 
 def save_args(args: argparse.Namespace, fname: str):
@@ -848,10 +860,16 @@ def add_training_args(params):
                               default=None,
                               help='Maximum number of samples. Default: %(default)s.')
     train_params.add_argument(C.TRAIN_ARGS_CHECKPOINT_INTERVAL,
-                              "--checkpoint-frequency",
                               type=int_greater_or_equal(1),
                               default=4000,
                               help='Checkpoint and evaluate every x updates/batches. Default: %(default)s.')
+    train_params.add_argument(C.TRAIN_ARGS_CHECKPOINT_FREQUENCY,
+                              type=int_greater_or_equal(1),
+                              dest="checkpoint_interval",
+                              deprecated_dest="checkpoint_frequency",
+                              action=StoreDeprecatedAction,
+                              default=argparse.SUPPRESS,
+                              help=argparse.SUPPRESS)
     train_params.add_argument('--max-num-checkpoint-not-improved',
                               type=int,
                               default=32,

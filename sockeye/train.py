@@ -802,6 +802,8 @@ def train(args: argparse.Namespace) -> training.TrainState:
 
     setup_main_logger(file_logging=True,
                       console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
+    if hasattr(args, "checkpoint_frequency"):
+        logger.warn("'--checkpoint-frequency' is deprecated, and will be removed in the future.  Please use '--checkpoint-interval'")
     utils.log_basic_info(args)
     arguments.save_args(args, os.path.join(output_folder, C.ARGS_STATE_NAME))
 
@@ -908,6 +910,4 @@ def train(args: argparse.Namespace) -> training.TrainState:
         return training_state
 
 if __name__ == "__main__":
-    if any([a == "--checkpoint-frequency" or a.startswith("--checkpoint-frequency=") for a in sys.argv]):
-        logger.warn("The '--checkpoint-frequency' switch is deprecated and should be replaced with '--checkpoint-interval'")
     main()
