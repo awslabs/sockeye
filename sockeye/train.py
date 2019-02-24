@@ -799,7 +799,9 @@ def train(args: argparse.Namespace) -> training.TrainState:
     resume_training = check_resume(args, output_folder)
 
     setup_main_logger(file_logging=True,
-                      console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
+                      console=not args.quiet,
+                      path=os.path.join(output_folder, C.LOG_NAME),
+                      level=args.loglevel)
     if hasattr(args, "checkpoint_frequency"):
         logger.warn("'--checkpoint-frequency' is deprecated, and will be removed in the future.  Please use '--checkpoint-interval'")
     utils.log_basic_info(args)

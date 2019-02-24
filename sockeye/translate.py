@@ -19,7 +19,6 @@ import sys
 import time
 import logging
 from contextlib import ExitStack
-from math import ceil
 from typing import Generator, Optional, List
 
 from sockeye.lexicon import TopKLexicon
@@ -49,10 +48,11 @@ def run_translate(args: argparse.Namespace):
 
     if args.output is not None:
         setup_main_logger(console=not args.quiet,
-                                   file_logging=True,
-                                   path="%s.%s" % (args.output, C.LOG_NAME))
+                          file_logging=True,
+                          path="%s.%s" % (args.output, C.LOG_NAME),
+                          level=args.loglevel)
     else:
-        setup_main_logger(file_logging=False)
+        setup_main_logger(file_logging=False, level=args.loglevel)
 
     log_basic_info(args)
 
@@ -175,17 +175,17 @@ def read_and_translate(translator: inference.Translator,
     :param input_factors: Optional list of paths to files that contain source factors.
     :param input_is_json: Whether the input is in json format.
     """
-    batch_size = translator.batch_size
+    batch_size = translator.max_batch_size
     if chunk_size is None:
-        if translator.batch_size == 1:
+        if translator.max_batch_size == 1:
             # No batching, therefore there is not need to read segments in chunks.
             chunk_size = C.CHUNK_SIZE_NO_BATCHING
         else:
             # Get a constant number of batches per call to Translator.translate.
-            chunk_size = C.CHUNK_SIZE_PER_BATCH_SEGMENT * translator.batch_size
+            chunk_size = C.CHUNK_SIZE_PER_BATCH_SEGMENT * translator.max_batch_size
     else:
-        if chunk_size < translator.batch_size:
-            logger.warning("You specified a chunk size (%d) smaller than the batch size (%d). This will lead to "
+        if chunk_size < translator.max_batch_size:
+            logger.warning("You specified a chunk size (%d) smaller than the max batch size (%d). This will lead to "
                            "a reduction in translation speed. Consider choosing a larger chunk size." % (chunk_size,
                                                                                                          batch_size))
 
@@ -198,9 +198,8 @@ def read_and_translate(translator: inference.Translator,
         total_time += chunk_time
 
     if total_lines != 0:
-        logger.info("Processed %d lines in %d batches. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",
-                    total_lines, ceil(total_lines / batch_size), total_time,
-                    total_time / total_lines, total_lines / total_time)
+        logger.info("Processed %d lines. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",
+                    total_lines, total_time, total_time / total_lines, total_lines / total_time)
     else:
         logger.info("Processed 0 lines.")
 

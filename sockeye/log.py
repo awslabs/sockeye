@@ -14,7 +14,7 @@
 import logging
 import logging.config
 import sys
-from typing import Optional, Dict, Any
+from typing import Optional
 
 FORMATTERS = {
     'verbose': {
@@ -108,13 +108,14 @@ def is_python34() -> bool:
     return version[0] == 3 and version[1] == 4
 
 
-def setup_main_logger(file_logging=True, console=True, path: Optional[str] = None):
+def setup_main_logger(file_logging=True, console=True, path: Optional[str] = None, level=logging.INFO):
     """
     Configures logging for the main application.
 
     :param file_logging: Whether to log to a file.
     :param console: Whether to log to the console.
     :param path: Optional path to write logfile to.
+    :param level: Log level. Default: INFO.
     """
     if file_logging and console:
         log_config = LOGGING_CONFIGS["file_console"]  # type: ignore
@@ -127,6 +128,9 @@ def setup_main_logger(file_logging=True, console=True, path: Optional[str] = Non
 
     if path:
         log_config["handlers"]["rotating"]["filename"] = path  # type: ignore
+
+    for _, handler_config in log_config['handlers'].items():  # type: ignore
+        handler_config['level'] = level
 
     logging.config.dictConfig(log_config)  # type: ignore
 

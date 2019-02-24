@@ -347,6 +347,10 @@ def add_logging_args(params):
                                 default=False,
                                 action="store_true",
                                 help='Suppress console logging.')
+    logging_params.add_argument('--loglevel',
+                                default='INFO',
+                                choices=['INFO', 'DEBUG'],
+                                help='Log level. Default: %(default)s.')
 
 
 def add_training_data_args(params, required=False):
@@ -364,6 +368,7 @@ def add_training_data_args(params, required=False):
                         required=required,
                         type=regular_file(),
                         help='Target side of parallel training data.')
+
 
 def add_validation_data_params(params):
     params.add_argument('--validation-source', '-vs',
@@ -1120,7 +1125,6 @@ def add_score_cli_args(params):
     add_training_data_args(params, required=False)
     add_vocab_args(params)
     add_device_args(params)
-    add_logging_args(params)
     add_batch_args(params, default_batch_size=500)
 
     params = params.add_argument_group("Scoring parameters")
@@ -1165,6 +1169,8 @@ def add_score_cli_args(params):
                         choices=C.SCORING_TYPE_CHOICES,
                         default=C.SCORING_TYPE_DEFAULT,
                         help='Score type to output. Default: %(default)s')
+
+    add_logging_args(params)
 
 
 def add_max_output_cli_args(params):
