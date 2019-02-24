@@ -39,7 +39,7 @@ TEST_CONFIGS = [
     ("--encoder rnn --decoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 8 --num-embed 4 "
      " --rnn-attention-type mlp"
      " --rnn-attention-num-hidden 8 --loss cross-entropy --optimized-metric perplexity --max-updates 2"
-     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01 --batch-type sentence "
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --batch-type sentence "
      " --decode-and-evaluate 0",
      "--batch-size 2 --beam-size 10"),
     # Full transformer
@@ -50,7 +50,7 @@ TEST_CONFIGS = [
      " --weight-tying --weight-tying-type src_trg_softmax"
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
-     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01",
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
      "--batch-size 1 --beam-size 10")]
 
 

@@ -40,7 +40,7 @@ _SEED_DEV_DATA = 17
 seed = random.randint(0, 1000)
 
 
-COMMON_TRAINING_PARAMS = " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001" \
+COMMON_TRAINING_PARAMS = " --checkpoint-interval 1000 --optimizer adam --initial-learning-rate 0.001" \
                          " --decode-and-evaluate 0 --label-smoothing 0.0" \
                          " --optimized-metric perplexity --loss cross-entropy"
 

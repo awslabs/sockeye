@@ -448,7 +448,7 @@ class EarlyStoppingTrainer:
             validation_iter: data_io.BaseParallelSampleIter,
             early_stopping_metric,
             metrics: List[str],
-            checkpoint_frequency: int,
+            checkpoint_interval: int,
             max_num_not_improved: int,
             min_samples: Optional[int] = None,
             max_samples: Optional[int] = None,
@@ -472,7 +472,7 @@ class EarlyStoppingTrainer:
 
         :param early_stopping_metric: The metric that is evaluated on held-out data and optimized.
         :param metrics: List of metrics that will be tracked during training.
-        :param checkpoint_frequency: Frequency of checkpoints in number of update steps.
+        :param checkpoint_interval: Frequency of checkpoints in number of update steps.
 
         :param max_num_not_improved: Stop training if early_stopping_metric did not improve for this many checkpoints.
                Use -1 to disable stopping based on early_stopping_metric.
@@ -554,7 +554,7 @@ class EarlyStoppingTrainer:
             # STEP
             ######
             batch = next_data_batch
-            self._step(self.model, batch, checkpoint_frequency, metric_train, metric_loss)
+            self._step(self.model, batch, checkpoint_interval, metric_train, metric_loss)
             batch_num_samples = batch.data[0].shape[0]
             batch_num_tokens = batch.data[0].shape[1] * batch_num_samples
             self.state.updates += 1
@@ -572,14 +572,14 @@ class EarlyStoppingTrainer:
             ############
             # CHECKPOINT
             ############
-            if self.state.updates > 0 and self.state.updates % checkpoint_frequency == 0:
+            if self.state.updates > 0 and self.state.updates % checkpoint_interval == 0:
                 time_cost = time.time() - tic
                 self.state.checkpoint += 1
                 # (1) save parameters and evaluate on validation data
                 self._save_params()
                 logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f Updates/sec=%.3f",
                             self.state.checkpoint, self.state.updates, self.state.epoch,
-                            self.state.samples, time_cost, checkpoint_frequency / time_cost)
+                            self.state.samples, time_cost, checkpoint_interval / time_cost)
                 for name, val in metric_train.get_name_value():
                     logger.info('Checkpoint [%d]\tTrain-%s=%f', self.state.checkpoint, name, val)
                 self._evaluate(validation_iter, metric_val)
@@ -670,7 +670,7 @@ class EarlyStoppingTrainer:
     def _step(self,
               model: TrainingModel,
               batch: mx.io.DataBatch,
-              checkpoint_frequency: int,
+              checkpoint_interval: int,
               metric_train: mx.metric.EvalMetric,
               metric_loss: Optional[mx.metric.EvalMetric] = None):
         """
@@ -689,7 +689,7 @@ class EarlyStoppingTrainer:
         # Gradient rescaling
         ####################
         gradient_norm = None
-        if self.state.updates > 0 and (self.state.updates + 1) % checkpoint_frequency == 0:
+        if self.state.updates > 0 and (self.state.updates + 1) % checkpoint_interval == 0:
             # compute values for logging to metrics (before rescaling...)
             gradient_norm = self.state.gradient_norm = model.get_global_gradient_norm()
             self.state.gradients = model.get_gradients()
@@ -1196,9 +1196,9 @@ class DecoderProcessManager(object):
         self.decoder_process = None
         wait_time = int(time.time() - wait_start)
         logger.warning("Had to wait %d seconds for the Checkpoint %s to finish. Consider increasing the "
-                       "checkpoint frequency (updates between checkpoints, see %s) or reducing the size of the "
+                       "checkpoint interval (updates between checkpoints, see %s) or reducing the size of the "
                        "validation samples that are decoded (see %s)." % (wait_time, name,
-                                                                          C.TRAIN_ARGS_CHECKPOINT_FREQUENCY,
+                                                                          C.TRAIN_ARGS_CHECKPOINT_INTERVAL,
                                                                           C.TRAIN_ARGS_MONITOR_BLEU))
 
     @property

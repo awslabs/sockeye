@@ -91,7 +91,7 @@ Now we can train an one-layer LSTM with attention for image captioning model as 
         --encoder image-pretrain-cnn \
         --rnn-num-hidden 512 \
         --rnn-decoder-state-init zero \
-        --checkpoint-frequency 200 \
+        --checkpoint-interval 200 \
         --weight-normalization
 ```
 Use the option `--load-all-features-to-memory` to load all the features to memory. This is possible depending on the size of the dataset/features and amount of available CPU memory.
