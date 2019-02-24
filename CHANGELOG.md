@@ -12,7 +12,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.78]
 ### Changed
-- Dynamic batch decoding: `Translator.translate()` can now translate batches of `TranslatorInputs` that are smaller
+- Dynamic batch sizes: `Translator.translate()` will adjust batch size in beam search to the actual number of inputs without using padding.
 
 ## [1.18.77]
 ### Added
