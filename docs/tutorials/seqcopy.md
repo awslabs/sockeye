@@ -67,7 +67,7 @@ The metrics can be chosen using the `--metrics` parameter.
 Validation metrics are evaluated every time we create a checkpoint.
 During checkpointing the current model parameters are saved into the model directory and current validation scores are evaluated.
 By default Sockeye will create a checkpoint every 1000 updates.
-This can be adjusted through the `--checkpoint-frequency` parameter.
+This can be adjusted through the `--checkpoint-interval` parameter.
 
 From the log you can see that initially the accuracy is around 0.1:
 ```bash

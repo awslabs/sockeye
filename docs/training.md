@@ -72,7 +72,7 @@ Vocabularies will automatically be created from the training data and vocabulary
 ### Checkpointing and early-stopping
 
 Training is governed by the concept of "checkpoints", rather than epochs.
-You can specify the checkpoint frequency in terms of updates/batches with `--checkpoint-frequency`.
+You can specify the checkpoint interval in terms of updates/batches with `--checkpoint-interval`.
 Training performs early-stopping to prevent overfitting, i.e., training is stopped once a defined evaluation metric computed on the held-out validation data does not improve for a number of checkpoints given by the parameter `--max-num-checkpoint-not-improved`.
 You can specify a maximum number of updates/batches using `--max-updates`.
 

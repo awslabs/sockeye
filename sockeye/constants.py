@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 """
-Defines various constants used througout the project
+Defines various constants used throughout the project
 """
 import mxnet as mx
 import numpy as np
@@ -274,6 +274,7 @@ INFERENCE_ARG_OUTPUT_SHORT = "-o"
 INFERENCE_ARG_INPUT_FACTORS_LONG = "--input-factors"
 INFERENCE_ARG_INPUT_FACTORS_SHORT = "-if"
 TRAIN_ARGS_MONITOR_BLEU = "--decode-and-evaluate"
+TRAIN_ARGS_CHECKPOINT_INTERVAL = "--checkpoint-interval"
 TRAIN_ARGS_CHECKPOINT_FREQUENCY = "--checkpoint-frequency"
 TRAIN_ARGS_STOP_ON_DECODER_FAILURE = "--stop-training-on-decoder-failure"
 

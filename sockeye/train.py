@@ -758,7 +758,7 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
                                               extra_initializers=extra_initializers)
 
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
-                                             args.checkpoint_frequency,
+                                             args.checkpoint_interval,
                                              none_if_negative(args.learning_rate_half_life),
                                              args.learning_rate_reduce_factor,
                                              args.learning_rate_reduce_num_not_improved,
@@ -800,6 +800,8 @@ def train(args: argparse.Namespace) -> training.TrainState:
 
     setup_main_logger(file_logging=True,
                       console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
+    if hasattr(args, "checkpoint_frequency"):
+        logger.warn("'--checkpoint-frequency' is deprecated, and will be removed in the future.  Please use '--checkpoint-interval'")
     utils.log_basic_info(args)
     arguments.save_args(args, os.path.join(output_folder, C.ARGS_STATE_NAME))
 
@@ -888,7 +890,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                      validation_iter=eval_iter,
                                      early_stopping_metric=args.optimized_metric,
                                      metrics=args.metrics,
-                                     checkpoint_frequency=args.checkpoint_frequency,
+                                     checkpoint_interval=args.checkpoint_interval,
                                      max_num_not_improved=max_num_checkpoint_not_improved,
                                      min_samples=min_samples,
                                      max_samples=max_samples,

@@ -138,7 +138,7 @@ def test_model_parameters(test_params, expected_params):
               loss_normalization_type='valid',
               metrics=[C.PERPLEXITY],
               optimized_metric=C.PERPLEXITY,
-              checkpoint_frequency=4000,
+              checkpoint_interval=4000,
               max_num_checkpoint_not_improved=32,
               embed_dropout=(.0, .0),
               transformer_dropout_attention=0.1,
@@ -259,8 +259,8 @@ def test_inference_args(test_params, expected_params):
           # The tutorial text mentions that we train a RNN model:
           encoder=C.TRANSFORMER_TYPE,
           decoder=C.TRANSFORMER_TYPE),
-     # Additionally we mention the checkpoint_frequency
-     ['checkpoint_frequency']),
+     # Additionally we mention the checkpoint_interval
+     ['checkpoint_interval']),
     # WMT tutorial
     ('-d train_data '
      '-vs newstest2016.tc.BPE.de '
