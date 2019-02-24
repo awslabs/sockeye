@@ -14,15 +14,25 @@
 """
 Simple Training CLI.
 """
+
+# Start the forkserver. It is important that this is done before any other imports so that the forkserver is in a clean
+# state.
+if __name__ == "__main__":
+    import sockeye.multiprocessing_utils as mp
+    mp.initialize()
+
+
 import argparse
 import os
 import shutil
 import sys
 import tempfile
+import logging
 from contextlib import ExitStack
 from typing import Any, cast, Optional, Dict, List, Tuple
 
 import mxnet as mx
+
 
 from . import arguments
 from . import checkpoint_decoder
@@ -48,7 +58,7 @@ from .optimizers import OptimizerConfig
 from .utils import check_condition
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
-logger = setup_main_logger(__name__, file_logging=False, console=True)
+logger = logging.getLogger(__name__)
 
 
 def none_if_negative(val):
@@ -78,16 +88,13 @@ def check_arg_compatibility(args: argparse.Namespace):
 
     :param args: Arguments as returned by argparse.
     """
-    check_condition(args.optimized_metric == C.BLEU or args.optimized_metric == C.ROUGE1 or args.optimized_metric in args.metrics,
-                    "Must optimize either BLEU, ROUGE or one of tracked metrics (--metrics)")
-
     if args.encoder == C.TRANSFORMER_TYPE:
         check_condition(args.transformer_model_size[0] == args.num_embed[0],
                         "Source embedding size must match transformer model size: %s vs. %s"
                         % (args.transformer_model_size, args.num_embed[0]))
 
         total_source_factor_size = sum(args.source_factors_num_embed)
-        if total_source_factor_size > 0:
+        if total_source_factor_size > 0 and args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
             adjusted_transformer_encoder_model_size = args.num_embed[0] + total_source_factor_size
             check_condition(adjusted_transformer_encoder_model_size % 2 == 0 and
                             adjusted_transformer_encoder_model_size % args.transformer_attention_heads[0] == 0,
@@ -155,36 +162,6 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     return resume_training
 
 
-def determine_context(args: argparse.Namespace, exit_stack: ExitStack) -> List[mx.Context]:
-    """
-    Determine the context we should run on (CPU or GPU).
-
-    :param args: Arguments as returned by argparse.
-    :param exit_stack: An ExitStack from contextlib.
-    :return: A list with the context(s) to run on.
-    """
-    if args.use_cpu:
-        logger.info("Training Device: CPU")
-        context = [mx.cpu()]
-    else:
-        num_gpus = utils.get_num_gpus()
-        check_condition(num_gpus >= 1,
-                        "No GPUs found, consider running on the CPU with --use-cpu "
-                        "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
-                        "binary isn't on the path).")
-        if args.disable_device_locking:
-            context = utils.expand_requested_device_ids(args.device_ids)
-        else:
-            context = exit_stack.enter_context(utils.acquire_gpus(args.device_ids, lock_dir=args.lock_dir))
-        if args.batch_type == C.BATCH_TYPE_SENTENCE:
-            check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
-                                                                 "divisible by the number of devices. Choose a batch "
-                                                                 "size that is a multiple of %d." % len(context))
-        logger.info("Training Device(s): GPU %s", context)
-        context = [mx.gpu(gpu_id) for gpu_id in context]
-    return context
-
-
 def create_checkpoint_decoder(args: argparse.Namespace,
                               exit_stack: ExitStack,
                               train_context: List[mx.Context]) -> Optional[checkpoint_decoder.CheckpointDecoder]:
@@ -209,20 +186,11 @@ def create_checkpoint_decoder(args: argparse.Namespace,
     if args.use_cpu or args.decode_and_evaluate_use_cpu:
         context = mx.cpu()
     elif args.decode_and_evaluate_device_id is not None:
-        # decode device is defined from the commandline
-        num_gpus = utils.get_num_gpus()
-        check_condition(num_gpus >= 1,
-                        "No GPUs found, consider running on the CPU with --use-cpu "
-                        "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
-                        "binary isn't on the path).")
-
-        if args.disable_device_locking:
-            context = utils.expand_requested_device_ids([args.decode_and_evaluate_device_id])
-        else:
-            context = exit_stack.enter_context(utils.acquire_gpus([args.decode_and_evaluate_device_id],
-                                                                  lock_dir=args.lock_dir))
-        context = mx.gpu(context[0])
-
+        context = utils.determine_context(device_ids=[args.decode_and_evaluate_device_id],
+                                          use_cpu=False,
+                                          disable_device_locking=args.disable_device_locking,
+                                          lock_dir=args.lock_dir,
+                                          exit_stack=exit_stack)[0]
     else:
         # default decode context is the last training device
         context = train_context[-1]
@@ -286,6 +254,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 
     validation_sources = [args.validation_source] + args.validation_source_factors
     validation_sources = [str(os.path.abspath(source)) for source in validation_sources]
+    validation_target = str(os.path.abspath(args.validation_target))
 
     either_raw_or_prepared_error_msg = "Either specify a raw training corpus with %s and %s or a preprocessed corpus " \
                                        "with %s." % (C.TRAINING_ARG_SOURCE,
@@ -300,14 +269,14 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         train_iter, validation_iter, data_config, source_vocabs, target_vocab = data_io.get_prepared_data_iters(
             prepared_data_dir=args.prepared_data,
             validation_sources=validation_sources,
-            validation_target=str(os.path.abspath(args.validation_target)),
+            validation_target=validation_target,
             shared_vocab=shared_vocab,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
-            batch_num_devices=batch_num_devices,
-            fill_up=args.fill_up)
+            batch_num_devices=batch_num_devices)
 
-        check_condition(len(source_vocabs) == len(args.source_factors_num_embed) + 1,
+        check_condition(args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM \
+                        or len(source_vocabs) == len(args.source_factors_num_embed) + 1,
                         "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
                             len(source_vocabs), len(args.source_factors_num_embed) + 1))
 
@@ -321,9 +290,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             utils.check_condition(vocab.are_identical(target_vocab, model_target_vocab),
                                   "Prepared data and resumed model target vocabs do not match.")
 
-            check_condition(len(args.source_factors) == len(args.validation_source_factors),
-                            'Training and validation data must have the same number of factors: %d vs. %d.' % (
-                                len(args.source_factors), len(args.validation_source_factors)))
+        check_condition(data_config.num_source_factors == len(validation_sources),
+                        'Training and validation data must have the same number of factors, but found %d and %d.' % (
+                            data_config.num_source_factors, len(validation_sources)))
 
         return train_iter, validation_iter, data_config, source_vocabs, target_vocab
 
@@ -343,7 +312,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 
         else:
             # Load or create vocabs
-            source_vocab_paths = [args.source_vocab] + [None] * len(args.source_factors)
+            source_factor_vocab_paths = [args.source_factor_vocabs[i] if i < len(args.source_factor_vocabs)
+                                         else None for i in range(len(args.source_factors))]
+            source_vocab_paths = [args.source_vocab] + source_factor_vocab_paths
             target_vocab_path = args.target_vocab
             source_vocabs, target_vocab = vocab.load_or_create_vocabs(
                 source_paths=[args.source] + args.source_factors,
@@ -354,20 +325,26 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 num_words_source=num_words_source,
                 num_words_target=num_words_target,
                 word_min_count_source=word_min_count_source,
-                word_min_count_target=word_min_count_target)
+                word_min_count_target=word_min_count_target,
+                pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
-        check_condition(len(args.source_factors) == len(args.source_factors_num_embed),
+        check_condition(args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM \
+                        or len(args.source_factors) == len(args.source_factors_num_embed),
                         "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (
                             len(args.source_factors), len(args.source_factors_num_embed)))
 
         sources = [args.source] + args.source_factors
         sources = [str(os.path.abspath(source)) for source in sources]
 
+        check_condition(len(sources) == len(validation_sources),
+                        'Training and validation data must have the same number of factors, but found %d and %d.' % (
+                            len(source_vocabs), len(validation_sources)))
+
         train_iter, validation_iter, config_data, data_info = data_io.get_training_data_iters(
             sources=sources,
             target=os.path.abspath(args.target),
             validation_sources=validation_sources,
-            validation_target=os.path.abspath(args.validation_target),
+            validation_target=validation_target,
             source_vocabs=source_vocabs,
             target_vocab=target_vocab,
             source_vocab_paths=source_vocab_paths,
@@ -376,7 +353,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
             batch_num_devices=batch_num_devices,
-            fill_up=args.fill_up,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
@@ -422,8 +398,8 @@ def create_encoder_config(args: argparse.Namespace,
         encoder_transformer_model_size = args.transformer_model_size[0]
 
         total_source_factor_size = sum(args.source_factors_num_embed)
-        if total_source_factor_size > 0:
-            logger.info("Encoder transformer-model-size adjusted to account source factor embeddings: %d -> %d" % (
+        if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT and total_source_factor_size > 0:
+            logger.info("Encoder transformer-model-size adjusted to account for source factor embeddings: %d -> %d" % (
                 encoder_transformer_model_size, num_embed_source + total_source_factor_size))
             encoder_transformer_model_size = num_embed_source + total_source_factor_size
         config_encoder = transformer.TransformerConfig(
@@ -449,7 +425,9 @@ def create_encoder_config(args: argparse.Namespace,
                                                    num_hidden=args.cnn_num_hidden,
                                                    act_type=args.cnn_activation_type,
                                                    weight_normalization=args.weight_normalization)
-        cnn_num_embed = num_embed_source + sum(args.source_factors_num_embed)
+        cnn_num_embed = num_embed_source
+        if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+            cnn_num_embed += sum(args.source_factors_num_embed)
         config_encoder = encoder.ConvolutionalEncoderConfig(num_embed=cnn_num_embed,
                                                             max_seq_len_source=max_seq_len_source,
                                                             cnn_config=cnn_config,
@@ -547,6 +525,7 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
         config_coverage = None
         if args.rnn_attention_type == C.ATT_COV:
             config_coverage = coverage.CoverageConfig(type=args.rnn_attention_coverage_type,
+                                                      max_fertility=args.rnn_attention_coverage_max_fertility,
                                                       num_hidden=args.rnn_attention_coverage_num_hidden,
                                                       layer_normalization=args.layer_normalization)
         config_attention = rnn_attention.AttentionConfig(type=args.rnn_attention_type,
@@ -654,13 +633,21 @@ def create_model_config(args: argparse.Namespace,
 
     source_factor_configs = None
     if len(source_vocab_sizes) > 1:
+        source_factors_num_embed = args.source_factors_num_embed
+        if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM:
+            # If factors are being added instead of concatenated, set all dimensions to the embedding dimensions
+            logger.info("Setting all source factor embedding sizes to `num_embed` ('%d') for summing",
+                        num_embed_source)
+            source_factors_num_embed = [num_embed_source] * len(source_factor_vocab_sizes)
+
         source_factor_configs = [encoder.FactorConfig(size, dim) for size, dim in zip(source_factor_vocab_sizes,
-                                                                                      args.source_factors_num_embed)]
+                                                                                      source_factors_num_embed)]
 
     config_embed_source = encoder.EmbeddingConfig(vocab_size=source_vocab_size,
                                                   num_embed=num_embed_source,
                                                   dropout=embed_dropout_source,
-                                                  factor_configs=source_factor_configs)
+                                                  factor_configs=source_factor_configs,
+                                                  source_factors_combine=args.source_factors_combine)
 
     config_embed_target = encoder.EmbeddingConfig(vocab_size=target_vocab_size,
                                                   num_embed=num_embed_target,
@@ -771,7 +758,7 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
                                               extra_initializers=extra_initializers)
 
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
-                                             args.checkpoint_frequency,
+                                             args.checkpoint_interval,
                                              none_if_negative(args.learning_rate_half_life),
                                              args.learning_rate_reduce_factor,
                                              args.learning_rate_reduce_num_not_improved,
@@ -797,7 +784,7 @@ def main():
     train(args)
 
 
-def train(args: argparse.Namespace):
+def train(args: argparse.Namespace) -> training.TrainState:
     if args.dry_run:
         # Modify arguments so that we write to a temporary directory and
         # perform 0 training iterations
@@ -811,10 +798,10 @@ def train(args: argparse.Namespace):
     output_folder = os.path.abspath(args.output)
     resume_training = check_resume(args, output_folder)
 
-    global logger
-    logger = setup_main_logger(__name__,
-                               file_logging=True,
-                               console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
+    setup_main_logger(file_logging=True,
+                      console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
+    if hasattr(args, "checkpoint_frequency"):
+        logger.warn("'--checkpoint-frequency' is deprecated, and will be removed in the future.  Please use '--checkpoint-interval'")
     utils.log_basic_info(args)
     arguments.save_args(args, os.path.join(output_folder, C.ARGS_STATE_NAME))
 
@@ -826,7 +813,16 @@ def train(args: argparse.Namespace):
                 max_seq_len_source, max_seq_len_target)
 
     with ExitStack() as exit_stack:
-        context = determine_context(args, exit_stack)
+        context = utils.determine_context(device_ids=args.device_ids,
+                                          use_cpu=args.use_cpu,
+                                          disable_device_locking=args.disable_device_locking,
+                                          lock_dir=args.lock_dir,
+                                          exit_stack=exit_stack)
+        if args.batch_type == C.BATCH_TYPE_SENTENCE:
+            check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
+                                                                 "divisible by the number of devices. Choose a batch "
+                                                                 "size that is a multiple of %d." % len(context))
+        logger.info("Training Device(s): %s", ", ".join(str(c) for c in context))
 
         train_iter, eval_iter, config_data, source_vocabs, target_vocab = create_data_iters_and_vocabs(
             args=args,
@@ -885,29 +881,31 @@ def train(args: argparse.Namespace):
         trainer = training.EarlyStoppingTrainer(model=training_model,
                                                 optimizer_config=create_optimizer_config(args, source_vocab_sizes),
                                                 max_params_files_to_keep=args.keep_last_params,
+                                                keep_initializations=args.keep_initializations,
                                                 source_vocabs=source_vocabs,
-                                                target_vocab=target_vocab)
+                                                target_vocab=target_vocab,
+                                                stop_training_on_decoder_failure=args.stop_training_on_decoder_failure)
 
-        trainer.fit(train_iter=train_iter,
-                    validation_iter=eval_iter,
-                    early_stopping_metric=args.optimized_metric,
-                    metrics=args.metrics,
-                    checkpoint_frequency=args.checkpoint_frequency,
-                    max_num_not_improved=max_num_checkpoint_not_improved,
-                    min_samples=min_samples,
-                    max_samples=max_samples,
-                    min_updates=min_updates,
-                    max_updates=max_updates,
-                    min_epochs=min_epochs,
-                    max_epochs=max_epochs,
-                    lr_decay_param_reset=args.learning_rate_decay_param_reset,
-                    lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset,
-                    decoder=create_checkpoint_decoder(args, exit_stack, context),
-                    mxmonitor_pattern=args.monitor_pattern,
-                    mxmonitor_stat_func=args.monitor_stat_func,
-                    allow_missing_parameters=args.allow_missing_params or model_config.lhuc,
-                    existing_parameters=args.params)
-
+        training_state = trainer.fit(train_iter=train_iter,
+                                     validation_iter=eval_iter,
+                                     early_stopping_metric=args.optimized_metric,
+                                     metrics=args.metrics,
+                                     checkpoint_interval=args.checkpoint_interval,
+                                     max_num_not_improved=max_num_checkpoint_not_improved,
+                                     min_samples=min_samples,
+                                     max_samples=max_samples,
+                                     min_updates=min_updates,
+                                     max_updates=max_updates,
+                                     min_epochs=min_epochs,
+                                     max_epochs=max_epochs,
+                                     lr_decay_param_reset=args.learning_rate_decay_param_reset,
+                                     lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset,
+                                     decoder=create_checkpoint_decoder(args, exit_stack, context),
+                                     mxmonitor_pattern=args.monitor_pattern,
+                                     mxmonitor_stat_func=args.monitor_stat_func,
+                                     allow_missing_parameters=args.allow_missing_params or model_config.lhuc,
+                                     existing_parameters=args.params)
+        return training_state
 
 if __name__ == "__main__":
     main()

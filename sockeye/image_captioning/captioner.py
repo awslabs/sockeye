@@ -17,6 +17,7 @@ Image captioning CLI.
 import argparse
 import os
 import tempfile
+import logging
 from contextlib import ExitStack
 
 import mxnet as mx
@@ -33,17 +34,16 @@ from ..image_captioning.extract_features import get_pretrained_net, \
     batching, read_list_file, extract_features_forward
 from ..lexicon import TopKLexicon
 from ..log import setup_main_logger
-from ..translate import read_and_translate, _setup_context
-from ..utils import check_condition
-from ..utils import log_basic_info
+from ..translate import read_and_translate
+from ..utils import check_condition, log_basic_info, determine_context
 
-logger = setup_main_logger(__name__, file_logging=False)
+logger = logging.getLogger(__name__)
 
 
 def get_pretrained_caption_net(args: argparse.Namespace,
                                context: mx.Context,
                                image_preextracted_features: bool) -> inference_image.ImageCaptioner:
-    models, source_vocabs, target_vocab = inference_image.load_models(
+    models, target_vocab = inference_image.load_models(
         context=context,
         max_input_len=args.max_input_len,
         beam_size=args.beam_size,
@@ -60,8 +60,7 @@ def get_pretrained_caption_net(args: argparse.Namespace,
     restrict_lexicon = None  # type: TopKLexicon
     store_beam = args.output_type == C.OUTPUT_HANDLER_BEAM_STORE
     if args.restrict_lexicon:
-        restrict_lexicon = TopKLexicon(source_vocabs, target_vocab)
-        restrict_lexicon.load(args.restrict_lexicon)
+        raise NotImplementedError('restrict lexicon does not work with image captioning for now.')
 
     translator = inference_image.ImageCaptioner(context=context,
                                                 ensemble_mode=args.ensemble_mode,
@@ -71,6 +70,7 @@ def get_pretrained_caption_net(args: argparse.Namespace,
                                                     args.length_penalty_beta),
                                                 beam_prune=args.beam_prune,
                                                 beam_search_stop=args.beam_search_stop,
+                                                nbest_size=1,
                                                 models=models,
                                                 source_vocabs=None,
                                                 target_vocab=target_vocab,
@@ -110,14 +110,18 @@ def main():
     params = arguments.ConfigArgumentParser(description='Image Captioning CLI')
     arguments_image.add_image_caption_cli_args(params)
     args = params.parse_args()
+    caption(args)
+
+
+def caption(args: argparse.Namespace):
     image_preextracted_features = not args.extract_image_features
 
     if args.output is not None:
-        global logger
-        logger = setup_main_logger(__name__,
-                                   console=not args.quiet,
+        setup_main_logger(console=not args.quiet,
                                    file_logging=True,
                                    path="%s.%s" % (args.output, C.LOG_NAME))
+    else:
+        setup_main_logger(file_logging=False)
 
     if args.checkpoints is not None:
         check_condition(len(args.checkpoints) == len(args.models),
@@ -130,7 +134,12 @@ def main():
                                                     args.sure_align_threshold)
 
     with ExitStack() as exit_stack:
-        context = _setup_context(args, exit_stack)
+        context = determine_context(device_ids=args.device_ids,
+                                    use_cpu=args.use_cpu,
+                                    disable_device_locking=args.disable_device_locking,
+                                    lock_dir=args.lock_dir,
+                                    exit_stack=exit_stack)[0]
+        logger.info("Captioning Device: %s", context)
 
         if not image_preextracted_features:
             # Extract features and override input and source_root with tmp location of features
@@ -140,13 +149,14 @@ def main():
         else:  # Read feature size from disk
             _, args.feature_size = read_feature_shape(args.source_root)
 
-        translator = get_pretrained_caption_net(args, context,
-                                                image_preextracted_features)
+        captioner = get_pretrained_caption_net(args, context,
+                                               image_preextracted_features)
 
-        read_and_translate(translator=translator,
+        read_and_translate(translator=captioner,
                            output_handler=out_handler,
                            chunk_size=args.chunk_size,
-                           input_file=args.input)
+                           input_file=args.input,
+                           input_is_json=args.json_input)
 
 
 if __name__ == '__main__':

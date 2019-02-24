@@ -14,10 +14,12 @@
 import pytest
 
 import sockeye.constants as C
-from sockeye.vocab import build_vocab, get_ordered_tokens_from_vocab
+from sockeye.vocab import build_vocab, get_ordered_tokens_from_vocab, is_valid_vocab
 
 test_vocab = [
         # Example 1
+        (["one two three", "one two three"], None, 1,
+         {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "two": 4, "three": 5, "one": 6}),
         (["one two three", "one two three"], 3, 1,
          {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "two": 4, "three": 5, "one": 6}),
         (["one two three", "one two three"], 3, 2,
@@ -38,8 +40,18 @@ test_vocab = [
 
 @pytest.mark.parametrize("data,size,min_count,expected", test_vocab)
 def test_build_vocab(data, size, min_count, expected):
-    vocab = build_vocab(data, size, min_count)
+    vocab = build_vocab(data=data, num_words=size, min_count=min_count)
     assert vocab == expected
+
+
+@pytest.mark.parametrize("num_types,pad_to_multiple_of,expected_vocab_size",
+                         [(4, None, 8), (2, 8, 8), (4, 8, 8), (8, 8, 16), (10, 16, 16), (13, 16, 32)])
+def test_padded_build_vocab(num_types, pad_to_multiple_of, expected_vocab_size):
+    data = [" ".join('word%d' % i for i in range(num_types))]
+    size = None
+    min_count = 1
+    vocab = build_vocab(data, size, min_count, pad_to_multiple_of=pad_to_multiple_of)
+    assert len(vocab) == expected_vocab_size
 
 
 test_constants = [
@@ -67,3 +79,24 @@ def test_constants_in_vocab(data, size, min_count, constants):
 def test_get_ordered_tokens_from_vocab(vocab, expected_output):
     assert get_ordered_tokens_from_vocab(vocab) == expected_output
 
+
+@pytest.mark.parametrize(
+    "vocab, expected_result",
+    [
+        ({symbol: idx for idx, symbol in enumerate(C.VOCAB_SYMBOLS + ["w1", "w2"])}, True),
+        # A vocabulary with just the valid symbols doesn't make much sense but is technically valid
+        ({symbol: idx for idx, symbol in enumerate(C.VOCAB_SYMBOLS)}, True),
+        # Manually specifying the list of required special symbol so that we avoid making a backwards-incompatible
+        # change by adding a new symbol to C.VOCAB_SYMBOLS
+        ({symbol: idx for idx, symbol in enumerate([C.PAD_SYMBOL, C.UNK_SYMBOL, C.BOS_SYMBOL, C.EOS_SYMBOL])}, True),
+        # PAD_ID must have word id 0
+        ({symbol: idx for idx, symbol in enumerate(reversed(C.VOCAB_SYMBOLS))}, False),
+        ({symbol: idx for idx, symbol in enumerate(list(reversed(C.VOCAB_SYMBOLS)) + ["w1", "w2"])}, False),
+        # If there is a gap the vocabulary is not valid:
+        ({symbol: idx if symbol != "w2" else idx + 1 for idx, symbol in enumerate(C.VOCAB_SYMBOLS + ["w1", "w2"])}, False),
+        # There shouldn't be any duplicate word ids
+        ({symbol: idx if symbol != "w2" else idx - 1 for idx, symbol in enumerate(C.VOCAB_SYMBOLS + ["w1", "w2"])}, False),
+    ]
+)
+def test_verify_valid_vocab(vocab, expected_result):
+    assert is_valid_vocab(vocab) == expected_result

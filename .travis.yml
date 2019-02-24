@@ -30,7 +30,7 @@ script:
   - if [ "$TRAVIS_EVENT_TYPE" != "cron" ]; then python -m pytest -k "Copy:transformer:transformer" --maxfail=1 test/system; fi
   - if [ "$TRAVIS_EVENT_TYPE" != "cron" ]; then python -m pytest -k "Copy:cnn:cnn" --maxfail=1 test/system; fi
   - if [ "$TRAVIS_EVENT_TYPE" = "cron" ]; then python -m pytest --maxfail=1 test/system; fi
-  - if [ "$TRAVIS_EVENT_TYPE" = "cron" ]; then python -m contrib.autopilot.test; fi
+  - if [ "$TRAVIS_EVENT_TYPE" = "cron" ]; then python -m sockeye_contrib.autopilot.test; fi
 
 # Deploy all tagged versions to PyPI
 deploy:

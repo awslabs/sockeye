@@ -1,4 +1,4 @@
-# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 """
-Defines various constants used througout the project
+Defines various constants used throughout the project
 """
 import mxnet as mx
 import numpy as np
@@ -22,6 +22,7 @@ EOS_SYMBOL = "</s>"
 UNK_SYMBOL = "<unk>"
 PAD_SYMBOL = "<pad>"
 PAD_ID = 0
+PAD_FORMAT = "<pad%d>"
 TOKEN_SEPARATOR = " "
 VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
 # reserve extra space for the EOS or BOS symbol that is added to both source and target
@@ -49,6 +50,11 @@ SOURCE_POSITIONAL_EMBEDDING_PREFIX = "source_pos_" + EMBEDDING_PREFIX
 TARGET_EMBEDDING_PREFIX = "target_" + EMBEDDING_PREFIX
 TARGET_POSITIONAL_EMBEDDING_PREFIX = "target_pos_" + EMBEDDING_PREFIX
 SHARED_EMBEDDING_PREFIX = "source_target_" + EMBEDDING_PREFIX
+
+# source factors
+SOURCE_FACTORS_COMBINE_SUM = 'sum'
+SOURCE_FACTORS_COMBINE_CONCAT = 'concat'
+SOURCE_FACTORS_COMBINE_CHOICES = [SOURCE_FACTORS_COMBINE_SUM, SOURCE_FACTORS_COMBINE_CONCAT]
 
 # encoder names (arguments)
 RNN_NAME = "rnn"
@@ -155,6 +161,17 @@ CNN_ACTIVATION_TYPES = [GLU, RELU, SIGMOID, SOFT_RELU, TANH]
 CNN_PAD_LEFT = "left"
 CNN_PAD_CENTERED = "centered"
 
+# coverage types
+COVERAGE_COUNT = "count"
+COVERAGE_FERTILITY = "fertility"
+COVERAGE_TYPES = [TANH,
+                  SIGMOID,
+                  RELU,
+                  SOFT_RELU,
+                  GRU_TYPE,
+                  COVERAGE_COUNT,
+                  COVERAGE_FERTILITY]
+
 # default I/O variable names
 SOURCE_NAME = "source"
 SOURCE_LENGTH_NAME = "source_length"
@@ -185,6 +202,7 @@ MONITOR_STAT_FUNCS = {STAT_FUNC_DEFAULT: None,
 
 # Inference constants
 DEFAULT_BEAM_SIZE = 5
+DEFAULT_NBEST_SIZE = 1
 CHUNK_SIZE_NO_BATCHING = 1
 CHUNK_SIZE_PER_BATCH_SEGMENT = 500
 BEAM_SEARCH_STOP_FIRST = 'first'
@@ -194,6 +212,7 @@ BEAM_SEARCH_STOP_ALL = 'all'
 JSON_TEXT_KEY = "text"
 JSON_FACTORS_KEY = "factors"
 JSON_CONSTRAINTS_KEY = "constraints"
+JSON_AVOID_KEY = "avoid"
 JSON_ENCODING = "utf-8"
 
 # Lexical constraints
@@ -233,14 +252,18 @@ TRAINING_STATE_PARAMS_NAME = "params"
 ARGS_STATE_NAME = "args.yaml"
 
 # Arguments that may differ and still resume training
-ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet",
+ARGS_MAY_DIFFER = ["overwrite_output", "use_tensorboard", "quiet",
                    "align_plot_prefix", "sure_align_threshold",
-                   "keep_last_params"]
+                   "keep_last_params", "seed",
+                   "max_updates", "min_updates",
+                   "max_num_epochs", "min_num_epochs",
+                   "max_samples", "min_samples"]
 
 # Other argument constants
 TRAINING_ARG_SOURCE = "--source"
 TRAINING_ARG_TARGET = "--target"
 TRAINING_ARG_PREPARED_DATA = "--prepared-data"
+TRAINING_ARG_MAX_SEQ_LEN = "--max-seq-len"
 
 VOCAB_ARG_SHARED_VOCAB = "--shared-vocab"
 
@@ -251,7 +274,9 @@ INFERENCE_ARG_OUTPUT_SHORT = "-o"
 INFERENCE_ARG_INPUT_FACTORS_LONG = "--input-factors"
 INFERENCE_ARG_INPUT_FACTORS_SHORT = "-if"
 TRAIN_ARGS_MONITOR_BLEU = "--decode-and-evaluate"
+TRAIN_ARGS_CHECKPOINT_INTERVAL = "--checkpoint-interval"
 TRAIN_ARGS_CHECKPOINT_FREQUENCY = "--checkpoint-frequency"
+TRAIN_ARGS_STOP_ON_DECODER_FAILURE = "--stop-training-on-decoder-failure"
 
 # Used to delimit factors on STDIN for inference
 DEFAULT_FACTOR_DELIMITER = '|'
@@ -316,18 +341,25 @@ OUTPUT_HANDLER_TRANSLATION = "translation"
 OUTPUT_HANDLER_TRANSLATION_WITH_SCORE = "translation_with_score"
 OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENTS = "translation_with_alignments"
 OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENT_MATRIX = "translation_with_alignment_matrix"
+OUTPUT_HANDLER_SCORE = "score"
+OUTPUT_HANDLER_PAIR_WITH_SCORE = "pair_with_score"
 OUTPUT_HANDLER_BENCHMARK = "benchmark"
 OUTPUT_HANDLER_ALIGN_PLOT = "align_plot"
 OUTPUT_HANDLER_ALIGN_TEXT = "align_text"
 OUTPUT_HANDLER_BEAM_STORE = "beam_store"
+OUTPUT_HANDLER_JSON = "json"
 OUTPUT_HANDLERS = [OUTPUT_HANDLER_TRANSLATION,
+                   OUTPUT_HANDLER_SCORE,
                    OUTPUT_HANDLER_TRANSLATION_WITH_SCORE,
                    OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENTS,
                    OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENT_MATRIX,
                    OUTPUT_HANDLER_BENCHMARK,
                    OUTPUT_HANDLER_ALIGN_PLOT,
                    OUTPUT_HANDLER_ALIGN_TEXT,
-                   OUTPUT_HANDLER_BEAM_STORE]
+                   OUTPUT_HANDLER_BEAM_STORE,
+                   OUTPUT_HANDLER_JSON]
+OUTPUT_HANDLERS_SCORING = [OUTPUT_HANDLER_SCORE,
+                           OUTPUT_HANDLER_PAIR_WITH_SCORE]
 
 # metrics
 ACCURACY = 'accuracy'
@@ -346,9 +378,11 @@ ROUGE_2_VAL = ROUGE2 + "-val"
 ROUGE_L_VAL = ROUGEL + "-val"
 AVG_TIME = "avg-sec-per-sent-val"
 DECODING_TIME = "decode-walltime-val"
-METRICS = [PERPLEXITY, ACCURACY, BLEU, ROUGE1]
-METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, ROUGE1: True, PERPLEXITY: False}
-METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, ROUGE1: 0.0, PERPLEXITY: np.inf}
+METRICS = [PERPLEXITY, ACCURACY, BLEU, CHRF, ROUGE1]
+METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, CHRF: True, ROUGE1: True, PERPLEXITY: False}
+METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, CHRF: 0.0, ROUGE1: 0.0, PERPLEXITY: np.inf}
+METRICS_REQUIRING_DECODER = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL]
+EVALUATE_METRICS = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL]
 
 # loss
 CROSS_ENTROPY = 'cross-entropy'
@@ -389,3 +423,21 @@ DATA_INFO = "data.info"
 DATA_CONFIG = "data.config"
 PREPARED_DATA_VERSION_FILE = "data.version"
 PREPARED_DATA_VERSION = 2
+
+# reranking
+RERANK_BLEU = "bleu"
+RERANK_CHRF = "chrf"
+RERANK_METRICS = [RERANK_BLEU, RERANK_CHRF]
+
+# scoring
+SCORING_TYPE_NEGLOGPROB = 'neglogprob'
+SCORING_TYPE_LOGPROB = 'logprob'
+SCORING_TYPE_DEFAULT = SCORING_TYPE_NEGLOGPROB
+SCORING_TYPE_CHOICES = [SCORING_TYPE_NEGLOGPROB, SCORING_TYPE_LOGPROB]
+
+
+# parameter averaging
+AVERAGE_BEST = 'best'
+AVERAGE_LAST = 'last'
+AVERAGE_LIFESPAN = 'lifespan'
+AVERAGE_CHOICES = [AVERAGE_BEST, AVERAGE_LAST, AVERAGE_LIFESPAN]

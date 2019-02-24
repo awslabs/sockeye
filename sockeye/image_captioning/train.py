@@ -14,30 +14,32 @@
 """
 Training CLI for image captioning.
 """
+
+# Start the forkserver. It is important that this is done before any other imports so that the forkserver is in a clean
+# state.
+if __name__ == "__main__":
+    import sockeye.multiprocessing_utils as mp
+    mp.initialize()
+
+
 import argparse
 import json
 import os
 import pickle
+import logging
 from contextlib import ExitStack
 from typing import cast, Dict, List, Tuple, Optional
 
 import mxnet as mx
 import numpy as np
 
-from ..config import Config
-from ..log import setup_main_logger
-from ..train import check_resume, check_arg_compatibility, \
-    determine_context, create_decoder_config, \
-    create_optimizer_config, create_training_model
-from ..utils import check_condition
 # Sockeye captioner
 from . import arguments as arguments_image
 from . import checkpoint_decoder
 from . import data_io as data_io_image
 from . import encoder as encoder_image
-from .. import constants as C
-# Sockeye
 from .. import arguments
+from .. import constants as C
 from .. import data_io
 from .. import encoder
 from .. import loss
@@ -45,9 +47,14 @@ from .. import model
 from .. import training
 from .. import utils
 from .. import vocab
+from ..config import Config
+from ..log import setup_main_logger
+from ..train import check_resume, check_arg_compatibility, create_decoder_config, \
+    create_optimizer_config, create_training_model
+from ..utils import check_condition
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
-logger = setup_main_logger(__name__, file_logging=False, console=True)
+logger = logging.getLogger(__name__)
 
 
 def read_feature_shape(path):
@@ -81,33 +88,24 @@ def create_checkpoint_decoder(args: argparse.Namespace,
     if args.use_cpu or args.decode_and_evaluate_use_cpu:
         context = mx.cpu()
     elif args.decode_and_evaluate_device_id is not None:
-        # decode device is defined from the commandline
-        num_gpus = utils.get_num_gpus()
-        check_condition(num_gpus >= 1,
-                        "No GPUs found, consider running on the CPU with --use-cpu "
-                        "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
-                        "binary isn't on the path).")
-
-        if args.disable_device_locking:
-            context = utils.expand_requested_device_ids([args.decode_and_evaluate_device_id])
-        else:
-            context = exit_stack.enter_context(utils.acquire_gpus([args.decode_and_evaluate_device_id],
-                                                                  lock_dir=args.lock_dir))
-        context = mx.gpu(context[0])
-
+        context = utils.determine_context(device_ids=args.decode_and_evaluate_device_id,
+                                          use_cpu=False,
+                                          disable_device_locking=args.disable_device_locking,
+                                          lock_dir=args.lock_dir,
+                                          exit_stack=exit_stack)[0]
     else:
         # default decode context is the last training device
         context = train_context[-1]
 
     return checkpoint_decoder.CheckpointDecoderImageModel(context=context,
-                                                inputs=[args.validation_source] + args.validation_source_factors,
-                                                references=args.validation_target,
-                                                model=args.output,
-                                                sample_size=sample_size,
-                                                source_image_size=args.source_image_size,
-                                                image_root=args.validation_source_root,
-                                                max_output_length=args.max_output_length,
-                                                use_feature_loader=args.image_preextracted_features)
+                                                          inputs=[args.validation_source] + args.validation_source_factors,
+                                                          references=args.validation_target,
+                                                          model=args.output,
+                                                          sample_size=sample_size,
+                                                          source_image_size=args.source_image_size,
+                                                          image_root=args.validation_source_root,
+                                                          max_output_length=args.max_output_length,
+                                                          use_feature_loader=args.image_preextracted_features)
 
 
 def create_data_iters_and_vocab(args: argparse.Namespace,
@@ -129,6 +127,7 @@ def create_data_iters_and_vocab(args: argparse.Namespace,
     """
 
     _, num_words_target = args.num_words
+    num_words_target = num_words_target if num_words_target > 0 else None
     _, word_min_count_target = args.word_min_count
     batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
     batch_by_words = args.batch_type == C.BATCH_TYPE_WORD
@@ -169,7 +168,6 @@ def create_data_iters_and_vocab(args: argparse.Namespace,
         batch_by_words=batch_by_words,
         batch_num_devices=batch_num_devices,
         source_image_size=args.source_image_size,
-        fill_up=args.fill_up,
         max_seq_len_target=max_seq_len_target,
         bucketing=not args.no_bucketing,
         bucket_width=args.bucket_width,
@@ -187,19 +185,18 @@ def create_data_iters_and_vocab(args: argparse.Namespace,
 
 
 def create_encoder_config(args: argparse.Namespace) -> Tuple[Config, int]:
-
     if args.encoder == C.IMAGE_PRETRAIN_TYPE:
         number_of_kernels = args.source_image_size[0]
         encoded_seq_len = np.prod(args.source_image_size[1:])
         config_encoder = encoder_image.ImageLoadedCnnEncoderConfig(model_path=args.image_encoder_model_path,
-                                                          epoch=args.image_encoder_model_epoch,
-                                                          layer_name=args.image_encoder_layer,
-                                                          encoded_seq_len=encoded_seq_len,
-                                                          num_embed=args.image_encoder_num_hidden,
-                                                          no_global_descriptor=args.no_image_encoder_global_descriptor,
-                                                          preextracted_features=args.image_preextracted_features,
-                                                          number_of_kernels=number_of_kernels,
-                                                          positional_embedding_type=args.image_positional_embedding_type)
+                                                                   epoch=args.image_encoder_model_epoch,
+                                                                   layer_name=args.image_encoder_layer,
+                                                                   encoded_seq_len=encoded_seq_len,
+                                                                   num_embed=args.image_encoder_num_hidden,
+                                                                   no_global_descriptor=args.no_image_encoder_global_descriptor,
+                                                                   preextracted_features=args.image_preextracted_features,
+                                                                   number_of_kernels=number_of_kernels,
+                                                                   positional_embedding_type=args.image_positional_embedding_type)
         encoder_num_hidden = args.image_encoder_num_hidden
     else:
         raise ValueError("Image encoder must be provided. (current: {}, "
@@ -260,9 +257,10 @@ def get_preinit_encoders(encoders: List[encoder.Encoder]) -> List[Tuple[str, mx.
     :param encoders: List of encoders
     :return: The list of initializers
     """
-    init = []
+    init = []  # type: List[Tuple[str, mx.init.Initializer]]
     for enc in encoders:
         if hasattr(enc, "get_initializers"):
+            enc = cast(encoder_image.ImageLoadedCnnEncoder, enc)
             init.extend(enc.get_initializers())
     return init
 
@@ -271,6 +269,10 @@ def main():
     params = arguments.ConfigArgumentParser(description='Train Sockeye images-to-text models.')
     arguments_image.add_image_train_cli_args(params)
     args = params.parse_args()
+    train(args)
+
+
+def train(args: argparse.Namespace):
     # TODO: make training compatible with full net
     args.image_preextracted_features = True  # override this for now
 
@@ -280,10 +282,8 @@ def main():
     output_folder = os.path.abspath(args.output)
     resume_training = check_resume(args, output_folder)
 
-    global logger
-    logger = setup_main_logger(__name__,
-                               file_logging=True,
-                               console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
+    setup_main_logger(file_logging=True,
+                      console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
     utils.log_basic_info(args)
     with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "w") as fp:
         json.dump(vars(args), fp)
@@ -296,7 +296,16 @@ def main():
                 max_seq_len_source, max_seq_len_target)
 
     with ExitStack() as exit_stack:
-        context = determine_context(args, exit_stack)
+        context = utils.determine_context(device_ids=args.device_ids,
+                                          use_cpu=args.use_cpu,
+                                          disable_device_locking=args.disable_device_locking,
+                                          lock_dir=args.lock_dir,
+                                          exit_stack=exit_stack)
+        if args.batch_type == C.BATCH_TYPE_SENTENCE:
+            check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
+                                                                 "divisible by the number of devices. Choose a batch "
+                                                                 "size that is a multiple of %d." % len(context))
+        logger.info("Training Device(s): %s", ", ".join(str(c) for c in context))
 
         # Read feature size
         if args.image_preextracted_features:
@@ -353,12 +362,14 @@ def main():
 
         # Get initialization from encoders (useful for pretrained models)
         extra_initializers = get_preinit_encoders(training_model.encoder.encoders)
-        if len(extra_initializers)==0:
+        if len(extra_initializers) == 0:
             extra_initializers = None
 
         trainer = training.EarlyStoppingTrainer(model=training_model,
-                                                optimizer_config=create_optimizer_config(args, [1.0], extra_initializers),
+                                                optimizer_config=create_optimizer_config(args, [1.0],
+                                                                                         extra_initializers),
                                                 max_params_files_to_keep=args.keep_last_params,
+                                                keep_initializations=args.keep_initializations,
                                                 source_vocabs=[None],
                                                 target_vocab=target_vocab)
 
@@ -366,7 +377,7 @@ def main():
                     validation_iter=eval_iter,
                     early_stopping_metric=args.optimized_metric,
                     metrics=args.metrics,
-                    checkpoint_frequency=args.checkpoint_frequency,
+                    checkpoint_interval=args.checkpoint_interval,
                     max_num_not_improved=max_num_checkpoint_not_improved,
                     min_samples=min_samples,
                     max_samples=max_samples,

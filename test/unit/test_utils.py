@@ -11,10 +11,12 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import gzip
 import math
 import os
 import re
 import tempfile
+from tempfile import TemporaryDirectory
 
 import mxnet as mx
 import numpy as np
@@ -62,7 +64,7 @@ def test_expand_requested_device_ids(requested_device_ids, num_gpus_available, e
 
 
 @pytest.mark.parametrize("requested_device_ids, num_gpus_available, expected", device_params)
-def test_aquire_gpus(tmpdir, requested_device_ids, num_gpus_available, expected):
+def test_acquire_gpus(tmpdir, requested_device_ids, num_gpus_available, expected):
     with utils.acquire_gpus(requested_device_ids, lock_dir=str(tmpdir),
                             num_gpus_available=num_gpus_available) as acquired_gpus:
         assert set(acquired_gpus) == set(expected)
@@ -89,7 +91,7 @@ def test_expand_requested_device_ids_exception(requested_device_ids, num_gpus_av
 
 
 @pytest.mark.parametrize("requested_device_ids, num_gpus_available", device_params_expected_exception)
-def test_aquire_gpus_exception(tmpdir, requested_device_ids, num_gpus_available):
+def test_acquire_gpus_exception(tmpdir, requested_device_ids, num_gpus_available):
     with pytest.raises(ValueError):
         with utils.acquire_gpus(requested_device_ids, lock_dir=str(tmpdir),
                                 num_gpus_available=num_gpus_available) as _:
@@ -102,7 +104,7 @@ device_params_1_locked = [([-4, 3, 5], 7, [0, 2, 3, 4, 5, 6]),
 
 
 @pytest.mark.parametrize("requested_device_ids, num_gpus_available, expected", device_params_1_locked)
-def test_aquire_gpus_1_locked(tmpdir, requested_device_ids, num_gpus_available, expected):
+def test_acquire_gpus_1_locked(tmpdir, requested_device_ids, num_gpus_available, expected):
     gpu_1 = 1
     with utils.GpuFileLock([gpu_1], str(tmpdir)) as lock:
         with utils.acquire_gpus(requested_device_ids, lock_dir=str(tmpdir),
@@ -347,3 +349,47 @@ def test_split(num_factors):
     result = utils.split(data, num_outputs=num_factors, axis=2, squeeze_axis=True)
     assert isinstance(result, list)
     assert result[0].shape == (batch_size, bucket_key)
+
+
+def test_get_num_gpus():
+    assert utils.get_num_gpus() >= 0
+
+
+def _touch_file(fname, compressed: bool, empty: bool) -> str:
+    if compressed:
+        open_func = gzip.open
+    else:
+        open_func = open
+    with open_func(fname, encoding='utf8', mode='wt') as f:
+        if not empty:
+            for i in range(10):
+                print(str(i), file=f)
+    return fname
+
+
+def test_is_gzip_file():
+    with TemporaryDirectory() as temp:
+        fname = os.path.join(temp, 'test')
+        assert utils.is_gzip_file(_touch_file(fname, compressed=True, empty=True))
+        assert utils.is_gzip_file(_touch_file(fname, compressed=True, empty=False))
+        assert not utils.is_gzip_file(_touch_file(fname, compressed=False, empty=True))
+        assert not utils.is_gzip_file(_touch_file(fname, compressed=False, empty=False))
+
+
+def test_smart_open_without_suffix():
+    with TemporaryDirectory() as temp:
+        fname = os.path.join(temp, 'test')
+        _touch_file(fname, compressed=True, empty=False)
+        with utils.smart_open(fname) as fin:
+            assert len(fin.readlines()) == 10
+        _touch_file(fname, compressed=False, empty=False)
+        with utils.smart_open(fname) as fin:
+            assert len(fin.readlines()) == 10
+
+
+@pytest.mark.parametrize("data,expected_lengths", [
+    (mx.nd.array([[1, 2, 0], [1, 0, 0], [0, 0, 0]]), mx.nd.array([2, 1, 0]))
+])
+def test_compute_lengths(data, expected_lengths):
+    lengths = utils.compute_lengths(mx.sym.Variable('data')).eval(data=data)[0]
+    assert (lengths.asnumpy() == expected_lengths.asnumpy()).all()

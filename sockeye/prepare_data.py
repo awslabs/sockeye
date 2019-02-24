@@ -13,6 +13,7 @@
 
 import argparse
 import os
+import logging
 
 from . import arguments
 from . import constants as C
@@ -21,7 +22,7 @@ from . import utils
 from . import vocab
 from .log import setup_main_logger
 
-logger = setup_main_logger(__name__, file_logging=False, console=True)
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -32,11 +33,9 @@ def main():
 
 
 def prepare_data(args: argparse.Namespace):
-
     output_folder = os.path.abspath(args.output)
     os.makedirs(output_folder, exist_ok=True)
-    global logger
-    logger = setup_main_logger(__name__, file_logging=True, path=os.path.join(output_folder, C.LOG_NAME))
+    setup_main_logger(file_logging=True, path=os.path.join(output_folder, C.LOG_NAME))
 
     utils.seed_rngs(args.seed)
 
@@ -46,8 +45,8 @@ def prepare_data(args: argparse.Namespace):
     bucket_width = args.bucket_width
 
     source_paths = [args.source] + args.source_factors
-    # NOTE: Pre-existing source factor vocabularies not yet supported for prepare data
-    source_factor_vocab_paths = [None] * len(args.source_factors)
+    source_factor_vocab_paths = [args.source_factor_vocabs[i] if i < len(args.source_factor_vocabs)
+                                 else None for i in range(len(args.source_factors))]
     source_vocab_paths = [args.source_vocab] + source_factor_vocab_paths
 
     num_words_source, num_words_target = args.num_words
@@ -71,7 +70,8 @@ def prepare_data(args: argparse.Namespace):
         num_words_source=num_words_source,
         word_min_count_source=word_min_count_source,
         num_words_target=num_words_target,
-        word_min_count_target=word_min_count_target)
+        word_min_count_target=word_min_count_target,
+        pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
     data_io.prepare_data(source_fnames=source_paths,
                          target_fname=args.target,
@@ -91,4 +91,3 @@ def prepare_data(args: argparse.Namespace):
 
 if __name__ == "__main__":
     main()
-

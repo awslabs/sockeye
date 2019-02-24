@@ -1,4 +1,0 @@
-pyyaml==3.12
-mxnet-cu91mkl==1.2.0
-numpy>=1.12
-typing

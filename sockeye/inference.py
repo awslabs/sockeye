@@ -1,4 +1,4 @@
-# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -14,6 +14,7 @@
 """
 Code for inference/translation
 """
+import copy
 import itertools
 import json
 import logging
@@ -21,7 +22,7 @@ import os
 import time
 from collections import defaultdict
 from functools import lru_cache, partial
-from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set
+from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set, Any
 
 import mxnet as mx
 import numpy as np
@@ -55,6 +56,7 @@ class InferenceModel(model.SockeyeModel):
     :param decoder_return_logit_inputs: Decoder returns inputs to logit computation instead of softmax over target
                                         vocabulary.  Used when logits/softmax are handled separately.
     :param cache_output_layer_w_b: Cache weights and biases for logit computation.
+    :param skip_softmax: If True, does not compute softmax for greedy decoding.
     """
 
     def __init__(self,
@@ -67,13 +69,18 @@ class InferenceModel(model.SockeyeModel):
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  decoder_return_logit_inputs: bool = False,
                  cache_output_layer_w_b: bool = False,
-                 forced_max_output_len: Optional[int] = None) -> None:
+                 forced_max_output_len: Optional[int] = None,
+                 skip_softmax: bool = False) -> None:
         super().__init__(config)
         self.params_fname = params_fname
         self.context = context
         self.beam_size = beam_size
         utils.check_condition(beam_size < self.config.vocab_target_size,
                               'The beam size must be smaller than the target vocabulary size.')
+        if skip_softmax:
+            assert beam_size == 1, 'Skipping softmax does not have any effect for beam size > 1'
+        self.skip_softmax = skip_softmax
+
         self.batch_size = batch_size
         self.softmax_temperature = softmax_temperature
         self.max_input_length, self.get_max_output_length = models_max_input_output_length([self],
@@ -238,8 +245,12 @@ class InferenceModel(model.SockeyeModel):
                 # logits: (batch_size, target_vocab_size)
                 logits = self.output_layer(target_decoded)
                 if self.softmax_temperature is not None:
-                    logits /= self.softmax_temperature
-                outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
+                    logits = logits / self.softmax_temperature
+                if self.skip_softmax:
+                    # skip softmax for greedy decoding
+                    outputs = logits
+                else:
+                    outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
 
             data_names = [C.TARGET_NAME] + state_names
             label_names = []  # type: List[str]
@@ -272,11 +283,12 @@ class InferenceModel(model.SockeyeModel):
         :return: List of data descriptions.
         """
         source_max_length, target_max_length = bucket_key
-        return [mx.io.DataDesc(name=C.TARGET_NAME, shape=(self.batch_size * self.beam_size,), layout="NT")] + \
-               self.decoder.state_shapes(self.batch_size * self.beam_size,
-                                         target_max_length,
-                                         self.encoder.get_encoded_seq_len(source_max_length),
-                                         self.encoder.get_num_hidden())
+        return [mx.io.DataDesc(name=C.TARGET_NAME, shape=(self.batch_size * self.beam_size,),
+                               layout="NT")] + self.decoder.state_shapes(self.batch_size * self.beam_size,
+                                                                         target_max_length,
+                                                                         self.encoder.get_encoded_seq_len(
+                                                                             source_max_length),
+                                                                         self.encoder.get_num_hidden())
 
     def run_encoder(self,
                     source: mx.nd.NDArray,
@@ -362,9 +374,11 @@ def load_models(context: mx.context.Context,
                 decoder_return_logit_inputs: bool = False,
                 cache_output_layer_w_b: bool = False,
                 forced_max_output_len: Optional[int] = None,
-                override_dtype: Optional[str] = None) -> Tuple[List[InferenceModel],
-                                                               List[vocab.Vocab],
-                                                               vocab.Vocab]:
+                override_dtype: Optional[str] = None,
+                output_scores: bool = False,
+                sampling: bool = False) -> Tuple[List[InferenceModel],
+                                                 List[vocab.Vocab],
+                                                 vocab.Vocab]:
     """
     Loads a list of models for inference.
 
@@ -383,6 +397,10 @@ def load_models(context: mx.context.Context,
                                    restrict lexicon).
     :param forced_max_output_len: An optional overwrite of the maximum output length.
     :param override_dtype: Overrides dtype of encoder and decoder defined at training time to a different one.
+    :param output_scores: Whether the scores will be needed as outputs. If True, scores will be normalized, negative
+           log probabilities. If False, scores will be negative, raw logit activations if decoding with beam size 1
+           and a single model.
+    :param sampling: True if the model is sampling instead of doing normal topk().
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
@@ -393,6 +411,14 @@ def load_models(context: mx.context.Context,
 
     if checkpoints is None:
         checkpoints = [None] * len(model_folders)
+    else:
+        utils.check_condition(len(checkpoints) == len(model_folders), "Must provide checkpoints for each model")
+
+    skip_softmax = False
+    # performance tweak: skip softmax for a single model, decoding with beam size 1, when not sampling and no scores are required in output.
+    if len(model_folders) == 1 and beam_size == 1 and not output_scores and not sampling:
+        skip_softmax = True
+        logger.info("Enabled skipping softmax for a single model and greedy decoding.")
 
     for model_folder, checkpoint in zip(model_folders, checkpoints):
         model_source_vocabs = vocab.load_source_vocabs(model_folder)
@@ -404,9 +430,17 @@ def load_models(context: mx.context.Context,
         logger.info("Model version: %s", model_version)
         utils.check_version(model_version)
         model_config = model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
+
+        logger.info("Disabling dropout layers for performance reasons")
+        model_config.disable_dropout()
+
         if override_dtype is not None:
             model_config.config_encoder.dtype = override_dtype
             model_config.config_decoder.dtype = override_dtype
+            if override_dtype == C.DTYPE_FP16:
+                logger.warning('Experimental feature \'override_dtype=float16\' has been used. '
+                               'This feature may be removed or change its behaviour in future. '
+                               'DO NOT USE IT IN PRODUCTION!')
 
         if checkpoint is None:
             params_fname = os.path.join(model_folder, C.PARAMS_BEST_NAME)
@@ -420,7 +454,8 @@ def load_models(context: mx.context.Context,
                                          batch_size=batch_size,
                                          softmax_temperature=softmax_temperature,
                                          decoder_return_logit_inputs=decoder_return_logit_inputs,
-                                         cache_output_layer_w_b=cache_output_layer_w_b)
+                                         cache_output_layer_w_b=cache_output_layer_w_b,
+                                         skip_softmax=skip_softmax)
         utils.check_condition(inference_model.num_source_factors == len(model_source_vocabs),
                               "Number of loaded source vocabularies (%d) does not match "
                               "number of source factors for model '%s' (%d)" % (len(model_source_vocabs), model_folder,
@@ -564,39 +599,44 @@ def get_max_input_output_length(supported_max_seq_len_source: Optional[int],
 
 BeamHistory = Dict[str, List]
 Tokens = List[str]
+SentenceId = Union[int, str]
 
 
 class TranslatorInput:
     """
     Object required by Translator.translate().
+    If not None, `pass_through_dict` is an arbitrary dictionary instantiated from a JSON object
+    via `make_input_from_dict()`, and it contains extra fields found in an input JSON object.
+    If `--output-type json` is selected, all such fields that are not fields used or changed by
+    Sockeye will be included in the output JSON object. This provides a mechanism for passing
+    fields through the call to Sockeye.
 
     :param sentence_id: Sentence id.
     :param tokens: List of input tokens.
     :param factors: Optional list of additional factor sequences.
     :param constraints: Optional list of target-side constraints.
-    :param chunk_id: Chunk id. Defaults to -1.
+    :param pass_through_dict: Optional raw dictionary of arbitrary input data.
     """
 
-    __slots__ = ('sentence_id', 'tokens', 'factors', 'constraints', 'chunk_id')
+    __slots__ = ('sentence_id', 'tokens', 'factors', 'constraints', 'avoid_list', 'pass_through_dict')
 
     def __init__(self,
-                 sentence_id: int,
+                 sentence_id: SentenceId,
                  tokens: Tokens,
                  factors: Optional[List[Tokens]] = None,
                  constraints: Optional[List[Tokens]] = None,
-                 chunk_id: int = -1) -> None:
+                 avoid_list: Optional[List[Tokens]] = None,
+                 pass_through_dict: Optional[Dict] = None) -> None:
         self.sentence_id = sentence_id
-        self.chunk_id = chunk_id
         self.tokens = tokens
         self.factors = factors
         self.constraints = constraints
+        self.avoid_list = avoid_list
+        self.pass_through_dict = pass_through_dict
 
     def __str__(self):
-        return 'TranslatorInput(%d, %s, factors=%s, constraints=%s, chunk_id=%d)' % (self.sentence_id,
-                                                                                     self.tokens,
-                                                                                     self.factors,
-                                                                                     self.constraints,
-                                                                                     self.chunk_id)
+        return 'TranslatorInput(%s, %s, factors=%s, constraints=%s, avoid=%s)' \
+            % (self.sentence_id, self.tokens, self.factors, self.constraints, self.avoid_list)
 
     def __len__(self):
         return len(self.tokens)
@@ -618,7 +658,7 @@ class TranslatorInput:
 
         if len(self.tokens) > chunk_size and self.constraints is not None:
             logger.warning(
-                'Input %d has length (%d) that exceeds max input length (%d), '
+                'Input %s has length (%d) that exceeds max input length (%d), '
                 'triggering internal splitting. Placing all target-side constraints '
                 'with the first chunk, which is probably wrong.',
                 self.sentence_id, len(self.tokens), chunk_size)
@@ -628,11 +668,13 @@ class TranslatorInput:
             # Constrained decoding is not supported for chunked TranslatorInputs. As a fall-back, constraints are
             # assigned to the first chunk
             constraints = self.constraints if chunk_id == 0 else None
+            pass_through_dict = self.pass_through_dict if chunk_id == 0 else None
             yield TranslatorInput(sentence_id=self.sentence_id,
                                   tokens=self.tokens[i:i + chunk_size],
                                   factors=factors,
                                   constraints=constraints,
-                                  chunk_id=chunk_id)
+                                  avoid_list=self.avoid_list,
+                                  pass_through_dict=pass_through_dict)
 
     def with_eos(self) -> 'TranslatorInput':
         """
@@ -643,67 +685,103 @@ class TranslatorInput:
                                factors=[factor + [C.EOS_SYMBOL] for factor in
                                         self.factors] if self.factors is not None else None,
                                constraints=self.constraints,
-                               chunk_id=self.chunk_id)
+                               avoid_list=self.avoid_list,
+                               pass_through_dict=self.pass_through_dict)
 
 
 class BadTranslatorInput(TranslatorInput):
 
-    def __init__(self, sentence_id, tokens):
-        super().__init__(sentence_id=sentence_id, tokens=tokens, chunk_id=-1, factors=None)
+    def __init__(self, sentence_id: SentenceId, tokens: Tokens) -> None:
+        super().__init__(sentence_id=sentence_id, tokens=tokens, factors=None)
 
 
-def _bad_input(sentence_id: int, reason: str = '') -> BadTranslatorInput:
-    logger.warning("Bad input (%d): '%s'. Will return empty output.", sentence_id, reason.strip())
+def _bad_input(sentence_id: SentenceId, reason: str = '') -> BadTranslatorInput:
+    logger.warning("Bad input (%s): '%s'. Will return empty output.", sentence_id, reason.strip())
     return BadTranslatorInput(sentence_id=sentence_id, tokens=[])
 
 
-def make_input_from_plain_string(sentence_id: int, string: str) -> TranslatorInput:
+def make_input_from_plain_string(sentence_id: SentenceId, string: str) -> TranslatorInput:
     """
     Returns a TranslatorInput object from a plain string.
 
-    :param sentence_id: An integer id.
+    :param sentence_id: Sentence id.
     :param string: An input string.
     :return: A TranslatorInput.
     """
     return TranslatorInput(sentence_id, tokens=list(data_io.get_tokens(string)), factors=None)
 
 
-def make_input_from_json_string(sentence_id: int, json_string: str) -> TranslatorInput:
+def make_input_from_json_string(sentence_id: SentenceId, json_string: str) -> TranslatorInput:
     """
     Returns a TranslatorInput object from a JSON object, serialized as a string.
 
-    :param sentence_id: An integer id.
+    :param sentence_id: Sentence id.
     :param json_string: A JSON object serialized as a string that must contain a key "text", mapping to the input text,
            and optionally a key "factors" that maps to a list of strings, each of which representing a factor sequence
-           for the input text.
+           for the input text. Constraints and an avoid list can also be added through the "constraints" and "avoid"
+           keys.
     :return: A TranslatorInput.
     """
     try:
         jobj = json.loads(json_string, encoding=C.JSON_ENCODING)
-        tokens = jobj[C.JSON_TEXT_KEY]
-        tokens = list(data_io.get_tokens(tokens))
-        factors = jobj.get(C.JSON_FACTORS_KEY)
-        if isinstance(factors, list):
-            factors = [list(data_io.get_tokens(factor)) for factor in factors]
-            lengths = [len(f) for f in factors]
-            if not all(l == len(tokens) for l in lengths):
-                logger.error("Factors have different length than input text: %d vs. %s", len(tokens), str(lengths))
-                return _bad_input(sentence_id, reason=json_string)
-        else:
-            factors = None
-        constraints = jobj.get(C.JSON_CONSTRAINTS_KEY)
-        if isinstance(constraints, list) and len(constraints) > 0:
-            constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
-        else:
-            constraints = None
-        return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors, constraints=constraints)
+        return make_input_from_dict(sentence_id, jobj)
 
     except Exception as e:
         logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
         return _bad_input(sentence_id, reason=json_string)
 
 
-def make_input_from_factored_string(sentence_id: int,
+def make_input_from_dict(sentence_id: SentenceId, input_dict: Dict) -> TranslatorInput:
+    """
+    Returns a TranslatorInput object from a JSON object, serialized as a string.
+
+    :param sentence_id: Sentence id.
+    :param input_dict: A dict that must contain a key "text", mapping to the input text, and optionally a key "factors"
+           that maps to a list of strings, each of which representing a factor sequence for the input text.
+           Constraints and an avoid list can also be added through the "constraints" and "avoid" keys.
+    :return: A TranslatorInput.
+    """
+    try:
+        tokens = input_dict[C.JSON_TEXT_KEY]
+        tokens = list(data_io.get_tokens(tokens))
+        factors = input_dict.get(C.JSON_FACTORS_KEY)
+        if isinstance(factors, list):
+            factors = [list(data_io.get_tokens(factor)) for factor in factors]
+            lengths = [len(f) for f in factors]
+            if not all(length == len(tokens) for length in lengths):
+                logger.error("Factors have different length than input text: %d vs. %s", len(tokens), str(lengths))
+                return _bad_input(sentence_id, reason=str(input_dict))
+
+        # List of phrases to prevent from occuring in the output
+        avoid_list = input_dict.get(C.JSON_AVOID_KEY)
+
+        # List of phrases that must appear in the output
+        constraints = input_dict.get(C.JSON_CONSTRAINTS_KEY)
+
+        # If there is overlap between positive and negative constraints, assume the user wanted
+        # the words, and so remove them from the avoid_list (negative constraints)
+        if constraints is not None and avoid_list is not None:
+            avoid_set = set(avoid_list)
+            overlap = set(constraints).intersection(avoid_set)
+            if len(overlap) > 0:
+                logger.warning("Overlap between constraints and avoid set, dropping the overlapping avoids")
+                avoid_list = list(avoid_set.difference(overlap))
+
+        # Convert to a list of tokens
+        if isinstance(avoid_list, list):
+            avoid_list = [list(data_io.get_tokens(phrase)) for phrase in avoid_list]
+        if isinstance(constraints, list):
+            constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
+
+        return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors,
+                               constraints=constraints, avoid_list=avoid_list, pass_through_dict=input_dict)
+
+    except Exception as e:
+        logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
+        return _bad_input(sentence_id, reason=str(input_dict))
+
+
+def make_input_from_factored_string(sentence_id: SentenceId,
                                     factored_string: str,
                                     translator: 'Translator',
                                     delimiter: str = C.DEFAULT_FACTOR_DELIMITER) -> TranslatorInput:
@@ -711,7 +789,7 @@ def make_input_from_factored_string(sentence_id: int,
     Returns a TranslatorInput object from a string with factor annotations on a token level, separated by delimiter.
     If translator does not require any source factors, the string is parsed as a plain token string.
 
-    :param sentence_id: An integer id.
+    :param sentence_id: Sentence id.
     :param factored_string: An input string with additional factors per token, separated by delimiter.
     :param translator: A translator object.
     :param delimiter: A factor delimiter. Default: '|'.
@@ -743,12 +821,12 @@ def make_input_from_factored_string(sentence_id: int,
     return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
 
 
-def make_input_from_multiple_strings(sentence_id: int, strings: List[str]) -> TranslatorInput:
+def make_input_from_multiple_strings(sentence_id: SentenceId, strings: List[str]) -> TranslatorInput:
     """
     Returns a TranslatorInput object from multiple strings, where the first element corresponds to the surface tokens
     and the remaining elements to additional factors. All strings must parse into token sequences of the same length.
 
-    :param sentence_id: An integer id.
+    :param sentence_id: Sentence id.
     :param strings: A list of strings representing a factored input sequence.
     :return: A TranslatorInput.
     """
@@ -767,62 +845,158 @@ class TranslatorOutput:
     """
     Output structure from Translator.
 
-    :param id: Id of input sentence.
+    :param sentence_id: Sentence id.
     :param translation: Translation string without sentence boundary tokens.
     :param tokens: List of translated tokens.
     :param attention_matrix: Attention matrix. Shape: (target_length, source_length).
     :param score: Negative log probability of generated translation.
+    :param pass_through_dict: Dictionary of key/value pairs to pass through when working with JSON.
     :param beam_histories: List of beam histories. The list will contain more than one
            history if it was split due to exceeding max_length.
+    :param nbest_translations: List of nbest translations as strings.
+    :param nbest_tokens: List of nbest translations as lists of tokens.
+    :param nbest_attention_matrices: List of attention matrices, one for each nbest translation.
+    :param nbest_scores: List of nbest scores, one for each nbest translation.
     """
-    __slots__ = ('id', 'translation', 'tokens', 'attention_matrix', 'score', 'beam_histories')
+    __slots__ = ('sentence_id',
+                 'translation',
+                 'tokens',
+                 'attention_matrix',
+                 'score',
+                 'pass_through_dict',
+                 'beam_histories',
+                 'nbest_translations',
+                 'nbest_tokens',
+                 'nbest_attention_matrices',
+                 'nbest_scores')
 
     def __init__(self,
-                 id: int,
+                 sentence_id: SentenceId,
                  translation: str,
-                 tokens: List[str],
+                 tokens: Tokens,
                  attention_matrix: np.ndarray,
                  score: float,
-                 beam_histories: Optional[List[BeamHistory]] = None) -> None:
-        self.id = id
+                 pass_through_dict: Optional[Dict[str,Any]] = None,
+                 beam_histories: Optional[List[BeamHistory]] = None,
+                 nbest_translations: Optional[List[str]] = None,
+                 nbest_tokens: Optional[List[Tokens]] = None,
+                 nbest_attention_matrices: Optional[List[np.ndarray]] = None,
+                 nbest_scores: Optional[List[float]] = None) -> None:
+        self.sentence_id = sentence_id
         self.translation = translation
         self.tokens = tokens
         self.attention_matrix = attention_matrix
         self.score = score
+        self.pass_through_dict = copy.deepcopy(pass_through_dict) if pass_through_dict else {}
         self.beam_histories = beam_histories
+        self.nbest_translations = nbest_translations
+        self.nbest_tokens = nbest_tokens
+        self.nbest_attention_matrices = nbest_attention_matrices
+        self.nbest_scores = nbest_scores
+
+    def json(self, align_threshold: float = 0.0) -> Dict:
+        """
+        Returns a dictionary suitable for json.dumps() representing all
+        the information in the class. It is initialized with any keys
+        present in the corresponding `TranslatorInput` object's pass_through_dict.
+        Keys from here that are not overwritten by Sockeye will thus be passed
+        through to the output.
+
+        :param align_threshold: If alignments are defined, only print ones over this threshold.
+        :return: A dictionary.
+        """
+        _d = self.pass_through_dict  # type: Dict[str, Any]
+        _d['sentence_id'] = self.sentence_id
+        _d['translation'] = self.translation
+        _d['score'] = self.score
+
+        if self.nbest_translations is not None and len(self.nbest_translations) > 1:
+            _d['translations'] = self.nbest_translations
+            _d['scores'] = self.nbest_scores
+            if self.nbest_attention_matrices:
+                extracted_alignments = []
+                for alignment_matrix in self.nbest_attention_matrices:
+                    extracted_alignments.append(list(utils.get_alignments(alignment_matrix, threshold=align_threshold)))
+                _d['alignments'] = extracted_alignments
+
+        return _d
 
 
 TokenIds = List[int]
 
 
+class NBestTranslations:
+    __slots__ = ('target_ids_list',
+                 'attention_matrices',
+                 'scores')
+
+    def __init__(self,
+                 target_ids_list: List[TokenIds],
+                 attention_matrices: List[np.ndarray],
+                 scores: List[float]) -> None:
+
+        self.target_ids_list = target_ids_list
+        self.attention_matrices = attention_matrices
+        self.scores = scores
+
+
 class Translation:
-    __slots__ = ('target_ids', 'attention_matrix', 'score', 'beam_histories')
+    __slots__ = ('target_ids',
+                 'attention_matrix',
+                 'score',
+                 'beam_histories',
+                 'nbest_translations')
 
     def __init__(self,
                  target_ids: TokenIds,
                  attention_matrix: np.ndarray,
                  score: float,
-                 beam_history: List[BeamHistory] = None) -> None:
+                 beam_histories: List[BeamHistory] = None,
+                 nbest_translations: NBestTranslations = None) -> None:
         self.target_ids = target_ids
         self.attention_matrix = attention_matrix
         self.score = score
-        self.beam_histories = beam_history if beam_history is not None else []
+        self.beam_histories = beam_histories if beam_histories is not None else []
+        self.nbest_translations = nbest_translations
 
 
-def empty_translation() -> Translation:
-    return Translation(target_ids=[], attention_matrix=np.asarray([[0]]), score=-np.inf)
+def empty_translation(add_nbest: bool = False) -> Translation:
+    """
+    Return an empty translation.
+
+    :param add_nbest: Include (empty) nbest_translations in the translation object.
+    """
+    return Translation(target_ids=[],
+                       attention_matrix=np.asarray([[0]]),
+                       score=-np.inf,
+                       nbest_translations=NBestTranslations([], [], []) if add_nbest else None
+                       )
 
 
-TranslatedChunk = NamedTuple('TranslatedChunk', [
-    ('id', int),
-    ('chunk_id', int),
-    ('translation', Translation),
+IndexedTranslatorInput = NamedTuple('IndexedTranslatorInput', [
+    ('input_idx', int),
+    ('chunk_idx', int),
+    ('translator_input', TranslatorInput)
 ])
 """
 Translation of a chunk of a sentence.
 
-:param id: Id of the sentence.
-:param chunk_id: Id of the chunk.
+:param input_idx: Internal index of translation requests to keep track of the correct order of translations.
+:param chunk_idx: The index of the chunk. Used when TranslatorInputs get split across multiple chunks.
+:param input: The translator input.
+"""
+
+
+IndexedTranslation = NamedTuple('IndexedTranslation', [
+    ('input_idx', int),
+    ('chunk_idx', int),
+    ('translation', Translation)
+])
+"""
+Translation of a chunk of a sentence.
+
+:param input_idx: Internal index of translation requests to keep track of the correct order of translations.
+:param chunk_idx: The index of the chunk. Used when TranslatorInputs get split across multiple chunks.
 :param translation: The translation of the input chunk.
 """
 
@@ -881,42 +1055,99 @@ class LengthPenalty(mx.gluon.HybridBlock):
         return self.hybrid_forward(None, lengths)
 
 
-def _concat_translations(translations: List[Translation], start_id: int, stop_ids: Set[int],
+def _concat_nbest_translations(translations: List[Translation], stop_ids: Set[int],
+                               length_penalty: LengthPenalty) -> Translation:
+    """
+    Combines nbest translations through concatenation.
+
+    :param translations: A list of translations (sequence starting with BOS symbol,
+        attention_matrix), score and length.
+    :param stop_ids: The EOS symbols.
+    :return: A concatenation of the translations with a score.
+    """
+    expanded_translations = (_expand_nbest_translation(translation) for translation in translations)
+
+    concatenated_translations = []  # type: List[Translation]
+
+    for translations_to_concat in zip(*expanded_translations):
+        concatenated_translations.append(_concat_translations(translations=list(translations_to_concat),
+                                                              stop_ids=stop_ids,
+                                                              length_penalty=length_penalty))
+
+    return _reduce_nbest_translations(concatenated_translations)
+
+
+def _reduce_nbest_translations(nbest_translations_list: List[Translation]) -> Translation:
+    """
+    Combines Translation objects that are nbest translations of the same sentence.
+
+    :param nbest_translations_list: A list of Translation objects, all of them translations of
+        the same source sentence.
+    :return: A single Translation object where nbest lists are collapsed.
+    """
+    best_translation = nbest_translations_list[0]
+
+    sequences = [translation.target_ids for translation in nbest_translations_list]
+    attention_matrices = [translation.attention_matrix for translation in nbest_translations_list]
+    scores = [translation.score for translation in nbest_translations_list]
+
+    nbest_translations = NBestTranslations(sequences, attention_matrices, scores)
+
+    return Translation(best_translation.target_ids,
+                       best_translation.attention_matrix,
+                       best_translation.score,
+                       best_translation.beam_histories,
+                       nbest_translations)
+
+
+def _expand_nbest_translation(translation: Translation) -> List[Translation]:
+    """
+    Expand nbest translations in a single Translation object to one Translation
+        object per nbest translation.
+
+    :param translation: A Translation object.
+    :return: A list of Translation objects.
+    """
+    nbest_list = []  # type = List[Translation]
+    for target_ids, attention_matrix, score in zip(translation.nbest_translations.target_ids_list,
+                                                   translation.nbest_translations.attention_matrices,
+                                                   translation.nbest_translations.scores):
+        nbest_list.append(Translation(target_ids, attention_matrix, score, translation.beam_histories))
+
+    return nbest_list
+
+
+def _concat_translations(translations: List[Translation], stop_ids: Set[int],
                          length_penalty: LengthPenalty) -> Translation:
     """
-    Combine translations through concatenation.
+    Combines translations through concatenation.
 
     :param translations: A list of translations (sequence starting with BOS symbol, attention_matrix), score and length.
-    :param start_id: The EOS symbol.
-    :param translations: The BOS symbols.
-    :return: A concatenation if the translations with a score.
+    :param stop_ids: The EOS symbols.
+    :return: A concatenation of the translations with a score.
     """
     # Concatenation of all target ids without BOS and EOS
-    target_ids = [start_id]
+    target_ids = []
     attention_matrices = []
     beam_histories = []  # type: List[BeamHistory]
+
     for idx, translation in enumerate(translations):
-        assert translation.target_ids[0] == start_id
         if idx == len(translations) - 1:
-            target_ids.extend(translation.target_ids[1:])
-            attention_matrices.append(translation.attention_matrix[1:, :])
+            target_ids.extend(translation.target_ids)
+            attention_matrices.append(translation.attention_matrix)
         else:
             if translation.target_ids[-1] in stop_ids:
-                target_ids.extend(translation.target_ids[1:-1])
-                attention_matrices.append(translation.attention_matrix[1:-1, :])
+                target_ids.extend(translation.target_ids[:-1])
+                attention_matrices.append(translation.attention_matrix[:-1, :])
             else:
-                target_ids.extend(translation.target_ids[1:])
-                attention_matrices.append(translation.attention_matrix[1:, :])
+                target_ids.extend(translation.target_ids)
+                attention_matrices.append(translation.attention_matrix)
         beam_histories.extend(translation.beam_histories)
 
     # Combine attention matrices:
     attention_shapes = [attention_matrix.shape for attention_matrix in attention_matrices]
-    # Adding another row for the empty BOS alignment vector
-    bos_align_shape = np.asarray([1, 0])
-    attention_matrix_combined = np.zeros(np.sum(np.asarray(attention_shapes), axis=0) + bos_align_shape)
-
-    # We start at position 1 as position 0 is for the BOS, which is kept zero
-    pos_t, pos_s = 1, 0
+    attention_matrix_combined = np.zeros(np.sum(np.asarray(attention_shapes), axis=0))
+    pos_t, pos_s = 0, 0
     for attention_matrix, (len_t, len_s) in zip(attention_matrices, attention_shapes):
         attention_matrix_combined[pos_t:pos_t + len_t, pos_s:pos_s + len_s] = attention_matrix
         pos_t += len_t
@@ -939,13 +1170,17 @@ class Translator:
     :param ensemble_mode: Ensemble mode: linear or log_linear combination.
     :param length_penalty: Length penalty instance.
     :param beam_prune: Beam pruning difference threshold.
-    :param beam_search_stop: The stopping criterium.
+    :param beam_search_stop: The stopping criterion.
     :param models: List of models.
     :param source_vocabs: Source vocabularies.
     :param target_vocab: Target vocabulary.
+    :param nbest_size: Size of nbest list of translations.
     :param restrict_lexicon: Top-k lexicon to use for target vocabulary restriction.
+    :param avoid_list: Global list of phrases to exclude from the output.
     :param store_beam: If True, store the beam search history and return it in the TranslatorOutput.
     :param strip_unknown_words: If True, removes any <unk> symbols from outputs.
+    :param skip_topk: If True, uses argmax instead of topk for greedy decoding.
+    :param sample: If True, sample from softmax multinomial instead of using topk.
     """
 
     def __init__(self,
@@ -958,9 +1193,13 @@ class Translator:
                  models: List[InferenceModel],
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
+                 nbest_size: int = 1,
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
+                 avoid_list: Optional[str] = None,
                  store_beam: bool = False,
-                 strip_unknown_words: bool = False) -> None:
+                 strip_unknown_words: bool = False,
+                 skip_topk: bool = False,
+                 sample: int = None) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
@@ -974,21 +1213,41 @@ class Translator:
         assert C.PAD_ID == 0, "pad id should be 0"
         self.stop_ids = {self.vocab_target[C.EOS_SYMBOL], C.PAD_ID}  # type: Set[int]
         self.strip_ids = self.stop_ids.copy()  # ids to strip from the output
+        self.unk_id = self.vocab_target[C.UNK_SYMBOL]
         if strip_unknown_words:
-            self.strip_ids.add(self.vocab_target[C.UNK_SYMBOL])
+            self.strip_ids.add(self.unk_id)
         self.models = models
         utils.check_condition(all(models[0].source_with_eos == m.source_with_eos for m in models),
                               "The source_with_eos property must match across models.")
         self.source_with_eos = models[0].source_with_eos
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.beam_size = self.models[0].beam_size
+        self.nbest_size = nbest_size
+        utils.check_condition(self.beam_size >= nbest_size, 'nbest_size must be smaller or equal to beam_size.')
+        if self.nbest_size > 1:
+            utils.check_condition(self.beam_search_stop == C.BEAM_SEARCH_STOP_ALL,
+                                  "nbest_size > 1 requires beam_search_stop to be set to 'all'")
         self.batch_size = self.models[0].batch_size
+
+        if any(m.skip_softmax for m in self.models):
+            utils.check_condition(len(self.models) == 1 and self.beam_size == 1,
+                                  "Skipping softmax cannot be enabled for ensembles or beam sizes > 1.")
+
+        self.skip_topk = skip_topk
+        if self.skip_topk:
+            utils.check_condition(self.beam_size == 1, "skip_topk has no effect if beam size is larger than 1")
+            utils.check_condition(len(self.models) == 1, "skip_topk has no effect for decoding with more than 1 model")
+
+        self.sample = sample
+        utils.check_condition(not self.sample or self.restrict_lexicon is None,
+                              "Sampling is not available when working with a restricted lexicon.")
+
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
-        self.max_input_length = self.models[0].max_input_length
+        self._max_input_length = self.models[0].max_input_length
         if bucket_source_width > 0:
-            self.buckets_source = data_io.define_buckets(self.max_input_length, step=bucket_source_width)
+            self.buckets_source = data_io.define_buckets(self._max_input_length, step=bucket_source_width)
         else:
-            self.buckets_source = [self.max_input_length]
+            self.buckets_source = [self._max_input_length]
         self.pad_dist = mx.nd.full((self.batch_size * self.beam_size, len(self.vocab_target) - 1), val=np.inf,
                                    ctx=self.context)
         # These are constants used for manipulation of the beam and scores (particularly for pruning)
@@ -997,48 +1256,91 @@ class Translator:
                                     ctx=self.context, dtype='float32')
 
         # offset for hypothesis indices in batch decoding
-        self.offset = mx.nd.array(np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size), self.beam_size),
+        self.offset = mx.nd.array(np.repeat(np.arange(0, self.batch_size * self.beam_size, self.beam_size),
+                                            self.beam_size),
                                   dtype='int32', ctx=self.context)
+        # locations of each batch item when first dimension is (batch * beam)
+        self.batch_indices = mx.nd.array(np.arange(0, self.batch_size * self.beam_size, self.beam_size), dtype='int32', ctx=self.context)
 
         self._update_scores = UpdateScores()
         self._update_scores.initialize(ctx=self.context)
-        self._update_scores.hybridize()
+        self._update_scores.hybridize(static_alloc=True, static_shape=True)
 
-        # topk function used in beam search
-        self._topk = partial(utils.topk,
-                             k=self.beam_size,
-                             batch_size=self.batch_size,
-                             offset=self.offset,
-                             use_mxnet_topk=self.context != mx.cpu())  # MXNet implementation is faster on GPUs
+        # Vocabulary selection leads to different vocabulary sizes across requests. Hence, we cannot use a
+        # statically-shaped HybridBlock for the topk operation in this case; resorting to imperative topk
+        # function in this case.
+        if not self.restrict_lexicon:
+            if self.skip_topk:
+                self._top = Top1(k=self.beam_size,
+                                 batch_size=self.batch_size)  # type: mx.gluon.HybridBlock
+            elif self.sample is not None:
+                self._top = SampleK(k=self.beam_size,
+                                    n=self.sample,
+                                    batch_size=self.batch_size,
+                                    context=self.context)  # type: mx.gluon.HybridBlock
+            else:
+                self._top = TopK(k=self.beam_size,
+                                 batch_size=self.batch_size,
+                                 vocab_size=len(self.vocab_target))  # type: mx.gluon.HybridBlock
+
+            self._top.initialize(ctx=self.context)
+            self._top.hybridize(static_alloc=True, static_shape=True)
+        else:
+            if self.skip_topk:
+                self._top = partial(utils.top1, offset=self.offset)  # type: Callable
+            else:
+                self._top = partial(utils.topk, k=self.beam_size, offset=self.offset)  # type: Callable
 
         self._sort_by_index = SortByIndex()
         self._sort_by_index.initialize(ctx=self.context)
-        self._sort_by_index.hybridize()
+        self._sort_by_index.hybridize(static_alloc=True, static_shape=True)
 
-        self._normalize_finished = NormalizeFinishedHypotheses(pad_id=C.PAD_ID,
-                                                               eos_id=self.vocab_target[C.EOS_SYMBOL],
-                                                               length_penalty_alpha=self.length_penalty.alpha,
-                                                               length_penalty_beta=self.length_penalty.beta)
-        self._normalize_finished.initialize(ctx=self.context)
-        self._normalize_finished.hybridize()
+        self._update_finished = NormalizeAndUpdateFinished(pad_id=C.PAD_ID,
+                                                           eos_id=self.vocab_target[C.EOS_SYMBOL],
+                                                           length_penalty_alpha=self.length_penalty.alpha,
+                                                           length_penalty_beta=self.length_penalty.beta)
+        self._update_finished.initialize(ctx=self.context)
+        self._update_finished.hybridize(static_alloc=True, static_shape=True)
+
         self._prune_hyps = PruneHypotheses(threshold=self.beam_prune, beam_size=self.beam_size)
         self._prune_hyps.initialize(ctx=self.context)
-        self._prune_hyps.hybridize()
+        self._prune_hyps.hybridize(static_alloc=True, static_shape=True)
 
-        self._update_lengths_and_finished = UpdateLengthsAndFinished(pad_id=C.PAD_ID,
-                                                                     eos_id=self.vocab_target[C.EOS_SYMBOL])
-        self._update_lengths_and_finished.initialize(ctx=self.context)
-        self._update_lengths_and_finished.hybridize()
+        self.global_avoid_trie = None
+        if avoid_list is not None:
+            self.global_avoid_trie = constrained.AvoidTrie()
+            for phrase in data_io.read_content(avoid_list):
+                phrase_ids = data_io.tokens2ids(phrase, self.vocab_target)
+                if self.unk_id in phrase_ids:
+                    logger.warning("Global avoid phrase '%s' contains an %s; this may indicate improper preprocessing.",
+                                   ' '.join(phrase), C.UNK_SYMBOL)
+                self.global_avoid_trie.add_phrase(phrase_ids)
+
+        self._concat_translations = partial(_concat_nbest_translations if self.nbest_size > 1 else _concat_translations,
+                                            stop_ids=self.stop_ids,
+                                            length_penalty=self.length_penalty)
 
         logger.info("Translator (%d model(s) beam_size=%d beam_prune=%s beam_search_stop=%s "
-                    "ensemble_mode=%s batch_size=%d buckets_source=%s)",
+                    "nbest_size=%s ensemble_mode=%s batch_size=%d buckets_source=%s avoiding=%d)",
                     len(self.models),
                     self.beam_size,
                     'off' if not self.beam_prune else "%.2f" % self.beam_prune,
                     self.beam_search_stop,
+                    self.nbest_size,
                     "None" if len(self.models) == 1 else ensemble_mode,
                     self.batch_size,
-                    self.buckets_source)
+                    self.buckets_source,
+                    0 if self.global_avoid_trie is None else len(self.global_avoid_trie))
+
+    @property
+    def max_input_length(self) -> int:
+        """
+        Returns maximum input length for TranslatorInput objects passed to translate()
+        """
+        if self.source_with_eos:
+            return self._max_input_length - C.SPACE_FOR_XOS
+        else:
+            return self._max_input_length
 
     @property
     def num_source_factors(self) -> int:
@@ -1063,9 +1365,9 @@ class Translator:
         """
         Returns averaged and re-normalized log probabilities
         """
-        log_probs = utils.average_arrays([mx.nd.log(p) for p in predictions])
+        log_probs = utils.average_arrays([p.log() for p in predictions])
         # pylint: disable=invalid-unary-operand-type
-        return -mx.nd.log(mx.nd.softmax(log_probs))
+        return -log_probs.log_softmax()
 
     def translate(self, trans_inputs: List[TranslatorInput]) -> List[TranslatorOutput]:
         """
@@ -1075,59 +1377,66 @@ class Translator:
         :param trans_inputs: List of TranslatorInputs as returned by make_input().
         :return: List of translation results.
         """
-        translated_chunks = []  # type: List[TranslatedChunk]
+        translated_chunks = []  # type: List[IndexedTranslation]
 
         # split into chunks
-        input_chunks = []  # type: List[TranslatorInput]
-        for input_idx, trans_input in enumerate(trans_inputs, 1):
-
+        input_chunks = []  # type: List[IndexedTranslatorInput]
+        for trans_input_idx, trans_input in enumerate(trans_inputs):
             # bad input
             if isinstance(trans_input, BadTranslatorInput):
-                translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
-
+                translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
+                                                            translation=empty_translation(add_nbest=(self.nbest_size > 1))))
             # empty input
             elif len(trans_input.tokens) == 0:
-                translated_chunks.append(TranslatedChunk(id=input_idx, chunk_id=0, translation=empty_translation()))
+                translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
+                                                            translation=empty_translation(add_nbest=(self.nbest_size > 1))))
             else:
                 # TODO(tdomhan): Remove branch without EOS with next major version bump, as future models will always be trained with source side EOS symbols
                 if self.source_with_eos:
-                    max_input_length_without_eos = self.max_input_length - C.SPACE_FOR_XOS
+                    max_input_length_without_eos = self.max_input_length
                     # oversized input
                     if len(trans_input.tokens) > max_input_length_without_eos:
                         logger.debug(
-                            "Input %d has length (%d) that exceeds max input length (%d). "
+                            "Input %s has length (%d) that exceeds max input length (%d). "
                             "Splitting into chunks of size %d.",
                             trans_input.sentence_id, len(trans_input.tokens),
                             self.buckets_source[-1], max_input_length_without_eos)
-                        input_chunks.extend([trans_input_chunk.with_eos()
-                                             for trans_input_chunk in
-                                             trans_input.chunks(max_input_length_without_eos)])
+                        chunks = [trans_input_chunk.with_eos()
+                                  for trans_input_chunk in trans_input.chunks(max_input_length_without_eos)]
+                        input_chunks.extend([IndexedTranslatorInput(trans_input_idx, chunk_idx, chunk_input)
+                                             for chunk_idx, chunk_input in enumerate(chunks)])
                     # regular input
                     else:
-                        input_chunks.append(trans_input.with_eos())
+                        input_chunks.append(IndexedTranslatorInput(trans_input_idx,
+                                                                   chunk_idx=0,
+                                                                   translator_input=trans_input.with_eos()))
                 else:
-                    # oversized input
                     if len(trans_input.tokens) > self.max_input_length:
+                        # oversized input
                         logger.debug(
-                            "Input %d has length (%d) that exceeds max input length (%d). "
+                            "Input %s has length (%d) that exceeds max input length (%d). "
                             "Splitting into chunks of size %d.",
                             trans_input.sentence_id, len(trans_input.tokens),
                             self.buckets_source[-1], self.max_input_length)
-                        input_chunks.extend([trans_input_chunk
-                                             for trans_input_chunk in
-                                             trans_input.chunks(self.max_input_length)])
-                    # regular input
+                        chunks = [trans_input_chunk
+                                  for trans_input_chunk in
+                                  trans_input.chunks(self.max_input_length)]
+                        input_chunks.extend([IndexedTranslatorInput(trans_input_idx, chunk_idx, chunk_input)
+                                             for chunk_idx, chunk_input in enumerate(chunks)])
                     else:
-                        input_chunks.append(trans_input)
+                        # regular input
+                        input_chunks.append(IndexedTranslatorInput(trans_input_idx,
+                                                                   chunk_idx=0,
+                                                                   translator_input=trans_input))
 
             if trans_input.constraints is not None:
-                logger.info("Input %d has %d %s: %s", trans_input.sentence_id,
+                logger.info("Input %s has %d %s: %s", trans_input.sentence_id,
                             len(trans_input.constraints),
                             "constraint" if len(trans_input.constraints) == 1 else "constraints",
                             ", ".join(" ".join(x) for x in trans_input.constraints))
 
         # Sort longest to shortest (to rather fill batches of shorter than longer sequences)
-        input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.tokens), reverse=True)
+        input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.translator_input.tokens), reverse=True)
 
         # translate in batch-sized blocks over input chunks
         for batch_id, batch in enumerate(utils.grouper(input_chunks, self.batch_size)):
@@ -1137,24 +1446,26 @@ class Translator:
             if rest > 0:
                 logger.debug("Extending the last batch to the full batch size (%d)", self.batch_size)
                 batch = batch + [batch[0]] * rest
-            batch_translations = self._translate_nd(*self._get_inference_input(batch))
+            translator_inputs = [indexed_translator_input.translator_input for indexed_translator_input in batch]
+            batch_translations = self._translate_nd(*self._get_inference_input(translator_inputs))
             # truncate to remove filler translations
             if rest > 0:
                 batch_translations = batch_translations[:-rest]
             for chunk, translation in zip(batch, batch_translations):
-                translated_chunks.append(TranslatedChunk(chunk.sentence_id, chunk.chunk_id, translation))
+                translated_chunks.append(IndexedTranslation(chunk.input_idx, chunk.chunk_idx, translation))
         # Sort by input idx and then chunk id
         translated_chunks = sorted(translated_chunks)
 
         # Concatenate results
         results = []  # type: List[TranslatorOutput]
-        chunks_by_input_idx = itertools.groupby(translated_chunks, key=lambda translation: translation.id)
-        for trans_input, (input_idx, chunks) in zip(trans_inputs, chunks_by_input_idx):
-            chunks = list(chunks)  # type: ignore
-            if len(chunks) == 1:  # type: ignore
-                translation = chunks[0].translation  # type: ignore
+        chunks_by_input_idx = itertools.groupby(translated_chunks, key=lambda translation: translation.input_idx)
+        for trans_input, (input_idx, translations_for_input_idx) in zip(trans_inputs, chunks_by_input_idx):
+            translations_for_input_idx = list(translations_for_input_idx)  # type: ignore
+            if len(translations_for_input_idx) == 1:  # type: ignore
+                translation = translations_for_input_idx[0].translation  # type: ignore
             else:
-                translations_to_concat = [translated_chunk.translation for translated_chunk in chunks]
+                translations_to_concat = [translated_chunk.translation
+                                          for translated_chunk in translations_for_input_idx]
                 translation = self._concat_translations(translations_to_concat)
 
             results.append(self._make_result(trans_input, translation))
@@ -1165,27 +1476,29 @@ class Translator:
                              trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray,
                                                                            int,
                                                                            List[Optional[constrained.RawConstraintList]],
+                                                                           List[Optional[constrained.RawConstraintList]],
                                                                            mx.nd.NDArray]:
         """
-        Assembles the numerical data for the batch.
-        This comprises an NDArray for the source sentences, the bucket key (padded source length), and a list of
-        raw constraint lists, one for each sentence in the batch, an NDArray of maximum output lengths for each sentence in the batch.
+        Assembles the numerical data for the batch. This comprises an NDArray for the source sentences,
+        the bucket key (padded source length), and a list of raw constraint lists, one for each sentence in the batch,
+        an NDArray of maximum output lengths for each sentence in the batch.
         Each raw constraint list contains phrases in the form of lists of integers in the target language vocabulary.
 
         :param trans_inputs: List of TranslatorInputs.
         :return NDArray of source ids (shape=(batch_size, bucket_key, num_factors)),
-                bucket key, list of raw constraint lists,
-                NDArray of maximum output lengths.
+                bucket key, list of raw constraint lists, and list of phrases to avoid,
+                and an NDArray of maximum output lengths.
         """
 
         bucket_key = data_io.get_bucket(max(len(inp.tokens) for inp in trans_inputs), self.buckets_source)
         source = mx.nd.zeros((len(trans_inputs), bucket_key, self.num_source_factors), ctx=self.context)
         raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
+        raw_avoid_list = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
 
         max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)
-            max_output_lengths.append(self.models[0].get_max_output_length(num_tokens))
+            max_output_lengths.append(self.models[0].get_max_output_length(data_io.get_bucket(num_tokens, self.buckets_source)))
             source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
 
             factors = trans_input.factors if trans_input.factors is not None else []
@@ -1202,49 +1515,71 @@ class Translator:
                 raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
                                       trans_input.constraints]
 
-        return source, bucket_key, raw_constraints, mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
+            if trans_input.avoid_list is not None:
+                raw_avoid_list[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
+                                     trans_input.avoid_list]
+                if any(self.unk_id in phrase for phrase in raw_avoid_list[j]):
+                    logger.warning("Sentence %s: %s was found in the list of phrases to avoid; "
+                                   "this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
+
+        return source, bucket_key, raw_constraints, raw_avoid_list, mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
 
     def _make_result(self,
                      trans_input: TranslatorInput,
                      translation: Translation) -> TranslatorOutput:
         """
-        Returns a translator result from generated target-side word ids, attention matrix, and score.
+        Returns a translator result from generated target-side word ids, attention matrices and scores.
         Strips stop ids from translation string.
 
         :param trans_input: Translator input.
         :param translation: The translation + attention and score.
         :return: TranslatorOutput.
         """
-        # remove special sentence start symbol (<s>) from the output:
-        target_ids = translation.target_ids[1:]
-        attention_matrix = translation.attention_matrix[1:, :]
-
+        target_ids = translation.target_ids
         target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
+        target_string = C.TOKEN_SEPARATOR.join(data_io.ids2tokens(target_ids, self.vocab_target_inv, self.strip_ids))
 
-        target_string = C.TOKEN_SEPARATOR.join(
-            tok for target_id, tok in zip(target_ids, target_tokens) if target_id not in self.strip_ids)
+        attention_matrix = translation.attention_matrix
         attention_matrix = attention_matrix[:, :len(trans_input.tokens)]
 
-        return TranslatorOutput(id=trans_input.sentence_id,
-                                translation=target_string,
-                                tokens=target_tokens,
-                                attention_matrix=attention_matrix,
-                                score=translation.score,
-                                beam_histories=translation.beam_histories)
+        if translation.nbest_translations is None:
+            return TranslatorOutput(sentence_id=trans_input.sentence_id,
+                                    translation=target_string,
+                                    tokens=target_tokens,
+                                    attention_matrix=attention_matrix,
+                                    score=translation.score,
+                                    pass_through_dict=trans_input.pass_through_dict,
+                                    beam_histories=translation.beam_histories)
+        else:
+            nbest_target_ids = translation.nbest_translations.target_ids_list
+            target_tokens_list = [[self.vocab_target_inv[id] for id in ids] for ids in nbest_target_ids]
+            target_strings = [C.TOKEN_SEPARATOR.join(
+                                data_io.ids2tokens(target_ids,
+                                                   self.vocab_target_inv,
+                                                   self.strip_ids)) for target_ids in nbest_target_ids]
 
-    def _concat_translations(self, translations: List[Translation]) -> Translation:
-        """
-        Combine translations through concatenation.
+            attention_matrices = [matrix[:, :len(trans_input.tokens)] for matrix in
+                                  translation.nbest_translations.attention_matrices]
 
-        :param translations: A list of translations (sequence, attention_matrix), score and length.
-        :return: A concatenation if the translations with a score.
-        """
-        return _concat_translations(translations, self.start_id, self.stop_ids, self.length_penalty)
+            scores = translation.nbest_translations.scores
+
+            return TranslatorOutput(sentence_id=trans_input.sentence_id,
+                                    translation=target_string,
+                                    tokens=target_tokens,
+                                    attention_matrix=attention_matrix,
+                                    score=translation.score,
+                                    pass_through_dict=trans_input.pass_through_dict,
+                                    beam_histories=translation.beam_histories,
+                                    nbest_translations=target_strings,
+                                    nbest_tokens=target_tokens_list,
+                                    nbest_attention_matrices=attention_matrices,
+                                    nbest_scores=scores)
 
     def _translate_nd(self,
                       source: mx.nd.NDArray,
                       source_length: int,
                       raw_constraints: List[Optional[constrained.RawConstraintList]],
+                      raw_avoid_list: List[Optional[constrained.RawConstraintList]],
                       max_output_lengths: mx.nd.NDArray) -> List[Translation]:
         """
         Translates source of source_length, given a bucket_key.
@@ -1256,7 +1591,11 @@ class Translator:
         :return: Sequence of translations.
         """
 
-        return self._get_best_from_beam(*self._beam_search(source, source_length, raw_constraints, max_output_lengths))
+        return self._get_best_from_beam(*self._beam_search(source,
+                                                           source_length,
+                                                           raw_constraints,
+                                                           raw_avoid_list,
+                                                           max_output_lengths))
 
     def _encode(self, sources: mx.nd.NDArray, source_length: int) -> List[ModelState]:
         """
@@ -1285,56 +1624,69 @@ class Translator:
         :param states: List of model states.
         :param models_output_layer_w: Custom model weights for logit computation (empty for none).
         :param models_output_layer_b: Custom model biases for logit computation (empty for none).
-        :return: (probs, attention scores, list of model states)
+        :return: (scores, attention scores, list of model states)
         """
         bucket_key = (source_length, step)
 
-        model_probs, model_attention_probs, model_states = [], [], []
+        model_outs, model_attention_probs, model_states = [], [], []
         # We use zip_longest here since we'll have empty lists when not using restrict_lexicon
         for model, out_w, out_b, state in itertools.zip_longest(
                 self.models, models_output_layer_w, models_output_layer_b, states):
-            decoder_outputs, attention_probs, state = model.run_decoder(prev_word, bucket_key, state)
+            decoder_out, attention_probs, state = model.run_decoder(prev_word, bucket_key, state)
             # Compute logits and softmax with restricted vocabulary
             if self.restrict_lexicon:
-                logits = model.output_layer(decoder_outputs, out_w, out_b)
-                probs = mx.nd.softmax(logits)
+                # Apply output layer outside decoder module.
+                logits = model.output_layer(decoder_out, out_w, out_b)
+                if model.skip_softmax:
+                    model_out = logits  # raw logits
+                else:
+                    model_out = mx.nd.softmax(logits)  # normalized probabilities
             else:
-                # Otherwise decoder outputs are already target vocab probs
-                probs = decoder_outputs
-            model_probs.append(probs)
+                # Output layer is applied inside decoder module.
+                # if model.skip_softmax decoder_out represents logits, normalized probabilities else.
+                model_out = decoder_out
+            model_outs.append(model_out)
             model_attention_probs.append(attention_probs)
             model_states.append(state)
-        neg_logprobs, attention_probs = self._combine_predictions(model_probs, model_attention_probs)
-        return neg_logprobs, attention_probs, model_states
+        scores, attention_probs = self._combine_predictions(model_outs, model_attention_probs)
+        return scores, attention_probs, model_states
 
     def _combine_predictions(self,
-                             probs: List[mx.nd.NDArray],
+                             model_outputs: List[mx.nd.NDArray],
                              attention_probs: List[mx.nd.NDArray]) -> Tuple[mx.nd.NDArray, mx.nd.NDArray]:
         """
-        Returns combined predictions of models as negative log probabilities and averaged attention prob scores.
+        Returns combined predictions of models and averaged attention prob scores.
+        If model_outputs are probabilities, they are converted to negative log probabilities before combination.
+        If model_outputs are logits (and no ensembling is used),
+        no combination is applied and logits are converted to negative logits.
 
-        :param probs: List of Shape(beam_size, target_vocab_size).
+        :param model_outputs: List of Shape(beam_size, target_vocab_size).
         :param attention_probs: List of Shape(beam_size, bucket_key).
-        :return: Combined negative log probabilities, averaged attention scores.
+        :return: Combined scores, averaged attention scores.
         """
         # average attention prob scores. TODO: is there a smarter way to do this?
         attention_prob_score = utils.average_arrays(attention_probs)
 
         # combine model predictions and convert to neg log probs
         if len(self.models) == 1:
-            neg_logprobs = -mx.nd.log(probs[0])  # pylint: disable=invalid-unary-operand-type
+            if self.models[0].skip_softmax:
+                scores = -model_outputs[0]
+            else:
+                scores = -mx.nd.log(model_outputs[0])  # pylint: disable=invalid-unary-operand-type
         else:
-            neg_logprobs = self.interpolation_func(probs)
-        return neg_logprobs, attention_prob_score
+            scores = self.interpolation_func(model_outputs)
+        return scores, attention_prob_score
 
     def _beam_search(self,
                      source: mx.nd.NDArray,
                      source_length: int,
                      raw_constraint_list: List[Optional[constrained.RawConstraintList]],
-                     max_output_lengths: mx.nd.NDArray) -> Tuple[mx.nd.NDArray,
-                                                                 mx.nd.NDArray,
-                                                                 mx.nd.NDArray,
-                                                                 mx.nd.NDArray,
+                     raw_avoid_list: List[Optional[constrained.RawConstraintList]],
+                     max_output_lengths: mx.nd.NDArray) -> Tuple[np.ndarray,
+                                                                 np.ndarray,
+                                                                 np.ndarray,
+                                                                 np.ndarray,
+                                                                 np.ndarray,
                                                                  List[Optional[constrained.ConstrainedHypothesis]],
                                                                  Optional[List[BeamHistory]]]:
         """
@@ -1344,8 +1696,11 @@ class Translator:
         :param source_length: Max source length.
         :param raw_constraint_list: A list of optional lists containing phrases (as lists of target word IDs)
                that must appear in each output.
-        :return List of lists of word ids, list of attentions, array of accumulated length-normalized
-                negative log-probs.
+        :param raw_avoid_list: A list of optional lists containing phrases (as lists of target word IDs)
+               that must NOT appear in each output.
+        :return List of best hypotheses indices, list of best word indices, list of attentions,
+                array of accumulated length-normalized negative log-probs, hypotheses lengths, constraints (if any),
+                beam histories (if any).
         """
 
         # Length of encoded sequence (may differ from initial input length)
@@ -1361,23 +1716,24 @@ class Translator:
 
         best_word_indices = mx.nd.full((self.batch_size * self.beam_size,), val=self.start_id, ctx=self.context,
                                        dtype='int32')
-        # growing sequences: (batch_size * beam_size, 1), pre-filled with <s> symbols on index 0
-        sequences = mx.nd.full((self.batch_size * self.beam_size, 1), val=self.start_id, ctx=self.context,
-                               dtype='int32')
+
+        # Best word and hypotheses indices across beam search steps from topk operation.
+        best_hyp_indices_list = []  # type: List[mx.nd.NDArray]
+        best_word_indices_list = []  # type: List[mx.nd.NDArray]
 
         # Beam history
         beam_histories = None  # type: Optional[List[BeamHistory]]
         if self.store_beam:
             beam_histories = [defaultdict(list) for _ in range(self.batch_size)]
 
-        lengths = mx.nd.ones((self.batch_size * self.beam_size, 1), ctx=self.context)
+        lengths = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context)
         finished = mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32')
 
         # Extending max_output_lengths to shape (batch_size * beam_size,)
         max_output_lengths = mx.nd.repeat(max_output_lengths, self.beam_size)
 
-        # attentions: (batch_size * beam_size, 1, encoded_source_length)
-        attentions = mx.nd.zeros((self.batch_size * self.beam_size, 1, encoded_source_length), ctx=self.context)
+        # Attention distributions across beam search steps
+        attentions = []  # type: List[mx.nd.NDArray]
 
         # scores_accumulated: chosen smallest scores in scores (ascending).
         scores_accumulated = mx.nd.zeros((self.batch_size * self.beam_size, 1), ctx=self.context)
@@ -1430,46 +1786,65 @@ class Translator:
         constraints = constrained.init_batch(raw_constraint_list, self.beam_size, self.start_id,
                                              self.vocab_target[C.EOS_SYMBOL])
 
+        if self.global_avoid_trie or any(raw_avoid_list):
+            avoid_states = constrained.AvoidBatch(self.batch_size, self.beam_size,
+                                                  avoid_list=raw_avoid_list,
+                                                  global_avoid_trie=self.global_avoid_trie)
+            avoid_states.consume(best_word_indices)
+
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
         # item on the beam for each sentence
-        inactive = mx.nd.ones((self.batch_size * self.beam_size), dtype='int32', ctx=self.context)
-        inactive[::self.beam_size] = 0
+        inactive = mx.nd.zeros((self.batch_size * self.beam_size), dtype='int32', ctx=self.context)
         t = 1
         for t in range(1, max_output_length):
             # (1) obtain next predictions and advance models' state
-            # scores: (batch_size * beam_size, target_vocab_size)
+            # target_dists: (batch_size * beam_size, target_vocab_size)
             # attention_scores: (batch_size * beam_size, bucket_key)
-            scores, attention_scores, model_states = self._decode_step(prev_word=best_word_indices,
-                                                                       step=t,
-                                                                       source_length=source_length,
-                                                                       states=model_states,
-                                                                       models_output_layer_w=models_output_layer_w,
-                                                                       models_output_layer_b=models_output_layer_b)
+            target_dists, attention_scores, model_states = self._decode_step(prev_word=best_word_indices,
+                                                                             step=t,
+                                                                             source_length=source_length,
+                                                                             states=model_states,
+                                                                             models_output_layer_w=models_output_layer_w,
+                                                                             models_output_layer_b=models_output_layer_b)
 
-            # (2) Update scores. Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
+            # (2) Produces the accumulated cost of target words in each row.
+            # There is special treatment for finished and inactive rows: inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
-            scores = self._update_scores.forward(scores, finished, inactive, scores_accumulated, self.inf_array, pad_dist)
+            scores = self._update_scores.forward(target_dists, finished, inactive, scores_accumulated, pad_dist)
+
+            # Mark entries that should be blocked as having a score of np.inf
+            if self.global_avoid_trie or any(raw_avoid_list):
+                block_indices = avoid_states.avoid()
+                if len(block_indices) > 0:
+                    scores[block_indices] = np.inf
+                    if self.sample is not None:
+                        target_dists[block_indices] = np.inf
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
-            best_hyp_indices, best_word_indices, scores_accumulated = self._topk(scores)
+
+            if self.sample is not None:
+                best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, target_dists, finished)
+            else:
+                # On the first timestep, all hypotheses have identical histories, so force topk() to choose extensions
+                # of the first row only
+                if t == 1 and not self.skip_topk:
+                    scores = scores[self.batch_indices, :]
+
+                best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores)
 
             # Constraints for constrained decoding are processed sentence by sentence
             if any(raw_constraint_list):
-                best_hyp_indices, best_word_indices, scores_accumulated, \
-                constraints, inactive = constrained.topk(self.batch_size,
-                                                         self.beam_size,
-                                                         inactive,
-                                                         scores,
-                                                         constraints,
-                                                         best_hyp_indices,
-                                                         best_word_indices,
-                                                         scores_accumulated,
-                                                         self.context)
-
-            else:
-                # All rows are now active (after special treatment of start state at t=1)
-                inactive[:] = 0
+                best_hyp_indices, best_word_indices, scores_accumulated, constraints, inactive = constrained.topk(
+                    t,
+                    self.batch_size,
+                    self.beam_size,
+                    inactive,
+                    scores,
+                    constraints,
+                    best_hyp_indices,
+                    best_word_indices,
+                    scores_accumulated)
 
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
@@ -1483,10 +1858,11 @@ class Translator:
 
             # (5) Normalize the scores of newly finished hypotheses. Note that after this until the
             # next call to topk(), hypotheses may not be in sorted order.
-            finished, scores_accumulated = self._normalize_finished.forward(best_word_indices,
-                                                                            finished,
-                                                                            scores_accumulated,
-                                                                            lengths)
+            finished, scores_accumulated, lengths = self._update_finished.forward(best_word_indices,
+                                                                                  max_output_lengths,
+                                                                                  finished,
+                                                                                  scores_accumulated,
+                                                                                  lengths)
 
             # (6) Prune out low-probability hypotheses. Pruning works by setting entries `inactive`.
             if self.beam_prune > 0.0:
@@ -1496,29 +1872,20 @@ class Translator:
                                                                                            self.inf_array,
                                                                                            self.zeros_array)
 
-            # Update hypotheses lengths (unless finished or inactive) and compute finished hypotheses
-            finished, finished_or_inactive, lengths = self._update_lengths_and_finished.forward(finished,
-                                                                                                inactive,
-                                                                                                lengths,
-                                                                                                max_output_lengths,
-                                                                                                best_word_indices)
+            # (7) update negative constraints
+            if self.global_avoid_trie or any(raw_avoid_list):
+                avoid_states.reorder(best_hyp_indices)
+                avoid_states.consume(best_word_indices)
 
-            # (7) Reorder sequences and attentions according to best_hyp_indices
-            # and extend sequences with best_word_indices.
-            # pylint: disable=unsupported-assignment-operation
-            sequences = mx.nd.take(sequences, best_hyp_indices)
-            attentions = mx.nd.take(attentions, best_hyp_indices)
-            sequences = mx.nd.concat(sequences, best_word_indices.reshape((-1, 1)), dim=1)
-            attentions = mx.nd.concat(attentions, attention_scores.reshape((-1, 1, encoded_source_length)), dim=1)
-
-            # (6) optionally save beam history
+            # (8) optionally save beam history
             if self.store_beam:
+                finished_or_inactive = mx.nd.clip(data=finished + inactive, a_min=0, a_max=1)
                 unnormalized_scores = mx.nd.where(finished_or_inactive,
-                                                  scores_accumulated * self.length_penalty(lengths - 1),
+                                                  scores_accumulated * self.length_penalty(lengths),
                                                   scores_accumulated)
                 normalized_scores = mx.nd.where(finished_or_inactive,
                                                 scores_accumulated,
-                                                scores_accumulated / self.length_penalty(lengths - 1))
+                                                scores_accumulated / self.length_penalty(lengths))
                 for sent in range(self.batch_size):
                     rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
 
@@ -1536,15 +1903,20 @@ class Translator:
                         beam_histories[sent]["normalized_scores"].append(
                             normalized_scores[rows].asnumpy().flatten().tolist())
 
-            if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST and self.batch_size == 1:
-                # TODO: extend to work with batch_size > 1 (i.e., one stopped for each sentence)
-                if mx.nd.sum(finished).asscalar() > 0:
+            # Collect best hypotheses, best word indices, and attention scores
+            best_hyp_indices_list.append(best_hyp_indices)
+            best_word_indices_list.append(best_word_indices)
+            attentions.append(attention_scores)
+
+            if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
+                at_least_one_finished = finished.reshape((self.batch_size, self.beam_size)).sum(axis=1) > 0
+                if at_least_one_finished.sum().asscalar() == self.batch_size:
                     break
             else:
-                if mx.nd.sum(finished).asscalar() == self.batch_size * self.beam_size:  # all finished
+                if finished.sum().asscalar() == self.batch_size * self.beam_size:  # all finished
                     break
 
-            # (8) update models' state with winning hypotheses (ascending)
+            # (9) update models' state with winning hypotheses (ascending)
             for ms in model_states:
                 ms.sort_state(best_hyp_indices)
 
@@ -1553,68 +1925,108 @@ class Translator:
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
         folded_accumulated_scores = scores_accumulated.reshape((self.batch_size,
                                                                 self.beam_size * scores_accumulated.shape[-1]))
-        indices = mx.nd.argsort(folded_accumulated_scores, axis=1)
-        best_hyp_indices = mx.nd.array(np.unravel_index(indices.astype(np.int32).asnumpy().ravel(),
-                                                        scores_accumulated.shape),
-                                       dtype='int32',
-                                       ctx=self.offset.context)[0] + self.offset
-        sequences = sequences.take(best_hyp_indices)
+        indices = mx.nd.cast(mx.nd.argsort(folded_accumulated_scores, axis=1), dtype='int32').reshape((-1,))
+        best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated.shape) + self.offset
+        best_hyp_indices_list.append(best_hyp_indices)
         lengths = lengths.take(best_hyp_indices)
-        attentions = attentions.take(best_hyp_indices)
         scores_accumulated = scores_accumulated.take(best_hyp_indices)
         constraints = [constraints[x] for x in best_hyp_indices.asnumpy()]
 
-        return sequences, attentions, scores_accumulated, lengths, constraints, beam_histories
+        all_best_hyp_indices = mx.nd.stack(*best_hyp_indices_list, axis=1)
+        all_best_word_indices = mx.nd.stack(*best_word_indices_list, axis=1)
+        all_attentions = mx.nd.stack(*attentions, axis=1)
+
+        return all_best_hyp_indices.asnumpy(), \
+               all_best_word_indices.asnumpy(), \
+               all_attentions.asnumpy(), \
+               scores_accumulated.asnumpy(), \
+               lengths.asnumpy().astype('int32'), \
+               constraints, \
+               beam_histories
 
     def _get_best_from_beam(self,
-                            sequences: mx.nd.NDArray,
-                            attention_lists: mx.nd.NDArray,
-                            seq_scores: mx.nd.NDArray,
-                            lengths: mx.nd.NDArray,
+                            best_hyp_indices: np.ndarray,
+                            best_word_indices: np.ndarray,
+                            attentions: np.ndarray,
+                            seq_scores: np.ndarray,
+                            lengths: np.ndarray,
                             constraints: List[Optional[constrained.ConstrainedHypothesis]],
                             beam_histories: Optional[List[BeamHistory]] = None) -> List[Translation]:
         """
-        Return the best (aka top) entry from the n-best list.
+        Return the nbest (aka n top) entries from the n-best list.
 
-        :param sequences: Array of word ids. Shape: (batch * beam, bucket_key).
-        :param attention_lists: Array of attentions over source words.
-                                Shape: (batch * beam, max_output_length, encoded_source_length).
+        :param best_hyp_indices: Array of best hypotheses indices ids. Shape: (batch * beam, num_beam_search_steps + 1).
+        :param best_word_indices: Array of best hypotheses indices ids. Shape: (batch * beam, num_beam_search_steps).
+        :param attentions: Array of attentions over source words.
+                           Shape: (batch * beam, num_beam_search_steps, encoded_source_length).
         :param seq_scores: Array of length-normalized negative log-probs. Shape: (batch * beam, 1)
-        :param lengths: The lengths of all items in the beam. Shape: (batch * beam).
+        :param lengths: The lengths of all items in the beam. Shape: (batch * beam). Dtype: int32.
         :param constraints: The constraints for all items in the beam. Shape: (batch * beam).
         :param beam_histories: The beam histories for each sentence in the batch.
         :return: List of Translation objects containing all relevant information.
         """
-        utils.check_condition(sequences.shape[0] == attention_lists.shape[0] == seq_scores.shape[0] == lengths.shape[0],
-                              "Shape mismatch")
-
-        # Initialize the best_ids to the first item in each batch
-        best_ids = mx.nd.arange(0, self.batch_size * self.beam_size, self.beam_size, ctx=self.context, dtype='int32')
-
-        if any(constraints):
-            # For constrained decoding, select from items that have met all constraints (might not be finished)
-            unmet = mx.nd.array([c.num_needed() if c is not None else 0 for c in constraints], ctx=self.context)
-            filtered = mx.nd.where(unmet == 0, seq_scores, self.inf_array)
-            filtered = filtered.reshape((self.batch_size, self.beam_size))
-            best_ids += mx.nd.cast(mx.nd.argmin(filtered, axis=1), dtype='int32')
-
+        nbest_translations = []  # type: List[List[Translation]]
         histories = beam_histories if beam_histories is not None else [None] * self.batch_size  # type: List
-        return [self._assemble_translation(*x) for x in zip(sequences[best_ids],
-                                                            lengths[best_ids],
-                                                            attention_lists[best_ids],
-                                                            seq_scores[best_ids],
-                                                            histories)]
+
+        for n in range(0, self.nbest_size):
+
+            # Initialize the best_ids to the first item in each batch, plus current nbest index
+            best_ids = np.arange(n, self.batch_size * self.beam_size, self.beam_size, dtype='int32')
+
+            # only check for constraints for 1-best translation for each sequence in batch
+            if n == 0 and any(constraints):
+                # For constrained decoding, select from items that have met all constraints (might not be finished)
+                unmet = np.array([c.num_needed() if c is not None else 0 for c in constraints])
+                filtered = np.where(unmet == 0, seq_scores.flatten(), np.inf)
+                filtered = filtered.reshape((self.batch_size, self.beam_size))
+                best_ids += np.argmin(filtered, axis=1).astype('int32')
+
+            # Obtain sequences for all best hypotheses in the batch
+            indices = self._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)
+
+            nbest_translations.append([self._assemble_translation(*x) for x in zip(best_word_indices[indices, np.arange(indices.shape[1])],
+                                                                                   lengths[best_ids],
+                                                                                   attentions[best_ids],
+                                                                                   seq_scores[best_ids],
+                                                                                   histories)])
+        # reorder and regroup lists
+        reduced_translations = [_reduce_nbest_translations(grouped_nbest) for grouped_nbest in zip(*nbest_translations)]
+        return reduced_translations
 
     @staticmethod
-    def _assemble_translation(sequence: mx.nd.NDArray,
-                              length: mx.nd.NDArray,
-                              attention_lists: mx.nd.NDArray,
-                              seq_score: mx.nd.NDArray,
+    def _get_best_word_indices_for_kth_hypotheses(ks: np.ndarray, all_hyp_indices: np.ndarray) -> np.ndarray:
+        """
+        Traverses the matrix of best hypotheses indices collected during beam search in reversed order by
+        using the kth hypotheses index as a backpointer.
+        Returns an array containing the indices into the best_word_indices collected during beam search to extract
+        the kth hypotheses.
+
+        :param ks: The kth-best hypotheses to extract. Supports multiple for batch_size > 1. Shape: (batch,).
+        :param all_hyp_indices: All best hypotheses indices list collected in beam search. Shape: (batch * beam, steps).
+        :return: Array of indices into the best_word_indices collected in beam search
+            that extract the kth-best hypothesis. Shape: (batch,).
+        """
+        batch_size = ks.shape[0]
+        num_steps = all_hyp_indices.shape[1]
+        result = np.zeros((batch_size, num_steps - 1), dtype=all_hyp_indices.dtype)
+        # first index into the history of the desired hypotheses.
+        pointer = all_hyp_indices[ks, -1]
+        # for each column/step follow the pointer, starting from the penultimate column/step
+        num_steps = all_hyp_indices.shape[1]
+        for step in range(num_steps - 2, -1, -1):
+            result[:, step] = pointer
+            pointer = all_hyp_indices[pointer, step]
+        return result
+
+    @staticmethod
+    def _assemble_translation(sequence: np.ndarray,
+                              length: np.ndarray,
+                              attention_lists: np.ndarray,
+                              seq_score: np.ndarray,
                               beam_history: Optional[BeamHistory]) -> Translation:
         """
         Takes a set of data pertaining to a single translated item, performs slightly different
         processing on each, and merges it into a Translation object.
-
         :param sequence: Array of word ids. Shape: (batch_size, bucket_key).
         :param length: The length of the translated segment.
         :param attention_lists: Array of attentions over source words.
@@ -1623,11 +2035,10 @@ class Translator:
         :param beam_history: The optional beam histories for each sentence in the batch.
         :return: A Translation object.
         """
-
-        length = int(length.asscalar())
-        sequence = sequence[:length].asnumpy().tolist()
-        attention_matrix = np.stack(attention_lists.asnumpy()[:length, :], axis=0)
-        score = seq_score.asscalar()
+        length = int(length)
+        sequence = sequence[:length].tolist()
+        attention_matrix = attention_lists[:length, :]
+        score = float(seq_score)
         beam_history_list = [beam_history] if beam_history is not None else []
         return Translation(sequence, attention_matrix, score, beam_history_list)
 
@@ -1699,7 +2110,142 @@ class SortByIndex(mx.gluon.HybridBlock):
         return [F.take(arg, indices) for arg in args]
 
 
-class NormalizeFinishedHypotheses(mx.gluon.HybridBlock):
+class TopK(mx.gluon.HybridBlock):
+    """
+    A HybridBlock for a statically-shaped batch-wise topk operation.
+    """
+
+    def __init__(self, k: int, batch_size: int, vocab_size: int) -> None:
+        """
+        :param k: The number of smallest scores to return.
+        :param batch_size: Number of sentences being decoded at once.
+        :param vocab_size: Vocabulary size.
+        """
+        super().__init__()
+        self.k = k
+        self.batch_size = batch_size
+        self.vocab_size = vocab_size
+        with self.name_scope():
+            offset = mx.nd.repeat(mx.nd.arange(0, batch_size * k, k, dtype='int32'), k)
+            self.offset = self.params.get_constant(name='offset', value=offset)
+
+    def hybrid_forward(self, F, scores, offset):
+        """
+        Get the lowest k elements per sentence from a `scores` matrix.
+
+        :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+        :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+        :return: The row indices, column indices and values of the k smallest items in matrix.
+        """
+
+        # Shape: t==1 => (batch size, vocab_size) t>1 => (batch size * beam size, vocab size)
+        folded_scores = F.reshape(scores, shape=(self.batch_size, -1))
+
+        values, indices = F.topk(folded_scores, axis=1, k=self.k, ret_typ='both', is_ascend=True)
+
+        # Project indices back into original shape (which is different for t==1 and t>1)
+        indices = F.reshape(F.cast(indices, 'int32'), shape=(-1,))
+        unraveled = F.unravel_index(indices, shape=(-1, self.vocab_size))
+
+        best_hyp_indices, best_word_indices = F.split(unraveled, axis=0, num_outputs=2, squeeze_axis=True)
+        best_hyp_indices = best_hyp_indices + offset
+        values = F.reshape(values, shape=(-1, 1))
+        return best_hyp_indices, best_word_indices, values
+
+
+class SampleK(mx.gluon.HybridBlock):
+    """
+    A HybridBlock for selecting a random word from each hypothesis according to its distribution.
+    """
+
+    def __init__(self, k: int, n: int, batch_size: int, context: mx.context.Context) -> None:
+        """
+        :param k: The size of the beam.
+        :param n: Sample from the top-N words in the vocab at each timestep.
+        :param batch_size: Number of sentences being decoded at once.
+        :param context: Context for block constants.
+        """
+        super().__init__()
+        self.beam_size = k
+        self.n = n
+        self.batch_size = batch_size
+        self.context = context
+
+        with self.name_scope():
+            self.best_hyp_indices = self.params.get_constant(name='best_hyp_indices',
+                                                             value=mx.nd.arange(0, batch_size * k, dtype='int32'))
+            self.zeros_array = self.params.get_constant(name="zeros_array",
+                                                        value=mx.nd.zeros((self.batch_size * self.beam_size,), ctx=self.context, dtype='int32'))
+
+    def hybrid_forward(self, F, scores, target_dists, finished, best_hyp_indices, zeros_array):
+        """
+        Choose an extension of each hypothesis from its softmax distribution.
+
+        :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+        :param target_dists: The non-cumulative target distributions (ignored).
+        :param finished: The list of finished hypotheses.
+        :param best_hyp_indices: Best hypothesis indices constant.
+        :param zeros_array: Zeros array constant.
+        :return: The row indices, column indices, and values of the sampled words.
+        """
+        # Map the negative logprobs to probabilities so as to have a distribution
+        target_dists = F.exp(-target_dists)
+
+        # n == 0 means sample from the full vocabulary. Otherwise, we sample from the top n.
+        if self.n != 0:
+            # select the top n in each row, via a mask
+            masked_items = F.topk(target_dists, k=self.n, ret_typ='mask', axis=1, is_ascend=False)
+            # set unmasked items to 0
+            masked_items = F.where(masked_items, target_dists, masked_items)
+            # renormalize
+            target_dists = F.broadcast_div(masked_items, F.sum(masked_items, axis=1, keepdims=True))
+
+        # Sample from the target distributions over words, then get the corresponding values from the cumulative scores
+        best_word_indices = F.where(finished, zeros_array, F.random.multinomial(target_dists, get_prob=False))
+        values = F.pick(scores, best_word_indices, axis=1, keepdims=True)
+
+        return best_hyp_indices, best_word_indices, values
+
+
+class Top1(mx.gluon.HybridBlock):
+    """
+    A HybridBlock for a statically-shaped batch-wise first-best operation.
+
+    Get the single lowest element per sentence from a `scores` matrix. Expects that
+    beam size is 1, for greedy decoding.
+
+    NOTE(mathmu): The current implementation of argmin in MXNet much slower than topk with k=1.
+    """
+    def __init__(self, k: int, batch_size: int) -> None:
+        """
+        :param k: The number of smallest scores to return.
+        :param batch_size: Number of sentences being decoded at once.
+        """
+        super().__init__()
+        with self.name_scope():
+            offset = mx.nd.repeat(mx.nd.arange(0, batch_size * k, k, dtype='int32'), k)
+            self.offset = self.params.get_constant(name='offset', value=offset)
+
+    def hybrid_forward(self, F, scores, offset):
+        """
+        Get the single lowest element per sentence from a `scores` matrix. Expects that
+        beam size is 1, for greedy decoding.
+
+        :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+        :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+        :return: The row indices, column indices and values of the smallest items in matrix.
+        """
+        best_word_indices = F.cast(F.argmin(scores, axis=1), dtype='int32')
+        values = F.pick(scores, best_word_indices, axis=1)
+        values = F.reshape(values, shape=(-1, 1))
+
+        # for top1, the best hyp indices are equal to the plain offset
+        best_hyp_indices = offset
+
+        return best_hyp_indices, best_word_indices, values
+
+
+class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
     """
     A HybridBlock for normalizing newly finished hypotheses scores with LengthPenalty.
     """
@@ -1714,65 +2260,45 @@ class NormalizeFinishedHypotheses(mx.gluon.HybridBlock):
         with self.name_scope():
             self.length_penalty = LengthPenalty(alpha=length_penalty_alpha, beta=length_penalty_beta)
 
-    def hybrid_forward(self, F, best_word_indices, finished, scores_accumulated, lengths):
-        all_finished = ((best_word_indices == self.pad_id) + (best_word_indices == self.eos_id))
-        newly_finished = all_finished - finished
+    def hybrid_forward(self, F, best_word_indices, max_output_lengths, finished, scores_accumulated, lengths):
+        all_finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
+        newly_finished = F.broadcast_logical_xor(all_finished, finished)
         scores_accumulated = F.where(newly_finished,
                                      scores_accumulated / self.length_penalty(lengths),
                                      scores_accumulated)
-        finished = all_finished
-        return finished, scores_accumulated
 
+        # Update lengths of all items, except those that were already finished. This updates
+        # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
+        lengths = lengths + F.cast(1 - F.expand_dims(finished, axis=1), dtype='float32')
 
-class UpdateLengthsAndFinished(mx.gluon.HybridBlock):
-    """
-    A HybridBlock that updates the lengths of unfinished and active hypotheses and recomputes finished hypotheses.
-    """
-
-    def __init__(self, pad_id: int, eos_id: int) -> None:
-        super().__init__()
-        self.pad_id = pad_id
-        self.eos_id = eos_id
-
-    def hybrid_forward(self, F, finished, inactive, lengths, max_output_lengths, best_word_indices):
-        finished_or_inactive = F.clip(data=finished + inactive, a_min=0, a_max=1)
-        # update lengths of hypotheses unless they are finished or inactive
-        lengths = lengths + F.cast(1 - F.expand_dims(finished_or_inactive, axis=1), dtype='float32')
-        # recompute finished. Hypotheses are finished if they are
+        # Now, recompute finished. Hypotheses are finished if they are
         # - extended with <pad>, or
         # - extended with <eos>, or
         # - at their maximum length.
-        finished = F.clip(
-            (best_word_indices == self.pad_id) +
-            (best_word_indices == self.eos_id) +
-            (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') >= max_output_lengths),
-            a_min=0, a_max=1)
+        finished = F.broadcast_logical_or(F.broadcast_logical_or(best_word_indices == self.pad_id,
+                                                                 best_word_indices == self.eos_id),
+                                          (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') >= max_output_lengths))
 
-        return finished, finished_or_inactive, lengths
+        return finished, scores_accumulated, lengths
 
 
 class UpdateScores(mx.gluon.HybridBlock):
     """
-    A HybridBlock that updates the scores from the decoder step with acumulated scores.
+    A HybridBlock that updates the scores from the decoder step with accumulated scores.
     Inactive hypotheses receive score inf. Finished hypotheses receive their accumulated score for C.PAD_ID.
     All other options are set to infinity.
     """
 
     def __init__(self):
         super().__init__()
-        assert C.PAD_ID == 0, "This blocks only works with PAD_ID == 0"
+        assert C.PAD_ID == 0, "This block only works with PAD_ID == 0"
 
-    def hybrid_forward(self, F, scores, finished, inactive, scores_accumulated, inf_array, pad_dist):
+    def hybrid_forward(self, F, target_dists, finished, inactive, scores_accumulated, pad_dist):
         # Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
         # finished rows are inf everywhere except column zero (pad_id), which holds the accumulated model score.
         # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
         # infinity otherwise.
-        scores = F.broadcast_add(scores, scores_accumulated)
-        # pylint: disable=invalid-sequence-index
-        pad_id_scores = F.where(F.clip(finished - inactive, 0, 1),
-                                scores_accumulated,
-                                inf_array)
+        scores = F.broadcast_add(target_dists, scores_accumulated)
         # pad_dist. Shape: (batch*beam, vocab_size)
-        pad_dist = F.concat(pad_id_scores, pad_dist)
-        scores = F.where(finished + inactive, pad_dist, scores)
+        scores = F.where(F.broadcast_logical_or(finished, inactive), F.concat(scores_accumulated, pad_dist), scores)
         return scores

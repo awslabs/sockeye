@@ -10,6 +10,215 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+
+## [1.18.77]
+### Added
+- `sockeye.score` now loads data on demand and doesn't skip any input lines
+
+## [1.18.76]
+### Changed
+- Do not compare scores from translation and scoring in integration tests.
+
+### Added
+- Adding the option via the flag `--stop-training-on-decoder-failure` to stop training in case the checkpoint decoder dies (e.g. because there is not enough memory).
+In case this is turned on a checkpoint decoder is launched right when training starts in order to fail as early as possible.
+
+## [1.18.75]
+### Changed
+- Do not create dropout layers for inference models for performance reasons.
+
+## [1.18.74]
+### Changed
+- Revert change in 1.18.72 as no memory saving could be observed.
+
+## [1.18.73]
+### Fixed
+- Fixed a bug where `source-factors-num-embed` was not correctly adjusted to `num-embed`
+  when using prepared data & `source-factor-combine` sum.
+
+## [1.18.72]
+### Changed
+- Removed use of `expand_dims` in favor of `reshape` to save memory.
+
+## [1.18.71]
+### Fixed
+- Fixed default setting of source factor combination to be 'concat' for backwards compatibility.
+
+## [1.18.70]
+### Added
+- Sockeye now outputs fields found in a JSON input object, if they are not overwritten by Sockeye. This behavior can be enabled by selecting `--json-input` (to read input as a JSON object) and `--output-type json` (to write a JSON object to output).
+
+## [1.18.69]
+### Added
+- Source factors can now be added to the embeddings instead of concatenated with `--source-factors-combine sum` (default: concat)
+
+## [1.18.68]
+- Fixed training crashes with `--learning-rate-decay-optimizer-states-reset initial` option.
+
+## [1.18.67]
+### Added
+- Added `fertility` as a further type of attention coverage.
+- Added an option for training to keep the initializations of the model via `--keep-initializations`. When set, the trainer will avoid deleting the params file for the first checkpoint, no matter what `--keep-last-params` is set to.
+
+## [1.18.66]
+### Fixed
+- Fix to argument names that are allowed to differ for resuming training.
+
+## [1.18.65]
+### Changed
+- More informative error message about inconsistent --shared-vocab setting.
+
+## [1.18.64]
+### Added
+- Adding translation sampling via `--sample [N]`. This causes the decoder to sample each next step from the target distribution probabilities at each
+  timestep. An optional value of `N` causes the decoder to sample only from the top `N` vocabulary items for each hypothesis at each timestep (the
+  default is 0, meaning to sample from the entire vocabulary).
+
+## [1.18.63]
+### Changed
+- The checkpoint decoder and nvidia-smi subprocess are now launched from a forkserver, allowing for a better separation between processes.
+
+## [1.18.62]
+### Added
+- Add option to make `TranslatorInputs` directly from a dict.
+
+## [1.18.61]
+### Changed
+- Update to MXNet 1.3.1. Removed requirements/requirements.gpu-cu{75,91}.txt as CUDA 7.5 and 9.1 are deprecated.
+
+## [1.18.60]
+### Fixed
+- Performance optimization to skip the softmax operation for single model greedy decoding is now only applied if no translation scores are required in the output.
+
+## [1.18.59]
+### Added
+- Full training state is now returned from EarlyStoppingTrainer's fit().
+### Changed
+- Training state cleanup will not be performed for training runs that did not converge yet.
+- Switched to portalocker for locking files (Windows compatibility).
+
+## [1.18.58]
+### Added
+- Added nbest translation, exposed as `--nbest-size`. Nbest translation means to not only output the most probable translation according to a model, but the top n most probable hypotheses. If `--nbest-size > 1` and the option `--output-type` is not explicitly specified, the output type will be changed to one JSON list of nbest translations per line. `--nbest-size` can never be larger than `--beam-size`.
+
+### Changed
+- Changed `sockeye.rerank` CLI to be compatible with nbest translation JSON output format.
+
+## [1.18.57]
+### Added
+- Added `sockeye.score` CLI for quickly scoring existing translations ([documentation](tutorials/scoring.md)).
+### Fixed
+- Entry-point clean-up after the contrib/ rename
+
+## [1.18.56]
+### Changed
+- Update to MXNet 1.3.0.post0
+
+## [1.18.55]
+- Renamed `contrib` to less-generic `sockeye_contrib`
+
+## [1.18.54]
+### Added
+- `--source-factor-vocabs` can be set to provide source factor vocabularies.
+
+## [1.18.53]
+### Added
+- Always skipping softmax for greedy decoding by default, only for single models.
+- Added option `--skip-topk` for greedy decoding.
+
+## [1.18.52]
+### Fixed
+- Fixed bug in constrained decoding to make sure best hypothesis satifies all constraints.
+
+## [1.18.51]
+### Added
+- Added a CLI for reranking of an nbest list of translations.
+
+## [1.18.50]
+### Fixed
+- Check for equivalency of training and validation source factors was incorrectly indented.
+
+## [1.18.49]
+### Changed
+- Removed dependence on the nvidia-smi tool. The number of GPUs is now determined programatically.
+
+## [1.18.48]
+### Changed
+- Translator.max_input_length now reports correct maximum input length for TranslatorInput objects, independent of the internal representation, where an additional EOS gets added. 
+
+## [1.18.47]
+### Changed
+- translate CLI: no longer rely on external, user-given input id for sorting translations. Also allow string ids for sentences.
+
+## [1.18.46]
+### Fixed
+- Fixed issue with `--num-words 0:0` in image captioning and another issue related to loading all features to memory with variable length.
+
+## [1.18.45]
+### Added
+- Added an 8 layer LSTM model similar (but not exactly identical) to the 'GNMT' architecture to autopilot.
+
+## [1.18.44]
+### Fixed
+- Fixed an issue with `--max-num-epochs` causing training to stop before the update/batch that actually completes the epoch was made.
+
+## [1.18.43]
+### Added
+- `<s>` now supported as the first token in a multi-word negative constraint
+  (e.g., `<s> I think` to prevent a sentence from starting with `I think`)
+### Fixed
+- Bugfix in resetting the state of a multiple-word negative constraint
+
+## [1.18.42]
+### Changed
+- Simplified gluon blocks for length calculation
+
+## [1.18.41]
+### Changed
+- Require numpy 1.14 or later to avoid MKL conflicts between numpy as mxnet-mkl.
+
+## [1.18.40]
+### Fixed
+- Fixed bad check for existence of negative constraints.
+- Resolved conflict for phrases that are both positive and negative constraints.
+- Fixed softmax temperature at inference time.
+
+## [1.18.39]
+### Added
+- Image Captioning now supports constrained decoding.
+- Image Captioning: zero padding of features now allows input features of different shape for each image.
+
+## [1.18.38]
+### Fixed
+- Fixed issue with the incorrect order of translations when empty inputs are present and translating in chunks.
+
+## [1.18.37]
+### Fixed
+- Determining the max output length for each sentence in a batch by the bucket length rather than the actual in order to match the behavior of a single sentence translation.
+
+## [1.18.36]
+### Changed
+- Updated to [MXNet 1.2.1](https://github.com/apache/incubator-mxnet/tree/1.2.1)
+
+## [1.18.35]
+### Added
+- ROUGE scores are now available in `sockeye-evaluate`.
+- Enabled CHRF as an early-stopping metric.
+
+## [1.18.34]
+### Added
+- Added support for `--beam-search-stop first` for decoding jobs with `--batch-size > 1`.
+
+## [1.18.33]
+### Added
+- Now supports negative constraints, which are phrases that must *not* appear in the output.
+   - Global constraints can be listed in a (pre-processed) file, one per line: `--avoid-list FILE`
+   - Per-sentence constraints are passed using the `avoid` keyword in the JSON object, with a list of strings as its field value.
+
+## [1.18.32]
+### Added
+- Added option to pad vocabulary to a multiple of x: e.g. `--pad-vocab-to-multiple-of 16`.
+
 ## [1.18.31]
 ### Added
 - Pre-training the RNN decoder. Usage:
@@ -18,7 +227,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.30]
 ### Fixed
-- Preserving max output length for each sentence to allow having identical translations for both with and without batching. 
+- Preserving max output length for each sentence to allow having identical translations for both with and without batching.
 
 ## [1.18.29]
 ### Changed
@@ -61,7 +270,7 @@ there was an edge case where the memory usage was sub-optimal with word based ba
 
 ## [1.18.21]
 ### Fixed
-- Constrained decoding was missed a crucial cast
+- Constrained decoding was missing a crucial cast
 - Fixed test cases that should have caught this
 
 ## [1.18.20]

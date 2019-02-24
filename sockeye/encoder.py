@@ -47,7 +47,6 @@ def get_encoder(config: 'EncoderConfig', prefix: str = '') -> 'Encoder':
     else:
         from .image_captioning.encoder import ImageLoadedCnnEncoderConfig, \
             get_image_cnn_encoder
-        ImageEncoderConfig = ImageLoadedCnnEncoderConfig
 
         if isinstance(config, ImageLoadedCnnEncoderConfig):
             return get_image_cnn_encoder(config)
@@ -339,6 +338,7 @@ class EmbeddingConfig(config.Config):
                  num_embed: int,
                  dropout: float,
                  factor_configs: Optional[List[FactorConfig]] = None,
+                 source_factors_combine: str = C.SOURCE_FACTORS_COMBINE_CONCAT,
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.vocab_size = vocab_size
@@ -348,6 +348,7 @@ class EmbeddingConfig(config.Config):
         self.num_factors = 1
         if self.factor_configs is not None:
             self.num_factors += len(self.factor_configs)
+        self.source_factors_combine = source_factors_combine
         self.dtype = dtype
 
 
@@ -378,7 +379,7 @@ class Embedding(Encoder):
 
         self.embed_factor_weights = []  # type: List[mx.sym.Symbol]
         if self.config.factor_configs is not None:
-            # Factors weights aren't shared so they're not passed in and we create them here.
+            # Factor weights aren't shared so they're not passed in and we create them here.
             for i, fc in enumerate(self.config.factor_configs):
                 self.embed_factor_weights.append(mx.sym.Variable(prefix + "factor%d_weight" % i,
                                                                  shape=(fc.vocab_size, fc.num_embed)))
@@ -419,7 +420,10 @@ class Embedding(Encoder):
                                      name=self.prefix + "embed")
 
         if self.config.factor_configs is not None:
-            embedding = mx.sym.concat(embedding, *factor_embeddings, dim=2, name=self.prefix + "embed_plus_factors")
+            if self.config.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+                embedding = mx.sym.concat(embedding, *factor_embeddings, dim=2, name=self.prefix + "embed_plus_factors")
+            else:
+                embedding = mx.sym.add_n(embedding, *factor_embeddings, name=self.prefix + "embed_plus_factors")
 
         if self.config.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.config.dropout, name="source_embed_dropout")
@@ -433,13 +437,10 @@ class Embedding(Encoder):
         return self.config.num_embed
 
 
-class PassThroughEmbeddingConfig(config.Config):
+class PassThroughEmbeddingConfig(EmbeddingConfig):
 
     def __init__(self) -> None:
-        super().__init__()
-        self.vocab_size = 0
-        self.num_embed = 0
-        self.num_factors = 1
+        super().__init__(vocab_size=0, num_embed=0, dropout=0.0, factor_configs=None)
 
 
 class PassThroughEmbedding(Encoder):
@@ -451,6 +452,7 @@ class PassThroughEmbedding(Encoder):
 
     def __init__(self,
                  config: PassThroughEmbeddingConfig) -> None:
+        super().__init__('float32')
         self.config = config
 
     def encode(self,
@@ -1246,8 +1248,8 @@ class ConvolutionalEmbeddingEncoder(Encoder):
                 transform = mx.sym.Dropout(data=transform, p=self.dropout)
             # Connection
             seg_embedding = gate * transform + (1 - gate) * seg_embedding
-        # (batch_size, seq_len/stride, outut_dim) aka
-        # (batch_size, encoded_seq_len, num_segment_emded)
+        # (batch_size, seq_len/stride, output_dim) aka
+        # (batch_size, encoded_seq_len, num_segment_embed)
         seg_embedding = mx.sym.Reshape(data=seg_embedding,
                                        shape=(-1, encoded_seq_len, self.output_dim))
 

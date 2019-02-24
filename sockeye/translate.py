@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -17,22 +17,22 @@ Translation CLI.
 import argparse
 import sys
 import time
+import logging
 from contextlib import ExitStack
-from typing import Generator, Optional, List
-
-import mxnet as mx
 from math import ceil
+from typing import Generator, Optional, List
 
 from sockeye.lexicon import TopKLexicon
 from sockeye.log import setup_main_logger
 from sockeye.output_handler import get_output_handler, OutputHandler
-from sockeye.utils import acquire_gpus, get_num_gpus, log_basic_info, check_condition, grouper
+from sockeye.utils import determine_context, log_basic_info, check_condition, grouper
 from . import arguments
 from . import constants as C
 from . import data_io
 from . import inference
+from . import utils
 
-logger = setup_main_logger(__name__, file_logging=False)
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -44,33 +44,35 @@ def main():
 
 def run_translate(args: argparse.Namespace):
 
+    # Seed randomly unless a seed has been passed
+    utils.seed_rngs(args.seed if args.seed is not None else int(time.time()))
+
     if args.output is not None:
-        global logger
-        logger = setup_main_logger(__name__,
-                                   console=not args.quiet,
+        setup_main_logger(console=not args.quiet,
                                    file_logging=True,
                                    path="%s.%s" % (args.output, C.LOG_NAME))
-
-    if args.checkpoints is not None:
-        check_condition(len(args.checkpoints) == len(args.models), "must provide checkpoints for each model")
-
-    if args.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
-        check_condition(args.batch_size == 1,
-                        "Early stopping (--beam-search-stop %s) not supported with batching" % (C.BEAM_SEARCH_STOP_FIRST))
+    else:
+        setup_main_logger(file_logging=False)
 
     log_basic_info(args)
 
+    if args.nbest_size > 1:
+        if args.output_type != C.OUTPUT_HANDLER_JSON:
+            logger.warning("For nbest translation, you must specify `--output-type '%s'; overriding your setting of '%s'.",
+                           C.OUTPUT_HANDLER_JSON, args.output_type)
+            args.output_type = C.OUTPUT_HANDLER_JSON
     output_handler = get_output_handler(args.output_type,
                                         args.output,
                                         args.sure_align_threshold)
 
     with ExitStack() as exit_stack:
-        context = _setup_context(args, exit_stack)
-
-        if args.override_dtype == C.DTYPE_FP16:
-            logger.warning('Experimental feature \'--override-dtype float16\' has been used. '
-                           'This feature may be removed or change its behaviour in future. '
-                           'DO NOT USE IT IN PRODUCTION!')
+        check_condition(len(args.device_ids) == 1, "translate only supports single device for now")
+        context = determine_context(device_ids=args.device_ids,
+                                    use_cpu=args.use_cpu,
+                                    disable_device_locking=args.disable_device_locking,
+                                    lock_dir=args.lock_dir,
+                                    exit_stack=exit_stack)[0]
+        logger.info("Translate Device: %s", context)
 
         models, source_vocabs, target_vocab = inference.load_models(
             context=context,
@@ -83,7 +85,9 @@ def run_translate(args: argparse.Namespace):
             max_output_length_num_stds=args.max_output_length_num_stds,
             decoder_return_logit_inputs=args.restrict_lexicon is not None,
             cache_output_layer_w_b=args.restrict_lexicon is not None,
-            override_dtype=args.override_dtype)
+            override_dtype=args.override_dtype,
+            output_scores=output_handler.reports_score(),
+            sampling=args.sample)
         restrict_lexicon = None  # type: Optional[TopKLexicon]
         if args.restrict_lexicon:
             restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
@@ -96,12 +100,16 @@ def run_translate(args: argparse.Namespace):
                                                                                  args.length_penalty_beta),
                                           beam_prune=args.beam_prune,
                                           beam_search_stop=args.beam_search_stop,
+                                          nbest_size=args.nbest_size,
                                           models=models,
                                           source_vocabs=source_vocabs,
                                           target_vocab=target_vocab,
                                           restrict_lexicon=restrict_lexicon,
+                                          avoid_list=args.avoid_list,
                                           store_beam=store_beam,
-                                          strip_unknown_words=args.strip_unknown_words)
+                                          strip_unknown_words=args.strip_unknown_words,
+                                          skip_topk=args.skip_topk,
+                                          sample=args.sample)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
@@ -138,9 +146,10 @@ def make_inputs(input_file: Optional[str],
     else:
         input_factors = [] if input_factors is None else input_factors
         inputs = [input_file] + input_factors
-        check_condition(translator.num_source_factors == len(inputs),
-                        "Model(s) require %d factors, but %d given (through --input and --input-factors)." % (
-                            translator.num_source_factors, len(inputs)))
+        if not input_is_json:
+            check_condition(translator.num_source_factors == len(inputs),
+                            "Model(s) require %d factors, but %d given (through --input and --input-factors)." % (
+                                translator.num_source_factors, len(inputs)))
         with ExitStack() as exit_stack:
             streams = [exit_stack.enter_context(data_io.smart_open(i)) for i in inputs]
             for sentence_id, inputs in enumerate(zip(*streams), 1):
@@ -214,29 +223,6 @@ def translate(output_handler: OutputHandler,
     for trans_input, trans_output in zip(trans_inputs, trans_outputs):
         output_handler.handle(trans_input, trans_output, batch_time)
     return total_time
-
-
-def _setup_context(args, exit_stack):
-    if args.use_cpu:
-        context = mx.cpu()
-    else:
-        num_gpus = get_num_gpus()
-        check_condition(num_gpus >= 1,
-                        "No GPUs found, consider running on the CPU with --use-cpu "
-                        "(note: check depends on nvidia-smi and this could also mean that the nvidia-smi "
-                        "binary isn't on the path).")
-        check_condition(len(args.device_ids) == 1, "cannot run on multiple devices for now")
-        gpu_id = args.device_ids[0]
-        if args.disable_device_locking:
-            if gpu_id < 0:
-                # without locking and a negative device id we just take the first device
-                gpu_id = 0
-        else:
-            gpu_ids = exit_stack.enter_context(acquire_gpus([gpu_id], lock_dir=args.lock_dir))
-            gpu_id = gpu_ids[0]
-
-        context = mx.gpu(gpu_id)
-    return context
 
 
 if __name__ == '__main__':
