@@ -634,9 +634,9 @@ class EarlyStoppingTrainer:
                                 early_stopping_metric, self.state.num_not_improved, self.state.best_metric)
 
                 # (5) detect divergence with respect to perplexity value at the last checkpoint
-                if self.state.metrics and not has_improved and early_stopping_metric == C.PERPLEXITY:
+                if self.state.metrics and not has_improved:
                     # perplexity cannot exceed the number of target words, using the double to avoid precision issues
-                    last_ppl_value = self.state.metrics[-1][early_stopping_metric]
+                    last_ppl_value = self.state.metrics[-1][C.PERPLEXITY]
                     if not np.isfinite(last_ppl_value) or last_ppl_value > 2 * len(self.target_vocab):
                         self.state.diverged = True
 
