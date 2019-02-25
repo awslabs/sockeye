@@ -607,6 +607,7 @@ class EarlyStoppingTrainer:
                     if min_samples is not None and self.state.samples < min_samples:
                         logger.info("Minimum number of samples (%d) not reached yet: %d",
                                     min_samples, self.state.samples)
+                        self.state.converged = False
 
                 # (3) update training metrics as the last step to capture the converged status
                 self._update_metrics(metric_train, metric_val, process_manager)
@@ -636,7 +637,7 @@ class EarlyStoppingTrainer:
                 # (5) detect divergence with respect to perplexity value at the last checkpoint
                 if self.state.metrics and not has_improved:
                     # perplexity cannot exceed the number of target words, using the double to avoid precision issues
-                    last_ppl_value = self.state.metrics[-1][C.PERPLEXITY]
+                    last_ppl_value = self.state.metrics[-1]["%s-val" % C.PERPLEXITY]
                     if not np.isfinite(last_ppl_value) or last_ppl_value > 2 * len(self.target_vocab):
                         self.state.diverged = True
 
