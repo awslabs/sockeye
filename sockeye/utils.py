@@ -791,7 +791,7 @@ def write_metrics_file(metrics: List[Dict[str, Any]], path: str):
     """
     with open(path, 'w') as metrics_out:
         for checkpoint, metric_dict in enumerate(metrics, 1):
-            metrics_str = "\t".join(["{}={}".format(name, value) for name, value in sorted(metric_dict.items())])
+            metrics_str = "\t".join(["{}={:f}".format(name, value) for name, value in sorted(metric_dict.items())])
             metrics_out.write("{}\t{}\n".format(checkpoint, metrics_str))
 
 
