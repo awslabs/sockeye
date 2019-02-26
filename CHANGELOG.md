@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.80]
+### Changed
+ - The embedding size is automatically adjusted to the Transformer model size in case it is not specified on the command line.
+
 ## [1.18.79]
 ### Added
 - Writing of the convergence/divergence status to the metrics file and guarding against numpy.histogram's errors for NaNs during divergent behaviour.
