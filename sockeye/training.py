@@ -764,9 +764,13 @@ class EarlyStoppingTrainer:
         for name, value in metric_train.get_name_value():
             if np.isfinite(value):
                 checkpoint_metrics["%s-train" % name] = value
+            else:
+                logger.warning("A non-finite value skipped for training metric %s", name)
         for name, value in metric_val.get_name_value():
             if np.isfinite(value):
                 checkpoint_metrics["%s-val" % name] = value
+            else:
+                logger.warning("A non-finite value skipped for validation metric %s", name)
 
         if process_manager is not None:
             result = process_manager.collect_results()
