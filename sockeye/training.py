@@ -762,15 +762,9 @@ class EarlyStoppingTrainer:
 
         # copy values from checkpoint_metrics, skipping NaNs and infinities that break numpy's histograms
         for name, value in metric_train.get_name_value():
-            if np.isfinite(value):
-                checkpoint_metrics["%s-train" % name] = value
-            else:
-                logger.warning("A non-finite value skipped for training metric %s", name)
+            checkpoint_metrics["%s-train" % name] = value
         for name, value in metric_val.get_name_value():
-            if np.isfinite(value):
-                checkpoint_metrics["%s-val" % name] = value
-            else:
-                logger.warning("A non-finite value skipped for validation metric %s", name)
+            checkpoint_metrics["%s-val" % name] = value
 
         if process_manager is not None:
             result = process_manager.collect_results()
@@ -1079,7 +1073,7 @@ class TensorboardLogger:
             return
 
         for name, value in metrics.items():
-            if isinstance(value, mx.nd.NDArray):
+            if isinstance(value, mx.nd.NDArray) and mx.ndarray.contrib.isfinite(value).sum() == value.size():
                 self.sw.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
             else:
                 self.sw.add_scalar(tag=name, value=value, global_step=checkpoint)
