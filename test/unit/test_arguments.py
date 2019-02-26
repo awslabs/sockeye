@@ -206,7 +206,7 @@ def test_training_arg(test_params, expected_params):
                       beam_size=5,
                       nbest_size=1,
                       beam_prune=0,
-                      batch_size=1,
+                      batch_size=C.DEFAULT_BATCH_SIZE,
                       chunk_size=None,
                       ensemble_mode='linear',
                       bucket_width=10,
