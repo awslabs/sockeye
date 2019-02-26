@@ -774,7 +774,7 @@ def read_metrics_file(path: str) -> List[Dict[str, Any]]:
             checkpoint = int(fields[0])
             check_condition(i == checkpoint,
                             "Line (%d) and loaded checkpoint (%d) do not align." % (i, checkpoint))
-            metric = dict()
+            metric = dict()  # type: Dict[str, Any]
             for field in fields[1:]:
                 key, value = field.split("=", 1)
                 if value == 'True' or value == 'False':

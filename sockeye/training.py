@@ -588,7 +588,30 @@ class EarlyStoppingTrainer:
                 for name, val in metric_val.get_name_value():
                     logger.info('Checkpoint [%d]\tValidation-%s=%f', self.state.checkpoint, name, val)
 
-                # (2) determine stopping
+                # (2) determine improvement
+                has_improved = False
+                previous_best = self.state.best_metric
+                # at this point state.self..metrics doesn't have validation results yet
+                current_checkpoint_val_metric = [{"%s-val" % name:val for name, val in metric_val.get_name_value()}]
+                for checkpoint, metric_dict in enumerate(self.state.metrics + current_checkpoint_val_metric, 1):
+                    value = metric_dict.get("%s-val" % early_stopping_metric, self.state.best_metric)
+                    if utils.metric_value_is_better(value, self.state.best_metric, early_stopping_metric):
+                        self.state.best_metric = value
+                        self.state.best_checkpoint = checkpoint
+                        has_improved = True
+
+                if has_improved:
+                    self._update_best_params_link()
+                    self._update_best_optimizer_states(lr_decay_opt_states_reset)
+                    self.state.num_not_improved = 0
+                    logger.info("Validation-%s improved to %f (delta=%f).", early_stopping_metric,
+                                self.state.best_metric, abs(self.state.best_metric - previous_best))
+                else:
+                    self.state.num_not_improved += 1
+                    logger.info("Validation-%s has not improved for %d checkpoints, best so far: %f",
+                                early_stopping_metric, self.state.num_not_improved, self.state.best_metric)
+
+                # (3) determine stopping
                 if 0 <= max_num_not_improved <= self.state.num_not_improved:
                     logger.info("Maximum number of not improved checkpoints (%d) reached: %d",
                                 max_num_not_improved, self.state.num_not_improved)
@@ -609,38 +632,18 @@ class EarlyStoppingTrainer:
                                     min_samples, self.state.samples)
                         self.state.converged = False
 
-                # (3) update training metrics as the last step to capture the converged status
+                # (4) detect divergence with respect to the perplexity value at the last checkpoint
+                if self.state.metrics and not has_improved:
+                    last_ppl_value = metric_val[C.PERPLEXITY]
+                    # using a double of uniform distribution's value as a threshold
+                    if not np.isfinite(last_ppl_value) or last_ppl_value > 2 * len(self.target_vocab):
+                        logger.warning("Model optimization diverged. Last checkpoint's perplexity: %f",
+                                       last_ppl_value)
+                        self.state.diverged = True
+
+                # (5) update and write training/validation metrics late to capture converged/diverged status
                 self._update_metrics(metric_train, metric_val, process_manager)
                 metric_train.reset()
-
-                # (4) determine improvement
-                has_improved = False
-                previous_best = self.state.best_metric
-                for checkpoint, metric_dict in enumerate(self.state.metrics, 1):
-                    value = metric_dict.get("%s-val" % early_stopping_metric, self.state.best_metric)
-                    if utils.metric_value_is_better(value, self.state.best_metric, early_stopping_metric):
-                        self.state.best_metric = value
-                        self.state.best_checkpoint = checkpoint
-                        has_improved = True
-
-                if has_improved:
-                    self._update_best_params_link()
-                    self._update_best_optimizer_states(lr_decay_opt_states_reset)
-                    self.state.num_not_improved = 0
-                    logger.info("Validation-%s improved to %f (delta=%f).", early_stopping_metric,
-                                self.state.best_metric, abs(self.state.best_metric - previous_best))
-                else:
-                    self.state.num_not_improved += 1
-                    logger.info("Validation-%s has not improved for %d checkpoints, best so far: %f",
-                                early_stopping_metric, self.state.num_not_improved, self.state.best_metric)
-
-                # (5) detect divergence with respect to perplexity value at the last checkpoint
-                if self.state.metrics and not has_improved:
-                    # perplexity cannot exceed the number of target words, using the double to avoid precision issues
-                    last_ppl_value = self.state.metrics[-1]["%s-val" % C.PERPLEXITY]
-                    if not np.isfinite(last_ppl_value) or last_ppl_value > 2 * len(self.target_vocab):
-                        self.state.diverged = True
-                        logger.warning("Model optimization diverged. Last checkpoint's perplexity: %f", last_ppl_value)
 
                 # If using an extended optimizer, provide extra state information about the current checkpoint
                 # Loss: optimized metric
@@ -655,7 +658,7 @@ class EarlyStoppingTrainer:
                 # (6) adjust learning rates
                 self._adjust_learning_rate(has_improved, lr_decay_param_reset, lr_decay_opt_states_reset)
 
-                # (7) save training state
+                # (8) save training state
                 self._save_training_state(train_iter)
 
                 if self.state.converged or self.state.diverged:
@@ -761,7 +764,6 @@ class EarlyStoppingTrainer:
         checkpoint_metrics['converged'] = self.state.converged
         checkpoint_metrics['diverged'] = self.state.diverged
 
-        # copy values from checkpoint_metrics, skipping NaNs and infinities that break numpy's histograms
         for name, value in metric_train.get_name_value():
             checkpoint_metrics["%s-train" % name] = value
         for name, value in metric_val.get_name_value():
