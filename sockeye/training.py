@@ -634,7 +634,7 @@ class EarlyStoppingTrainer:
 
                 # (4) detect divergence with respect to the perplexity value at the last checkpoint
                 if self.state.metrics and not has_improved:
-                    last_ppl_value = metric_val[C.PERPLEXITY]
+                    last_ppl_value = current_checkpoint_val_metric["%s-val" % C.PERPLEXITY]
                     # using a double of uniform distribution's value as a threshold
                     if not np.isfinite(last_ppl_value) or last_ppl_value > 2 * len(self.target_vocab):
                         logger.warning("Model optimization diverged. Last checkpoint's perplexity: %f",
