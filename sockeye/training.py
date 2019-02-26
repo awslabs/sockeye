@@ -640,6 +640,7 @@ class EarlyStoppingTrainer:
                     last_ppl_value = self.state.metrics[-1]["%s-val" % C.PERPLEXITY]
                     if not np.isfinite(last_ppl_value) or last_ppl_value > 2 * len(self.target_vocab):
                         self.state.diverged = True
+                        logger.warning("Model optimization diverged. Last checkpoint's perplexity: %f", last_ppl_value)
 
                 # If using an extended optimizer, provide extra state information about the current checkpoint
                 # Loss: optimized metric
@@ -1073,8 +1074,11 @@ class TensorboardLogger:
             return
 
         for name, value in metrics.items():
-            if isinstance(value, mx.nd.NDArray) and mx.ndarray.contrib.isfinite(value).sum() == value.size():
-                self.sw.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
+            if isinstance(value, mx.nd.NDArray):
+                if mx.ndarray.contrib.isfinite(value).sum() == value.size():
+                    self.sw.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
+                else:
+                    logger.warning("Not adding the histogram of %s to tensorboard because some of its values are not finite.")
             else:
                 self.sw.add_scalar(tag=name, value=value, global_step=checkpoint)
 
