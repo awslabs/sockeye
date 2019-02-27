@@ -591,7 +591,7 @@ class EarlyStoppingTrainer:
                 # (2) determine improvement
                 has_improved = False
                 previous_best = self.state.best_metric
-                # at this point state.self..metrics doesn't have validation results yet
+                # at this point state.self.metrics doesn't have validation results yet
                 current_checkpoint_val_metric = {"%s-val" % name:val for name, val in metric_val.get_name_value()}
                 for checkpoint, metric_dict in enumerate(self.state.metrics + [current_checkpoint_val_metric], 1):
                     value = metric_dict.get("%s-val" % early_stopping_metric, self.state.best_metric)
