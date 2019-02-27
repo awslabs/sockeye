@@ -351,8 +351,7 @@ def create_encoder_config(args: argparse.Namespace,
                           max_seq_len_source: int,
                           max_seq_len_target: int,
                           config_conv: Optional[encoder.ConvolutionalEmbeddingConfig],
-                          num_embed_source: int) -> Tuple[encoder.EncoderConfig,
-                                                                                                int]:
+                          num_embed_source: int) -> Tuple[encoder.EncoderConfig, int]:
     """
     Create the encoder config.
 
