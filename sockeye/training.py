@@ -1077,7 +1077,8 @@ class TensorboardLogger:
 
         for name, value in metrics.items():
             if isinstance(value, mx.nd.NDArray):
-                if mx.ndarray.contrib.isfinite(value).sum() == value.size():
+                # TODO: switch to mx.ndarray.contrib.isfinite after upgrade to MxNet 1.4.*
+                if utils.isfinite(value).sum() == value.size():
                     self.sw.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
                 else:
                     logger.warning("Not adding the histogram of %s to tensorboard because some of its values are not finite.")

@@ -990,3 +990,12 @@ def inflect(word: str,
         return 'was' if count == 1 else 'were'
     else:
         return word + '(s)'
+
+
+def isfinite(data: mx.nd.NDArray) -> mx.nd.NDArray:
+    """Performs an element-wise check to determine if the NDArray contains an infinite element or not.
+       TODO: remove this funciton after upgrade to MXNet 1.4.* in favor of mx.ndarray.contrib.isfinite()
+    """
+    is_data_not_nan = data == data
+    is_data_not_infinite = data.abs() != np.inf
+    return mx.nd.logical_and(is_data_not_infinite, is_data_not_nan)
