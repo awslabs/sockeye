@@ -224,7 +224,7 @@ def create_model_config(args: argparse.Namespace,
 
     config_encoder, encoder_num_hidden = create_encoder_config(args)
     config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target,
-                                           embed_dropout_target)
+                                           num_embed_target)
 
     config_embed_source = encoder.PassThroughEmbeddingConfig()
     config_embed_target = encoder.EmbeddingConfig(vocab_size=vocab_target_size,
