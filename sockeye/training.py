@@ -588,10 +588,21 @@ class EarlyStoppingTrainer:
                 for name, val in metric_val.get_name_value():
                     logger.info('Checkpoint [%d]\tValidation-%s=%f', self.state.checkpoint, name, val)
 
-                # (2) determine improvement
+                # (2) wait for checkpoint decoder results and fill self.state.metrics
+                if process_manager is not None:
+                    result = process_manager.collect_results()
+                    if result is not None:
+                        decoded_checkpoint, decoder_metrics = result
+                        # The first checkpoint before any gradient updates is ignored
+                        if decoded_checkpoint > 0:
+                            self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
+                            self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
+                    process_manager.start_decoder(self.state.checkpoint)
+
+                # (3) determine improvement
                 has_improved = False
                 previous_best = self.state.best_metric
-                # at this point state.self.metrics doesn't have validation results yet
+                # at this point state.self.metrics doesn't have perplexity validation results yet
                 current_checkpoint_val_metric = {"%s-val" % name:val for name, val in metric_val.get_name_value()}
                 for checkpoint, metric_dict in enumerate(self.state.metrics + [current_checkpoint_val_metric], 1):
                     value = metric_dict.get("%s-val" % early_stopping_metric, self.state.best_metric)
@@ -611,7 +622,7 @@ class EarlyStoppingTrainer:
                     logger.info("Validation-%s has not improved for %d checkpoints, best so far: %f",
                                 early_stopping_metric, self.state.num_not_improved, self.state.best_metric)
 
-                # (3) determine stopping
+                # (4) determine stopping
                 if 0 <= max_num_not_improved <= self.state.num_not_improved:
                     logger.info("Maximum number of not improved checkpoints (%d) reached: %d",
                                 max_num_not_improved, self.state.num_not_improved)
@@ -632,7 +643,7 @@ class EarlyStoppingTrainer:
                                     min_samples, self.state.samples)
                         self.state.converged = False
 
-                # (4) detect divergence with respect to the perplexity value at the last checkpoint
+                # (5) detect divergence with respect to the perplexity value at the last checkpoint
                 if self.state.metrics and not has_improved:
                     last_ppl_value = current_checkpoint_val_metric["%s-val" % C.PERPLEXITY]
                     # using a double of uniform distribution's value as a threshold
@@ -641,7 +652,7 @@ class EarlyStoppingTrainer:
                                        last_ppl_value)
                         self.state.diverged = True
 
-                # (5) update and write training/validation metrics late to capture converged/diverged status
+                # (6) update and write training/validation metrics late to capture converged/diverged status
                 self._update_metrics(metric_train, metric_val, process_manager)
                 metric_train.reset()
 
@@ -655,7 +666,7 @@ class EarlyStoppingTrainer:
                     checkpoint_state = CheckpointState(checkpoint=self.state.checkpoint, metric_val=m_val)
                     self.model.optimizer.pre_update_checkpoint(checkpoint_state)
 
-                # (6) adjust learning rates
+                # (7) adjust learning rates
                 self._adjust_learning_rate(has_improved, lr_decay_param_reset, lr_decay_opt_states_reset)
 
                 # (8) save training state
@@ -768,16 +779,6 @@ class EarlyStoppingTrainer:
             checkpoint_metrics["%s-train" % name] = value
         for name, value in metric_val.get_name_value():
             checkpoint_metrics["%s-val" % name] = value
-
-        if process_manager is not None:
-            result = process_manager.collect_results()
-            if result is not None:
-                decoded_checkpoint, decoder_metrics = result
-                # The first checkpoint before any gradient updates is ignored
-                if decoded_checkpoint > 0:
-                    self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
-                    self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
-            process_manager.start_decoder(self.state.checkpoint)
 
         self.state.metrics.append(checkpoint_metrics)
         utils.write_metrics_file(self.state.metrics, self.metrics_fname)
