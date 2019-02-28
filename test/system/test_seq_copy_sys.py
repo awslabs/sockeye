@@ -25,6 +25,7 @@ from test.common import check_train_translate, tmp_digits_dataset
 logger = logging.getLogger(__name__)
 
 _TRAIN_LINE_COUNT = 10000
+_TRAIN_LINE_COUNT_EMPTY = 100
 _DEV_LINE_COUNT = 100
 _LINE_MAX_LENGTH = 10
 _TEST_LINE_COUNT = 110
@@ -124,6 +125,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
     """Task: copy short sequences of digits"""
     with tmp_digits_dataset(prefix="test_seq_copy",
                             train_line_count=_TRAIN_LINE_COUNT,
+                            train_line_count_empty=_TRAIN_LINE_COUNT_EMPTY,
                             train_max_length=_LINE_MAX_LENGTH,
                             dev_line_count=_DEV_LINE_COUNT,
                             dev_max_length=_LINE_MAX_LENGTH,
@@ -239,7 +241,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
 def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                   use_source_factor, perplexity_thresh, bleu_thresh):
     """Task: sort short sequences of digits"""
-    with tmp_digits_dataset("test_seq_sort.", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT, _LINE_MAX_LENGTH,
+    with tmp_digits_dataset("test_seq_sort.", _TRAIN_LINE_COUNT, _TRAIN_LINE_COUNT_EMPTY, _LINE_MAX_LENGTH, _DEV_LINE_COUNT, _LINE_MAX_LENGTH,
                             _TEST_LINE_COUNT, _TEST_LINE_COUNT_EMPTY, _TEST_MAX_LENGTH,
                             sort_target=True, seed_train=_SEED_TRAIN_DATA, seed_dev=_SEED_DEV_DATA,
                             with_source_factors=use_source_factor) as data:

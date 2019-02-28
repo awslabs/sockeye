@@ -450,6 +450,7 @@ def test_non_parallel_calculate_length_statistics(sources, target):
 
 def test_get_training_data_iters():
     train_line_count = 100
+    train_line_count_empty = 0
     train_max_length = 30
     dev_line_count = 20
     dev_max_length = 30
@@ -460,7 +461,7 @@ def test_get_training_data_iters():
     test_max_length = 30
     batch_size = 5
     with tmp_digits_dataset("tmp_corpus",
-                            train_line_count, train_max_length - C.SPACE_FOR_XOS,
+                            train_line_count, train_line_count_empty, train_max_length - C.SPACE_FOR_XOS,
                             dev_line_count, dev_max_length - C.SPACE_FOR_XOS,
                             test_line_count, test_line_count_empty,
                             test_max_length - C.SPACE_FOR_XOS) as data:
