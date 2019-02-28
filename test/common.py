@@ -135,7 +135,7 @@ _LEXICON_CREATE_PARAMS_COMMON = "create -i {input} -m {model} -k {topk} -o {lexi
 
 @contextmanager
 def tmp_digits_dataset(prefix: str,
-                       train_line_count: int, train_max_length: int,
+                       train_line_count: int, train_line_count_empty: int, train_max_length: int,
                        dev_line_count: int, dev_max_length: int,
                        test_line_count: int, test_line_count_empty: int, test_max_length: int,
                        sort_target: bool = False,
@@ -153,8 +153,8 @@ def tmp_digits_dataset(prefix: str,
         dev_target_path = os.path.join(work_dir, "dev.tgt")
         test_source_path = os.path.join(work_dir, "test.src")
         test_target_path = os.path.join(work_dir, "test.tgt")
-        generate_digits_file(train_source_path, train_target_path, train_line_count,
-                             train_max_length, sort_target=sort_target, seed=seed_train)
+        generate_digits_file(train_source_path, train_target_path, train_line_count, train_max_length,
+                             line_count_empty=train_line_count_empty, sort_target=sort_target, seed=seed_train)
         generate_digits_file(dev_source_path, dev_target_path, dev_line_count, dev_max_length, sort_target=sort_target,
                              seed=seed_dev)
         generate_digits_file(test_source_path, test_target_path, test_line_count, test_max_length,
