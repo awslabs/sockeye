@@ -50,7 +50,7 @@ from .. import vocab
 from ..config import Config
 from ..log import setup_main_logger
 from ..train import check_resume, check_arg_compatibility, create_decoder_config, \
-    create_optimizer_config, create_training_model
+    create_optimizer_config, create_training_model, get_num_embed
 from ..utils import check_condition
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
@@ -219,7 +219,7 @@ def create_model_config(args: argparse.Namespace,
     :param config_data: Data config.
     :return: The model configuration.
     """
-    num_embed_source, num_embed_target = args.num_embed
+    num_embed_source, num_embed_target = get_num_embed(args)
     _, embed_dropout_target = args.embed_dropout
 
     config_encoder, encoder_num_hidden = create_encoder_config(args)

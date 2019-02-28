@@ -574,11 +574,14 @@ def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
     num_embed_source, num_embed_target = args.num_embed
     if args.encoder == C.TRANSFORMER_TYPE:
         transformer_model_size_source = args.transformer_model_size[0]
-        if transformer_model_size_source != num_embed_source:
-            logger.warning("Source embedding size does not match Transformer model size (%d vs %d). "
-                           "It will automatically be adjusted to match the Transformer model size (%d).",
-                           transformer_model_size_source, num_embed_source, transformer_model_size_source)
+        if not num_embed_source:
+            logger.info("Source embedding size was not set t will automatically be adjusted to match the "
+                        "Transformer model size (%d).", transformer_model_size_source)
             num_embed_source = transformer_model_size_source
+        else:
+            check_condition(args.transformer_model_size[0] == num_embed_source,
+                            "Source embedding size must match transformer model size: %s vs. %s"
+                            % (args.transformer_model_size, num_embed_source))
 
         total_source_factor_size = sum(args.source_factors_num_embed)
         if total_source_factor_size > 0 and args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
@@ -591,11 +594,20 @@ def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
 
     if args.decoder == C.TRANSFORMER_TYPE:
         transformer_model_size_target = args.transformer_model_size[1]
-        if transformer_model_size_target != num_embed_target:
-            logger.warning("Target embedding size does not match Transformer model size (%d vs %d). "
-                           "It will automatically be adjusted to match the Transformer model size (%d).",
-                           transformer_model_size_target, num_embed_target, transformer_model_size_target)
+        if not num_embed_target:
+            logger.info("Target embedding size was not set t will automatically be adjusted to match the "
+                        "Transformer model size (%d).", transformer_model_size_target)
             num_embed_target = transformer_model_size_target
+        else:
+            # Make sure that if the user sets num_embed it matches the Transformer model size
+            check_condition(args.transformer_model_size[1] == num_embed_target,
+                            "Target embedding size must match transformer model size: %s vs. %s"
+                            % (args.transformer_model_size, num_embed_target))
+
+    if not num_embed_source:
+        num_embed_source = C.DEFAULT_NUM_EMBED
+    if not num_embed_target:
+        num_embed_target = C.DEFAULT_NUM_EMBED
 
     return num_embed_source, num_embed_target
 
