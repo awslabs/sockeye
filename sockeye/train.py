@@ -575,8 +575,8 @@ def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
     if args.encoder == C.TRANSFORMER_TYPE:
         transformer_model_size_source = args.transformer_model_size[0]
         if not num_embed_source:
-            logger.info("Source embedding size was not set t will automatically be adjusted to match the "
-                        "Transformer model size (%d).", transformer_model_size_source)
+            logger.info("Source embedding size was not set it will automatically be adjusted to match the "
+                        "Transformer source model size (%d).", transformer_model_size_source)
             num_embed_source = transformer_model_size_source
         else:
             check_condition(args.transformer_model_size[0] == num_embed_source,
@@ -595,8 +595,8 @@ def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
     if args.decoder == C.TRANSFORMER_TYPE:
         transformer_model_size_target = args.transformer_model_size[1]
         if not num_embed_target:
-            logger.info("Target embedding size was not set t will automatically be adjusted to match the "
-                        "Transformer model size (%d).", transformer_model_size_target)
+            logger.info("Target embedding size was not set it will automatically be adjusted to match the "
+                        "Transformer target model size (%d).", transformer_model_size_target)
             num_embed_target = transformer_model_size_target
         else:
             # Make sure that if the user sets num_embed it matches the Transformer model size
