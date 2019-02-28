@@ -597,6 +597,8 @@ class EarlyStoppingTrainer:
                         if decoded_checkpoint > 0:
                             self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
                             self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
+                            utils.write_metrics_file(self.state.metrics, self.metrics_fname)
+                    # Start the decoder for the next checkpoint
                     process_manager.start_decoder(self.state.checkpoint)
 
                 # (3) determine improvement
@@ -653,7 +655,7 @@ class EarlyStoppingTrainer:
                         self.state.diverged = True
 
                 # (6) update and write training/validation metrics late to capture converged/diverged status
-                self._update_metrics(metric_train, metric_val, process_manager)
+                self._update_metrics(metric_train, metric_val)
                 metric_train.reset()
 
                 # If using an extended optimizer, provide extra state information about the current checkpoint
@@ -759,8 +761,7 @@ class EarlyStoppingTrainer:
 
     def _update_metrics(self,
                         metric_train: mx.metric.EvalMetric,
-                        metric_val: mx.metric.EvalMetric,
-                        process_manager: Optional['DecoderProcessManager'] = None):
+                        metric_val: mx.metric.EvalMetric):
         """
         Updates metrics for current checkpoint. If a process manager is given, also collects previous decoding results
         and spawns a new decoding process.
@@ -801,7 +802,10 @@ class EarlyStoppingTrainer:
                 decoded_checkpoint, decoder_metrics = result
                 self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
                 self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
-            utils.write_metrics_file(self.state.metrics, self.metrics_fname)
+
+
+                utils.write_metrics_file(self.state.metrics, self.metrics_fname)
+                self.state.save(os.path.join(self.training_state_dirname, C.TRAINING_STATE_NAME))
 
         if not keep_training_state:
             final_training_state_dirname = os.path.join(self.model.output_dir, C.TRAINING_STATE_DIRNAME)
@@ -815,6 +819,7 @@ class EarlyStoppingTrainer:
                 initial_opt_states_fname = os.path.join(self.model.output_dir, C.OPT_STATES_INITIAL)
                 if os.path.exists(initial_opt_states_fname):
                     os.remove(initial_opt_states_fname)
+
 
     def _initialize_parameters(self, params: Optional[str], allow_missing_params: bool):
         self.model.initialize_parameters(self.optimizer_config.initializer, allow_missing_params)
@@ -1079,7 +1084,7 @@ class TensorboardLogger:
         for name, value in metrics.items():
             if isinstance(value, mx.nd.NDArray):
                 # TODO: switch to mx.ndarray.contrib.isfinite after upgrade to MxNet 1.4.*
-                if utils.isfinite(value).sum() == value.size():
+                if utils.isfinite(value).astype('int32').sum().asscalar() == value.size:
                     self.sw.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
                 else:
                     logger.warning("Not adding the histogram of %s to tensorboard because some of its values are not finite.")
