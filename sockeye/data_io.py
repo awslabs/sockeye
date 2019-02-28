@@ -432,7 +432,7 @@ class RawParallelDatasetLoader:
     :param eos_id: End-of-sentence id.
     :param pad_id: Padding id.
     :param eos_id: Unknown id.
-    :param skip_blanks: Skip blank lines.
+    :param skip_blanks: Whether to skip blank lines.
     :param dtype: Data type.
     """
 
@@ -472,7 +472,7 @@ class RawParallelDatasetLoader:
         num_pad_target = 0
 
         # Bucket sentences as padded np arrays
-        for sentno, (sources, target) in enumerate(parallel_iter(source_iterables, target_iterable, skip_blanks=False), 1):
+        for sentno, (sources, target) in enumerate(parallel_iter(source_iterables, target_iterable, skip_blanks=self.skip_blanks), 1):
             sources = [[] if stream is None else stream for stream in sources]
             if target is None:
                 target = []

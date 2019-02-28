@@ -31,6 +31,7 @@ from test.common import check_train_translate, run_train_translate, tmp_digits_d
 logger = logging.getLogger(__name__)
 
 _TRAIN_LINE_COUNT = 20
+_TRAIN_LINE_COUNT_EMPTY = 1
 _DEV_LINE_COUNT = 5
 _TEST_LINE_COUNT = 5
 _TEST_LINE_COUNT_EMPTY = 2
@@ -165,6 +166,7 @@ def test_seq_copy(train_params: str,
 
     with tmp_digits_dataset(prefix="test_seq_copy",
                             train_line_count=_TRAIN_LINE_COUNT,
+                            train_line_count_empty=_TRAIN_LINE_COUNT_EMPTY,
                             train_max_length=_LINE_MAX_LENGTH,
                             dev_line_count=_DEV_LINE_COUNT,
                             dev_max_length=_LINE_MAX_LENGTH,
@@ -173,7 +175,7 @@ def test_seq_copy(train_params: str,
                             test_max_length=_TEST_MAX_LENGTH,
                             sort_target=False,
                             with_source_factors=use_source_factors) as data:
-        
+
         # TODO: Here we temporarily switch off comparing translation and scoring scores, which
         # sometimes produces inconsistent results for --batch-size > 1 (see issue #639 on github).
         check_train_translate(train_params=train_params,
@@ -198,6 +200,7 @@ def test_other_clis(train_params: str, translate_params: str):
     """
     with tmp_digits_dataset(prefix="test_other_clis",
                             train_line_count=_TRAIN_LINE_COUNT,
+                            train_line_count_empty=_TRAIN_LINE_COUNT_EMPTY,
                             train_max_length=_LINE_MAX_LENGTH,
                             dev_line_count=_DEV_LINE_COUNT,
                             dev_max_length=_LINE_MAX_LENGTH,

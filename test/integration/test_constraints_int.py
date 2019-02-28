@@ -28,6 +28,7 @@ from test.common import run_train_translate, tmp_digits_dataset, collect_transla
     _TRANSLATE_PARAMS_COMMON
 
 _TRAIN_LINE_COUNT = 20
+_TRAIN_LINE_COUNT_EMPTY = 1
 _DEV_LINE_COUNT = 5
 _TEST_LINE_COUNT = 5
 _TEST_LINE_COUNT_EMPTY = 2
@@ -58,6 +59,7 @@ TEST_CONFIGS = [
 def test_constraints(train_params: str, translate_params: str):
     with tmp_digits_dataset(prefix="test_constraints",
                             train_line_count=_TRAIN_LINE_COUNT,
+                            train_line_count_empty=_TRAIN_LINE_COUNT_EMPTY,
                             train_max_length=_LINE_MAX_LENGTH,
                             dev_line_count=_DEV_LINE_COUNT,
                             dev_max_length=_LINE_MAX_LENGTH,
