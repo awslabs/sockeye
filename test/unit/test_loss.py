@@ -121,14 +121,14 @@ def test_smoothed_cross_entropy_loss():
                                         [0]]),
                            'valid',
                            0.0,
-                           -np.log(0.8 + 1e-8) / 1.0),
+                           -np.log(0.8 + 1e-8) / 1.0),  # pylint: disable=invalid-unary-operand-type
                           (mx.nd.array([[0.0, 0.2, 0.8],
                                         [0.0, 1.0, 0.0]]),
                            mx.nd.array([[2],
                                         [0]]),
                            'batch',
                            0.0,
-                           -np.log(0.8 + 1e-8) / 2.0)]
+                           -np.log(0.8 + 1e-8) / 2.0)]  # pylint: disable=invalid-unary-operand-type
                          )
 def test_cross_entropy_metric(preds, labels, normalization_type, label_smoothing, expected_value):
     config = sockeye.loss.LossConfig(name=C.CROSS_ENTROPY,
@@ -146,7 +146,7 @@ def test_cross_entropy_internal():
     pred = mx.nd.array([[0.0, 0.2, 0.8]])
     logprob = mx.nd.log(pred + 1e-8)
     label = mx.nd.array([2])
-    expected_cross_entropy = -np.log(0.8 + 1e-8) / 1.0
+    expected_cross_entropy = -np.log(0.8 + 1e-8) / 1.0  # pylint: disable=invalid-unary-operand-type
 
     cross_entropy = sockeye.loss.CrossEntropyMetric.cross_entropy(logprob, label).sum()
     cross_entropy_smoothed = sockeye.loss.CrossEntropyMetric.cross_entropy_smoothed(logprob, label,

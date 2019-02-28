@@ -774,10 +774,13 @@ def read_metrics_file(path: str) -> List[Dict[str, Any]]:
             checkpoint = int(fields[0])
             check_condition(i == checkpoint,
                             "Line (%d) and loaded checkpoint (%d) do not align." % (i, checkpoint))
-            metric = dict()
+            metric = dict()  # type: Dict[str, Any]
             for field in fields[1:]:
                 key, value = field.split("=", 1)
-                metric[key] = float(value)
+                if value == 'True' or value == 'False':
+                    metric[key] = bool(value)
+                else:
+                    metric[key] = float(value)
             metrics.append(metric)
     return metrics
 
@@ -987,3 +990,12 @@ def inflect(word: str,
         return 'was' if count == 1 else 'were'
     else:
         return word + '(s)'
+
+
+def isfinite(data: mx.nd.NDArray) -> mx.nd.NDArray:
+    """Performs an element-wise check to determine if the NDArray contains an infinite element or not.
+       TODO: remove this funciton after upgrade to MXNet 1.4.* in favor of mx.ndarray.contrib.isfinite()
+    """
+    is_data_not_nan = data == data
+    is_data_not_infinite = data.abs() != np.inf
+    return mx.nd.logical_and(is_data_not_infinite, is_data_not_nan)

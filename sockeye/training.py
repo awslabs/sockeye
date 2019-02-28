@@ -378,7 +378,7 @@ class TrainState:
 
     __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint',
                  'updates', 'samples', 'gradient_norm', 'gradients', 'metrics', 'start_tic',
-                 'early_stopping_metric', 'best_metric', 'best_checkpoint', 'converged']
+                 'early_stopping_metric', 'best_metric', 'best_checkpoint', 'converged', 'diverged']
 
     def __init__(self, early_stopping_metric: str) -> None:
         self.num_not_improved = 0
@@ -396,6 +396,7 @@ class TrainState:
         self.best_metric = C.METRIC_WORST[early_stopping_metric]
         self.best_checkpoint = 0
         self.converged = False
+        self.diverged = False
 
     def save(self, fname: str):
         """
@@ -440,6 +441,7 @@ class EarlyStoppingTrainer:
         self.tflogger = TensorboardLogger(logdir=os.path.join(model.output_dir, C.TENSORBOARD_NAME),
                                           source_vocab=source_vocabs[0],
                                           target_vocab=target_vocab)
+        self.target_vocab = target_vocab
         self.state = None  # type: Optional[TrainState]
         self.stop_training_on_decoder_failure = stop_training_on_decoder_failure
 
@@ -586,14 +588,23 @@ class EarlyStoppingTrainer:
                 for name, val in metric_val.get_name_value():
                     logger.info('Checkpoint [%d]\tValidation-%s=%f', self.state.checkpoint, name, val)
 
-                # (3) update training metrics
-                self._update_metrics(metric_train, metric_val, process_manager)
-                metric_train.reset()
+                # (2) wait for checkpoint decoder results and fill self.state.metrics
+                if process_manager is not None:
+                    result = process_manager.collect_results()
+                    if result is not None:
+                        decoded_checkpoint, decoder_metrics = result
+                        # The first checkpoint before any gradient updates is ignored
+                        if decoded_checkpoint > 0:
+                            self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
+                            self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
+                    process_manager.start_decoder(self.state.checkpoint)
 
-                # (4) determine improvement
+                # (3) determine improvement
                 has_improved = False
                 previous_best = self.state.best_metric
-                for checkpoint, metric_dict in enumerate(self.state.metrics, 1):
+                # at this point state.self.metrics doesn't have perplexity validation results yet
+                current_checkpoint_val_metric = {"%s-val" % name:val for name, val in metric_val.get_name_value()}
+                for checkpoint, metric_dict in enumerate(self.state.metrics + [current_checkpoint_val_metric], 1):
                     value = metric_dict.get("%s-val" % early_stopping_metric, self.state.best_metric)
                     if utils.metric_value_is_better(value, self.state.best_metric, early_stopping_metric):
                         self.state.best_metric = value
@@ -611,23 +622,7 @@ class EarlyStoppingTrainer:
                     logger.info("Validation-%s has not improved for %d checkpoints, best so far: %f",
                                 early_stopping_metric, self.state.num_not_improved, self.state.best_metric)
 
-                # If using an extended optimizer, provide extra state information about the current checkpoint
-                # Loss: optimized metric
-                if metric_loss is not None and isinstance(self.model.optimizer, SockeyeOptimizer):
-                    m_val = 0
-                    for name, val in metric_val.get_name_value():
-                        if name == early_stopping_metric:
-                            m_val = val
-                    checkpoint_state = CheckpointState(checkpoint=self.state.checkpoint, metric_val=m_val)
-                    self.model.optimizer.pre_update_checkpoint(checkpoint_state)
-
-                # (5) adjust learning rates
-                self._adjust_learning_rate(has_improved, lr_decay_param_reset, lr_decay_opt_states_reset)
-
-                # (6) save training state
-                self._save_training_state(train_iter)
-
-                # (7) determine stopping
+                # (4) determine stopping
                 if 0 <= max_num_not_improved <= self.state.num_not_improved:
                     logger.info("Maximum number of not improved checkpoints (%d) reached: %d",
                                 max_num_not_improved, self.state.num_not_improved)
@@ -646,9 +641,39 @@ class EarlyStoppingTrainer:
                     if min_samples is not None and self.state.samples < min_samples:
                         logger.info("Minimum number of samples (%d) not reached yet: %d",
                                     min_samples, self.state.samples)
+                        self.state.converged = False
 
-                    if self.state.converged:
-                        break
+                # (5) detect divergence with respect to the perplexity value at the last checkpoint
+                if self.state.metrics and not has_improved:
+                    last_ppl_value = current_checkpoint_val_metric["%s-val" % C.PERPLEXITY]
+                    # using a double of uniform distribution's value as a threshold
+                    if not np.isfinite(last_ppl_value) or last_ppl_value > 2 * len(self.target_vocab):
+                        logger.warning("Model optimization diverged. Last checkpoint's perplexity: %f",
+                                       last_ppl_value)
+                        self.state.diverged = True
+
+                # (6) update and write training/validation metrics late to capture converged/diverged status
+                self._update_metrics(metric_train, metric_val, process_manager)
+                metric_train.reset()
+
+                # If using an extended optimizer, provide extra state information about the current checkpoint
+                # Loss: optimized metric
+                if metric_loss is not None and isinstance(self.model.optimizer, SockeyeOptimizer):
+                    m_val = 0
+                    for name, val in metric_val.get_name_value():
+                        if name == early_stopping_metric:
+                            m_val = val
+                    checkpoint_state = CheckpointState(checkpoint=self.state.checkpoint, metric_val=m_val)
+                    self.model.optimizer.pre_update_checkpoint(checkpoint_state)
+
+                # (7) adjust learning rates
+                self._adjust_learning_rate(has_improved, lr_decay_param_reset, lr_decay_opt_states_reset)
+
+                # (8) save training state
+                self._save_training_state(train_iter)
+
+                if self.state.converged or self.state.diverged:
+                    break
 
                 tic = time.time()
 
@@ -660,7 +685,7 @@ class EarlyStoppingTrainer:
                     break
 
         self._cleanup(lr_decay_opt_states_reset, process_manager=process_manager,
-                      keep_training_state=not self.state.converged)
+                      keep_training_state=not self.state.converged and not self.state.diverged)
         logger.info("Training finished%s. Best checkpoint: %d. Best validation %s: %.6f",
                     ", can be continued later" if not self.state.converged else "",
                     self.state.best_checkpoint, early_stopping_metric, self.state.best_metric)
@@ -747,21 +772,13 @@ class EarlyStoppingTrainer:
                               "time-elapsed": time.time() - self.state.start_tic}
         gpu_memory_usage = utils.get_gpu_memory_usage(self.model.context)
         checkpoint_metrics['used-gpu-memory'] = sum(v[0] for v in gpu_memory_usage.values())
+        checkpoint_metrics['converged'] = self.state.converged
+        checkpoint_metrics['diverged'] = self.state.diverged
 
         for name, value in metric_train.get_name_value():
             checkpoint_metrics["%s-train" % name] = value
         for name, value in metric_val.get_name_value():
             checkpoint_metrics["%s-val" % name] = value
-
-        if process_manager is not None:
-            result = process_manager.collect_results()
-            if result is not None:
-                decoded_checkpoint, decoder_metrics = result
-                # The first checkpoint before any gradient updates is ignored
-                if decoded_checkpoint > 0:
-                    self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
-                    self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
-            process_manager.start_decoder(self.state.checkpoint)
 
         self.state.metrics.append(checkpoint_metrics)
         utils.write_metrics_file(self.state.metrics, self.metrics_fname)
@@ -1061,7 +1078,11 @@ class TensorboardLogger:
 
         for name, value in metrics.items():
             if isinstance(value, mx.nd.NDArray):
-                self.sw.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
+                # TODO: switch to mx.ndarray.contrib.isfinite after upgrade to MxNet 1.4.*
+                if utils.isfinite(value).sum() == value.size():
+                    self.sw.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
+                else:
+                    logger.warning("Not adding the histogram of %s to tensorboard because some of its values are not finite.")
             else:
                 self.sw.add_scalar(tag=name, value=value, global_step=checkpoint)
 
