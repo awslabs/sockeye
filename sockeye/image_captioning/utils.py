@@ -191,7 +191,8 @@ def zero_pad_features(features: List[np.ndarray],
         if np.any(diff_shape < 0):
             raise ValueError("Provided target values must be bigger then the original "
                              "values for each dimension. (provided: {}, original {})".format(target_shape, feature_shape))
-        diff_shape = [[0, d] for d in diff_shape]  # pad format: ((before_1, after_1), ... (before_N, after_N))
+        # pad format: ((before_1, after_1), ... (before_N, after_N))
+        diff_shape = [[0, d] for d in diff_shape]  # pylint: disable=not-an-iterable
         p = np.pad(feature, diff_shape, 'constant', constant_values=0)
         pad_features.append(p)
     return pad_features
