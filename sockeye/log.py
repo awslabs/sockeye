@@ -90,10 +90,16 @@ FILE_CONSOLE_LOGGING = {
     }
 }
 
+NO_LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': True,
+}
+
 LOGGING_CONFIGS = {
     "file_only": FILE_LOGGING,
     "console_only": CONSOLE_LOGGING,
     "file_console": FILE_CONSOLE_LOGGING,
+    "none": NO_LOGGING,
 }
 
 
@@ -102,40 +108,42 @@ def is_python34() -> bool:
     return version[0] == 3 and version[1] == 4
 
 
-def setup_main_logger(name: str, file_logging=True, console=True, path: Optional[str] = None) -> logging.Logger:
+def setup_main_logger(file_logging=True, console=True, path: Optional[str] = None, level=logging.INFO):
     """
-    Return a logger that configures logging for the main application.
+    Configures logging for the main application.
 
-    :param name: Name of the returned logger.
     :param file_logging: Whether to log to a file.
     :param console: Whether to log to the console.
     :param path: Optional path to write logfile to.
+    :param level: Log level. Default: INFO.
     """
     if file_logging and console:
-        log_config = LOGGING_CONFIGS["file_console"]
+        log_config = LOGGING_CONFIGS["file_console"]  # type: ignore
     elif file_logging:
         log_config = LOGGING_CONFIGS["file_only"]
-    else:
+    elif console:
         log_config = LOGGING_CONFIGS["console_only"]
+    else:
+        log_config = LOGGING_CONFIGS["none"]
 
     if path:
         log_config["handlers"]["rotating"]["filename"] = path  # type: ignore
 
-    logging.config.dictConfig(log_config)
-    logger = logging.getLogger(name)
+    for _, handler_config in log_config['handlers'].items():  # type: ignore
+        handler_config['level'] = level
+
+    logging.config.dictConfig(log_config)  # type: ignore
 
     def exception_hook(exc_type, exc_value, exc_traceback):
         if is_python34():
             # Python3.4 does not seem to handle logger.exception() well
             import traceback
             traceback = "".join(traceback.format_tb(exc_traceback)) + exc_type.name
-            logger.error("Uncaught exception\n%s", traceback)
+            logging.error("Uncaught exception\n%s", traceback)
         else:
-            logger.exception("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+            logging.exception("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
 
     sys.excepthook = exception_hook
-
-    return logger
 
 
 def log_sockeye_version(logger):

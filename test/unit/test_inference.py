@@ -13,6 +13,7 @@
 
 import json
 from math import ceil
+from typing import Tuple
 from unittest.mock import patch, Mock
 
 import mxnet as mx
@@ -31,6 +32,7 @@ _EOS = -1
 
 def mock_translator(batch_size: int = 1,
                     beam_size: int = 5,
+                    nbest_size: int = 1,
                     beam_prune: float = 0,
                     num_source_factors: int = 1):
     """
@@ -44,6 +46,7 @@ def mock_translator(batch_size: int = 1,
                                                   length_penalty=None,
                                                   beam_prune=None,
                                                   beam_search_stop=None,
+                                                  nbest_size=None,
                                                   models=None,
                                                   source_vocabs=None,
                                                   target_vocab=None,
@@ -61,6 +64,7 @@ def mock_translator(batch_size: int = 1,
 
         translator.batch_size = batch_size
         translator.beam_size = beam_size
+        translator.nbest_size = nbest_size
         translator.beam_prune = beam_prune
         translator.zeros_array = mx.nd.zeros((beam_size,), dtype='int32')
         translator.inf_array = mx.nd.full((batch_size * beam_size,), val=np.inf, dtype='float32')
@@ -304,6 +308,32 @@ def test_failed_make_input_from_valid_json_string(text, text_key, factors, facto
     assert isinstance(inp, sockeye.inference.BadTranslatorInput)
 
 
+@pytest.mark.parametrize("text, factors",
+                         [("this is a test without factors", None),
+                          ("", None),
+                          ("test", ["X", "X"]),
+                          ("a b c", ["x y z"]),
+                          ("a", [])])
+def test_make_input_from_valid_dict(text, factors):
+    sentence_id = 1
+    expected_tokens = list(sockeye.data_io.get_tokens(text))
+    inp = sockeye.inference.make_input_from_dict(sentence_id, {C.JSON_TEXT_KEY: text,
+                                                               C.JSON_FACTORS_KEY: factors})
+    assert len(inp) == len(expected_tokens)
+    assert inp.tokens == expected_tokens
+    if factors is not None:
+        assert len(inp.factors) == len(factors)
+    else:
+        assert inp.factors is None
+
+
+@pytest.mark.parametrize("text, text_key, factors, factors_key", [("a", "blub", None, "")])
+def test_failed_make_input_from_valid_dict(text, text_key, factors, factors_key):
+    sentence_id = 1
+    inp = sockeye.inference.make_input_from_dict(sentence_id, {text_key: text, factors_key: factors})
+    assert isinstance(inp, sockeye.inference.BadTranslatorInput)
+
+
 @pytest.mark.parametrize("strings",
                          [
                              ["a b c"],
@@ -338,19 +368,17 @@ prune_tests = [
 
 @pytest.mark.parametrize("batch, beam, prune, scores, finished, expected_inactive", prune_tests)
 def test_beam_prune(batch, beam, prune, scores, finished, expected_inactive):
-    scores = mx.nd.array(scores)
+    scores = mx.nd.array(scores).reshape((-1, 1))
     finished = mx.nd.array(finished, dtype='int32')
-    inf_array = mx.nd.full((batch * beam,), val=np.inf)
-    zeros_array = mx.nd.zeros((batch * beam,), dtype='int32')
     best_word_indices = mx.nd.zeros((batch * beam,), dtype='int32')
 
     prune_hyps = sockeye.inference.PruneHypotheses(prune, beam)
     prune_hyps.initialize()
-    inactive, _, _ = prune_hyps(best_word_indices, scores, finished, inf_array, zeros_array)
+    inactive, _, _ = prune_hyps(best_word_indices, scores, finished)
     assert inactive.asnumpy().tolist() == expected_inactive
 
     prune_hyps.hybridize()
-    inactive, _, _ = prune_hyps(best_word_indices, scores, finished, inf_array, zeros_array)
+    inactive, _, _ = prune_hyps(best_word_indices, scores, finished)
     assert inactive.asnumpy().tolist() == expected_inactive
 
 
@@ -374,6 +402,39 @@ def test_sort_by_index():
         assert (o.asnumpy() == e).all()
 
 
+def numpy_topk(scores: mx.nd.NDArray,
+               k: int,
+               offset: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
+    """
+    Get the lowest k elements per sentence from a `scores` matrix using an intermediary Numpy conversion.
+    This should be equivalent to sockeye.utils.topk() and is used as a comparative implementation in testing.
+
+    :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+    :param k: The number of smallest scores to return.
+    :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+    :return: The row indices, column indices and values of the k smallest items in matrix.
+    """
+    # (batch_size, beam_size * target_vocab_size)
+    folded_scores = scores.reshape((-1, k * scores.shape[-1]))
+    batch_size = folded_scores.shape[0]
+
+    folded_scores = folded_scores.asnumpy()
+    # Get the scores
+    # Indexes into folded_scores: (batch_size, beam_size)
+    flat_idxs = np.argpartition(folded_scores, range(k))[:, :k]
+    # Score values: (batch_size, beam_size)
+    values = mx.nd.array(folded_scores[np.arange(folded_scores.shape[0])[:, None], flat_idxs], ctx=scores.context)
+    best_hyp_indices, best_word_indices = mx.nd.array(np.unravel_index(flat_idxs.ravel(), scores.shape),
+                                                      dtype='int32', ctx=scores.context)
+
+    if batch_size > 1:
+        # Offsetting the indices to match the shape of the scores matrix
+        best_hyp_indices += offset
+
+    values = values.reshape((-1, 1))
+    return best_hyp_indices, best_word_indices, values
+
+
 @pytest.mark.parametrize("batch_size, beam_size, target_vocab_size",
                         [(1, 5, 200),
                          (5, 5, 200),
@@ -384,38 +445,71 @@ def test_topk_func(batch_size, beam_size, target_vocab_size):
     # Random model scores. Shape: (batch_size * beam_size, target_vocab_size)
     scores = mx.nd.random.uniform(0, 1, (batch_size * beam_size, target_vocab_size))
     # offset for batch sizes > 1
-    offset = mx.nd.array(np.repeat(np.arange(0, batch_size * beam_size, beam_size), beam_size), dtype='int32')
+    offset = mx.nd.repeat(mx.nd.arange(0, batch_size * beam_size, beam_size, dtype='int32'), beam_size)
 
-    np_hyp, np_word, np_values = sockeye.utils.topk(scores, k=beam_size,
-                                                    offset=offset, use_mxnet_topk=False)
+    np_hyp, np_word, np_values = numpy_topk(scores, k=beam_size, offset=offset)
     np_hyp, np_word, np_values = np_hyp.asnumpy(), np_word.asnumpy(), np_values.asnumpy()
 
-    mx_hyp, mx_word, mx_values = sockeye.utils.topk(scores, k=beam_size,
-                                                    offset=offset, use_mxnet_topk=True)
+    mx_hyp, mx_word, mx_values = sockeye.utils.topk(scores, k=beam_size, offset=offset)
     mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
     assert all(mx_hyp == np_hyp)
     assert all(mx_word == np_word)
     assert all(mx_values == np_values)
 
-    topk = sockeye.inference.TopK(k=beam_size, batch_size=batch_size, vocab_size=target_vocab_size)
+    topk = sockeye.inference.TopK(k=beam_size, vocab_size=target_vocab_size)
     topk.initialize()
-    assert all(topk.offset.data() == offset)
 
-    mx_hyp, mx_word, mx_values = topk(scores)
+    mx_hyp, mx_word, mx_values = topk(scores, offset)
     mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
     assert all(mx_hyp == np_hyp)
     assert all(mx_word == np_word)
     assert all(mx_values == np_values)
 
     topk.hybridize()
-    mx_hyp, mx_word, mx_values = topk(scores)
+    mx_hyp, mx_word, mx_values = topk(scores, offset)
     mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
     assert all(mx_hyp == np_hyp)
     assert all(mx_word == np_word)
     assert all(mx_values == np_values)
 
 
-def test_get_best_word_indeces_for_kth_hypotheses():
+@pytest.mark.parametrize("batch_size, beam_size, target_vocab_size, top_n",
+                        [(1, 5, 200, 0),
+                         (5, 5, 200, 0),
+                         (1, 100, 200, 5),
+                         (5, 100, 200, 5)])
+def test_samplek_func(batch_size, beam_size, target_vocab_size, top_n):
+    # arrange scores increasing values from left to right, so the best item is always index 0, next-best 1, and so on
+    scores = mx.nd.array([list(range(1, target_vocab_size + 1)) for _ in range(batch_size * beam_size)])
+    # normalize
+    target_dists = mx.nd.broadcast_div(scores, scores.sum(axis=1, keepdims=True))
+
+    samplek = sockeye.inference.SampleK(k=beam_size, n=top_n, max_batch_size=batch_size)
+    samplek.initialize()
+
+    # 0..(batch_size * beam_size)-1
+    expected_hyps = mx.nd.array(range(batch_size * beam_size), dtype='int32')
+    finished = mx.nd.cast(mx.nd.random.uniform(0, 1, (batch_size * beam_size)) > 0.5, dtype='int32')
+
+    for i in [1, 2]:
+        if i == 2:
+            samplek.hybridize()
+
+        hyps, words, values = samplek(scores, scores, finished)
+        assert hyps.shape[0] == batch_size * beam_size
+
+        # The indices should always be the integers from 0 to batch*beam-1
+        assert sum(hyps == expected_hyps).asscalar() == (batch_size * beam_size)
+        if top_n != 0:
+            # Scores are increasing left-to-right, so best items are all the lowest word IDs.
+            # No word id greater than the cap (top_n) should be selected
+            assert mx.nd.sum(words >= top_n)[0].asscalar() == 0
+
+        # word index should be zero for all finished hypotheses
+        assert mx.nd.sum(mx.nd.where(finished, words, finished))[0].asscalar() == 0
+
+
+def test_get_best_word_indices_for_kth_hypotheses():
     # data
     all_hyp_indices = np.array([[0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 2, 0, 0, 4, 3],
                                 [0, 2, 2, 0, 1, 0, 0, 2, 1, 1, 3, 1, 1, 0, 1, 4, 0, 4],
@@ -431,22 +525,22 @@ def test_get_best_word_indeces_for_kth_hypotheses():
 
     # extract individually
     for k, expected_result in zip(ks, expected_indices):
-        result = sockeye.inference.Translator._get_best_word_indeces_for_kth_hypotheses(k, all_hyp_indices)
+        result = sockeye.inference.Translator._get_best_word_indices_for_kth_hypotheses(k, all_hyp_indices)
         assert result.shape == expected_result.shape
         assert (result == expected_result).all()
 
     # extract all at once
     ks = np.concatenate(ks, axis=0)
     expected_indices = np.concatenate(expected_indices, axis=0)
-    result = sockeye.inference.Translator._get_best_word_indeces_for_kth_hypotheses(ks, all_hyp_indices)
+    result = sockeye.inference.Translator._get_best_word_indices_for_kth_hypotheses(ks, all_hyp_indices)
     assert result.shape == expected_indices.shape
     assert (result == expected_indices).all()
 
 
 @pytest.mark.parametrize("raw_constraints, beam_histories, expected_best_ids, expected_best_indices",
-                        [([[], [], [], []], [None, None], np.array([0, 2], dtype='int32'), np.array([[1, 1, 1], [3, 3, 3]], dtype='int32')),
-                         ([[[1]], [], [[3]], []], [None, None], np.array([1, 3], dtype='int32'), np.array([[1, 0, 0], [3, 2, 2]], dtype='int32'))
-                         ])
+                         [([[], [], [], []], [None, None], np.array([0, 2], dtype='int32'), np.array([[1, 1, 1], [3, 3, 3]], dtype='int32')),
+                          ([[[1]], [], [[3]], []], [None, None], np.array([1, 3], dtype='int32'), np.array([[1, 0, 0], [3, 2, 2]], dtype='int32'))
+                          ])
 def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, expected_best_indices):
     best_hyp_indices = np.array([[0, 1, 0, 1],
                                  [0, 1, 1, 0],

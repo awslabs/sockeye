@@ -15,11 +15,13 @@
 Code for scoring.
 """
 import logging
+import math
 import os
 import time
 from typing import List, Optional, Tuple
 
 import mxnet as mx
+import numpy as np
 
 from . import constants as C
 from . import data_io
@@ -56,14 +58,12 @@ class ScoringModel(model.SockeyeModel):
                  context: List[mx.context.Context],
                  provide_data: List[mx.io.DataDesc],
                  provide_label: List[mx.io.DataDesc],
-                 bucketing: bool,
                  default_bucket_key: Tuple[int, int],
                  score_type: str,
                  length_penalty: inference.LengthPenalty,
                  softmax_temperature: Optional[float] = None) -> None:
         super().__init__(config)
         self.context = context
-        self.bucketing = bucketing
         self.score_type = score_type
         self.length_penalty = length_penalty
         self.softmax_temperature = softmax_temperature
@@ -170,19 +170,12 @@ class ScoringModel(model.SockeyeModel):
             # sums: (batch_size,) target_dists: (batch_size, target_seq_len, target_vocab_size)
             return mx.sym.Group([sums, target_dists]), data_names, label_names
 
-        if self.bucketing:
-            logger.info("Using bucketing. Default max_seq_len=%s", default_bucket_key)
-            self.module = mx.mod.BucketingModule(sym_gen=sym_gen,
-                                                 logger=logger,
-                                                 default_bucket_key=default_bucket_key,
-                                                 context=self.context)
-        else:
-            symbol, _, __ = sym_gen(default_bucket_key)
-            self.module = mx.mod.Module(symbol=symbol,
-                                        data_names=data_names,
-                                        label_names=label_names,
-                                        logger=logger,
-                                        context=self.context)
+        symbol, _, __ = sym_gen(default_bucket_key)
+        self.module = mx.mod.Module(symbol=symbol,
+                                    data_names=data_names,
+                                    label_names=label_names,
+                                    logger=logger,
+                                    context=self.context)
 
         self.module.bind(data_shapes=provide_data,
                          label_shapes=provide_label,
@@ -225,8 +218,8 @@ class Scorer:
 
         total_time = 0.
         sentence_no = 0
-        for i, batch in enumerate(score_iter):
-
+        batch_no = 0
+        for batch_no, batch in enumerate(score_iter, 1):
             batch_tic = time.time()
 
             # Run the model and get the outputs
@@ -235,10 +228,12 @@ class Scorer:
             batch_time = time.time() - batch_tic
             total_time += batch_time
 
-            for source, target, score in zip(batch.data[0], batch.data[1], scores):
+            batch_size = len(batch.data[0])
 
-                # The "zeros" padding method will have filled remainder batches with zeros, so we can skip them here
-                if source[0][0] == C.PAD_ID:
+            for sentno, (source, target, score) in enumerate(zip(batch.data[0], batch.data[1], scores), 1):
+
+                # The last batch may be underfilled, in which case batch.pad will be set
+                if sentno > (batch_size - batch.pad):
                     break
 
                 sentence_no += 1
@@ -249,9 +244,21 @@ class Scorer:
                 target_ids = [int(x) for x in target.asnumpy().tolist()]
                 target_string = C.TOKEN_SEPARATOR.join(
                     data_io.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
-                score = score.asscalar()
+
+                # Report a score of -inf for invalid sentence pairs (empty source and/or target)
+                if source[0][0] == C.PAD_ID or target[0] == C.PAD_ID:
+                    score = -np.inf
+                else:
+                    score = score.asscalar()
 
                 # Output handling routines require us to make use of inference classes.
                 output_handler.handle(TranslatorInput(sentence_no, source_tokens),
                                       TranslatorOutput(sentence_no, target_string, None, None, score),
                                       batch_time)
+
+        if sentence_no != 0:
+            logger.info("Processed %d lines in %d batches. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",
+                        sentence_no, math.ceil(sentence_no / batch_no), total_time,
+                        total_time / sentence_no, sentence_no / total_time)
+        else:
+            logger.info("Processed 0 lines.")

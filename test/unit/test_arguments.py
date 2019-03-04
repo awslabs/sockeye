@@ -15,6 +15,7 @@ import argparse
 import pytest
 import tempfile
 import os
+import re
 import yaml
 
 import sockeye.arguments as arguments
@@ -60,7 +61,7 @@ def test_io_args(test_params, expected_params):
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('', dict(quiet=False)),
+    ('', dict(quiet=False, loglevel='INFO')),
 ])
 def test_logging_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_logging_args)
@@ -81,11 +82,13 @@ def test_device_args(test_params, expected_params):
               num_layers=(6, 6),
               num_embed=(512, 512),
               source_factors_num_embed=[],
+              source_factors_combine=C.SOURCE_FACTORS_COMBINE_CONCAT,
               rnn_attention_type='mlp',
               rnn_attention_num_hidden=None,
               rnn_scale_dot_attention=False,
               rnn_attention_coverage_type='count',
               rnn_attention_coverage_num_hidden=1,
+              rnn_attention_coverage_max_fertility=2,
               weight_tying=False,
               weight_tying_type="trg_softmax",
               rnn_attention_mhdot_heads=None,
@@ -130,13 +133,12 @@ def test_model_parameters(test_params, expected_params):
     ('', dict(decoder_only=False,
               batch_size=4096,
               batch_type="word",
-              fill_up='replicate',
               loss=C.CROSS_ENTROPY,
               label_smoothing=0.1,
               loss_normalization_type='valid',
               metrics=[C.PERPLEXITY],
               optimized_metric=C.PERPLEXITY,
-              checkpoint_frequency=4000,
+              checkpoint_interval=4000,
               max_num_checkpoint_not_improved=32,
               embed_dropout=(.0, .0),
               transformer_dropout_attention=0.1,
@@ -183,8 +185,10 @@ def test_model_parameters(test_params, expected_params):
               decode_and_evaluate=500,
               decode_and_evaluate_use_cpu=False,
               decode_and_evaluate_device_id=None,
+              stop_training_on_decoder_failure=False,
               seed=13,
               keep_last_params=-1,
+              keep_initializations=False,
               rnn_enc_last_hidden_concat_to_embedding=False,
               dry_run=False)),
 ])
@@ -200,6 +204,7 @@ def test_training_arg(test_params, expected_params):
                       checkpoints=None,
                       models=['model'],
                       beam_size=5,
+                      nbest_size=1,
                       beam_prune=0,
                       batch_size=1,
                       chunk_size=None,
@@ -218,6 +223,8 @@ def test_training_arg(test_params, expected_params):
                       length_penalty_beta=0.0,
                       strip_unknown_words=False,
                       override_dtype=None,
+                      sample=None,
+                      seed=None,
                       skip_topk=False)),
 ])
 def test_inference_args(test_params, expected_params):
@@ -252,8 +259,8 @@ def test_inference_args(test_params, expected_params):
           # The tutorial text mentions that we train a RNN model:
           encoder=C.TRANSFORMER_TYPE,
           decoder=C.TRANSFORMER_TYPE),
-     # Additionally we mention the checkpoint_frequency
-     ['checkpoint_frequency']),
+     # Additionally we mention the checkpoint_interval
+     ['checkpoint_interval']),
     # WMT tutorial
     ('-d train_data '
      '-vs newstest2016.tc.BPE.de '
@@ -506,3 +513,7 @@ def test_config_file_required(config_command_line, config_contents):
             # Parse args and cast to dicts directly
             config_file_argparse.parse_args(
                 args=(config_command_line + (" --config %s" % fp.name)).split())
+
+def test_arguments_allowed_to_differ():
+    for arg in C.ARGS_MAY_DIFFER:
+        assert re.match(r'^[a-zA-Z0-9_]*$', arg)

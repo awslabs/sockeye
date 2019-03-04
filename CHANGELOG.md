@@ -10,6 +10,115 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.81]
+### Fixed
+- Making sure the training pickled training state contains the checkpoint decoder's BLEU score of the last checkpoint.
+
+## [1.18.80]
+### Fixed
+- Fixed a bug introduced in 1.18.77 where blank lines in the training data resulted in failure.
+
+## [1.18.79]
+### Added
+- Writing of the convergence/divergence status to the metrics file and guarding against numpy.histogram's errors for NaNs during divergent behaviour.
+
+## [1.18.78]
+### Changed
+- Dynamic batch sizes: `Translator.translate()` will adjust batch size in beam search to the actual number of inputs without using padding.
+
+## [1.18.77]
+### Added
+- `sockeye.score` now loads data on demand and doesn't skip any input lines
+
+## [1.18.76]
+### Changed
+- Do not compare scores from translation and scoring in integration tests.
+
+### Added
+- Adding the option via the flag `--stop-training-on-decoder-failure` to stop training in case the checkpoint decoder dies (e.g. because there is not enough memory).
+In case this is turned on a checkpoint decoder is launched right when training starts in order to fail as early as possible.
+
+## [1.18.75]
+### Changed
+- Do not create dropout layers for inference models for performance reasons.
+
+## [1.18.74]
+### Changed
+- Revert change in 1.18.72 as no memory saving could be observed.
+
+## [1.18.73]
+### Fixed
+- Fixed a bug where `source-factors-num-embed` was not correctly adjusted to `num-embed`
+  when using prepared data & `source-factor-combine` sum.
+
+## [1.18.72]
+### Changed
+- Removed use of `expand_dims` in favor of `reshape` to save memory.
+
+## [1.18.71]
+### Fixed
+- Fixed default setting of source factor combination to be 'concat' for backwards compatibility.
+
+## [1.18.70]
+### Added
+- Sockeye now outputs fields found in a JSON input object, if they are not overwritten by Sockeye. This behavior can be enabled by selecting `--json-input` (to read input as a JSON object) and `--output-type json` (to write a JSON object to output).
+
+## [1.18.69]
+### Added
+- Source factors can now be added to the embeddings instead of concatenated with `--source-factors-combine sum` (default: concat)
+
+## [1.18.68]
+- Fixed training crashes with `--learning-rate-decay-optimizer-states-reset initial` option.
+
+## [1.18.67]
+### Added
+- Added `fertility` as a further type of attention coverage.
+- Added an option for training to keep the initializations of the model via `--keep-initializations`. When set, the trainer will avoid deleting the params file for the first checkpoint, no matter what `--keep-last-params` is set to.
+
+## [1.18.66]
+### Fixed
+- Fix to argument names that are allowed to differ for resuming training.
+
+## [1.18.65]
+### Changed
+- More informative error message about inconsistent --shared-vocab setting.
+
+## [1.18.64]
+### Added
+- Adding translation sampling via `--sample [N]`. This causes the decoder to sample each next step from the target distribution probabilities at each
+  timestep. An optional value of `N` causes the decoder to sample only from the top `N` vocabulary items for each hypothesis at each timestep (the
+  default is 0, meaning to sample from the entire vocabulary).
+
+## [1.18.63]
+### Changed
+- The checkpoint decoder and nvidia-smi subprocess are now launched from a forkserver, allowing for a better separation between processes.
+
+## [1.18.62]
+### Added
+- Add option to make `TranslatorInputs` directly from a dict.
+
+## [1.18.61]
+### Changed
+- Update to MXNet 1.3.1. Removed requirements/requirements.gpu-cu{75,91}.txt as CUDA 7.5 and 9.1 are deprecated.
+
+## [1.18.60]
+### Fixed
+- Performance optimization to skip the softmax operation for single model greedy decoding is now only applied if no translation scores are required in the output.
+
+## [1.18.59]
+### Added
+- Full training state is now returned from EarlyStoppingTrainer's fit().
+### Changed
+- Training state cleanup will not be performed for training runs that did not converge yet.
+- Switched to portalocker for locking files (Windows compatibility).
+
+## [1.18.58]
+### Added
+- Added nbest translation, exposed as `--nbest-size`. Nbest translation means to not only output the most probable translation according to a model, but the top n most probable hypotheses. If `--nbest-size > 1` and the option `--output-type` is not explicitly specified, the output type will be changed to one JSON list of nbest translations per line. `--nbest-size` can never be larger than `--beam-size`.
+
+### Changed
+- Changed `sockeye.rerank` CLI to be compatible with nbest translation JSON output format.
+
 ## [1.18.57]
 ### Added
 - Added `sockeye.score` CLI for quickly scoring existing translations ([documentation](tutorials/scoring.md)).

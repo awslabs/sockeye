@@ -151,7 +151,7 @@ def test_att_mlp():
 
 
 def test_att_cov():
-    config_coverage = sockeye.coverage.CoverageConfig(type='tanh', num_hidden=5, layer_normalization=True)
+    config_coverage = sockeye.coverage.CoverageConfig(type='tanh', max_fertility=2, num_hidden=5, layer_normalization=True)
 
     config_attention = sockeye.rnn_attention.AttentionConfig(type=C.ATT_COV,
                                                              num_hidden=16,
@@ -216,7 +216,7 @@ def test_attention(attention_type,
     assert np.isclose(attention_prob_result, np.asarray([[0.5, 0.5, 0.]])).all()
 
 
-coverage_cases = [("gru", 10), ("tanh", 4), ("count", 1), ("sigmoid", 1), ("relu", 30)]
+coverage_cases = [("gru", 10), ("tanh", 4), ("count", 1), ("sigmoid", 1), ("relu", 30), ("fertility", 1)]
 
 
 @pytest.mark.parametrize("attention_coverage_type,attention_coverage_num_hidden", coverage_cases)
@@ -232,6 +232,7 @@ def test_coverage_attention(attention_coverage_type,
     source_seq_len = 10
 
     config_coverage = sockeye.coverage.CoverageConfig(type=attention_coverage_type,
+                                                      max_fertility=2,
                                                       num_hidden=attention_coverage_num_hidden,
                                                       layer_normalization=False)
     config_attention = sockeye.rnn_attention.AttentionConfig(type="coverage",

@@ -16,7 +16,6 @@ A set of utility methods.
 """
 import binascii
 import errno
-import fcntl
 import glob
 import gzip
 import itertools
@@ -27,11 +26,14 @@ import shutil
 import subprocess
 import sys
 import time
+import sockeye.multiprocessing_utils as mp_utils
+import multiprocessing
 from contextlib import contextmanager, ExitStack
 from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
 
 import mxnet as mx
 import numpy as np
+import portalocker
 
 from . import __version__, constants as C
 from .log import log_sockeye_version, log_mxnet_version
@@ -275,37 +277,29 @@ def top1(scores: mx.nd.NDArray,
 
 
 def topk(scores: mx.nd.NDArray,
-         k: int,
          offset: mx.nd.NDArray,
-         use_mxnet_topk: bool) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
+         k: int) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
     """
     Get the lowest k elements per sentence from a `scores` matrix.
+    At the first timestep, the shape of scores is (batch, target_vocabulary_size).
+    At subsequent steps, the shape is (batch * k, target_vocabulary_size).
 
     :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+    :param offset: Array (shape: batch_size * k) containing offsets to add to the hypothesis indices in batch decoding.
     :param k: The number of smallest scores to return.
-    :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
-    :param use_mxnet_topk: True to use the mxnet implementation or False to use the numpy one.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
+
+    # Compute the batch size from the offsets and k. We don't know the batch size because it is
+    # either 1 (at timestep 1) or k (at timesteps 2+).
     # (batch_size, beam_size * target_vocab_size)
-    folded_scores = scores.reshape((-1, k * scores.shape[-1]))
-    batch_size = folded_scores.shape[0]
+    batch_size = int(offset.shape[-1] / k)
+    folded_scores = scores.reshape((batch_size, -1))
 
-    if use_mxnet_topk:
-        # pylint: disable=unbalanced-tuple-unpacking
-        values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
-        indices = mx.nd.cast(indices, 'int32').reshape((-1,))
-        best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, scores.shape)
-
-    else:
-        folded_scores = folded_scores.asnumpy()
-        # Get the scores
-        # Indexes into folded_scores: (batch_size, beam_size)
-        flat_idxs = np.argpartition(folded_scores, range(k))[:, :k]
-        # Score values: (batch_size, beam_size)
-        values = mx.nd.array(folded_scores[np.arange(folded_scores.shape[0])[:, None], flat_idxs], ctx=scores.context)
-        best_hyp_indices, best_word_indices = mx.nd.array(np.unravel_index(flat_idxs.ravel(), scores.shape),
-                                                          dtype='int32', ctx=scores.context)
+    # pylint: disable=unbalanced-tuple-unpacking
+    values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
+    indices = mx.nd.cast(indices, 'int32').reshape((-1,))
+    best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, shape=(batch_size * k, scores.shape[-1]))
 
     if batch_size > 1:
         # Offsetting the indices to match the shape of the scores matrix
@@ -469,6 +463,37 @@ def get_num_gpus() -> int:
     return mx.context.num_gpus()
 
 
+def query_nvidia_smi(device_ids: List[int], result_queue: multiprocessing.Queue) -> None:
+    """
+    Runs nvidia-smi to determine the memory usage.
+
+    :param device_ids: A list of devices for which the the memory usage will be queried.
+    :param result_queue: The queue to which the result dictionary of device id mapping to a tuple of
+    (memory used, memory total) is added.
+    """
+    device_id_strs = [str(device_id) for device_id in device_ids]
+    query = "--query-gpu=index,memory.used,memory.total"
+    format_arg = "--format=csv,noheader,nounits"
+    try:
+        sp = subprocess.Popen(['nvidia-smi', query, format_arg, "-i", ",".join(device_id_strs)],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        result = sp.communicate()[0].decode("utf-8").rstrip().split("\n")
+    except OSError:
+        logger.exception("Failed calling nvidia-smi to query memory usage.")
+        result_queue.put({})
+        return
+    try:
+        memory_data = {}
+        for line in result:
+            gpu_id, mem_used, mem_total = line.split(",")
+            memory_data[int(gpu_id)] = (int(mem_used), int(mem_total))
+
+        result_queue.put(memory_data)
+    except:
+        logger.exception("Failed parsing nvidia-smi output %s", "\n".join(result))
+        result_queue.put({})
+
+
 def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, int]]:
     """
     Returns used and total memory for GPUs identified by the given context list.
@@ -484,21 +509,21 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, 
     if shutil.which("nvidia-smi") is None:
         logger.warning("Couldn't find nvidia-smi, therefore we assume no GPUs are available.")
         return {}
-    ids = [str(c.device_id) for c in ctx]
-    query = "--query-gpu=index,memory.used,memory.total"
-    format_arg = "--format=csv,noheader,nounits"
-    try:
-        sp = subprocess.Popen(['nvidia-smi', query, format_arg, "-i", ",".join(ids)],
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        result = sp.communicate()[0].decode("utf-8").rstrip().split("\n")
-    except OSError:
-        logger.exception("Failed calling nvidia-smi to query memory usage.")
-        return {}
-    memory_data = {}
-    for line in result:
-        gpu_id, mem_used, mem_total = line.split(",")
-        memory_data[int(gpu_id)] = (int(mem_used), int(mem_total))
+
+    device_ids = [c.device_id for c in ctx]
+
+    # Run from clean forkserver process to not leak any CUDA resources
+
+    mp_context = mp_utils.get_context()
+    result_queue = mp_context.Queue()
+    nvidia_smi_process = mp_context.Process(target=query_nvidia_smi, args=(device_ids, result_queue,))
+    nvidia_smi_process.start()
+    nvidia_smi_process.join()
+
+    memory_data = result_queue.get()
+
     log_gpu_memory_usage(memory_data)
+
     return memory_data
 
 
@@ -702,7 +727,7 @@ class GpuFileLock:
                     continue
             try:
                 # exclusive non-blocking lock
-                fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                portalocker.lock(lock_file, portalocker.LOCK_EX | portalocker.LOCK_NB)
                 # got the lock, let's write our PID into it:
                 lock_file.write("%d\n" % os.getpid())
                 lock_file.flush()
@@ -715,11 +740,12 @@ class GpuFileLock:
                 logger.info("Acquired GPU {}.".format(gpu_id))
 
                 return gpu_id
-            except IOError as e:
-                # raise on unrelated IOErrors
-                if e.errno != errno.EAGAIN:
+            except portalocker.LockException as e:
+                # portalocker packages the original exception,
+                # we dig it out and raise if unrelated to us
+                if e.args[0].errno != errno.EAGAIN:  # pylint: disable=no-member
                     logger.error("Failed acquiring GPU lock.", exc_info=True)
-                    raise
+                    raise e.args[0]
                 else:
                     logger.debug("GPU {} is currently locked.".format(gpu_id))
         return None
@@ -729,7 +755,7 @@ class GpuFileLock:
             logger.info("Releasing GPU {}.".format(self.gpu_id))
         if self.lock_file is not None:
             if self._acquired_lock:
-                fcntl.flock(self.lock_file, fcntl.LOCK_UN)
+                portalocker.lock(self.lock_file, portalocker.LOCK_UN)
             self.lock_file.close()
             os.remove(self.lockfile_path)
 
@@ -748,10 +774,13 @@ def read_metrics_file(path: str) -> List[Dict[str, Any]]:
             checkpoint = int(fields[0])
             check_condition(i == checkpoint,
                             "Line (%d) and loaded checkpoint (%d) do not align." % (i, checkpoint))
-            metric = dict()
+            metric = dict()  # type: Dict[str, Any]
             for field in fields[1:]:
                 key, value = field.split("=", 1)
-                metric[key] = float(value)
+                if value == 'True' or value == 'False':
+                    metric[key] = bool(value)
+                else:
+                    metric[key] = float(value)
             metrics.append(metric)
     return metrics
 
@@ -872,7 +901,7 @@ def metric_value_is_better(new: float, old: float, metric: str) -> bool:
         return new < old
 
 
-def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int):
+def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int, keep_first: bool):
     """
     Deletes oldest parameter files from a model folder.
 
@@ -880,12 +909,13 @@ def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, 
     :param max_to_keep: Maximum number of files to keep, negative to keep all.
     :param checkpoint: Current checkpoint (i.e. index of last params file created).
     :param best_checkpoint: Best checkpoint. The parameter file corresponding to this checkpoint will not be deleted.
+    :param keep_first: Don't delete the first checkpoint.
     """
     if max_to_keep <= 0:
         return
     existing_files = glob.glob(os.path.join(output_folder, C.PARAMS_PREFIX + "*"))
     params_name_with_dir = os.path.join(output_folder, C.PARAMS_NAME)
-    for n in range(0, max(1, checkpoint - max_to_keep + 1)):
+    for n in range(1 if keep_first else 0, max(1, checkpoint - max_to_keep + 1)):
         if n != best_checkpoint:
             param_fname_n = params_name_with_dir % n
             if param_fname_n in existing_files:
@@ -960,3 +990,12 @@ def inflect(word: str,
         return 'was' if count == 1 else 'were'
     else:
         return word + '(s)'
+
+
+def isfinite(data: mx.nd.NDArray) -> mx.nd.NDArray:
+    """Performs an element-wise check to determine if the NDArray contains an infinite element or not.
+       TODO: remove this funciton after upgrade to MXNet 1.4.* in favor of mx.ndarray.contrib.isfinite()
+    """
+    is_data_not_nan = data == data
+    is_data_not_infinite = data.abs() != np.inf
+    return mx.nd.logical_and(is_data_not_infinite, is_data_not_nan)

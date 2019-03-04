@@ -43,15 +43,16 @@ class ImageInferenceModel(InferenceModel):
         super().__init__(**kwargs)
         self.input_size = input_size
 
-    def _get_encoder_data_shapes(self, bucket_key: int = None) -> List[mx.io.DataDesc]:
+    def _get_encoder_data_shapes(self, bucket_key: int, batch_size: int) -> List[mx.io.DataDesc]:
         """
         Returns data shapes of the encoder module.
 
         :param bucket_key: Maximum input length.
+        :param batch_size: Batch size.
         :return: List of data descriptions.
         """
         return [mx.io.DataDesc(name=C.SOURCE_NAME,
-                               shape=(self.batch_size,) + self.input_size,
+                               shape=(batch_size,) + self.input_size,
                                layout=C.BATCH_MAJOR_IMAGE)]
 
     @property
@@ -104,13 +105,13 @@ class ImageCaptioner(Translator):
         :param trans_inputs: List of TranslatorInputs as returned by make_input().
         :return: List of translation results.
         """
-
+        batch_size = len(trans_inputs)
         # translate in batch-sized blocks over input chunks
         translations = []
-        for batch_id, batch in enumerate(utils.grouper(trans_inputs, self.batch_size)):
+        for batch_id, batch in enumerate(utils.grouper(trans_inputs, batch_size)):
             logger.debug("Translating batch %d", batch_id)
             # underfilled batch will be filled to a full batch size with copies of the 1st input
-            rest = self.batch_size - len(batch)
+            rest = batch_size - len(batch)
             if rest > 0:
                 logger.debug("Extending the last batch to the full batch size (%d)", self.batch_size)
                 batch = batch + [batch[0]] * rest
@@ -143,10 +144,10 @@ class ImageCaptioner(Translator):
         :return: NDArray of images paths, bucket key, a list of raw constraint lists,
                 an NDArray of maximum output lengths.
         """
-
-        image_paths = [None for x in range(self.batch_size)]  # type: List[Optional[str]]
-        raw_constraints = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
-        raw_avoid_list = [None for x in range(self.batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
+        batch_size = len(trans_inputs)
+        image_paths = [None for _ in range(batch_size)]  # type: List[Optional[str]]
+        raw_constraints = [None for _ in range(batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
+        raw_avoid_list = [None for _ in range(batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
         for j, trans_input in enumerate(trans_inputs):
             # Join relative path with absolute
             path = trans_input.tokens[0]
@@ -224,7 +225,6 @@ def load_models(context: mx.context.Context,
                                               params_fname=params_fname,
                                               context=context,
                                               beam_size=beam_size,
-                                              batch_size=batch_size,
                                               softmax_temperature=softmax_temperature,
                                               decoder_return_logit_inputs=decoder_return_logit_inputs,
                                               cache_output_layer_w_b=cache_output_layer_w_b,
@@ -240,6 +240,6 @@ def load_models(context: mx.context.Context,
                                                                           forced_max_output_len=forced_max_output_len)
 
     for inference_model in models:
-        inference_model.initialize(max_input_len, get_max_output_length)
+        inference_model.initialize(batch_size, max_input_len, get_max_output_length)
 
     return models, target_vocabs[0]

@@ -14,15 +14,25 @@
 """
 Simple Training CLI.
 """
+
+# Start the forkserver. It is important that this is done before any other imports so that the forkserver is in a clean
+# state.
+if __name__ == "__main__":
+    import sockeye.multiprocessing_utils as mp
+    mp.initialize()
+
+
 import argparse
 import os
 import shutil
 import sys
 import tempfile
+import logging
 from contextlib import ExitStack
 from typing import Any, cast, Optional, Dict, List, Tuple
 
 import mxnet as mx
+
 
 from . import arguments
 from . import checkpoint_decoder
@@ -48,7 +58,7 @@ from .optimizers import OptimizerConfig
 from .utils import check_condition
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
-logger = setup_main_logger(__name__, file_logging=False, console=True)
+logger = logging.getLogger(__name__)
 
 
 def none_if_negative(val):
@@ -84,7 +94,7 @@ def check_arg_compatibility(args: argparse.Namespace):
                         % (args.transformer_model_size, args.num_embed[0]))
 
         total_source_factor_size = sum(args.source_factors_num_embed)
-        if total_source_factor_size > 0:
+        if total_source_factor_size > 0 and args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
             adjusted_transformer_encoder_model_size = args.num_embed[0] + total_source_factor_size
             check_condition(adjusted_transformer_encoder_model_size % 2 == 0 and
                             adjusted_transformer_encoder_model_size % args.transformer_attention_heads[0] == 0,
@@ -176,7 +186,7 @@ def create_checkpoint_decoder(args: argparse.Namespace,
     if args.use_cpu or args.decode_and_evaluate_use_cpu:
         context = mx.cpu()
     elif args.decode_and_evaluate_device_id is not None:
-        context = utils.determine_context(device_ids=args.decode_and_evaluate_device_id,
+        context = utils.determine_context(device_ids=[args.decode_and_evaluate_device_id],
                                           use_cpu=False,
                                           disable_device_locking=args.disable_device_locking,
                                           lock_dir=args.lock_dir,
@@ -263,10 +273,10 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             shared_vocab=shared_vocab,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
-            batch_num_devices=batch_num_devices,
-            fill_up=args.fill_up)
+            batch_num_devices=batch_num_devices)
 
-        check_condition(len(source_vocabs) == len(args.source_factors_num_embed) + 1,
+        check_condition(args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM \
+                        or len(source_vocabs) == len(args.source_factors_num_embed) + 1,
                         "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
                             len(source_vocabs), len(args.source_factors_num_embed) + 1))
 
@@ -318,7 +328,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 word_min_count_target=word_min_count_target,
                 pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
-        check_condition(len(args.source_factors) == len(args.source_factors_num_embed),
+        check_condition(args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM \
+                        or len(args.source_factors) == len(args.source_factors_num_embed),
                         "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (
                             len(args.source_factors), len(args.source_factors_num_embed)))
 
@@ -342,7 +353,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
             batch_num_devices=batch_num_devices,
-            fill_up=args.fill_up,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
@@ -388,8 +398,8 @@ def create_encoder_config(args: argparse.Namespace,
         encoder_transformer_model_size = args.transformer_model_size[0]
 
         total_source_factor_size = sum(args.source_factors_num_embed)
-        if total_source_factor_size > 0:
-            logger.info("Encoder transformer-model-size adjusted to account source factor embeddings: %d -> %d" % (
+        if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT and total_source_factor_size > 0:
+            logger.info("Encoder transformer-model-size adjusted to account for source factor embeddings: %d -> %d" % (
                 encoder_transformer_model_size, num_embed_source + total_source_factor_size))
             encoder_transformer_model_size = num_embed_source + total_source_factor_size
         config_encoder = transformer.TransformerConfig(
@@ -415,7 +425,9 @@ def create_encoder_config(args: argparse.Namespace,
                                                    num_hidden=args.cnn_num_hidden,
                                                    act_type=args.cnn_activation_type,
                                                    weight_normalization=args.weight_normalization)
-        cnn_num_embed = num_embed_source + sum(args.source_factors_num_embed)
+        cnn_num_embed = num_embed_source
+        if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+            cnn_num_embed += sum(args.source_factors_num_embed)
         config_encoder = encoder.ConvolutionalEncoderConfig(num_embed=cnn_num_embed,
                                                             max_seq_len_source=max_seq_len_source,
                                                             cnn_config=cnn_config,
@@ -513,6 +525,7 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
         config_coverage = None
         if args.rnn_attention_type == C.ATT_COV:
             config_coverage = coverage.CoverageConfig(type=args.rnn_attention_coverage_type,
+                                                      max_fertility=args.rnn_attention_coverage_max_fertility,
                                                       num_hidden=args.rnn_attention_coverage_num_hidden,
                                                       layer_normalization=args.layer_normalization)
         config_attention = rnn_attention.AttentionConfig(type=args.rnn_attention_type,
@@ -620,13 +633,21 @@ def create_model_config(args: argparse.Namespace,
 
     source_factor_configs = None
     if len(source_vocab_sizes) > 1:
+        source_factors_num_embed = args.source_factors_num_embed
+        if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM:
+            # If factors are being added instead of concatenated, set all dimensions to the embedding dimensions
+            logger.info("Setting all source factor embedding sizes to `num_embed` ('%d') for summing",
+                        num_embed_source)
+            source_factors_num_embed = [num_embed_source] * len(source_factor_vocab_sizes)
+
         source_factor_configs = [encoder.FactorConfig(size, dim) for size, dim in zip(source_factor_vocab_sizes,
-                                                                                      args.source_factors_num_embed)]
+                                                                                      source_factors_num_embed)]
 
     config_embed_source = encoder.EmbeddingConfig(vocab_size=source_vocab_size,
                                                   num_embed=num_embed_source,
                                                   dropout=embed_dropout_source,
-                                                  factor_configs=source_factor_configs)
+                                                  factor_configs=source_factor_configs,
+                                                  source_factors_combine=args.source_factors_combine)
 
     config_embed_target = encoder.EmbeddingConfig(vocab_size=target_vocab_size,
                                                   num_embed=num_embed_target,
@@ -737,7 +758,7 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
                                               extra_initializers=extra_initializers)
 
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
-                                             args.checkpoint_frequency,
+                                             args.checkpoint_interval,
                                              none_if_negative(args.learning_rate_half_life),
                                              args.learning_rate_reduce_factor,
                                              args.learning_rate_reduce_num_not_improved,
@@ -763,7 +784,7 @@ def main():
     train(args)
 
 
-def train(args: argparse.Namespace):
+def train(args: argparse.Namespace) -> training.TrainState:
     if args.dry_run:
         # Modify arguments so that we write to a temporary directory and
         # perform 0 training iterations
@@ -777,10 +798,12 @@ def train(args: argparse.Namespace):
     output_folder = os.path.abspath(args.output)
     resume_training = check_resume(args, output_folder)
 
-    global logger
-    logger = setup_main_logger(__name__,
-                               file_logging=True,
-                               console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
+    setup_main_logger(file_logging=True,
+                      console=not args.quiet,
+                      path=os.path.join(output_folder, C.LOG_NAME),
+                      level=args.loglevel)
+    if hasattr(args, "checkpoint_frequency"):
+        logger.warning("'--checkpoint-frequency' is deprecated, and will be removed in the future.  Please use '--checkpoint-interval'")
     utils.log_basic_info(args)
     arguments.save_args(args, os.path.join(output_folder, C.ARGS_STATE_NAME))
 
@@ -860,29 +883,31 @@ def train(args: argparse.Namespace):
         trainer = training.EarlyStoppingTrainer(model=training_model,
                                                 optimizer_config=create_optimizer_config(args, source_vocab_sizes),
                                                 max_params_files_to_keep=args.keep_last_params,
+                                                keep_initializations=args.keep_initializations,
                                                 source_vocabs=source_vocabs,
-                                                target_vocab=target_vocab)
+                                                target_vocab=target_vocab,
+                                                stop_training_on_decoder_failure=args.stop_training_on_decoder_failure)
 
-        trainer.fit(train_iter=train_iter,
-                    validation_iter=eval_iter,
-                    early_stopping_metric=args.optimized_metric,
-                    metrics=args.metrics,
-                    checkpoint_frequency=args.checkpoint_frequency,
-                    max_num_not_improved=max_num_checkpoint_not_improved,
-                    min_samples=min_samples,
-                    max_samples=max_samples,
-                    min_updates=min_updates,
-                    max_updates=max_updates,
-                    min_epochs=min_epochs,
-                    max_epochs=max_epochs,
-                    lr_decay_param_reset=args.learning_rate_decay_param_reset,
-                    lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset,
-                    decoder=create_checkpoint_decoder(args, exit_stack, context),
-                    mxmonitor_pattern=args.monitor_pattern,
-                    mxmonitor_stat_func=args.monitor_stat_func,
-                    allow_missing_parameters=args.allow_missing_params or model_config.lhuc,
-                    existing_parameters=args.params)
-
+        training_state = trainer.fit(train_iter=train_iter,
+                                     validation_iter=eval_iter,
+                                     early_stopping_metric=args.optimized_metric,
+                                     metrics=args.metrics,
+                                     checkpoint_interval=args.checkpoint_interval,
+                                     max_num_not_improved=max_num_checkpoint_not_improved,
+                                     min_samples=min_samples,
+                                     max_samples=max_samples,
+                                     min_updates=min_updates,
+                                     max_updates=max_updates,
+                                     min_epochs=min_epochs,
+                                     max_epochs=max_epochs,
+                                     lr_decay_param_reset=args.learning_rate_decay_param_reset,
+                                     lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset,
+                                     decoder=create_checkpoint_decoder(args, exit_stack, context),
+                                     mxmonitor_pattern=args.monitor_pattern,
+                                     mxmonitor_stat_func=args.monitor_stat_func,
+                                     allow_missing_parameters=args.allow_missing_params or model_config.lhuc,
+                                     existing_parameters=args.params)
+        return training_state
 
 if __name__ == "__main__":
     main()

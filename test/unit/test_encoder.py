@@ -199,7 +199,7 @@ def test_convolutional_embedding_encoder(config, out_data_shape, out_data_length
 
     exe = encoded_data_length.simple_bind(mx.cpu(), data_length=_DATA_LENGTH_ND.shape)
     exe.forward(data_length=_DATA_LENGTH_ND)
-    assert np.equal(exe.outputs[0].asnumpy(), np.asarray(out_data_length)).all()
+    assert np.equal(exe.outputs[0].asnumpy(), np.asarray(out_data_length)).all()  # pylint: disable=no-member
 
     assert encoded_seq_len == out_seq_len
 

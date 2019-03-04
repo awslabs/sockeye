@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -17,8 +17,8 @@ Translation CLI.
 import argparse
 import sys
 import time
+import logging
 from contextlib import ExitStack
-from math import ceil
 from typing import Generator, Optional, List
 
 from sockeye.lexicon import TopKLexicon
@@ -29,8 +29,9 @@ from . import arguments
 from . import constants as C
 from . import data_io
 from . import inference
+from . import utils
 
-logger = setup_main_logger(__name__, file_logging=False)
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -42,22 +43,24 @@ def main():
 
 def run_translate(args: argparse.Namespace):
 
+    # Seed randomly unless a seed has been passed
+    utils.seed_rngs(args.seed if args.seed is not None else int(time.time()))
+
     if args.output is not None:
-        global logger
-        logger = setup_main_logger(__name__,
-                                   console=not args.quiet,
-                                   file_logging=True,
-                                   path="%s.%s" % (args.output, C.LOG_NAME))
-
-    if args.checkpoints is not None:
-        check_condition(len(args.checkpoints) == len(args.models), "must provide checkpoints for each model")
-
-    if args.skip_topk:
-        check_condition(args.beam_size == 1, "--skip-topk has no effect if beam size is larger than 1")
-        check_condition(len(args.models) == 1, "--skip-topk has no effect for decoding with more than 1 model")
+        setup_main_logger(console=not args.quiet,
+                          file_logging=True,
+                          path="%s.%s" % (args.output, C.LOG_NAME),
+                          level=args.loglevel)
+    else:
+        setup_main_logger(file_logging=False, level=args.loglevel)
 
     log_basic_info(args)
 
+    if args.nbest_size > 1:
+        if args.output_type != C.OUTPUT_HANDLER_JSON:
+            logger.warning("For nbest translation, you must specify `--output-type '%s'; overriding your setting of '%s'.",
+                           C.OUTPUT_HANDLER_JSON, args.output_type)
+            args.output_type = C.OUTPUT_HANDLER_JSON
     output_handler = get_output_handler(args.output_type,
                                         args.output,
                                         args.sure_align_threshold)
@@ -71,11 +74,6 @@ def run_translate(args: argparse.Namespace):
                                     exit_stack=exit_stack)[0]
         logger.info("Translate Device: %s", context)
 
-        if args.override_dtype == C.DTYPE_FP16:
-            logger.warning('Experimental feature \'--override-dtype float16\' has been used. '
-                           'This feature may be removed or change its behaviour in future. '
-                           'DO NOT USE IT IN PRODUCTION!')
-
         models, source_vocabs, target_vocab = inference.load_models(
             context=context,
             max_input_len=args.max_input_len,
@@ -87,7 +85,9 @@ def run_translate(args: argparse.Namespace):
             max_output_length_num_stds=args.max_output_length_num_stds,
             decoder_return_logit_inputs=args.restrict_lexicon is not None,
             cache_output_layer_w_b=args.restrict_lexicon is not None,
-            override_dtype=args.override_dtype)
+            override_dtype=args.override_dtype,
+            output_scores=output_handler.reports_score(),
+            sampling=args.sample)
         restrict_lexicon = None  # type: Optional[TopKLexicon]
         if args.restrict_lexicon:
             restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
@@ -100,6 +100,7 @@ def run_translate(args: argparse.Namespace):
                                                                                  args.length_penalty_beta),
                                           beam_prune=args.beam_prune,
                                           beam_search_stop=args.beam_search_stop,
+                                          nbest_size=args.nbest_size,
                                           models=models,
                                           source_vocabs=source_vocabs,
                                           target_vocab=target_vocab,
@@ -107,7 +108,8 @@ def run_translate(args: argparse.Namespace):
                                           avoid_list=args.avoid_list,
                                           store_beam=store_beam,
                                           strip_unknown_words=args.strip_unknown_words,
-                                          skip_topk=args.skip_topk)
+                                          skip_topk=args.skip_topk,
+                                          sample=args.sample)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
@@ -173,17 +175,17 @@ def read_and_translate(translator: inference.Translator,
     :param input_factors: Optional list of paths to files that contain source factors.
     :param input_is_json: Whether the input is in json format.
     """
-    batch_size = translator.batch_size
+    batch_size = translator.max_batch_size
     if chunk_size is None:
-        if translator.batch_size == 1:
+        if translator.max_batch_size == 1:
             # No batching, therefore there is not need to read segments in chunks.
             chunk_size = C.CHUNK_SIZE_NO_BATCHING
         else:
             # Get a constant number of batches per call to Translator.translate.
-            chunk_size = C.CHUNK_SIZE_PER_BATCH_SEGMENT * translator.batch_size
+            chunk_size = C.CHUNK_SIZE_PER_BATCH_SEGMENT * translator.max_batch_size
     else:
-        if chunk_size < translator.batch_size:
-            logger.warning("You specified a chunk size (%d) smaller than the batch size (%d). This will lead to "
+        if chunk_size < translator.max_batch_size:
+            logger.warning("You specified a chunk size (%d) smaller than the max batch size (%d). This will lead to "
                            "a reduction in translation speed. Consider choosing a larger chunk size." % (chunk_size,
                                                                                                          batch_size))
 
@@ -196,9 +198,8 @@ def read_and_translate(translator: inference.Translator,
         total_time += chunk_time
 
     if total_lines != 0:
-        logger.info("Processed %d lines in %d batches. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",
-                    total_lines, ceil(total_lines / batch_size), total_time,
-                    total_time / total_lines, total_lines / total_time)
+        logger.info("Processed %d lines. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",
+                    total_lines, total_time, total_time / total_lines, total_lines / total_time)
     else:
         logger.info("Processed 0 lines.")
 

@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -17,9 +17,8 @@ CLI to rerank an nbest list of translations.
 
 import argparse
 import json
-import sys
-from collections import namedtuple
-from typing import List
+import logging
+from typing import Any, Dict, List
 
 import numpy as np
 
@@ -29,9 +28,7 @@ from . import constants as C
 from . import log
 from . import utils
 
-logger = log.setup_main_logger(__name__, console=True, file_logging=False)
-
-RerankOutput = namedtuple('RerankOutput', ['hypotheses', 'scores'])
+logger = logging.getLogger(__name__)
 
 
 class Reranker:
@@ -53,78 +50,69 @@ class Reranker:
 
         self.return_score = return_score
 
-    def rerank_hypotheses(self, hypotheses: List[str],
-                          reference: str) -> RerankOutput:
+    def rerank(self, hypotheses: Dict[str, Any], reference: str) -> Dict[str, Any]:
         """
         Reranks a set of hypotheses that belong to one single reference
-        translation.
+        translation. Uses stable sorting.
 
-        :param hypotheses: List of nbest translations.
+        :param hypotheses: Nbest translations.
         :param reference: A single string with the actual reference translation.
-        :return: A sorted list of hypotheses, possibly with scores.
+        :return: Nbest translations sorted by reranking scores.
         """
-        scores = [self.scoring_function(hypothesis, reference) for hypothesis in hypotheses]
-
-        sorted_indexes = np.argsort(scores)[::-1]  # descending
-        sorted_hypotheses = [hypotheses[i] for i in sorted_indexes]
-
+        scores = [self.scoring_function(hypothesis, reference) for hypothesis in hypotheses['translations']]
+        ranking = list(np.argsort(scores, kind='mergesort')[::-1])  # descending
+        reranked_hypotheses = self._sort_by_ranking(hypotheses, ranking)
         if self.return_score:
-            sorted_scores = [scores[i] for i in sorted_indexes]
-            return RerankOutput(hypotheses=sorted_hypotheses,
-                                scores=sorted_scores)
-        else:
-            return RerankOutput(hypotheses=sorted_hypotheses,
-                                scores=[])
+            reranked_hypotheses['scores'] = [scores[i] for i in ranking]
+        return reranked_hypotheses
 
-    def rerank_top1(self, hypotheses: List[str],
-                    reference: str) -> RerankOutput:
-        """
-        Reranks a set of hypotheses that belong to one single reference
-        translation and outputs the best hypothesis.
+    @staticmethod
+    def _sort_by_ranking(hypotheses: Dict[str, Any], ranking: List[int]) -> Dict[str, Any]:
+        def ranksort(l):
+            return [l[i] for i in ranking]
 
-        :param hypotheses: List of nbest translations.
-        :param reference: A single string with the actual reference translation.
-        :return: The single best hypothesis, possibly with its score.
-        """
-        scores = [self.scoring_function(hypothesis, reference) for hypothesis in hypotheses]
-        best_index = np.argmax(scores)  # type: int
-
-        if self.return_score:
-            return RerankOutput(hypotheses=[hypotheses[best_index]],
-                                scores=[scores[best_index]])
-        else:
-            return RerankOutput(hypotheses=[hypotheses[best_index]],
-                                scores=[])
+        return {key: ranksort(value) for key, value in hypotheses.items()}
 
 
 def rerank(args: argparse.Namespace):
     """
-    Reranks a list of hypotheses acoording to a sentence-level metric.
+    Reranks a list of hypotheses according to a sentence-level metric.
     Writes all output to STDOUT.
 
     :param args: Namespace object holding CLI arguments.
     """
-    reranker = Reranker(args.metric)
+    reranker = Reranker(args.metric, args.return_score)
 
     with utils.smart_open(args.reference) as reference, utils.smart_open(args.hypotheses) as hypotheses:
-        for reference_line, hypothesis_line in zip(reference, hypotheses):
-            reference_line = reference_line.strip()
-            hypotheses = json.loads(hypothesis_line)
+        for i, (reference_line, hypothesis_line) in enumerate(zip(reference, hypotheses), 1):
+            reference = reference_line.strip()
+            # Expects a JSON object with keys containing at least 'translations',
+            # as returned by sockeye.translate's nbest output
+            hypotheses = json.loads(hypothesis_line.strip())
+            utils.check_condition('translations' in hypotheses,
+                                  "Reranking requires nbest JSON input with 'translations' key present.")
+            num_hypotheses = len(hypotheses['translations'])
 
-            utils.check_condition(len(hypotheses) > 1, "Reranking strictly needs more than 1 hypothesis.")
+            if not num_hypotheses > 1:
+                logger.info("Line %d contains %d hypotheses. Nothing to rerank.", i, num_hypotheses)
+                reranked_hypotheses = hypotheses
+            else:
+                reranked_hypotheses = reranker.rerank(hypotheses, reference)
 
             if args.output_best:
-                rank_output = reranker.rerank_top1(hypotheses, reference_line)
-                sys.stdout.write(rank_output.hypotheses[0] + "\n")
+                if not num_hypotheses:
+                    print()
+                else:
+                    print(reranked_hypotheses['translations'][0])
             else:
-                rank_output = reranker.rerank_hypotheses(hypotheses, reference_line)
-                sys.stdout.write(json.dumps(rank_output.hypotheses) + "\n")
+                print(json.dumps(reranked_hypotheses, sort_keys=True))
 
 
 def main():
     """
     Commandline interface to rerank nbest lists.
     """
+    log.setup_main_logger(console=True, file_logging=False)
     log.log_sockeye_version(logger)
 
     params = argparse.ArgumentParser(description="Rerank nbest lists of translations."

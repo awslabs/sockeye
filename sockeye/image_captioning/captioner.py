@@ -17,6 +17,7 @@ Image captioning CLI.
 import argparse
 import os
 import tempfile
+import logging
 from contextlib import ExitStack
 
 import mxnet as mx
@@ -36,7 +37,7 @@ from ..log import setup_main_logger
 from ..translate import read_and_translate
 from ..utils import check_condition, log_basic_info, determine_context
 
-logger = setup_main_logger(__name__, file_logging=False)
+logger = logging.getLogger(__name__)
 
 
 def get_pretrained_caption_net(args: argparse.Namespace,
@@ -69,6 +70,7 @@ def get_pretrained_caption_net(args: argparse.Namespace,
                                                     args.length_penalty_beta),
                                                 beam_prune=args.beam_prune,
                                                 beam_search_stop=args.beam_search_stop,
+                                                nbest_size=1,
                                                 models=models,
                                                 source_vocabs=None,
                                                 target_vocab=target_vocab,
@@ -115,11 +117,11 @@ def caption(args: argparse.Namespace):
     image_preextracted_features = not args.extract_image_features
 
     if args.output is not None:
-        global logger
-        logger = setup_main_logger(__name__,
-                                   console=not args.quiet,
+        setup_main_logger(console=not args.quiet,
                                    file_logging=True,
                                    path="%s.%s" % (args.output, C.LOG_NAME))
+    else:
+        setup_main_logger(file_logging=False)
 
     if args.checkpoints is not None:
         check_condition(len(args.checkpoints) == len(args.models),

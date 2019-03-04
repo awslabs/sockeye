@@ -72,7 +72,7 @@ Vocabularies will automatically be created from the training data and vocabulary
 ### Checkpointing and early-stopping
 
 Training is governed by the concept of "checkpoints", rather than epochs.
-You can specify the checkpoint frequency in terms of updates/batches with `--checkpoint-frequency`.
+You can specify the checkpoint interval in terms of updates/batches with `--checkpoint-interval`.
 Training performs early-stopping to prevent overfitting, i.e., training is stopped once a defined evaluation metric computed on the held-out validation data does not improve for a number of checkpoints given by the parameter `--max-num-checkpoint-not-improved`.
 You can specify a maximum number of updates/batches using `--max-updates`.
 
@@ -168,8 +168,11 @@ You need a corresponding feature line of the following form:
 This flag can also be supplied to [the data preparation step](#data-preparation).
 
 Each source factor has its own vocabulary and learned embedding.
-At training time, you need to specifiy the embedding sizes for each factor.
+The source factors can be combined with the word embeddings in two ways: concatenation and summing.
+For concatenation (`--source-factors-combine concat`, the default), you need to specifiy the embedding sizes for each factor.
 This is done with `--source-factors-num-embed X1 X2 ...`.
-These embedding sizes are *added* to those of the word embeddings, so the total source embedding size will be the sum of the word embeddings and all source factor embeddings.
+Since these embeddings concatenated to those of the word embeddings, the total source embedding size will be the sum of the word embeddings and all source factor embeddings.
+You can also sum the embeddings (`--source-factors-combine sum`).
+In this case, you do not need to specify `--source-factors-num-embed`, since they are automatically all set to the size of the word embeddings (`--num-embed`).
 
 You then also have to apply factors for the source side [at inference time](inference.html#source-factors).

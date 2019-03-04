@@ -60,15 +60,44 @@ For example:
 Any number of factors can be supplied; just delimit them with `|`.
 Factor representation are dense; each word must be annotated for all factors.
 
-### JSON format
+### Input and output with JSON
 
-Sockeye supports a JSON input format with the text to translate in the "text" field (`sockeye.translate --json-input`).
-Each sentence is encoded in a single-line JSON object.
-This object can also specify the source factors as a list of token-parallel strings, e.g.,
+Sockeye supports JSON for both input and output.
+JSON input is enabled by adding the `--json-input` to the call to `sockeye.translate`.
+In this case, Sockeye will take the text to translate from the "text" field.
+Sockeye expects a complete JSON object on each line of input.
+This JSON object can also specify the source factors as a list of token-parallel strings, e.g.,
 
 ```python
 { "text": "The boy ate the waff@@ le .", "factors": ["O O O O B E O"] }
 ```
+
+JSON output is enabled with the `--output-type json` flag.
+The translation itself will appear in a `translation` field, along with other fields such as `sentence_id`.
+
+If both JSON input and output are enabled, Sockeye will push through all fields in the input object that it doesn't overwrite.
+For example, if your input is:
+
+```json
+{ "text": "The boy ate the waff@@ le .", "sentiment_id": "positive" }
+```
+
+The output may be:
+
+```json
+{ "sentence_id": 1, "sentiment_id": "positive", "text": "The boy ate the waff@@ le .", "translation": "Der Junge aß die Waffel." }
+```
+
+## N-best translations
+
+Sockeye can return the n best hypotheses per input (*nbest lists*).
+Such nbest lists can for example be used in reranking (`python -m sockeye.rerank`).
+
+When `--nbest-size > 1`, each line in the output of `translate` will contain the following JSON object:
+```python
+{"alignments": [<1st alignment>, <2nd alignment>, ...], "scores": [<1st score>, <2nd score>, ...], "translations": ["<1st hypothesis>", "<2nd hypothesis>", ...]}
+```
+Note that `--nbest-size` must be smaller or equal to `--beam-size` and `--beam-search-stop` must be set to `all`.
 
 ## Lexical constraints
 
@@ -136,7 +165,7 @@ As always, don't forget to apply source- and target-side preprocessing to your i
 On multi-core computers, translation per core separately can speedup translation performance, due to some operation can't be handled parallel in one process.
 Using this method, translation on each core can be parallel.
 
-One [python script example](https://raw.githubusercontent.com/awslabs/sockeye/master/tutorials/process_per_core_translation/cpu_process_per_core_translation.py) is given and you can run it as follows:
+One [python script example](https://raw.githubusercontent.com/awslabs/sockeye/master/docs/tutorials/cpu_process_per_core_translation.py) is given and you can run it as follows:
 
 ```bash
 > python cpu_process_per_core_translation.py -m model -i input_file_name -o output_file_name -bs batch_size -t true
@@ -147,3 +176,14 @@ Options:
 - `-t true`: each core translate the whole input file.
 
 - `-t false`: each core translate (input file line/core number) lines , then merge the translated file into one complete output file.
+
+## Sampling
+
+Instead of filling the beam with the best items at each step of the decoder, Sockeye can sample from the target distributions of each hypothesis using `--sample [N]`.
+If the optional parameter `N` is specified, the sampling will be limited to the top `N` vocabulary items.
+The default, `N = 0`, which means to sample from the full distribution over all target vocabulary items.
+Limiting `N` to a value that is much smaller than the target vocabulary size (say, 5%) can lead to much more sensible samples.
+
+You can use this with `--nbest-size` to output multiple samples for each input.
+However, note that since each beam item is sampled independently, there is no guarantee that sampled items will be unique.
+You can use `--softmax-temperature T` to make the target distributions more peaked (`T < 1.0`) or smoother (`T > 1.0`).

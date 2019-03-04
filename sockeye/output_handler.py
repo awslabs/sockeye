@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -54,6 +54,8 @@ def get_output_handler(output_type: str,
         return AlignTextHandler(sure_align_threshold)
     elif output_type == C.OUTPUT_HANDLER_BEAM_STORE:
         return BeamStoringHandler(output_stream)
+    elif output_type == C.OUTPUT_HANDLER_JSON:
+        return JSONOutputHandler(output_stream, sure_align_threshold)
     else:
         raise ValueError("unknown output type")
 
@@ -72,6 +74,14 @@ class OutputHandler(ABC):
         :param t_input: Translator input.
         :param t_output: Translator output.
         :param t_walltime: Total wall-clock time for translation.
+        """
+        pass
+
+    @abstractmethod
+    def reports_score(self) -> bool:
+        """
+        True if output_handler makes use of TranslatorOutput.score
+        :return:
         """
         pass
 
@@ -98,6 +108,9 @@ class StringOutputHandler(OutputHandler):
         self.stream.write("%s\n" % t_output.translation)
         self.stream.flush()
 
+    def reports_score(self) -> bool:
+        return False
+
 
 class StringWithScoreOutputHandler(OutputHandler):
     """
@@ -122,6 +135,9 @@ class StringWithScoreOutputHandler(OutputHandler):
         self.stream.write("{:.3f}\t{}\n".format(t_output.score, t_output.translation))
         self.stream.flush()
 
+    def reports_score(self) -> bool:
+        return True
+
 
 class ScoreOutputHandler(OutputHandler):
     """
@@ -144,6 +160,9 @@ class ScoreOutputHandler(OutputHandler):
         """
         self.stream.write("{:.3f}\n".format(t_output.score))
         self.stream.flush()
+
+    def reports_score(self) -> bool:
+        return True
 
 
 class PairWithScoreOutputHandler(OutputHandler):
@@ -169,6 +188,9 @@ class PairWithScoreOutputHandler(OutputHandler):
                                                     C.TOKEN_SEPARATOR.join(t_input.tokens),
                                                     t_output.translation))
         self.stream.flush()
+
+    def reports_score(self) -> bool:
+        return True
 
 
 class StringWithAlignmentsOutputHandler(StringOutputHandler):
@@ -200,6 +222,9 @@ class StringWithAlignmentsOutputHandler(StringOutputHandler):
             ["%d-%d" % (s, t) for s, t in get_alignments(t_output.attention_matrix, threshold=self.threshold)])
         self.stream.write("%s\t%s\n" % (t_output.translation, alignments))
         self.stream.flush()
+
+    def reports_score(self) -> bool:
+        return False
 
 
 class StringWithAlignmentMatrixOutputHandler(StringOutputHandler):
@@ -250,6 +275,9 @@ class StringWithAlignmentMatrixOutputHandler(StringOutputHandler):
         self.stream.write("\n")
         self.stream.flush()
 
+    def reports_score(self) -> bool:
+        return True
+
 
 class BenchmarkOutputHandler(StringOutputHandler):
     """
@@ -272,6 +300,9 @@ class BenchmarkOutputHandler(StringOutputHandler):
                            len(t_output.tokens),
                            t_walltime))
         self.stream.flush()
+
+    def reports_score(self) -> bool:
+        return False
 
 
 class AlignPlotHandler(OutputHandler):
@@ -298,6 +329,9 @@ class AlignPlotHandler(OutputHandler):
                        t_output.tokens,
                        "%s_%s.png" % (self.plot_prefix, t_input.sentence_id))
 
+    def reports_score(self) -> bool:
+        return False
+
 
 class AlignTextHandler(OutputHandler):
     """
@@ -322,6 +356,9 @@ class AlignTextHandler(OutputHandler):
                              t_input.tokens,
                              t_output.tokens,
                              self.threshold)
+
+    def reports_score(self) -> bool:
+        return False
 
 
 class BeamStoringHandler(OutputHandler):
@@ -352,3 +389,31 @@ class BeamStoringHandler(OutputHandler):
             h["id"] = t_output.sentence_id  # type: ignore
             self.stream.write("%s\n" % json.dumps(h, sort_keys=True))
         self.stream.flush()
+
+    def reports_score(self) -> bool:
+        return False
+
+class JSONOutputHandler(OutputHandler):
+    """
+    Output single-line JSON objects.
+    Carries over extra fields from the input.
+    """
+    def __init__(self, stream, threshold: float = 0.0) -> None:
+        self.stream = stream
+        self.align_threshold = threshold
+
+    def handle(self,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
+               t_walltime: float = 0.):
+        """
+        Outputs a JSON object of the fields in the `TranslatorOutput` object.
+        """
+
+        d_ = t_output.json(self.align_threshold)
+
+        self.stream.write("%s\n" % json.dumps(d_, sort_keys=True))
+        self.stream.flush()
+
+    def reports_score(self) -> bool:
+        return True

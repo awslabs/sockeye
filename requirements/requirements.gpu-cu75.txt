@@ -1,4 +1,0 @@
-pyyaml==3.12
-mxnet-cu75mkl==1.3.0.post0
-numpy>=1.14
-typing
