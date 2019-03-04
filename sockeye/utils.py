@@ -778,7 +778,7 @@ def read_metrics_file(path: str) -> List[Dict[str, Any]]:
             for field in fields[1:]:
                 key, value = field.split("=", 1)
                 if value == 'True' or value == 'False':
-                    metric[key] = bool(value)
+                    metric[key] = (value == 'True')
                 else:
                     metric[key] = float(value)
             metrics.append(metric)

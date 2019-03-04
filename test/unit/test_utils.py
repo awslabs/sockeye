@@ -393,3 +393,19 @@ def test_smart_open_without_suffix():
 def test_compute_lengths(data, expected_lengths):
     lengths = utils.compute_lengths(mx.sym.Variable('data')).eval(data=data)[0]
     assert (lengths.asnumpy() == expected_lengths.asnumpy()).all()
+
+
+def test_read_metric_file():
+    expected_metrics = [{'float_metric':3.45, 'bool_metric': True},
+                       {'float_metric':1.0, 'bool_metric': False}]
+    with TemporaryDirectory(prefix="metric_file") as work_dir:
+        metric_path = os.path.join(work_dir, "metrics")
+        utils.write_metrics_file(expected_metrics, metric_path)
+
+        read_metrics = utils.read_metrics_file(metric_path)
+
+    assert len(read_metrics) == len(expected_metrics)
+    for i, m in enumerate(read_metrics):
+        for k, v in m.items():
+            assert type(v) == type(expected_metrics[i][k])
+            assert v == expected_metrics[i][k]
