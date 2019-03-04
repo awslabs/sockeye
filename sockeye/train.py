@@ -862,6 +862,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
         # Handle options that override training settings
         min_updates = args.min_updates
         max_updates = args.max_updates
+        max_seconds = args.max_seconds
         min_samples = args.min_samples
         max_samples = args.max_samples
         max_num_checkpoint_not_improved = args.max_num_checkpoint_not_improved
@@ -898,6 +899,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                      max_samples=max_samples,
                                      min_updates=min_updates,
                                      max_updates=max_updates,
+                                     max_seconds=max_seconds,
                                      min_epochs=min_epochs,
                                      max_epochs=max_epochs,
                                      lr_decay_param_reset=args.learning_rate_decay_param_reset,

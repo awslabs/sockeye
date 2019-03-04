@@ -851,6 +851,11 @@ def add_training_args(params):
                               type=int,
                               default=None,
                               help='Maximum number of updates. Default: %(default)s.')
+    train_params.add_argument('--max-seconds',
+                              type=int,
+                              default=None,
+                              help='Training will stop on the next checkpoint after reaching the maximum seconds. '
+                                   'Default: %(default)s.')
     train_params.add_argument('--min-samples',
                               type=int,
                               default=None,

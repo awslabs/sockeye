@@ -377,8 +377,8 @@ class TrainState:
     """
 
     __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint',
-                 'updates', 'samples', 'gradient_norm', 'gradients', 'metrics', 'start_tic',
-                 'early_stopping_metric', 'best_metric', 'best_checkpoint', 'converged', 'diverged']
+                 'updates', 'samples', 'gradient_norm', 'gradients', 'metrics', 'start_tic', '_tic_last_time_elapsed',
+                 '_time_elapsed', 'early_stopping_metric', 'best_metric', 'best_checkpoint', 'converged', 'diverged']
 
     def __init__(self, early_stopping_metric: str) -> None:
         self.num_not_improved = 0
@@ -392,6 +392,8 @@ class TrainState:
         # stores dicts of metric names & values for each checkpoint
         self.metrics = []  # type: List[Dict]
         self.start_tic = time.time()
+        self._tic_last_time_elapsed = self.start_tic
+        self._time_elapsed = 0.0
         self.early_stopping_metric = early_stopping_metric
         self.best_metric = C.METRIC_WORST[early_stopping_metric]
         self.best_checkpoint = 0
@@ -402,6 +404,7 @@ class TrainState:
         """
         Saves this training state to fname.
         """
+        self.update_time_elapsed()
         with open(fname, "wb") as fp:
             pickle.dump(self, fp)
 
@@ -411,7 +414,23 @@ class TrainState:
         Loads a training state from fname.
         """
         with open(fname, "rb") as fp:
-            return pickle.load(fp)
+            state = pickle.load(fp)
+            if not hasattr(state, '_time_elapsed'):
+                # backwards compatibility
+                state._time_elapsed = time.time() - state.start_tic
+                logger.warning("Training state did not encode the elapsed time. Will assume take the absolute time "
+                               "since the training started as the elapsed time (%f).", state._time_elapsed)
+            state._tic_last_time_elapsed = time.time()
+            return state
+
+    def update_time_elapsed(self):
+        current_time = time.time()
+        self._time_elapsed += current_time - self._tic_last_time_elapsed
+        self._tic_last_time_elapsed = current_time
+
+    @property
+    def time_elapsed(self):
+        return self._time_elapsed
 
 
 class EarlyStoppingTrainer:
@@ -456,6 +475,7 @@ class EarlyStoppingTrainer:
             max_samples: Optional[int] = None,
             min_updates: Optional[int] = None,
             max_updates: Optional[int] = None,
+            max_seconds: Optional[int] = None,
             min_epochs: Optional[int] = None,
             max_epochs: Optional[int] = None,
             lr_decay_param_reset: bool = False,
@@ -482,6 +502,8 @@ class EarlyStoppingTrainer:
         :param max_samples: Optional maximum number of samples.
         :param min_updates: Optional minimum number of update steps.
         :param max_updates: Optional maximum number of update steps.
+        :param max_seconds: Optional maximum number of seconds to run the training for. Training will stop on the next
+            checkpoint after reaching the maximum seconds.
         :param min_epochs: Optional minimum number of epochs to train, overrides early stopping.
         :param max_epochs: Optional maximum number of epochs to train, overrides early stopping.
 
@@ -622,7 +644,7 @@ class EarlyStoppingTrainer:
                     logger.info("Validation-%s has not improved for %d checkpoints, best so far: %f",
                                 early_stopping_metric, self.state.num_not_improved, self.state.best_metric)
 
-                # (4) determine stopping
+                # (4) determine convergence
                 if 0 <= max_num_not_improved <= self.state.num_not_improved:
                     logger.info("Maximum number of not improved checkpoints (%d) reached: %d",
                                 max_num_not_improved, self.state.num_not_improved)
@@ -671,6 +693,12 @@ class EarlyStoppingTrainer:
 
                 # (8) save training state
                 self._save_training_state(train_iter)
+
+                # (9) stop training if we reach the maximum seconds
+                if max_seconds and self.state.time_elapsed >= max_seconds:
+                    logger.info("Training has run for %.0f seconds, reaching the maximum of %d seconds.",
+                                self.state.time_elapsed, max_seconds)
+                    break
 
                 if self.state.converged or self.state.diverged:
                     break
@@ -766,10 +794,11 @@ class EarlyStoppingTrainer:
         and spawns a new decoding process.
         Writes all metrics to the metrics file and optionally logs to tensorboard.
         """
+        self.state.update_time_elapsed()
         checkpoint_metrics = {"epoch": self.state.epoch,
                               "learning-rate": self.model.optimizer.learning_rate,
                               "gradient-norm": self.state.gradient_norm,
-                              "time-elapsed": time.time() - self.state.start_tic}
+                              "time-elapsed": self.state.time_elapsed}
         gpu_memory_usage = utils.get_gpu_memory_usage(self.model.context)
         checkpoint_metrics['used-gpu-memory'] = sum(v[0] for v in gpu_memory_usage.values())
         checkpoint_metrics['converged'] = self.state.converged
