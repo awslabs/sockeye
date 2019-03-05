@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.83]
+### Fixed
+- Bugfix in batch decoding with lexical constraints
+
 ## [1.18.82]
 ### Fixed
 - Fixed type conversion in metrics file reading introduced in 1.18.79.

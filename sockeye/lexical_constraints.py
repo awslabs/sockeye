@@ -510,15 +510,15 @@ def topk(timestep: int,
         the updated constrained hypotheses, and the updated set of inactive hypotheses.
     """
 
-    if timestep == 1:
-        beam_size = 1
+    # On the first timstep, we work with batches of size 1 since there is only one start state
+    working_beam_size = 1 if timestep == 1 else beam_size
 
     for sentno in range(batch_size):
-        rows = slice(sentno * beam_size, (sentno + 1) * beam_size)
+        rows = slice(sentno * beam_size, sentno * beam_size + working_beam_size)
         if hypotheses[rows.start] is not None and hypotheses[rows.start].size() > 0:
             best_ids[rows], best_word_ids[rows], seq_scores[rows], \
             hypotheses[rows], inactive[rows] = _topk(timestep,
-                                                     beam_size,
+                                                     working_beam_size,
                                                      inactive[rows],
                                                      scores[rows],
                                                      hypotheses[rows],
@@ -569,7 +569,7 @@ def _topk(timestep: int,
     for row, col, seq_score in zip(best_ids, best_word_ids, sequence_scores):
         row = int(row.asscalar())
         col = int(col.asscalar())
-        if hypotheses[row].is_valid(col):
+        if hypotheses[row] is not None and hypotheses[row].is_valid(col):
             seq_score = float(seq_score.asscalar())
             new_item = hypotheses[row].advance(col)
             cand = ConstrainedCandidate(row, col, seq_score, new_item)
