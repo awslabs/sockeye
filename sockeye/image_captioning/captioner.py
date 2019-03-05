@@ -127,6 +127,13 @@ def caption(args: argparse.Namespace):
         check_condition(len(args.checkpoints) == len(args.models),
                         "must provide checkpoints for each model")
 
+    # If the user has not explicitly set a batch size, set it based on the file type
+    if batch_size is None:
+        if args.input == sys.stdin:
+            args.batch_size = 1
+        else:
+            args.batch_size = C.DEFAULT_BATCH_SIZE
+
     log_basic_info(args)
 
     out_handler = output_handler.get_output_handler(args.output_type,

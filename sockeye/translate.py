@@ -56,6 +56,14 @@ def run_translate(args: argparse.Namespace):
 
     log_basic_info(args)
 
+    # If the user has not explicitly set a batch size, set it based on the file type
+    batch_size = args.batch_size
+    if batch_size is None:
+        if args.input == sys.stdin:
+            batch_size = 1
+        else:
+            batch_size = C.DEFAULT_BATCH_SIZE
+
     if args.nbest_size > 1:
         if args.output_type != C.OUTPUT_HANDLER_JSON:
             logger.warning("For nbest translation, you must specify `--output-type '%s'; overriding your setting of '%s'.",
@@ -78,7 +86,7 @@ def run_translate(args: argparse.Namespace):
             context=context,
             max_input_len=args.max_input_len,
             beam_size=args.beam_size,
-            batch_size=args.batch_size,
+            batch_size=batch_size,
             model_folders=args.models,
             checkpoints=args.checkpoints,
             softmax_temperature=args.softmax_temperature,

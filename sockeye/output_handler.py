@@ -411,9 +411,7 @@ class JSONOutputHandler(OutputHandler):
         """
 
         d_ = t_output.json(self.align_threshold)
-
-        self.stream.write("%s\n" % json.dumps(d_, sort_keys=True))
-        self.stream.flush()
+        print(json.dumps(d_, sort_keys=True, ensure_ascii=False), file=self.stream, flush=True)
 
     def reports_score(self) -> bool:
         return True

@@ -1244,9 +1244,9 @@ def add_inference_args(params):
                                     'or when a finished hypothesis is in (first) position. Default: %(default)s.')
     decode_params.add_argument('--batch-size',
                                type=int_greater_or_equal(1),
-                               default=32,
+                               default=None,
                                help='Batch size during decoding. Determines how many sentences are translated '
-                                    'simultaneously. Default: %(default)s.')
+                                    'simultaneously. Default: {} for file input, 1 for STDIN'.format(C.DEFAULT_BATCH_SIZE))
     decode_params.add_argument('--chunk-size',
                                type=int_greater_or_equal(1),
                                default=None,
