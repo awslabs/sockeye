@@ -10,9 +10,13 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [1.18.83]
+## [1.18.84]
 ### Changed
 - Updated to [MXNet 1.4.0](https://github.com/apache/incubator-mxnet/tree/1.4.0)
+
+## [1.18.83]
+### Changed
+ - The embedding size is automatically adjusted to the Transformer model size in case it is not specified on the command line.
 
 ## [1.18.82]
 ### Fixed

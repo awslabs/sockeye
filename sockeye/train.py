@@ -88,24 +88,6 @@ def check_arg_compatibility(args: argparse.Namespace):
 
     :param args: Arguments as returned by argparse.
     """
-    if args.encoder == C.TRANSFORMER_TYPE:
-        check_condition(args.transformer_model_size[0] == args.num_embed[0],
-                        "Source embedding size must match transformer model size: %s vs. %s"
-                        % (args.transformer_model_size, args.num_embed[0]))
-
-        total_source_factor_size = sum(args.source_factors_num_embed)
-        if total_source_factor_size > 0 and args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
-            adjusted_transformer_encoder_model_size = args.num_embed[0] + total_source_factor_size
-            check_condition(adjusted_transformer_encoder_model_size % 2 == 0 and
-                            adjusted_transformer_encoder_model_size % args.transformer_attention_heads[0] == 0,
-                            "Sum of source factor sizes, i.e. num-embed plus source-factors-num-embed, (%d) "
-                            "has to be even and a multiple of encoder attention heads (%d)" % (
-                                adjusted_transformer_encoder_model_size, args.transformer_attention_heads[0]))
-
-    if args.decoder == C.TRANSFORMER_TYPE:
-        check_condition(args.transformer_model_size[1] == args.num_embed[1],
-                        "Target embedding size must match transformer model size: %s vs. %s"
-                        % (args.transformer_model_size, args.num_embed[1]))
 
     if args.lhuc is not None:
         # Actually this check is a bit too strict
@@ -368,8 +350,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 def create_encoder_config(args: argparse.Namespace,
                           max_seq_len_source: int,
                           max_seq_len_target: int,
-                          config_conv: Optional[encoder.ConvolutionalEmbeddingConfig]) -> Tuple[encoder.EncoderConfig,
-                                                                                                int]:
+                          config_conv: Optional[encoder.ConvolutionalEmbeddingConfig],
+                          num_embed_source: int) -> Tuple[encoder.EncoderConfig, int]:
     """
     Create the encoder config.
 
@@ -377,10 +359,10 @@ def create_encoder_config(args: argparse.Namespace,
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
     :param config_conv: The config for the convolutional encoder (optional).
+    :param num_embed_source: The size of the source embedding.
     :return: The encoder config and the number of hidden units of the encoder.
     """
     encoder_num_layers, _ = args.num_layers
-    num_embed_source, _ = args.num_embed
     config_encoder = None  # type: Optional[Config]
 
     if args.decoder_only:
@@ -458,7 +440,8 @@ def create_encoder_config(args: argparse.Namespace,
 
 
 def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
-                          max_seq_len_source: int, max_seq_len_target: int) -> decoder.DecoderConfig:
+                          max_seq_len_source: int, max_seq_len_target: int,
+                          num_embed_target: int) -> decoder.DecoderConfig:
     """
     Create the config for the decoder.
 
@@ -466,10 +449,10 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
     :param encoder_num_hidden: Number of hidden units of the Encoder.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
+    :param num_embed_target: The size of the source embedding.
     :return: The config for the decoder.
     """
     _, decoder_num_layers = args.num_layers
-    _, num_embed_target = args.num_embed
 
     config_decoder = None  # type: Optional[Config]
 
@@ -587,6 +570,48 @@ def check_encoder_decoder_args(args) -> None:
                         "Recurrent dropout without memory loss only supported for LSTMs right now.")
 
 
+def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
+    num_embed_source, num_embed_target = args.num_embed
+    if args.encoder == C.TRANSFORMER_TYPE:
+        transformer_model_size_source = args.transformer_model_size[0]
+        if not num_embed_source:
+            logger.info("Source embedding size was not set it will automatically be adjusted to match the "
+                        "Transformer source model size (%d).", transformer_model_size_source)
+            num_embed_source = transformer_model_size_source
+        else:
+            check_condition(args.transformer_model_size[0] == num_embed_source,
+                            "Source embedding size must match transformer model size: %s vs. %s"
+                            % (args.transformer_model_size, num_embed_source))
+
+        total_source_factor_size = sum(args.source_factors_num_embed)
+        if total_source_factor_size > 0 and args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+            adjusted_transformer_encoder_model_size = num_embed_source + total_source_factor_size
+            check_condition(adjusted_transformer_encoder_model_size % 2 == 0 and
+                            adjusted_transformer_encoder_model_size % args.transformer_attention_heads[0] == 0,
+                            "Sum of source factor sizes, i.e. num-embed plus source-factors-num-embed, (%d) "
+                            "has to be even and a multiple of encoder attention heads (%d)" % (
+                                adjusted_transformer_encoder_model_size, args.transformer_attention_heads[0]))
+
+    if args.decoder == C.TRANSFORMER_TYPE:
+        transformer_model_size_target = args.transformer_model_size[1]
+        if not num_embed_target:
+            logger.info("Target embedding size was not set it will automatically be adjusted to match the "
+                        "Transformer target model size (%d).", transformer_model_size_target)
+            num_embed_target = transformer_model_size_target
+        else:
+            # Make sure that if the user sets num_embed it matches the Transformer model size
+            check_condition(args.transformer_model_size[1] == num_embed_target,
+                            "Target embedding size must match transformer model size: %s vs. %s"
+                            % (args.transformer_model_size, num_embed_target))
+
+    if not num_embed_source:
+        num_embed_source = C.DEFAULT_NUM_EMBED
+    if not num_embed_target:
+        num_embed_target = C.DEFAULT_NUM_EMBED
+
+    return num_embed_source, num_embed_target
+
+
 def create_model_config(args: argparse.Namespace,
                         source_vocab_sizes: List[int],
                         target_vocab_size: int,
@@ -604,7 +629,8 @@ def create_model_config(args: argparse.Namespace,
     :param config_data: Data config.
     :return: The model configuration.
     """
-    num_embed_source, num_embed_target = args.num_embed
+    num_embed_source, num_embed_target = get_num_embed(args)
+
     embed_dropout_source, embed_dropout_target = args.embed_dropout
     source_vocab_size, *source_factor_vocab_sizes = source_vocab_sizes
 
@@ -628,8 +654,9 @@ def create_model_config(args: argparse.Namespace,
                                                            dropout=args.conv_embed_dropout)
 
     config_encoder, encoder_num_hidden = create_encoder_config(args, max_seq_len_source, max_seq_len_target,
-                                                               config_conv)
-    config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target)
+                                                               config_conv, num_embed_source)
+    config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target,
+                                           num_embed_target)
 
     source_factor_configs = None
     if len(source_vocab_sizes) > 1:
