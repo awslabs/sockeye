@@ -13,6 +13,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ## [1.18.84]
 ### Changed
 - Updated to [MXNet 1.4.0](https://github.com/apache/incubator-mxnet/tree/1.4.0)
+- Integration tests no longer check for equivalence of outputs with batch size 2.
 
 ## [1.18.83]
 ### Changed
