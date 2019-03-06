@@ -288,6 +288,7 @@ def get_valid_length_mask_for(data: mx.sym.Symbol,
                               name: str = '') -> mx.sym.Symbol:
     """
     Returns bias/mask for variable sequence lengths.
+
     :param data: Input data to mask. Shape: (batch, seq_len, _).
     :param lengths: Sequence lengths. Shape: (batch,).
     :param num_heads: Number of attention heads.
