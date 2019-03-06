@@ -1278,6 +1278,7 @@ class Translator:
 
             self._top.initialize(ctx=self.context)
             self._top.hybridize(static_alloc=True, static_shape=True)
+            self._top = partial(utils.topk, k=self.beam_size)  # type: Callable
         else:
             if self.skip_topk:
                 self._top = utils.top1  # type: Callable
