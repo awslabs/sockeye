@@ -576,7 +576,7 @@ def _sequential_topk(timestep: int,
     # (3) the best item (constrained or not) in that row
     best_next = mx.nd.argmin(scores, axis=1)
     for row in range(beam_size):
-        if inactive[row] or (timestep == 1 and row > 0):
+        if inactive[row]:
             continue
 
         hyp = hypotheses[row]
