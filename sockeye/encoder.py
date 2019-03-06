@@ -839,6 +839,25 @@ class RecurrentEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
+        
+        # The following piece of code illustrates how to unroll the RNN cell(s) over time independent of seq_len,
+        # using the new control-flow operator foreach. It works, but shape inference fails when using
+        # the VariationalDropout cell. ATM it is unclear how to fix it.
+
+        # self.rnn.reset()
+        # states = self.rnn.begin_state()  # type: List[mx.sym.Symbol]
+        # states.append(mx.sym.zeros((1,)))  # last state is step counter starting at 0
+        #
+        # def loop_body(inputs, states):
+        #     cell_states = states[:-1]
+        #     i = states[-1]
+        #     out, new_states = self.rnn(inputs, cell_states)
+        #     new_states.append(i + 1)
+        #     return out, new_states
+        #
+        # # last state item is step counter
+        # outputs, _ = mx.sym.contrib.foreach(loop_body, data, states)
+
         outputs, _ = self.rnn.unroll(seq_len, inputs=data, merge_outputs=True, layout=self.layout)
 
         return outputs, data_length, seq_len
@@ -987,7 +1006,7 @@ class ConvolutionalEncoder(Encoder):
 
         # Multiple layers with residual connections:
         for layer in self.layers:
-            data = data + layer(data, data_length, seq_len)
+            data = data + layer(data, data_length)
         return data, data_length, seq_len
 
     def get_num_hidden(self) -> int:
