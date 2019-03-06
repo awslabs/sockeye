@@ -707,9 +707,9 @@ def add_model_parameters(params):
     # embedding arguments
     model_params.add_argument('--num-embed',
                               type=multiple_values(num_values=2, greater_or_equal=1),
-                              default=(512, 512),
+                              default=(None, None),
                               help='Embedding size for source and target tokens. '
-                                   'Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
+                                   'Use "x:x" to specify separate values for src&tgt. Default: %d.' % C.DEFAULT_NUM_EMBED)
     model_params.add_argument('--source-factors-num-embed',
                               type=int,
                               nargs='+',
