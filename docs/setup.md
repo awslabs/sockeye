@@ -28,7 +28,7 @@ wget https://raw.githubusercontent.com/awslabs/sockeye/master/requirements/requi
 pip install sockeye --no-deps -r requirements.gpu-cu${CUDA_VERSION}.txt
 rm requirements.gpu-cu${CUDA_VERSION}.txt
 ```
-where `${CUDA_VERSION}` can be `80` (8.0), `90` (9.0), or `92` (9.2).
+where `${CUDA_VERSION}` can be `80` (8.0), `90` (9.0), `92` (9.2), or `100` (10.0).
 
 ### → via source...
 
@@ -47,7 +47,7 @@ running the following:
 > pip install -r requirements/requirements.gpu-cu${CUDA_VERSION}.txt
 > pip install .
 ```
-where `${CUDA_VERSION}` can be `80` (8.0), `90` (9.0), or `92` (9.2).
+where `${CUDA_VERSION}` can be `80` (8.0), `90` (9.0), `92` (9.2), or `100` (10.0).
 
 Developers will be better served by pointing `$PYTHONPATH` to the root of the git-cloned source.
 

@@ -10,9 +10,17 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [1.18.81]
+## [1.18.83]
 ### Changed
  - The embedding size is automatically adjusted to the Transformer model size in case it is not specified on the command line.
+
+## [1.18.82]
+### Fixed
+- Fixed type conversion in metrics file reading introduced in 1.18.79.
+
+## [1.18.81]
+### Fixed
+- Making sure the training pickled training state contains the checkpoint decoder's BLEU score of the last checkpoint.
 
 ## [1.18.80]
 ### Fixed
