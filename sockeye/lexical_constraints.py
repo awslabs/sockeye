@@ -510,21 +510,18 @@ def topk(timestep: int,
         the updated constrained hypotheses, and the updated set of inactive hypotheses.
     """
 
-    # On the first timstep, we work with batches of size 1 since there is only one start state
-    working_beam_size = 1 if timestep == 1 else beam_size
-
     for sentno in range(batch_size):
-        rows = slice(sentno * beam_size, sentno * beam_size + working_beam_size)
+        rows = slice(sentno * beam_size, sentno * beam_size + beam_size)
         if hypotheses[rows.start] is not None and hypotheses[rows.start].size() > 0:
             best_ids[rows], best_word_ids[rows], seq_scores[rows], \
-            hypotheses[rows], inactive[rows] = _topk(timestep,
-                                                     working_beam_size,
-                                                     inactive[rows],
-                                                     scores[rows],
-                                                     hypotheses[rows],
-                                                     best_ids[rows] - rows.start,
-                                                     best_word_ids[rows],
-                                                     seq_scores[rows])
+                hypotheses[rows], inactive[rows] = _sequential_topk(timestep,
+                                                                    beam_size,
+                                                                    inactive[rows],
+                                                                    scores[rows],
+                                                                    hypotheses[rows],
+                                                                    best_ids[rows] - rows.start,
+                                                                    best_word_ids[rows],
+                                                                    seq_scores[rows])
 
             # offsetting since the returned smallest_k() indices were slice-relative
             best_ids[rows] += rows.start
@@ -536,15 +533,15 @@ def topk(timestep: int,
     return best_ids, best_word_ids, seq_scores, hypotheses, inactive
 
 
-def _topk(timestep: int,
-          beam_size: int,
-          inactive: mx.nd.NDArray,
-          scores: mx.nd.NDArray,
-          hypotheses: List[ConstrainedHypothesis],
-          best_ids: mx.nd.NDArray,
-          best_word_ids: mx.nd.NDArray,
-          sequence_scores: mx.nd.NDArray) -> Tuple[np.array, np.array, np.array,
-                                                   List[ConstrainedHypothesis], mx.nd.NDArray]:
+def _sequential_topk(timestep: int,
+                     beam_size: int,
+                     inactive: mx.nd.NDArray,
+                     scores: mx.nd.NDArray,
+                     hypotheses: List[ConstrainedHypothesis],
+                     best_ids: mx.nd.NDArray,
+                     best_word_ids: mx.nd.NDArray,
+                     sequence_scores: mx.nd.NDArray) -> Tuple[np.array, np.array, np.array,
+                                                              List[ConstrainedHypothesis], mx.nd.NDArray]:
     """
     Builds a new topk list such that the beam contains hypotheses having completed different numbers of constraints.
     These items are built from three different types: (1) the best items across the whole

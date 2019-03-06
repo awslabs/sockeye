@@ -12,7 +12,8 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.83]
 ### Fixed
-- Bugfix in batch decoding with lexical constraints
+- Fixed lexical constraints bugs that broke batching and caused large drop in BLEU.
+  These were introduced with sampling (1.18.64).
 
 ## [1.18.82]
 ### Fixed
