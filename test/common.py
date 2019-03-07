@@ -406,7 +406,7 @@ def test_translate_equivalence(data: Dict[str, Any], translate_params_equiv: str
         assert all(abs(a - b) < 0.01 or np.isnan(a - b) for a, b in zip(data['test_scores'], translate_scores_equiv))
 
 
-def _create_constrained_inputs(translate_inputs: List[str], translate_outputs: List[str]) -> List[Dict[str, Any]]:
+def _create_reference_constraints(translate_inputs: List[str], translate_outputs: List[str]) -> List[Dict[str, Any]]:
     constrained_inputs = []
     for sentno, (source, translate_output) in enumerate(zip(translate_inputs, translate_outputs)):
         constrained_inputs.append(json.dumps({'text': source, 'constraints': ['<s> {} </s>'.format(translate_output)]}, ensure_ascii=False))
@@ -414,7 +414,7 @@ def _create_constrained_inputs(translate_inputs: List[str], translate_outputs: L
 
 
 def test_constrained_decoding_against_ref(data: Dict[str, Any], translate_params: str):
-    constrained_inputs = _create_constrained_inputs(data['test_inputs'], data['test_outputs'])
+    constrained_inputs = _create_reference_constraints(data['test_inputs'], data['test_outputs'])
     new_test_source_path = os.path.join(data['work_dir'], "test_constrained.txt")
     with open(new_test_source_path, 'w') as out:
         for json_line in constrained_inputs:
