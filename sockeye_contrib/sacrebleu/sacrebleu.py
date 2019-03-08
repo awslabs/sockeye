@@ -695,8 +695,8 @@ def smart_open(file, mode='rt', encoding='utf-8'):
     :param encoding: The file encoding.
     """
     if file.endswith('.gz'):
-        return gzip.open(file, mode=mode, encoding=encoding)
-    return open(file, mode=mode, encoding=encoding)
+        return gzip.open(file, mode=mode, encoding=encoding, newline='\n')
+    return open(file, mode=mode, encoding=encoding, newline='\n')
 
 
 def my_log(num):
