@@ -140,6 +140,7 @@ def test_model_parameters(test_params, expected_params):
               optimized_metric=C.PERPLEXITY,
               checkpoint_interval=4000,
               max_num_checkpoint_not_improved=32,
+              max_num_checkpoint=None,
               embed_dropout=(.0, .0),
               transformer_dropout_attention=0.1,
               transformer_dropout_act=0.1,
