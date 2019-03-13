@@ -1071,6 +1071,11 @@ def add_training_args(params):
                               default=[],
                               nargs='*',
                               help="Names of parameters to fix at training time. Default: %(default)s.")
+    train_params.add_argument('--fixed-param-strategy',
+                              default=None,
+                              choices=C.FIXED_PARAM_STRATEGY_CHOICES,
+                              help="Fix various parameters during training (Wuebker et al., 2018). "
+                                   "Default: %(default)s.")
 
     train_params.add_argument(C.TRAIN_ARGS_MONITOR_BLEU,
                               default=500,
