@@ -876,10 +876,10 @@ def add_training_args(params):
                               help='Maximum number of checkpoints the model is allowed to not improve in '
                                    '<optimized-metric> on validation data before training is stopped. '
                                    'Default: %(default)s.')
-    train_params.add_argument('--max-num-checkpoint',
+    train_params.add_argument('--max-checkpoints',
                               type=int,
                               default=None,
-                              help='Absolute maximum number of checkpoints to continue training the model '
+                              help='Maximum number of checkpoints to continue training the model '
                                    'before training is stopped. '
                                    'Default: %(default)s.')
     train_params.add_argument('--min-num-epochs',

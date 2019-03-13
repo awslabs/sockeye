@@ -452,7 +452,7 @@ class EarlyStoppingTrainer:
             metrics: List[str],
             checkpoint_interval: int,
             max_num_not_improved: int,
-            max_num_checkpoint: int,
+            max_checkpoints: Optional[int] = None,
             min_samples: Optional[int] = None,
             max_samples: Optional[int] = None,
             min_updates: Optional[int] = None,
@@ -479,8 +479,9 @@ class EarlyStoppingTrainer:
 
         :param max_num_not_improved: Stop training if early_stopping_metric did not improve for this many checkpoints.
                Use -1 to disable stopping based on early_stopping_metric.
-        :param max_num_checkpoint: Stop training after this many checkpoints, if for no other reason.
+        :param max_checkpoints: Stop training after this many checkpoints.
                Use None to disable.
+
         :param min_samples: Optional minimum number of samples.
         :param max_samples: Optional maximum number of samples.
         :param min_updates: Optional minimum number of update steps.
@@ -540,10 +541,11 @@ class EarlyStoppingTrainer:
         speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
         tic = time.time()
 
-        max_checkpoint = None
-        if max_num_checkpoint is not None:
-            max_checkpoint = max_num_checkpoint + self.state.checkpoint
-
+        if max_checkpoints is not None:
+            max_updates = self.state.updates + max_checkpoints * checkpoint_interval
+            logger.info(("Resetting max_updates to %d + %d * %d = %d in order to implement stopping after (an additional) %d checkpoints."
+                         % (self.state.updates, max_checkpoints, checkpoint_interval, max_updates, max_checkpoints)))
+            
         next_data_batch = train_iter.next()
         while True:
 
@@ -557,10 +559,6 @@ class EarlyStoppingTrainer:
 
             if max_samples is not None and self.state.samples >= max_samples:
                 logger.info("Maximum # of samples (%s) reached", max_samples)
-                break
-
-            if max_checkpoint is not None and self.state.checkpoint >= max_checkpoint:
-                logger.info("Maximum # of checkpoints (%s) reached", max_num_checkpoint)
                 break
 
             ######

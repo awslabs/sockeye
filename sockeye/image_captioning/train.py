@@ -346,18 +346,17 @@ def train(args: argparse.Namespace):
         min_samples = args.min_samples
         max_samples = args.max_samples
         max_num_checkpoint_not_improved = args.max_num_checkpoint_not_improved
-        max_num_checkpoint = args.max_num_checkpoint
         min_epochs = args.min_num_epochs
         max_epochs = args.max_num_epochs
         if min_epochs is not None and max_epochs is not None:
             check_condition(min_epochs <= max_epochs,
                             "Minimum number of epochs must be smaller than maximum number of epochs")
+            
         # Fixed training schedule always runs for a set number of updates
         if args.learning_rate_schedule:
             min_updates = None
             max_updates = sum(num_updates for (_, num_updates) in args.learning_rate_schedule)
             max_num_checkpoint_not_improved = -1
-            max_num_checkpoint = None
             min_samples = None
             max_samples = None
             min_epochs = None
@@ -382,7 +381,7 @@ def train(args: argparse.Namespace):
                     metrics=args.metrics,
                     checkpoint_interval=args.checkpoint_interval,
                     max_num_not_improved=max_num_checkpoint_not_improved,
-                    max_num_checkpoint=max_num_checkpoint,
+                    max_checkpoints=args.max_checkpoints,
                     min_samples=min_samples,
                     max_samples=max_samples,
                     min_updates=min_updates,
