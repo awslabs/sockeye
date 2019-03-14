@@ -452,6 +452,7 @@ class EarlyStoppingTrainer:
             metrics: List[str],
             checkpoint_interval: int,
             max_num_not_improved: int,
+            max_checkpoints: Optional[int] = None,
             min_samples: Optional[int] = None,
             max_samples: Optional[int] = None,
             min_updates: Optional[int] = None,
@@ -478,6 +479,9 @@ class EarlyStoppingTrainer:
 
         :param max_num_not_improved: Stop training if early_stopping_metric did not improve for this many checkpoints.
                Use -1 to disable stopping based on early_stopping_metric.
+        :param max_checkpoints: Stop training after this many checkpoints.
+               Use None to disable.
+
         :param min_samples: Optional minimum number of samples.
         :param max_samples: Optional maximum number of samples.
         :param min_updates: Optional minimum number of update steps.
@@ -537,6 +541,11 @@ class EarlyStoppingTrainer:
         speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
         tic = time.time()
 
+        if max_checkpoints is not None:
+            max_updates = self.state.updates + max_checkpoints * checkpoint_interval
+            logger.info(("Resetting max_updates to %d + %d * %d = %d in order to implement stopping after (an additional) %d checkpoints."
+                         % (self.state.updates, max_checkpoints, checkpoint_interval, max_updates, max_checkpoints)))
+            
         next_data_batch = train_iter.next()
         while True:
 
