@@ -211,13 +211,9 @@ class TrainingModel(model.SockeyeModel):
             num_decoder_layers = self.config.config_decoder.num_layers
 
         def is_fixed(name: str) -> bool:
-            if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_EMBEDDINGS:
-                # Any type of learned embedding.
-                return not (name.startswith(C.SOURCE_EMBEDDING_PREFIX) or
-                            name.startswith(C.SOURCE_POSITIONAL_EMBEDDING_PREFIX) or
-                            name.startswith(C.TARGET_EMBEDDING_PREFIX) or
-                            name.startswith(C.TARGET_POSITIONAL_EMBEDDING_PREFIX) or
-                            name.startswith(C.SHARED_EMBEDDING_PREFIX))
+            if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER:
+                # Any decoder layer.
+                return not name.startswith(C.DECODER_PREFIX)
             if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTER_LAYERS:
                 # First and last encoder and decoder layers for RNN,
                 # Transformer, and CNN models.
@@ -234,6 +230,13 @@ class TrainingModel(model.SockeyeModel):
                             name.startswith("{}{}".format(C.CNN_ENCODER_PREFIX, num_encoder_layers - 1)) or
                             name.startswith("{}{}".format(C.CNN_DECODER_PREFIX, 0)) or
                             name.startswith("{}{}".format(C.CNN_DECODER_PREFIX, num_decoder_layers - 1)))
+            if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_EMBEDDINGS:
+                # Any type of learned embedding.
+                return not (name.startswith(C.SOURCE_EMBEDDING_PREFIX) or
+                            name.startswith(C.SOURCE_POSITIONAL_EMBEDDING_PREFIX) or
+                            name.startswith(C.TARGET_EMBEDDING_PREFIX) or
+                            name.startswith(C.TARGET_POSITIONAL_EMBEDDING_PREFIX) or
+                            name.startswith(C.SHARED_EMBEDDING_PREFIX))
             if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTPUT_PROJ:
                 # Target output projection.
                 return not name.startswith(C.DEFAULT_OUTPUT_LAYER_PREFIX)

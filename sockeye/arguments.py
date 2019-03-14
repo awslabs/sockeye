@@ -1074,8 +1074,8 @@ def add_training_args(params):
     train_params.add_argument('--fixed-param-strategy',
                               default=None,
                               choices=C.FIXED_PARAM_STRATEGY_CHOICES,
-                              help="Fix various parameters during training (Wuebker et al., 2018). "
-                                   "Default: %(default)s.")
+                              help="Fix various parameters during training according to a named strategy "
+                                   "(Wuebker et al., 2018). Default: %(default)s.")
 
     train_params.add_argument(C.TRAIN_ARGS_MONITOR_BLEU,
                               default=500,

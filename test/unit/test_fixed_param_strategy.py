@@ -21,6 +21,7 @@ from sockeye.training import TrainingModel
 
 NUM_LAYERS = 3
 
+# Abbreviated version of weights from different model types.
 ALL_PARAMS = [
     # RNN
     'encoder_birnn_forward_l0_W',
@@ -51,6 +52,35 @@ ALL_PARAMS = [
     'decoder_cnn_1_W',
     'decoder_cnn_2_W',
     'decoder_cnn_i2h_W',
+    # Embeddings
+    'source_embed_factor0_weight',
+    'source_embed_factor1_weight',
+    'source_embed_weight',
+    'source_pos_embed_weight',
+    'target_embed_weight',
+    'target_pos_embed_weight',
+    'source_target_embed_weight',
+    # Output
+    'target_output_bias',
+    'target_output_weight',
+]
+
+ALL_EXCEPT_DECODER_PARAMS = [
+    # RNN
+    'encoder_birnn_forward_l0_W',
+    'encoder_birnn_reverse_l0_W',
+    'encoder_rnn_l0_W',
+    'encoder_rnn_l1_W',
+    # Transformer
+    'encoder_transformer_0_W',
+    'encoder_transformer_1_W',
+    'encoder_transformer_2_W',
+    'encoder_transformer_final_W',
+    # CNN
+    'encoder_cnn_0_W',
+    'encoder_cnn_1_W',
+    'encoder_cnn_2_W',
+    'encoder_cnn_i2h_W',
     # Embeddings
     'source_embed_factor0_weight',
     'source_embed_factor1_weight',
@@ -170,6 +200,7 @@ ALL_EXCEPT_OUTPUT_PROJ_PARAMS = [
 ]
 
 @pytest.mark.parametrize("param_names, strategy, expected_fixed_param_names", [
+    (ALL_PARAMS, C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER, ALL_EXCEPT_DECODER_PARAMS),
     (ALL_PARAMS, C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTER_LAYERS, ALL_EXCEPT_OUTER_LAYERS_PARAMS),
     (ALL_PARAMS, C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_EMBEDDINGS, ALL_EXCEPT_EMBED_PARAMS),
     (ALL_PARAMS, C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTPUT_PROJ, ALL_EXCEPT_OUTPUT_PROJ_PARAMS),
