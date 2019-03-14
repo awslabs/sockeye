@@ -15,6 +15,8 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 - Disabled dynamic batching for `Translator.translate()` by default due to increased memory usage. The default is to
   fill-up batches to `Translator.max_batch_size`.
   Dynamic batching can still be enabled if `fill_up_batches` is set to False.
+### Added
+- Added parameter to force training to stop after a given number of checkpoints. Useful when forced to share limited GPU resources.
 
 ## [1.18.84]
 ### Fixed
