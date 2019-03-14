@@ -105,7 +105,7 @@ class ImageCaptioner(Translator):
         :param trans_inputs: List of TranslatorInputs as returned by make_input().
         :return: List of translation results.
         """
-        batch_size = len(trans_inputs)
+        batch_size = self.max_batch_size
         # translate in batch-sized blocks over input chunks
         translations = []
         for batch_id, batch in enumerate(utils.grouper(trans_inputs, batch_size)):
@@ -113,7 +113,7 @@ class ImageCaptioner(Translator):
             # underfilled batch will be filled to a full batch size with copies of the 1st input
             rest = batch_size - len(batch)
             if rest > 0:
-                logger.debug("Extending the last batch to the full batch size (%d)", self.batch_size)
+                logger.debug("Extending the last batch to the full batch size (%d)", batch_size)
                 batch = batch + [batch[0]] * rest
             batch_translations = self._translate_nd(*self._get_inference_input(batch))
             # truncate to remove filler translations

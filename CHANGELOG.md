@@ -11,7 +11,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
 ## [1.18.85]
-### Fixed
+### Changed
+- Disabled dynamic batching for `Translator.translate()` by default due to increased memory usage. The default is to
+  fill-up batches to `Translator.max_batch_size`.
+  Dynamic batching can still be enabled if `fill_up_batches` is set to False.
+### Added
 - Added parameter to force training to stop after a given number of checkpoints. Useful when forced to share limited GPU resources.
 
 ## [1.18.84]
