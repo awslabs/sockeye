@@ -1067,15 +1067,16 @@ def add_training_args(params):
                               choices=[C.RNN_INIT_ORTHOGONAL, C.RNN_INIT_ORTHOGONAL_STACKED, C.RNN_INIT_DEFAULT],
                               help="Initialization method for RNN parameters. Default: %(default)s.")
 
+    train_params.add_argument('--fixed-param-strategy',
+                               default=None,
+                               choices=C.FIXED_PARAM_STRATEGY_CHOICES,
+                               help="Fix various parameters during training using a named strategy. The strategy "
+                                    "name indicates which parameters will be fixed (Wuebker et al., 2018). "
+                                    "Default: %(default)s.")
     train_params.add_argument('--fixed-param-names',
                               default=[],
                               nargs='*',
-                              help="Names of parameters to fix at training time. Default: %(default)s.")
-    train_params.add_argument('--fixed-param-strategy',
-                              default=None,
-                              choices=C.FIXED_PARAM_STRATEGY_CHOICES,
-                              help="Fix various parameters during training according to a named strategy "
-                                   "(Wuebker et al., 2018). Default: %(default)s.")
+                              help="Manually specify names of parameters to fix during training. Default: %(default)s.")
 
     train_params.add_argument(C.TRAIN_ARGS_MONITOR_BLEU,
                               default=500,
