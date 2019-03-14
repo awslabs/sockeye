@@ -373,18 +373,22 @@ class TrainingModel(model.SockeyeModel):
         arg_params, aux_params = self.module.get_params()
         total_parameters = 0
         fixed_parameters = 0
+        learned_parameters = 0
         info = []  # type: List[str]
         for name, array in sorted(arg_params.items()):
             info.append("%s: %s" % (name, array.shape))
             num_parameters = reduce(lambda x, y: x * y, array.shape)
             total_parameters += num_parameters
-            if self.module._fixed_param_names is not None and name in self.module._fixed_param_names:
+            if name in self.module._fixed_param_names:
                 fixed_parameters += num_parameters
+            else:
+                learned_parameters += num_parameters
+        percent_fixed = 100 * (fixed_parameters / total_parameters)
+        percent_learned = 100 * (learned_parameters / total_parameters)
         logger.info("Model parameters: %s", ", ".join(info))
-        if self.module._fixed_param_names is not None:
-            logger.info("Fixed model parameters: %s", ", ".join(self.module._fixed_param_names))
-            percent_fixed = 100 * (fixed_parameters / total_parameters)
-            logger.info("Fixed %d / %d parameters (%0.2f%%)", fixed_parameters, total_parameters, percent_fixed)
+        logger.info("Fixed model parameters: %s", ", ".join(self.module._fixed_param_names))
+        logger.info("Fixing %d parameters (%0.2f%%)", fixed_parameters, percent_fixed)
+        logger.info("Learning %d parameters (%0.2f%%)", learned_parameters, percent_learned)
         logger.info("Total # of parameters: %d", total_parameters)
 
     def save_params_to_file(self, fname: str):
