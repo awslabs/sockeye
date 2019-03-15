@@ -58,6 +58,7 @@ class TrainingModel(model.SockeyeModel):
             unrolled to the full length.
     :param gradient_compression_params: Optional dictionary of gradient compression parameters.
     :param fixed_param_names: Optional list of params to fix during training (i.e. their values will not be trained).
+    :param fixed_param_strategy: Optional string indicating a named strategy for fixing parameters.
     """
 
     def __init__(self,
@@ -193,7 +194,7 @@ class TrainingModel(model.SockeyeModel):
         self.save_version(self.output_dir)
         self.save_config(self.output_dir)
 
-    def _generate_fixed_param_names(self, param_names: List[str], strategy: str):
+    def _generate_fixed_param_names(self, param_names: List[str], strategy: str) -> List[str]:
         """
         Generate a fixed parameter list given a list of all parameter names and
         a strategy.
@@ -383,8 +384,8 @@ class TrainingModel(model.SockeyeModel):
                 fixed_parameters += num_parameters
             else:
                 learned_parameters += num_parameters
-        percent_fixed = 100 * (fixed_parameters / total_parameters)
-        percent_learned = 100 * (learned_parameters / total_parameters)
+        percent_fixed = 100 * (fixed_parameters / max(1, total_parameters))
+        percent_learned = 100 * (learned_parameters / max(1, total_parameters))
         logger.info("Model parameters: %s", ", ".join(info))
         logger.info("Fixed model parameters: %s", ", ".join(self.module._fixed_param_names))
         logger.info("Fixing %d parameters (%0.2f%%)", fixed_parameters, percent_fixed)
@@ -616,7 +617,7 @@ class EarlyStoppingTrainer:
             max_updates = self.state.updates + max_checkpoints * checkpoint_interval
             logger.info(("Resetting max_updates to %d + %d * %d = %d in order to implement stopping after (an additional) %d checkpoints."
                          % (self.state.updates, max_checkpoints, checkpoint_interval, max_updates, max_checkpoints)))
-            
+
         next_data_batch = train_iter.next()
         while True:
 
