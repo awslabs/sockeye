@@ -182,6 +182,7 @@ def test_model_parameters(test_params, expected_params):
               cnn_hidden_dropout=0.2,
               rnn_forget_bias=0.0,
               fixed_param_names=[],
+              fixed_param_strategy=None,
               rnn_h2h_init=C.RNN_INIT_ORTHOGONAL,
               decode_and_evaluate=500,
               decode_and_evaluate_use_cpu=False,

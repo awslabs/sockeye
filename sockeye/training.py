@@ -35,6 +35,8 @@ from . import lr_scheduler
 from . import model
 from . import utils
 from . import vocab
+from .encoder import EmptyEncoderConfig, RecurrentEncoderConfig
+from .decoder import RecurrentDecoderConfig
 from .optimizers import BatchState, CheckpointState, SockeyeOptimizer, OptimizerConfig
 import multiprocessing
 import sockeye.multiprocessing_utils as mp_utils
@@ -56,6 +58,7 @@ class TrainingModel(model.SockeyeModel):
             unrolled to the full length.
     :param gradient_compression_params: Optional dictionary of gradient compression parameters.
     :param fixed_param_names: Optional list of params to fix during training (i.e. their values will not be trained).
+    :param fixed_param_strategy: Optional string indicating a named strategy for fixing parameters.
     """
 
     def __init__(self,
@@ -67,11 +70,13 @@ class TrainingModel(model.SockeyeModel):
                  default_bucket_key: Tuple[int, int],
                  bucketing: bool,
                  gradient_compression_params: Optional[Dict[str, Any]] = None,
-                 fixed_param_names: Optional[List[str]] = None) -> None:
+                 fixed_param_names: Optional[List[str]] = None,
+                 fixed_param_strategy: Optional[str] = None) -> None:
         super().__init__(config)
         self.context = context
         self.output_dir = output_dir
         self.fixed_param_names = fixed_param_names
+        self.fixed_param_strategy = fixed_param_strategy
         self._bucketing = bucketing
         self._gradient_compression_params = gradient_compression_params
         self._initialize(provide_data, provide_label, default_bucket_key)
@@ -146,9 +151,15 @@ class TrainingModel(model.SockeyeModel):
 
             return mx.sym.Group(loss_output), data_names, label_names
 
+        # Fix model parameters as needed for different training options.
+        utils.check_condition(not self.config.lhuc or self.fixed_param_strategy is None,
+                "LHUC fixes all other parameters and is thus not compatible with other fixing strategies.")
         if self.config.lhuc:
             arguments = sym_gen(default_bucket_key)[0].list_arguments()
             fixed_param_names = [a for a in arguments if not a.endswith(C.LHUC_NAME)]
+        elif self.fixed_param_strategy is not None:
+            arguments = sym_gen(default_bucket_key)[0].list_arguments()
+            fixed_param_names = self._generate_fixed_param_names(arguments, self.fixed_param_strategy)
         else:
             fixed_param_names = self.fixed_param_names
 
@@ -182,6 +193,57 @@ class TrainingModel(model.SockeyeModel):
 
         self.save_version(self.output_dir)
         self.save_config(self.output_dir)
+
+    def _generate_fixed_param_names(self, param_names: List[str], strategy: str) -> List[str]:
+        """
+        Generate a fixed parameter list given a list of all parameter names and
+        a strategy.
+        """
+        # Number of encoder/decoder layers in model.
+        if isinstance(self.config.config_encoder, EmptyEncoderConfig):
+            num_encoder_layers = 1
+        elif isinstance(self.config.config_encoder, RecurrentEncoderConfig):
+            num_encoder_layers = self.config.config_encoder.rnn_config.num_layers
+        else:
+            num_encoder_layers = self.config.config_encoder.num_layers
+        if isinstance(self.config.config_decoder, RecurrentDecoderConfig):
+            num_decoder_layers = self.config.config_decoder.rnn_config.num_layers
+        else:
+            num_decoder_layers = self.config.config_decoder.num_layers
+
+        def is_fixed(name: str) -> bool:
+            if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER:
+                # Any decoder layer.
+                return not name.startswith(C.DECODER_PREFIX)
+            if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTER_LAYERS:
+                # First and last encoder and decoder layers for RNN,
+                # Transformer, and CNN models.
+                return not (name.startswith("{}{}l{}".format(C.BIDIRECTIONALRNN_PREFIX, C.FORWARD_PREFIX, 0)) or
+                            name.startswith("{}{}l{}".format(C.BIDIRECTIONALRNN_PREFIX, C.REVERSE_PREFIX, 0)) or
+                            name.startswith("{}l{}".format(C.STACKEDRNN_PREFIX, num_encoder_layers - 2)) or
+                            name.startswith("{}l{}".format(C.RNN_DECODER_PREFIX, 0)) or
+                            name.startswith("{}l{}".format(C.RNN_DECODER_PREFIX, num_decoder_layers - 1)) or
+                            name.startswith("{}{}".format(C.TRANSFORMER_ENCODER_PREFIX, 0)) or
+                            name.startswith("{}{}".format(C.TRANSFORMER_ENCODER_PREFIX, num_encoder_layers - 1)) or
+                            name.startswith("{}{}".format(C.TRANSFORMER_DECODER_PREFIX, 0)) or
+                            name.startswith("{}{}".format(C.TRANSFORMER_DECODER_PREFIX, num_decoder_layers - 1)) or
+                            name.startswith("{}{}".format(C.CNN_ENCODER_PREFIX, 0)) or
+                            name.startswith("{}{}".format(C.CNN_ENCODER_PREFIX, num_encoder_layers - 1)) or
+                            name.startswith("{}{}".format(C.CNN_DECODER_PREFIX, 0)) or
+                            name.startswith("{}{}".format(C.CNN_DECODER_PREFIX, num_decoder_layers - 1)))
+            if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_EMBEDDINGS:
+                # Any type of learned embedding.
+                return not (name.startswith(C.SOURCE_EMBEDDING_PREFIX) or
+                            name.startswith(C.SOURCE_POSITIONAL_EMBEDDING_PREFIX) or
+                            name.startswith(C.TARGET_EMBEDDING_PREFIX) or
+                            name.startswith(C.TARGET_POSITIONAL_EMBEDDING_PREFIX) or
+                            name.startswith(C.SHARED_EMBEDDING_PREFIX))
+            if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTPUT_PROJ:
+                # Target output projection.
+                return not name.startswith(C.DEFAULT_OUTPUT_LAYER_PREFIX)
+            raise ValueError("Unknown fixed parameter strategy: %s" % strategy)
+
+        return [name for name in param_names if is_fixed(name)]
 
     def run_forward_backward(self, batch: mx.io.DataBatch, metric: mx.metric.EvalMetric):
         """
@@ -311,13 +373,23 @@ class TrainingModel(model.SockeyeModel):
         """
         arg_params, aux_params = self.module.get_params()
         total_parameters = 0
+        fixed_parameters = 0
+        learned_parameters = 0
         info = []  # type: List[str]
         for name, array in sorted(arg_params.items()):
             info.append("%s: %s" % (name, array.shape))
-            total_parameters += reduce(lambda x, y: x * y, array.shape)
+            num_parameters = reduce(lambda x, y: x * y, array.shape)
+            total_parameters += num_parameters
+            if name in self.module._fixed_param_names:
+                fixed_parameters += num_parameters
+            else:
+                learned_parameters += num_parameters
+        percent_fixed = 100 * (fixed_parameters / max(1, total_parameters))
+        percent_learned = 100 * (learned_parameters / max(1, total_parameters))
         logger.info("Model parameters: %s", ", ".join(info))
-        if self.fixed_param_names:
-            logger.info("Fixed model parameters: %s", ", ".join(self.fixed_param_names))
+        logger.info("Fixed model parameters: %s", ", ".join(self.module._fixed_param_names))
+        logger.info("Fixing %d parameters (%0.2f%%)", fixed_parameters, percent_fixed)
+        logger.info("Learning %d parameters (%0.2f%%)", learned_parameters, percent_learned)
         logger.info("Total # of parameters: %d", total_parameters)
 
     def save_params_to_file(self, fname: str):
@@ -545,7 +617,7 @@ class EarlyStoppingTrainer:
             max_updates = self.state.updates + max_checkpoints * checkpoint_interval
             logger.info(("Resetting max_updates to %d + %d * %d = %d in order to implement stopping after (an additional) %d checkpoints."
                          % (self.state.updates, max_checkpoints, checkpoint_interval, max_updates, max_checkpoints)))
-            
+
         next_data_batch = train_iter.next()
         while True:
 
