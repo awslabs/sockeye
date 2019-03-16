@@ -1369,19 +1369,21 @@ class Translator:
         # pylint: disable=invalid-unary-operand-type
         return -log_probs.log_softmax()
 
-    def translate(self, trans_inputs: List[TranslatorInput]) -> List[TranslatorOutput]:
+    def translate(self, trans_inputs: List[TranslatorInput], fill_up_batches: bool = True) -> List[TranslatorOutput]:
         """
         Batch-translates a list of TranslatorInputs, returns a list of TranslatorOutputs.
         Empty or bad inputs are skipped.
         Splits inputs longer than Translator.max_input_length into segments of size max_input_length,
         and then groups segments into batches of at most Translator.max_batch_size.
         Too-long segments that were split are reassembled into a single output after translation.
+        If fill_up_batches is set to True, underfilled batches are padded to Translator.max_batch_size, otherwise
+        dynamic batch sizing is used, which comes at increased memory usage.
 
         :param trans_inputs: List of TranslatorInputs as returned by make_input().
+        :param fill_up_batches: If True, underfilled batches are padded to Translator.max_batch_size.
         :return: List of translation results.
         """
         num_inputs = len(trans_inputs)
-        batch_size = min(num_inputs, self.max_batch_size)
         translated_chunks = []  # type: List[IndexedTranslation]
 
         # split into chunks
@@ -1446,11 +1448,24 @@ class Translator:
         input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.translator_input.tokens), reverse=True)
 
         # translate in batch-sized blocks over input chunks
+        batch_size = self.max_batch_size if fill_up_batches else min(len(input_chunks), self.max_batch_size)
+
         num_batches = 0
         for batch_id, batch in enumerate(utils.grouper(input_chunks, batch_size)):
             logger.debug("Translating batch %d", batch_id)
+
+            rest = batch_size - len(batch)
+            if fill_up_batches and rest > 0:
+                logger.debug("Padding batch of size %d to full batch size (%d)", len(batch), batch_size)
+                batch = batch + [batch[0]] * rest
+
             translator_inputs = [indexed_translator_input.translator_input for indexed_translator_input in batch]
             batch_translations = self._translate_nd(*self._get_inference_input(translator_inputs))
+
+            # truncate to remove filler translations
+            if fill_up_batches and rest > 0:
+                batch_translations = batch_translations[:-rest]
+
             for chunk, translation in zip(batch, batch_translations):
                 translated_chunks.append(IndexedTranslation(chunk.input_idx, chunk.chunk_idx, translation))
             num_batches += 1

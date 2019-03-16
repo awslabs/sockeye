@@ -260,7 +260,7 @@ ARGS_MAY_DIFFER = ["overwrite_output", "use_tensorboard", "quiet",
                    "keep_last_params", "seed",
                    "max_updates", "min_updates",
                    "max_num_epochs", "min_num_epochs",
-                   "max_samples", "min_samples"]
+                   "max_samples", "min_samples", "max_checkpoints"]
 
 # Other argument constants
 TRAINING_ARG_SOURCE = "--source"
@@ -418,6 +418,17 @@ LHUC_DECODER = "decoder"
 LHUC_STATE_INIT = "state_init"
 LHUC_ALL = "all"
 LHUC_CHOICES = [LHUC_ENCODER, LHUC_DECODER, LHUC_STATE_INIT, LHUC_ALL]
+
+# Strategies for fixing various parameters.
+FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER = "all_except_decoder"
+FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTER_LAYERS = "all_except_outer_layers"
+FIXED_PARAM_STRATEGY_ALL_EXCEPT_EMBEDDINGS = "all_except_embeddings"
+FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTPUT_PROJ = "all_except_output_proj"
+
+FIXED_PARAM_STRATEGY_CHOICES = [FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER,
+                                FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTER_LAYERS,
+                                FIXED_PARAM_STRATEGY_ALL_EXCEPT_EMBEDDINGS,
+                                FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTPUT_PROJ]
 
 # data sharding
 SHARD_NAME = "shard.%05d"

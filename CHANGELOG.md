@@ -10,10 +10,24 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [1.18.85]
+
+## [1.18.87]
 ### Changed
 - Updated to [MXNet 1.4.0](https://github.com/apache/incubator-mxnet/tree/1.4.0)
 - Integration tests no longer check for equivalence of outputs with batch size 2
+
+## [1.18.86]
+### Added
+- Added the `--fixed-param-strategy` option that allows fixing various model parameters during training via named strategies.
+  These include some of the simpler combinations from [Wuebker et al. (2018)](https://arxiv.org/abs/1811.01990) such as fixing everything except the first and last layers of the encoder and decoder (`all_except_outer_layers`).  See the help message for a full list of strategies.
+
+## [1.18.85]
+### Changed
+- Disabled dynamic batching for `Translator.translate()` by default due to increased memory usage. The default is to
+  fill-up batches to `Translator.max_batch_size`.
+  Dynamic batching can still be enabled if `fill_up_batches` is set to False.
+### Added
+- Added parameter to force training to stop after a given number of checkpoints. Useful when forced to share limited GPU resources.
 
 ## [1.18.84]
 ### Fixed
@@ -177,7 +191,7 @@ In case this is turned on a checkpoint decoder is launched right when training s
 
 ## [1.18.48]
 ### Changed
-- Translator.max_input_length now reports correct maximum input length for TranslatorInput objects, independent of the internal representation, where an additional EOS gets added. 
+- Translator.max_input_length now reports correct maximum input length for TranslatorInput objects, independent of the internal representation, where an additional EOS gets added.
 
 ## [1.18.47]
 ### Changed
