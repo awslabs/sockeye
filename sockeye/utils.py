@@ -18,6 +18,7 @@ import binascii
 import errno
 import glob
 import gzip
+import math
 import itertools
 import logging
 import os
@@ -252,6 +253,11 @@ class OnlineMeanAndVariance:
             return float('nan')
         else:
             return self._M2 / self._count
+
+    @property
+    def std(self) -> float:
+        variance = self.variance
+        return math.sqrt(variance) if not math.isnan(variance) else 0.0
 
 
 def top1(scores: mx.nd.NDArray,
