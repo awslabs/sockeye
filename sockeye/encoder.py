@@ -1009,7 +1009,7 @@ class ConvolutionalEncoder(Encoder):
 
         # Multiple layers with residual connections:
         for layer in self.layers:
-            data = data + layer(data, data_length, seq_len)
+            data = data + layer(data, data_length)
         return data, data_length, seq_len
 
     def get_num_hidden(self) -> int:
