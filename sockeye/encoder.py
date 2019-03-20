@@ -848,7 +848,20 @@ class RecurrentEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
-        outputs, _ = self.rnn.unroll(seq_len, inputs=data, merge_outputs=True, layout=self.layout)
+        # time major data
+        self.rnn.reset()
+        states = self.rnn.begin_state()  # type: List[mx.sym.Symbol]
+        states.append(mx.sym.zeros((1,)))  # last state is step counter starting at 0
+
+        def loop_body(inputs, states):
+            cell_states = states[:-1]
+            i = states[-1]
+            out, new_states = self.rnn(inputs, cell_states)
+            new_states.append(i + 1)
+            return out, new_states
+
+        # last state item is step counter
+        outputs, _ = mx.sym.contrib.foreach(loop_body, data, states)
 
         return outputs, data_length, seq_len
 
