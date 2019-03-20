@@ -300,7 +300,7 @@ def get_valid_length_mask_for(data: mx.sym.Symbol,
     # (batch, 1)
     zeros = mx.sym.reshape(mx.sym.zeros_like(lengths), shape=(-1, 1))
     # (batch, seq_len)
-    zeros = mx.sym.broadcast_like(zeros, mx.sym.BlockGrad(data), lhs_axes=(1,), rhs_axes=(1,))
+    zeros = mx.sym.broadcast_like(zeros, data, lhs_axes=(1,), rhs_axes=(1,))
     # (batch_size, max_length)
     x = mx.sym.SequenceMask(data=zeros,
                             use_sequence_length=True,
