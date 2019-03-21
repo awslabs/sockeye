@@ -276,7 +276,7 @@ class LengthRatio:
 
         :param source_encoded: Encoder representation for n elements. Shape: (n, source_encoded_length, hidden_size).
         :param source_encoded_length: A vector of encoded sequence lengths. Shape: (n,).
-        :return: Predictions of len(hypothesis)/len(reference). Shape(n, 1).
+        :return: Predictions of the ratio length(hypothesis)/length(reference). Shape(n, 1).
         """
         # data: (n, hidden_size)
         data = LengthRatio.average_sources(source_encoded, source_encoded_length)

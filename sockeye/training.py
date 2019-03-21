@@ -155,7 +155,7 @@ class TrainingModel(model.SockeyeModel):
             # logits: (batch_size * target_seq_len, target_vocab_size)
             logits = self.output_layer(target_decoded)
 
-            # 1) standard cross-entorpy loss
+            # 1) standard cross-entropy loss
             net_outputs = [self.model_loss.get_loss(logits, labels)]
             # 2) length task losses
             if self.length_task_loss is not None:
@@ -164,7 +164,7 @@ class TrainingModel(model.SockeyeModel):
                 if isinstance(self.length_task_loss, loss.MSELoss):
                     loss_symbol = self.length_task_loss.get_loss(predicted_length_ratio, length_ratio)
                 elif isinstance(self.length_task_loss, loss.PoissonLoss):
-                    # convert float predictions to integer lengths for the Poisson loss to be well defined
+                    # convert ratios to (expected) length estimations for the Poisson loss
                     predicted_reference_length = predicted_length_ratio * source_encoded_length.reshape((-1, 1))
                     loss_symbol = self.length_task_loss.get_loss(predicted_reference_length, target_length)
                 # return both the loss symbol, prediction and the computed length_ratio to be used in metrics

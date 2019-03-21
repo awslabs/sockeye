@@ -264,7 +264,7 @@ class PoissonLoss(Loss):
         # MakeLoss scales only the gradient, so scaling explicitly
         loss_value = self.loss_config.length_task_weight * loss_value
         loss_value = mx.sym.MakeLoss(data=loss_value,
-                                     normalization='null',
+                                     normalization='batch',
                                      name=self.name)
         return loss_value
 
@@ -302,7 +302,7 @@ class MSELoss(Loss):
         labels = mx.sym.reshape(labels, shape=(-1, 1))
         loss_value = self.loss_config.length_task_weight / 2 * mx.sym.square(pred - labels)
         loss_value = mx.sym.MakeLoss(data=loss_value,
-                                     normalization='null',
+                                     normalization='batch',
                                      name=self.name)
         return loss_value
 

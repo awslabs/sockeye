@@ -158,7 +158,7 @@ def test_brevity_penalty_default():
     brevity_penalty = sockeye.inference.BrevityPenalty(0.0)
     expected_bp = 0.0
 
-    assert np.isclose(brevity_penalty.get(hyp_lengths, ref_lengths), expected_bp).all()
+    assert np.isclose(brevity_penalty.get(hyp_lengths, ref_lengths), expected_bp)
     assert np.isclose(brevity_penalty(hyp_lengths, ref_lengths).asnumpy(), expected_bp).all()
     brevity_penalty.hybridize()
     assert np.isclose(brevity_penalty(hyp_lengths, ref_lengths).asnumpy(), expected_bp).all()
