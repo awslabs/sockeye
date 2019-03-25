@@ -22,8 +22,9 @@ from functools import partial
 from typing import Callable, Iterable, Dict, List, Tuple, Optional
 
 import numpy as np
+import sacrebleu
 
-from sockeye_contrib import sacrebleu, rouge
+from sockeye_contrib import rouge
 from . import arguments
 from . import constants as C
 from . import data_io
