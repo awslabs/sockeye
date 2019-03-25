@@ -118,7 +118,7 @@ def run_translate(args: argparse.Namespace):
                             constant_length_ratio)
         elif args.brevity_penalty_type == C.BREVITY_PENALTY_LEARNED:
             constant_length_ratio = -1.0
-        elif args.brevity_penalty_type is None:
+        elif args.brevity_penalty_type == C.BREVITY_PENALTY_NONE:
             brevity_penalty_weight = 0.0
             constant_length_ratio = -1.0
         else:

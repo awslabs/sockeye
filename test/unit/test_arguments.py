@@ -227,7 +227,7 @@ def test_training_arg(test_params, expected_params):
                       length_penalty_beta=0.0,
                       brevity_penalty_constant_length_ratio=0.0,
                       brevity_penalty_weight=1.0,
-                      brevity_penalty_type=None,
+                      brevity_penalty_type='none',
                       strip_unknown_words=False,
                       override_dtype=None,
                       sample=None,

@@ -1393,9 +1393,9 @@ def add_length_penalty_args(params):
 
 def add_brevity_penalty_args(params):
     params.add_argument('--brevity-penalty-type',
-                        default=None,
+                        default='none',
                         type=str,
-                        choices=[C.BREVITY_PENALTY_LEARNED, C.BREVITY_PENALTY_CONSTANT],
+                        choices=[C.BREVITY_PENALTY_NONE, C.BREVITY_PENALTY_LEARNED, C.BREVITY_PENALTY_CONSTANT],
                         help='If specified, adds brevity penalty to the hypotheses\' scores, calculated with learned '
                              'or constant length ratios. The latter, by default, uses the length ratio (|ref|/|hyp|) '
                              'estimated from the training data and averaged over models. Default: %(default)s.')
