@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.88]
+### Changed
+- Made sacrebleu a pip dependency and removed it from `sockeye_contrib`.
+
 ## [1.18.87]
 ### Added
 - Data statistics at training time now compute mean and standard deviation of length ratios per bucket.
