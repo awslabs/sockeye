@@ -977,7 +977,7 @@ class DataStatistics(config.Config):
                  buckets: List[Tuple[int, int]],
                  num_sents_per_bucket: List[int],
                  mean_len_target_per_bucket: List[Optional[float]],
-                 length_ratio_stats_per_bucket: List[Tuple[Optional[float], Optional[float]]]) -> None:
+                 length_ratio_stats_per_bucket: Optional[List[Tuple[Optional[float], Optional[float]]]] = None) -> None:
         super().__init__()
         self.num_sents = num_sents
         self.num_discarded = num_discarded
@@ -1015,18 +1015,29 @@ def describe_data_and_buckets(data_statistics: DataStatistics, bucket_batch_size
     check_condition(len(bucket_batch_sizes) == len(data_statistics.buckets),
                     "Number of bucket batch sizes (%d) does not match number of buckets in statistics (%d)."
                     % (len(bucket_batch_sizes), len(data_statistics.buckets)))
-    for bucket_batch_size, num_seq, (lr_mean, lr_std) in zip(bucket_batch_sizes,
-                                                             data_statistics.num_sents_per_bucket,
-                                                             data_statistics.length_ratio_stats_per_bucket):
-        if num_seq > 0:
-            logger.info("Bucket %s: %d samples in %d batches of %d, ~%.1f tokens/batch, "
-                        "trg/src length ratio: %.2f (+-%.2f)",
-                        bucket_batch_size.bucket,
-                        num_seq,
-                        math.ceil(num_seq / bucket_batch_size.batch_size),
-                        bucket_batch_size.batch_size,
-                        bucket_batch_size.average_words_per_batch,
-                        lr_mean, lr_std)
+    if data_statistics.length_ratio_stats_per_bucket:
+        for bucket_batch_size, num_seq, (lr_mean, lr_std) in zip(bucket_batch_sizes,
+                                                                data_statistics.num_sents_per_bucket,
+                                                                data_statistics.length_ratio_stats_per_bucket):
+            if num_seq > 0:
+                logger.info("Bucket %s: %d samples in %d batches of %d, ~%.1f tokens/batch, "
+                            "trg/src length ratio: %.2f (+-%.2f)",
+                            bucket_batch_size.bucket,
+                            num_seq,
+                            math.ceil(num_seq / bucket_batch_size.batch_size),
+                            bucket_batch_size.batch_size,
+                            bucket_batch_size.average_words_per_batch,
+                            lr_mean, lr_std)
+    else:
+        # TODO: remove with next bump of C.PREPARED_DATA_VERSION
+        for bucket_batch_size, num_seq in zip(bucket_batch_sizes, data_statistics.num_sents_per_bucket):
+            if num_seq > 0:
+                logger.info("Bucket %s: %d samples in %d batches of %d, ~%.1f tokens/batch, ",
+                            bucket_batch_size.bucket,
+                            num_seq,
+                            math.ceil(num_seq / bucket_batch_size.batch_size),
+                            bucket_batch_size.batch_size,
+                            bucket_batch_size.average_words_per_batch)
 
 
 class DataInfo(config.Config):
