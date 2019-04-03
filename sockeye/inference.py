@@ -2173,7 +2173,9 @@ class TopK(mx.gluon.HybridBlock):
 
         # Project indices back into original shape (which is different for t==1 and t>1)
         indices = F.reshape(F.cast(indices, 'int32'), shape=(-1,))
-        unraveled = F.unravel_index(indices, shape=(-1, self.vocab_size))
+        # TODO: we currently exploit a bug in the implementation of unravel_index to not require knowing the first shape
+        # value. See https://github.com/apache/incubator-mxnet/issues/13862
+        unraveled = F.unravel_index(indices, shape=(C.LARGEST_INT, self.vocab_size))
 
         best_hyp_indices, best_word_indices = F.split(unraveled, axis=0, num_outputs=2, squeeze_axis=True)
         best_hyp_indices = best_hyp_indices + offset

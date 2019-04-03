@@ -14,6 +14,8 @@
 """
 Defines various constants used throughout the project
 """
+import sys
+
 import mxnet as mx
 import numpy as np
 
@@ -407,6 +409,7 @@ LARGE_VALUES = {
     # https://en.wikipedia.org/wiki/Single-precision_floating-point_format#Precision_limits_on_integer_values.
     DTYPE_FP32: LARGE_POSITIVE_VALUE
 }
+LARGEST_INT = sys.maxsize
 
 LHUC_NAME = "lhuc"
 # lhuc application points

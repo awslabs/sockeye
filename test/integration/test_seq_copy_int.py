@@ -183,7 +183,7 @@ def test_seq_copy(train_params: str,
                               data=data,
                               use_prepared_data=use_prepared_data,
                               max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
-                              compare_translate_vs_scoring_scores=False)
+                              compare_output=False)
 
 
 TINY_TEST_MODEL = [(" --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 4 --num-embed 4"

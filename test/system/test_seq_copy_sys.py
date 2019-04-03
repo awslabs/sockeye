@@ -139,6 +139,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
                                      data=data,
                                      use_prepared_data=use_prepared_data,
                                      max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
+                                     compare_output=True,
                                      seed=seed)
 
         # get best validation perplexity
@@ -250,6 +251,7 @@ def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                                      data=data,
                                      use_prepared_data=use_prepared_data,
                                      max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
+                                     compare_output=True,
                                      seed=seed)
 
         # get best validation perplexity
