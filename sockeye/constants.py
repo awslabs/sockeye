@@ -437,6 +437,7 @@ SHARD_TARGET = SHARD_NAME + ".target"
 DATA_INFO = "data.info"
 DATA_CONFIG = "data.config"
 PREPARED_DATA_VERSION_FILE = "data.version"
+# TODO: with next bump remove branch over data_statistics.length_ratio_stats_per_bucket
 PREPARED_DATA_VERSION = 2
 
 # reranking
