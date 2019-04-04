@@ -475,7 +475,7 @@ def call_sacrebleu(input_fname: str, ref_fname: str, output_fname: str, log_fnam
         command.append("--tokenize=none")
     # Call sacrebleu
     with open(log_fname, "wb") as log:
-        logging.info("sacrebleuu: %s -> %s", input_fname, output_fname)
+        logging.info("sacrebleu: %s -> %s", input_fname, output_fname)
         logging.info("Log: %s", log_fname)
         score = subprocess.check_output(command, stderr=log)
     # Record successful score
