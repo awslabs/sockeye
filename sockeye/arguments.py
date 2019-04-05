@@ -883,6 +883,10 @@ def add_training_args(params):
                               type=int,
                               default=None,
                               help='Maximum number of updates. Default: %(default)s.')
+    train_params.add_argument('--update-interval',
+                              type=int,
+                              default=1,
+                              help="Number of batch gradients to accumulate before updating. Default: %(default)s.")
     train_params.add_argument('--min-samples',
                               type=int,
                               default=None,

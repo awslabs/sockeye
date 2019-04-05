@@ -57,6 +57,7 @@ class TrainingModel(model.SockeyeModel):
     :param bucketing: If True bucketing will be used, if False the computation graph will always be
             unrolled to the full length.
     :param gradient_compression_params: Optional dictionary of gradient compression parameters.
+    :param gradient_accumulation: Whether to accumulate gradients over batches. Default: False.
     :param fixed_param_names: Optional list of params to fix during training (i.e. their values will not be trained).
     :param fixed_param_strategy: Optional string indicating a named strategy for fixing parameters.
     """
@@ -70,6 +71,7 @@ class TrainingModel(model.SockeyeModel):
                  default_bucket_key: Tuple[int, int],
                  bucketing: bool,
                  gradient_compression_params: Optional[Dict[str, Any]] = None,
+                 gradient_accumulation: bool = False,
                  fixed_param_names: Optional[List[str]] = None,
                  fixed_param_strategy: Optional[str] = None) -> None:
         super().__init__(config)
@@ -79,6 +81,7 @@ class TrainingModel(model.SockeyeModel):
         self.fixed_param_strategy = fixed_param_strategy
         self._bucketing = bucketing
         self._gradient_compression_params = gradient_compression_params
+        self._gradient_accumulation = gradient_accumulation
         self._initialize(provide_data, provide_label, default_bucket_key)
         self._monitor = None  # type: Optional[mx.monitor.Monitor]
 
@@ -210,7 +213,7 @@ class TrainingModel(model.SockeyeModel):
                          label_shapes=provide_label,
                          for_training=True,
                          force_rebind=True,
-                         grad_req='write')
+                         grad_req='add' if self._gradient_accumulation else 'write')
 
         self.module.symbol.save(os.path.join(self.output_dir, C.SYMBOL_NAME))
 
@@ -309,6 +312,12 @@ class TrainingModel(model.SockeyeModel):
                 if arr is None:
                     continue
                 arr *= scale
+
+    def zero_gradients(self):
+        """
+        Sets all gradients to zero.
+        """
+        self.rescale_gradients(0.)
 
     def prepare_batch(self, batch: mx.io.DataBatch):
         """
@@ -471,7 +480,7 @@ class TrainState:
     Stores the state an EarlyStoppingTrainer instance.
     """
 
-    __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint',
+    __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint', 'batches',
                  'updates', 'samples', 'gradient_norm', 'gradients', 'metrics', 'start_tic',
                  'early_stopping_metric', 'best_metric', 'best_checkpoint', 'converged', 'diverged']
 
@@ -480,6 +489,7 @@ class TrainState:
         self.epoch = 0
         self.checkpoint = 0
         self.best_checkpoint = 0
+        self.batches = 0
         self.updates = 0
         self.samples = 0
         self.gradient_norm = None  # type: Optional[float]
@@ -533,6 +543,7 @@ class EarlyStoppingTrainer:
         self.optimizer_config = optimizer_config
         self.max_params_files_to_keep = max_params_files_to_keep
         self.keep_initializations = keep_initializations
+        self.update_interval = self.optimizer_config.update_interval
         self.tflogger = TensorboardLogger(logdir=os.path.join(model.output_dir, C.TENSORBOARD_NAME),
                                           source_vocab=source_vocabs[0],
                                           target_vocab=target_vocab)
@@ -660,10 +671,10 @@ class EarlyStoppingTrainer:
             # STEP
             ######
             batch = next_data_batch
+            self.state.batches += 1
             self._step(self.model, batch, checkpoint_interval, metric_train, metric_loss)
             batch_num_samples = batch.data[0].shape[0]
             batch_num_tokens = batch.data[0].shape[1] * batch_num_samples
-            self.state.updates += 1
             self.state.samples += batch_num_samples
 
             if not train_iter.iter_next():
@@ -673,12 +684,13 @@ class EarlyStoppingTrainer:
             next_data_batch = train_iter.next()
             self.model.prepare_batch(next_data_batch)
 
-            speedometer(self.state.epoch, self.state.updates, batch_num_samples, batch_num_tokens, metric_train)
+            speedometer(self.state.epoch, self.state.batches, self.state.updates,
+                        batch_num_samples, batch_num_tokens, metric_train)
 
             ############
             # CHECKPOINT
             ############
-            if self.state.updates > 0 and self.state.updates % checkpoint_interval == 0:
+            if self.state.updates > 0 and self.state.batches % (checkpoint_interval * self.update_interval) == 0:
                 time_cost = time.time() - tic
                 self.state.checkpoint += 1
                 # (1) save parameters and evaluate on validation data
@@ -709,7 +721,7 @@ class EarlyStoppingTrainer:
                 has_improved = False
                 previous_best = self.state.best_metric
                 # at this point state.self.metrics doesn't have perplexity validation results yet
-                current_checkpoint_val_metric = {"%s-val" % name:val for name, val in metric_val.get_name_value()}
+                current_checkpoint_val_metric = {"%s-val" % name: val for name, val in metric_val.get_name_value()}
                 for checkpoint, metric_dict in enumerate(self.state.metrics + [current_checkpoint_val_metric], 1):
                     value = metric_dict.get("%s-val" % early_stopping_metric, self.state.best_metric)
                     if utils.metric_value_is_better(value, self.state.best_metric, early_stopping_metric):
@@ -847,7 +859,11 @@ class EarlyStoppingTrainer:
         ########
         # UPDATE
         ########
-        model.update()
+        if self.update_interval == 1 or self.state.batches % self.update_interval == 0:
+            model.update()
+            if self.update_interval > 1:
+                model.zero_gradients()
+            self.state.updates += 1
 
         if model.monitor is not None:
             results = model.monitor.toc()
@@ -906,8 +922,6 @@ class EarlyStoppingTrainer:
                 decoded_checkpoint, decoder_metrics = result
                 self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
                 self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
-
-
                 utils.write_metrics_file(self.state.metrics, self.metrics_fname)
                 self.state.save(os.path.join(self.training_state_dirname, C.TRAINING_STATE_NAME))
 
@@ -923,7 +937,6 @@ class EarlyStoppingTrainer:
                 initial_opt_states_fname = os.path.join(self.model.output_dir, C.OPT_STATES_INITIAL)
                 if os.path.exists(initial_opt_states_fname):
                     os.remove(initial_opt_states_fname)
-
 
     def _initialize_parameters(self, params: Optional[str], allow_missing_params: bool):
         self.model.initialize_parameters(self.optimizer_config.initializer, allow_missing_params)
@@ -1234,8 +1247,9 @@ class Speedometer:
         self.tokens = 0
         self.msg = 'Epoch[%d] Batch [%d]\tSpeed: %.2f samples/sec %.2f tokens/sec %.2f updates/sec'
 
-    def __call__(self, epoch: int, updates: int, samples: int, tokens: int, metric: Optional[mx.metric.EvalMetric]):
-        count = updates
+    def __call__(self, epoch: int, batches: int, updates: int, samples: int,
+                 tokens: int, metric: Optional[mx.metric.EvalMetric]):
+        count = batches
         if self.last_count > count:
             self.init = False
         self.last_count = count
@@ -1245,7 +1259,8 @@ class Speedometer:
         if self.init:
             if count % self.frequency == 0:
                 toc = (time.time() - self.tic)
-                updates_per_sec = self.frequency / toc
+                update_interval = batches / updates
+                updates_per_sec = self.frequency / update_interval / toc
                 samples_per_sec = self.samples / toc
                 tokens_per_sec = self.tokens / toc
                 self.samples = 0
