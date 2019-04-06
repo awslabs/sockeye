@@ -1062,7 +1062,7 @@ class TransformerEncoder(Encoder):
         for i, layer in enumerate(self.layers):
             # (batch_size, seq_len, config.model_size)
             data = layer(data, bias)
-        data = self.final_process(data=data, prev=None)
+        data = self.final_process(data, None)
         data = utils.uncast_conditionally(data, self.dtype)
         return data, data_length, seq_len
 

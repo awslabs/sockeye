@@ -269,11 +269,8 @@ class TransformerDecoder(Decoder):
             target = mx.sym.Dropout(data=target, p=self.config.dropout_prepost)
 
         for layer in self.layers:
-            target = layer(target=target,
-                           target_bias=target_bias,
-                           source=source_encoded,
-                           source_bias=source_bias)
-        target = self.final_process(data=target, prev=None)
+            target = layer(target, target_bias, source_encoded, source_bias)
+        target = self.final_process(target, None)
 
         return target
 
@@ -321,17 +318,13 @@ class TransformerDecoder(Decoder):
         new_states = [source_encoded, source_encoded_lengths]
         layer_caches = self._get_cache_per_layer(cast(List[mx.sym.Symbol], cache))
         for layer, layer_cache in zip(self.layers, layer_caches):
-            target = layer(target=target,
-                           target_bias=target_bias,
-                           source=source_encoded,
-                           source_bias=source_bias,
-                           cache=layer_cache)
+            target = layer(target, target_bias, source_encoded, source_bias, layer_cache)
             # store updated keys and values in states list.
             # (layer.__call__() has the side-effect of updating contents of layer_cache)
             new_states += [layer_cache['k'], layer_cache['v']]
 
         # (batch_size, 1, model_size)
-        target = self.final_process(data=target, prev=None)
+        target = self.final_process(target, None)
         # (batch_size, model_size)
         target = mx.sym.reshape(target, shape=(-3, -1))
 
@@ -817,7 +810,7 @@ class RecurrentDecoder(Decoder):
                                              bias=self.init_bs[state_idx],
                                              name="%senc2decinit_%d" % (self.prefix, state_idx))
                 if self.config.layer_normalization:
-                    init = self.init_norms[state_idx](data=init)
+                    init = self.init_norms[state_idx](init)
                 init = mx.sym.Activation(data=init, act_type="tanh",
                                          name="%senc2dec_inittanh_%d" % (self.prefix, state_idx))
                 if self.config.state_init_lhuc:
@@ -895,7 +888,7 @@ class RecurrentDecoder(Decoder):
                                        bias=self.hidden_b,
                                        name='%shidden_fc_t%d' % (self.prefix, seq_idx))
         if self.config.layer_normalization:
-            hidden = self.hidden_norm(data=hidden)
+            hidden = self.hidden_norm(hidden)
 
         # hidden: (batch_size, rnn_num_hidden)
         hidden = mx.sym.Activation(data=hidden, act_type="tanh",
@@ -929,7 +922,7 @@ class RecurrentDecoder(Decoder):
         hidden = gate * mapped_rnn_output + (1 - gate) * mapped_context
 
         if self.config.layer_normalization:
-            hidden = self.hidden_norm(data=hidden)
+            hidden = self.hidden_norm(hidden)
 
         # hidden: (batch_size, rnn_num_hidden)
         hidden = mx.sym.Activation(data=hidden, act_type="tanh",

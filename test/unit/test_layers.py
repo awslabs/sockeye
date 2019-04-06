@@ -22,20 +22,20 @@ def test_layer_normalization():
     batch_size = 32
     other_dim = 10
     num_hidden = 64
-    x = mx.sym.Variable('x')
     x_nd = mx.nd.uniform(0, 10, (batch_size, other_dim, num_hidden))
     x_np = x_nd.asnumpy()
 
     ln = sockeye.layers.LayerNormalization(prefix="")
+    ln.initialize()
 
     expected_mean = np.mean(x_np, axis=-1, keepdims=True)
     expected_var = np.var(x_np, axis=-1, keepdims=True)
     expected_norm = (x_np - expected_mean) / np.sqrt(expected_var)
 
-    norm = ln(x).eval(x=x_nd,
-                    _gamma=mx.nd.ones((num_hidden,)),
-                    _beta=mx.nd.zeros((num_hidden,)))[0]
-
+    norm = ln(x_nd)
+    assert np.isclose(norm.asnumpy(), expected_norm, atol=1.e-6).all()
+    ln.hybridize()
+    norm = ln(x_nd)
     assert np.isclose(norm.asnumpy(), expected_norm, atol=1.e-6).all()
 
 
@@ -46,7 +46,7 @@ def test_lhuc():
     inp = mx.sym.Variable("inp")
     params = mx.sym.Variable("params")
     lhuc = sockeye.layers.LHUC(num_hidden=num_hidden, weight=params)
-    with_lhuc = lhuc(inputs=inp)
+    with_lhuc = lhuc(inp)
 
     inp_nd = mx.nd.random_uniform(shape=(batch_size, num_hidden))
     params_same_nd = mx.nd.zeros(shape=(num_hidden,))
