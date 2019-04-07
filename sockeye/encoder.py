@@ -1013,7 +1013,7 @@ class ConvolutionalEncoder(Encoder):
         return self.config.cnn_config.num_hidden
 
 
-class TransformerEncoder(Encoder):
+class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
     """
     Non-recurrent encoder based on the transformer architecture in:
 
@@ -1027,19 +1027,43 @@ class TransformerEncoder(Encoder):
     def __init__(self,
                  config: transformer.TransformerConfig,
                  prefix: str = C.TRANSFORMER_ENCODER_PREFIX) -> None:
-        super().__init__(config.dtype)
+        Encoder.__init__(self, dtype=config.dtype)
+        mx.gluon.HybridBlock.__init__(self, prefix=prefix)
         self.config = config
-        self.prefix = prefix
-        self.layers = [transformer.TransformerEncoderBlock(
-            config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
-        self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                                 dropout=config.dropout_prepost,
-                                                                 prefix="%sfinal_process_" % prefix)
+
+        with self.name_scope():
+            self.layers = [transformer.TransformerEncoderBlock(
+                config, prefix="%d_" % i) for i in range(config.num_layers)]
+            self.valid_length_mask = transformer.TransformerValidLengthMask(num_heads=self.config.attention_heads,
+                                                                            fold_heads=True,
+                                                                            name="bias")
+            self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                                     dropout=config.dropout_prepost,
+                                                                     prefix="final_process_")
+
+    def hybrid_forward(self, F, data, data_length):
+        return self._encode(F, data, data_length)
+
+    def _encode(self, F, data: mx.sym.Symbol, data_length: mx.sym.Symbol) -> mx.sym.Symbol:
+
+        data = utils.cast_conditionally(F, data, self.dtype)
+        if self.config.dropout_prepost > 0.0:
+            data = F.Dropout(data=data, p=self.config.dropout_prepost)
+
+        # (batch_size * heads, 1, seq_len)
+        bias = F.expand_dims(self.valid_length_mask(data, data_length), axis=1)
+        bias = utils.cast_conditionally(F, bias, self.dtype)
+        for i, layer in enumerate(self.layers):
+            # (batch_size, seq_len, config.model_size)
+            data = layer(data, bias)
+        data = self.final_process(data, None)
+        data = utils.uncast_conditionally(F, data, self.dtype)
+        return data
 
     def encode(self,
                data: mx.sym.Symbol,
-               data_length: mx.sym.Symbol,
-               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               data_length: Optional[mx.sym.Symbol],
+               seq_len: int):
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -1048,23 +1072,7 @@ class TransformerEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data data, data_length, seq_len.
         """
-        data = utils.cast_conditionally(data, self.dtype)
-        if self.config.dropout_prepost > 0.0:
-            data = mx.sym.Dropout(data=data, p=self.config.dropout_prepost)
-
-        # (batch_size * heads, 1, max_length)
-        bias = mx.sym.expand_dims(transformer.get_valid_length_mask_for(data=data,
-                                                                        lengths=data_length,
-                                                                        num_heads=self.config.attention_heads,
-                                                                        fold_heads=True,
-                                                                        name="%sbias" % self.prefix), axis=1)
-        bias = utils.cast_conditionally(bias, self.dtype)
-        for i, layer in enumerate(self.layers):
-            # (batch_size, seq_len, config.model_size)
-            data = layer(data, bias)
-        data = self.final_process(data, None)
-        data = utils.uncast_conditionally(data, self.dtype)
-        return data, data_length, seq_len
+        return self._encode(mx.sym, data, data_length), data_length, seq_len
 
     def get_num_hidden(self) -> int:
         """

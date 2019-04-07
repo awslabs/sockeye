@@ -267,43 +267,51 @@ class TransformerFeedForward(mx.gluon.HybridBlock):
         return y
 
 
-def get_valid_length_mask_for(data: mx.sym.Symbol,
-                              lengths: mx.sym.Symbol,
-                              num_heads: Optional[int] = None,
-                              fold_heads: bool = True,
-                              name: str = '') -> mx.sym.Symbol:
+class TransformerValidLengthMask(mx.gluon.HybridBlock):
     """
     Returns bias/mask for variable sequence lengths.
 
-    :param data: Input data to mask. Shape: (batch, seq_len, _).
-    :param lengths: Sequence lengths. Shape: (batch,).
     :param num_heads: Number of attention heads.
     :param fold_heads: Whether to fold heads dimension into batch dimension.
     :param name: Name of symbol.
     :return: Bias symbol. Shape: (batch, seq_len)
     """
-    if mx.__version__.startswith("1.3.1"):
-        # TODO(fhieber): remove old branch eventually
-        # mxnet 1.3.1's broadcast_like operator does not support individual axes yet. This branch uses another way
-        # of creating the required zeros array.
-        # (batch, seq_len)
-        zeros = mx.sym.sum(mx.sym.zeros_like(data), axis=2, keepdims=False)
-    else:
-        # (batch, 1)
-        zeros = mx.sym.reshape(mx.sym.zeros_like(lengths), shape=(-1, 1))
-        # (batch, seq_len)
-        zeros = mx.sym.broadcast_like(zeros, data, lhs_axes=(1,), rhs_axes=(1,))
-    # (batch_size, max_length)
-    x = mx.sym.SequenceMask(data=zeros,
-                            use_sequence_length=True,
-                            sequence_length=lengths,
-                            axis=1,
-                            value=C.LARGE_NEGATIVE_VALUE)
+    def __init__(self, num_heads: Optional[int] = None, fold_heads: bool = True, name: str = '') -> None:
+        super().__init__(prefix=name)
+        self.num_heads = num_heads
+        self.fold_heads = fold_heads
 
-    if num_heads is not None:
-        # (batch_size, heads, max_length) if fold_heads == False else (batch_size * heads, max_length)
-        x = layers.broadcast_to_heads(mx.sym, x, num_heads, ndim=2, fold_heads=fold_heads)
-    return mx.sym.BlockGrad(x, name='%sbias' % name)
+    def hybrid_forward(self, F, data, lengths):
+        """
+        Returns bias/mask for variable sequence lengths.
+
+        :param F: symbolic or ndarray.
+        :param data: Input data to mask. Shape: (batch, seq_len, _).
+        :param lengths: Sequence lengths. Shape: (batch,).
+        :return:
+        """
+        if mx.__version__.startswith("1.3"):
+            # TODO(fhieber): remove old branch eventually
+            # mxnet 1.3.1's broadcast_like operator does not support individual axes yet. This branch uses another way
+            # of creating the required zeros array.
+            # (batch, seq_len)
+            mask = F.sym.sum(F.sym.zeros_like(data), axis=2, keepdims=False)
+        else:
+            # (batch, 1)
+            mask = F.reshape(F.zeros_like(lengths), shape=(-1, 1))
+            # (batch, seq_len)
+            mask = F.broadcast_like(mask, data, lhs_axes=(1,), rhs_axes=(1,))
+        # (batch_size, max_length)
+        mask = F.SequenceMask(data=mask,
+                              use_sequence_length=True,
+                              sequence_length=lengths,
+                              axis=1,
+                              value=C.LARGE_NEGATIVE_VALUE)
+        if self.num_heads is not None:
+            # (batch_size, heads, max_length) if fold_heads == False else (batch_size * heads, max_length)
+            mask = layers.broadcast_to_heads(F, mask, self.num_heads, ndim=2, fold_heads=self.fold_heads)
+
+        return mx.sym.BlockGrad(mask)
 
 
 def get_autoregressive_bias(max_length: int, dtype: str = C.DTYPE_FP32) -> mx.sym.Symbol:
