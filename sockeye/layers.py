@@ -384,51 +384,37 @@ def broadcast_to_heads(F, x: mx.sym.Symbol, num_heads: int, ndim: int, fold_head
         return x
 
 
-def dot_attention(F: Union[mx.nd.NDArray, mx.sym.Symbol],
-                  queries: mx.sym.Symbol,
-                  keys: mx.sym.Symbol,
-                  values: mx.sym.Symbol,
-                  lengths: Optional[mx.sym.Symbol] = None,
-                  dropout: float = 0.0,
-                  bias: Optional[mx.sym.Symbol] = None,
-                  prefix: Optional[str] = ''):
-    """
-    Computes dot attention for a set of queries, keys, and values.
+class DotAttentionCell(mx.gluon.HybridBlock):
 
-    :param queries: Attention queries. Shape: (n, lq, d).
-    :param keys: Attention keys. Shape: (n, lk, d).
-    :param values: Attention values. Shape: (n, lk, dv).
-    :param lengths: Optional sequence lengths of the keys. Shape: (n,).
-    :param dropout: Dropout probability.
-    :param bias: Optional 3d bias tensor.
-    :param prefix: Optional prefix
-    :return: 'Context' vectors for each query. Shape: (n, lq, dv).
-    """
-    utils.check_condition(lengths is not None or bias is not None,
-                          "Must provide either length or bias argument for masking")
+    def __init__(self, dropout: float = 0.0, prefix: str = '') -> None:
+        super().__init__(prefix=prefix)
+        self.dropout = dropout
 
-    # (n, lq, lk)
-    logits = F.batch_dot(lhs=queries, rhs=keys, transpose_b=True, name='%sdot' % prefix)
-
-    if lengths is not None:
-        # mask lk dimension
-        # (lk, n, lq)
-        logits = F.transpose(logits, axes=(2, 0, 1))
-        logits = F.SequenceMask(logits,
-                                use_sequence_length=True,
-                                sequence_length=lengths,
-                                value=C.LARGE_NEGATIVE_VALUE)
+    def hybrid_forward(self, F, queries, keys, values, lengths=None, bias=None):
+        utils.check_condition(lengths is not None or bias is not None,
+                              "Must provide either length or bias argument for masking")
         # (n, lq, lk)
-        logits = F.transpose(data=logits, axes=(1, 2, 0))
+        logits = F.batch_dot(lhs=queries, rhs=keys, transpose_b=True)
 
-    if bias is not None:
-        logits = F.broadcast_add(logits, bias, name='%sbias_add' % prefix)
+        if lengths is not None:
+            # mask lk dimension
+            # (lk, n, lq)
+            logits = F.transpose(logits, axes=(2, 0, 1))
+            logits = F.SequenceMask(logits,
+                                    use_sequence_length=True,
+                                    sequence_length=lengths,
+                                    value=C.LARGE_NEGATIVE_VALUE)
+            # (n, lq, lk)
+            logits = F.transpose(data=logits, axes=(1, 2, 0))
 
-    probs = F.softmax(logits, axis=-1)
-    probs = F.Dropout(probs, p=dropout) if dropout > 0.0 else probs
+        if bias is not None:
+            logits = F.broadcast_add(logits, bias)
 
-    # (n, lq, lk) x (n, lk, dv) -> (n, lq, dv)
-    return F.batch_dot(lhs=probs, rhs=values, name='%scontexts' % prefix)
+        probs = F.softmax(logits, axis=-1)
+        probs = F.Dropout(probs, p=self.dropout) if self.dropout > 0.0 else probs
+
+        # (n, lq, lk) x (n, lk, dv) -> (n, lq, dv)
+        return F.batch_dot(lhs=probs, rhs=values)
 
 
 class MultiHeadAttentionBase(mx.gluon.HybridBlock):
@@ -453,14 +439,14 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
         self.depth = depth_att
         self.heads = heads
         self.depth_out = depth_out
-        self.dropout = dropout
         self.depth_per_head = self.depth // self.heads
 
         with self.name_scope():
+            self.dot_att = DotAttentionCell(dropout=dropout, prefix='dot_att')
             self.ff_out = mx.gluon.nn.Dense(units=depth_out, flatten=False, use_bias=False, prefix='h2o_')
 
     def _attend(self,
-                F: Union[mx.nd.NDArray, mx.sym.Symbol],
+                F,
                 queries: mx.sym.Symbol,
                 keys: mx.sym.Symbol,
                 values: mx.sym.Symbol,
@@ -486,9 +472,7 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
         lengths = broadcast_to_heads(F, lengths, self.heads, ndim=1, fold_heads=True) if lengths is not None else lengths
 
         # (batch*heads, query_max_length, depth_per_head)
-        contexts = dot_attention(F,
-                                 queries, keys, values,
-                                 lengths=lengths, dropout=self.dropout, bias=bias, prefix=self.prefix)
+        contexts = self.dot_att(queries, keys, values, lengths, bias)
 
         # (batch, query_max_length, depth)
         contexts = combine_heads(F, contexts, self.depth_per_head, self.heads)
@@ -606,6 +590,29 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         return self._attend(F, queries, keys, values, bias=bias, lengths=memory_lengths)
 
 
+class PlainDotAttention(mx.gluon.HybridBlock):
+    """
+    Dot attention layer for queries independent from keys/values.
+    """
+    def __init__(self, prefix=''):
+        super().__init__(prefix=prefix)
+        with self.name_scope():
+            self.dot_att = DotAttentionCell()
+
+    def hybrid_forward(self, F, queries, memory, memory_lengths):
+        """
+        Returns a symbol of shape (batch, max_length, output_depth).
+
+        :param queries: Symbol of shape (batch, queries_max_length, input_depth).
+        :param memory: Symbol of shape (batch, memory_max_length, input_depth).
+        :param memory_lengths: Symbol of shape (batch, 1).
+        :return: Symbol of shape (batch, queries_max_length, output_depth).
+       """
+
+        # (batch*heads, queries_max_length, depth_per_head)
+        return self.dot_att(queries, memory, memory, memory_lengths, None)
+
+
 class ProjectedDotAttention(mx.gluon.HybridBlock):
     """
     Dot attention layer for queries independent from keys/values.
@@ -622,6 +629,7 @@ class ProjectedDotAttention(mx.gluon.HybridBlock):
         with self.name_scope():
             self.q2h = mx.gluon.nn.Dense(units=num_hidden, flatten=False, use_bias=True)
             self.kv2h = mx.gluon.nn.Dense(units=num_hidden * 2, flatten=False, use_bias=True)
+            self.dot_att = DotAttentionCell()
 
     def hybrid_forward(self, F,
                        queries: mx.sym.Symbol,
@@ -649,28 +657,6 @@ class ProjectedDotAttention(mx.gluon.HybridBlock):
         queries = queries * (self.num_hidden ** -0.5)
 
         # (batch, queries_max_length, num_hidden)
-        contexts = dot_attention(F, queries, keys, values, memory_lengths)
-
-        return contexts
-
-
-class PlainDotAttention(mx.gluon.HybridBlock):
-    """
-    Dot attention layer for queries independent from keys/values.
-    """
-
-    def hybrid_forward(self, F,
-                       queries: mx.sym.Symbol, memory: mx.sym.Symbol, memory_lengths: mx.sym.Symbol) -> mx.sym.Symbol:
-        """
-        Returns a symbol of shape (batch, max_length, output_depth).
-
-        :param queries: Symbol of shape (batch, queries_max_length, input_depth).
-        :param memory: Symbol of shape (batch, memory_max_length, input_depth).
-        :param memory_lengths: Symbol of shape (batch, 1).
-        :return: Symbol of shape (batch, queries_max_length, output_depth).
-        """
-
-        # (batch*heads, queries_max_length, depth_per_head)
-        contexts = dot_attention(F, queries, memory, memory, memory_lengths)
+        contexts = self.dot_att(queries, keys, values, memory_lengths, None)
 
         return contexts
