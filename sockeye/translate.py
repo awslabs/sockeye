@@ -88,10 +88,24 @@ def run_translate(args: argparse.Namespace):
             override_dtype=args.override_dtype,
             output_scores=output_handler.reports_score(),
             sampling=args.sample)
-        restrict_lexicon = None  # type: Optional[TopKLexicon]
-        if args.restrict_lexicon:
-            restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
-            restrict_lexicon.load(args.restrict_lexicon, k=args.restrict_lexicon_topk)
+
+        restrict_lexicon = None  # type: Optional[Union[TopKLexicon, Dict[str, TopKLexicon]]]
+        if args.restrict_lexicon is not None:
+            logger.info(str(args.restrict_lexicon))
+            if len(args.restrict_lexicon) == 1:
+                # Single lexicon used for all inputs
+                restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
+                # Handle a single arg of key:path or path (parsed as path:path)
+                restrict_lexicon.load(args.restrict_lexicon[0][1], k=args.restrict_lexicon_topk)
+            else:
+                check_condition(args.json_input, "JSON input is required when using multiple lexicons for vocabulary restriction")
+                # Multiple lexicons with specified names
+                restrict_lexicon = dict()
+                for key, path in args.restrict_lexicon:
+                    lexicon = TopKLexicon(source_vocabs[0], target_vocab)
+                    lexicon.load(path, k=args.restrict_lexicon_topk)
+                    restrict_lexicon[key] = lexicon
+
         store_beam = args.output_type == C.OUTPUT_HANDLER_BEAM_STORE
         translator = inference.Translator(context=context,
                                           ensemble_mode=args.ensemble_mode,
@@ -138,7 +152,9 @@ def make_inputs(input_file: Optional[str],
         check_condition(input_factors is None, "Translating from STDIN, not expecting any factor files.")
         for sentence_id, line in enumerate(sys.stdin, 1):
             if input_is_json:
-                yield inference.make_input_from_json_string(sentence_id=sentence_id, json_string=line)
+                yield inference.make_input_from_json_string(sentence_id=sentence_id,
+                                                            json_string=line,
+                                                            translator=translator)
             else:
                 yield inference.make_input_from_factored_string(sentence_id=sentence_id,
                                                                 factored_string=line,
@@ -154,7 +170,9 @@ def make_inputs(input_file: Optional[str],
             streams = [exit_stack.enter_context(data_io.smart_open(i)) for i in inputs]
             for sentence_id, inputs in enumerate(zip(*streams), 1):
                 if input_is_json:
-                    yield inference.make_input_from_json_string(sentence_id=sentence_id, json_string=inputs[0])
+                    yield inference.make_input_from_json_string(sentence_id=sentence_id,
+                                                                json_string=inputs[0],
+                                                                translator=translator)
                 else:
                     yield inference.make_input_from_multiple_strings(sentence_id=sentence_id, strings=list(inputs))
 
