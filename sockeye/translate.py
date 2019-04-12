@@ -19,7 +19,7 @@ import sys
 import time
 import logging
 from contextlib import ExitStack
-from typing import Generator, Optional, List
+from typing import Dict, Generator, List, Optional, Union
 
 from sockeye.lexicon import TopKLexicon
 from sockeye.log import setup_main_logger
