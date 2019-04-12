@@ -10,6 +10,14 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.91]
+### Changed
+- Multiple lexicons can now be specified with the `--restrict-lexicon` option:
+  - For a single lexicon: `--restrict-lexicon /path/to/lexicon`.
+  - For multiple lexicons: `--restrict-lexicon key1:/path/to/lexicon1 key2:/path/to/lexicon2 ...`.
+  - Use `--json-input` to specify the lexicon to use for each input, ex: `{"text": "some input string", "restrict_lexicon": "key1"}`.
+
+
 ## [1.18.90]
 ### Changed
 - Updated to [MXNet 1.4.0](https://github.com/apache/incubator-mxnet/tree/1.4.0)
