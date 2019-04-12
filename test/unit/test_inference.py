@@ -24,6 +24,7 @@ import sockeye.constants as C
 import sockeye.data_io
 import sockeye.inference
 import sockeye.lexical_constraints
+import sockeye.lexicon
 import sockeye.utils
 
 _BOS = 0
@@ -69,6 +70,7 @@ def mock_translator(batch_size: int = 1,
         translator.zeros_array = mx.nd.zeros((beam_size,), dtype='int32')
         translator.inf_array = mx.nd.full((batch_size * beam_size,), val=np.inf, dtype='float32')
         translator.inf_array = mx.nd.slice(translator.inf_array, begin=(0), end=(beam_size))
+        translator.restrict_lexicon = None
         return translator
 
 
@@ -290,9 +292,12 @@ def test_make_input_whitespace_delimiter(delimiter):
                           ("a", [])])
 def test_make_input_from_valid_json_string(text, factors):
     sentence_id = 1
+    translator = mock_translator()
     expected_tokens = list(sockeye.data_io.get_tokens(text))
-    inp = sockeye.inference.make_input_from_json_string(sentence_id, json.dumps({C.JSON_TEXT_KEY: text,
-                                                                                 C.JSON_FACTORS_KEY: factors}))
+    inp = sockeye.inference.make_input_from_json_string(sentence_id,
+                                                        json.dumps({C.JSON_TEXT_KEY: text,
+                                                                    C.JSON_FACTORS_KEY: factors}),
+                                                        translator)
     assert len(inp) == len(expected_tokens)
     assert inp.tokens == expected_tokens
     if factors is not None:
@@ -301,10 +306,40 @@ def test_make_input_from_valid_json_string(text, factors):
         assert inp.factors is None
 
 
+def test_make_input_from_valid_json_string_restrict_lexicon():
+    sentence_id = 1
+    text = 'this is a test'
+    translator = mock_translator()
+
+    lexicon1 = Mock(sockeye.lexicon.TopKLexicon)
+    lexicon2 = Mock(sockeye.lexicon.TopKLexicon)
+    translator.restrict_lexicon = {'lexicon1': lexicon1, 'lexicon2': lexicon2}
+    assert translator.restrict_lexicon['lexicon1'] is not translator.restrict_lexicon['lexicon2']
+
+    restrict_lexicon1 = 'lexicon1'
+    inp1 = sockeye.inference.make_input_from_json_string(sentence_id,
+                                                         json.dumps({C.JSON_TEXT_KEY: text,
+                                                                     C.JSON_RESTRICT_LEXICON_KEY: restrict_lexicon1}),
+                                                         translator)
+    assert inp1.restrict_lexicon is lexicon1
+
+    restrict_lexicon2 = 'lexicon2'
+    inp2 = sockeye.inference.make_input_from_json_string(sentence_id,
+                                                         json.dumps({C.JSON_TEXT_KEY: text,
+                                                                     C.JSON_RESTRICT_LEXICON_KEY: restrict_lexicon2}),
+                                                         translator)
+    assert inp2.restrict_lexicon is lexicon2
+
+    assert inp1.restrict_lexicon is not inp2.restrict_lexicon
+
+
 @pytest.mark.parametrize("text, text_key, factors, factors_key", [("a", "blub", None, "")])
 def test_failed_make_input_from_valid_json_string(text, text_key, factors, factors_key):
     sentence_id = 1
-    inp = sockeye.inference.make_input_from_json_string(sentence_id, json.dumps({text_key: text, factors_key: factors}))
+    translator = mock_translator()
+    inp = sockeye.inference.make_input_from_json_string(sentence_id,
+                                                        json.dumps({text_key: text, factors_key: factors}),
+                                                        translator)
     assert isinstance(inp, sockeye.inference.BadTranslatorInput)
 
 
@@ -316,9 +351,10 @@ def test_failed_make_input_from_valid_json_string(text, text_key, factors, facto
                           ("a", [])])
 def test_make_input_from_valid_dict(text, factors):
     sentence_id = 1
+    translator = mock_translator()
     expected_tokens = list(sockeye.data_io.get_tokens(text))
     inp = sockeye.inference.make_input_from_dict(sentence_id, {C.JSON_TEXT_KEY: text,
-                                                               C.JSON_FACTORS_KEY: factors})
+                                                               C.JSON_FACTORS_KEY: factors}, translator)
     assert len(inp) == len(expected_tokens)
     assert inp.tokens == expected_tokens
     if factors is not None:
@@ -330,7 +366,8 @@ def test_make_input_from_valid_dict(text, factors):
 @pytest.mark.parametrize("text, text_key, factors, factors_key", [("a", "blub", None, "")])
 def test_failed_make_input_from_valid_dict(text, text_key, factors, factors_key):
     sentence_id = 1
-    inp = sockeye.inference.make_input_from_dict(sentence_id, {text_key: text, factors_key: factors})
+    translator = mock_translator()
+    inp = sockeye.inference.make_input_from_dict(sentence_id, {text_key: text, factors_key: factors}, translator)
     assert isinstance(inp, sockeye.inference.BadTranslatorInput)
 
 
