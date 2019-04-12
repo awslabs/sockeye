@@ -1603,7 +1603,8 @@ class Translator:
                     logger.warning("Sentence %s: %s was found in the list of phrases to avoid; "
                                    "this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
 
-        return source, bucket_key, restrict_lexicon, raw_constraints, raw_avoid_list, mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
+        return source, bucket_key, restrict_lexicon, raw_constraints, raw_avoid_list, \
+                mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
 
     def _make_result(self,
                      trans_input: TranslatorInput,
