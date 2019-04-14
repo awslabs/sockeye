@@ -1032,8 +1032,9 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
         self.config = config
 
         with self.name_scope():
-            self.layers = [transformer.TransformerEncoderBlock(
-                config, prefix="%d_" % i) for i in range(config.num_layers)]
+            self.layers = mx.gluon.nn.HybridSequential()
+            for i in range(config.num_layers):
+                self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i))
             self.valid_length_mask = transformer.TransformerValidLengthMask(num_heads=self.config.attention_heads,
                                                                             fold_heads=True,
                                                                             name="bias")
@@ -1053,7 +1054,7 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
         # (batch_size * heads, 1, seq_len)
         bias = F.expand_dims(self.valid_length_mask(data, data_length), axis=1)
         bias = utils.cast_conditionally(F, bias, self.dtype)
-        for i, layer in enumerate(self.layers):
+        for layer in self.layers:
             # (batch_size, seq_len, config.model_size)
             data = layer(data, bias)
         data = self.final_process(data, None)
