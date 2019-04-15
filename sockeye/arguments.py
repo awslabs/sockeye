@@ -1309,10 +1309,16 @@ def add_inference_args(params):
                                     'to calculate maximum output length for beam search for each sentence. '
                                     'Default: %(default)s.')
     decode_params.add_argument('--restrict-lexicon',
-                               type=str,
+                               nargs='+',
+                               type=multiple_values(num_values=2, data_type=str),
                                default=None,
-                               help="Specify top-k lexicon to restrict output vocabulary based on source. See lexicon "
-                                    "module. Default: %(default)s.")
+                               help="Specify top-k lexicon to restrict output vocabulary to the k most likely context-"
+                                    "free translations of the source words in each sentence (Devlin, 2017). See the "
+                                    "lexicon module for creating top-k lexicons. To use multiple lexicons, provide "
+                                    "'--restrict-lexicon key1:path1 key2:path2 ...' and use JSON input to specify the "
+                                    "lexicon for each sentence: "
+                                    "{\"text\": \"some input string\", \"restrict_lexicon\": \"key\"}. "
+                                    "Default: %(default)s.")
     decode_params.add_argument('--restrict-lexicon-topk',
                                type=int,
                                default=None,
