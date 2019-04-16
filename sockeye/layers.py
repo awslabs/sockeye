@@ -20,6 +20,7 @@ import numpy as np
 
 from . import constants as C
 from . import utils
+from . import config
 
 logger = logging.getLogger(__name__)
 
@@ -175,12 +176,14 @@ class OutputLayer:
                  vocab_size: int,
                  weight: Optional[mx.sym.Symbol],
                  weight_normalization: bool,
-                 prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX) -> None:
+                 prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX,
+                 name: str = C.LOGITS_NAME) -> None:
         self.vocab_size = vocab_size
         self.prefix = prefix
+        self.name = name
 
         if weight is None:
-            self.w = mx.sym.Variable("%sweight" % self.prefix, shape=(vocab_size, hidden_size))
+            self.w = mx.sym.Variable("%sweight" % self.prefix, shape=(vocab_size, hidden_size), dtype='float32')
         else:
             self.w = weight
 
@@ -212,7 +215,7 @@ class OutputLayer:
                                          weight=self.w,
                                          bias=self.b,
                                          flatten=False,
-                                         name=C.LOGITS_NAME)
+                                         name=self.name)
 
         # Equivalent NDArray implementation (requires passed weights/biases)
         assert isinstance(hidden, mx.nd.NDArray)
@@ -224,6 +227,84 @@ class OutputLayer:
                                     weight=weight,
                                     bias=bias,
                                     flatten=False)
+
+
+class LengthRatioConfig(config.Config):
+    """
+    Configuration of the length ratio predictor.
+
+    :param layers: Number of layers.
+    :param weight: Weight of this loss.
+    """
+
+    def __init__(self, num_layers: int, weight: float) -> None:
+        super().__init__()
+        self.num_layers = num_layers
+        # TODO: keeping weight here is redundant because it is also stored
+        # in the loss config, but it's used to test if we need length prediction
+        self.weight = weight
+
+
+class LengthRatio:
+    """
+    Defines the length-ratio prediction layer of Sockeye.
+
+    :param hidden_size: Encoder hidden size.
+    :param num_layers: Number of layers.
+    :param prefix: Prefix used for naming.
+    """
+
+    def __init__(self,
+                 hidden_size: int,
+                 num_layers: int,
+                 prefix: str = C.LENRATIOS_OUTPUT_LAYER_PREFIX) -> None:
+        utils.check_condition(num_layers >= 1, "LengthRatio's num_layers has to be >=1.")
+        self.prefix = prefix
+        self.num_layers = num_layers
+        self.hidden_size = hidden_size
+
+        self.layers = [mx.gluon.nn.Dense(units=hidden_size, activation='tanh', flatten=False, prefix=prefix + 'dense%d_' % l) \
+                        for l in range(num_layers - 1)]
+        # SoftReLU activation to ensure positiveness of the predicted length ratio
+        self.layers.append(mx.gluon.nn.Dense(units=1, activation='softrelu', flatten=False, prefix=prefix + 'dense%d_' % (num_layers - 1)))
+
+    def __call__(self,
+                 source_encoded: mx.sym.Symbol,
+                 source_encoded_length: mx.sym.Symbol) -> mx.sym.Symbol:
+        """
+        Transformation to the length ratio. Returns a vector.
+
+        :param source_encoded: Encoder representation for n elements. Shape: (n, source_encoded_length, hidden_size).
+        :param source_encoded_length: A vector of encoded sequence lengths. Shape: (n,).
+        :return: Predictions of the ratio length(hypothesis)/length(reference). Shape(n, 1).
+        """
+        # data: (n, hidden_size)
+        data = LengthRatio.average_sources(source_encoded, source_encoded_length)
+        # MLP
+        for layer in self.layers:
+            data = layer(data)
+        # data: (n, 1)
+        return data
+
+    @staticmethod
+    def average_sources(source_encoded: mx.sym.Symbol, source_encoded_length: mx.sym.Symbol) -> mx.nd.NDArray:
+        """
+        Calculate the average of encoded sources taking into account their lengths.
+
+        :param source_encoded: Encoder representation for n elements. Shape: (n, source_encoded_length, hidden_size).
+        :param source_encoded_length: A vector of encoded sequence lengths. Shape: (n,).
+        :return: Average vectors. Shape(n, hidden_size).
+        """
+        # source_masked: (n, source_encoded_length, hidden_size)
+        source_masked = mx.sym.SequenceMask(data=source_encoded,
+                                            axis=1,
+                                            sequence_length=source_encoded_length,
+                                            use_sequence_length=True,
+                                            value=0.)
+        # calculate the proper means of encoded sources
+        averaged = mx.sym.broadcast_div(mx.sym.sum(source_masked, axis=1, keepdims=False),
+                                                   mx.sym.reshape(source_encoded_length, shape=(-1, 1)))
+        return averaged
 
 
 def split_heads(x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:

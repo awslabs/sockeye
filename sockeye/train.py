@@ -44,6 +44,7 @@ from . import decoder
 from . import encoder
 from . import initializer
 from . import loss
+from . import layers
 from . import lr_scheduler
 from . import model
 from . import rnn
@@ -685,6 +686,16 @@ def create_model_config(args: argparse.Namespace,
                                   normalization_type=args.loss_normalization_type,
                                   label_smoothing=args.label_smoothing)
 
+    if args.length_task is not None:
+        config_length_task = layers.LengthRatioConfig(num_layers=args.length_task_layers, weight=args.length_task_weight)
+        link = C.LINK_NORMAL if args.length_task == C.LENGTH_TASK_RATIO else C.LINK_POISSON
+        config_length_task_loss = loss.LossConfig(name=C.LENRATIO_REGRESSION,
+                                                   length_task_link=link,
+                                                   length_task_weight=args.length_task_weight)
+    else:
+        config_length_task = None
+        config_length_task_loss = None
+
     model_config = model.ModelConfig(config_data=config_data,
                                      vocab_source_size=source_vocab_size,
                                      vocab_target_size=target_vocab_size,
@@ -693,6 +704,8 @@ def create_model_config(args: argparse.Namespace,
                                      config_encoder=config_encoder,
                                      config_decoder=config_decoder,
                                      config_loss=config_loss,
+                                     config_length_task_loss=config_length_task_loss,
+                                     config_length_task=config_length_task,
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
                                      weight_normalization=args.weight_normalization,
@@ -841,6 +854,9 @@ def train(args: argparse.Namespace) -> training.TrainState:
     max_seq_len_target = max_seq_len_target + C.SPACE_FOR_XOS
     logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
                 max_seq_len_source, max_seq_len_target)
+
+    check_condition(args.length_task is not None or C.LENRATIO_MSE not in args.metrics,
+                    "%s metrics requires enabling length ratio prediction with --length-task." % C.LENRATIO_MSE)
 
     with ExitStack() as exit_stack:
         context = utils.determine_context(device_ids=args.device_ids,

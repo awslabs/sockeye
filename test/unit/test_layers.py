@@ -71,3 +71,68 @@ def test_weight_normalization():
                                                           [3., 4.]]),
                                       wn_scale=scale_factor)
     assert np.isclose(np.linalg.norm(nd_norm_weight[0].asnumpy(), axis=1), expected_norm).all()
+
+
+def test_length_ratio_average_sources():
+    # sources: (n=3, length=5, hidden_size=2)
+    sources = mx.nd.array([[[1, 5],
+                            [2, 6],
+                            [3, 7],
+                            [4, 8],
+                            [0, 9]],
+                          [[10, 0],
+                            [9, 1],
+                            [8, 3],
+                            [7, 5],
+                            [0, 7]],
+                          [[-1, 0],
+                           [-1, 0],
+                           [-1, 0],
+                           [0, -1],
+                           [0, -1]]])
+    lengths = mx.nd.array([3, 4, 5])
+    expected_averages = np.array([[2., 6.], [8.5, 2.25], [-0.6, -0.4]])
+
+    average = sockeye.layers.LengthRatio.average_sources(mx.sym.Variable('sources'),
+                                                         mx.sym.Variable('lengths'))
+    average = average.eval(sources=sources, lengths=lengths)[0]
+    assert np.isclose(average.asnumpy(), expected_averages).all()
+
+
+def test_length_ratio():
+    # sources: (n=3, length=5, hidden_size=2)
+    sources = mx.nd.array([[[1, 6],
+                            [2, 7],
+                            [3, 8],
+                            [4, 9],
+                            [5, 10]],
+                          [[10, 5],
+                            [9, 4],
+                            [8, 3],
+                            [7, 2],
+                            [6, 1]],
+                          [[-1, 1],
+                           [-1, 0],
+                           [-1, 2],
+                           [-1, -2],
+                           [1, 1]]])
+    lengths = mx.nd.array([5, 5, 4])
+    expected_averages = np.array([[3., 8.], [8., 3.], [-1., 0.25]])
+    weight = mx.nd.array([[1.1, 1.3]])
+    bias = mx.nd.array([8])
+
+    length_ratio = sockeye.layers.LengthRatio(hidden_size=2, num_layers=1, prefix="lr_")
+
+    data = length_ratio(mx.sym.Variable('sources'), mx.sym.Variable('lengths'))
+    ratio = data.eval(sources=sources, lengths=lengths,
+                      lr_dense0_weight=weight, lr_dense0_bias=bias)[0]
+
+    average = sockeye.layers.LengthRatio.average_sources(mx.sym.Variable('sources'),
+                                                         mx.sym.Variable('lengths')).eval(sources=sources,
+                                                                                          lengths=lengths)[0]
+    assert np.isclose(average.asnumpy(), expected_averages).all()
+
+    softrelu = lambda x: np.log(1 + np.exp(x))
+    expected_softrelu = softrelu(np.dot(expected_averages, weight.asnumpy().T) + bias.asnumpy())
+
+    assert np.isclose(ratio.asnumpy(), expected_softrelu).all()

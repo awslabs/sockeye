@@ -82,6 +82,8 @@ class CheckpointDecoderImageModel(CheckpointDecoder):
                                                     length_penalty=inference.LengthPenalty(
                                                         self.length_penalty_alpha,
                                                         self.length_penalty_beta),
+                                                    brevity_penalty=inference.BrevityPenalty(
+                                                        weight=0.0),
                                                     beam_prune=0.0,
                                                     beam_search_stop='all',
                                                     models=models,

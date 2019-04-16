@@ -98,9 +98,18 @@ class TrainingModel(model.SockeyeModel):
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
 
         self.model_loss = loss.get_loss(self.config.config_loss)
+        logger.info("Using model loss: %s", self.model_loss)
+        if self.config.config_length_task_loss is not None:
+            self.length_task_loss = loss.get_length_task_loss(self.config.config_length_task_loss)
+            logger.info("Using length task loss: %s", self.length_task_loss)
+        else:
+            self.length_task_loss = None
 
         data_names = [C.SOURCE_NAME, C.TARGET_NAME]
         label_names = [C.TARGET_LABEL_NAME]
+
+        # length_ratio: (batch_size, ). Will be pruned if not used
+        length_ratio = mx.sym.broadcast_div(target_length, source_length, name=C.LENRATIO_LABEL_NAME)
 
         # check provide_{data,label} names
         provide_data_names = [d[0] for d in provide_data]
@@ -134,7 +143,6 @@ class TrainingModel(model.SockeyeModel):
              source_encoded_seq_len) = self.encoder.encode(source_embed,
                                                            source_embed_length,
                                                            source_embed_seq_len)
-
             # decoder
             # target_decoded: (batch-size, target_len, decoder_depth)
             target_decoded = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
@@ -147,9 +155,24 @@ class TrainingModel(model.SockeyeModel):
             # logits: (batch_size * target_seq_len, target_vocab_size)
             logits = self.output_layer(target_decoded)
 
-            loss_output = self.model_loss.get_loss(logits, labels)
+            # 1) standard cross-entropy loss
+            net_outputs = [self.model_loss.get_loss(logits, labels)]
+            # 2) length task losses
+            if self.length_task_loss is not None:
+                # predicted_length_ratios: (batch_size, 1)
+                predicted_length_ratio = self.length_ratio(source_encoded, source_encoded_length)
+                if isinstance(self.length_task_loss, loss.MSELoss):
+                    loss_symbol = self.length_task_loss.get_loss(predicted_length_ratio, length_ratio)
+                elif isinstance(self.length_task_loss, loss.PoissonLoss):
+                    # convert ratios to (expected) length estimations for the Poisson loss
+                    predicted_reference_length = predicted_length_ratio * source_encoded_length.reshape((-1, 1))
+                    loss_symbol = self.length_task_loss.get_loss(predicted_reference_length, target_length)
+                # return both the loss symbol, prediction and the computed length_ratio to be used in metrics
+                net_outputs.extend([loss_symbol,
+                                    mx.sym.BlockGrad(predicted_length_ratio, name=C.LENRATIO_NAME),
+                                    mx.sym.BlockGrad(length_ratio, name=C.LENRATIO_LABEL_NAME)])
 
-            return mx.sym.Group(loss_output), data_names, label_names
+            return mx.sym.Group(net_outputs), data_names, label_names
 
         # Fix model parameters as needed for different training options.
         utils.check_condition(not self.config.lhuc or self.fixed_param_strategy is None,
@@ -319,7 +342,7 @@ class TrainingModel(model.SockeyeModel):
 
     @property
     def loss(self):
-        return self.model_loss
+        return [self.model_loss] + [self.length_task_loss] if self.length_task_loss is not None else []
 
     @property
     def optimizer(self) -> Union[mx.optimizer.Optimizer, SockeyeOptimizer]:
@@ -957,9 +980,12 @@ class EarlyStoppingTrainer:
         """
         # output_names refers to the list of outputs this metric should use to update itself, e.g. the softmax output
         if metric_name == C.ACCURACY:
-            return utils.Accuracy(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME])
+            return utils.Accuracy(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME], label_names=[C.TARGET_LABEL_NAME])
         elif metric_name == C.PERPLEXITY:
-            return mx.metric.Perplexity(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME])
+            return mx.metric.Perplexity(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME], label_names=[C.TARGET_LABEL_NAME], name=C.PERPLEXITY)
+        elif metric_name == C.LENRATIO_MSE:
+            return loss.LengthRatioMSEMetric(name=C.LENRATIO_MSE,
+                                  output_names=[C.LENRATIO_OUTPUT_NAME], label_names=[C.LENRATIO_LABEL_OUTPUT_NAME])
         else:
             raise ValueError("unknown metric name")
 

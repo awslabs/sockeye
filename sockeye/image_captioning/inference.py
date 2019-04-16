@@ -71,6 +71,7 @@ class ImageCaptioner(Translator):
     :param context: MXNet context to bind modules to.
     :param ensemble_mode: Ensemble mode: linear or log_linear combination.
     :param length_penalty: Length penalty instance.
+    :param brevity_penalty: Brevity penalty instance.
     :param beam_prune: Beam pruning difference threshold.
     :param beam_search_stop: The stopping criterium.
     :param models: List of models.

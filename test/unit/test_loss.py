@@ -27,7 +27,7 @@ def test_cross_entropy_loss():
 
     logits = mx.sym.Variable("logits")
     labels = mx.sym.Variable("labels")
-    sym = mx.sym.Group(loss.get_loss(logits, labels))
+    sym = mx.sym.Group([loss.get_loss(logits, labels)])
 
     assert sym.list_arguments() == ['logits', 'labels']
     assert sym.list_outputs() == [C.SOFTMAX_NAME + "_output"]
@@ -75,7 +75,7 @@ def test_smoothed_cross_entropy_loss():
 
     logits = mx.sym.Variable("logits")
     labels = mx.sym.Variable("labels")
-    sym = mx.sym.Group(loss.get_loss(logits, labels))
+    sym = mx.sym.Group([loss.get_loss(logits, labels)])
 
     assert sym.list_arguments() == ['logits', 'labels']
     assert sym.list_outputs() == [C.SOFTMAX_NAME + "_output"]

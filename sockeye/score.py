@@ -123,7 +123,10 @@ def score(args: argparse.Namespace):
                                              score_type=args.score_type,
                                              length_penalty=inference.LengthPenalty(alpha=args.length_penalty_alpha,
                                                                                     beta=args.length_penalty_beta),
-                                             softmax_temperature=args.softmax_temperature)
+                                             brevity_penalty=inference.BrevityPenalty(weight=args.brevity_penalty_weight),
+                                             softmax_temperature=args.softmax_temperature,
+                                             brevity_penalty_type=args.brevity_penalty_type,
+                                             constant_length_ratio=args.brevity_penalty_constant_length_ratio)
 
         scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab)
 
