@@ -1130,7 +1130,9 @@ class BrevityPenalty(mx.gluon.HybridBlock):
             if F is None:
                 return 0.0
             else:
-                return F.zeros_like(hyp_lengths)
+                # subtract to avoid MxNet's warning of not using both arguments
+                # this branch should not and is not used during inference
+                return F.zeros_like(hyp_lengths - reference_lengths)
         else:
             # log_bp is always <= 0.0
             if F is None:
