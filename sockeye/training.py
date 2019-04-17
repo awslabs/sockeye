@@ -828,24 +828,6 @@ class EarlyStoppingTrainer:
         ####################
         model.run_forward_backward(batch, metric_train)
 
-        ####################
-        # Gradient rescaling
-        ####################
-        gradient_norm = None
-        if self.state.updates > 0 and (self.state.updates + 1) % checkpoint_interval == 0:
-            # compute values for logging to metrics (before rescaling...)
-            gradient_norm = self.state.gradient_norm = model.get_global_gradient_norm()
-            self.state.gradients = model.get_gradients()
-
-        # note: C.GRADIENT_CLIPPING_TYPE_ABS is handled by the mxnet optimizer directly
-        if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
-            if gradient_norm is None:
-                gradient_norm = model.get_global_gradient_norm()
-            # clip gradients
-            if gradient_norm > self.optimizer_config.gradient_clipping_threshold:
-                ratio = self.optimizer_config.gradient_clipping_threshold / gradient_norm
-                model.rescale_gradients(ratio)
-
         # If using an extended optimizer, provide extra state information about the current batch
         optimizer = model.optimizer
         if metric_loss is not None and isinstance(optimizer, SockeyeOptimizer):
@@ -860,9 +842,28 @@ class EarlyStoppingTrainer:
         # UPDATE
         ########
         if self.update_interval == 1 or self.state.batches % self.update_interval == 0:
+
+            # Gradient rescaling
+            gradient_norm = None
+            if self.state.updates > 0 and (self.state.updates + 1) % checkpoint_interval == 0:
+                # compute values for logging to metrics (before rescaling...)
+                gradient_norm = self.state.gradient_norm = model.get_global_gradient_norm()
+                self.state.gradients = model.get_gradients()
+
+            # note: C.GRADIENT_CLIPPING_TYPE_ABS is handled by the mxnet optimizer directly
+            if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
+                if gradient_norm is None:
+                    gradient_norm = model.get_global_gradient_norm()
+                # clip gradients
+                if gradient_norm > self.optimizer_config.gradient_clipping_threshold:
+                    ratio = self.optimizer_config.gradient_clipping_threshold / gradient_norm
+                    model.rescale_gradients(ratio)
+
             model.update()
+
             if self.update_interval > 1:
                 model.zero_gradients()
+
             self.state.updates += 1
 
         if model.monitor is not None:

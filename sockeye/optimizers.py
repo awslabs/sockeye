@@ -39,7 +39,7 @@ class OptimizerConfig(config.Config):
                  initializer: mx.initializer.Initializer,
                  gradient_clipping_type: str,
                  gradient_clipping_threshold: Optional[float],
-                 update_interval: Optional[int] = None) -> None:
+                 update_interval: int = 1) -> None:
         super().__init__()
         self.name = name
         self.params = params
@@ -47,7 +47,7 @@ class OptimizerConfig(config.Config):
         self.initializer = initializer
         self.gradient_clipping_type = gradient_clipping_type
         self.gradient_clipping_threshold = gradient_clipping_threshold
-        self.update_interval = 1 if update_interval is None else update_interval
+        self.update_interval = update_interval
 
     @property
     def lr_scheduler(self) -> Optional[LearningRateScheduler]:

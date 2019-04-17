@@ -774,6 +774,8 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
     else:
         gradient_clipping_type = args.gradient_clipping_type
 
+    effective_batch_size = args.batch_size * args.update_interval
+
     # Note: for 'abs' we use the implementation inside of MXNet's optimizer and 'norm_*' we implement ourselves
     # inside the TrainingModel.
     if gradient_clipping_threshold is not None and gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_ABS:
@@ -784,7 +786,6 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
         # When we normalize by the number of non-PAD symbols in a batch we need to disable rescale_grad.
         optimizer_params["rescale_grad"] = 1.0 / args.update_interval
     elif args.loss_normalization_type == C.LOSS_NORM_BATCH:
-        effective_batch_size = args.batch_size * args.update_interval
         # Making MXNet module API's default scaling factor explicit
         optimizer_params["rescale_grad"] = 1.0 / effective_batch_size
     # Manually specified params
@@ -820,7 +821,7 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
     logger.info("Gradient Compression: %s", gradient_compression_params(args))
     if args.update_interval > 1:
         logger.info("Gradient accumulation over %d batches. Effective batch size: %d",
-                    args.update_interval, args.batch_size * args.update_interval)
+                    args.update_interval, effective_batch_size)
     return config
 
 
