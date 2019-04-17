@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.93]
+### Fixed
+- Made `brevity_penalty` argument in `Translator` class optional to ensure backwards compatibility.
+
 ## [1.18.92]
 ### Added
 - Added sentence length (and length ratio) prediction to be able to discourage hypotheses that are too short at inference time. Can be enabled for training with `--length-task` and with `--brevity-penalty-type` during inference.
