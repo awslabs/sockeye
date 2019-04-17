@@ -524,19 +524,8 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
         :param seq_len: sequence length.
         :return: (batch_size, source_seq_len, num_embed)
         """
-        # add positional embeddings to data
-        if self.scale_up_input:
-            data = data * (self.num_embed ** 0.5)
-
-        positions = mx.sym.BlockGrad(mx.symbol.Custom(length=seq_len,
-                                                      depth=self.num_embed,
-                                                      name="%spositional_encodings" % self.prefix,
-                                                      op_type='positional_encodings'))
-
-        if self.scale_down_positions:
-            positions = positions * (self.num_embed ** -0.5)
-
-        embedding = mx.sym.broadcast_add(data, positions)
+        positions = mx.sym.arange(0, seq_len)
+        embedding = self.encode_positions(positions, data)
         return embedding, data_length, seq_len
 
     def encode_positions(self,
@@ -552,7 +541,7 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
         # (num_embed,)
         channels = mx.sym.arange(0, self.num_embed // 2)
         # (1, num_embed,)
-        scaling = mx.sym.expand_dims(1. / mx.sym.pow(10000, (2 * channels) / self.num_embed), axis=0)
+        scaling = mx.sym.expand_dims(1. / mx.sym.power(10000, (2 * channels) / self.num_embed), axis=0)
 
         # (batch_size, num_embed/2)
         scaled_positions = mx.sym.dot(positions, scaling)
@@ -568,6 +557,8 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
 
         if self.scale_down_positions:
             pos_embedding = pos_embedding * (self.num_embed ** -0.5)
+
+        pos_embedding = mx.sym.BlockGrad(pos_embedding)
 
         return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix)
 
@@ -1043,11 +1034,11 @@ class TransformerEncoder(Encoder):
             data = mx.sym.Dropout(data=data, p=self.config.dropout_prepost)
 
         # (batch_size * heads, 1, max_length)
-        bias = mx.sym.expand_dims(transformer.get_variable_length_bias(lengths=data_length,
-                                                                       max_length=seq_len,
-                                                                       num_heads=self.config.attention_heads,
-                                                                       fold_heads=True,
-                                                                       name="%sbias" % self.prefix), axis=1)
+        bias = mx.sym.expand_dims(transformer.get_valid_length_mask_for(data=data,
+                                                                        lengths=data_length,
+                                                                        num_heads=self.config.attention_heads,
+                                                                        fold_heads=True,
+                                                                        name="%sbias" % self.prefix), axis=1)
         bias = utils.cast_conditionally(bias, self.dtype)
         for i, layer in enumerate(self.layers):
             # (batch_size, seq_len, config.model_size)
