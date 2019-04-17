@@ -1141,12 +1141,14 @@ class BrevityPenalty(mx.gluon.HybridBlock):
                 log_bp = F.minimum(F.zeros_like(hyp_lengths), 1.0 - reference_lengths / hyp_lengths)
             return self.weight * log_bp
 
-    def get(self, hyp_lengths: Union[mx.nd.NDArray, int, float],
-                  reference_lengths: Optional[Union[mx.nd.NDArray, int, float]]) -> Union[mx.nd.NDArray, float]:
+    def get(self,
+            hyp_lengths: Union[mx.nd.NDArray, int, float],
+            reference_lengths: Optional[Union[mx.nd.NDArray, int, float]]) -> Union[mx.nd.NDArray, float]:
         """
         Calculate the length penalty for the given vector of lengths.
 
-        :param lengths: A scalar or a matrix of sentence lengths of dimensionality (batch_size, 1).
+        :param hyp_lengths: Hypotheses lengths.
+        :param reference_lengths: Reference lengths.
         :return: The length penalty. A scalar or a matrix (batch_size, 1) depending on the input.
         """
         if reference_lengths is None:
@@ -1156,13 +1158,16 @@ class BrevityPenalty(mx.gluon.HybridBlock):
 
 
 def _concat_nbest_translations(translations: List[Translation], stop_ids: Set[int],
-                               length_penalty: LengthPenalty, brevity_penalty: BrevityPenalty) -> Translation:
+                               length_penalty: LengthPenalty,
+                               brevity_penalty: Optional[BrevityPenalty] = None) -> Translation:
     """
     Combines nbest translations through concatenation.
 
     :param translations: A list of translations (sequence starting with BOS symbol,
         attention_matrix), score and length.
     :param stop_ids: The EOS symbols.
+    :param length_penalty: LengthPenalty.
+    :param brevity_penalty: Optional BrevityPenalty.
     :return: A concatenation of the translations with a score.
     """
     expanded_translations = (_expand_nbest_translation(translation) for translation in translations)
@@ -1220,15 +1225,17 @@ def _expand_nbest_translation(translation: Translation) -> List[Translation]:
     return nbest_list
 
 
-def _concat_translations(translations: List[Translation], stop_ids: Set[int],
-        length_penalty: LengthPenalty, brevity_penalty: BrevityPenalty) -> Translation:
+def _concat_translations(translations: List[Translation],
+                         stop_ids: Set[int],
+                         length_penalty: LengthPenalty,
+                         brevity_penalty: Optional[BrevityPenalty] = None) -> Translation:
     """
     Combines translations through concatenation.
 
     :param translations: A list of translations (sequence starting with BOS symbol, attention_matrix), score and length.
     :param stop_ids: The EOS symbols.
     :param length_penalty: Instance of the LengthPenalty class initialized with alpha and beta.
-    :param brevity_penalty: Instance of the BrevityPenalty class initiliazed with a brevity weight.
+    :param brevity_penalty: Optional Instance of the BrevityPenalty class initialized with a brevity weight.
     :return: A concatenation of the translations with a score.
     """
     # Concatenation of all target ids without BOS and EOS
@@ -1263,11 +1270,14 @@ def _concat_translations(translations: List[Translation], stop_ids: Set[int],
         pos_t += len_t
         pos_s += len_s
 
-   # Unnormalize + sum and renormalize the score:
-    score = sum((translation.score + brevity_penalty.get(len(translation.target_ids), translation.estimated_reference_length)) \
+    def _brevity_penalty(hypothesis_length, reference_length):
+        return 0.0 if brevity_penalty is None else brevity_penalty.get(hypothesis_length, reference_length)
+
+    # Unnormalize + sum and renormalize the score:
+    score = sum((translation.score + _brevity_penalty(len(translation.target_ids), translation.estimated_reference_length)) \
                     * length_penalty.get(len(translation.target_ids))
                  for translation in translations)
-    score = score / length_penalty.get(len(target_ids)) - brevity_penalty.get(len(target_ids), estimated_reference_length)
+    score = score / length_penalty.get(len(target_ids)) - _brevity_penalty(len(target_ids), estimated_reference_length)
     return Translation(target_ids, attention_matrix_combined, score, beam_histories,
                        estimated_reference_length=estimated_reference_length)
 
@@ -1295,6 +1305,7 @@ class Translator:
     :param skip_topk: If True, uses argmax instead of topk for greedy decoding.
     :param sample: If True, sample from softmax multinomial instead of using topk.
     :param constant_length_ratio: If > 0, will override models' prediction of the length ratio (if any).
+    :param brevity_penalty: Optional BrevityPenalty.
     """
 
     def __init__(self,
@@ -1302,7 +1313,6 @@ class Translator:
                  ensemble_mode: str,
                  bucket_source_width: int,
                  length_penalty: LengthPenalty,
-                 brevity_penalty: BrevityPenalty,
                  beam_prune: float,
                  beam_search_stop: str,
                  models: List[InferenceModel],
@@ -1315,7 +1325,8 @@ class Translator:
                  strip_unknown_words: bool = False,
                  skip_topk: bool = False,
                  sample: int = None,
-                 constant_length_ratio: float = 0.0) -> None:
+                 constant_length_ratio: float = 0.0,
+                 brevity_penalty: Optional[BrevityPenalty] = None) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.brevity_penalty = brevity_penalty
@@ -1399,11 +1410,12 @@ class Translator:
         self._sort_by_index.initialize(ctx=self.context)
         self._sort_by_index.hybridize(static_alloc=True, static_shape=True)
 
+        brevity_penalty_weight = self.brevity_penalty.weight if self.brevity_penalty is not None else 0.0
         self._update_finished = NormalizeAndUpdateFinished(pad_id=C.PAD_ID,
                                                            eos_id=self.vocab_target[C.EOS_SYMBOL],
                                                            length_penalty_alpha=self.length_penalty.alpha,
                                                            length_penalty_beta=self.length_penalty.beta,
-                                                           brevity_penalty_weight=self.brevity_penalty.weight)
+                                                           brevity_penalty_weight=brevity_penalty_weight)
         self._update_finished.initialize(ctx=self.context)
         self._update_finished.hybridize(static_alloc=True, static_shape=True)
 
@@ -2453,16 +2465,15 @@ class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
         self.eos_id = eos_id
         with self.name_scope():
             self.length_penalty = LengthPenalty(alpha=length_penalty_alpha, beta=length_penalty_beta)
-            self.brevity_penalty = None
-            self.brevity_penalty_weight = brevity_penalty_weight
+            self.brevity_penalty = None  # type: Optional[BrevityPenalty]
             if brevity_penalty_weight > 0.0:
-                  self.brevity_penalty = BrevityPenalty(weight=brevity_penalty_weight)
+                self.brevity_penalty = BrevityPenalty(weight=brevity_penalty_weight)
 
     def hybrid_forward(self, F, best_word_indices, max_output_lengths,
                        finished, scores_accumulated, lengths, reference_lengths):
         all_finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
         newly_finished = F.broadcast_logical_xor(all_finished, finished)
-        if self.brevity_penalty_weight > 0.0:
+        if self.brevity_penalty is not None:
             brevity_penalty = self.brevity_penalty(lengths, reference_lengths)
         else:
             brevity_penalty = F.zeros_like(reference_lengths)

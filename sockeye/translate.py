@@ -124,13 +124,15 @@ def run_translate(args: argparse.Namespace):
         else:
             raise ValueError("Unknown brevity penalty type %s" % args.brevity_penalty_type)
 
+        brevity_penalty = None  # type: Optional[inference.BrevityPenalty]
+        if brevity_penalty_weight != 0.0:
+            brevity_penalty = inference.BrevityPenalty(brevity_penalty_weight)
 
         translator = inference.Translator(context=context,
                                           ensemble_mode=args.ensemble_mode,
                                           bucket_source_width=args.bucket_width,
                                           length_penalty=inference.LengthPenalty(args.length_penalty_alpha,
                                                                                  args.length_penalty_beta),
-                                          brevity_penalty=inference.BrevityPenalty(brevity_penalty_weight),
                                           beam_prune=args.beam_prune,
                                           beam_search_stop=args.beam_search_stop,
                                           nbest_size=args.nbest_size,
@@ -143,7 +145,8 @@ def run_translate(args: argparse.Namespace):
                                           strip_unknown_words=args.strip_unknown_words,
                                           skip_topk=args.skip_topk,
                                           sample=args.sample,
-                                          constant_length_ratio=constant_length_ratio)
+                                          constant_length_ratio=constant_length_ratio,
+                                          brevity_penalty=brevity_penalty)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
