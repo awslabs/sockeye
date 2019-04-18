@@ -321,6 +321,7 @@ def get_autoregressive_bias(max_length: int, dtype: str = C.DTYPE_FP32) -> mx.sy
     :return: Bias symbol of shape (1, max_length, max_length).
     """
     length_array = mx.sym.arange(max_length, dtype=dtype)
+    # matrix with lower triangle and main diagonal set to 0, upper triangle set to 1
     bias = mx.sym.broadcast_greater(mx.sym.reshape(length_array, shape=(1, -1)),
                                     mx.sym.reshape(length_array, shape=(-1, 1)))
     bias = bias * -C.LARGE_VALUES[dtype]
