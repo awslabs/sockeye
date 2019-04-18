@@ -295,10 +295,17 @@ def get_valid_length_mask_for(data: mx.sym.Symbol,
     :param name: Name of symbol.
     :return: Bias symbol. Shape: (batch, seq_len)
     """
-    # (batch, 1)
-    zeros = mx.sym.reshape(mx.sym.zeros_like(lengths), shape=(-1, 1))
-    # (batch, seq_len)
-    zeros = mx.sym.broadcast_like(zeros, data, lhs_axes=(1,), rhs_axes=(1,))
+    if mx.__version__ == "1.3.1":
+        # TODO(fhieber): remove old branch eventually
+        # mxnet 1.3.1's broadcast_like operator does not support individual axes yet. This branch uses another way
+        # of creating the required zeros array.
+        # (batch, seq_len)
+        zeros = mx.sym.sum(mx.sym.zeros_like(data), axis=2, keepdims=False)
+    else:
+        # (batch, 1)
+        zeros = mx.sym.reshape(mx.sym.zeros_like(lengths), shape=(-1, 1))
+        # (batch, seq_len)
+        zeros = mx.sym.broadcast_like(zeros, data, lhs_axes=(1,), rhs_axes=(1,))
     # (batch_size, max_length)
     x = mx.sym.SequenceMask(data=zeros,
                             use_sequence_length=True,
