@@ -13,7 +13,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ## [1.18.95]
 ### Changed
 - Removed custom operators from transformer models and replaced them with symbolic operators.
-  Provides noticable speedup in performance.
+  Improves Performance.
 
 ## [1.18.94]
 ### Added
