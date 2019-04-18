@@ -541,7 +541,7 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
         # (num_embed,)
         channels = mx.sym.arange(0, self.num_embed // 2)
         # (1, num_embed,)
-        scaling = mx.sym.expand_dims(1. / mx.sym.power(10000, (2 * channels) / self.num_embed), axis=0)
+        scaling = mx.sym.expand_dims(1. / mx.sym.pow(10000, (2 * channels) / self.num_embed), axis=0)
 
         # (batch_size, num_embed/2)
         scaled_positions = mx.sym.dot(positions, scaling)

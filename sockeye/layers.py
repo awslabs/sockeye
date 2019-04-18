@@ -13,14 +13,13 @@
 
 import logging
 import math
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Union
 
 import mxnet as mx
-import numpy as np
 
+from . import config
 from . import constants as C
 from . import utils
-from . import config
 
 logger = logging.getLogger(__name__)
 

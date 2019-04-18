@@ -14,7 +14,6 @@
 from typing import Dict, Optional, TYPE_CHECKING
 
 import mxnet as mx
-import numpy as np
 
 from . import config
 from . import constants as C
