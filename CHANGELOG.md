@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.95]
+### Changed
+- Removed custom operators from transformer models and replaced them with symbolic operators.
+  Improves Performance.
+
 ## [1.18.94]
 ### Added
 - Added ability to accumulate gradients over multiple batches (--update-interval). This allows simulation of large

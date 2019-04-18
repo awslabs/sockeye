@@ -251,16 +251,16 @@ class TransformerDecoder(Decoder):
         """
 
         # (batch_size * heads, max_length)
-        source_bias = transformer.get_variable_length_bias(lengths=source_encoded_lengths,
-                                                           max_length=source_encoded_max_length,
-                                                           num_heads=self.config.attention_heads,
-                                                           fold_heads=True,
-                                                           name="%ssource_bias" % self.prefix)
+        source_bias = transformer.get_valid_length_mask_for(data=source_encoded,
+                                                            lengths=source_encoded_lengths,
+                                                            num_heads=self.config.attention_heads,
+                                                            fold_heads=True,
+                                                            name="%ssource_bias" % self.prefix)
         # (batch_size * heads, 1, max_length)
         source_bias = mx.sym.expand_dims(source_bias, axis=1)
 
         # (1, target_max_length, target_max_length)
-        target_bias = transformer.get_autoregressive_bias(target_embed_max_length, name="%starget_bias" % self.prefix)
+        target_bias = transformer.get_autoregressive_bias(target_embed_max_length)
 
         # target: (batch_size, target_max_length, model_size)
         target, _, target_max_length = self.pos_embedding.encode(target_embed, None, target_embed_max_length)
@@ -305,17 +305,17 @@ class TransformerDecoder(Decoder):
         target = mx.sym.expand_dims(target_embed_prev, axis=1)
 
         # (batch_size * heads, max_length)
-        source_bias = transformer.get_variable_length_bias(lengths=source_encoded_lengths,
-                                                           max_length=source_encoded_max_length,
-                                                           num_heads=self.config.attention_heads,
-                                                           fold_heads=True,
-                                                           name="%ssource_bias" % self.prefix)
+        source_bias = transformer.get_valid_length_mask_for(data=source_encoded,
+                                                            lengths=source_encoded_lengths,
+                                                            num_heads=self.config.attention_heads,
+                                                            fold_heads=True,
+                                                            name="%ssource_bias" % self.prefix)
         # (batch_size * heads, 1, max_length)
         source_bias = mx.sym.expand_dims(source_bias, axis=1)
 
         # auto-regressive bias for last position in sequence
         # (1, target_max_length, target_max_length)
-        target_bias = transformer.get_autoregressive_bias(step, name="%sbias" % self.prefix)
+        target_bias = transformer.get_autoregressive_bias(step)
         target_bias = mx.sym.slice_axis(target_bias, axis=1, begin=-1, end=step)
 
         new_states = [source_encoded, source_encoded_lengths]
