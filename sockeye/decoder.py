@@ -223,6 +223,10 @@ class TransformerDecoder(Decoder):
                                                                  dropout=config.dropout_prepost,
                                                                  prefix="%sfinal_process_" % prefix)
 
+        self.valid_length_mask = transformer.TransformerValidLengthMask(num_heads=self.config.attention_heads,
+                                                                        fold_heads=True,
+                                                                        name="%ssource_bias" % self.prefix)
+
         self.pos_embedding = encoder.get_positional_embedding(config.positional_embedding_type,
                                                               config.model_size,
                                                               max_seq_len=config.max_seq_len_target,
@@ -251,11 +255,8 @@ class TransformerDecoder(Decoder):
         """
 
         # (batch_size * heads, max_length)
-        source_bias = transformer.get_valid_length_mask_for(data=source_encoded,
-                                                            lengths=source_encoded_lengths,
-                                                            num_heads=self.config.attention_heads,
-                                                            fold_heads=True,
-                                                            name="%ssource_bias" % self.prefix)
+        source_bias = self.valid_length_mask(source_encoded,source_encoded_lengths)
+
         # (batch_size * heads, 1, max_length)
         source_bias = mx.sym.expand_dims(source_bias, axis=1)
 
@@ -302,11 +303,8 @@ class TransformerDecoder(Decoder):
         target = mx.sym.expand_dims(target_embed_prev, axis=1)
 
         # (batch_size * heads, max_length)
-        source_bias = transformer.get_valid_length_mask_for(data=source_encoded,
-                                                            lengths=source_encoded_lengths,
-                                                            num_heads=self.config.attention_heads,
-                                                            fold_heads=True,
-                                                            name="%ssource_bias" % self.prefix)
+        source_bias = self.valid_length_mask(source_encoded, source_encoded_lengths)
+
         # (batch_size * heads, 1, max_length)
         source_bias = mx.sym.expand_dims(source_bias, axis=1)
 

@@ -295,7 +295,7 @@ class TransformerValidLengthMask(mx.gluon.HybridBlock):
             # mxnet 1.3.1's broadcast_like operator does not support individual axes yet. This branch uses another way
             # of creating the required zeros array.
             # (batch, seq_len)
-            mask = F.sym.sum(F.sym.zeros_like(data), axis=2, keepdims=False)
+            mask = F.sum(F.zeros_like(data), axis=2, keepdims=False)
         else:
             # (batch, 1)
             mask = F.reshape(F.zeros_like(lengths), shape=(-1, 1))
@@ -311,7 +311,7 @@ class TransformerValidLengthMask(mx.gluon.HybridBlock):
             # (batch_size, heads, max_length) if fold_heads == False else (batch_size * heads, max_length)
             mask = layers.broadcast_to_heads(F, mask, self.num_heads, ndim=2, fold_heads=self.fold_heads)
 
-        return mx.sym.BlockGrad(mask)
+        return F.BlockGrad(mask)
 
 
 def get_autoregressive_bias(max_length: int, dtype: str = C.DTYPE_FP32) -> mx.sym.Symbol:
