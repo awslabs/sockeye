@@ -318,7 +318,9 @@ def main():
     params = argparse.ArgumentParser(description='CLI to build source and target vocab(s).')
     arguments.add_build_vocab_args(params)
     args = params.parse_args()
+    prepare_vocab(args)
 
+def prepare_vocab(args: argparse.Namespace):
     num_words, num_words_other = args.num_words
     num_words = num_words if num_words > 0 else None
     num_words_other = num_words_other if num_words_other > 0 else None
