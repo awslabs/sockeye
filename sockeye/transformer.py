@@ -295,7 +295,7 @@ def get_valid_length_mask_for(data: mx.sym.Symbol,
     :param name: Name of symbol.
     :return: Bias symbol. Shape: (batch, seq_len)
     """
-    if mx.__version__.startswith("1.3.1"):
+    if mx.__version__.startswith("1.3"):
         # TODO(fhieber): remove old branch eventually
         # mxnet 1.3.1's broadcast_like operator does not support individual axes yet. This branch uses another way
         # of creating the required zeros array.
