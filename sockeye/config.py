@@ -34,7 +34,7 @@ class Config(yaml.YAMLObject, metaclass=TaggedYamlObjectMetaclass):
     Base configuration object that supports freezing of members and YAML (de-)serialization.
     Actual Configuration should subclass this object.
     """
-    yaml_loader = yaml.UnsafeLoader
+    yaml_loader = yaml.UnsafeLoader  # type: ignore
 
     def __init__(self):
         self.__add_frozen()
@@ -121,7 +121,7 @@ class Config(yaml.YAMLObject, metaclass=TaggedYamlObjectMetaclass):
         :return: Configuration.
         """
         with open(fname) as inp:
-            obj = yaml.load(inp, Loader=yaml.UnsafeLoader)
+            obj = yaml.load(inp, Loader=yaml.UnsafeLoader)  # type: ignore
             obj.__add_frozen()
             return obj
 
