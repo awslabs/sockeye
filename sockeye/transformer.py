@@ -61,7 +61,7 @@ class TransformerConfig(config.Config):
         self.dtype = dtype
 
 
-class TransformerEncoderBlock:
+class TransformerEncoderBlock(mx.gluon.HybridBlock):
     """
     A transformer encoder block consists self-attention and a feed-forward layer with pre/post process blocks
     in between.
@@ -70,51 +70,52 @@ class TransformerEncoderBlock:
     def __init__(self,
                  config: TransformerConfig,
                  prefix: str) -> None:
-        self.pre_self_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                          dropout=config.dropout_prepost,
-                                                          prefix="%satt_self_pre_" % prefix)
-        self.self_attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
-                                                            heads=config.attention_heads,
-                                                            depth_out=config.model_size,
-                                                            dropout=config.dropout_attention,
-                                                            prefix="%satt_self_" % prefix)
-        self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                           dropout=config.dropout_prepost,
-                                                           prefix="%satt_self_post_" % prefix)
+        super().__init__(prefix=prefix)
 
-        self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                              dropout=config.dropout_prepost,
-                                              prefix="%sff_pre_" % prefix)
-        self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
-                                         num_model=config.model_size,
-                                         act_type=config.act_type,
-                                         dropout=config.dropout_act,
-                                         prefix="%sff_" % prefix)
-        self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                               dropout=config.dropout_prepost,
-                                               prefix="%sff_post_" % prefix)
-        self.lhuc = None
-        if config.use_lhuc:
-            self.lhuc = layers.LHUC(config.model_size, prefix=prefix)
+        with self.name_scope():
+            self.pre_self_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                              dropout=config.dropout_prepost,
+                                                              prefix="att_self_pre_")
+            self.self_attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
+                                                                heads=config.attention_heads,
+                                                                depth_out=config.model_size,
+                                                                dropout=config.dropout_attention,
+                                                                prefix="att_self_")
+            self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                               dropout=config.dropout_prepost,
+                                                               prefix="att_self_post_")
 
-    def __call__(self, data: mx.sym.Symbol, bias: mx.sym.Symbol) -> mx.sym.Symbol:
+            self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                  dropout=config.dropout_prepost,
+                                                  prefix="ff_pre_")
+            self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
+                                             num_model=config.model_size,
+                                             act_type=config.act_type,
+                                             dropout=config.dropout_act,
+                                             prefix="ff_")
+            self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                   dropout=config.dropout_prepost,
+                                                   prefix="ff_post_")
+            self.lhuc = None
+            if config.use_lhuc:
+                self.lhuc = layers.LHUC(config.model_size)
+
+    def hybrid_forward(self, F, data: mx.sym.Symbol, bias: mx.sym.Symbol) -> mx.sym.Symbol:
         # self-attention
-        data_self_att = self.self_attention(inputs=self.pre_self_attention(data, None),
-                                            bias=bias,
-                                            cache=None)
+        data_self_att = self.self_attention(self.pre_self_attention(data, None), None, bias, None)
         data = self.post_self_attention(data_self_att, data)
 
         # feed-forward
         data_ff = self.ff(self.pre_ff(data, None))
         data = self.post_ff(data_ff, data)
 
-        if self.lhuc:
+        if self.lhuc is not None:
             data = self.lhuc(data)
 
         return data
 
 
-class TransformerDecoderBlock:
+class TransformerDecoderBlock(mx.gluon.HybridBlock):
     """
     A transformer encoder block consists self-attention, encoder attention, and a feed-forward layer
     with pre/post process blocks in between.
@@ -123,63 +124,60 @@ class TransformerDecoderBlock:
     def __init__(self,
                  config: TransformerConfig,
                  prefix: str) -> None:
-        self.prefix = prefix
-        self.pre_self_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                          dropout=config.dropout_prepost,
-                                                          prefix="%satt_self_pre_" % prefix)
-        self.self_attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
-                                                            heads=config.attention_heads,
-                                                            depth_out=config.model_size,
-                                                            dropout=config.dropout_attention,
-                                                            prefix="%satt_self_" % prefix)
-        self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                           dropout=config.dropout_prepost,
-                                                           prefix="%satt_self_post_" % prefix)
+        super().__init__(prefix=prefix)
+        with self.name_scope():
+            self.pre_self_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                              dropout=config.dropout_prepost,
+                                                              prefix="att_self_pre_")
+            self.self_attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
+                                                                heads=config.attention_heads,
+                                                                depth_out=config.model_size,
+                                                                dropout=config.dropout_attention,
+                                                                prefix="att_self_")
+            self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                               dropout=config.dropout_prepost,
+                                                               prefix="att_self_post_")
 
-        self.pre_enc_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                         dropout=config.dropout_prepost,
-                                                         prefix="%satt_enc_pre_" % prefix)
-        self.enc_attention = layers.MultiHeadAttention(depth_att=config.model_size,
-                                                       heads=config.attention_heads,
-                                                       depth_out=config.model_size,
-                                                       dropout=config.dropout_attention,
-                                                       prefix="%satt_enc_" % prefix)
-        self.post_enc_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                          dropout=config.dropout_prepost,
-                                                          prefix="%satt_enc_post_" % prefix)
+            self.pre_enc_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                             dropout=config.dropout_prepost,
+                                                             prefix="att_enc_pre_")
+            self.enc_attention = layers.MultiHeadAttention(depth_att=config.model_size,
+                                                           heads=config.attention_heads,
+                                                           depth_out=config.model_size,
+                                                           dropout=config.dropout_attention,
+                                                           prefix="att_enc_")
+            self.post_enc_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                              dropout=config.dropout_prepost,
+                                                              prefix="att_enc_post_")
 
-        self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                              dropout=config.dropout_prepost,
-                                              prefix="%sff_pre_" % prefix)
-        self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
-                                         num_model=config.model_size,
-                                         act_type=config.act_type,
-                                         dropout=config.dropout_act,
-                                         prefix="%sff_" % prefix)
-        self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                               dropout=config.dropout_prepost,
-                                               prefix="%sff_post_" % prefix)
+            self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                  dropout=config.dropout_prepost,
+                                                  prefix="ff_pre_")
+            self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
+                                             num_model=config.model_size,
+                                             act_type=config.act_type,
+                                             dropout=config.dropout_act,
+                                             prefix="ff_")
+            self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                   dropout=config.dropout_prepost,
+                                                   prefix="ff_post_")
 
-        self.lhuc = None
-        if config.use_lhuc:
-            self.lhuc = layers.LHUC(config.model_size, prefix=prefix)
+            self.lhuc = None
+            if config.use_lhuc:
+                self.lhuc = layers.LHUC(config.model_size)
 
-    def __call__(self,
-                 target: mx.sym.Symbol,
-                 target_bias: mx.sym.Symbol,
-                 source: mx.sym.Symbol,
-                 source_bias: mx.sym.Symbol,
-                 cache: Optional[Dict[str, Optional[mx.sym.Symbol]]] = None) -> mx.sym.Symbol:
+    def hybrid_forward(self, F,
+                       target: mx.sym.Symbol,
+                       target_bias: mx.sym.Symbol,
+                       source: mx.sym.Symbol,
+                       source_bias: mx.sym.Symbol,
+                       cache: Optional[Dict[str, Optional[mx.sym.Symbol]]] = None) -> mx.sym.Symbol:
         # self-attention
-        target_self_att = self.self_attention(inputs=self.pre_self_attention(target, None),
-                                              bias=target_bias,
-                                              cache=cache)
+        target_self_att = self.self_attention(self.pre_self_attention(target, None), None, target_bias, cache)
         target = self.post_self_attention(target_self_att, target)
 
         # encoder attention
-        target_enc_att = self.enc_attention(queries=self.pre_enc_attention(target, None),
-                                            memory=source,
-                                            bias=source_bias)
+        target_enc_att = self.enc_attention(self.pre_enc_attention(target, None), source, None, source_bias)
         target = self.post_enc_attention(target_enc_att, target)
 
         # feed-forward
@@ -192,7 +190,7 @@ class TransformerDecoderBlock:
         return target
 
 
-class TransformerProcessBlock:
+class TransformerProcessBlock(mx.gluon.nn.HybridBlock):
     """
     Block to perform pre/post processing on layer inputs.
     The processing steps are determined by the sequence argument, which can contain one of the three operations:
@@ -205,16 +203,13 @@ class TransformerProcessBlock:
                  sequence: str,
                  dropout: float,
                  prefix: str) -> None:
+        super().__init__(prefix=prefix)
         self.sequence = sequence
         self.dropout = dropout
-        self.prefix = prefix
-        self.layer_norm = None
-        if "n" in sequence:
-            self.layer_norm = layers.LayerNormalization(prefix="%snorm" % self.prefix)
+        with self.name_scope():
+            self.layer_norm = layers.LayerNormalization(prefix="norm") if 'n' in sequence else None
 
-    def __call__(self,
-                 data: mx.sym.Symbol,
-                 prev: Optional[mx.sym.Symbol]) -> mx.sym.Symbol:
+    def hybrid_forward(self, F, data: mx.sym.Symbol, prev: Optional[mx.sym.Symbol]) -> mx.sym.Symbol:
         """
         Apply processing sequence to data with optional previous input.
 
@@ -231,23 +226,23 @@ class TransformerProcessBlock:
         for step in self.sequence:
 
             if step == "r":
-                data = mx.sym._internal._plus(data, prev, name="%sresidual" % self.prefix)
+                data = F._internal._plus(data, prev)
 
             elif step == "n":
-                data = self.layer_norm(data=data)
+                data = self.layer_norm(data)
 
             elif step == "d":
                 if self.dropout > 0.0:
-                    data = mx.sym.Dropout(data, p=self.dropout, name="%sdropout" % self.prefix)
+                    data = F.Dropout(data, p=self.dropout)
             else:
                 raise ValueError("Unknown step in sequence: %s" % step)
 
         return data
 
 
-class TransformerFeedForward:
+class TransformerFeedForward(mx.gluon.HybridBlock):
     """
-    Position-wise feed-forward network with activation.
+    Position-wise feed-forward block with activation.
     """
 
     def __init__(self,
@@ -256,67 +251,67 @@ class TransformerFeedForward:
                  act_type: str,
                  dropout: float,
                  prefix: str) -> None:
-        self.num_hidden = num_hidden
-        self.num_model = num_model
+        super().__init__(prefix=prefix)
         self.dropout = dropout
-        self.prefix = prefix
-        self.act_type = act_type
-        self.w_i2h = mx.sym.Variable('%si2h_weight' % prefix)
-        self.b_i2h = mx.sym.Variable('%si2h_bias' % prefix)
-        self.w_h2o = mx.sym.Variable('%sh2o_weight' % prefix)
-        self.b_h2o = mx.sym.Variable('%sh2o_bias' % prefix)
+        with self.name_scope():
+            self.ff1 = mx.gluon.nn.Dense(units=num_hidden, flatten=False, prefix='i2h_')
+            self.act = layers.get_activation(act_type)
+            self.ff2 = mx.gluon.nn.Dense(units=num_model, flatten=False, prefix='h2o_')
 
-    def __call__(self, x) -> mx.sym.Symbol:
-        """
-        Position-wise feed-forward network with activation.
-
-        :param x: Symbol of shape (batch_size, seq_len, num_hidden)
-        :return: Symbol of shape (batch_size, seq_len, num_hidden)
-        """
-        h = mx.sym.FullyConnected(data=x, num_hidden=self.num_hidden, weight=self.w_i2h, bias=self.b_i2h, flatten=False)
-        h = layers.activation(h, act_type=self.act_type)
+    def hybrid_forward(self, F, x):
+        h = self.ff1(x)
+        h = self.act(h)
         if self.dropout > 0.0:
-            h = mx.sym.Dropout(h, p=self.dropout)
-        y = mx.sym.FullyConnected(data=h, num_hidden=self.num_model, weight=self.w_h2o, bias=self.b_h2o, flatten=False)
+            h = F.Dropout(h, p=self.dropout)
+        y = self.ff2(h)
         return y
 
 
-def get_valid_length_mask_for(data: mx.sym.Symbol,
-                              lengths: mx.sym.Symbol,
-                              num_heads: Optional[int] = None,
-                              fold_heads: bool = True,
-                              name: str = '') -> mx.sym.Symbol:
+class TransformerValidLengthMask(mx.gluon.HybridBlock):
     """
     Returns bias/mask for variable sequence lengths.
-    :param data: Input data to mask. Shape: (batch, seq_len, _).
-    :param lengths: Sequence lengths. Shape: (batch,).
+
     :param num_heads: Number of attention heads.
     :param fold_heads: Whether to fold heads dimension into batch dimension.
     :param name: Name of symbol.
     :return: Bias symbol. Shape: (batch, seq_len)
     """
-    if mx.__version__.startswith("1.3"):
-        # TODO(fhieber): remove old branch eventually
-        # mxnet 1.3.1's broadcast_like operator does not support individual axes yet. This branch uses another way
-        # of creating the required zeros array.
-        # (batch, seq_len)
-        zeros = mx.sym.sum(mx.sym.zeros_like(data), axis=2, keepdims=False)
-    else:
-        # (batch, 1)
-        zeros = mx.sym.reshape(mx.sym.zeros_like(lengths), shape=(-1, 1))
-        # (batch, seq_len)
-        zeros = mx.sym.broadcast_like(zeros, data, lhs_axes=(1,), rhs_axes=(1,))
-    # (batch_size, max_length)
-    x = mx.sym.SequenceMask(data=zeros,
-                            use_sequence_length=True,
-                            sequence_length=lengths,
-                            axis=1,
-                            value=C.LARGE_NEGATIVE_VALUE)
+    def __init__(self, num_heads: Optional[int] = None, fold_heads: bool = True, name: str = '') -> None:
+        super().__init__(prefix=name)
+        self.num_heads = num_heads
+        self.fold_heads = fold_heads
 
-    if num_heads is not None:
-        # (batch_size, heads, max_length) if fold_heads == False else (batch_size * heads, max_length)
-        x = layers.broadcast_to_heads(x, num_heads, ndim=2, fold_heads=fold_heads)
-    return mx.sym.BlockGrad(x, name='%sbias' % name)
+    def hybrid_forward(self, F, data, lengths):
+        """
+        Returns bias/mask for variable sequence lengths.
+
+        :param F: symbolic or ndarray.
+        :param data: Input data to mask. Shape: (batch, seq_len, _).
+        :param lengths: Sequence lengths. Shape: (batch,).
+        :return:
+        """
+        if mx.__version__.startswith("1.3"):
+            # TODO(fhieber): remove old branch eventually
+            # mxnet 1.3.1's broadcast_like operator does not support individual axes yet. This branch uses another way
+            # of creating the required zeros array.
+            # (batch, seq_len)
+            mask = F.sum(F.zeros_like(data), axis=2, keepdims=False)
+        else:
+            # (batch, 1)
+            mask = F.reshape(F.zeros_like(lengths), shape=(-1, 1))
+            # (batch, seq_len)
+            mask = F.broadcast_like(mask, data, lhs_axes=(1,), rhs_axes=(1,))
+        # (batch_size, max_length)
+        mask = F.SequenceMask(data=mask,
+                              use_sequence_length=True,
+                              sequence_length=lengths,
+                              axis=1,
+                              value=C.LARGE_NEGATIVE_VALUE)
+        if self.num_heads is not None:
+            # (batch_size, heads, max_length) if fold_heads == False else (batch_size * heads, max_length)
+            mask = layers.broadcast_to_heads(F, mask, self.num_heads, ndim=2, fold_heads=self.fold_heads)
+
+        return F.BlockGrad(mask)
 
 
 def get_autoregressive_bias(max_length: int, dtype: str = C.DTYPE_FP32) -> mx.sym.Symbol:

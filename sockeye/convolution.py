@@ -88,14 +88,12 @@ class ConvolutionBlock:
 
     def __call__(self,
                  data: mx.sym.Symbol,
-                 data_length: mx.sym.Symbol,
-                 seq_len: int) -> mx.sym.Symbol:
+                 data_length: mx.sym.Symbol) -> mx.sym.Symbol:
         """
         Run the convolutional block.
 
         :param data: Input data. Shape: (batch_size, seq_len, num_hidden).
         :param data_length: Vector with sequence lengths. Shape: (batch_size,).
-        :param seq_len: Maximum sequence length.
         :return: Shape: (batch_size, seq_len, num_hidden).
         """
         if self.pad_type == C.CNN_PAD_LEFT:
@@ -126,11 +124,11 @@ class ConvolutionBlock:
 
         # (batch_size, 2 * num_hidden, seq_len)
         if self.pad_type == C.CNN_PAD_LEFT:
-            data_conv = mx.sym.slice_axis(data=data_conv, axis=2, begin=0, end=seq_len)
+            data_conv = mx.sym.slice_like(data_conv, data, axes=(0, 0, -1))
 
         return self._post_convolution(data_conv)
 
-    def step(self, data):
+    def step(self, data: mx.sym.Symbol) -> mx.sym.Symbol:
         """
         Run convolution over a single position. The data must be exactly as wide as the convolution filters.
 
@@ -158,7 +156,7 @@ class ConvolutionBlock:
         data_conv = mx.sym.expand_dims(data_conv, axis=2)
         return self._post_convolution(data_conv)
 
-    def _post_convolution(self, data_conv):
+    def _post_convolution(self, data_conv: mx.sym.Symbol) -> mx.sym.Symbol:
         # data_conv: (batch_size, pre_activation_num_hidden, seq_len)
         # TODO: add layer norm (can we do this without reshaping?!)
 

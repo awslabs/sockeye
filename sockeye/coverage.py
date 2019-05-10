@@ -358,7 +358,7 @@ class ActivationCoverage(Coverage):
             updated_coverage = intermediate + attention_hidden + coverage_hidden
 
             if self.layer_norm is not None:
-                updated_coverage = self.layer_norm(data=updated_coverage)
+                updated_coverage = self.layer_norm(updated_coverage)
 
             # (batch_size, seq_len, coverage_num_hidden)
             coverage = mx.sym.Activation(data=updated_coverage,

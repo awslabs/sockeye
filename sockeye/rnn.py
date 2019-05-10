@@ -214,7 +214,7 @@ class LayerNormLSTMCell(mx.rnn.LSTMCell):
         h2h = mx.sym.FullyConnected(data=states[0], weight=self._hW, bias=self._hB,
                                     num_hidden=self._num_hidden * 4,
                                     name='%sh2h' % name)
-        gates = self._iN(data=i2h) + self._hN(data=h2h + mx.sym.zeros_like(i2h))
+        gates = self._iN(i2h) + self._hN(h2h + mx.sym.zeros_like(i2h))
         # pylint: disable=unbalanced-tuple-unpacking
         in_gate, forget_gate, in_transform, out_gate = mx.sym.split(gates,
                                                                     num_outputs=4,
@@ -231,7 +231,7 @@ class LayerNormLSTMCell(mx.rnn.LSTMCell):
         next_c = mx.sym._internal._plus(forget_gate * states[1], in_gate * in_transform,
                                         name='%sstate' % name)
         next_h = mx.sym._internal._mul(out_gate,
-                                       mx.sym.Activation(self._cN(data=next_c), act_type="tanh"),
+                                       mx.sym.Activation(self._cN(next_c), act_type="tanh"),
                                        name='%sout' % name)
         return next_h, [next_h, next_c]
 
@@ -280,10 +280,10 @@ class LayerNormPerGateLSTMCell(mx.rnn.LSTMCell):
         in_gate, forget_gate, in_transform, out_gate = mx.sym.split(
             gates, num_outputs=4, name="%sslice" % name)
 
-        in_gate = self._norm_layers[0](data=in_gate)
-        forget_gate = self._norm_layers[1](data=forget_gate)
-        in_transform = self._norm_layers[2](data=in_transform)
-        out_gate = self._norm_layers[3](data=out_gate)
+        in_gate = self._norm_layers[0](in_gate)
+        forget_gate = self._norm_layers[1](forget_gate)
+        in_transform = self._norm_layers[2](in_transform)
+        out_gate = self._norm_layers[3](out_gate)
 
         in_gate = mx.sym.Activation(in_gate, act_type="sigmoid",
                                     name='%si' % name)
@@ -313,7 +313,7 @@ class LHUCCell(mx.rnn.ModifierCell):
 
     def __call__(self, inputs, states):
         output, states = self.base_cell(inputs, states)
-        output = self.lhuc(inputs=output)
+        output = self.lhuc(output)
         return output, states
 
 
@@ -402,8 +402,8 @@ class LayerNormGRUCell(mx.rnn.GRUCell):
                                     num_hidden=self._num_hidden * 3,
                                     name="%s_h2h" % name)
 
-        i2h = self._iN(data=i2h)
-        h2h = self._hN(data=h2h)
+        i2h = self._iN(i2h)
+        h2h = self._hN(h2h)
 
         # pylint: disable=unbalanced-tuple-unpacking
         i2h_r, i2h_z, i2h = mx.sym.split(i2h, num_outputs=3, name="%s_i2h_slice" % name)
@@ -470,12 +470,12 @@ class LayerNormPerGateGRUCell(mx.rnn.GRUCell):
         i2h_r, i2h_z, i2h = mx.sym.split(i2h, num_outputs=3, name="%s_i2h_slice" % name)
         h2h_r, h2h_z, h2h = mx.sym.split(h2h, num_outputs=3, name="%s_h2h_slice" % name)
 
-        reset_gate = mx.sym.Activation(self._norm_layers[0](data=i2h_r + h2h_r),
+        reset_gate = mx.sym.Activation(self._norm_layers[0](i2h_r + h2h_r),
                                        act_type="sigmoid", name="%s_r_act" % name)
-        update_gate = mx.sym.Activation(self._norm_layers[1](data=i2h_z + h2h_z),
+        update_gate = mx.sym.Activation(self._norm_layers[1](i2h_z + h2h_z),
                                         act_type="sigmoid", name="%s_z_act" % name)
 
-        next_h_tmp = mx.sym.Activation(self._norm_layers[2](data=i2h + reset_gate * h2h),
+        next_h_tmp = mx.sym.Activation(self._norm_layers[2](i2h + reset_gate * h2h),
                                        act_type="tanh", name="%s_h_act" % name)
 
         next_h = mx.sym._internal._plus((1. - update_gate) * next_h_tmp, update_gate * prev_state_h,
