@@ -1046,7 +1046,6 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
         return self._encode(F, data, data_length)
 
     def _encode(self, F, data: mx.sym.Symbol, data_length: mx.sym.Symbol) -> mx.sym.Symbol:
-
         data = utils.cast_conditionally(F, data, self.dtype)
         if self.config.dropout_prepost > 0.0:
             data = F.Dropout(data=data, p=self.config.dropout_prepost)

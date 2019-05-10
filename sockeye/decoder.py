@@ -255,7 +255,7 @@ class TransformerDecoder(Decoder):
         """
 
         # (batch_size * heads, max_length)
-        source_bias = self.valid_length_mask(source_encoded,source_encoded_lengths)
+        source_bias = self.valid_length_mask(source_encoded, source_encoded_lengths)
 
         # (batch_size * heads, 1, max_length)
         source_bias = mx.sym.expand_dims(source_bias, axis=1)
