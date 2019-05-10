@@ -1,4 +1,4 @@
-pyyaml==3.12
+pyyaml>=5.1
 mxnet-cu100mkl==1.4.0
 numpy>=1.14
 typing
