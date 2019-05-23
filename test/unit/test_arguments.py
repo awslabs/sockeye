@@ -15,13 +15,13 @@ import argparse
 import pytest
 import tempfile
 import os
+import re
 import yaml
 
 import sockeye.arguments as arguments
 import sockeye.constants as C
 
 from itertools import zip_longest
-
 
 # note that while --prepared-data and --source/--target are mutually exclusive this is not the case at the CLI level
 @pytest.mark.parametrize("test_params, expected_params", [
@@ -35,7 +35,8 @@ from itertools import zip_longest
           validation_source='test_validation_src', validation_target='test_validation_tgt',
           validation_source_factors=[],
           output='test_output', overwrite_output=False,
-          source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1, 1),
+          source_vocab=None, target_vocab=None, source_factor_vocabs=[], shared_vocab=False, num_words=(0, 0),
+          word_min_count=(1, 1), pad_vocab_to_multiple_of=None,
           no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
           monitor_pattern=None, monitor_stat_func='mx_default')),
 
@@ -49,7 +50,8 @@ from itertools import zip_longest
           validation_source='test_validation_src', validation_target='test_validation_tgt',
           validation_source_factors=[],
           output='test_output', overwrite_output=False,
-          source_vocab=None, target_vocab=None, shared_vocab=False, num_words=(50000, 50000), word_min_count=(1, 1),
+          source_vocab=None, target_vocab=None, source_factor_vocabs=[], shared_vocab=False, num_words=(0, 0),
+          word_min_count=(1, 1), pad_vocab_to_multiple_of=None,
           no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
           monitor_pattern=None, monitor_stat_func='mx_default'))
 ])
@@ -58,7 +60,7 @@ def test_io_args(test_params, expected_params):
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('', dict(quiet=False)),
+    ('', dict(quiet=False, loglevel='INFO')),
 ])
 def test_logging_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_logging_args)
@@ -77,20 +79,22 @@ def test_device_args(test_params, expected_params):
     ('', dict(params=None,
               allow_missing_params=False,
               num_layers=(6, 6),
-              num_embed=(512, 512),
+              num_embed=(None, None),
               source_factors_num_embed=[],
+              source_factors_combine=C.SOURCE_FACTORS_COMBINE_CONCAT,
               rnn_attention_type='mlp',
               rnn_attention_num_hidden=None,
               rnn_scale_dot_attention=False,
               rnn_attention_coverage_type='count',
               rnn_attention_coverage_num_hidden=1,
+              rnn_attention_coverage_max_fertility=2,
               weight_tying=False,
               weight_tying_type="trg_softmax",
               rnn_attention_mhdot_heads=None,
-              transformer_attention_heads=8,
-              transformer_feed_forward_num_hidden=2048,
+              transformer_attention_heads=(8, 8),
+              transformer_feed_forward_num_hidden=(2048, 2048),
               transformer_activation_type=C.RELU,
-              transformer_model_size=512,
+              transformer_model_size=(512, 512),
               transformer_positional_embedding_type="fixed",
               transformer_preprocess=('n', 'n'),
               transformer_postprocess=('dr', 'dr'),
@@ -125,16 +129,20 @@ def test_model_parameters(test_params, expected_params):
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('', dict(batch_size=4096,
+    ('', dict(decoder_only=False,
+              batch_size=4096,
               batch_type="word",
-              fill_up='replicate',
               loss=C.CROSS_ENTROPY,
               label_smoothing=0.1,
               loss_normalization_type='valid',
+              length_task=None,
+              length_task_layers=1,
+              length_task_weight=1.0,
               metrics=[C.PERPLEXITY],
               optimized_metric=C.PERPLEXITY,
-              checkpoint_frequency=4000,
+              checkpoint_interval=4000,
               max_num_checkpoint_not_improved=32,
+              max_checkpoints=None,
               embed_dropout=(.0, .0),
               transformer_dropout_attention=0.1,
               transformer_dropout_act=0.1,
@@ -149,6 +157,7 @@ def test_model_parameters(test_params, expected_params):
               max_samples=None,
               min_updates=None,
               max_updates=None,
+              update_interval=1,
               min_num_epochs=None,
               max_num_epochs=None,
               initial_learning_rate=0.0002,
@@ -178,12 +187,16 @@ def test_model_parameters(test_params, expected_params):
               cnn_hidden_dropout=0.2,
               rnn_forget_bias=0.0,
               fixed_param_names=[],
+              fixed_param_strategy=None,
               rnn_h2h_init=C.RNN_INIT_ORTHOGONAL,
               decode_and_evaluate=500,
               decode_and_evaluate_use_cpu=False,
               decode_and_evaluate_device_id=None,
+              stop_training_on_decoder_failure=False,
               seed=13,
               keep_last_params=-1,
+              keep_initializations=False,
+              rnn_enc_last_hidden_concat_to_embedding=False,
               dry_run=False)),
 ])
 def test_training_arg(test_params, expected_params):
@@ -198,6 +211,7 @@ def test_training_arg(test_params, expected_params):
                       checkpoints=None,
                       models=['model'],
                       beam_size=5,
+                      nbest_size=1,
                       beam_prune=0,
                       batch_size=1,
                       chunk_size=None,
@@ -206,6 +220,7 @@ def test_training_arg(test_params, expected_params):
                       max_input_len=None,
                       restrict_lexicon=None,
                       restrict_lexicon_topk=None,
+                      avoid_list=None,
                       softmax_temperature=None,
                       output_type='translation',
                       sure_align_threshold=0.9,
@@ -213,8 +228,14 @@ def test_training_arg(test_params, expected_params):
                       beam_search_stop='all',
                       length_penalty_alpha=1.0,
                       length_penalty_beta=0.0,
+                      brevity_penalty_constant_length_ratio=0.0,
+                      brevity_penalty_weight=1.0,
+                      brevity_penalty_type='none',
                       strip_unknown_words=False,
-                      override_dtype=None)),
+                      override_dtype=None,
+                      sample=None,
+                      seed=None,
+                      skip_topk=False)),
 ])
 def test_inference_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_inference_args)
@@ -248,8 +269,8 @@ def test_inference_args(test_params, expected_params):
           # The tutorial text mentions that we train a RNN model:
           encoder=C.TRANSFORMER_TYPE,
           decoder=C.TRANSFORMER_TYPE),
-     # Additionally we mention the checkpoint_frequency
-     ['checkpoint_frequency']),
+     # Additionally we mention the checkpoint_interval
+     ['checkpoint_interval']),
     # WMT tutorial
     ('-d train_data '
      '-vs newstest2016.tc.BPE.de '
@@ -333,9 +354,11 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           source_vocab=None,
           target_vocab=None,
           source_factors=[],
+          source_factor_vocabs=[],
           shared_vocab=False,
-          num_words=(50000, 50000),
+          num_words=(0, 0),
           word_min_count=(1, 1),
+          pad_vocab_to_multiple_of=None,
           no_bucketing=False,
           bucket_width=10,
           max_seq_len=(99, 99),
@@ -356,9 +379,11 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           source_vocab=None,
           target_vocab=None,
           source_factors=[],
+          source_factor_vocabs=[],
           shared_vocab=False,
-          num_words=(50000, 50000),
+          num_words=(0, 0),
           word_min_count=(1, 1),
+          pad_vocab_to_multiple_of=None,
           no_bucketing=False,
           bucket_width=10,
           max_seq_len=(99, 99),
@@ -385,8 +410,10 @@ def _create_argument_values_that_must_be_files_or_dirs(params):
 
     params = params.split()
     regular_files_params = {'-vs', '-vt', '-t', '-s', '--source', '--target',
-                            '--validation-source', '--validation-target'}
-    folder_params = {'--prepared-data', '-d'}
+                            '--validation-source', '--validation-target',
+                            '--input', '-i'}
+    folder_params = {'--prepared-data', '-d', '--image-root', '-ir',
+                     '--validation-source-root', '-vsr', '--source-root', '-sr'}
     to_unlink = set()
     for arg, val in grouper(params, 2):
         if arg in regular_files_params and not os.path.isfile(val):
@@ -498,3 +525,7 @@ def test_config_file_required(config_command_line, config_contents):
             # Parse args and cast to dicts directly
             config_file_argparse.parse_args(
                 args=(config_command_line + (" --config %s" % fp.name)).split())
+
+def test_arguments_allowed_to_differ():
+    for arg in C.ARGS_MAY_DIFFER:
+        assert re.match(r'^[a-zA-Z0-9_]*$', arg)

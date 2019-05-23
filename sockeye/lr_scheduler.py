@@ -26,7 +26,7 @@ class LearningRateScheduler:
         self.base_lr = None  # Note: will be overwritten by MXNet optimizer
         check_condition(warmup >= 0, "warmup needs to be >= 0.")
         self.warmup = warmup
-        self.log_warmup_every_t = self.warmup // 10
+        self.log_warmup_every_t = max(self.warmup // 10, 1)
         self.last_warmup_log = -1
 
     def __call__(self, num_updates):
@@ -42,7 +42,7 @@ class LearningRateScheduler:
         fraction = (num_updates + 1) * self.base_lr / (self.warmup + 1)
         if num_updates > self.last_warmup_log and num_updates % self.log_warmup_every_t == 0:
             self.last_warmup_log = num_updates
-            logger.info("Learning rate warmup: %3.0f%%", fraction/self.base_lr * 100.0)
+            logger.info("Learning rate warmup: %3.0f%%", fraction / self.base_lr * 100.0)
         return fraction
 
 

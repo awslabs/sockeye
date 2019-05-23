@@ -16,7 +16,7 @@ Functions to generate loss symbols for sequence-to-sequence models.
 """
 import logging
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 import mxnet as mx
 from mxnet.metric import EvalMetric
@@ -35,50 +35,88 @@ class LossConfig(config.Config):
     :param vocab_size: Target vocab size.
     :param normalization_type: How to normalize the loss.
     :param label_smoothing: Optional smoothing constant for label smoothing.
+    :param link: Link function.
+    :param weight: Loss weight.
     """
 
     def __init__(self,
                  name: str,
-                 vocab_size: int,
-                 normalization_type: str,
-                 label_smoothing: float = 0.0) -> None:
+                 vocab_size: Optional[int] = None,
+                 normalization_type: Optional[str] = None,
+                 label_smoothing: float = 0.0,
+                 length_task_link: Optional[str] = None,
+                 length_task_weight: float = 1.0) -> None:
         super().__init__()
         self.name = name
         self.vocab_size = vocab_size
         self.normalization_type = normalization_type
         self.label_smoothing = label_smoothing
+        self.length_task_link = length_task_link
+        self.length_task_weight = length_task_weight
 
 
-def get_loss(loss_config: LossConfig) -> 'Loss':
+def get_loss(config: LossConfig) -> 'Loss':
     """
-    Returns Loss instance.
+    Returns a Loss instance.
 
-    :param loss_config: Loss configuration.
+    :param config: Loss configuration.
+    :return: Instance implementing the Loss.
     """
-    if loss_config.name == C.CROSS_ENTROPY:
-        return CrossEntropyLoss(loss_config)
+    if config.name == C.CROSS_ENTROPY:
+        return CrossEntropyLoss(config,
+                                output_names=[C.SOFTMAX_OUTPUT_NAME],
+                                label_names=[C.TARGET_LABEL_NAME])
     else:
-        raise ValueError("unknown loss name: %s" % loss_config.name)
+        raise ValueError("unknown loss name: %s" % config.name)
+
+
+def get_length_task_loss(config: LossConfig) -> 'Loss':
+    """
+    Returns a Loss instance.
+
+    :param config: Loss configuration.
+    :return: Instance implementing Loss.
+    """
+    if config.length_task_link is not None:
+        if config.length_task_link == C.LINK_NORMAL:
+            return MSELoss(config,
+                           output_names=[C.LENRATIO_OUTPUT_NAME],
+                           label_names=[C.LENRATIO_LABEL_NAME])
+        elif config.length_task_link == C.LINK_POISSON:
+            return PoissonLoss(config,
+                               output_names=[C.LENRATIO_OUTPUT_NAME],
+                               label_names=[C.LENRATIO_LABEL_NAME])
+        else:
+            raise ValueError("unknown link function name for length task: %s" % config.length_task_link)
+    return None
 
 
 class Loss(ABC):
     """
     Generic Loss interface.
-    get_loss() method should return a loss symbol and the softmax outputs.
+    get_loss() method should return a loss symbol.
     The softmax outputs (named C.SOFTMAX_NAME) are used by EvalMetrics to compute various metrics,
     e.g. perplexity, accuracy. In the special case of cross_entropy, the SoftmaxOutput symbol
     provides softmax outputs for forward() AND cross_entropy gradients for backward().
     """
 
-    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> List[mx.sym.Symbol]:
+    def __init__(self, loss_config: LossConfig, output_names: List[str], label_names: List[str]) -> None:
+        self.output_names = output_names
+        self.label_names = label_names
+        self.loss_config = loss_config
+
+    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> mx.sym.Symbol:
         """
         Returns loss and softmax output symbols given logits and integer-coded labels.
 
         :param logits: Shape: (batch_size * target_seq_len, target_vocab_size).
         :param labels: Shape: (batch_size * target_seq_len,).
-        :return: List of loss and softmax output symbols.
+        :return: Loss symbol.
         """
         raise NotImplementedError()
+
+    def __repr__(self):
+        return self.loss_config.name
 
     @abstractmethod
     def create_metric(self) -> EvalMetric:
@@ -95,18 +133,22 @@ class CrossEntropyLoss(Loss):
     :param loss_config: Loss configuration.
     """
 
-    def __init__(self, loss_config: LossConfig) -> None:
+    def __init__(self, loss_config: LossConfig,
+                 output_names: List[str], label_names: List[str],
+                 ignore_label: int=C.PAD_ID, name: str=C.SOFTMAX_NAME) -> None:
         logger.info("Loss: CrossEntropy(normalization_type=%s, label_smoothing=%s)",
                     loss_config.normalization_type, loss_config.label_smoothing)
-        self.loss_config = loss_config
+        super().__init__(loss_config=loss_config, output_names=output_names, label_names=label_names)
+        self.ignore_label = ignore_label
+        self.name = name
 
-    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> List[mx.sym.Symbol]:
+    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> mx.sym.Symbol:
         """
-        Returns loss and softmax output symbols given logits and integer-coded labels.
+        Returns loss symbol given logits and integer-coded labels.
 
         :param logits: Shape: (batch_size * target_seq_len, target_vocab_size).
         :param labels: Shape: (batch_size * target_seq_len,).
-        :return: List of loss symbol.
+        :return: List of loss symbols.
         """
         if self.loss_config.normalization_type == C.LOSS_NORM_VALID:
             normalization = "valid"
@@ -114,13 +156,13 @@ class CrossEntropyLoss(Loss):
             normalization = "null"
         else:
             raise ValueError("Unknown loss normalization type: %s" % self.loss_config.normalization_type)
-        return [mx.sym.SoftmaxOutput(data=logits,
-                                     label=labels,
-                                     ignore_label=C.PAD_ID,
-                                     use_ignore=True,
-                                     normalization=normalization,
-                                     smooth_alpha=self.loss_config.label_smoothing,
-                                     name=C.SOFTMAX_NAME)]
+        return mx.sym.SoftmaxOutput(data=logits,
+                                    label=labels,
+                                    ignore_label=self.ignore_label,
+                                    use_ignore=True,
+                                    normalization=normalization,
+                                    smooth_alpha=self.loss_config.label_smoothing,
+                                    name=self.name)
 
     def create_metric(self) -> "CrossEntropyMetric":
         return CrossEntropyMetric(self.loss_config)
@@ -190,3 +232,143 @@ class CrossEntropyMetric(EvalMetric):
                 self.num_inst += batch_size
 
             self.sum_metric += ce.asscalar()
+
+
+class PoissonLoss(Loss):
+    """
+    Computes the Poisson regression loss.
+    MSEMetric for this loss will be reporting the mean
+    square error between lengths, not length ratios!
+
+    :param loss_config: Loss configuration.
+    """
+
+    def __init__(self,
+                 loss_config: LossConfig,
+                 output_names: List[str], label_names: List[str],
+                 name: str = C.LENRATIO_LOSS_NAME) -> None:
+        super().__init__(loss_config=loss_config,
+                         output_names=output_names, label_names=label_names)
+        self.name = name
+
+    def get_loss(self, pred: mx.sym.Symbol, labels: mx.sym.Symbol) -> mx.sym.Symbol:
+        """
+        Returns Poisson loss and output symbol given data and expected integers as labels.
+
+        :param pred: Predictions. shape: (batch_size, 1).
+        :param labels: Target integers. Shape: (batch_size,).
+        :return: Loss symbol.
+        """
+        labels = mx.sym.reshape(labels, shape=(-1, 1))
+        loss_value = pred - labels * mx.sym.log(mx.sym.maximum(1e-10, pred))
+        # MakeLoss scales only the gradient, so scaling explicitly
+        loss_value = self.loss_config.length_task_weight * loss_value
+        loss_value = mx.sym.MakeLoss(data=loss_value,
+                                     normalization='batch',
+                                     name=self.name)
+        return loss_value
+
+    def create_metric(self) -> 'MSEMetric':
+        return LengthRatioMSEMetric(name=C.LENRATIO_MSE,
+                                    output_names=self.output_names,
+                                    label_names=self.label_names)
+
+
+class MSELoss(Loss):
+    """
+    Computes the Mean Squared Error loss.
+    MSEMetric for this loss will be reporting the mea
+    square error between length ratios.
+
+    :param loss_config: Loss configuration.
+    """
+
+    def __init__(self,
+                 loss_config: LossConfig,
+                 output_names: List[str], label_names: List[str],
+                 name: str = C.LENRATIO_LOSS_NAME) -> None:
+        super().__init__(loss_config=loss_config,
+                         output_names=output_names, label_names=label_names)
+        self.name = name
+
+    def get_loss(self, pred: mx.sym.Symbol, labels: mx.sym.Symbol) -> mx.sym.Symbol:
+        """
+        Returns MSE loss and output symbol given logits and expected integers as labels.
+
+        :param pred: Predictions. Shape: (batch_size, 1).
+        :param labels: Targets. Shape: (batch_size,).
+        :return: Loss symbol.
+        """
+        labels = mx.sym.reshape(labels, shape=(-1, 1))
+        loss_value = self.loss_config.length_task_weight / 2 * mx.sym.square(pred - labels)
+        loss_value = mx.sym.MakeLoss(data=loss_value,
+                                     normalization='batch',
+                                     name=self.name)
+        return loss_value
+
+    def create_metric(self) -> 'MSEMetric':
+        return LengthRatioMSEMetric(name=C.LENRATIO_MSE,
+                                    output_names=self.output_names,
+                                    label_names=self.label_names)
+
+
+class MSEMetric(EvalMetric):
+    """
+    Version of the MSE metric that ignores padding tokens.
+
+    :param loss_config: The configuration used for the corresponding loss.
+    :param name: Name of this metric instance for display.
+    :param output_names: Name of predictions that should be used when updating with update_dict.
+    :param label_names: Name of labels that should be used when updating with update_dict.
+    """
+
+    def __init__(self,
+                 name: str,
+                 output_names: Optional[List[str]] = None,
+                 label_names: Optional[List[str]] = None) -> None:
+        super().__init__(name, output_names=output_names, label_names=label_names)
+
+    def update(self, labels, preds):
+        """
+        :param labels: List of (batch_size,)-shaped NDArrays.
+        :param preds: List of (batch_size,1)-shaped NDArrays.
+        """
+        for label, pred in zip(labels, preds):
+            batch_size = label.shape[0]
+            # label: (batch_size, 1)
+            label = label.as_in_context(pred.context).reshape((label.size,1))
+            # mse: (batch_size,)
+            mse = mx.nd.square(label - pred)
+            # mse: (1,)
+            mse = mx.nd.sum(mse)
+            self.num_inst += batch_size
+
+            self.sum_metric += mse.asscalar()
+
+
+class LengthRatioMSEMetric(MSEMetric):
+    """
+    Version of the MSE metric specific to length ratio prediction, that
+    looks for its labels in the network outputs instead of the iterator,
+    as those are generated on the fly by the TrainingModel's sym_gen().
+
+    :param loss_config: The configuration used for the corresponding loss.
+    :param name: Name of this metric instance for display.
+    :param output_names: Name of predictions that should be used when updating with update_dict.
+    :param label_names: Name of labels that should be used when updating with update_dict.
+    """
+
+    def __init__(self,
+                 name: str,
+                 output_names: Optional[List[str]] = None,
+                 label_names: Optional[List[str]] = None) -> None:
+        super().__init__(name, output_names=output_names, label_names=label_names)
+
+    def update_dict(self, label: Dict, pred: Dict):
+        """
+        If label is missing the right name, copy it from the prediction.
+        """
+        if not set(self.label_names).issubset(set(label.keys())):
+            label.update({name:pred[name] for name in self.label_names})
+        super().update_dict(label, pred)
+

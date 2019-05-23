@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -12,16 +12,20 @@
 # permissions and limitations under the License.
 
 import logging
+import os
 import random
 
 import pytest
 
 import sockeye.constants as C
-from test.common import tmp_digits_dataset, run_train_translate
+import sockeye.evaluate
+import sockeye.utils
+from test.common import check_train_translate, tmp_digits_dataset
 
 logger = logging.getLogger(__name__)
 
 _TRAIN_LINE_COUNT = 10000
+_TRAIN_LINE_COUNT_EMPTY = 100
 _DEV_LINE_COUNT = 100
 _LINE_MAX_LENGTH = 10
 _TEST_LINE_COUNT = 110
@@ -37,7 +41,7 @@ _SEED_DEV_DATA = 17
 seed = random.randint(0, 1000)
 
 
-COMMON_TRAINING_PARAMS = " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001" \
+COMMON_TRAINING_PARAMS = " --checkpoint-interval 1000 --optimizer adam --initial-learning-rate 0.001" \
                          " --decode-and-evaluate 0 --label-smoothing 0.0" \
                          " --optimized-metric perplexity --loss cross-entropy"
 
@@ -69,7 +73,7 @@ COMMON_TRAINING_PARAMS = " --checkpoint-frequency 1000 --optimizer adam --initia
      "--encoder rnn --decoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 "
      " --rnn-attention-type mlp --rnn-attention-num-hidden 32 "
      " --batch-size 80 --batch-type word "
-     " --max-updates 5000  "
+     " --max-updates 5000 "
      " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0 --layer-normalization" + COMMON_TRAINING_PARAMS,
      "--beam-size 5 --batch-size 2 --beam-prune 1",
      True,
@@ -115,28 +119,61 @@ COMMON_TRAINING_PARAMS = " --checkpoint-frequency 1000 --optimizer adam --initia
      "--beam-size 1",
      True,
      1.04,
-     0.98)
+     0.98),
+    ("Copy:transformer:transformer:length_task_learned",
+     "--encoder transformer --decoder transformer"
+     " --max-updates 4000"
+     " --num-layers 2 --transformer-attention-heads 4 --transformer-model-size 32"
+     " --transformer-feed-forward-num-hidden 64 --num-embed 32"
+     " --length-task length --length-task-weight 1.5 --length-task-layers 3 --metrics perplexity length-ratio-mse"
+     " --batch-size 16 --batch-type sentence" + COMMON_TRAINING_PARAMS,
+     "--beam-size 5 --batch-size 2 --brevity-penalty-type learned --brevity-penalty-weight 0.9 --max-input-len %s" % _TEST_MAX_LENGTH,
+     True,
+     1.02,
+     0.96),
+    ("Copy:transformer:transformer:length_task_constant",
+     "--encoder transformer --decoder transformer"
+     " --max-updates 4000"
+     " --num-layers 2 --transformer-attention-heads 4 --transformer-model-size 32"
+     " --transformer-feed-forward-num-hidden 64 --num-embed 32"
+     " --length-task ratio --length-task-weight 0.1 --length-task-layers 1 --metrics perplexity length-ratio-mse"
+     " --batch-size 16 --batch-type sentence" + COMMON_TRAINING_PARAMS,
+     "--beam-size 5 --batch-size 2 --brevity-penalty-type constant --brevity-penalty-weight 1.0 --brevity-penalty-constant-length-ratio 1 --max-input-len %s" % _TEST_MAX_LENGTH,
+     False,
+     1.02,
+     0.94)
 ])
 def test_seq_copy(name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh):
     """Task: copy short sequences of digits"""
-    with tmp_digits_dataset("test_seq_copy.", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT,
-                            _LINE_MAX_LENGTH, _TEST_LINE_COUNT, _TEST_LINE_COUNT_EMPTY, _TEST_MAX_LENGTH,
-                            seed_train=_SEED_TRAIN_DATA, seed_dev=_SEED_DEV_DATA) as data:
-        # Test model configuration
-        perplexity, bleu, bleu_restrict, chrf = run_train_translate(train_params=train_params,
-                                                                    translate_params=translate_params,
-                                                                    translate_params_equiv=None,
-                                                                    train_source_path=data['source'],
-                                                                    train_target_path=data['target'],
-                                                                    dev_source_path=data['validation_source'],
-                                                                    dev_target_path=data['validation_target'],
-                                                                    test_source_path=data['test_source'],
-                                                                    test_target_path=data['test_target'],
-                                                                    use_prepared_data=use_prepared_data,
-                                                                    max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
-                                                                    restrict_lexicon=True,
-                                                                    work_dir=data['work_dir'],
-                                                                    seed=seed)
+    with tmp_digits_dataset(prefix="test_seq_copy",
+                            train_line_count=_TRAIN_LINE_COUNT,
+                            train_line_count_empty=_TRAIN_LINE_COUNT_EMPTY,
+                            train_max_length=_LINE_MAX_LENGTH,
+                            dev_line_count=_DEV_LINE_COUNT,
+                            dev_max_length=_LINE_MAX_LENGTH,
+                            test_line_count=_TEST_LINE_COUNT,
+                            test_line_count_empty=_TEST_LINE_COUNT_EMPTY,
+                            test_max_length=_TEST_MAX_LENGTH,
+                            sort_target=False,
+                            with_source_factors=False) as data:
+        data = check_train_translate(train_params=train_params,
+                                     translate_params=translate_params,
+                                     data=data,
+                                     use_prepared_data=use_prepared_data,
+                                     max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
+                                     compare_output=True,
+                                     seed=seed)
+
+        # get best validation perplexity
+        metrics = sockeye.utils.read_metrics_file(os.path.join(data['model'], C.METRICS_NAME))
+        perplexity = min(m[C.PERPLEXITY + '-val'] for m in metrics)
+
+        # compute metrics
+        bleu = sockeye.evaluate.raw_corpus_bleu(hypotheses=data['test_outputs'], references=data['test_targets'])
+        chrf = sockeye.evaluate.raw_corpus_chrf(hypotheses=data['test_outputs'], references=data['test_targets'])
+        bleu_restrict = sockeye.evaluate.raw_corpus_bleu(hypotheses=data['test_outputs_restricted'],
+                                                         references=data['test_targets'])
+
         logger.info("test: %s", name)
         logger.info("perplexity=%f, bleu=%f, bleu_restrict=%f chrf=%f", perplexity, bleu, bleu_restrict, chrf)
         assert perplexity <= perplexity_thresh
@@ -193,7 +230,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      0.97),
     ("Sort:transformer:transformer",
      "--encoder transformer --decoder transformer"
-     " --batch-size 16 --batch-type sentence"
+     " --batch-size 16 --update-interval 1 --batch-type sentence"
      " --max-updates 6000"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
      " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
@@ -204,7 +241,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      0.97),
     ("Sort:transformer_with_source_factor",
      "--encoder transformer --decoder transformer"
-     " --batch-size 16 --batch-type sentence"
+     " --batch-size 8 --update-interval 2 --batch-type sentence"
      " --max-updates 6000"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
      " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
@@ -227,31 +264,28 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
 def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                   use_source_factor, perplexity_thresh, bleu_thresh):
     """Task: sort short sequences of digits"""
-    with tmp_digits_dataset("test_seq_sort.", _TRAIN_LINE_COUNT, _LINE_MAX_LENGTH, _DEV_LINE_COUNT, _LINE_MAX_LENGTH,
+    with tmp_digits_dataset("test_seq_sort.", _TRAIN_LINE_COUNT, _TRAIN_LINE_COUNT_EMPTY, _LINE_MAX_LENGTH, _DEV_LINE_COUNT, _LINE_MAX_LENGTH,
                             _TEST_LINE_COUNT, _TEST_LINE_COUNT_EMPTY, _TEST_MAX_LENGTH,
                             sort_target=True, seed_train=_SEED_TRAIN_DATA, seed_dev=_SEED_DEV_DATA,
                             with_source_factors=use_source_factor) as data:
-        # Test model configuration
-        perplexity, bleu, bleu_restrict, chrf = run_train_translate(train_params=train_params,
-                                                                    translate_params=translate_params,
-                                                                    translate_params_equiv=None,
-                                                                    train_source_path=data['source'],
-                                                                    train_target_path=data['target'],
-                                                                    dev_source_path=data['validation_source'],
-                                                                    dev_target_path=data['validation_target'],
-                                                                    test_source_path=data['test_source'],
-                                                                    test_target_path=data['test_target'],
-                                                                    train_source_factor_paths=data.get(
-                                                                        'train_source_factors'),
-                                                                    dev_source_factor_paths=data.get(
-                                                                        'dev_source_factors'),
-                                                                    test_source_factor_paths=data.get(
-                                                                        'test_source_factors'),
-                                                                    use_prepared_data=use_prepared_data,
-                                                                    max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
-                                                                    restrict_lexicon=True,
-                                                                    work_dir=data['work_dir'],
-                                                                    seed=seed)
+        data = check_train_translate(train_params=train_params,
+                                     translate_params=translate_params,
+                                     data=data,
+                                     use_prepared_data=use_prepared_data,
+                                     max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
+                                     compare_output=True,
+                                     seed=seed)
+
+        # get best validation perplexity
+        metrics = sockeye.utils.read_metrics_file(os.path.join(data['model'], C.METRICS_NAME))
+        perplexity = min(m[C.PERPLEXITY + '-val'] for m in metrics)
+
+        # compute metrics
+        bleu = sockeye.evaluate.raw_corpus_bleu(hypotheses=data['test_outputs'], references=data['test_targets'])
+        chrf = sockeye.evaluate.raw_corpus_chrf(hypotheses=data['test_outputs'], references=data['test_targets'])
+        bleu_restrict = sockeye.evaluate.raw_corpus_bleu(hypotheses=data['test_outputs_restricted'],
+                                                         references=data['test_targets'])
+
         logger.info("test: %s", name)
         logger.info("perplexity=%f, bleu=%f, bleu_restrict=%f chrf=%f", perplexity, bleu, bleu_restrict, chrf)
         assert perplexity <= perplexity_thresh
