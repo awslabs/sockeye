@@ -239,7 +239,8 @@ class InferenceModel(model.SockeyeModel):
             # target_decoded: (batch_size, decoder_depth)
             (target_decoded,
              attention_probs,
-             states) = self.decoder.decode_step(decode_step,
+             states,
+             pointer_scores) = self.decoder.decode_step(decode_step,
                                                 target_embed_prev,
                                                 source_encoded_seq_len,
                                                 *states)
@@ -250,6 +251,9 @@ class InferenceModel(model.SockeyeModel):
             else:
                 # logits: (batch_size, target_vocab_size)
                 logits = self.output_layer(target_decoded)
+                if self.config.num_pointers:
+                    logits = mx.sym.concat(logits, pointer_scores, dim=1)
+                
                 if self.softmax_temperature is not None:
                     logits = logits / self.softmax_temperature
                 if self.skip_softmax:
@@ -1827,6 +1831,14 @@ class Translator:
         for model, out_w, out_b, state in itertools.zip_longest(
                 self.models, models_output_layer_w, models_output_layer_b, states):
             decoder_out, attention_probs, state = model.run_decoder(prev_word, bucket_key, state)
+            
+            if model.config.num_pointers:
+                (beam_size, target_vocab_size) = decoder_out.shape
+                diff_size = len(self.vocab_target) - target_vocab_size
+                if diff_size > 0:
+                    decoder_out = mx.nd.concat(decoder_out,
+                                               mx.nd.zeros((beam_size, diff_size), ctx=self.context), dim=1)
+            
             # Compute logits and softmax with restricted vocabulary
             if self.restrict_lexicon:
                 # Apply output layer outside decoder module.

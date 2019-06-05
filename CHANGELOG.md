@@ -10,6 +10,13 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.100]
+### Changed
+- Implemented an attention-based copy mechanism as described in [Jia, Robin, and Percy Liang. "Data recombination for neural semantic parsing." (2016)](https://arxiv.org/abs/1606.03622).
+- Added a <ptr\d+> special symbol to explicitly point at an input token in the target sequence
+- Changed the decoder interface to pass both the decoder data and the pointer data.
+- Changed the AttentionState named tuple to add the raw attention scores.
+
 ## [1.18.99]
 ### Changed
 - Updated to [MXNet 1.4.1](https://github.com/apache/incubator-mxnet/tree/1.4.1)
