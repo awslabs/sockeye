@@ -11,21 +11,19 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import json
 from unittest.mock import Mock
 
 import mxnet as mx
-import numpy as np
 import pytest
-from math import ceil
 
-from sockeye.data_io import get_tokens, tokens2ids, strids2ids
-from sockeye.vocab import build_vocab, reverse_vocab
-from sockeye.lexical_constraints import init_batch, get_bank_sizes, topk, ConstrainedHypothesis, AvoidBatch, AvoidState, AvoidTrie
+from sockeye.data_io import get_tokens, strids2ids
 from sockeye.inference import Translator
+from sockeye.lexical_constraints import init_batch, get_bank_sizes, ConstrainedHypothesis, AvoidBatch, AvoidState, \
+    AvoidTrie
 
 BOS_ID = 2
 EOS_ID = 3
+
 
 def mock_translator(num_source_factors: int):
     t_mock = Mock(Translator)
