@@ -15,28 +15,6 @@ import mxnet as mx
 import numpy as np
 
 import sockeye.layers
-import sockeye.rnn
-
-
-def test_layer_normalization():
-    batch_size = 32
-    other_dim = 10
-    num_hidden = 64
-    x_nd = mx.nd.uniform(0, 10, (batch_size, other_dim, num_hidden))
-    x_np = x_nd.asnumpy()
-
-    ln = sockeye.layers.LayerNormalization(prefix="")
-    ln.initialize()
-
-    expected_mean = np.mean(x_np, axis=-1, keepdims=True)
-    expected_var = np.var(x_np, axis=-1, keepdims=True)
-    expected_norm = (x_np - expected_mean) / np.sqrt(expected_var)
-
-    norm = ln(x_nd)
-    assert np.isclose(norm.asnumpy(), expected_norm, atol=1.e-6).all()
-    ln.hybridize()
-    norm = ln(x_nd)
-    assert np.isclose(norm.asnumpy(), expected_norm, atol=1.e-6).all()
 
 
 def test_lhuc():
