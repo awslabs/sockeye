@@ -122,83 +122,11 @@ def test_device_args(test_params, expected_params):
               conv_embed_num_highway_layers=4,
               conv_embed_pool_stride=5,
               conv_embed_add_positional_encodings=False,
-              rnn_attention_in_upper_layers=False))
+              rnn_attention_in_upper_layers=False,
+              dtype='float32'))
 ])
 def test_model_parameters(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_model_parameters)
-
-
-@pytest.mark.parametrize("test_params, expected_params", [
-    ('', dict(decoder_only=False,
-              batch_size=4096,
-              batch_type="word",
-              loss=C.CROSS_ENTROPY,
-              label_smoothing=0.1,
-              loss_normalization_type='valid',
-              length_task=None,
-              length_task_layers=1,
-              length_task_weight=1.0,
-              metrics=[C.PERPLEXITY],
-              optimized_metric=C.PERPLEXITY,
-              checkpoint_interval=4000,
-              max_num_checkpoint_not_improved=32,
-              max_checkpoints=None,
-              embed_dropout=(.0, .0),
-              transformer_dropout_attention=0.1,
-              transformer_dropout_act=0.1,
-              transformer_dropout_prepost=0.1,
-              conv_embed_dropout=0.0,
-              optimizer='adam',
-              optimizer_params=None,
-              kvstore='device',
-              gradient_compression_type=None,
-              gradient_compression_threshold=0.5,
-              min_samples=None,
-              max_samples=None,
-              min_updates=None,
-              max_updates=None,
-              update_interval=1,
-              min_num_epochs=None,
-              max_num_epochs=None,
-              initial_learning_rate=0.0002,
-              weight_decay=0.0,
-              momentum=None,
-              gradient_clipping_threshold=1.0,
-              gradient_clipping_type='none',
-              learning_rate_scheduler_type='plateau-reduce',
-              learning_rate_reduce_factor=0.7,
-              learning_rate_reduce_num_not_improved=8,
-              learning_rate_half_life=10,
-              learning_rate_warmup=0,
-              learning_rate_schedule=None,
-              learning_rate_decay_param_reset=False,
-              learning_rate_decay_optimizer_states_reset='off',
-              weight_init='xavier',
-              weight_init_scale=3.0,
-              weight_init_xavier_rand_type='uniform',
-              weight_init_xavier_factor_type='avg',
-              embed_weight_init='default',
-              rnn_dropout_inputs=(.0, .0),
-              rnn_dropout_states=(.0, .0),
-              rnn_dropout_recurrent=(.0, .0),
-              rnn_decoder_hidden_dropout=.2,
-              cnn_hidden_dropout=0.2,
-              rnn_forget_bias=0.0,
-              fixed_param_names=[],
-              fixed_param_strategy=None,
-              rnn_h2h_init=C.RNN_INIT_ORTHOGONAL,
-              decode_and_evaluate=500,
-              decode_and_evaluate_use_cpu=False,
-              decode_and_evaluate_device_id=None,
-              stop_training_on_decoder_failure=False,
-              seed=13,
-              keep_last_params=-1,
-              keep_initializations=False,
-              rnn_enc_last_hidden_concat_to_embedding=False,
-              dry_run=False)),
-])
-def test_training_arg(test_params, expected_params):
-    _test_args(test_params, expected_params, arguments.add_training_args)
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
@@ -230,13 +158,80 @@ def test_training_arg(test_params, expected_params):
                       brevity_penalty_weight=1.0,
                       brevity_penalty_type='none',
                       strip_unknown_words=False,
-                      override_dtype=None,
+                      dtype='float32',
                       sample=None,
                       seed=None,
                       skip_topk=False)),
 ])
 def test_inference_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_inference_args)
+
+
+@pytest.mark.parametrize("test_params, expected_params", [
+    ('', dict(decoder_only=False,
+              batch_size=4096,
+              batch_type="word",
+              loss=C.CROSS_ENTROPY,
+              label_smoothing=0.1,
+              length_task=None,
+              length_task_layers=1,
+              length_task_weight=1.0,
+              optimized_metric=C.PERPLEXITY,
+              checkpoint_interval=4000,
+              max_num_checkpoint_not_improved=32,
+              max_checkpoints=None,
+              embed_dropout=(.0, .0),
+              transformer_dropout_attention=0.1,
+              transformer_dropout_act=0.1,
+              transformer_dropout_prepost=0.1,
+              conv_embed_dropout=0.0,
+              optimizer='adam',
+              optimizer_params=None,
+              kvstore='device',
+              min_samples=None,
+              max_samples=None,
+              min_updates=None,
+              max_updates=None,
+              update_interval=1,
+              min_num_epochs=None,
+              max_num_epochs=None,
+              initial_learning_rate=0.0002,
+              weight_decay=0.0,
+              momentum=None,
+              gradient_clipping_threshold=1.0,
+              gradient_clipping_type='none',
+              learning_rate_scheduler_type='plateau-reduce',
+              learning_rate_reduce_factor=0.7,
+              learning_rate_reduce_num_not_improved=8,
+              learning_rate_half_life=10,
+              learning_rate_warmup=0,
+              learning_rate_schedule=None,
+              weight_init='xavier',
+              weight_init_scale=3.0,
+              weight_init_xavier_rand_type='uniform',
+              weight_init_xavier_factor_type='avg',
+              embed_weight_init='default',
+              rnn_dropout_inputs=(.0, .0),
+              rnn_dropout_states=(.0, .0),
+              rnn_dropout_recurrent=(.0, .0),
+              rnn_decoder_hidden_dropout=.2,
+              cnn_hidden_dropout=0.2,
+              rnn_forget_bias=0.0,
+              fixed_param_names=[],
+              fixed_param_strategy=None,
+              rnn_h2h_init=C.RNN_INIT_ORTHOGONAL,
+              decode_and_evaluate=500,
+              decode_and_evaluate_use_cpu=False,
+              decode_and_evaluate_device_id=None,
+              stop_training_on_decoder_failure=False,
+              seed=13,
+              keep_last_params=-1,
+              keep_initializations=False,
+              rnn_enc_last_hidden_concat_to_embedding=False,
+              dry_run=False)),
+])
+def test_training_arg(test_params, expected_params):
+    _test_args(test_params, expected_params, arguments.add_training_args)
 
 
 # Make sure that the parameter names and default values used in the tutorials do not change without the tutorials
@@ -251,7 +246,6 @@ def test_inference_args(test_params, expected_params):
      '--rnn-num-hidden 64 '
      '--rnn-attention-type dot '
      '--use-cpu '
-     '--metrics perplexity accuracy '
      '--max-num-checkpoint-not-improved 3 '
      '-o seqcopy_model',
      dict(source="train.source",
@@ -261,7 +255,6 @@ def test_inference_args(test_params, expected_params):
           num_embed=(32, 32),
           rnn_num_hidden=64,
           use_cpu=True,
-          metrics=['perplexity', 'accuracy'],
           max_num_checkpoint_not_improved=3,
           output="seqcopy_model",
           # The tutorial text mentions that we train a RNN model:
