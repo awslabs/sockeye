@@ -419,12 +419,18 @@ LARGE_VALUES = {
     # Something at the middle of 32768<x<65519. Will be rounded to a multiple of 32.
     # https://en.wikipedia.org/wiki/Half-precision_floating-point_format#Precision_limitations_on_integer_values
     DTYPE_FP16: 49152.0,
+    np.float16: 49152.0,
 
     # Will be rounded to 1.0e8.
     # https://en.wikipedia.org/wiki/Single-precision_floating-point_format#Precision_limits_on_integer_values.
-    DTYPE_FP32: LARGE_POSITIVE_VALUE
+    DTYPE_FP32: LARGE_POSITIVE_VALUE,
+    np.float32: LARGE_POSITIVE_VALUE
 }
 LARGEST_INT = sys.maxsize
+
+# see https://docs.nvidia.com/deeplearning/sdk/mixed-precision-training/index.html
+# TODO: better to use dynamic loss scaling for FP16, but unclear how to do this with SoftmaxOutpu loss for CE.
+FIXED_GRAD_SCALE_FP16 = 128.0
 
 LHUC_NAME = "lhuc"
 # lhuc application points
@@ -452,8 +458,7 @@ SHARD_TARGET = SHARD_NAME + ".target"
 DATA_INFO = "data.info"
 DATA_CONFIG = "data.config"
 PREPARED_DATA_VERSION_FILE = "data.version"
-# TODO: with next bump remove branch over data_statistics.length_ratio_stats_per_bucket
-PREPARED_DATA_VERSION = 2
+PREPARED_DATA_VERSION = 3
 
 # reranking
 RERANK_BLEU = "bleu"

@@ -21,7 +21,7 @@ import logging
 import os
 import time
 from collections import defaultdict
-from functools import lru_cache, partial
+from functools import partial
 from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set, Any
 
 import mxnet as mx
@@ -31,403 +31,32 @@ from . import constants as C
 from . import data_io
 from . import lexical_constraints as constrained
 from . import lexicon
-from . import model
 from . import utils
 from . import vocab
 from .log import is_python34
+from .model import SockeyeModel
 
 logger = logging.getLogger(__name__)
 
 
-class InferenceModel(model.SockeyeModel):
-    """
-    InferenceModel is a SockeyeModel that supports three operations used for inference/decoding:
-
-    (1) Encoder forward call: encode source sentence and return initial decoder states.
-    (2) Decoder forward call: single decoder step: predict next word.
-
-    :param config: Configuration object holding details about the model.
-    :param params_fname: File with model parameters.
-    :param context: MXNet context to bind modules to.
-    :param beam_size: Beam size.
-    :param softmax_temperature: Optional parameter to control steepness of softmax distribution.
-    :param max_output_length_num_stds: Number of standard deviations as safety margin for maximum output length.
-    :param decoder_return_logit_inputs: Decoder returns inputs to logit computation instead of softmax over target
-                                        vocabulary.  Used when logits/softmax are handled separately.
-    :param cache_output_layer_w_b: Cache weights and biases for logit computation.
-    :param skip_softmax: If True, does not compute softmax for greedy decoding.
-    """
-
-    def __init__(self,
-                 config: model.ModelConfig,
-                 params_fname: str,
-                 context: mx.context.Context,
-                 beam_size: int,
-                 softmax_temperature: Optional[float] = None,
-                 max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
-                 decoder_return_logit_inputs: bool = False,
-                 cache_output_layer_w_b: bool = False,
-                 forced_max_output_len: Optional[int] = None,
-                 skip_softmax: bool = False) -> None:
-        super().__init__(config)
-        self.params_fname = params_fname
-        self.context = context
-        self.beam_size = beam_size
-        utils.check_condition(beam_size < self.config.vocab_target_size,
-                              'The beam size must be smaller than the target vocabulary size.')
-        if skip_softmax:
-            assert beam_size == 1, 'Skipping softmax does not have any effect for beam size > 1'
-        self.skip_softmax = skip_softmax
-
-        self.softmax_temperature = softmax_temperature
-        self.max_input_length, self.get_max_output_length = models_max_input_output_length([self],
-                                                                                           max_output_length_num_stds,
-                                                                                           forced_max_output_len=forced_max_output_len)
-
-        self.max_batch_size = None  # type: Optional[int]
-        self.encoder_module = None  # type: Optional[mx.mod.BucketingModule]
-        self.encoder_default_bucket_key = None  # type: Optional[int]
-        self.decoder_module = None  # type: Optional[mx.mod.BucketingModule]
-        self.decoder_default_bucket_key = None  # type: Optional[Tuple[int, int]]
-        self.decoder_return_logit_inputs = decoder_return_logit_inputs
-
-        self.cache_output_layer_w_b = cache_output_layer_w_b
-        self.output_layer_w = None  # type: Optional[mx.nd.NDArray]
-        self.output_layer_b = None  # type: Optional[mx.nd.NDArray]
-
-    @property
-    def num_source_factors(self) -> int:
-        """
-        Returns the number of source factors of this InferenceModel (at least 1).
-        """
-        return self.config.config_data.num_source_factors
-
-    def initialize(self, max_batch_size: int, max_input_length: int, get_max_output_length_function: Callable):
-        """
-        Delayed construction of modules to ensure multiple Inference models can agree on computing a common
-        maximum output length.
-
-        :param max_batch_size: Maximum batch size.
-        :param max_input_length: Maximum input length.
-        :param get_max_output_length_function: Callable to compute maximum output length.
-        """
-        self.max_batch_size = max_batch_size
-        self.max_input_length = max_input_length
-        if self.max_input_length > self.training_max_seq_len_source:
-            logger.warning("Model was only trained with sentences up to a length of %d, "
-                           "but a max_input_len of %d is used.",
-                           self.training_max_seq_len_source, self.max_input_length)
-        self.get_max_output_length = get_max_output_length_function
-
-        # check the maximum supported length of the encoder & decoder:
-        if self.max_supported_seq_len_source is not None:
-            utils.check_condition(self.max_input_length <= self.max_supported_seq_len_source,
-                                  "Encoder only supports a maximum length of %d" % self.max_supported_seq_len_source)
-        if self.max_supported_seq_len_target is not None:
-            decoder_max_len = self.get_max_output_length(max_input_length)
-            utils.check_condition(decoder_max_len <= self.max_supported_seq_len_target,
-                                  "Decoder only supports a maximum length of %d, but %d was requested. Note that the "
-                                  "maximum output length depends on the input length and the source/target length "
-                                  "ratio observed during training." % (self.max_supported_seq_len_target,
-                                                                       decoder_max_len))
-
-        self.encoder_module, self.encoder_default_bucket_key = self._get_encoder_module()
-        self.decoder_module, self.decoder_default_bucket_key = self._get_decoder_module()
-
-        max_encoder_data_shapes = self._get_encoder_data_shapes(self.encoder_default_bucket_key,
-                                                                self.max_batch_size)
-        max_decoder_data_shapes = self._get_decoder_data_shapes(self.decoder_default_bucket_key,
-                                                                self.max_batch_size * self.beam_size)
-        self.encoder_module.bind(data_shapes=max_encoder_data_shapes, for_training=False, grad_req="null")
-        self.decoder_module.bind(data_shapes=max_decoder_data_shapes, for_training=False, grad_req="null")
-
-        self.load_params_from_file(self.params_fname)
-        self.encoder_module.init_params(arg_params=self.params, aux_params=self.aux_params, allow_missing=False)
-        self.decoder_module.init_params(arg_params=self.params, aux_params=self.aux_params, allow_missing=False)
-
-        if self.cache_output_layer_w_b:
-            if self.output_layer.weight_normalization:
-                # precompute normalized output layer weight imperatively
-                assert self.output_layer.weight_norm is not None
-                weight = self.params[self.output_layer.weight_norm.weight.name].as_in_context(self.context)
-                scale = self.params[self.output_layer.weight_norm.scale.name].as_in_context(self.context)
-                self.output_layer_w = self.output_layer.weight_norm(weight, scale)
-            else:
-                self.output_layer_w = self.params[self.output_layer.w.name].as_in_context(self.context)
-            self.output_layer_b = self.params[self.output_layer.b.name].as_in_context(self.context)
-
-    def _get_encoder_module(self) -> Tuple[mx.mod.BucketingModule, int]:
-        """
-        Returns a BucketingModule for the encoder. Given a source sequence, it returns
-        the initial decoder states of the model.
-        The bucket key for this module is the length of the source sequence.
-
-        :return: Tuple of encoder module and default bucket key.
-        """
-
-        def sym_gen(source_seq_len: int):
-            source = mx.sym.Variable(C.SOURCE_NAME)
-            source_words = source.split(num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
-            source_length = utils.compute_lengths(source_words)
-
-            # source embedding
-            (source_embed,
-             source_embed_length,
-             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
-
-            # encoder
-            # source_encoded: (source_encoded_length, batch_size, encoder_depth)
-            (source_encoded,
-             source_encoded_length,
-             source_encoded_seq_len) = self.encoder.encode(source_embed,
-                                                           source_embed_length,
-                                                           source_embed_seq_len)
-
-            # initial decoder states
-            decoder_init_states = self.decoder.init_states(source_encoded,
-                                                           source_encoded_length,
-                                                           source_encoded_seq_len)
-
-            data_names = [C.SOURCE_NAME]
-            label_names = []  # type: List[str]
-
-            # predict length ratios
-            predicted_length_ratios = []  # type: List[mx.nd.NDArray]
-            if self.length_ratio is not None:
-                # predicted_length_ratios: List[(n, 1)]
-                predicted_length_ratios = [self.length_ratio(source_encoded, source_encoded_length)]
-
-            return mx.sym.Group(decoder_init_states + predicted_length_ratios), data_names, label_names
-
-        default_bucket_key = self.max_input_length
-        module = mx.mod.BucketingModule(sym_gen=sym_gen,
-                                        default_bucket_key=default_bucket_key,
-                                        context=self.context)
-        return module, default_bucket_key
-
-    def _get_decoder_module(self) -> Tuple[mx.mod.BucketingModule, Tuple[int, int]]:
-        """
-        Returns a BucketingModule for a single decoder step.
-        Given previously predicted word and previous decoder states, it returns
-        a distribution over the next predicted word and the next decoder states.
-        The bucket key for this module is the length of the source sequence
-        and the current time-step in the inference procedure (e.g. beam search).
-        The latter corresponds to the current length of the target sequences.
-
-        :return: Tuple of decoder module and default bucket key.
-        """
-
-        def sym_gen(bucket_key: Tuple[int, int]):
-            """
-            Returns either softmax output (probs over target vocabulary) or inputs to logit
-            computation, controlled by decoder_return_logit_inputs
-            """
-            source_seq_len, decode_step = bucket_key
-            source_embed_seq_len = self.embedding_source.get_encoded_seq_len(source_seq_len)
-            source_encoded_seq_len = self.encoder.get_encoded_seq_len(source_embed_seq_len)
-
-            self.decoder.reset()
-            target_prev = mx.sym.Variable(C.TARGET_NAME)
-            states = self.decoder.state_variables(decode_step)
-            state_names = [state.name for state in states]
-
-            # embedding for previous word
-            # (batch_size, num_embed)
-            target_embed_prev, _, _ = self.embedding_target.encode(data=target_prev, data_length=None, seq_len=1)
-
-            # decoder
-            # target_decoded: (batch_size, decoder_depth)
-            (target_decoded,
-             attention_probs,
-             states) = self.decoder.decode_step(decode_step,
-                                                target_embed_prev,
-                                                source_encoded_seq_len,
-                                                *states)
-
-            if self.decoder_return_logit_inputs:
-                # skip output layer in graph
-                outputs = mx.sym.identity(target_decoded, name=C.LOGIT_INPUTS_NAME)
-            else:
-                # logits: (batch_size, target_vocab_size)
-                logits = self.output_layer(target_decoded)
-                if self.softmax_temperature is not None:
-                    logits = logits / self.softmax_temperature
-                if self.skip_softmax:
-                    # skip softmax for greedy decoding
-                    outputs = logits
-                else:
-                    outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
-
-            data_names = [C.TARGET_NAME] + state_names
-            label_names = []  # type: List[str]
-            return mx.sym.Group([outputs, attention_probs] + states), data_names, label_names
-
-        # pylint: disable=not-callable
-        default_bucket_key = (self.max_input_length, self.get_max_output_length(self.max_input_length))
-        module = mx.mod.BucketingModule(sym_gen=sym_gen,
-                                        default_bucket_key=default_bucket_key,
-                                        context=self.context)
-        return module, default_bucket_key
-
-    def _get_encoder_data_shapes(self, bucket_key: int, batch_size: int) -> List[mx.io.DataDesc]:
-        """
-        Returns data shapes of the encoder module.
-
-        :param bucket_key: Maximum input length.
-        :return: List of data descriptions.
-        """
-        return [mx.io.DataDesc(name=C.SOURCE_NAME,
-                               shape=(batch_size, bucket_key, self.num_source_factors),
-                               layout=C.BATCH_MAJOR)]
-
-    @lru_cache(maxsize=None)
-    def _get_decoder_data_shapes(self, bucket_key: Tuple[int, int], batch_beam_size: int) -> List[mx.io.DataDesc]:
-        """
-        Returns data shapes of the decoder module.
-
-        :param bucket_key: Tuple of (maximum input length, maximum target length).
-        :param batch_beam_size: Batch size * beam size.
-        :return: List of data descriptions.
-        """
-        source_max_length, target_max_length = bucket_key
-        return [mx.io.DataDesc(name=C.TARGET_NAME, shape=(batch_beam_size,),
-                               layout="NT")] + self.decoder.state_shapes(batch_beam_size,
-                                                                         target_max_length,
-                                                                         self.encoder.get_encoded_seq_len(
-                                                                             source_max_length),
-                                                                         self.encoder.get_num_hidden())
-
-    def run_encoder(self,
-                    source: mx.nd.NDArray,
-                    source_max_length: int) -> Tuple['ModelState', mx.nd.NDArray]:
-        """
-        Runs forward pass of the encoder.
-        Encodes source given source length and bucket key.
-        Returns encoder representation of the source, source_length, initial hidden state of decoder RNN,
-        and initial decoder states tiled to beam size.
-
-        :param source: Integer-coded input tokens. Shape (batch_size, source length, num_source_factors).
-        :param source_max_length: Bucket key.
-        :return: Initial model state.
-        """
-        batch_size = source.shape[0]
-        batch = mx.io.DataBatch(data=[source],
-                                label=None,
-                                bucket_key=source_max_length,
-                                provide_data=self._get_encoder_data_shapes(source_max_length, batch_size))
-
-        self.encoder_module.forward(data_batch=batch, is_train=False)
-        decoder_init_states = self.encoder_module.get_outputs()
-
-        if self.length_ratio is not None:
-            estimated_length_ratio = decoder_init_states[-1]
-            estimated_length_ratio = mx.nd.repeat(estimated_length_ratio, repeats=self.beam_size, axis=0)
-            decoder_init_states = decoder_init_states[:-1]
-        else:
-            estimated_length_ratio = None
-            decoder_init_states = decoder_init_states
-        # replicate encoder/init module results beam size times
-        decoder_init_states = [mx.nd.repeat(s, repeats=self.beam_size, axis=0) for s in decoder_init_states]
-        return ModelState(decoder_init_states), estimated_length_ratio
-
-    def run_decoder(self,
-                    prev_word: mx.nd.NDArray,
-                    bucket_key: Tuple[int, int],
-                    model_state: 'ModelState') -> Tuple[mx.nd.NDArray, mx.nd.NDArray, 'ModelState']:
-        """
-        Runs forward pass of the single-step decoder.
-
-        :param prev_word: Previous word ids. Shape: (batch*beam,).
-        :param bucket_key: Bucket key.
-        :param model_state: Model states.
-        :return: Decoder stack output (logit inputs or probability distribution), attention scores, updated model state.
-        """
-        batch_beam_size = prev_word.shape[0]
-        batch = mx.io.DataBatch(
-            data=[prev_word.as_in_context(self.context)] + model_state.states,
-            label=None,
-            bucket_key=bucket_key,
-            provide_data=self._get_decoder_data_shapes(bucket_key, batch_beam_size))
-        self.decoder_module.forward(data_batch=batch, is_train=False)
-        out, attention_probs, *model_state.states = self.decoder_module.get_outputs()
-        return out, attention_probs, model_state
-
-    @property
-    def training_max_seq_len_source(self) -> int:
-        """ The maximum sequence length on the source side during training. """
-        return self.config.config_data.data_statistics.max_observed_len_source
-
-    @property
-    def training_max_seq_len_target(self) -> int:
-        """ The maximum sequence length on the target side during training. """
-        return self.config.config_data.data_statistics.max_observed_len_target
-
-    @property
-    def max_supported_seq_len_source(self) -> Optional[int]:
-        """ If not None this is the maximally supported source length during inference (hard constraint). """
-        return self.encoder.get_max_seq_len()
-
-    @property
-    def max_supported_seq_len_target(self) -> Optional[int]:
-        """ If not None this is the maximally supported target length during inference (hard constraint). """
-        return self.decoder.get_max_seq_len()
-
-    @property
-    def length_ratio_mean(self) -> float:
-        return self.config.config_data.data_statistics.length_ratio_mean
-
-    @property
-    def length_ratio_std(self) -> float:
-        return self.config.config_data.data_statistics.length_ratio_std
-
-    @property
-    def source_with_eos(self) -> bool:
-        return self.config.config_data.source_with_eos
-
-
 def load_models(context: mx.context.Context,
-                max_input_len: Optional[int],
-                beam_size: int,
-                batch_size: int,
                 model_folders: List[str],
                 checkpoints: Optional[List[int]] = None,
-                softmax_temperature: Optional[float] = None,
-                max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
-                decoder_return_logit_inputs: bool = False,
-                cache_output_layer_w_b: bool = False,
-                forced_max_output_len: Optional[int] = None,
-                override_dtype: Optional[str] = None,
-                output_scores: bool = False,
-                sampling: bool = False) -> Tuple[List[InferenceModel],
-                                                 List[vocab.Vocab],
-                                                 vocab.Vocab]:
+                dtype: str = C.DTYPE_FP32,
+                hybridize: bool = True) -> Tuple[List[SockeyeModel], List[vocab.Vocab], vocab.Vocab]:
     """
     Loads a list of models for inference.
 
     :param context: MXNet context to bind modules to.
-    :param max_input_len: Maximum input length.
-    :param beam_size: Beam size.
-    :param batch_size: Batch size.
     :param model_folders: List of model folders to load models from.
     :param checkpoints: List of checkpoints to use for each model in model_folders. Use None to load best checkpoint.
-    :param softmax_temperature: Optional parameter to control steepness of softmax distribution.
-    :param max_output_length_num_stds: Number of standard deviations to add to mean target-source length ratio
-           to compute maximum output length.
-    :param decoder_return_logit_inputs: Model decoders return inputs to logit computation instead of softmax over target
-                                        vocabulary.  Used when logits/softmax are handled separately.
-    :param cache_output_layer_w_b: Models cache weights and biases for logit computation as NumPy arrays (used with
-                                   restrict lexicon).
-    :param forced_max_output_len: An optional overwrite of the maximum output length.
-    :param override_dtype: Overrides dtype of encoder and decoder defined at training time to a different one.
-    :param output_scores: Whether the scores will be needed as outputs. If True, scores will be normalized, negative
-           log probabilities. If False, scores will be negative, raw logit activations if decoding with beam size 1
-           and a single model.
-    :param sampling: True if the model is sampling instead of doing normal topk().
+    :param dtype: Float precision to use. Default: float32.
+    :param hybridize: Whether to hybridize the loaded models. Default: true.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
     load_time_start = time.time()
-    models = []  # type: List[InferenceModel]
+    models = []  # type: List[SockeyeModel]
     source_vocabs = []  # type: List[List[vocab.Vocab]]
     target_vocabs = []  # type: List[vocab.Vocab]
 
@@ -435,12 +64,6 @@ def load_models(context: mx.context.Context,
         checkpoints = [None] * len(model_folders)
     else:
         utils.check_condition(len(checkpoints) == len(model_folders), "Must provide checkpoints for each model")
-
-    skip_softmax = False
-    # performance tweak: skip softmax for a single model, decoding with beam size 1, when not sampling and no scores are required in output.
-    if len(model_folders) == 1 and beam_size == 1 and not output_scores and not sampling:
-        skip_softmax = True
-        logger.info("Enabled skipping softmax for a single model and greedy decoding.")
 
     for model_folder, checkpoint in zip(model_folders, checkpoints):
         model_source_vocabs = vocab.load_source_vocabs(model_folder)
@@ -451,37 +74,40 @@ def load_models(context: mx.context.Context,
         model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
         logger.info("Model version: %s", model_version)
         utils.check_version(model_version)
-        model_config = model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
+        model_config = SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
 
         logger.info("Disabling dropout layers for performance reasons")
         model_config.disable_dropout()
-
-        if override_dtype is not None:
-            model_config.config_encoder.dtype = override_dtype
-            model_config.config_decoder.dtype = override_dtype
-            if override_dtype == C.DTYPE_FP16:
-                logger.warning('Experimental feature \'override_dtype=float16\' has been used. '
-                               'This feature may be removed or change its behaviour in future. '
-                               'DO NOT USE IT IN PRODUCTION!')
 
         if checkpoint is None:
             params_fname = os.path.join(model_folder, C.PARAMS_BEST_NAME)
         else:
             params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
-        inference_model = InferenceModel(config=model_config,
-                                         params_fname=params_fname,
-                                         context=context,
-                                         beam_size=beam_size,
-                                         softmax_temperature=softmax_temperature,
-                                         decoder_return_logit_inputs=decoder_return_logit_inputs,
-                                         cache_output_layer_w_b=cache_output_layer_w_b,
-                                         skip_softmax=skip_softmax)
-        utils.check_condition(inference_model.num_source_factors == len(model_source_vocabs),
+        model = SockeyeModel(model_config)
+        model.initialize(ctx=context)
+
+        if dtype == C.DTYPE_FP16:
+            logger.info("Using fp16 precision")
+            model.cast(C.DTYPE_FP16)
+
+        # TODO: store training precision in model config, or store final parameters in fp32 to make loading of params more forgiving
+
+        model.load_params_from_file(fname=params_fname,
+                                    ctx=context,
+                                    allow_missing=False,
+                                    ignore_extra=False)
+        for param in model.collect_params().values():
+            param.grad_req = 'null'
+
+        if hybridize:
+            model.hybridize(static_alloc=True)
+
+        utils.check_condition(model.num_source_factors == len(model_source_vocabs),
                               "Number of loaded source vocabularies (%d) does not match "
                               "number of source factors for model '%s' (%d)" % (len(model_source_vocabs), model_folder,
-                                                                                inference_model.num_source_factors))
-        models.append(inference_model)
+                                                                                model.num_source_factors))
+        models.append(model)
 
     utils.check_condition(vocab.are_identical(*target_vocabs), "Target vocabulary ids do not match")
     first_model_vocabs = source_vocabs[0]
@@ -489,26 +115,12 @@ def load_models(context: mx.context.Context,
         utils.check_condition(vocab.are_identical(*[source_vocabs[i][fi] for i in range(len(source_vocabs))]),
                               "Source vocabulary ids do not match. Factor %d" % fi)
 
-    source_with_eos = models[0].source_with_eos
-    utils.check_condition(all(source_with_eos == m.source_with_eos for m in models),
-                          "All models must agree on using source-side EOS symbols or not. "
-                          "Did you try combining models trained with different versions?")
-
-    # set a common max_output length for all models.
-    max_input_len, get_max_output_length = models_max_input_output_length(models,
-                                                                          max_output_length_num_stds,
-                                                                          max_input_len,
-                                                                          forced_max_output_len=forced_max_output_len)
-
-    for inference_model in models:
-        inference_model.initialize(batch_size, max_input_len, get_max_output_length)
-
     load_time = time.time() - load_time_start
     logger.info("%d model(s) loaded in %.4fs", len(models), load_time)
     return models, source_vocabs[0], target_vocabs[0]
 
 
-def models_max_input_output_length(models: List[InferenceModel],
+def models_max_input_output_length(models: List[SockeyeModel],
                                    num_stds: int,
                                    forced_max_input_len: Optional[int] = None,
                                    forced_max_output_len: Optional[int] = None) -> Tuple[int, Callable]:
@@ -528,17 +140,11 @@ def models_max_input_output_length(models: List[InferenceModel],
     max_mean = max(model.length_ratio_mean for model in models)
     max_std = max(model.length_ratio_std for model in models)
 
-    supported_max_seq_len_source = min((model.max_supported_seq_len_source for model in models
-                                        if model.max_supported_seq_len_source is not None),
-                                       default=None)
-    supported_max_seq_len_target = min((model.max_supported_seq_len_target for model in models
-                                        if model.max_supported_seq_len_target is not None),
-                                       default=None)
-    training_max_seq_len_source = min(model.training_max_seq_len_source for model in models)
+    supported_max_seq_len_source = min((model.max_supported_seq_len_source for model in models))
+    supported_max_seq_len_target = min((model.max_supported_seq_len_target for model in models))
 
     return get_max_input_output_length(supported_max_seq_len_source,
                                        supported_max_seq_len_target,
-                                       training_max_seq_len_source,
                                        length_ratio_mean=max_mean,
                                        length_ratio_std=max_std,
                                        num_stds=num_stds,
@@ -546,9 +152,8 @@ def models_max_input_output_length(models: List[InferenceModel],
                                        forced_max_output_len=forced_max_output_len)
 
 
-def get_max_input_output_length(supported_max_seq_len_source: Optional[int],
-                                supported_max_seq_len_target: Optional[int],
-                                training_max_seq_len_source: Optional[int],
+def get_max_input_output_length(supported_max_seq_len_source: int,
+                                supported_max_seq_len_target: int,
                                 length_ratio_mean: float,
                                 length_ratio_std: float,
                                 num_stds: int,
@@ -560,7 +165,6 @@ def get_max_input_output_length(supported_max_seq_len_source: Optional[int],
 
     :param supported_max_seq_len_source: The maximum source length supported by the models.
     :param supported_max_seq_len_target: The maximum target length supported by the models.
-    :param training_max_seq_len_source: The maximum source length observed during training.
     :param length_ratio_mean: The mean of the length ratio that was calculated on the raw sequences with special
            symbols such as EOS or BOS.
     :param length_ratio_std: The standard deviation of the length ratio.
@@ -578,30 +182,14 @@ def get_max_input_output_length(supported_max_seq_len_source: Optional[int],
     else:
         factor = length_ratio_mean + (length_ratio_std * num_stds)
 
-    if forced_max_input_len is None:
-        # Make sure that if there is a hard constraint on the maximum source or target length we never exceed this
-        # constraint. This is for example the case for learned positional embeddings, which are only defined for the
-        # maximum source and target sequence length observed during training.
-        if supported_max_seq_len_source is not None and supported_max_seq_len_target is None:
-            max_input_len = supported_max_seq_len_source
-        elif supported_max_seq_len_source is None and supported_max_seq_len_target is not None:
-            max_output_len = supported_max_seq_len_target - space_for_bos - space_for_eos
-            if np.ceil(factor * training_max_seq_len_source) > max_output_len:
-                max_input_len = int(np.floor(max_output_len / factor))
-            else:
-                max_input_len = training_max_seq_len_source
-        elif supported_max_seq_len_source is not None or supported_max_seq_len_target is not None:
-            max_output_len = supported_max_seq_len_target - space_for_bos - space_for_eos
-            if np.ceil(factor * supported_max_seq_len_source) > max_output_len:
-                max_input_len = int(np.floor(max_output_len / factor))
-            else:
-                max_input_len = supported_max_seq_len_source
-        else:
-            # Any source/target length is supported and max_input_len was not manually set, therefore we use the
-            # maximum length from training.
-            max_input_len = training_max_seq_len_source
+    max_output_len = supported_max_seq_len_target - space_for_bos - space_for_eos
+    if np.ceil(factor * supported_max_seq_len_source) > max_output_len:
+        max_input_len = int(np.floor(max_output_len / factor))
     else:
-        max_input_len = forced_max_input_len
+        max_input_len = supported_max_seq_len_source
+
+    if forced_max_input_len is not None:
+        max_input_len = min(max_input_len, forced_max_input_len)
 
     def get_max_output_length(input_length: int):
         """
@@ -611,9 +199,10 @@ def get_max_input_output_length(supported_max_seq_len_source: Optional[int],
         (see data_io.analyze_sequence_lengths)
         """
         if forced_max_output_len is not None:
-            return forced_max_output_len
+            output_len = forced_max_output_len
         else:
-            return int(np.ceil(factor * input_length)) + space_for_bos + space_for_eos
+            output_len = int(np.ceil(factor * input_length)) + space_for_bos + space_for_eos
+        return min(output_len, max_output_len)
 
     return max_input_len, get_max_output_length
 
@@ -1242,7 +831,7 @@ def _concat_translations(translations: List[Translation],
     target_ids = []
     attention_matrices = []
     beam_histories = []  # type: List[BeamHistory]
-    estimated_reference_length = None  # type: float
+    estimated_reference_length = None  # type: Optional[float]
 
     for idx, translation in enumerate(translations):
         if idx == len(translations) - 1:
@@ -1311,11 +900,12 @@ class Translator:
     def __init__(self,
                  context: mx.context.Context,
                  ensemble_mode: str,
-                 bucket_source_width: int,
                  length_penalty: LengthPenalty,
+                 batch_size: int,
+                 beam_size: int,
                  beam_prune: float,
                  beam_search_stop: str,
-                 models: List[InferenceModel],
+                 models: List[SockeyeModel],
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
                  nbest_size: int = 1,
@@ -1326,11 +916,18 @@ class Translator:
                  skip_topk: bool = False,
                  sample: int = None,
                  constant_length_ratio: float = 0.0,
-                 brevity_penalty: Optional[BrevityPenalty] = None) -> None:
+                 brevity_penalty: Optional[BrevityPenalty] = None,
+                 hybridize: bool = True,
+                 max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
+                 max_input_len: Optional[int] = None,
+                 max_output_len: Optional[int] = None) -> None:
         self.context = context
+        self.dtype = models[0].dtype
         self.length_penalty = length_penalty
         self.brevity_penalty = brevity_penalty
         self.constant_length_ratio = constant_length_ratio
+        self.batch_size = batch_size
+        self.beam_size = beam_size
         self.beam_prune = beam_prune
         self.beam_search_stop = beam_search_stop
         self.source_vocabs = source_vocabs
@@ -1346,23 +943,29 @@ class Translator:
         if strip_unknown_words:
             self.strip_ids.add(self.unk_id)
         self.models = models
-        utils.check_condition(all(models[0].source_with_eos == m.source_with_eos for m in models),
-                              "The source_with_eos property must match across models.")
-        self.source_with_eos = models[0].source_with_eos
+
+        # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
+        # set a common max_output length for all models.
+        self._max_input_length, self.get_max_output_length = models_max_input_output_length(
+            models,
+            max_output_length_num_stds,
+            forced_max_input_len=max_input_len,
+            forced_max_output_len=max_output_len)
+
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
-        self.beam_size = self.models[0].beam_size
         self.nbest_size = nbest_size
         utils.check_condition(self.beam_size >= nbest_size, 'nbest_size must be smaller or equal to beam_size.')
         if self.nbest_size > 1:
             utils.check_condition(self.beam_search_stop == C.BEAM_SEARCH_STOP_ALL,
                                   "nbest_size > 1 requires beam_search_stop to be set to 'all'")
 
-        # maximum allowed batch size of this translator instance
-        self.batch_size = self.models[0].max_batch_size
-
-        if any(m.skip_softmax for m in self.models):
-            utils.check_condition(len(self.models) == 1 and self.beam_size == 1,
-                                  "Skipping softmax cannot be enabled for ensembles or beam sizes > 1.")
+        # TODO clean up
+        output_scores = False  # set according to output_handler.reports_score()
+        sampling = False
+        self.skip_softmax = False
+        if len(self.models) == 1 and self.beam_size == 1 and not output_scores and not sampling:
+            self.skip_softmax = True
+            logger.info("Enabled skipping softmax for a single model and greedy decoding.")
 
         self.skip_topk = skip_topk
         if self.skip_topk:
@@ -1373,16 +976,10 @@ class Translator:
         utils.check_condition(not self.sample or self.restrict_lexicon is None,
                               "Sampling is not available when working with a restricted lexicon.")
 
-        # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
-        self._max_input_length = self.models[0].max_input_length
-        if bucket_source_width > 0:
-            self.buckets_source = data_io.define_buckets(self._max_input_length, step=bucket_source_width)
-        else:
-            self.buckets_source = [self._max_input_length]
-
         self._update_scores = UpdateScores()
         self._update_scores.initialize(ctx=self.context)
-        self._update_scores.hybridize(static_alloc=True, static_shape=True)
+        if hybridize:
+            self._update_scores.hybridize(static_alloc=True, static_shape=True)
 
         # Vocabulary selection leads to different vocabulary sizes across requests. Hence, we cannot use a
         # statically-shaped HybridBlock for the topk operation in this case; resorting to imperative topk
@@ -1399,7 +996,8 @@ class Translator:
                                  vocab_size=len(self.vocab_target))  # type: mx.gluon.HybridBlock
 
             self._top.initialize(ctx=self.context)
-            self._top.hybridize(static_alloc=True, static_shape=True)
+            if hybridize:
+                self._top.hybridize(static_alloc=True, static_shape=True)
         else:
             if self.skip_topk:
                 self._top = utils.top1  # type: Callable
@@ -1408,7 +1006,8 @@ class Translator:
 
         self._sort_by_index = SortByIndex()
         self._sort_by_index.initialize(ctx=self.context)
-        self._sort_by_index.hybridize(static_alloc=True, static_shape=True)
+        if hybridize:
+            self._sort_by_index.hybridize(static_alloc=True, static_shape=True)
 
         brevity_penalty_weight = self.brevity_penalty.weight if self.brevity_penalty is not None else 0.0
         self._update_finished = NormalizeAndUpdateFinished(pad_id=C.PAD_ID,
@@ -1417,11 +1016,13 @@ class Translator:
                                                            length_penalty_beta=self.length_penalty.beta,
                                                            brevity_penalty_weight=brevity_penalty_weight)
         self._update_finished.initialize(ctx=self.context)
-        self._update_finished.hybridize(static_alloc=True, static_shape=True)
+        if hybridize:
+            self._update_finished.hybridize(static_alloc=True, static_shape=True)
 
         self._prune_hyps = PruneHypotheses(threshold=self.beam_prune, beam_size=self.beam_size)
         self._prune_hyps.initialize(ctx=self.context)
-        self._prune_hyps.hybridize(static_alloc=True, static_shape=True)
+        if hybridize:
+            self._prune_hyps.hybridize(static_alloc=True, static_shape=True)
 
         self.global_avoid_trie = None
         if avoid_list is not None:
@@ -1439,7 +1040,7 @@ class Translator:
                                             brevity_penalty=self.brevity_penalty)  # type: Callable
 
         logger.info("Translator (%d model(s) beam_size=%d beam_prune=%s beam_search_stop=%s "
-                    "nbest_size=%s ensemble_mode=%s max_batch_size=%d buckets_source=%s avoiding=%d)",
+                    "nbest_size=%s ensemble_mode=%s max_batch_size=%d avoiding=%d dtype=%s)",
                     len(self.models),
                     self.beam_size,
                     'off' if not self.beam_prune else "%.2f" % self.beam_prune,
@@ -1447,18 +1048,15 @@ class Translator:
                     self.nbest_size,
                     "None" if len(self.models) == 1 else ensemble_mode,
                     self.max_batch_size,
-                    self.buckets_source,
-                    0 if self.global_avoid_trie is None else len(self.global_avoid_trie))
+                    0 if self.global_avoid_trie is None else len(self.global_avoid_trie),
+                    self.dtype)
 
     @property
     def max_input_length(self) -> int:
         """
         Returns maximum input length for TranslatorInput objects passed to translate()
         """
-        if self.source_with_eos:
-            return self._max_input_length - C.SPACE_FOR_XOS
-        else:
-            return self._max_input_length
+        return self._max_input_length - C.SPACE_FOR_XOS
 
     @property
     def max_batch_size(self) -> int:
@@ -1523,43 +1121,23 @@ class Translator:
                 translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
                                                             translation=empty_translation(add_nbest=(self.nbest_size > 1))))
             else:
-                # TODO(tdomhan): Remove branch without EOS with next major version bump, as future models will always be trained with source side EOS symbols
-                if self.source_with_eos:
-                    max_input_length_without_eos = self.max_input_length
+                if len(trans_input.tokens) > self.max_input_length:
                     # oversized input
-                    if len(trans_input.tokens) > max_input_length_without_eos:
-                        logger.debug(
-                            "Input %s has length (%d) that exceeds max input length (%d). "
-                            "Splitting into chunks of size %d.",
-                            trans_input.sentence_id, len(trans_input.tokens),
-                            self.buckets_source[-1], max_input_length_without_eos)
-                        chunks = [trans_input_chunk.with_eos()
-                                  for trans_input_chunk in trans_input.chunks(max_input_length_without_eos)]
-                        input_chunks.extend([IndexedTranslatorInput(trans_input_idx, chunk_idx, chunk_input)
-                                             for chunk_idx, chunk_input in enumerate(chunks)])
-                    # regular input
-                    else:
-                        input_chunks.append(IndexedTranslatorInput(trans_input_idx,
-                                                                   chunk_idx=0,
-                                                                   translator_input=trans_input.with_eos()))
+                    logger.debug(
+                        "Input %s has length (%d) that exceeds max input length (%d). "
+                        "Splitting into chunks of size %d.",
+                        trans_input.sentence_id, len(trans_input.tokens),
+                        self.max_input_length, self.max_input_length)
+                    chunks = [trans_input_chunk
+                              for trans_input_chunk in
+                              trans_input.chunks(self.max_input_length)]
+                    input_chunks.extend([IndexedTranslatorInput(trans_input_idx, chunk_idx, chunk_input)
+                                         for chunk_idx, chunk_input in enumerate(chunks)])
                 else:
-                    if len(trans_input.tokens) > self.max_input_length:
-                        # oversized input
-                        logger.debug(
-                            "Input %s has length (%d) that exceeds max input length (%d). "
-                            "Splitting into chunks of size %d.",
-                            trans_input.sentence_id, len(trans_input.tokens),
-                            self.buckets_source[-1], self.max_input_length)
-                        chunks = [trans_input_chunk
-                                  for trans_input_chunk in
-                                  trans_input.chunks(self.max_input_length)]
-                        input_chunks.extend([IndexedTranslatorInput(trans_input_idx, chunk_idx, chunk_input)
-                                             for chunk_idx, chunk_input in enumerate(chunks)])
-                    else:
-                        # regular input
-                        input_chunks.append(IndexedTranslatorInput(trans_input_idx,
-                                                                   chunk_idx=0,
-                                                                   translator_input=trans_input))
+                    # regular input
+                    input_chunks.append(IndexedTranslatorInput(trans_input_idx,
+                                                               chunk_idx=0,
+                                                               translator_input=trans_input))
 
             if trans_input.constraints is not None:
                 logger.info("Input %s has %d %s: %s", trans_input.sentence_id,
@@ -1633,13 +1211,16 @@ class Translator:
 
         :param trans_inputs: List of TranslatorInputs.
         :return NDArray of source ids (shape=(batch_size, bucket_key, num_factors)),
-                bucket key, lexicon for vocabulary restriction, list of raw constraint
+                NDArray of valid source lengths, lexicon for vocabulary restriction, list of raw constraint
                 lists, and list of phrases to avoid, and an NDArray of maximum output
                 lengths.
         """
         batch_size = len(trans_inputs)
-        bucket_key = data_io.get_bucket(max(len(inp.tokens) for inp in trans_inputs), self.buckets_source)
-        source = mx.nd.zeros((batch_size, bucket_key, self.num_source_factors), ctx=self.context)
+        lengths = [len(inp) for inp in trans_inputs]
+        source_length = mx.nd.array(lengths, ctx=self.context, dtype=self.dtype)  # shape: (batch_size,)
+        max_length = max(len(inp) for inp in trans_inputs)
+        source = mx.nd.zeros((batch_size, max_length, self.num_source_factors), ctx=self.context, dtype=self.dtype)
+
         restrict_lexicon = None  # type: Optional[lexicon.TopKLexicon]
         raw_constraints = [None] * batch_size  # type: List[Optional[constrained.RawConstraintList]]
         raw_avoid_list = [None] * batch_size  # type: List[Optional[constrained.RawConstraintList]]
@@ -1647,7 +1228,8 @@ class Translator:
         max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)
-            max_output_lengths.append(self.models[0].get_max_output_length(data_io.get_bucket(num_tokens, self.buckets_source)))
+            # NOTE: no longer using bucket for max output length as in Sockeye 1.0
+            max_output_lengths.append(self.get_max_output_length(num_tokens))
             source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
 
             factors = trans_input.factors if trans_input.factors is not None else []
@@ -1691,7 +1273,7 @@ class Translator:
                     logger.warning("Sentence %s: %s was found in the list of phrases to avoid; "
                                    "this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
 
-        return source, bucket_key, restrict_lexicon, raw_constraints, raw_avoid_list, \
+        return source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, \
                 mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
 
     def _make_result(self,
@@ -1747,16 +1329,16 @@ class Translator:
 
     def _translate_nd(self,
                       source: mx.nd.NDArray,
-                      source_length: int,
+                      source_length: mx.nd.NDArray,
                       restrict_lexicon: Optional[lexicon.TopKLexicon],
                       raw_constraints: List[Optional[constrained.RawConstraintList]],
                       raw_avoid_list: List[Optional[constrained.RawConstraintList]],
                       max_output_lengths: mx.nd.NDArray) -> List[Translation]:
         """
-        Translates source of source_length, given a bucket_key.
+        Translates source of source_length.
 
         :param source: Source ids. Shape: (batch_size, bucket_key, num_factors).
-        :param source_length: Bucket key.
+        :param source_length: Valid source lengths.
         :param restrict_lexicon: Lexicon to use for vocabulary restriction.
         :param raw_constraints: A list of optional constraint lists.
 
@@ -1769,42 +1351,52 @@ class Translator:
                                                            raw_avoid_list,
                                                            max_output_lengths))
 
-    def _encode(self, sources: mx.nd.NDArray, source_length: int) -> Tuple[List[ModelState], mx.nd.NDArray]:
+    def _encode(self, sources: mx.nd.NDArray, source_length: mx.nd.NDArray) -> Tuple[List[ModelState], mx.nd.NDArray]:
         """
         Returns a ModelState for each model representing the state of the model after encoding the source.
 
-        :param sources: Source ids. Shape: (batch_size, bucket_key, num_factors).
-        :param source_length: Bucket key.
+        :param sources: Source ids. Shape: (batch_size, max_length, num_factors).
+        :param source_length: Valid lengths for each input. Shape: (batch_size,)
         :return: List of ModelStates and the estimated reference length based on ratios averaged over models.
         """
-        model_states = []
-        ratios = []
-        for model in self.models:
-            state, ratio = model.run_encoder(sources, source_length)
-            model_states.append(state)
-            if ratio is not None:
-                ratios.append(ratio)
+        model_states = []  # type: List[ModelState]
+        predicted_output_lengths = []  # type: List[mx.nd.NDArray]
+        for model in self.models:  # type: SockeyeModel
+            # Encode input. Shape: (batch, length, num_hidden), (batch,)
+            source_encoded, source_encoded_lengths = model.encode(sources, valid_length=source_length)
 
-        # num_seq takes batch_size and beam_size into account
-        num_seq = model_states[0].states[0].shape[0]
-        if self.constant_length_ratio > 0.0:
-            # override all ratios with the constant value
-            length_ratios = mx.nd.full(val=self.constant_length_ratio, shape=(num_seq, 1), ctx=self.context)
-        else:
-            if len(ratios) > 0:  # some model predicted a ratio?
-                # average the ratios over the models that actually we able to predict them
-                length_ratios = mx.nd.mean(mx.nd.stack(*ratios, axis=1), axis=1)
+            # Length task prediction
+            if model.length_ratio is not None:
+                # (batch,)
+                predicted_length_ratio = model.predict_length_ratio(source_encoded, source_encoded_lengths)
+                predicted_output_length = predicted_length_ratio * source_encoded_lengths
+            elif self.constant_length_ratio > 0.0:
+                # (batch,)
+                predicted_output_length = source_encoded_lengths * self.constant_length_ratio
             else:
-                length_ratios = mx.nd.zeros((num_seq, 1), ctx=self.context)
+                # (batch,)
+                predicted_output_length = mx.nd.zeros_like(source_encoded_lengths)
+            predicted_output_lengths.append(predicted_output_length)
 
-        encoded_source_length=self.models[0].encoder.get_encoded_seq_len(source_length)
-        return model_states, length_ratios * encoded_source_length
+            # Decoder init states
+            decoder_init_states = model.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths, is_inference=True)
+            # replicate encoder/init module results beam size times. Shape: (batch*beam, ...)
+            decoder_init_states = [s.repeat(repeats=self.beam_size, axis=0) for s in decoder_init_states]
+            model_state = ModelState(decoder_init_states)
+            model_states.append(model_state)
 
+        # (batch,)
+        # average the ratios over the models
+        predicted_output_lengths = mx.nd.mean(mx.nd.stack(*predicted_output_lengths, axis=0), axis=0)
+        # (batch, 1)
+        predicted_output_lengths = mx.nd.expand_dims(predicted_output_lengths, axis=1)
+        # (batch*beam, 1)
+        predicted_output_lengths = mx.nd.repeat(predicted_output_lengths, repeats=self.beam_size, axis=0)
+
+        return model_states, predicted_output_lengths.astype('float32', copy=False)
 
     def _decode_step(self,
                      prev_word: mx.nd.NDArray,
-                     step: int,
-                     source_length: int,
                      states: List[ModelState],
                      models_output_layer_w: List[mx.nd.NDArray],
                      models_output_layer_b: List[mx.nd.NDArray]) \
@@ -1813,34 +1405,39 @@ class Translator:
         Returns decoder predictions (combined from all models), attention scores, and updated states.
 
         :param prev_word: Previous words of hypotheses. Shape: (batch_size * beam_size,).
-        :param step: Beam search iteration.
-        :param source_length: Length of the input sequence.
         :param states: List of model states.
         :param models_output_layer_w: Custom model weights for logit computation (empty for none).
         :param models_output_layer_b: Custom model biases for logit computation (empty for none).
         :return: (scores, attention scores, list of model states)
         """
-        bucket_key = (source_length, step)
-
         model_outs, model_attention_probs, model_states = [], [], []
         # We use zip_longest here since we'll have empty lists when not using restrict_lexicon
         for model, out_w, out_b, state in itertools.zip_longest(
                 self.models, models_output_layer_w, models_output_layer_b, states):
-            decoder_out, attention_probs, state = model.run_decoder(prev_word, bucket_key, state)
+            model = model  # type: SockeyeModel
+            state = state  # type: ModelState
+            prev_word = prev_word.astype(self.dtype, copy=False)
+            decoder_out, new_states, step_additional_outputs = model.decode_step(prev_word, state.states)
+            state.states = new_states
+
             # Compute logits and softmax with restricted vocabulary
             if self.restrict_lexicon:
+                raise NotImplementedError()
+                # TODO: FP16 safety below
                 # Apply output layer outside decoder module.
                 logits = model.output_layer(decoder_out, out_w, out_b)
-                if model.skip_softmax:
+                if self.skip_softmax:
                     model_out = logits  # raw logits
                 else:
                     model_out = mx.nd.softmax(logits)  # normalized probabilities
             else:
-                # Output layer is applied inside decoder module.
-                # if model.skip_softmax decoder_out represents logits, normalized probabilities else.
-                model_out = decoder_out
+                logits = model.output_layer(decoder_out)
+                if self.skip_softmax:
+                    model_out = logits.astype('float32', copy=False)
+                else:
+                    model_out = mx.nd.softmax(logits.astype('float32', copy=False), axis=-1)
             model_outs.append(model_out)
-            model_attention_probs.append(attention_probs)
+            model_attention_probs.append(mx.nd.zeros_like(logits))  # TODO
             model_states.append(state)
         scores, attention_probs = self._combine_predictions(model_outs, model_attention_probs)
         return scores, attention_probs, model_states
@@ -1863,7 +1460,7 @@ class Translator:
 
         # combine model predictions and convert to neg log probs
         if len(self.models) == 1:
-            if self.models[0].skip_softmax:
+            if self.skip_softmax:
                 scores = -model_outputs[0]
             else:
                 scores = -mx.nd.log(model_outputs[0])  # pylint: disable=invalid-unary-operand-type
@@ -1873,7 +1470,7 @@ class Translator:
 
     def _beam_search(self,
                      source: mx.nd.NDArray,
-                     source_length: int,
+                     source_length: mx.nd.NDArray,
                      restrict_lexicon: Optional[lexicon.TopKLexicon],
                      raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                      raw_avoid_list: List[Optional[constrained.RawConstraintList]],
@@ -1889,7 +1486,7 @@ class Translator:
         Translates multiple sentences using beam search.
 
         :param source: Source ids. Shape: (batch_size, bucket_key, num_factors).
-        :param source_length: Max source length.
+        :param source_length: Valid source lengths. Shape: (batch_size,).
         :param restrict_lexicon: Lexicon to use for vocabulary restriction.
         :param raw_constraint_list: A list of optional lists containing phrases (as lists of target word IDs)
                that must appear in each output.
@@ -1902,13 +1499,8 @@ class Translator:
         batch_size = source.shape[0]
         logger.debug("_beam_search batch size: %d", batch_size)
 
-        # Length of encoded sequence (may differ from initial input length)
-        encoded_source_length = self.models[0].encoder.get_encoded_seq_len(source_length)
-        utils.check_condition(all(encoded_source_length ==
-                                  model.encoder.get_encoded_seq_len(source_length) for model in self.models),
-                              "Models must agree on encoded sequence length")
         # Maximum output length
-        max_output_length = self.models[0].get_max_output_length(source_length)
+        max_output_length = self.get_max_output_length(source.shape[1])
 
         # General data structure: batch_size * beam_size blocks in total;
         # a full beam for each sentence, folloed by the next beam-block for the next sentence and so on
@@ -2007,8 +1599,6 @@ class Translator:
             # target_dists: (batch_size * beam_size, target_vocab_size)
             # attention_scores: (batch_size * beam_size, bucket_key)
             target_dists, attention_scores, model_states = self._decode_step(prev_word=best_word_indices,
-                                                                             step=t,
-                                                                             source_length=source_length,
                                                                              states=model_states,
                                                                              models_output_layer_w=models_output_layer_w,
                                                                              models_output_layer_b=models_output_layer_b)
@@ -2287,6 +1877,212 @@ class Translator:
                 [self.vocab_target_inv[x] for x in word_ids if x != 0])
             logger.info('%d %d %d %d %.2f %s', i + 1, finished[i].asscalar(), inactive[i].asscalar(), unmet, score,
                         hypothesis)
+
+
+class BeamSearch(mx.gluon.Block):
+
+    def __init__(self, beam_size: int, start_id: int, eos_id: int, target_vocab_size: int, context,
+                 length_penalty: LengthPenalty,
+                 brevity_penalty: Optional[BrevityPenalty] = None):
+        super().__init__(prefix="BeamSearch")
+        self.beam_size = beam_size
+        self.start_id = start_id
+        self.context = context
+        self.target_vocab_size = target_vocab_size
+        
+        with self.name_scope():
+
+            self._update_scores = UpdateScores()
+
+            if self.skip_topk:
+                self._top = Top1()
+            else:
+                self._top = TopK(k=self.beam_size, vocab_size=self.target_vocab_size)
+
+            self._sort_by_index = SortByIndex()
+
+            brevity_penalty_weight = self.brevity_penalty.weight if self.brevity_penalty is not None else 0.0
+            self._update_finished = NormalizeAndUpdateFinished(pad_id=C.PAD_ID,
+                                                               eos_id=eos_id,
+                                                               length_penalty_alpha=self.length_penalty.alpha,
+                                                               length_penalty_beta=self.length_penalty.beta,
+                                                               brevity_penalty_weight=brevity_penalty_weight)
+
+    def forward(self, source: mx.nd.NDArray, source_length: mx.nd.NDArray):
+        batch_size = source.shape[0]
+        logger.debug("_beam_search batch size: %d", batch_size)
+
+        # Maximum output length
+        max_output_length = self.get_max_output_length(source.shape[1])
+
+        # General data structure: batch_size * beam_size blocks in total;
+        # a full beam for each sentence, folloed by the next beam-block for the next sentence and so on
+
+        best_word_indices = mx.nd.full((batch_size * self.beam_size,), val=self.start_id, ctx=self.context,
+                                       dtype='int32')
+
+        # offset for hypothesis indices in batch decoding
+        offset = mx.nd.repeat(mx.nd.arange(0, batch_size * self.beam_size, self.beam_size,
+                                           dtype='int32', ctx=self.context), self.beam_size)
+
+        # locations of each batch item when first dimension is (batch * beam)
+        batch_indices = mx.nd.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32', ctx=self.context)
+        first_step_mask = mx.nd.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context)
+        first_step_mask[batch_indices] = 1.0
+        pad_dist = mx.nd.full((batch_size * self.beam_size, self.target_vocab_size - 1), val=np.inf,
+                              ctx=self.context)
+
+        # Best word and hypotheses indices across beam search steps from topk operation.
+        best_hyp_indices_list = []  # type: List[mx.nd.NDArray]
+        best_word_indices_list = []  # type: List[mx.nd.NDArray]
+
+        lengths = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context)
+        finished = mx.nd.zeros((batch_size * self.beam_size,), ctx=self.context, dtype='int32')
+
+        # Extending max_output_lengths to shape (batch_size * beam_size,)
+        max_output_lengths = mx.nd.repeat(max_output_lengths, self.beam_size)
+
+        # Attention distributions across beam search steps
+        attentions = []  # type: List[mx.nd.NDArray]
+
+        # scores_accumulated: chosen smallest scores in scores (ascending).
+        scores_accumulated = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context)
+
+        # If using a top-k lexicon, select param rows for logit computation that correspond to the
+        # target vocab for this sentence.
+        models_output_layer_w = list()
+        models_output_layer_b = list()
+
+        # (0) encode source sentence, returns a list
+        model_states, estimated_reference_lengths = self._encode(source, source_length)
+
+        # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
+        # item on the beam for each sentence
+        inactive = mx.nd.zeros((batch_size * self.beam_size), dtype='int32', ctx=self.context)
+        t = 1
+        for t in range(1, max_output_length):
+            # (1) obtain next predictions and advance models' state
+            # target_dists: (batch_size * beam_size, target_vocab_size)
+            # attention_scores: (batch_size * beam_size, bucket_key)
+            target_dists, attention_scores, model_states = self._decode_step(prev_word=best_word_indices,
+                                                                             states=model_states,
+                                                                             models_output_layer_w=models_output_layer_w,
+                                                                             models_output_layer_b=models_output_layer_b)
+
+            # (2) Produces the accumulated cost of target words in each row.
+            # There is special treatment for finished and inactive rows: inactive rows are inf everywhere;
+            # finished rows are inf everywhere except column zero, which holds the accumulated model score
+            scores = self._update_scores.forward(target_dists, finished, inactive, scores_accumulated, pad_dist)
+
+            # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
+            # far as the active beam size for each sentence.
+
+            # On the first timestep, all hypotheses have identical histories, so force topk() to choose extensions
+            # of the first row only by setting all other rows to inf
+            if t == 1 and not self.skip_topk:
+                scores *= first_step_mask
+
+            best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, offset)
+
+            # (4) Reorder fixed-size beam data according to best_hyp_indices (ascending)
+            finished, lengths, attention_scores, estimated_reference_lengths \
+                = self._sort_by_index.forward(best_hyp_indices,
+                                              finished,
+                                              lengths,
+                                              attention_scores,
+                                              estimated_reference_lengths)
+
+            # (5) Normalize the scores of newly finished hypotheses. Note that after this until the
+            # next call to topk(), hypotheses may not be in sorted order.
+            finished, scores_accumulated, lengths = self._update_finished.forward(best_word_indices,
+                                                                                  max_output_lengths,
+                                                                                  finished,
+                                                                                  scores_accumulated,
+                                                                                  lengths,
+                                                                                  estimated_reference_lengths)
+
+            # Collect best hypotheses, best word indices, and attention scores
+            best_hyp_indices_list.append(best_hyp_indices)
+            best_word_indices_list.append(best_word_indices)
+            attentions.append(attention_scores)
+
+            if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
+                at_least_one_finished = finished.reshape((batch_size, self.beam_size)).sum(axis=1) > 0
+                if at_least_one_finished.sum().asscalar() == batch_size:
+                    break
+            else:
+                if finished.sum().asscalar() == batch_size * self.beam_size:  # all finished
+                    break
+
+            # (9) update models' state with winning hypotheses (ascending)
+            for ms in model_states:
+                ms.sort_state(best_hyp_indices)
+
+        logger.debug("Finished after %d / %d steps.", t + 1, max_output_length)
+
+        # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
+        folded_accumulated_scores = scores_accumulated.reshape((batch_size,
+                                                                self.beam_size * scores_accumulated.shape[-1]))
+        indices = mx.nd.cast(mx.nd.argsort(folded_accumulated_scores, axis=1), dtype='int32').reshape((-1,))
+        best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated.shape) + offset
+        best_hyp_indices_list.append(best_hyp_indices)
+        lengths = lengths.take(best_hyp_indices)
+        scores_accumulated = scores_accumulated.take(best_hyp_indices)
+
+        all_best_hyp_indices = mx.nd.stack(*best_hyp_indices_list, axis=1)
+        all_best_word_indices = mx.nd.stack(*best_word_indices_list, axis=1)
+        all_attentions = mx.nd.stack(*attentions, axis=1)
+
+        return all_best_hyp_indices.asnumpy(), \
+               all_best_word_indices.asnumpy(), \
+               all_attentions.asnumpy(), \
+               scores_accumulated.asnumpy(), \
+               lengths.asnumpy().astype('int32'), \
+               estimated_reference_lengths.asnumpy()
+
+    def _encode(self, sources: mx.nd.NDArray, source_length: mx.nd.NDArray) -> Tuple[List[ModelState], mx.nd.NDArray]:
+        """
+        Returns a ModelState for each model representing the state of the model after encoding the source.
+
+        :param sources: Source ids. Shape: (batch_size, max_length, num_factors).
+        :param source_length: Valid lengths for each input. Shape: (batch_size,)
+        :return: List of ModelStates and the estimated reference length based on ratios averaged over models.
+        """
+        model_states = []  # type: List[ModelState]
+        predicted_output_lengths = []  # type: List[mx.nd.NDArray]
+        for model in self.models:  # type: SockeyeModel
+            # Encode input. Shape: (batch, length, num_hidden), (batch,)
+            source_encoded, source_encoded_lengths = model.encode(sources, valid_length=source_length)
+
+            # Length task prediction
+            if model.length_ratio is not None:
+                # (batch,)
+                predicted_length_ratio = model.predict_length_ratio(source_encoded, source_encoded_lengths)
+                predicted_output_length = predicted_length_ratio * source_encoded_lengths
+            elif self.constant_length_ratio > 0.0:
+                # (batch,)
+                predicted_output_length = source_encoded_lengths * self.constant_length_ratio
+            else:
+                # (batch,)
+                predicted_output_length = mx.nd.zeros_like(source_encoded_lengths)
+            predicted_output_lengths.append(predicted_output_length)
+
+            # Decoder init states
+            decoder_init_states = model.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths, is_inference=True)
+            # replicate encoder/init module results beam size times. Shape: (batch*beam, ...)
+            decoder_init_states = [s.repeat(repeats=self.beam_size, axis=0) for s in decoder_init_states]
+            model_state = ModelState(decoder_init_states)
+            model_states.append(model_state)
+
+        # (batch,)
+        # average the ratios over the models
+        predicted_output_lengths = mx.nd.mean(mx.nd.stack(*predicted_output_lengths, axis=0), axis=0)
+        # (batch, 1)
+        predicted_output_lengths = mx.nd.expand_dims(predicted_output_lengths, axis=1)
+        # (batch*beam, 1)
+        predicted_output_lengths = mx.nd.repeat(predicted_output_lengths, repeats=self.beam_size, axis=0)
+
+        return model_states, predicted_output_lengths
 
 
 class PruneHypotheses(mx.gluon.HybridBlock):

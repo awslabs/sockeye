@@ -807,6 +807,9 @@ def add_model_parameters(params):
                               help="Adds weight normalization to decoder output layers "
                                    "(and all convolutional weight matrices for CNN decoders). Default: %(default)s.")
 
+    model_params.add_argument('--dtype', default=C.DTYPE_FP32, choices=[C.DTYPE_FP32, C.DTYPE_FP16],
+                              help="Data type.")
+
 
 def add_batch_args(params, default_batch_size=4096):
     params.add_argument('--batch-size', '-b',
@@ -844,11 +847,6 @@ def add_training_args(params):
                               default=0.1,
                               type=float,
                               help='Smoothing constant for label smoothing. Default: %(default)s.')
-    train_params.add_argument('--loss-normalization-type',
-                              default=C.LOSS_NORM_VALID,
-                              choices=[C.LOSS_NORM_VALID, C.LOSS_NORM_BATCH],
-                              help='How to normalize the loss. By default loss is normalized by the number '
-                                   'of valid (non-PAD) tokens (%s).' % C.LOSS_NORM_VALID)
 
     train_params.add_argument('--length-task',
                               type=str,
@@ -865,11 +863,6 @@ def add_training_args(params):
                               default=1,
                               help='Number of fully-connected layers for predicting the length ratio. Default %(default)s.')
 
-    train_params.add_argument('--metrics',
-                              nargs='+',
-                              default=[C.PERPLEXITY],
-                              choices=[C.PERPLEXITY, C.ACCURACY, C.LENRATIO_MSE],
-                              help='Names of metrics to track on training and validation data. Default: %(default)s.')
     train_params.add_argument('--optimized-metric',
                               default=C.PERPLEXITY,
                               choices=C.METRICS,
@@ -898,14 +891,8 @@ def add_training_args(params):
     train_params.add_argument(C.TRAIN_ARGS_CHECKPOINT_INTERVAL,
                               type=int_greater_or_equal(1),
                               default=4000,
-                              help='Checkpoint and evaluate every x updates/batches. Default: %(default)s.')
-    train_params.add_argument(C.TRAIN_ARGS_CHECKPOINT_FREQUENCY,
-                              type=int_greater_or_equal(1),
-                              dest="checkpoint_interval",
-                              deprecated_dest="checkpoint_frequency",
-                              action=StoreDeprecatedAction,
-                              default=argparse.SUPPRESS,
-                              help=argparse.SUPPRESS)
+                              help='Checkpoint and evaluate every x updates (update-interval * batches). '
+                                   'Default: %(default)s.')
     train_params.add_argument('--max-num-checkpoint-not-improved',
                               type=int,
                               default=32,
@@ -995,15 +982,6 @@ def add_training_args(params):
                               help="The MXNet kvstore to use. 'device' is recommended for single process training. "
                                    "Use any of 'dist_sync', 'dist_device_sync' and 'dist_async' for distributed "
                                    "training. Default: %(default)s.")
-    train_params.add_argument("--gradient-compression-type",
-                              type=str,
-                              default=C.GRADIENT_COMPRESSION_NONE,
-                              choices=C.GRADIENT_COMPRESSION_TYPES,
-                              help='Type of gradient compression to use. Default: %(default)s.')
-    train_params.add_argument("--gradient-compression-threshold",
-                              type=float,
-                              default=0.5,
-                              help="Threshold for gradient compression if --gctype is '2bit'. Default: %(default)s.")
 
     train_params.add_argument('--weight-init',
                               type=str,
@@ -1084,16 +1062,6 @@ def add_training_args(params):
                               default=0,
                               help="Number of warmup steps. If set to x, linearly increases learning rate from 10%% "
                                    "to 100%% of the initial learning rate. Default: %(default)s.")
-    train_params.add_argument('--learning-rate-decay-param-reset',
-                              action='store_true',
-                              help='Resets model parameters to current best when learning rate is reduced due to the '
-                                   'value of --learning-rate-reduce-num-not-improved. Default: %(default)s.')
-    train_params.add_argument('--learning-rate-decay-optimizer-states-reset',
-                              choices=C.LR_DECAY_OPT_STATES_RESET_CHOICES,
-                              default=C.LR_DECAY_OPT_STATES_RESET_OFF,
-                              help="Action to take on optimizer states (e.g. Adam states) when learning rate is "
-                                   "reduced due to the value of --learning-rate-reduce-num-not-improved. "
-                                   "Default: %(default)s.")
 
     train_params.add_argument('--rnn-forget-bias',
                               default=0.0,
@@ -1374,11 +1342,8 @@ def add_inference_args(params):
     add_length_penalty_args(decode_params)
     add_brevity_penalty_args(decode_params)
 
-    decode_params.add_argument('--override-dtype',
-                               default=None,
-                               type=str,
-                               help='EXPERIMENTAL: may be changed or removed in future. Overrides training dtype of '
-                                    'encoders and decoders during inference. Default: %(default)s.')
+    decode_params.add_argument('--dtype', default=C.DTYPE_FP32, choices=[C.DTYPE_FP32, C.DTYPE_FP16],
+                               help="Data type.")
 
 
 def add_length_penalty_args(params):

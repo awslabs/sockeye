@@ -76,18 +76,9 @@ def run_translate(args: argparse.Namespace):
 
         models, source_vocabs, target_vocab = inference.load_models(
             context=context,
-            max_input_len=args.max_input_len,
-            beam_size=args.beam_size,
-            batch_size=args.batch_size,
             model_folders=args.models,
             checkpoints=args.checkpoints,
-            softmax_temperature=args.softmax_temperature,
-            max_output_length_num_stds=args.max_output_length_num_stds,
-            decoder_return_logit_inputs=args.restrict_lexicon is not None,
-            cache_output_layer_w_b=args.restrict_lexicon is not None,
-            override_dtype=args.override_dtype,
-            output_scores=output_handler.reports_score(),
-            sampling=args.sample)
+            dtype=args.dtype)
 
         restrict_lexicon = None  # type: Optional[Union[TopKLexicon, Dict[str, TopKLexicon]]]
         if args.restrict_lexicon is not None:
@@ -130,9 +121,10 @@ def run_translate(args: argparse.Namespace):
 
         translator = inference.Translator(context=context,
                                           ensemble_mode=args.ensemble_mode,
-                                          bucket_source_width=args.bucket_width,
                                           length_penalty=inference.LengthPenalty(args.length_penalty_alpha,
                                                                                  args.length_penalty_beta),
+                                          batch_size=args.batch_size,
+                                          beam_size=args.beam_size,
                                           beam_prune=args.beam_prune,
                                           beam_search_stop=args.beam_search_stop,
                                           nbest_size=args.nbest_size,

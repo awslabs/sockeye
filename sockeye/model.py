@@ -14,18 +14,17 @@
 import copy
 import logging
 import os
-from typing import cast, Dict, Optional, Tuple
+from typing import cast, Optional, Tuple, Union, List
 
 import mxnet as mx
-
 from sockeye import __version__
 from sockeye.config import Config
+
 from . import constants as C
 from . import data_io
 from . import decoder
 from . import encoder
 from . import layers
-from . import loss
 from . import utils
 
 logger = logging.getLogger(__name__)
@@ -44,7 +43,7 @@ class ModelConfig(Config):
     :param config_embed_target: Embedding config for target.
     :param config_encoder: Encoder configuration.
     :param config_decoder: Decoder configuration.
-    :param config_loss: Loss configuration.
+    :param config_length_task: Optional length task configuration.
     :param weight_tying: Enables weight tying if True.
     :param weight_tying_type: Determines which weights get tied. Must be set if weight_tying is enabled.
     :param lhuc: LHUC (Vilar 2018) is applied at some part of the model.
@@ -58,8 +57,6 @@ class ModelConfig(Config):
                  config_embed_target: encoder.EmbeddingConfig,
                  config_encoder: encoder.EncoderConfig,
                  config_decoder: decoder.DecoderConfig,
-                 config_loss: loss.LossConfig,
-                 config_length_task_loss: Optional[loss.LossConfig] = None,
                  config_length_task: layers.LengthRatioConfig = None,
                  weight_tying: bool = False,
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
@@ -73,8 +70,6 @@ class ModelConfig(Config):
         self.config_embed_target = config_embed_target
         self.config_encoder = config_encoder
         self.config_decoder = config_decoder
-        self.config_loss = config_loss
-        self.config_length_task_loss = config_length_task_loss
         self.config_length_task = config_length_task
         self.weight_tying = weight_tying
         self.weight_tying_type = weight_tying_type
@@ -84,7 +79,7 @@ class ModelConfig(Config):
         self.lhuc = lhuc
 
 
-class SockeyeModel:
+class SockeyeModel(mx.gluon.Block):
     """
     SockeyeModel shares components needed for both training and inference.
     The main components of a Sockeye model are
@@ -101,49 +96,116 @@ class SockeyeModel:
     :param prefix: Name prefix for all parameters of this model.
     """
 
-    def __init__(self, config: ModelConfig, prefix: str = '') -> None:
+    def __init__(self, config: ModelConfig, prefix: str = '', **kwargs) -> None:
+        super().__init__(prefix=prefix, **kwargs)
         self.config = copy.deepcopy(config)
-        self.config.freeze()
-        self.prefix = prefix
         logger.info("%s", self.config)
+        self.dtype = 'float32'
 
-        # encoder & decoder first (to know the decoder depth)
-        self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix)
-        self.decoder = decoder.get_decoder(self.config.config_decoder, prefix=self.prefix)
+        with self.name_scope():
+            # source & target embeddings
+            self.source_embed_weight, self.target_embed_weight, self.output_weight = self._get_embedding_weights()
 
-        # source & target embeddings
-        embed_weight_source, embed_weight_target, out_weight_target = self._get_embed_weights(self.prefix)
-        if isinstance(self.config.config_embed_source, encoder.PassThroughEmbeddingConfig):
-            self.embedding_source = encoder.PassThroughEmbedding(self.config.config_embed_source)  # type: encoder.Encoder
-        else:
-            self.embedding_source = encoder.Embedding(self.config.config_embed_source,
-                                                      prefix=self.prefix + C.SOURCE_EMBEDDING_PREFIX,
-                                                      embed_weight=embed_weight_source,
-                                                      is_source=True)  # type: encoder.Encoder
+            self.embedding_source = encoder.Embedding(config.config_embed_source,
+                                                      prefix=self.prefix,
+                                                      is_source=True,
+                                                      embed_weight=self.source_embed_weight)
+            self.embedding_target = encoder.Embedding(config.config_embed_target,
+                                                      prefix=self.prefix,
+                                                      is_source=False,
+                                                      embed_weight=self.target_embed_weight)
 
-        self.embedding_target = encoder.Embedding(self.config.config_embed_target,
-                                                  prefix=self.prefix + C.TARGET_EMBEDDING_PREFIX,
-                                                  embed_weight=embed_weight_target)
+            # encoder & decoder first (to know the decoder depth)
+            self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix)
+            self.decoder = decoder.get_decoder(self.config.config_decoder, prefix=self.prefix)
+            # TODO
+            self.decoder = cast(decoder.TransformerDecoder, self.decoder)
 
-        # output layer
-        self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
-                                               vocab_size=self.config.vocab_target_size,
-                                               weight=out_weight_target,
-                                               weight_normalization=self.config.weight_normalization,
-                                               prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
+            self.output_layer = layers.OutputLayer(vocab_size=self.config.vocab_target_size,
+                                                   weight=self.output_weight)
 
-        # create length ratio prediction layer(s)
-        self.length_ratio = None
-        if self.config.config_length_task is not None:
-            if self.config.config_length_task.weight > 0.0:
+            self.length_ratio = None
+            if self.config.config_length_task is not None:
+                utils.check_condition(self.config.config_length_task.weight > 0.0,
+                                      'Auxiliary length task requested, but its loss weight is zero')
                 self.length_ratio = layers.LengthRatio(hidden_size=self.encoder.get_num_hidden(),
                                                        num_layers=self.config.config_length_task.num_layers,
                                                        prefix=self.prefix + C.LENRATIOS_OUTPUT_LAYER_PREFIX)
-            else:
-                logger.warning("Auxiliary length task requested, but its loss weight is zero -- this will have no effect.")
 
-        self.params = None  # type: Optional[Dict]
-        self.aux_params = None  # type: Optional[Dict]
+    def cast(self, dtype):
+        self.dtype = dtype
+        super().cast(dtype)
+
+    def encode(self, inputs, valid_length=None):
+        """Encode the input sequence.
+
+        Parameters
+        ----------
+        inputs : NDArray
+        states : list of NDArrays or None, default None
+        valid_length : NDArray or None, default None
+
+        Returns
+        -------
+        outputs : list
+            Outputs of the encoder.
+        """
+        source_embed, source_embed_length = self.embedding_source(inputs, valid_length)
+        source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
+        return source_encoded, source_encoded_length
+
+    def decode_step(self, step_input, states):
+        """One step decoding of the translation model.
+
+        Parameters
+        ----------
+        step_input : NDArray
+            Shape (batch_size,)
+        states : list of NDArrays
+
+        Returns
+        -------
+        step_output : NDArray
+            Shape (batch_size, C_out)
+        states : list
+        step_additional_outputs : list
+            Additional outputs of the step, e.g, the attention weights
+        """
+        # TODO: do we need valid length!?
+        valid_length = mx.nd.ones(shape=(step_input.shape[0],), ctx=step_input.context)
+        # target_embed: (batch_size, num_factors, num_hidden)  # TODO(FH): why num_factors?
+        target_embed, _ = self.embedding_target(step_input, valid_length=valid_length)
+
+        # TODO: add step_additional_outputs
+        step_additional_outputs = []
+        # TODO: add support for states from the decoder
+        step_output, new_states = self.decoder(target_embed, states)
+
+        return step_output, new_states, step_additional_outputs
+
+    def forward(self, source, source_length, target, target_length):  # pylint: disable=arguments-differ
+        source_embed, source_embed_length = self.embedding_source(source, source_length)
+        target_embed, target_embed_length = self.embedding_target(target, target_length)
+        source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
+
+        states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, is_inference=False)
+        target = self.decoder.decode_seq(target_embed, states=states)
+
+        output = self.output_layer(target)
+
+        if self.length_ratio is not None:
+            # predicted_length_ratios: (batch_size,)
+            predicted_length_ratio = self.length_ratio(source_encoded, source_encoded_length)
+            return {C.LOGITS_NAME: output, C.LENRATIO_NAME: predicted_length_ratio}
+        else:
+            return {C.LOGITS_NAME: output}
+
+    def predict_length_ratio(self, source_encoded, source_encoded_length):
+        utils.check_condition(self.length_ratio is not None,
+                              "Cannot predict length ratio, model does not seem to be trained with length task.")
+        # predicted_length_ratios: (batch_size,)
+        predicted_length_ratio = self.length_ratio(source_encoded, source_encoded_length)
+        return predicted_length_ratio
 
     def save_config(self, folder: str):
         """
@@ -153,7 +215,7 @@ class SockeyeModel:
         """
         fname = os.path.join(folder, C.CONFIG_NAME)
         self.config.save(fname)
-        logger.info('Saved config to "%s"', fname)
+        logger.info('Saved model config to "%s"', fname)
 
     @staticmethod
     def load_config(fname: str) -> ModelConfig:
@@ -164,36 +226,35 @@ class SockeyeModel:
         :return: Model configuration.
         """
         config = ModelConfig.load(fname)
-        logger.info('ModelConfig loaded from "%s"', fname)
+        logger.info('Loaded model config from "%s"', fname)
         return cast(ModelConfig, config)  # type: ignore
 
     def save_params_to_file(self, fname: str):
         """
         Saves model parameters to file.
-
         :param fname: Path to save parameters to.
         """
-        if self.aux_params is not None:
-            utils.save_params(self.params.copy(), fname, self.aux_params.copy())
-        else:
-            utils.save_params(self.params.copy(), fname)
+        self.save_parameters(fname)
         logging.info('Saved params to "%s"', fname)
 
-    def load_params_from_file(self, fname: str):
+    def load_params_from_file(self,
+                              fname: str,
+                              ctx: Union[mx.Context, List[mx.Context]] = None,
+                              allow_missing: bool = False,
+                              ignore_extra: bool = False):
         """
         Loads and sets model parameters from file.
 
         :param fname: Path to load parameters from.
+        :param ctx: Context to load parameters to.
+        :param allow_missing: Whether to not fail on missing parameters.
+        :param ignore_extra: Whether to ignore extra parameters in the file.
         """
         utils.check_condition(os.path.exists(fname), "No model parameter file found under %s. "
                                                      "This is either not a model directory or the first training "
                                                      "checkpoint has not happened yet." % fname)
-        self.params, self.aux_params = utils.load_params(fname)
-        utils.check_condition(all(name.startswith(self.prefix) for name in self.params.keys()),
-                              "Not all parameter names start with model prefix '%s'" % self.prefix)
-        utils.check_condition(all(name.startswith(self.prefix) for name in self.aux_params.keys()),
-                              "Not all auxiliary parameter names start with model prefix '%s'" % self.prefix)
-        logger.info('Loaded params from "%s"', fname)
+        self.load_parameters(fname, ctx=ctx, allow_missing=allow_missing, ignore_extra=ignore_extra)
+        logger.info('Loaded params from "%s" to "%s"', fname, mx.cpu() if ctx is None else ctx)
 
     @staticmethod
     def save_version(folder: str):
@@ -206,59 +267,80 @@ class SockeyeModel:
         with open(fname, "w") as out:
             out.write(__version__)
 
-    def _get_embed_weights(self, prefix: str) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol]:
+    def _get_embedding_weights(self) -> Tuple[mx.gluon.Parameter, mx.gluon.Parameter, mx.gluon.Parameter]:
         """
-        Returns embedding parameters for source and target.
+        Returns embeddings for source, target, and output layer.
         When source and target embeddings are shared, they are created here and passed in to each side,
         instead of being created in the Embedding constructors.
 
-        :param prefix: Prefix.
-        :return: Tuple of source and target parameter symbols.
+        :return: Tuple of source, target, and output embedding parameters.
         """
-        w_embed_source = mx.sym.Variable(prefix + C.SOURCE_EMBEDDING_PREFIX + "weight",
-                                         shape=(self.config.config_embed_source.vocab_size,
-                                                self.config.config_embed_source.num_embed))
-        w_embed_target = mx.sym.Variable(prefix + C.TARGET_EMBEDDING_PREFIX + "weight",
-                                         shape=(self.config.config_embed_target.vocab_size,
-                                                self.config.config_embed_target.num_embed))
+        share_embed = self.config.weight_tying and \
+                      C.WEIGHT_TYING_SRC in self.config.weight_tying_type and \
+                      C.WEIGHT_TYING_TRG in self.config.weight_tying_type
 
-        w_out_target = mx.sym.Variable(prefix + "target_output_weight", dtype='float32',
-                                       shape=(self.config.vocab_target_size, self.decoder.get_num_hidden()))
+        tie_weights = self.config.weight_tying and \
+                      C.WEIGHT_TYING_SOFTMAX in self.config.weight_tying_type
 
-        if self.config.weight_tying:
-            if C.WEIGHT_TYING_SRC in self.config.weight_tying_type \
-                    and C.WEIGHT_TYING_TRG in self.config.weight_tying_type:
-                logger.info("Tying the source and target embeddings.")
-                w_embed_source = w_embed_target = mx.sym.Variable(prefix + C.SHARED_EMBEDDING_PREFIX + "weight",
-                                                                  shape=(self.config.config_embed_source.vocab_size,
-                                                                         self.config.config_embed_source.num_embed))
+        source_embed_name = C.SOURCE_EMBEDDING_PREFIX + "weight" if not share_embed else C.SHARED_EMBEDDING_PREFIX + "weight"
+        target_embed_name = C.TARGET_EMBEDDING_PREFIX + "weight" if not share_embed else C.SHARED_EMBEDDING_PREFIX + "weight"
+        output_embed_name = "target_output_weight" if not tie_weights else target_embed_name
 
-            if C.WEIGHT_TYING_SOFTMAX in self.config.weight_tying_type:
-                logger.info("Tying the target embeddings and output layer parameters.")
-                utils.check_condition(self.config.config_embed_target.num_embed == self.decoder.get_num_hidden(),
-                                      "Weight tying requires target embedding size and decoder hidden size " +
-                                      "to be equal: %d vs. %d" % (self.config.config_embed_target.num_embed,
-                                                                  self.decoder.get_num_hidden()))
-                w_out_target = w_embed_target
+        source_embed_weight = self.params.get(source_embed_name,
+                                              shape=(self.config.config_embed_source.vocab_size,
+                                                     self.config.config_embed_source.num_embed),
+                                              allow_deferred_init=True)
 
-        self._embed_weight_source_name = None
-        if w_embed_source is not None:
-            self._embed_weight_source_name = w_embed_source.name
-        self._embed_weight_target_name = w_embed_target.name
-        self._out_weight_target_name = w_out_target.name
-        return w_embed_source, w_embed_target, w_out_target
+        if share_embed:
+            target_embed_weight = source_embed_weight
+        else:
+            target_embed_weight = self.params.get(target_embed_name,
+                                                  shape=(self.config.config_embed_target.vocab_size,
+                                                         self.config.config_embed_target.num_embed),
+                                                  allow_deferred_init=True)
 
-    def get_source_embed_params(self) -> Optional[mx.nd.NDArray]:
-        if self.params is None:
-            return None
-        return self.params.get(self._embed_weight_source_name)
+        if tie_weights:
+            output_weight = target_embed_weight
+        else:
+            output_weight = self.params.get(output_embed_name,
+                                            shape=(self.config.config_embed_target.vocab_size, 0),
+                                            allow_deferred_init=True)
 
-    def get_target_embed_params(self) -> Optional[mx.nd.NDArray]:
-        if self.params is None:
-            return None
-        return self.params.get(self._embed_weight_target_name)
+        return source_embed_weight, target_embed_weight, output_weight
 
-    def get_output_embed_params(self) -> Optional[mx.nd.NDArray]:
-        if self.params is None:
-            return None
-        return self.params.get(self._out_weight_target_name)
+    @property
+    def num_source_factors(self) -> int:
+        """
+        Returns the number of source factors of this model (at least 1).
+        """
+        return self.config.config_data.num_source_factors
+
+    @property
+    def training_max_seq_len_source(self) -> int:
+        """ The maximum sequence length on the source side during training. """
+        return self.config.config_data.data_statistics.max_observed_len_source
+
+    @property
+    def training_max_seq_len_target(self) -> int:
+        """ The maximum sequence length on the target side during training. """
+        return self.config.config_data.data_statistics.max_observed_len_target
+
+    @property
+    def max_supported_seq_len_source(self) -> Optional[int]:
+        """ If not None this is the maximally supported source length during inference (hard constraint). """
+        # TODO: this forced to training max length due to pos embeddings
+        return self.training_max_seq_len_source
+
+    @property
+    def max_supported_seq_len_target(self) -> Optional[int]:
+        """ If not None this is the maximally supported target length during inference (hard constraint). """
+        # TODO: this forced to training max length due to pos embeddings
+        return self.training_max_seq_len_target
+
+    @property
+    def length_ratio_mean(self) -> float:
+        return self.config.config_data.data_statistics.length_ratio_mean
+
+    @property
+    def length_ratio_std(self) -> float:
+        return self.config.config_data.data_statistics.length_ratio_std

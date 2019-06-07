@@ -23,16 +23,16 @@ if __name__ == "__main__":
 
 
 import argparse
+import logging
 import os
 import shutil
 import sys
 import tempfile
-import logging
 from contextlib import ExitStack
-from typing import Any, cast, Optional, Dict, List, Tuple
+from typing import cast, Optional, Dict, List, Tuple
 
 import mxnet as mx
-
+from mxnet import gluon
 
 from . import arguments
 from . import checkpoint_decoder
@@ -43,8 +43,8 @@ from . import data_io
 from . import decoder
 from . import encoder
 from . import initializer
-from . import loss
 from . import layers
+from . import loss
 from . import lr_scheduler
 from . import model
 from . import rnn
@@ -681,20 +681,10 @@ def create_model_config(args: argparse.Namespace,
                                                   num_embed=num_embed_target,
                                                   dropout=embed_dropout_target)
 
-    config_loss = loss.LossConfig(name=args.loss,
-                                  vocab_size=target_vocab_size,
-                                  normalization_type=args.loss_normalization_type,
-                                  label_smoothing=args.label_smoothing)
-
+    config_length_task = None
     if args.length_task is not None:
-        config_length_task = layers.LengthRatioConfig(num_layers=args.length_task_layers, weight=args.length_task_weight)
-        link = C.LINK_NORMAL if args.length_task == C.LENGTH_TASK_RATIO else C.LINK_POISSON
-        config_length_task_loss = loss.LossConfig(name=C.LENRATIO_REGRESSION,
-                                                   length_task_link=link,
-                                                   length_task_weight=args.length_task_weight)
-    else:
-        config_length_task = None
-        config_length_task_loss = None
+        config_length_task = layers.LengthRatioConfig(num_layers=args.length_task_layers,
+                                                      weight=args.length_task_weight)
 
     model_config = model.ModelConfig(config_data=config_data,
                                      vocab_source_size=source_vocab_size,
@@ -703,8 +693,6 @@ def create_model_config(args: argparse.Namespace,
                                      config_embed_target=config_embed_target,
                                      config_encoder=config_encoder,
                                      config_decoder=config_decoder,
-                                     config_loss=config_loss,
-                                     config_length_task_loss=config_length_task_loss,
                                      config_length_task=config_length_task,
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
@@ -713,45 +701,29 @@ def create_model_config(args: argparse.Namespace,
     return model_config
 
 
-def create_training_model(config: model.ModelConfig,
-                          context: List[mx.Context],
-                          output_dir: str,
-                          train_iter: data_io.BaseParallelSampleIter,
-                          args: argparse.Namespace) -> training.TrainingModel:
-    """
-    Create a training model and load the parameters from disk if needed.
-
-    :param config: The configuration for the model.
-    :param context: The context(s) to run on.
-    :param output_dir: Output folder.
-    :param train_iter: The training data iterator.
-    :param args: Arguments as returned by argparse.
-    :return: The training model.
-    """
-    training_model = training.TrainingModel(config=config,
-                                            context=context,
-                                            output_dir=output_dir,
-                                            provide_data=train_iter.provide_data,
-                                            provide_label=train_iter.provide_label,
-                                            default_bucket_key=train_iter.default_bucket_key,
-                                            bucketing=not args.no_bucketing,
-                                            gradient_compression_params=gradient_compression_params(args),
-                                            gradient_accumulation=args.update_interval > 1,
-                                            fixed_param_names=args.fixed_param_names,
-                                            fixed_param_strategy=args.fixed_param_strategy)
-
-    return training_model
-
-
-def gradient_compression_params(args: argparse.Namespace) -> Optional[Dict[str, Any]]:
-    """
-    :param args: Arguments as returned by argparse.
-    :return: Gradient compression parameters or None.
-    """
-    if args.gradient_compression_type is None:
-        return None
-    else:
-        return {'type': args.gradient_compression_type, 'threshold': args.gradient_compression_threshold}
+def create_losses(args: argparse.Namespace) -> List[loss.Loss]:
+    softmax_output_grad_scale = C.FIXED_GRAD_SCALE_FP16 if args.dtype == C.DTYPE_FP16 else 1.0
+    softmax_output_grad_scale /= float(args.update_interval)
+    losses = [loss.CrossEntropyLoss(name=C.CROSS_ENTROPY,
+                                    weight=softmax_output_grad_scale,
+                                    label_smoothing=args.label_smoothing,
+                                    dtype=args.dtype,
+                                    output_name=C.LOGITS_NAME,
+                                    label_name=C.TARGET_LABEL_NAME)]
+    if args.length_task is not None:
+        weight = args.length_task_weight
+        if args.length_task == C.LENGTH_TASK_RATIO:
+            length_loss = loss.MSELoss(name=C.LENRATIO_NAME + "_" + C.LINK_NORMAL,
+                                       weight=weight,
+                                       output_name=C.LENRATIO_NAME,
+                                       label_name=C.LENRATIO_LABEL_NAME)
+        else:
+            length_loss = loss.PoissonLoss(name=C.LENRATIO_NAME + "_" + C.LINK_POISSON,
+                                           weight=weight,
+                                           output_name=C.LENRATIO_NAME,
+                                           label_name=C.LENRATIO_LABEL_NAME)
+        losses.append(length_loss)
+    return losses
 
 
 def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[int],
@@ -782,12 +754,12 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
         optimizer_params["clip_gradient"] = gradient_clipping_threshold
     if args.momentum is not None:
         optimizer_params["momentum"] = args.momentum
-    if args.loss_normalization_type == C.LOSS_NORM_VALID:
-        # When we normalize by the number of non-PAD symbols in a batch we need to disable rescale_grad.
-        optimizer_params["rescale_grad"] = 1.0 / args.update_interval
-    elif args.loss_normalization_type == C.LOSS_NORM_BATCH:
-        # Making MXNet module API's default scaling factor explicit
-        optimizer_params["rescale_grad"] = 1.0 / effective_batch_size
+    # We normalize by the number of non-PAD symbols in a batch we need to disable rescale_grad.
+    # store.num_workers * accumulate ??
+    optimizer_params["rescale_grad"] = 1.0 / args.update_interval
+    if args.dtype == C.DTYPE_FP16:
+        optimizer_params["multi_precision"] = True
+        optimizer_params["rescale_grad"] /= C.FIXED_GRAD_SCALE_FP16
     # Manually specified params
     if args.optimizer_params:
         optimizer_params.update(args.optimizer_params)
@@ -800,7 +772,7 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
                                               embed_init_sigma=source_vocab_sizes[0] ** -0.5,
                                               rnn_init_type=args.rnn_h2h_init,
                                               extra_initializers=extra_initializers)
-
+    # TODO: remove lr schedulers entirely and let the early stopping trainer handle learning rates.
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
                                              args.checkpoint_interval,
                                              none_if_negative(args.learning_rate_half_life),
@@ -817,12 +789,73 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
                              gradient_clipping_threshold=gradient_clipping_threshold,
                              update_interval=args.update_interval)
     config.set_lr_scheduler(lr_sched)
-    logger.info("Optimizer: %s", config)
-    logger.info("Gradient Compression: %s", gradient_compression_params(args))
+    logger.info("Optimizer: %s | kvstore=%s | params=%s | initializer=%s",
+                config.name, config.kvstore, config.params, config.initializer)
     if args.update_interval > 1:
         logger.info("Gradient accumulation over %d batches. Effective batch size: %d",
                     args.update_interval, effective_batch_size)
     return config
+
+
+def set_grad_req_for_fixed_params(config: model.ModelConfig,
+                                  params: mx.gluon.ParameterDict,
+                                  fixed_param_names: List[str],
+                                  fixed_param_strategy: Optional[str] = None):
+    utils.check_condition(not config.lhuc or fixed_param_strategy is None,
+                          "LHUC fixes all other parameters and is thus not compatible with other fixing strategies.")
+    if config.lhuc:
+        # fix everything except LHUC-related parameters
+        fixed_param_names += [name for name in params if not name.endswith(C.LHUC_NAME)]
+        logger.info("LHUC enabled, fixing all non-LHUC parameters")
+    elif fixed_param_strategy is not None:
+        fixed_param_names += fixed_param_names_from_stragegy(config, params, fixed_param_strategy)
+        logger.info("Fixed param strategy: '%s'", fixed_param_strategy)
+
+    # set grad_req for fixed params
+    for name in fixed_param_names:
+        if name not in params:
+            logger.warning("Fixed parameter name '%s' not part of model parameters, ignoring", name)
+            continue
+        params[name].grad_req = 'null'
+
+    return params
+
+
+def fixed_param_names_from_stragegy(config: model.ModelConfig,
+                                    params: mx.gluon.ParameterDict,
+                                    strategy: str) -> List[str]:
+    """
+    Generate a fixed parameter list given a list of all parameter names and
+    a strategy.
+    """
+    # Number of encoder/decoder layers in model.
+    num_encoder_layers = config.config_encoder.num_layers
+    num_decoder_layers = config.config_decoder.num_layers
+
+    def is_fixed(name: str) -> bool:
+        if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER:
+            # Any decoder layer.
+            return not name.startswith(C.DECODER_PREFIX)
+        if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTER_LAYERS:
+            # First and last encoder and decoder layers for RNN,
+            # Transformer, and CNN models.
+            return not (name.startswith("{}{}".format(C.TRANSFORMER_ENCODER_PREFIX, 0)) or
+                        name.startswith("{}{}".format(C.TRANSFORMER_ENCODER_PREFIX, num_encoder_layers - 1)) or
+                        name.startswith("{}{}".format(C.TRANSFORMER_DECODER_PREFIX, 0)) or
+                        name.startswith("{}{}".format(C.TRANSFORMER_DECODER_PREFIX, num_decoder_layers - 1)))
+        if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_EMBEDDINGS:
+            # Any type of learned embedding.
+            return not (name.startswith(C.SOURCE_EMBEDDING_PREFIX) or
+                        name.startswith(C.SOURCE_POSITIONAL_EMBEDDING_PREFIX) or
+                        name.startswith(C.TARGET_EMBEDDING_PREFIX) or
+                        name.startswith(C.TARGET_POSITIONAL_EMBEDDING_PREFIX) or
+                        name.startswith(C.SHARED_EMBEDDING_PREFIX))
+        if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTPUT_PROJ:
+            # Target output projection.
+            return not name.startswith(C.DEFAULT_OUTPUT_LAYER_PREFIX)
+        raise ValueError("Unknown fixed parameter strategy: %s" % strategy)
+
+    return [name for name in params if is_fixed(name)]
 
 
 def main():
@@ -850,8 +883,6 @@ def train(args: argparse.Namespace) -> training.TrainState:
                       console=not args.quiet,
                       path=os.path.join(output_folder, C.LOG_NAME),
                       level=args.loglevel)
-    if hasattr(args, "checkpoint_frequency"):
-        logger.warning("'--checkpoint-frequency' is deprecated, and will be removed in the future.  Please use '--checkpoint-interval'")
     utils.log_basic_info(args)
     arguments.save_args(args, os.path.join(output_folder, C.ARGS_STATE_NAME))
 
@@ -861,9 +892,6 @@ def train(args: argparse.Namespace) -> training.TrainState:
     max_seq_len_target = max_seq_len_target + C.SPACE_FOR_XOS
     logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
                 max_seq_len_source, max_seq_len_target)
-
-    check_condition(args.length_task is not None or C.LENRATIO_MSE not in args.metrics,
-                    "%s metrics requires enabling length ratio prediction with --length-task." % C.LENRATIO_MSE)
 
     with ExitStack() as exit_stack:
         context = utils.determine_context(device_ids=args.device_ids,
@@ -899,68 +927,96 @@ def train(args: argparse.Namespace) -> training.TrainState:
                     target_vocab_size)
 
         model_config = create_model_config(args=args,
-                                           source_vocab_sizes=source_vocab_sizes, target_vocab_size=target_vocab_size,
-                                           max_seq_len_source=max_seq_len_source, max_seq_len_target=max_seq_len_target,
+                                           source_vocab_sizes=source_vocab_sizes,
+                                           target_vocab_size=target_vocab_size,
+                                           max_seq_len_source=max_seq_len_source,
+                                           max_seq_len_target=max_seq_len_target,
                                            config_data=config_data)
-        model_config.freeze()
 
-        training_model = create_training_model(config=model_config,
-                                               context=context,
-                                               output_dir=output_folder,
-                                               train_iter=train_iter,
-                                               args=args)
+        training_model = model.SockeyeModel(model_config)
 
         # Handle options that override training settings
-        min_updates = args.min_updates
-        max_updates = args.max_updates
-        min_samples = args.min_samples
-        max_samples = args.max_samples
-        max_num_checkpoint_not_improved = args.max_num_checkpoint_not_improved
-        min_epochs = args.min_num_epochs
-        max_epochs = args.max_num_epochs
-        if min_epochs is not None and max_epochs is not None:
-            check_condition(min_epochs <= max_epochs,
+        trainer_config = training.TrainerConfig(
+            output_dir=args.output,
+            early_stopping_metric=args.optimized_metric,
+            max_params_files_to_keep=args.keep_last_params,
+            keep_initializations=args.keep_initializations,
+            checkpoint_interval=args.checkpoint_interval,
+            max_num_checkpoint_not_improved=args.max_num_checkpoint_not_improved,
+            max_checkpoints=args.max_checkpoints,
+            min_samples=args.min_samples,
+            max_samples=args.max_samples,
+            min_updates=args.min_updates,
+            max_updates=args.max_updates,
+            min_epochs=args.min_num_epochs,
+            max_epochs=args.max_num_epochs,
+            update_interval=args.update_interval,
+            stop_training_on_decoder_failure=args.stop_training_on_decoder_failure
+        )
+        if trainer_config.min_epochs is not None and trainer_config.max_epochs is not None:
+            check_condition(trainer_config.min_epochs <= trainer_config.max_epochs,
                             "Minimum number of epochs must be smaller than maximum number of epochs")
 
         # Fixed training schedule always runs for a set number of updates
         if args.learning_rate_schedule:
-            min_updates = None
-            max_updates = sum(num_updates for (_, num_updates) in args.learning_rate_schedule)
-            max_num_checkpoint_not_improved = -1
-            min_samples = None
-            max_samples = None
-            min_epochs = None
-            max_epochs = None
+            trainer_config.min_updates = None
+            trainer_config.max_updates = sum(num_updates for (_, num_updates) in args.learning_rate_schedule)
+            trainer_config.max_num_checkpoint_not_improved = -1
+            trainer_config.min_samples = None
+            trainer_config.max_samples = None
+            trainer_config.min_epochs = None
+            trainer_config.max_epochs = None
 
-        trainer = training.EarlyStoppingTrainer(model=training_model,
-                                                optimizer_config=create_optimizer_config(args, source_vocab_sizes),
-                                                max_params_files_to_keep=args.keep_last_params,
-                                                keep_initializations=args.keep_initializations,
-                                                source_vocabs=source_vocabs,
-                                                target_vocab=target_vocab,
-                                                stop_training_on_decoder_failure=args.stop_training_on_decoder_failure)
+        optimizer_config = create_optimizer_config(args, source_vocab_sizes)
+        training_model.initialize(optimizer_config.initializer, ctx=context)
+        if args.params is not None:  # load existing parameters if present
+            training_model.load_params_from_file(fname=args.params,
+                                                 ctx=context,
+                                                 allow_missing=args.allow_missing_params or model_config.lhuc)
+        params = training_model.collect_params()
+        # set grad_req for fixed params
+        params = set_grad_req_for_fixed_params(config=model_config,
+                                               params=params,
+                                               fixed_param_names=args.fixed_param_names,
+                                               fixed_param_strategy=args.fixed_param_strategy)
 
-        training_state = trainer.fit(train_iter=train_iter,
-                                     validation_iter=eval_iter,
-                                     early_stopping_metric=args.optimized_metric,
-                                     metrics=args.metrics,
-                                     checkpoint_interval=args.checkpoint_interval,
-                                     max_num_not_improved=max_num_checkpoint_not_improved,
-                                     max_checkpoints=args.max_checkpoints,
-                                     min_samples=min_samples,
-                                     max_samples=max_samples,
-                                     min_updates=min_updates,
-                                     max_updates=max_updates,
-                                     min_epochs=min_epochs,
-                                     max_epochs=max_epochs,
-                                     lr_decay_param_reset=args.learning_rate_decay_param_reset,
-                                     lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset,
-                                     decoder=create_checkpoint_decoder(args, exit_stack, context),
-                                     mxmonitor_pattern=args.monitor_pattern,
-                                     mxmonitor_stat_func=args.monitor_stat_func,
-                                     allow_missing_parameters=args.allow_missing_params or model_config.lhuc,
-                                     existing_parameters=args.params)
+        if args.dtype == C.DTYPE_FP16:
+            training_model.cast(C.DTYPE_FP16)
+        utils.log_parameters(params)
+
+        # set grad_req to 'add' for trainable parameters
+        if args.update_interval > 1:
+            for name, param in params.items():
+                if param.grad_req != 'null':
+                    param.grad_req = 'add'
+
+        kvstore = mx.kvstore.create(args.kvstore)
+
+        gluon_trainer = gluon.Trainer(params,
+                                      optimizer_config.name,
+                                      optimizer_config.params,
+                                      kvstore=kvstore,
+                                      update_on_kvstore=None)
+        losses = create_losses(args)
+
+        hybridize = True
+        if hybridize:
+            training_model.hybridize(static_alloc=True)
+            for lf in losses:
+                lf.hybridize(static_alloc=True)
+
+        trainer = training.GluonEarlyStoppingTrainer(
+            config=trainer_config,
+            sockeye_model=training_model,
+            trainer=gluon_trainer,
+            loss_functions=losses,
+            context=context,
+            dtype=args.dtype
+        )
+
+        training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter)
         return training_state
+
 
 if __name__ == "__main__":
     main()
