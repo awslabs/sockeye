@@ -29,7 +29,7 @@ import shutil
 import sys
 import tempfile
 from contextlib import ExitStack
-from typing import cast, Optional, Dict, List, Tuple
+from typing import cast, Optional, Dict, List, Tuple, Union
 
 import mxnet as mx
 from mxnet import gluon
@@ -37,8 +37,6 @@ from mxnet import gluon
 from . import arguments
 from . import checkpoint_decoder
 from . import constants as C
-from . import convolution
-from . import coverage
 from . import data_io
 from . import decoder
 from . import encoder
@@ -47,8 +45,6 @@ from . import layers
 from . import loss
 from . import lr_scheduler
 from . import model
-from . import rnn
-from . import rnn_attention
 from . import training
 from . import transformer
 from . import utils
@@ -351,7 +347,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 def create_encoder_config(args: argparse.Namespace,
                           max_seq_len_source: int,
                           max_seq_len_target: int,
-                          config_conv: Optional[encoder.ConvolutionalEmbeddingConfig],
                           num_embed_source: int) -> Tuple[encoder.EncoderConfig, int]:
     """
     Create the encoder config.
@@ -364,78 +359,32 @@ def create_encoder_config(args: argparse.Namespace,
     :return: The encoder config and the number of hidden units of the encoder.
     """
     encoder_num_layers, _ = args.num_layers
-    config_encoder = None  # type: Optional[Config]
 
-    if args.decoder_only:
-        if args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
-            encoder_num_hidden = args.transformer_model_size[0]
-        elif args.encoder == C.CONVOLUTION_TYPE:
-            encoder_num_hidden = args.cnn_num_hidden
-        else:
-            encoder_num_hidden = args.rnn_num_hidden
-        config_encoder = encoder.EmptyEncoderConfig(num_embed=num_embed_source,
-                                                    num_hidden=encoder_num_hidden)
-    elif args.encoder in (C.TRANSFORMER_TYPE, C.TRANSFORMER_WITH_CONV_EMBED_TYPE):
-        encoder_transformer_preprocess, _ = args.transformer_preprocess
-        encoder_transformer_postprocess, _ = args.transformer_postprocess
-        encoder_transformer_model_size = args.transformer_model_size[0]
+    encoder_transformer_preprocess, _ = args.transformer_preprocess
+    encoder_transformer_postprocess, _ = args.transformer_postprocess
+    encoder_transformer_model_size = args.transformer_model_size[0]
 
-        total_source_factor_size = sum(args.source_factors_num_embed)
-        if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT and total_source_factor_size > 0:
-            logger.info("Encoder transformer-model-size adjusted to account for source factor embeddings: %d -> %d" % (
-                encoder_transformer_model_size, num_embed_source + total_source_factor_size))
-            encoder_transformer_model_size = num_embed_source + total_source_factor_size
-        config_encoder = transformer.TransformerConfig(
-            model_size=encoder_transformer_model_size,
-            attention_heads=args.transformer_attention_heads[0],
-            feed_forward_num_hidden=args.transformer_feed_forward_num_hidden[0],
-            act_type=args.transformer_activation_type,
-            num_layers=encoder_num_layers,
-            dropout_attention=args.transformer_dropout_attention,
-            dropout_act=args.transformer_dropout_act,
-            dropout_prepost=args.transformer_dropout_prepost,
-            positional_embedding_type=args.transformer_positional_embedding_type,
-            preprocess_sequence=encoder_transformer_preprocess,
-            postprocess_sequence=encoder_transformer_postprocess,
-            max_seq_len_source=max_seq_len_source,
-            max_seq_len_target=max_seq_len_target,
-            conv_config=config_conv,
-            lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc))
-        encoder_num_hidden = encoder_transformer_model_size
-    elif args.encoder == C.CONVOLUTION_TYPE:
-        cnn_kernel_width_encoder, _ = args.cnn_kernel_width
-        cnn_config = convolution.ConvolutionConfig(kernel_width=cnn_kernel_width_encoder,
-                                                   num_hidden=args.cnn_num_hidden,
-                                                   act_type=args.cnn_activation_type,
-                                                   weight_normalization=args.weight_normalization)
-        cnn_num_embed = num_embed_source
-        if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
-            cnn_num_embed += sum(args.source_factors_num_embed)
-        config_encoder = encoder.ConvolutionalEncoderConfig(num_embed=cnn_num_embed,
-                                                            max_seq_len_source=max_seq_len_source,
-                                                            cnn_config=cnn_config,
-                                                            num_layers=encoder_num_layers,
-                                                            positional_embedding_type=args.cnn_positional_embedding_type)
-
-        encoder_num_hidden = args.cnn_num_hidden
-    else:
-        encoder_rnn_dropout_inputs, _ = args.rnn_dropout_inputs
-        encoder_rnn_dropout_states, _ = args.rnn_dropout_states
-        encoder_rnn_dropout_recurrent, _ = args.rnn_dropout_recurrent
-        config_encoder = encoder.RecurrentEncoderConfig(
-            rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
-                                     num_hidden=args.rnn_num_hidden,
-                                     num_layers=encoder_num_layers,
-                                     dropout_inputs=encoder_rnn_dropout_inputs,
-                                     dropout_states=encoder_rnn_dropout_states,
-                                     dropout_recurrent=encoder_rnn_dropout_recurrent,
-                                     residual=args.rnn_residual_connections,
-                                     first_residual_layer=args.rnn_first_residual_layer,
-                                     forget_bias=args.rnn_forget_bias,
-                                     lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc)),
-            conv_config=config_conv,
-            reverse_input=args.rnn_encoder_reverse_input)
-        encoder_num_hidden = args.rnn_num_hidden
+    total_source_factor_size = sum(args.source_factors_num_embed)
+    if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT and total_source_factor_size > 0:
+        logger.info("Encoder transformer-model-size adjusted to account for source factor embeddings: %d -> %d" % (
+            encoder_transformer_model_size, num_embed_source + total_source_factor_size))
+        encoder_transformer_model_size = num_embed_source + total_source_factor_size
+    config_encoder = transformer.TransformerConfig(
+        model_size=encoder_transformer_model_size,
+        attention_heads=args.transformer_attention_heads[0],
+        feed_forward_num_hidden=args.transformer_feed_forward_num_hidden[0],
+        act_type=args.transformer_activation_type,
+        num_layers=encoder_num_layers,
+        dropout_attention=args.transformer_dropout_attention,
+        dropout_act=args.transformer_dropout_act,
+        dropout_prepost=args.transformer_dropout_prepost,
+        positional_embedding_type=args.transformer_positional_embedding_type,
+        preprocess_sequence=encoder_transformer_preprocess,
+        postprocess_sequence=encoder_transformer_postprocess,
+        max_seq_len_source=max_seq_len_source,
+        max_seq_len_target=max_seq_len_target,
+        lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc))
+    encoder_num_hidden = encoder_transformer_model_size
 
     return config_encoder, encoder_num_hidden
 
@@ -455,97 +404,23 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
     """
     _, decoder_num_layers = args.num_layers
 
-    config_decoder = None  # type: Optional[Config]
-
-    if args.decoder == C.TRANSFORMER_TYPE:
-        if args.decoder_only:
-            raise NotImplementedError()
-        _, decoder_transformer_preprocess = args.transformer_preprocess
-        _, decoder_transformer_postprocess = args.transformer_postprocess
-        config_decoder = transformer.TransformerConfig(
-            model_size=args.transformer_model_size[1],
-            attention_heads=args.transformer_attention_heads[1],
-            feed_forward_num_hidden=args.transformer_feed_forward_num_hidden[1],
-            act_type=args.transformer_activation_type,
-            num_layers=decoder_num_layers,
-            dropout_attention=args.transformer_dropout_attention,
-            dropout_act=args.transformer_dropout_act,
-            dropout_prepost=args.transformer_dropout_prepost,
-            positional_embedding_type=args.transformer_positional_embedding_type,
-            preprocess_sequence=decoder_transformer_preprocess,
-            postprocess_sequence=decoder_transformer_postprocess,
-            max_seq_len_source=max_seq_len_source,
-            max_seq_len_target=max_seq_len_target,
-            conv_config=None,
-            lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc))
-
-    elif args.decoder == C.CONVOLUTION_TYPE:
-        if args.decoder_only:
-            raise NotImplementedError()
-        _, cnn_kernel_width_decoder = args.cnn_kernel_width
-        convolution_config = convolution.ConvolutionConfig(kernel_width=cnn_kernel_width_decoder,
-                                                           num_hidden=args.cnn_num_hidden,
-                                                           act_type=args.cnn_activation_type,
-                                                           weight_normalization=args.weight_normalization)
-        config_decoder = decoder.ConvolutionalDecoderConfig(cnn_config=convolution_config,
-                                                            max_seq_len_target=max_seq_len_target,
-                                                            num_embed=num_embed_target,
-                                                            encoder_num_hidden=encoder_num_hidden,
-                                                            num_layers=decoder_num_layers,
-                                                            positional_embedding_type=args.cnn_positional_embedding_type,
-                                                            project_qkv=args.cnn_project_qkv,
-                                                            hidden_dropout=args.cnn_hidden_dropout)
-
-    else:
-        if args.decoder_only:
-            args.rnn_decoder_state_init = C.RNN_DEC_INIT_ZERO
-            args.rnn_context_gating = False
-            args.rnn_attention_type = C.ATT_FIXED
-            args.rnn_attention_in_upper_layers = False
-            args.lhuc = None
-            args.rnn_enc_last_hidden_concat_to_embedding = False
-
-        rnn_attention_num_hidden = args.rnn_num_hidden if args.rnn_attention_num_hidden is None else args.rnn_attention_num_hidden
-        config_coverage = None
-        if args.rnn_attention_type == C.ATT_COV:
-            config_coverage = coverage.CoverageConfig(type=args.rnn_attention_coverage_type,
-                                                      max_fertility=args.rnn_attention_coverage_max_fertility,
-                                                      num_hidden=args.rnn_attention_coverage_num_hidden,
-                                                      layer_normalization=args.layer_normalization)
-        config_attention = rnn_attention.AttentionConfig(type=args.rnn_attention_type,
-                                                         num_hidden=rnn_attention_num_hidden,
-                                                         input_previous_word=args.rnn_attention_use_prev_word,
-                                                         source_num_hidden=encoder_num_hidden,
-                                                         query_num_hidden=args.rnn_num_hidden,
-                                                         layer_normalization=args.layer_normalization,
-                                                         config_coverage=config_coverage,
-                                                         num_heads=args.rnn_attention_mhdot_heads,
-                                                         is_scaled=args.rnn_scale_dot_attention)
-
-        _, decoder_rnn_dropout_inputs = args.rnn_dropout_inputs
-        _, decoder_rnn_dropout_states = args.rnn_dropout_states
-        _, decoder_rnn_dropout_recurrent = args.rnn_dropout_recurrent
-
-        config_decoder = decoder.RecurrentDecoderConfig(
-            max_seq_len_source=max_seq_len_source,
-            rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
-                                     num_hidden=args.rnn_num_hidden,
-                                     num_layers=decoder_num_layers,
-                                     dropout_inputs=decoder_rnn_dropout_inputs,
-                                     dropout_states=decoder_rnn_dropout_states,
-                                     dropout_recurrent=decoder_rnn_dropout_recurrent,
-                                     residual=args.rnn_residual_connections,
-                                     first_residual_layer=args.rnn_first_residual_layer,
-                                     forget_bias=args.rnn_forget_bias,
-                                     lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc)),
-            attention_config=config_attention,
-            hidden_dropout=args.rnn_decoder_hidden_dropout,
-            state_init=args.rnn_decoder_state_init,
-            context_gating=args.rnn_context_gating,
-            layer_normalization=args.layer_normalization,
-            attention_in_upper_layers=args.rnn_attention_in_upper_layers,
-            state_init_lhuc=args.lhuc is not None and (C.LHUC_STATE_INIT in args.lhuc or C.LHUC_ALL in args.lhuc),
-            enc_last_hidden_concat_to_embedding=args.rnn_enc_last_hidden_concat_to_embedding)
+    _, decoder_transformer_preprocess = args.transformer_preprocess
+    _, decoder_transformer_postprocess = args.transformer_postprocess
+    config_decoder = transformer.TransformerConfig(
+        model_size=args.transformer_model_size[1],
+        attention_heads=args.transformer_attention_heads[1],
+        feed_forward_num_hidden=args.transformer_feed_forward_num_hidden[1],
+        act_type=args.transformer_activation_type,
+        num_layers=decoder_num_layers,
+        dropout_attention=args.transformer_dropout_attention,
+        dropout_act=args.transformer_dropout_act,
+        dropout_prepost=args.transformer_dropout_prepost,
+        positional_embedding_type=args.transformer_positional_embedding_type,
+        preprocess_sequence=decoder_transformer_preprocess,
+        postprocess_sequence=decoder_transformer_postprocess,
+        max_seq_len_source=max_seq_len_source,
+        max_seq_len_target=max_seq_len_target,
+        lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc))
 
     return config_decoder
 
@@ -558,7 +433,6 @@ def check_encoder_decoder_args(args) -> None:
     """
     encoder_embed_dropout, decoder_embed_dropout = args.embed_dropout
     encoder_rnn_dropout_inputs, decoder_rnn_dropout_inputs = args.rnn_dropout_inputs
-    encoder_rnn_dropout_states, decoder_rnn_dropout_states = args.rnn_dropout_states
     if encoder_embed_dropout > 0 and encoder_rnn_dropout_inputs > 0:
         logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
                        "two dropout layers on top of each other.")
@@ -637,25 +511,8 @@ def create_model_config(args: argparse.Namespace,
 
     check_encoder_decoder_args(args)
 
-    config_conv = None
-    if args.encoder == C.RNN_WITH_CONV_EMBED_NAME:
-        config_conv = encoder.ConvolutionalEmbeddingConfig(num_embed=num_embed_source,
-                                                           max_filter_width=args.conv_embed_max_filter_width,
-                                                           num_filters=args.conv_embed_num_filters,
-                                                           pool_stride=args.conv_embed_pool_stride,
-                                                           num_highway_layers=args.conv_embed_num_highway_layers,
-                                                           dropout=args.conv_embed_dropout)
-    if args.encoder == C.TRANSFORMER_WITH_CONV_EMBED_TYPE:
-        config_conv = encoder.ConvolutionalEmbeddingConfig(num_embed=num_embed_source,
-                                                           output_dim=num_embed_source,
-                                                           max_filter_width=args.conv_embed_max_filter_width,
-                                                           num_filters=args.conv_embed_num_filters,
-                                                           pool_stride=args.conv_embed_pool_stride,
-                                                           num_highway_layers=args.conv_embed_num_highway_layers,
-                                                           dropout=args.conv_embed_dropout)
-
     config_encoder, encoder_num_hidden = create_encoder_config(args, max_seq_len_source, max_seq_len_target,
-                                                               config_conv, num_embed_source)
+                                                               num_embed_source)
     config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target,
                                            num_embed_target)
 
@@ -822,7 +679,7 @@ def set_grad_req_for_fixed_params(config: model.ModelConfig,
 
 
 def fixed_param_names_from_stragegy(config: model.ModelConfig,
-                                    params: Dict,
+                                    params: Union[Dict, mx.gluon.ParameterDict],
                                     strategy: str) -> List[str]:
     """
     Generate a fixed parameter list given a list of all parameter names and

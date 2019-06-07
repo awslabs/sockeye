@@ -40,7 +40,6 @@ class TransformerConfig(config.Config):
                  postprocess_sequence: str,
                  max_seq_len_source: int,
                  max_seq_len_target: int,
-                 conv_config: Optional['encoder.ConvolutionalEmbeddingConfig'] = None,
                  lhuc: bool = False) -> None:  # type: ignore
         super().__init__()
         self.model_size = model_size
@@ -56,7 +55,6 @@ class TransformerConfig(config.Config):
         self.postprocess_sequence = postprocess_sequence
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
-        self.conv_config = conv_config
         self.use_lhuc = lhuc
 
 
