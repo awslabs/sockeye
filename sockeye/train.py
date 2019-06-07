@@ -822,7 +822,7 @@ def set_grad_req_for_fixed_params(config: model.ModelConfig,
 
 
 def fixed_param_names_from_stragegy(config: model.ModelConfig,
-                                    params: mx.gluon.ParameterDict,
+                                    params: Dict,
                                     strategy: str) -> List[str]:
     """
     Generate a fixed parameter list given a list of all parameter names and
