@@ -274,13 +274,12 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
               zip(bucket_counts, buckets)]
     target = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(1, bucket[1])))) for count, bucket in
               zip(bucket_counts, buckets)]
-    label = target
-    return source, target, label
+    return source, target
 
 
 def test_parallel_data_set():
     buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
-    source, target, label = _get_random_bucketed_data(buckets, min_count=0, max_count=5)
+    source, target = _get_random_bucketed_data(buckets, min_count=0, max_count=5)
 
     def check_equal(arrays1, arrays2):
         assert len(arrays1) == len(arrays2)
@@ -288,13 +287,12 @@ def test_parallel_data_set():
             assert np.array_equal(a1.asnumpy(), a2.asnumpy())
 
     with TemporaryDirectory() as work_dir:
-        dataset = data_io.ParallelDataSet(source, target, label)
+        dataset = data_io.ParallelDataSet(source, target)
         fname = os.path.join(work_dir, 'dataset')
         dataset.save(fname)
         dataset_loaded = data_io.ParallelDataSet.load(fname)
         check_equal(dataset.source, dataset_loaded.source)
         check_equal(dataset.target, dataset_loaded.target)
-        check_equal(dataset.label, dataset_loaded.label)
 
 
 def test_parallel_data_set_fill_up():
@@ -310,12 +308,10 @@ def test_parallel_data_set_fill_up():
     dataset_filled_up = dataset.fill_up(bucket_batch_sizes)
     assert len(dataset_filled_up.source) == len(dataset.source)
     assert len(dataset_filled_up.target) == len(dataset.target)
-    assert len(dataset_filled_up.label) == len(dataset.label)
     for bidx in range(len(dataset)):
         bucket_batch_size = bucket_batch_sizes[bidx].batch_size
         assert dataset_filled_up.source[bidx].shape[0] == bucket_batch_size
         assert dataset_filled_up.target[bidx].shape[0] == bucket_batch_size
-        assert dataset_filled_up.label[bidx].shape[0] == bucket_batch_size
 
 
 def test_get_permutations():
@@ -361,11 +357,9 @@ def test_parallel_data_set_permute():
         if num_samples:
             assert (dataset.source[buck_idx] == dataset_restored.source[buck_idx]).asnumpy().all()
             assert (dataset.target[buck_idx] == dataset_restored.target[buck_idx]).asnumpy().all()
-            assert (dataset.label[buck_idx] == dataset_restored.label[buck_idx]).asnumpy().all()
         else:
             assert not dataset_restored.source[buck_idx]
             assert not dataset_restored.target[buck_idx]
-            assert not dataset_restored.label[buck_idx]
 
 
 def test_get_batch_indices():
@@ -510,12 +504,11 @@ def test_get_training_data_iters():
         for epoch in range(2):
             while train_iter.iter_next():
                 batch = train_iter.next()
-                assert len(batch.data) == 2
-                assert len(batch.label) == 1
-                assert batch.bucket_key in train_iter.buckets
-                source = batch.data[0].asnumpy()
-                target = batch.data[1].asnumpy()
-                label = batch.label[0].asnumpy()
+                assert isinstance(batch, data_io.Batch)
+                source = batch.source.asnumpy()
+                target = batch.target.asnumpy()
+                label = batch.labels[C.TARGET_LABEL_NAME].asnumpy()
+                length_ratio_label = batch.labels[C.LENRATIO_LABEL_NAME].asnumpy()
                 assert source.shape[0] == target.shape[0] == label.shape[0] == batch_size
                 # target first symbol should be BOS
                 # each source sequence contains one EOS symbol
