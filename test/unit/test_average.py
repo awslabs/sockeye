@@ -25,7 +25,6 @@ import sockeye.average as average
 ])
 def test_strategy_best(test_points, expected_top_n, size, maximize):
     result = average._strategy_best(test_points, size, maximize)
-
     assert result == expected_top_n
 
 
@@ -40,7 +39,6 @@ def test_strategy_best(test_points, expected_top_n, size, maximize):
 ])
 def test_strategy_last(test_points, expected_top_n, size, maximize):
     result = average._strategy_last(test_points, size, maximize)
-
     assert result == expected_top_n
 
 
@@ -56,5 +54,4 @@ def test_strategy_last(test_points, expected_top_n, size, maximize):
 ])
 def test_strategy_lifespan(test_points, expected_top_n, size, maximize):
     result = average._strategy_lifespan(test_points, size, maximize)
-
     assert result == expected_top_n
