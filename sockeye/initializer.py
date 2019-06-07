@@ -22,6 +22,23 @@ import sockeye.constants as C
 logger = logging.getLogger(__name__)
 
 
+class _Mixed(mx.init.Initializer, mx.init.Mixed):
+    """
+    A wrapper around the MXNet's Mixed initializer that also inherits from Initializer to make it work with Gluon
+    """
+    def __init__(self, patterns: List[str], initializers: List[mx.init.Initializer], **kwargs):
+        mx.init.Mixed.__init__(self, patterns=patterns, initializers=initializers)
+        mx.init.Initializer.__init__(self, **kwargs)
+
+    def __repr__(self):
+        return "_Mixed(map=%s)" % self.map
+
+    def __call__(self, name: str, arr: mx.nd.NDArray):
+        mx.init.Mixed.__call__(self, name, arr)
+
+    def _init_weight(self, desc: mx.init.InitDesc, arr: mx.nd.NDArray):
+        mx.init.Mixed.__call__(self, str(desc), arr)
+
 def get_initializer(default_init_type: str, default_init_scale: float, default_init_xavier_rand_type: str,
                     default_init_xavier_factor_type: str, embed_init_type: str, embed_init_sigma: float,
                     rnn_init_type: str, extra_initializers: Optional[List[Tuple[str, mx.initializer.Initializer]]] = None) -> mx.initializer.Initializer:
@@ -70,7 +87,7 @@ def get_initializer(default_init_type: str, default_init_scale: float, default_i
     params_init_pairs = embed_init + rnn_init + default_init
     if extra_initializers is not None:
         params_init_pairs = extra_initializers + params_init_pairs
-    return mx.initializer.Mixed(*zip(*params_init_pairs))
+    return _Mixed(*zip(*params_init_pairs))
 
 
 @mx.init.register

@@ -18,6 +18,7 @@ import binascii
 import errno
 import glob
 import gzip
+from functools import reduce
 import math
 import itertools
 import logging
@@ -40,6 +41,9 @@ from . import __version__, constants as C
 from .log import log_sockeye_version, log_mxnet_version
 
 logger = logging.getLogger(__name__)
+
+
+NDarrayOrSymbol = Union[mx.nd.NDArray, mx.sym.Symbol]
 
 
 class SockeyeError(Exception):
@@ -990,27 +994,26 @@ def split(data: mx.nd.NDArray,
     return ndarray_or_list
 
 
-def inflect(word: str,
-            count: int):
+def log_parameters(params: mx.gluon.ParameterDict):
     """
-    Minimal inflection module.
-
-    :param word: The word to inflect.
-    :param count: The count.
-    :return: The word, perhaps inflected for number.
+    Logs information about model parameters.
     """
-    if word in ['time', 'sentence']:
-        return word if count == 1 else word + 's'
-    elif word == 'was':
-        return 'was' if count == 1 else 'were'
-    else:
-        return word + '(s)'
-
-
-def isfinite(data: mx.nd.NDArray) -> mx.nd.NDArray:
-    """Performs an element-wise check to determine if the NDArray contains an infinite element or not.
-       TODO: remove this funciton after upgrade to MXNet 1.4.* in favor of mx.ndarray.contrib.isfinite()
-    """
-    is_data_not_nan = data == data
-    is_data_not_infinite = data.abs() != np.inf
-    return mx.nd.logical_and(is_data_not_infinite, is_data_not_nan)
+    fixed_parameters = 0
+    learned_parameters = 0
+    fixed_parameter_names = []
+    learned_parameter_names = []
+    #info = []  # type: List[str]
+    for name, param in sorted(params.items()):
+        repr = "%s [%s, %s]" % (name, param.shape, param.dtype)
+        #info.append("%s shape=%s, dtype=%s" % (name, param.shape, param.dtype))
+        if param.grad_req == 'null':
+            fixed_parameter_names.append(repr)
+        else:
+            learned_parameter_names.append(repr)
+    #percent_fixed = 100 * (fixed_parameters / max(1, total_parameters))
+    #percent_learned = 100 * (learned_parameters / max(1, total_parameters))
+    logger.info("Trainable parameters: %s", ", ".join(learned_parameter_names))
+    logger.info("Fixed model parameters: %s", ", ".join(fixed_parameter_names))
+    #logger.info("Fixing %d parameters (%0.2f%%)", fixed_parameters, percent_fixed)
+    #logger.info("Learning %d parameters (%0.2f%%)", learned_parameters, percent_learned)
+    #logger.info("Total # of parameters: %d", total_parameters)

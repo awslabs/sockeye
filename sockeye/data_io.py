@@ -461,10 +461,8 @@ class RawParallelDatasetLoader:
 
         data_source = [np.full((num_samples, source_len, num_factors), self.pad_id, dtype=self.dtype)
                        for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
-        data_target = [np.full((num_samples, target_len), self.pad_id, dtype=self.dtype)
+        data_target = [np.full((num_samples, target_len + 1), self.pad_id, dtype=self.dtype)
                        for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
-        data_label = [np.full((num_samples, target_len), self.pad_id, dtype=self.dtype)
-                      for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
 
         bucket_sample_index = [0 for _ in self.buckets]
 
@@ -497,26 +495,20 @@ class RawParallelDatasetLoader:
             sample_index = bucket_sample_index[buck_index]
             for i, s in enumerate(sources):
                 data_source[buck_index][sample_index, 0:source_len, i] = s
-            data_target[buck_index][sample_index, :target_len] = target
-            # NOTE(fhieber): while this is wasteful w.r.t memory, we need to explicitly create the label sequence
-            # with the EOS symbol here sentence-wise and not per-batch due to variable sequence length within a batch.
-            # Once MXNet allows item assignments given a list of indices (probably MXNet 1.0): e.g a[[0,1,5,2]] = x,
-            # we can try again to compute the label sequence on the fly in next().
-            data_label[buck_index][sample_index, :target_len] = target[1:] + [self.eos_id]
+            data_target[buck_index][sample_index, :target_len + 1] = target + [self.eos_id]
 
             bucket_sample_index[buck_index] += 1
 
         for i in range(len(data_source)):
-            data_source[i] = mx.nd.array(data_source[i], dtype=self.dtype)
-            data_target[i] = mx.nd.array(data_target[i], dtype=self.dtype)
-            data_label[i] = mx.nd.array(data_label[i], dtype=self.dtype)
+            data_source[i] = mx.nd.from_numpy(data_source[i], zero_copy=True)
+            data_target[i] = mx.nd.from_numpy(data_target[i], zero_copy=True)
 
         if num_tokens_source > 0 and num_tokens_target > 0:
             logger.info("Created bucketed parallel data set. Introduced padding: source=%.1f%% target=%.1f%%)",
                         num_pad_source / num_tokens_source * 100,
                         num_pad_target / num_tokens_target * 100)
 
-        return ParallelDataSet(data_source, data_target, data_label)
+        return ParallelDataSet(data_source, data_target)
 
 
 def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int) -> int:
@@ -1015,29 +1007,18 @@ def describe_data_and_buckets(data_statistics: DataStatistics, bucket_batch_size
     check_condition(len(bucket_batch_sizes) == len(data_statistics.buckets),
                     "Number of bucket batch sizes (%d) does not match number of buckets in statistics (%d)."
                     % (len(bucket_batch_sizes), len(data_statistics.buckets)))
-    if data_statistics.length_ratio_stats_per_bucket:
-        for bucket_batch_size, num_seq, (lr_mean, lr_std) in zip(bucket_batch_sizes,
-                                                                data_statistics.num_sents_per_bucket,
-                                                                data_statistics.length_ratio_stats_per_bucket):
-            if num_seq > 0:
-                logger.info("Bucket %s: %d samples in %d batches of %d, ~%.1f tokens/batch, "
-                            "trg/src length ratio: %.2f (+-%.2f)",
-                            bucket_batch_size.bucket,
-                            num_seq,
-                            math.ceil(num_seq / bucket_batch_size.batch_size),
-                            bucket_batch_size.batch_size,
-                            bucket_batch_size.average_words_per_batch,
-                            lr_mean, lr_std)
-    else:
-        # TODO: remove with next bump of C.PREPARED_DATA_VERSION
-        for bucket_batch_size, num_seq in zip(bucket_batch_sizes, data_statistics.num_sents_per_bucket):
-            if num_seq > 0:
-                logger.info("Bucket %s: %d samples in %d batches of %d, ~%.1f tokens/batch, ",
-                            bucket_batch_size.bucket,
-                            num_seq,
-                            math.ceil(num_seq / bucket_batch_size.batch_size),
-                            bucket_batch_size.batch_size,
-                            bucket_batch_size.average_words_per_batch)
+    for bucket_batch_size, num_seq, (lr_mean, lr_std) in zip(bucket_batch_sizes,
+                                                             data_statistics.num_sents_per_bucket,
+                                                             data_statistics.length_ratio_stats_per_bucket):
+        if num_seq > 0:
+            logger.info("Bucket %s: %d samples in %d batches of %d, ~%.1f tokens/batch, "
+                        "trg/src length ratio: %.2f (+-%.2f)",
+                        bucket_batch_size.bucket,
+                        num_seq,
+                        math.ceil(num_seq / bucket_batch_size.batch_size),
+                        bucket_batch_size.batch_size,
+                        bucket_batch_size.average_words_per_batch,
+                        lr_mean, lr_std)
 
 
 class DataInfo(config.Config):
@@ -1342,20 +1323,16 @@ def get_target_bucket(buckets: List[Tuple[int, int]],
 
 class ParallelDataSet(Sized):
     """
-    Bucketed parallel data set with labels
+    Bucketed parallel data set
     """
 
     def __init__(self,
                  source: List[mx.nd.array],
-                 target: List[mx.nd.array],
-                 label: List[mx.nd.array]) -> None:
-        check_condition(len(source) == len(target) == len(label),
-                        "Number of buckets for source/target/label do not match: %d/%d/%d." % (len(source),
-                                                                                               len(target),
-                                                                                               len(label)))
+                 target: List[mx.nd.array]) -> None:
+        check_condition(len(source) == len(target),
+                        "Number of buckets for source/target do not match: %d/%d." % (len(source), len(target)))
         self.source = source
         self.target = target
-        self.label = label
 
     def __len__(self) -> int:
         return len(self.source)
@@ -1367,7 +1344,7 @@ class ParallelDataSet(Sized):
         """
         Saves the dataset to a binary .npy file.
         """
-        mx.nd.save(fname, self.source + self.target + self.label)
+        mx.nd.save(fname, self.source + self.target)
 
     @staticmethod
     def load(fname: str) -> 'ParallelDataSet':
@@ -1375,12 +1352,11 @@ class ParallelDataSet(Sized):
         Loads a dataset from a binary .npy file.
         """
         data = mx.nd.load(fname)
-        n = len(data) // 3
+        n = len(data) // 2
         source = data[:n]
         target = data[n:2 * n]
-        label = data[2 * n:]
-        assert len(source) == len(target) == len(label)
-        return ParallelDataSet(source, target, label)
+        assert len(source) == len(target)
+        return ParallelDataSet(source, target)
 
     def fill_up(self,
                 bucket_batch_sizes: List[BucketBatchSize],
@@ -1394,32 +1370,24 @@ class ParallelDataSet(Sized):
         """
         source = list(self.source)
         target = list(self.target)
-        label = list(self.label)
 
         rs = np.random.RandomState(seed)
 
         for bucket_idx in range(len(self)):
-            bucket = bucket_batch_sizes[bucket_idx].bucket
             bucket_batch_size = bucket_batch_sizes[bucket_idx].batch_size
             bucket_source = self.source[bucket_idx]
             bucket_target = self.target[bucket_idx]
-            bucket_label = self.label[bucket_idx]
             num_samples = bucket_source.shape[0]
 
             # Fill up the last batch by randomly sampling from the extant items.
             if num_samples % bucket_batch_size != 0:
                 rest = bucket_batch_size - num_samples % bucket_batch_size
                 desired_indices_np = rs.randint(num_samples, size=rest)
-                desired_indices = mx.nd.array(desired_indices_np)
-
-                if isinstance(source[bucket_idx], np.ndarray):
-                    source[bucket_idx] = np.concatenate((bucket_source, bucket_source.take(desired_indices_np)), axis=0)
-                else:
-                    source[bucket_idx] = mx.nd.concat(bucket_source, bucket_source.take(desired_indices), dim=0)
+                desired_indices = mx.nd.from_numpy(desired_indices_np, zero_copy=True)
+                source[bucket_idx] = mx.nd.concat(bucket_source, bucket_source.take(desired_indices), dim=0)
                 target[bucket_idx] = mx.nd.concat(bucket_target, bucket_target.take(desired_indices), dim=0)
-                label[bucket_idx] = mx.nd.concat(bucket_label, bucket_label.take(desired_indices), dim=0)
 
-        return ParallelDataSet(source, target, label)
+        return ParallelDataSet(source, target)
 
     def permute(self, permutations: List[mx.nd.NDArray]) -> 'ParallelDataSet':
         """
@@ -1432,7 +1400,6 @@ class ParallelDataSet(Sized):
         assert len(self) == len(permutations)
         source = []
         target = []
-        label = []
         for buck_idx in range(len(self)):
             num_samples = self.source[buck_idx].shape[0]
             if num_samples:  # not empty bucket
@@ -1442,13 +1409,11 @@ class ParallelDataSet(Sized):
                 else:
                     source.append(self.source[buck_idx].take(permutation))
                 target.append(self.target[buck_idx].take(permutation))
-                label.append(self.label[buck_idx].take(permutation))
             else:
                 source.append(self.source[buck_idx])
                 target.append(self.target[buck_idx])
-                label.append(self.label[buck_idx])
 
-        return ParallelDataSet(source, target, label)
+        return ParallelDataSet(source, target)
 
 
 def get_permutations(bucket_counts: List[int]) -> Tuple[List[mx.nd.NDArray], List[mx.nd.NDArray]]:
@@ -1468,8 +1433,8 @@ def get_permutations(bucket_counts: List[int]) -> Tuple[List[mx.nd.NDArray], Lis
         data_permutation = np.random.permutation(num_samples)
         inverse_data_permutation = np.empty(num_samples, np.int32)
         inverse_data_permutation[data_permutation] = np.arange(num_samples)
-        inverse_data_permutation = mx.nd.array(inverse_data_permutation)
-        data_permutation = mx.nd.array(data_permutation)
+        inverse_data_permutation = mx.nd.from_numpy(inverse_data_permutation, zero_copy=True)
+        data_permutation = mx.nd.from_numpy(data_permutation, zero_copy=True)
 
         data_permutations.append(data_permutation)
         inverse_data_permutations.append(inverse_data_permutation)
@@ -1512,9 +1477,6 @@ class BaseParallelSampleIter(mx.io.DataIter):
 
     :param buckets: The list of buckets.
     :param bucket_batch_sizes: A list, parallel to `buckets`, containing the number of samples in each bucket.
-    :param source_data_name: The source data name.
-    :param target_data_name: The target data name.
-    :param label_name: The label name.
     :param num_factors: The number of source factors.
     :param permute: Randomly shuffle the parallel data.
     :param dtype: The MXNet data type.
@@ -1525,9 +1487,6 @@ class BaseParallelSampleIter(mx.io.DataIter):
                  buckets: List[Tuple[int, int]],
                  batch_size: int,
                  bucket_batch_sizes: List[BucketBatchSize],
-                 source_data_name: str,
-                 target_data_name: str,
-                 label_name: str,
                  num_factors: int = 1,
                  permute: bool = True,
                  dtype='float32') -> None:
@@ -1536,35 +1495,9 @@ class BaseParallelSampleIter(mx.io.DataIter):
         self.buckets = list(buckets)
         self.default_bucket_key = get_default_bucket_key(self.buckets)
         self.bucket_batch_sizes = bucket_batch_sizes
-        self.source_data_name = source_data_name
-        self.target_data_name = target_data_name
-        self.label_name = label_name
         self.num_factors = num_factors
         self.permute = permute
         self.dtype = dtype
-
-        # "Staging area" that needs to fit any size batch we're using by total number of elements.
-        # When computing per-bucket batch sizes, we guarantee that the default bucket will have the
-        # largest total batch size.
-        # Note: this guarantees memory sharing for input data and is generally a good heuristic for
-        # other parts of the model, but it is possible that some architectures will have intermediate
-        # operations that produce shapes larger than the default bucket size.  In these cases, MXNet
-        # will silently allocate additional memory.
-        self.provide_data = [
-            mx.io.DataDesc(name=self.source_data_name,
-                           shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[0],
-                                  self.num_factors),
-                           layout=C.BATCH_MAJOR),
-            mx.io.DataDesc(name=self.target_data_name,
-                           shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[1]),
-                           layout=C.BATCH_MAJOR)]
-        self.provide_label = [
-            mx.io.DataDesc(name=self.label_name,
-                           shape=(self.bucket_batch_sizes[-1].batch_size, self.default_bucket_key[1]),
-                           layout=C.BATCH_MAJOR)]
-
-        self.data_names = [self.source_data_name, self.target_data_name]
-        self.label_names = [self.label_name]
 
     @abstractmethod
     def reset(self):
@@ -1575,7 +1508,7 @@ class BaseParallelSampleIter(mx.io.DataIter):
         pass
 
     @abstractmethod
-    def next(self) -> mx.io.DataBatch:
+    def next(self) -> 'Batch':
         pass
 
     @abstractmethod
@@ -1604,13 +1537,9 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
                  batch_size: int,
                  max_lens: Tuple[int, int],
                  num_factors: int = 1,
-                 source_data_name=C.SOURCE_NAME,
-                 target_data_name=C.TARGET_NAME,
-                 label_name=C.TARGET_LABEL_NAME,
                  dtype='float32') -> None:
         super().__init__(buckets=[bucket], batch_size=batch_size, bucket_batch_sizes=[BucketBatchSize(bucket, batch_size, None)],
-                         source_data_name=source_data_name, target_data_name=target_data_name,
-                         label_name=label_name, num_factors=num_factors, permute=False, dtype=dtype)
+                         num_factors=num_factors, permute=False, dtype=dtype)
         self.data_loader = data_loader
         self.sources_sentences, self.target_sentences = create_sequence_readers(sources, target, source_vocabs, target_vocab)
         self.sources_iters = [iter(s) for s in self.sources_sentences]
@@ -1700,15 +1629,11 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                  buckets,
                  batch_size,
                  bucket_batch_sizes,
-                 source_data_name=C.SOURCE_NAME,
-                 target_data_name=C.TARGET_NAME,
-                 label_name=C.TARGET_LABEL_NAME,
                  num_factors: int = 1,
                  permute: bool = True,
                  dtype='float32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
-                         source_data_name=source_data_name, target_data_name=target_data_name,
-                         label_name=label_name, num_factors=num_factors, permute=permute, dtype=dtype)
+                         num_factors=num_factors, permute=permute, dtype=dtype)
         assert len(shards_fnames) > 0
         self.shards_fnames = list(shards_fnames)
         self.shard_index = -1
@@ -1724,8 +1649,6 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                                              buckets=self.buckets,
                                              batch_size=self.batch_size,
                                              bucket_batch_sizes=self.bucket_batch_sizes,
-                                             source_data_name=self.source_data_name,
-                                             target_data_name=self.target_data_name,
                                              num_factors=self.num_factors,
                                              permute=self.permute)
 
@@ -1757,7 +1680,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
         next_shard_index = self.shard_index + 1
         return self.shard_iter.iter_next() or next_shard_index < len(self.shards_fnames)
 
-    def next(self) -> mx.io.DataBatch:
+    def next(self) -> 'Batch':
         if not self.shard_iter.iter_next():
             if self.shard_index < len(self.shards_fnames) - 1:
                 self.shard_index += 1
@@ -1791,18 +1714,14 @@ class ParallelSampleIter(BaseParallelSampleIter):
                  buckets,
                  batch_size,
                  bucket_batch_sizes,
-                 source_data_name=C.SOURCE_NAME,
-                 target_data_name=C.TARGET_NAME,
-                 label_name=C.TARGET_LABEL_NAME,
                  num_factors: int = 1,
                  permute: bool = True,
                  dtype='float32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
-                         source_data_name=source_data_name, target_data_name=target_data_name,
-                         label_name=label_name, num_factors=num_factors, permute=permute, dtype=dtype)
+                         num_factors=num_factors, permute=permute, dtype=dtype)
 
         # create independent lists to be shuffled
-        self.data = ParallelDataSet(list(data.source), list(data.target), list(data.label))
+        self.data = ParallelDataSet(list(data.source), list(data.target))
 
         # create index tuples (buck_idx, batch_start_pos) into buckets.
         # This is the list of all batches across all buckets in the dataset. These will be shuffled.
@@ -1839,7 +1758,7 @@ class ParallelSampleIter(BaseParallelSampleIter):
         """
         return self.curr_batch_index != len(self.batch_indices)
 
-    def next(self) -> mx.io.DataBatch:
+    def next(self) -> 'Batch':
         """
         Returns the next batch from the data iterator.
         """
@@ -1851,19 +1770,20 @@ class ParallelSampleIter(BaseParallelSampleIter):
 
         batch_size = self.bucket_batch_sizes[i].batch_size
         source = self.data.source[i][j:j + batch_size]
-        target = self.data.target[i][j:j + batch_size]
-        data = [source, target]
-        label = [self.data.label[i][j:j + batch_size]]
+        target = self.data.target[i][j:j + batch_size, :-1]
+        label = self.data.target[i][j:j + batch_size, 1:]
 
-        provide_data = [mx.io.DataDesc(name=n, shape=x.shape, layout=C.BATCH_MAJOR) for n, x in
-                        zip(self.data_names, data)]
-        provide_label = [mx.io.DataDesc(name=n, shape=x.shape, layout=C.BATCH_MAJOR) for n, x in
-                         zip(self.label_names, label)]
+        source_words = mx.nd.squeeze(mx.nd.slice(source, begin=(None, None, 0), end=(None, None, 1)), axis=2)
+        source_length = mx.nd.sum(source_words != C.PAD_ID, axis=1)
+        target_length = mx.nd.sum(target != C.PAD_ID, axis=1)
+        length_ratio = source_length / target_length
 
-        # TODO: num pad examples is not set here if fillup policy would be padding
-        return mx.io.DataBatch(data, label,
-                               pad=0, index=None, bucket_key=self.buckets[i],
-                               provide_data=provide_data, provide_label=provide_label)
+        samples = source.shape[0]
+        tokens = source.shape[1] * samples
+
+        labels = {C.TARGET_LABEL_NAME: label, C.LENRATIO_LABEL_NAME: length_ratio}
+
+        return Batch(source, source_length, target, target_length, labels, samples, tokens)
 
     def save_state(self, fname: str):
         """
@@ -1903,10 +1823,38 @@ class ParallelSampleIter(BaseParallelSampleIter):
         self.data_permutations = []
 
         for bucket in range(len(self.data)):
-            inverse_permutation = mx.nd.array(inverse_data_permutations[bucket])
+            inverse_permutation = mx.nd.from_numpy(inverse_data_permutations[bucket], zero_copy=True)
             self.inverse_data_permutations.append(inverse_permutation)
 
-            permutation = mx.nd.array(data_permutations[bucket])
+            permutation = mx.nd.from_numpy(data_permutations[bucket], zero_copy=True)
             self.data_permutations.append(permutation)
 
         self.data = self.data.permute(self.data_permutations)
+
+
+class Batch:
+
+    __slots__ = ['source', 'source_length', 'target', 'target_length', 'labels', 'samples', 'tokens']
+
+    def __init__(self, source, source_length, target, target_length, labels, samples, tokens):
+        self.source = source
+        self.source_length = source_length
+        self.target = target
+        self.target_length = target_length
+        self.labels = labels
+        self.samples = samples
+        self.tokens = tokens
+
+    def split_and_load(self, ctx: List[mx.context.Context]) -> 'Batch':
+        source = mx.gluon.utils.split_and_load(self.source, ctx, batch_axis=0)
+        source_length = mx.gluon.utils.split_and_load(self.source_length, ctx, batch_axis=0)
+        target = mx.gluon.utils.split_and_load(self.target, ctx, batch_axis=0)
+        target_length = mx.gluon.utils.split_and_load(self.target_length, ctx, batch_axis=0)
+        labels = {name: mx.gluon.utils.split_and_load(label, ctx, batch_axis=0) for name, label in self.labels.items()}
+        return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens)
+
+    def shards(self) -> Iterable[Tuple[Any]]:
+        assert isinstance(self.source, list), "Must call split_and_load() first"
+        for i, inputs in enumerate(zip(self.source, self.source_length, self.target, self.target_length)):
+            # model inputs, labels
+            yield inputs, {name: label[i] for name, label in self.labels.items()}

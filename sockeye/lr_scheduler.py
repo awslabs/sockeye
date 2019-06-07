@@ -206,7 +206,7 @@ class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
         self.reduce_num_not_improved = reduce_num_not_improved
         self.num_not_improved = 0
 
-        self.lr = None  # type: float
+        self.lr = None  # type: Optional[float]
         self.t_last_log = -1
         self.warmed_up = not self.warmup > 0
         logger.info("Will reduce the learning rate by a factor of %.2f whenever"

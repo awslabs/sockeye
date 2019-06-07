@@ -17,7 +17,7 @@ from typing import Optional, List, Iterable  # NOQA pylint: disable=unused-impor
 import mxnet as mx
 
 from sockeye.config import Config
-from sockeye.layers import LayerNormalization, LHUC
+from sockeye.layers import LHUC
 from . import constants as C
 from . import utils
 

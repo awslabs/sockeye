@@ -332,7 +332,6 @@ def train(args: argparse.Namespace):
                                            vocab_target_size=target_vocab_size,
                                            max_seq_len_source=max_seq_len_source, max_seq_len_target=max_seq_len_target,
                                            config_data=config_data)
-        model_config.freeze()
 
         training_model = create_training_model(config=model_config,
                                                context=context,
