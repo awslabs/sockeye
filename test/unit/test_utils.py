@@ -11,18 +11,20 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import gzip
+import math
 import os
 import re
 import tempfile
+from tempfile import TemporaryDirectory
 
-import math
 import mxnet as mx
 import numpy as np
 import pytest
 
 from sockeye import __version__
-from sockeye import utils
 from sockeye import constants as C
+from sockeye import utils
 
 
 @pytest.mark.parametrize("some_list, expected", [
@@ -62,7 +64,7 @@ def test_expand_requested_device_ids(requested_device_ids, num_gpus_available, e
 
 
 @pytest.mark.parametrize("requested_device_ids, num_gpus_available, expected", device_params)
-def test_aquire_gpus(tmpdir, requested_device_ids, num_gpus_available, expected):
+def test_acquire_gpus(tmpdir, requested_device_ids, num_gpus_available, expected):
     with utils.acquire_gpus(requested_device_ids, lock_dir=str(tmpdir),
                             num_gpus_available=num_gpus_available) as acquired_gpus:
         assert set(acquired_gpus) == set(expected)
@@ -89,7 +91,7 @@ def test_expand_requested_device_ids_exception(requested_device_ids, num_gpus_av
 
 
 @pytest.mark.parametrize("requested_device_ids, num_gpus_available", device_params_expected_exception)
-def test_aquire_gpus_exception(tmpdir, requested_device_ids, num_gpus_available):
+def test_acquire_gpus_exception(tmpdir, requested_device_ids, num_gpus_available):
     with pytest.raises(ValueError):
         with utils.acquire_gpus(requested_device_ids, lock_dir=str(tmpdir),
                                 num_gpus_available=num_gpus_available) as _:
@@ -102,7 +104,7 @@ device_params_1_locked = [([-4, 3, 5], 7, [0, 2, 3, 4, 5, 6]),
 
 
 @pytest.mark.parametrize("requested_device_ids, num_gpus_available, expected", device_params_1_locked)
-def test_aquire_gpus_1_locked(tmpdir, requested_device_ids, num_gpus_available, expected):
+def test_acquire_gpus_1_locked(tmpdir, requested_device_ids, num_gpus_available, expected):
     gpu_1 = 1
     with utils.GpuFileLock([gpu_1], str(tmpdir)) as lock:
         with utils.acquire_gpus(requested_device_ids, lock_dir=str(tmpdir),
@@ -336,3 +338,87 @@ def test_print_value():
                          ])
 def test_metric_value_is_better(new, old, metric, result):
     assert utils.metric_value_is_better(new, old, metric) == result
+
+
+@pytest.mark.parametrize("num_factors", [1, 2, 3])
+def test_split(num_factors):
+    batch_size = 4
+    bucket_key = 10
+    # Simulates splitting factored input
+    data = mx.nd.random.normal(shape=(batch_size, bucket_key, num_factors))
+    result = utils.split(data, num_outputs=num_factors, axis=2, squeeze_axis=True)
+    assert isinstance(result, list)
+    assert result[0].shape == (batch_size, bucket_key)
+
+
+def test_get_num_gpus():
+    assert utils.get_num_gpus() >= 0
+
+
+def _touch_file(fname, compressed: bool, empty: bool) -> str:
+    if compressed:
+        open_func = gzip.open
+    else:
+        open_func = open
+    with open_func(fname, encoding='utf8', mode='wt') as f:
+        if not empty:
+            for i in range(10):
+                print(str(i), file=f)
+    return fname
+
+
+def test_is_gzip_file():
+    with TemporaryDirectory() as temp:
+        fname = os.path.join(temp, 'test')
+        assert utils.is_gzip_file(_touch_file(fname, compressed=True, empty=True))
+        assert utils.is_gzip_file(_touch_file(fname, compressed=True, empty=False))
+        assert not utils.is_gzip_file(_touch_file(fname, compressed=False, empty=True))
+        assert not utils.is_gzip_file(_touch_file(fname, compressed=False, empty=False))
+
+
+def test_smart_open_without_suffix():
+    with TemporaryDirectory() as temp:
+        fname = os.path.join(temp, 'test')
+        _touch_file(fname, compressed=True, empty=False)
+        with utils.smart_open(fname) as fin:
+            assert len(fin.readlines()) == 10
+        _touch_file(fname, compressed=False, empty=False)
+        with utils.smart_open(fname) as fin:
+            assert len(fin.readlines()) == 10
+
+
+@pytest.mark.parametrize("data,expected_lengths", [
+    (mx.nd.array([[1, 2, 0], [1, 0, 0], [0, 0, 0]]), mx.nd.array([2, 1, 0]))
+])
+def test_compute_lengths(data, expected_lengths):
+    lengths = utils.compute_lengths(mx.sym.Variable('data')).eval(data=data)[0]
+    assert (lengths.asnumpy() == expected_lengths.asnumpy()).all()
+
+
+@pytest.mark.parametrize("line_num,line,expected_metrics", [
+        (1, "1\tfloat_metric=3.45\tbool_metric=True", {'float_metric':3.45, 'bool_metric': True}),
+        (3, "3\tfloat_metric=1.0\tbool_metric=False", {'float_metric':1.00, 'bool_metric': False}),
+        # line_num and checkpoint are not equal, should fail
+        (2, "4\tfloat_metric=1.0\tbool_metric=False", {'float_metric':1.00, 'bool_metric': False}),
+        ])
+def test_parse_metrics_line(line_num, line, expected_metrics):
+    if line_num == int(line.split('\t')[0]):
+        parsed_metrics = utils.parse_metrics_line(line_num, line)
+        for k, v in parsed_metrics.items():
+            assert type(v) == type(expected_metrics[k])
+            assert v == expected_metrics[k]
+    else:
+        with pytest.raises(utils.SockeyeError) as e:
+            parsed_metrics = utils.parse_metrics_line(line_num, line)
+
+
+def test_write_read_metric_file():
+    expected_metrics = [{'float_metric':3.45, 'bool_metric': True},
+                       {'float_metric':1.0, 'bool_metric': False}]
+    with TemporaryDirectory(prefix="metric_file") as work_dir:
+        metric_path = os.path.join(work_dir, "metrics")
+        utils.write_metrics_file(expected_metrics, metric_path)
+        read_metrics = utils.read_metrics_file(metric_path)
+
+    assert len(read_metrics) == len(expected_metrics)
+    assert expected_metrics == read_metrics

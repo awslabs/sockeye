@@ -59,6 +59,8 @@ class ModelConfig(Config):
                  config_encoder: encoder.EncoderConfig,
                  config_decoder: decoder.DecoderConfig,
                  config_loss: loss.LossConfig,
+                 config_length_task_loss: Optional[loss.LossConfig] = None,
+                 config_length_task: layers.LengthRatioConfig = None,
                  weight_tying: bool = False,
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
                  weight_normalization: bool = False,
@@ -72,6 +74,8 @@ class ModelConfig(Config):
         self.config_encoder = config_encoder
         self.config_decoder = config_decoder
         self.config_loss = config_loss
+        self.config_length_task_loss = config_length_task_loss
+        self.config_length_task = config_length_task
         self.weight_tying = weight_tying
         self.weight_tying_type = weight_tying_type
         self.weight_normalization = weight_normalization
@@ -109,10 +113,13 @@ class SockeyeModel:
 
         # source & target embeddings
         embed_weight_source, embed_weight_target, out_weight_target = self._get_embed_weights(self.prefix)
-        self.embedding_source = encoder.Embedding(self.config.config_embed_source,
-                                                  prefix=self.prefix + C.SOURCE_EMBEDDING_PREFIX,
-                                                  embed_weight=embed_weight_source,
-                                                  is_source=True)
+        if isinstance(self.config.config_embed_source, encoder.PassThroughEmbeddingConfig):
+            self.embedding_source = encoder.PassThroughEmbedding(self.config.config_embed_source)  # type: encoder.Encoder
+        else:
+            self.embedding_source = encoder.Embedding(self.config.config_embed_source,
+                                                      prefix=self.prefix + C.SOURCE_EMBEDDING_PREFIX,
+                                                      embed_weight=embed_weight_source,
+                                                      is_source=True)  # type: encoder.Encoder
 
         self.embedding_target = encoder.Embedding(self.config.config_embed_target,
                                                   prefix=self.prefix + C.TARGET_EMBEDDING_PREFIX,
@@ -124,6 +131,16 @@ class SockeyeModel:
                                                weight=out_weight_target,
                                                weight_normalization=self.config.weight_normalization,
                                                prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
+
+        # create length ratio prediction layer(s)
+        self.length_ratio = None
+        if self.config.config_length_task is not None:
+            if self.config.config_length_task.weight > 0.0:
+                self.length_ratio = layers.LengthRatio(hidden_size=self.encoder.get_num_hidden(),
+                                                       num_layers=self.config.config_length_task.num_layers,
+                                                       prefix=self.prefix + C.LENRATIOS_OUTPUT_LAYER_PREFIX)
+            else:
+                logger.warning("Auxiliary length task requested, but its loss weight is zero -- this will have no effect.")
 
         self.params = None  # type: Optional[Dict]
         self.aux_params = None  # type: Optional[Dict]
@@ -204,7 +221,8 @@ class SockeyeModel:
         w_embed_target = mx.sym.Variable(prefix + C.TARGET_EMBEDDING_PREFIX + "weight",
                                          shape=(self.config.config_embed_target.vocab_size,
                                                 self.config.config_embed_target.num_embed))
-        w_out_target = mx.sym.Variable(prefix + "target_output_weight",
+
+        w_out_target = mx.sym.Variable(prefix + "target_output_weight", dtype='float32',
                                        shape=(self.config.vocab_target_size, self.decoder.get_num_hidden()))
 
         if self.config.weight_tying:
@@ -223,7 +241,9 @@ class SockeyeModel:
                                                                   self.decoder.get_num_hidden()))
                 w_out_target = w_embed_target
 
-        self._embed_weight_source_name = w_embed_source.name
+        self._embed_weight_source_name = None
+        if w_embed_source is not None:
+            self._embed_weight_source_name = w_embed_source.name
         self._embed_weight_target_name = w_embed_target.name
         self._out_weight_target_name = w_out_target.name
         return w_embed_source, w_embed_target, w_out_target

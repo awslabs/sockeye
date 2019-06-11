@@ -1,4 +1,4 @@
-# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -12,8 +12,10 @@
 # permissions and limitations under the License.
 
 """
-Defines various constants used througout the project
+Defines various constants used throughout the project
 """
+import sys
+
 import mxnet as mx
 import numpy as np
 
@@ -22,6 +24,7 @@ EOS_SYMBOL = "</s>"
 UNK_SYMBOL = "<unk>"
 PAD_SYMBOL = "<pad>"
 PAD_ID = 0
+PAD_FORMAT = "<pad%d>"
 TOKEN_SEPARATOR = " "
 VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
 # reserve extra space for the EOS or BOS symbol that is added to both source and target
@@ -42,6 +45,7 @@ TRANSFORMER_ENCODER_PREFIX = ENCODER_PREFIX + "transformer_"
 CNN_ENCODER_PREFIX = ENCODER_PREFIX + "cnn_"
 CHAR_SEQ_ENCODER_PREFIX = ENCODER_PREFIX + "char_"
 DEFAULT_OUTPUT_LAYER_PREFIX = "target_output_"
+LENRATIOS_OUTPUT_LAYER_PREFIX = "length_ratio_layer_"
 
 # embedding prefixes
 SOURCE_EMBEDDING_PREFIX = "source_" + EMBEDDING_PREFIX
@@ -50,15 +54,21 @@ TARGET_EMBEDDING_PREFIX = "target_" + EMBEDDING_PREFIX
 TARGET_POSITIONAL_EMBEDDING_PREFIX = "target_pos_" + EMBEDDING_PREFIX
 SHARED_EMBEDDING_PREFIX = "source_target_" + EMBEDDING_PREFIX
 
+# source factors
+SOURCE_FACTORS_COMBINE_SUM = 'sum'
+SOURCE_FACTORS_COMBINE_CONCAT = 'concat'
+SOURCE_FACTORS_COMBINE_CHOICES = [SOURCE_FACTORS_COMBINE_SUM, SOURCE_FACTORS_COMBINE_CONCAT]
+
 # encoder names (arguments)
 RNN_NAME = "rnn"
 RNN_WITH_CONV_EMBED_NAME = "rnn-with-conv-embed"
 TRANSFORMER_TYPE = "transformer"
 CONVOLUTION_TYPE = "cnn"
 TRANSFORMER_WITH_CONV_EMBED_TYPE = "transformer-with-conv-embed"
+IMAGE_PRETRAIN_TYPE = "image-pretrain-cnn"
 
 # available encoders
-ENCODERS = [RNN_NAME, RNN_WITH_CONV_EMBED_NAME, TRANSFORMER_TYPE, TRANSFORMER_WITH_CONV_EMBED_TYPE, CONVOLUTION_TYPE]
+ENCODERS = [RNN_NAME, RNN_WITH_CONV_EMBED_NAME, TRANSFORMER_TYPE, TRANSFORMER_WITH_CONV_EMBED_TYPE, CONVOLUTION_TYPE, IMAGE_PRETRAIN_TYPE]
 
 # available decoder
 DECODERS = [RNN_NAME, TRANSFORMER_TYPE, CONVOLUTION_TYPE]
@@ -98,6 +108,7 @@ EMBED_INIT_PATTERN = '(%s|%s|%s)weight' % (SOURCE_EMBEDDING_PREFIX, TARGET_EMBED
 EMBED_INIT_DEFAULT = 'default'
 EMBED_INIT_NORMAL = 'normal'
 EMBED_INIT_TYPES = [EMBED_INIT_DEFAULT, EMBED_INIT_NORMAL]
+DEFAULT_NUM_EMBED = 512
 
 # RNN init types
 RNN_INIT_PATTERN = ".*h2h.*"
@@ -154,11 +165,27 @@ CNN_ACTIVATION_TYPES = [GLU, RELU, SIGMOID, SOFT_RELU, TANH]
 CNN_PAD_LEFT = "left"
 CNN_PAD_CENTERED = "centered"
 
+# coverage types
+COVERAGE_COUNT = "count"
+COVERAGE_FERTILITY = "fertility"
+COVERAGE_TYPES = [TANH,
+                  SIGMOID,
+                  RELU,
+                  SOFT_RELU,
+                  GRU_TYPE,
+                  COVERAGE_COUNT,
+                  COVERAGE_FERTILITY]
+
 # default I/O variable names
 SOURCE_NAME = "source"
 SOURCE_LENGTH_NAME = "source_length"
 TARGET_NAME = "target"
 TARGET_LABEL_NAME = "target_label"
+LENRATIO_LABEL_NAME = "length_ratio_label"
+LENRATIO_LABEL_OUTPUT_NAME = "length_ratio_label" + "_output"
+LENRATIO_NAME = "length_ratio"
+LENRATIO_LOSS_NAME = LENRATIO_NAME + "_loss"
+LENRATIO_OUTPUT_NAME = LENRATIO_NAME + "_output"
 LEXICON_NAME = "lexicon"
 
 SOURCE_ENCODED_NAME = "encoded_source"
@@ -184,6 +211,7 @@ MONITOR_STAT_FUNCS = {STAT_FUNC_DEFAULT: None,
 
 # Inference constants
 DEFAULT_BEAM_SIZE = 5
+DEFAULT_NBEST_SIZE = 1
 CHUNK_SIZE_NO_BATCHING = 1
 CHUNK_SIZE_PER_BATCH_SEGMENT = 500
 BEAM_SEARCH_STOP_FIRST = 'first'
@@ -192,7 +220,13 @@ BEAM_SEARCH_STOP_ALL = 'all'
 # Inference Input JSON constants
 JSON_TEXT_KEY = "text"
 JSON_FACTORS_KEY = "factors"
+JSON_RESTRICT_LEXICON_KEY = "restrict_lexicon"
+JSON_CONSTRAINTS_KEY = "constraints"
+JSON_AVOID_KEY = "avoid"
 JSON_ENCODING = "utf-8"
+
+# Lexical constraints
+BANK_ADJUSTMENT = 'even'
 
 VERSION_NAME = "version"
 CONFIG_NAME = "config"
@@ -228,14 +262,18 @@ TRAINING_STATE_PARAMS_NAME = "params"
 ARGS_STATE_NAME = "args.yaml"
 
 # Arguments that may differ and still resume training
-ARGS_MAY_DIFFER = ["overwrite_output", "use-tensorboard", "quiet",
+ARGS_MAY_DIFFER = ["overwrite_output", "use_tensorboard", "quiet",
                    "align_plot_prefix", "sure_align_threshold",
-                   "keep_last_params"]
+                   "keep_last_params", "seed",
+                   "max_updates", "min_updates",
+                   "max_num_epochs", "min_num_epochs",
+                   "max_samples", "min_samples", "max_checkpoints"]
 
 # Other argument constants
 TRAINING_ARG_SOURCE = "--source"
 TRAINING_ARG_TARGET = "--target"
 TRAINING_ARG_PREPARED_DATA = "--prepared-data"
+TRAINING_ARG_MAX_SEQ_LEN = "--max-seq-len"
 
 VOCAB_ARG_SHARED_VOCAB = "--shared-vocab"
 
@@ -246,12 +284,15 @@ INFERENCE_ARG_OUTPUT_SHORT = "-o"
 INFERENCE_ARG_INPUT_FACTORS_LONG = "--input-factors"
 INFERENCE_ARG_INPUT_FACTORS_SHORT = "-if"
 TRAIN_ARGS_MONITOR_BLEU = "--decode-and-evaluate"
+TRAIN_ARGS_CHECKPOINT_INTERVAL = "--checkpoint-interval"
 TRAIN_ARGS_CHECKPOINT_FREQUENCY = "--checkpoint-frequency"
+TRAIN_ARGS_STOP_ON_DECODER_FAILURE = "--stop-training-on-decoder-failure"
 
 # Used to delimit factors on STDIN for inference
 DEFAULT_FACTOR_DELIMITER = '|'
 
 # data layout strings
+BATCH_MAJOR_IMAGE = "NCHW"
 BATCH_MAJOR = "NTC"
 TIME_MAJOR = "TNC"
 
@@ -310,34 +351,59 @@ OUTPUT_HANDLER_TRANSLATION = "translation"
 OUTPUT_HANDLER_TRANSLATION_WITH_SCORE = "translation_with_score"
 OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENTS = "translation_with_alignments"
 OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENT_MATRIX = "translation_with_alignment_matrix"
+OUTPUT_HANDLER_SCORE = "score"
+OUTPUT_HANDLER_PAIR_WITH_SCORE = "pair_with_score"
 OUTPUT_HANDLER_BENCHMARK = "benchmark"
 OUTPUT_HANDLER_ALIGN_PLOT = "align_plot"
 OUTPUT_HANDLER_ALIGN_TEXT = "align_text"
 OUTPUT_HANDLER_BEAM_STORE = "beam_store"
+OUTPUT_HANDLER_JSON = "json"
 OUTPUT_HANDLERS = [OUTPUT_HANDLER_TRANSLATION,
+                   OUTPUT_HANDLER_SCORE,
                    OUTPUT_HANDLER_TRANSLATION_WITH_SCORE,
                    OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENTS,
                    OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENT_MATRIX,
                    OUTPUT_HANDLER_BENCHMARK,
                    OUTPUT_HANDLER_ALIGN_PLOT,
                    OUTPUT_HANDLER_ALIGN_TEXT,
-                   OUTPUT_HANDLER_BEAM_STORE]
+                   OUTPUT_HANDLER_BEAM_STORE,
+                   OUTPUT_HANDLER_JSON]
+OUTPUT_HANDLERS_SCORING = [OUTPUT_HANDLER_SCORE,
+                           OUTPUT_HANDLER_PAIR_WITH_SCORE]
 
 # metrics
 ACCURACY = 'accuracy'
 PERPLEXITY = 'perplexity'
+LENRATIO_MSE = 'length-ratio-mse'
 BLEU = 'bleu'
 CHRF = 'chrf'
+ROUGE = 'rouge'
+ROUGE1 = 'rouge1'
+ROUGE2 = 'rouge2'
+ROUGEL = 'rougel'
 BLEU_VAL = BLEU + "-val"
 CHRF_VAL = CHRF + "-val"
+ROUGE_VAL = ROUGE + "-val"
+ROUGE_1_VAL = ROUGE1 + "-val"
+ROUGE_2_VAL = ROUGE2 + "-val"
+ROUGE_L_VAL = ROUGEL + "-val"
+LENRATIO_VAL = 'length-ratio-mse'
 AVG_TIME = "avg-sec-per-sent-val"
 DECODING_TIME = "decode-walltime-val"
-METRICS = [PERPLEXITY, ACCURACY, BLEU]
-METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, PERPLEXITY: False}
-METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, PERPLEXITY: np.inf}
+METRICS = [PERPLEXITY, ACCURACY, LENRATIO_MSE, BLEU, CHRF, ROUGE1]
+METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, CHRF: True, ROUGE1: True, PERPLEXITY: False}
+METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, CHRF: 0.0, ROUGE1: 0.0, PERPLEXITY: np.inf}
+METRICS_REQUIRING_DECODER = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL]
+EVALUATE_METRICS = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL]
 
 # loss
 CROSS_ENTROPY = 'cross-entropy'
+LENRATIO_REGRESSION = 'length-ratio-regression'
+
+LINK_NORMAL = 'normal'
+LINK_POISSON = 'poisson'
+LENGTH_TASK_RATIO = 'ratio'
+LENGTH_TASK_LENGTH = 'length'
 
 LOSS_NORM_BATCH = 'batch'
 LOSS_NORM_VALID = "valid"
@@ -358,6 +424,7 @@ LARGE_VALUES = {
     # https://en.wikipedia.org/wiki/Single-precision_floating-point_format#Precision_limits_on_integer_values.
     DTYPE_FP32: LARGE_POSITIVE_VALUE
 }
+LARGEST_INT = sys.maxsize
 
 LHUC_NAME = "lhuc"
 # lhuc application points
@@ -367,6 +434,17 @@ LHUC_STATE_INIT = "state_init"
 LHUC_ALL = "all"
 LHUC_CHOICES = [LHUC_ENCODER, LHUC_DECODER, LHUC_STATE_INIT, LHUC_ALL]
 
+# Strategies for fixing various parameters.
+FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER = "all_except_decoder"
+FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTER_LAYERS = "all_except_outer_layers"
+FIXED_PARAM_STRATEGY_ALL_EXCEPT_EMBEDDINGS = "all_except_embeddings"
+FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTPUT_PROJ = "all_except_output_proj"
+
+FIXED_PARAM_STRATEGY_CHOICES = [FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER,
+                                FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTER_LAYERS,
+                                FIXED_PARAM_STRATEGY_ALL_EXCEPT_EMBEDDINGS,
+                                FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTPUT_PROJ]
+
 # data sharding
 SHARD_NAME = "shard.%05d"
 SHARD_SOURCE = SHARD_NAME + ".source"
@@ -374,4 +452,27 @@ SHARD_TARGET = SHARD_NAME + ".target"
 DATA_INFO = "data.info"
 DATA_CONFIG = "data.config"
 PREPARED_DATA_VERSION_FILE = "data.version"
+# TODO: with next bump remove branch over data_statistics.length_ratio_stats_per_bucket
 PREPARED_DATA_VERSION = 2
+
+# reranking
+RERANK_BLEU = "bleu"
+RERANK_CHRF = "chrf"
+RERANK_METRICS = [RERANK_BLEU, RERANK_CHRF]
+
+# scoring
+SCORING_TYPE_NEGLOGPROB = 'neglogprob'
+SCORING_TYPE_LOGPROB = 'logprob'
+SCORING_TYPE_DEFAULT = SCORING_TYPE_NEGLOGPROB
+SCORING_TYPE_CHOICES = [SCORING_TYPE_NEGLOGPROB, SCORING_TYPE_LOGPROB]
+
+# parameter averaging
+AVERAGE_BEST = 'best'
+AVERAGE_LAST = 'last'
+AVERAGE_LIFESPAN = 'lifespan'
+AVERAGE_CHOICES = [AVERAGE_BEST, AVERAGE_LAST, AVERAGE_LIFESPAN]
+
+# brevity penalty
+BREVITY_PENALTY_CONSTANT = 'constant'
+BREVITY_PENALTY_LEARNED = 'learned'
+BREVITY_PENALTY_NONE = 'none'

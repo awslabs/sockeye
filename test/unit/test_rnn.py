@@ -47,7 +47,6 @@ def test_ln_cell(cell, expected_param_keys):
     inputs = [mx.sym.Variable('rnn_t%d_data' % i) for i in range(3)]
     outputs, _ = cell.unroll(3, inputs)
     outputs = mx.sym.Group(outputs)
-    print(sorted(cell.params._params.keys()))
     assert sorted(cell.params._params.keys()) == expected_param_keys
     assert outputs.list_outputs() == ['rnn_t0_out_output', 'rnn_t1_out_output', 'rnn_t2_out_output']
 

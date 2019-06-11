@@ -23,10 +23,10 @@ import pytest
 from sockeye import constants as C
 from sockeye import data_io
 from sockeye import vocab
-from sockeye.utils import SockeyeError, get_tokens, seedRNGs
+from sockeye.utils import SockeyeError, get_tokens, seed_rngs
 from test.common import tmp_digits_dataset
 
-seedRNGs(12)
+seed_rngs(12)
 
 define_bucket_tests = [(50, 10, [10, 20, 30, 40, 50]),
                        (50, 20, [20, 40, 50]),
@@ -128,7 +128,7 @@ def test_sequence_reader(sequences, use_vocab, add_bos, add_eos):
 
         if vocabulary is None:
             with pytest.raises(SockeyeError) as e:
-                _ = data_io.SequenceReader(path, vocabulary=vocabulary, add_bos=True)
+                data_io.SequenceReader(path, vocabulary=vocabulary, add_bos=True)
             assert str(e.value) == "Adding a BOS or EOS symbol requires a vocabulary"
 
             expected_sequences = [data_io.strids2ids(get_tokens(s)) if s else None for s in sequences]
@@ -138,7 +138,7 @@ def test_sequence_reader(sequences, use_vocab, add_bos, add_eos):
             if add_bos:
                 expected_sequences = [[vocabulary[C.BOS_SYMBOL]] + s if s else None for s in expected_sequences]
             if add_eos:
-                expected_sequences = [s + [vocabulary[C.EOS_SYMBOL]]  if s else None for s in expected_sequences]
+                expected_sequences = [s + [vocabulary[C.EOS_SYMBOL]] if s else None for s in expected_sequences]
             assert read_sequences == expected_sequences
 
 
@@ -181,22 +181,22 @@ def test_nontoken_parallel_iter(source_iterables, target_iterable):
                              (
                                      [[[0], [1, 1]], [[0], [1, 1]]],
                                      [[0], [1]],
-                                     [(([0], [0]), [0]), (([1, 1], [1, 1]), [1])]
+                                     [([[0], [0]], [0]), ([[1, 1], [1, 1]], [1])]
                              ),
                              (
                                      [[[0], None], [[0], None]],
                                      [[0], [1]],
-                                     [(([0], [0]), [0])]
+                                     [([[0], [0]], [0])]
                              ),
                              (
                                      [[[0], [1, 1]], [[0], [1, 1]]],
                                      [[0], None],
-                                     [(([0], [0]), [0])]
+                                     [([[0], [0]], [0])]
                              ),
                              (
                                      [[None, [1, 1]], [None, [1, 1]]],
                                      [None, [1]],
-                                     [(([1, 1], [1, 1]), [1])]
+                                     [([[1, 1], [1, 1]], [1])]
                              ),
                              (
                                      [[None, [1, 1]], [None, [1, 1]]],
@@ -223,23 +223,33 @@ def test_sample_based_define_bucket_batch_sizes():
         assert bbs.average_words_per_batch == bbs.bucket[1] * batch_size
 
 
-def test_word_based_define_bucket_batch_sizes():
+@pytest.mark.parametrize("length_ratio", [0.5, 1.5])
+def test_word_based_define_bucket_batch_sizes(length_ratio):
     batch_by_words = True
     batch_num_devices = 1
     batch_size = 200
     max_seq_len = 100
-    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, 1.5)
+    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, length_ratio)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets=buckets,
                                                            batch_size=batch_size,
                                                            batch_by_words=batch_by_words,
                                                            batch_num_devices=batch_num_devices,
                                                            data_target_average_len=[None] * len(buckets))
+    max_num_words = 0
     # last bucket batch size is different
     for bbs in bucket_batch_sizes[:-1]:
-        expected_batch_size = round((batch_size / bbs.bucket[1]) / batch_num_devices)
+        target_padded_seq_len = bbs.bucket[1]
+        expected_batch_size = round((batch_size / target_padded_seq_len) / batch_num_devices)
         assert bbs.batch_size == expected_batch_size
         expected_average_words_per_batch = expected_batch_size * bbs.bucket[1]
         assert bbs.average_words_per_batch == expected_average_words_per_batch
+        max_num_words = max(max_num_words, bbs.batch_size * max(*bbs.bucket))
+
+    last_bbs = bucket_batch_sizes[-1]
+    min_expected_batch_size = round((batch_size / last_bbs.bucket[1]) / batch_num_devices)
+    assert last_bbs.batch_size >= min_expected_batch_size
+    last_bbs_num_words = last_bbs.batch_size * max(*last_bbs.bucket)
+    assert last_bbs_num_words >= max_num_words
 
 
 def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
@@ -297,7 +307,7 @@ def test_parallel_data_set_fill_up():
                                                            data_target_average_len=[None] * len(buckets))
     dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=1, max_count=5))
 
-    dataset_filled_up = dataset.fill_up(bucket_batch_sizes, 'replicate')
+    dataset_filled_up = dataset.fill_up(bucket_batch_sizes)
     assert len(dataset_filled_up.source) == len(dataset.source)
     assert len(dataset_filled_up.target) == len(dataset.target)
     assert len(dataset_filled_up.label) == len(dataset.label)
@@ -339,7 +349,7 @@ def test_parallel_data_set_permute():
                                                            batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
     dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5)).fill_up(
-        bucket_batch_sizes, 'replicate')
+        bucket_batch_sizes)
 
     permutations, inverse_permutations = data_io.get_permutations(dataset.get_bucket_counts())
 
@@ -379,7 +389,7 @@ def test_get_batch_indices():
         assert 0 <= start_pos < len(dataset.source[buck_idx]) - batch_size + 1
 
     # check that all indices are used for a filled-up dataset
-    dataset = dataset.fill_up(bucket_batch_sizes, fill_up='replicate')
+    dataset = dataset.fill_up(bucket_batch_sizes)
     indices = data_io.get_batch_indices(dataset, bucket_batch_sizes=bucket_batch_sizes)
     all_bucket_indices = set(list(range(len(dataset))))
     computed_bucket_indices = set([i for i, j in indices])
@@ -440,6 +450,7 @@ def test_non_parallel_calculate_length_statistics(sources, target):
 
 def test_get_training_data_iters():
     train_line_count = 100
+    train_line_count_empty = 0
     train_max_length = 30
     dev_line_count = 20
     dev_max_length = 30
@@ -450,20 +461,18 @@ def test_get_training_data_iters():
     test_max_length = 30
     batch_size = 5
     with tmp_digits_dataset("tmp_corpus",
-                            train_line_count, train_max_length - C.SPACE_FOR_XOS,
+                            train_line_count, train_line_count_empty, train_max_length - C.SPACE_FOR_XOS,
                             dev_line_count, dev_max_length - C.SPACE_FOR_XOS,
                             test_line_count, test_line_count_empty,
                             test_max_length - C.SPACE_FOR_XOS) as data:
         # tmp common vocab
-        vcb = vocab.build_from_paths([data['source'], data['target']])
+        vcb = vocab.build_from_paths([data['train_source'], data['train_target']])
 
         train_iter, val_iter, config_data, data_info = data_io.get_training_data_iters(
-            sources=[data['source']],
-            target=data['target'],
-            validation_sources=[
-                data['validation_source']],
-            validation_target=data[
-                'validation_target'],
+            sources=[data['train_source']],
+            target=data['train_target'],
+            validation_sources=[data['dev_source']],
+            validation_target=data['dev_target'],
             source_vocabs=[vcb],
             target_vocab=vcb,
             source_vocab_paths=[None],
@@ -472,7 +481,6 @@ def test_get_training_data_iters():
             batch_size=batch_size,
             batch_by_words=False,
             batch_num_devices=1,
-            fill_up="replicate",
             max_seq_len_source=train_max_length,
             max_seq_len_target=train_max_length,
             bucketing=True,
@@ -480,8 +488,8 @@ def test_get_training_data_iters():
         assert isinstance(train_iter, data_io.ParallelSampleIter)
         assert isinstance(val_iter, data_io.ParallelSampleIter)
         assert isinstance(config_data, data_io.DataConfig)
-        assert data_info.sources == [data['source']]
-        assert data_info.target == data['target']
+        assert data_info.sources == [data['train_source']]
+        assert data_info.target == data['train_target']
         assert data_info.source_vocabs == [None]
         assert data_info.target_vocab is None
         assert config_data.data_statistics.max_observed_len_source == train_max_length

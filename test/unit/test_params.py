@@ -22,13 +22,26 @@ import sockeye.utils
 
 
 def test_cleanup_param_files():
-    with tempfile.TemporaryDirectory() as tmpDir:
+    with tempfile.TemporaryDirectory() as tmp_dir:
         for n in itertools.chain(range(1, 20, 2), range(21, 41)):
             # Create empty files
-            open(os.path.join(tmpDir, C.PARAMS_NAME % n), "w").close()
-        sockeye.utils.cleanup_params_files(tmpDir, 5, 40, 17)
+            open(os.path.join(tmp_dir, C.PARAMS_NAME % n), "w").close()
+        sockeye.utils.cleanup_params_files(tmp_dir, 5, 40, 17, False)
 
-        expectedSurviving = set([os.path.join(tmpDir, C.PARAMS_NAME % n)
+        expectedSurviving = set([os.path.join(tmp_dir, C.PARAMS_NAME % n)
                                  for n in [17, 36, 37, 38, 39, 40]])
         # 17 must survive because it is the best one
-        assert set(glob.glob(os.path.join(tmpDir, C.PARAMS_PREFIX + "*"))) == expectedSurviving
+        assert set(glob.glob(os.path.join(tmp_dir, C.PARAMS_PREFIX + "*"))) == expectedSurviving
+
+def test_cleanup_param_files_keep_first():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        for n in itertools.chain(range(0, 20, 2), range(21, 41)):
+            # Create empty files
+            open(os.path.join(tmp_dir, C.PARAMS_NAME % n), "w").close()
+        sockeye.utils.cleanup_params_files(tmp_dir, 5, 40, 16, True)
+
+        expectedSurviving = set([os.path.join(tmp_dir, C.PARAMS_NAME % n)
+                                 for n in [0, 16, 36, 37, 38, 39, 40]])
+        # 16 must survive because it is the best one
+        # 0 should also survive because we set keep_first to True
+        assert set(glob.glob(os.path.join(tmp_dir, C.PARAMS_PREFIX + "*"))) == expectedSurviving
