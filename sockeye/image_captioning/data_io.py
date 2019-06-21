@@ -132,6 +132,7 @@ def get_validation_image_text_data_iter(data_loader: RawParallelDatasetLoader,
                                         vocab_target: vocab.Vocab,
                                         max_seq_len_target: int,
                                         batch_size: int,
+                                        fill_up: str,
                                         use_feature_loader: bool = False,
                                         preload_features: bool = False) -> 'ParallelSampleIter':
     """
@@ -155,7 +156,8 @@ def get_validation_image_text_data_iter(data_loader: RawParallelDatasetLoader,
 
     validation_data = data_loader.load(validation_source_images[0],
                                        validation_target_sentences,
-                                       validation_data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes)
+                                       validation_data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes,
+                                                                                                fill_up)
     return ImageTextSampleIter(data=validation_data,
                                buckets=buckets,
                                batch_size=batch_size,
@@ -175,6 +177,7 @@ def get_training_image_text_data_iters(source_root: str,
                                        batch_by_words: bool,
                                        batch_num_devices: int,
                                        source_image_size: tuple,
+                                       fill_up: str,
                                        max_seq_len_target: int,
                                        bucketing: bool,
                                        bucket_width: int,
@@ -197,6 +200,7 @@ def get_training_image_text_data_iters(source_root: str,
     :param batch_by_words: Size batches by words rather than sentences.
     :param batch_num_devices: Number of devices batches will be parallelized across.
     :param source_image_size: size to resize the image to (for iterator)
+    :param fill_up: Fill-up strategy for buckets.
     :param max_seq_len_target: Maximum target sequence length.
     :param bucketing: Whether to use bucketing.
     :param bucket_width: Size of buckets.
@@ -237,7 +241,8 @@ def get_training_image_text_data_iters(source_root: str,
                                            pad_id=C.PAD_ID)
 
     training_data = data_loader.load(source_images[0], target_sentences,
-                                     data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes)
+                                     data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes,
+                                                                                   fill_up)
 
     data_info = DataInfo(sources=source_images,
                          target=target,
@@ -274,10 +279,76 @@ def get_training_image_text_data_iters(source_root: str,
                                                           vocab_target=vocab_target,
                                                           max_seq_len_target=max_seq_len_target,
                                                           batch_size=batch_size,
+                                                          fill_up=fill_up,
                                                           use_feature_loader=use_feature_loader,
                                                           preload_features=preload_features)
 
     return train_iter, validation_iter, config_data, data_info
+
+
+def get_scoring_image_text_data_iters(source_root: str,
+                                      sources: List[str],
+                                      target: str,
+                                      vocab_target: vocab.Vocab,
+                                      batch_size: int,
+                                      batch_num_devices: int,
+                                      max_seq_len_source: int,
+                                      max_seq_len_target: int,
+                                      source_image_size: tuple,
+                                      use_feature_loader: bool = False,
+                                      preload_features: bool = False) -> 'BaseParallelSampleIter':
+  """
+  Returns a data iterator for scoring. The iterator loads data on demand,
+  batch by batch, and does not skip any lines. Lines that are too long
+  are truncated.
+  # TODO
+
+  """
+  logger.info("==============================")
+  logger.info("Creating scoring data iterator")
+  logger.info("==============================")
+
+  # One bucket to hold them all,
+  bucket = (max_seq_len_source, max_seq_len_target)
+  buckets = [bucket]
+
+  source_images = [FileListReader(sources[0], source_root)]
+  target_sentences = SequenceReader(target, vocab_target, add_bos=True)
+
+  # ...One loader to raise them,
+  data_loader = RawListTextDatasetLoader(buckets=buckets,
+                                         eos_id=vocab_target[C.EOS_SYMBOL],
+                                         pad_id=C.PAD_ID)
+
+  data_statistics = get_data_statistics(source_readers=None,
+                                        target_reader=target_sentences,
+                                        buckets=buckets,
+                                        length_ratio_mean=1.0,
+                                        length_ratio_std=1.0,
+                                        source_vocabs=None,
+                                        target_vocab=vocab_target)
+
+  bucket_batch_sizes = define_bucket_batch_sizes(buckets,
+                                                 batch_size,
+                                                 False,
+                                                 batch_num_devices,
+                                                 data_statistics.average_len_target_per_bucket)
+
+  data_statistics.log(bucket_batch_sizes)
+  data = data_loader.load(source_images[0], target_sentences, [data_statistics.num_sents])
+
+  # ...one iterator to traverse them all,
+  scoring_iter = ImageTextSampleIter(data=data,
+                                     buckets=buckets,
+                                     batch_size=batch_size,
+                                     bucket_batch_sizes=bucket_batch_sizes,
+                                     image_size=source_image_size,
+                                     use_feature_loader=use_feature_loader,
+                                     preload_features=preload_features,
+                                     permute=False)
+
+  # and with the model appraise them.
+  return scoring_iter
 
 
 class ImageTextSampleIter(ParallelSampleIter):
@@ -299,9 +370,10 @@ class ImageTextSampleIter(ParallelSampleIter):
                  dtype='float32',
                  source_only=False,
                  use_feature_loader: bool = False,
-                 preload_features: bool = False) -> None:
+                 preload_features: bool = False,
+                 permute: bool = True) -> None:
         super().__init__(data, buckets, batch_size, bucket_batch_sizes,
-                         source_data_name, target_data_name, label_name, dtype=dtype)
+                         source_data_name, target_data_name, label_name, dtype=dtype, permute=permute)
 
         self.with_text = not source_only
         self.image_size = tuple(image_size)

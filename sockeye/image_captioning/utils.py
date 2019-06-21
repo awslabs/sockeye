@@ -15,7 +15,6 @@
 A set of utility methods for images.
 """
 import os
-import logging
 from shutil import copyfile
 from typing import List, Optional
 
@@ -25,10 +24,13 @@ from ..log import setup_main_logger
 
 # Temporary logger, the real one (logging to a file probably, will be created
 # in the main function)
-logger = logging.getLogger(__name__)
+logger = setup_main_logger(__name__, file_logging=False, console=True)
 
 try:  # Try to import pillow
+    from PIL import ImageFile # pylint: disable=import-error
     from PIL import Image  # pylint: disable=import-error
+    ImageFile.LOAD_TRUNCATED_IMAGES = True  # load truncated images
+    Image.MAX_IMAGE_PIXELS = None  # load big images
 except ImportError as e:
     raise RuntimeError("Please install pillow.")
 
@@ -93,6 +95,7 @@ def load_preprocess_images(image_paths: List[str], image_size: tuple) -> List[np
 def load_preprocess_image(image_path: str, image_size: tuple) -> np.ndarray:
     with Image.open(image_path) as image:
         image_o = preprocess_image(image, image_size)
+        image_o = image_o[:3, :, :]
     return image_o
 
 
@@ -101,6 +104,12 @@ def preprocess_image(image: Image, image_size: tuple) -> np.ndarray:
     image_o = crop_resize_image(image, image_size)
     # convert to numpy
     image_o = np.asarray(image_o)
+    # Alpha channel?
+    if len(image_o.shape) > 2:
+        if image_o.shape[2] == 4:  # RGBA
+            image_o = image_o[:,:,:3]
+        elif image_o.shape[2] == 2:  # Gray-Alpha
+            image_o = image_o[:,:,0]
     # Gray-level to 3 channels
     if len(image_o.shape) == 2:
         image_o = np.tile(image_o[:, :, None], (1, 1, 3))
