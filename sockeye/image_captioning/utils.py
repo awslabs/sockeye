@@ -15,6 +15,7 @@
 A set of utility methods for images.
 """
 import os
+import logging
 from shutil import copyfile
 from typing import List, Optional
 
@@ -24,7 +25,7 @@ from ..log import setup_main_logger
 
 # Temporary logger, the real one (logging to a file probably, will be created
 # in the main function)
-logger = setup_main_logger(__name__, file_logging=False, console=True)
+logger = logging.getLogger(__name__)
 
 try:  # Try to import pillow
     from PIL import ImageFile # pylint: disable=import-error
