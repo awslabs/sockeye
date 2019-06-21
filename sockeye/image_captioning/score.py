@@ -20,6 +20,7 @@ import os
 from contextlib import ExitStack
 from typing import Optional, List, Tuple
 
+import mxnet as mx
 from .. import arguments
 from . import arguments as arguments_image
 from .. import constants as C
@@ -50,8 +51,9 @@ def main():
 
 
 def get_data_iters_and_vocabs(args: argparse.Namespace,
-                              model_folder: Optional[str]) -> Tuple['data_io.BaseParallelSampleIter',
-                                                                    List[vocab.Vocab], vocab.Vocab, model.ModelConfig]:
+                              model_folder: Optional[str],
+                              context: List[mx.Context]) -> Tuple['data_io.BaseParallelSampleIter',
+                                                                  List[vocab.Vocab], vocab.Vocab, model.ModelConfig]:
     """
     Loads the data iterators and vocabularies.
 
@@ -129,7 +131,8 @@ def score(args: argparse.Namespace):
         args.bucket_width = 10
         score_iter, source_vocabs, target_vocab, model_config = get_data_iters_and_vocabs(
             args=args,
-            model_folder=args.model)
+            model_folder=args.model,
+            context=context)
 
         scoring_model = scoring.ScoringModel(config=model_config,
                                              model_dir=args.model,
