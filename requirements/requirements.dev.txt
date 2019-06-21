@@ -1,10 +1,10 @@
 pytest
-pytest-cov
+pytest-cov<2.6.0
 pillow
 check-manifest
 matplotlib
 mypy==0.610
-pylint==2.0.1
+pylint==2.3.0
 setuptools>=38.6.0
 twine>=1.11.0
 wheel>=0.31.0

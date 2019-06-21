@@ -457,7 +457,7 @@ def call_sockeye_translate(args: List[str],
 
 def call_sacrebleu(input_fname: str, ref_fname: str, output_fname: str, log_fname: str, tokenized: bool = False):
     """
-    Call sockeye_contrib.sacrebleu.sacrebleu on tokenized or detokenized inputs.
+    Call pip-installed sacrebleu on tokenized or detokenized inputs.
 
     :param input_fname: Input translation file.
     :param ref_fname: Reference translation file.
@@ -466,9 +466,7 @@ def call_sacrebleu(input_fname: str, ref_fname: str, output_fname: str, log_fnam
     :param tokenized: Whether inputs are tokenized (or byte-pair encoded).
     """
     # Assemble command
-    command = [sys.executable,
-               "-m",
-               "sockeye_contrib.sacrebleu.sacrebleu",
+    command = ["sacrebleu",
                "--score-only",
                "--input={}".format(input_fname),
                ref_fname]
@@ -477,7 +475,7 @@ def call_sacrebleu(input_fname: str, ref_fname: str, output_fname: str, log_fnam
         command.append("--tokenize=none")
     # Call sacrebleu
     with open(log_fname, "wb") as log:
-        logging.info("sockeye_contrib.sacrebleu.sacrebleu: %s -> %s", input_fname, output_fname)
+        logging.info("sacrebleu: %s -> %s", input_fname, output_fname)
         logging.info("Log: %s", log_fname)
         score = subprocess.check_output(command, stderr=log)
     # Record successful score
@@ -795,11 +793,11 @@ def run_steps(args: argparse.Namespace):
             logging.info("Re-use output: %s", fname_bleu_bpe)
         else:
             fname_log = os.path.join(args.workspace,
-                         DIR_LOGS,
-                         "sockeye_contrib.sacrebleu.sacrebleu.{}.{}.{}.{}.log".format(task_name,
-                                                                              args.model,
-                                                                              fname_base + SUFFIX_BPE,
-                                                                              os.getpid()))
+                                     DIR_LOGS,
+                                     "sacrebleu.sacrebleu.{}.{}.{}.{}.log".format(task_name,
+                                                                                  args.model,
+                                                                                  fname_base + SUFFIX_BPE,
+                                                                                  os.getpid()))
             call_sacrebleu(input_fname=fname_bpe,
                            ref_fname=fname_ref_bpe,
                            output_fname=fname_bleu_bpe,
@@ -816,11 +814,11 @@ def run_steps(args: argparse.Namespace):
             logging.info("Merge BPE: %s -> %s", fname_bpe, fname_tok)
             third_party.merge_bpe(input_fname=fname_bpe, output_fname=fname_tok)
             fname_log = os.path.join(args.workspace,
-                         DIR_LOGS,
-                         "sockeye_contrib.sacrebleu.sacrebleu.{}.{}.{}.{}.log".format(task_name,
-                                                                              args.model,
-                                                                              fname_base + SUFFIX_TOK,
-                                                                              os.getpid()))
+                                     DIR_LOGS,
+                                     "sacrebleu.sacrebleu.{}.{}.{}.{}.log".format(task_name,
+                                                                                  args.model,
+                                                                                  fname_base + SUFFIX_TOK,
+                                                                                  os.getpid()))
             call_sacrebleu(input_fname=fname_tok,
                            ref_fname=fname_ref_tok,
                            output_fname=fname_bleu_tok,
@@ -834,7 +832,8 @@ def run_steps(args: argparse.Namespace):
             logging.info("Re-use output: %s", fname_bleu_detok)
         else:
             if not requires_tokenization:
-                logging.info("WARNING: Task uses pre-tokenized data, cannot reliably detokenize to compute WMT-compatible scores")
+                logging.info(
+                    "WARNING: Task uses pre-tokenized data, cannot reliably detokenize to compute WMT-compatible scores")
                 continue
             # Detokenize
             logging.info("Detokenize (%s): %s -> %s", lang_code, fname_tok, fname_detok)
@@ -843,11 +842,11 @@ def run_steps(args: argparse.Namespace):
                                                output_fname=fname_detok,
                                                lang_code=lang_code)
             fname_log = os.path.join(args.workspace,
-                         DIR_LOGS,
-                         "sockeye_contrib.sacrebleu.sacrebleu.{}.{}.{}.{}.log".format(task_name,
-                                                                              args.model,
-                                                                              fname_base + SUFFIX_DETOK,
-                                                                              os.getpid()))
+                                     DIR_LOGS,
+                                     "sacrebleu.sacrebleu.{}.{}.{}.{}.log".format(task_name,
+                                                                                  args.model,
+                                                                                  fname_base + SUFFIX_DETOK,
+                                                                                  os.getpid()))
             call_sacrebleu(input_fname=fname_detok,
                            ref_fname=fname_ref_raw,
                            output_fname=fname_bleu_detok,

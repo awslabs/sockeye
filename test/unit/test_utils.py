@@ -64,7 +64,7 @@ def test_expand_requested_device_ids(requested_device_ids, num_gpus_available, e
 
 
 @pytest.mark.parametrize("requested_device_ids, num_gpus_available, expected", device_params)
-def test_aquire_gpus(tmpdir, requested_device_ids, num_gpus_available, expected):
+def test_acquire_gpus(tmpdir, requested_device_ids, num_gpus_available, expected):
     with utils.acquire_gpus(requested_device_ids, lock_dir=str(tmpdir),
                             num_gpus_available=num_gpus_available) as acquired_gpus:
         assert set(acquired_gpus) == set(expected)
@@ -91,7 +91,7 @@ def test_expand_requested_device_ids_exception(requested_device_ids, num_gpus_av
 
 
 @pytest.mark.parametrize("requested_device_ids, num_gpus_available", device_params_expected_exception)
-def test_aquire_gpus_exception(tmpdir, requested_device_ids, num_gpus_available):
+def test_acquire_gpus_exception(tmpdir, requested_device_ids, num_gpus_available):
     with pytest.raises(ValueError):
         with utils.acquire_gpus(requested_device_ids, lock_dir=str(tmpdir),
                                 num_gpus_available=num_gpus_available) as _:
@@ -104,7 +104,7 @@ device_params_1_locked = [([-4, 3, 5], 7, [0, 2, 3, 4, 5, 6]),
 
 
 @pytest.mark.parametrize("requested_device_ids, num_gpus_available, expected", device_params_1_locked)
-def test_aquire_gpus_1_locked(tmpdir, requested_device_ids, num_gpus_available, expected):
+def test_acquire_gpus_1_locked(tmpdir, requested_device_ids, num_gpus_available, expected):
     gpu_1 = 1
     with utils.GpuFileLock([gpu_1], str(tmpdir)) as lock:
         with utils.acquire_gpus(requested_device_ids, lock_dir=str(tmpdir),
@@ -393,3 +393,32 @@ def test_smart_open_without_suffix():
 def test_compute_lengths(data, expected_lengths):
     lengths = utils.compute_lengths(mx.sym.Variable('data')).eval(data=data)[0]
     assert (lengths.asnumpy() == expected_lengths.asnumpy()).all()
+
+
+@pytest.mark.parametrize("line_num,line,expected_metrics", [
+        (1, "1\tfloat_metric=3.45\tbool_metric=True", {'float_metric':3.45, 'bool_metric': True}),
+        (3, "3\tfloat_metric=1.0\tbool_metric=False", {'float_metric':1.00, 'bool_metric': False}),
+        # line_num and checkpoint are not equal, should fail
+        (2, "4\tfloat_metric=1.0\tbool_metric=False", {'float_metric':1.00, 'bool_metric': False}),
+        ])
+def test_parse_metrics_line(line_num, line, expected_metrics):
+    if line_num == int(line.split('\t')[0]):
+        parsed_metrics = utils.parse_metrics_line(line_num, line)
+        for k, v in parsed_metrics.items():
+            assert type(v) == type(expected_metrics[k])
+            assert v == expected_metrics[k]
+    else:
+        with pytest.raises(utils.SockeyeError) as e:
+            parsed_metrics = utils.parse_metrics_line(line_num, line)
+
+
+def test_write_read_metric_file():
+    expected_metrics = [{'float_metric':3.45, 'bool_metric': True},
+                       {'float_metric':1.0, 'bool_metric': False}]
+    with TemporaryDirectory(prefix="metric_file") as work_dir:
+        metric_path = os.path.join(work_dir, "metrics")
+        utils.write_metrics_file(expected_metrics, metric_path)
+        read_metrics = utils.read_metrics_file(metric_path)
+
+    assert len(read_metrics) == len(expected_metrics)
+    assert expected_metrics == read_metrics

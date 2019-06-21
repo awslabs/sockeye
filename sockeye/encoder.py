@@ -338,6 +338,7 @@ class EmbeddingConfig(config.Config):
                  num_embed: int,
                  dropout: float,
                  factor_configs: Optional[List[FactorConfig]] = None,
+                 source_factors_combine: str = C.SOURCE_FACTORS_COMBINE_CONCAT,
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.vocab_size = vocab_size
@@ -347,6 +348,7 @@ class EmbeddingConfig(config.Config):
         self.num_factors = 1
         if self.factor_configs is not None:
             self.num_factors += len(self.factor_configs)
+        self.source_factors_combine = source_factors_combine
         self.dtype = dtype
 
 
@@ -377,7 +379,7 @@ class Embedding(Encoder):
 
         self.embed_factor_weights = []  # type: List[mx.sym.Symbol]
         if self.config.factor_configs is not None:
-            # Factors weights aren't shared so they're not passed in and we create them here.
+            # Factor weights aren't shared so they're not passed in and we create them here.
             for i, fc in enumerate(self.config.factor_configs):
                 self.embed_factor_weights.append(mx.sym.Variable(prefix + "factor%d_weight" % i,
                                                                  shape=(fc.vocab_size, fc.num_embed)))
@@ -418,7 +420,10 @@ class Embedding(Encoder):
                                      name=self.prefix + "embed")
 
         if self.config.factor_configs is not None:
-            embedding = mx.sym.concat(embedding, *factor_embeddings, dim=2, name=self.prefix + "embed_plus_factors")
+            if self.config.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+                embedding = mx.sym.concat(embedding, *factor_embeddings, dim=2, name=self.prefix + "embed_plus_factors")
+            else:
+                embedding = mx.sym.add_n(embedding, *factor_embeddings, name=self.prefix + "embed_plus_factors")
 
         if self.config.dropout > 0:
             embedding = mx.sym.Dropout(data=embedding, p=self.config.dropout, name="source_embed_dropout")
@@ -519,19 +524,8 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
         :param seq_len: sequence length.
         :return: (batch_size, source_seq_len, num_embed)
         """
-        # add positional embeddings to data
-        if self.scale_up_input:
-            data = data * (self.num_embed ** 0.5)
-
-        positions = mx.sym.BlockGrad(mx.symbol.Custom(length=seq_len,
-                                                      depth=self.num_embed,
-                                                      name="%spositional_encodings" % self.prefix,
-                                                      op_type='positional_encodings'))
-
-        if self.scale_down_positions:
-            positions = positions * (self.num_embed ** -0.5)
-
-        embedding = mx.sym.broadcast_add(data, positions)
+        positions = mx.sym.arange(0, seq_len)
+        embedding = self.encode_positions(positions, data)
         return embedding, data_length, seq_len
 
     def encode_positions(self,
@@ -563,6 +557,8 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
 
         if self.scale_down_positions:
             pos_embedding = pos_embedding * (self.num_embed ** -0.5)
+
+        pos_embedding = mx.sym.BlockGrad(pos_embedding)
 
         return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix)
 
@@ -843,6 +839,25 @@ class RecurrentEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
+        
+        # The following piece of code illustrates how to unroll the RNN cell(s) over time independent of seq_len,
+        # using the new control-flow operator foreach. It works, but shape inference fails when using
+        # the VariationalDropout cell. ATM it is unclear how to fix it.
+
+        # self.rnn.reset()
+        # states = self.rnn.begin_state()  # type: List[mx.sym.Symbol]
+        # states.append(mx.sym.zeros((1,)))  # last state is step counter starting at 0
+        #
+        # def loop_body(inputs, states):
+        #     cell_states = states[:-1]
+        #     i = states[-1]
+        #     out, new_states = self.rnn(inputs, cell_states)
+        #     new_states.append(i + 1)
+        #     return out, new_states
+        #
+        # # last state item is step counter
+        # outputs, _ = mx.sym.contrib.foreach(loop_body, data, states)
+
         outputs, _ = self.rnn.unroll(seq_len, inputs=data, merge_outputs=True, layout=self.layout)
 
         return outputs, data_length, seq_len
@@ -991,14 +1006,14 @@ class ConvolutionalEncoder(Encoder):
 
         # Multiple layers with residual connections:
         for layer in self.layers:
-            data = data + layer(data, data_length, seq_len)
+            data = data + layer(data, data_length)
         return data, data_length, seq_len
 
     def get_num_hidden(self) -> int:
         return self.config.cnn_config.num_hidden
 
 
-class TransformerEncoder(Encoder):
+class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
     """
     Non-recurrent encoder based on the transformer architecture in:
 
@@ -1012,19 +1027,43 @@ class TransformerEncoder(Encoder):
     def __init__(self,
                  config: transformer.TransformerConfig,
                  prefix: str = C.TRANSFORMER_ENCODER_PREFIX) -> None:
-        super().__init__(config.dtype)
+        Encoder.__init__(self, dtype=config.dtype)
+        mx.gluon.HybridBlock.__init__(self, prefix=prefix)
         self.config = config
-        self.prefix = prefix
-        self.layers = [transformer.TransformerEncoderBlock(
-            config, prefix="%s%d_" % (prefix, i)) for i in range(config.num_layers)]
-        self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                                 dropout=config.dropout_prepost,
-                                                                 prefix="%sfinal_process_" % prefix)
+
+        with self.name_scope():
+            self.layers = mx.gluon.nn.HybridSequential()
+            for i in range(config.num_layers):
+                self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i))
+            self.valid_length_mask = transformer.TransformerValidLengthMask(num_heads=self.config.attention_heads,
+                                                                            fold_heads=True,
+                                                                            name="bias")
+            self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                                     dropout=config.dropout_prepost,
+                                                                     prefix="final_process_")
+
+    def hybrid_forward(self, F, data, data_length):
+        return self._encode(F, data, data_length)
+
+    def _encode(self, F, data: mx.sym.Symbol, data_length: mx.sym.Symbol) -> mx.sym.Symbol:
+        data = utils.cast_conditionally(F, data, self.dtype)
+        if self.config.dropout_prepost > 0.0:
+            data = F.Dropout(data=data, p=self.config.dropout_prepost)
+
+        # (batch_size * heads, 1, seq_len)
+        bias = F.expand_dims(self.valid_length_mask(data, data_length), axis=1)
+        bias = utils.cast_conditionally(F, bias, self.dtype)
+        for layer in self.layers:
+            # (batch_size, seq_len, config.model_size)
+            data = layer(data, bias)
+        data = self.final_process(data, None)
+        data = utils.uncast_conditionally(F, data, self.dtype)
+        return data
 
     def encode(self,
                data: mx.sym.Symbol,
-               data_length: mx.sym.Symbol,
-               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               data_length: Optional[mx.sym.Symbol],
+               seq_len: int):
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -1033,23 +1072,7 @@ class TransformerEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data data, data_length, seq_len.
         """
-        data = utils.cast_conditionally(data, self.dtype)
-        if self.config.dropout_prepost > 0.0:
-            data = mx.sym.Dropout(data=data, p=self.config.dropout_prepost)
-
-        # (batch_size * heads, 1, max_length)
-        bias = mx.sym.expand_dims(transformer.get_variable_length_bias(lengths=data_length,
-                                                                       max_length=seq_len,
-                                                                       num_heads=self.config.attention_heads,
-                                                                       fold_heads=True,
-                                                                       name="%sbias" % self.prefix), axis=1)
-        bias = utils.cast_conditionally(bias, self.dtype)
-        for i, layer in enumerate(self.layers):
-            # (batch_size, seq_len, config.model_size)
-            data = layer(data, bias)
-        data = self.final_process(data=data, prev=None)
-        data = utils.uncast_conditionally(data, self.dtype)
-        return data, data_length, seq_len
+        return self._encode(mx.sym, data, data_length), data_length, seq_len
 
     def get_num_hidden(self) -> int:
         """

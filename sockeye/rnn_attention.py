@@ -441,8 +441,8 @@ class MultiHeadDotAttention(Attention):
         keys, values = mx.sym.split(data=source_hidden, num_outputs=2, axis=2)
 
         # (batch*heads, length, num_hidden/head)
-        keys = layers.split_heads(keys, self.num_hidden_per_head, self.heads)
-        values = layers.split_heads(values, self.num_hidden_per_head, self.heads)
+        keys = layers.split_heads(mx.sym, keys, self.num_hidden_per_head, self.heads)
+        values = layers.split_heads(mx.sym, values, self.num_hidden_per_head, self.heads)
 
         def attend(att_input: AttentionInput, att_state: AttentionState) -> AttentionState:
             """
@@ -471,7 +471,7 @@ class MultiHeadDotAttention(Attention):
             attention_scores = mx.sym.batch_dot(lhs=keys, rhs=query, name="%sdot" % self.prefix)
 
             # (batch*heads, 1)
-            lengths = layers.broadcast_to_heads(source_length, self.heads, ndim=1, fold_heads=True)
+            lengths = layers.broadcast_to_heads(mx.sym, source_length, self.heads, ndim=1, fold_heads=True)
 
             # context: (batch*heads, num_hidden/head)
             # attention_probs: (batch*heads, length)
@@ -481,7 +481,7 @@ class MultiHeadDotAttention(Attention):
             # (batch*heads, 1, num_hidden/head)
             context = mx.sym.expand_dims(context, axis=1)
             # (batch, 1, num_hidden)
-            context = layers.combine_heads(context, self.num_hidden_per_head, heads=self.heads)
+            context = layers.combine_heads(mx.sym, context, self.num_hidden_per_head, heads=self.heads)
             # (batch, num_hidden)
             context = mx.sym.reshape(context, shape=(-3, -1))
 
@@ -709,7 +709,7 @@ class MlpAttention(Attention):
                                                     name="%squery_plus_input" % self.prefix)
 
             if self._ln is not None:
-                attention_hidden = self._ln(data=attention_hidden)
+                attention_hidden = self._ln(attention_hidden)
 
             # (batch_size, seq_len, attention_num_hidden)
             attention_hidden = mx.sym.Activation(attention_hidden, act_type="tanh",

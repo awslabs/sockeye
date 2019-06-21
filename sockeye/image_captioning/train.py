@@ -14,10 +14,19 @@
 """
 Training CLI for image captioning.
 """
+
+# Start the forkserver. It is important that this is done before any other imports so that the forkserver is in a clean
+# state.
+if __name__ == "__main__":
+    import sockeye.multiprocessing_utils as mp
+    mp.initialize()
+
+
 import argparse
 import json
 import os
 import pickle
+import logging
 from contextlib import ExitStack
 from typing import cast, Dict, List, Tuple, Optional
 
@@ -41,11 +50,11 @@ from .. import vocab
 from ..config import Config
 from ..log import setup_main_logger
 from ..train import check_resume, check_arg_compatibility, create_decoder_config, \
-    create_optimizer_config, create_training_model
+    create_optimizer_config, create_training_model, get_num_embed
 from ..utils import check_condition
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
-logger = setup_main_logger(__name__, file_logging=False, console=True)
+logger = logging.getLogger(__name__)
 
 
 def read_feature_shape(path):
@@ -159,7 +168,6 @@ def create_data_iters_and_vocab(args: argparse.Namespace,
         batch_by_words=batch_by_words,
         batch_num_devices=batch_num_devices,
         source_image_size=args.source_image_size,
-        fill_up=args.fill_up,
         max_seq_len_target=max_seq_len_target,
         bucketing=not args.no_bucketing,
         bucket_width=args.bucket_width,
@@ -211,11 +219,12 @@ def create_model_config(args: argparse.Namespace,
     :param config_data: Data config.
     :return: The model configuration.
     """
-    num_embed_source, num_embed_target = args.num_embed
+    num_embed_source, num_embed_target = get_num_embed(args)
     _, embed_dropout_target = args.embed_dropout
 
     config_encoder, encoder_num_hidden = create_encoder_config(args)
-    config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target)
+    config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target,
+                                           num_embed_target)
 
     config_embed_source = encoder.PassThroughEmbeddingConfig()
     config_embed_target = encoder.EmbeddingConfig(vocab_size=vocab_target_size,
@@ -274,10 +283,8 @@ def train(args: argparse.Namespace):
     output_folder = os.path.abspath(args.output)
     resume_training = check_resume(args, output_folder)
 
-    global logger
-    logger = setup_main_logger(__name__,
-                               file_logging=True,
-                               console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
+    setup_main_logger(file_logging=True,
+                      console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
     utils.log_basic_info(args)
     with open(os.path.join(output_folder, C.ARGS_STATE_NAME), "w") as fp:
         json.dump(vars(args), fp)
@@ -344,6 +351,7 @@ def train(args: argparse.Namespace):
         if min_epochs is not None and max_epochs is not None:
             check_condition(min_epochs <= max_epochs,
                             "Minimum number of epochs must be smaller than maximum number of epochs")
+            
         # Fixed training schedule always runs for a set number of updates
         if args.learning_rate_schedule:
             min_updates = None
@@ -363,6 +371,7 @@ def train(args: argparse.Namespace):
                                                 optimizer_config=create_optimizer_config(args, [1.0],
                                                                                          extra_initializers),
                                                 max_params_files_to_keep=args.keep_last_params,
+                                                keep_initializations=args.keep_initializations,
                                                 source_vocabs=[None],
                                                 target_vocab=target_vocab)
 
@@ -370,8 +379,9 @@ def train(args: argparse.Namespace):
                     validation_iter=eval_iter,
                     early_stopping_metric=args.optimized_metric,
                     metrics=args.metrics,
-                    checkpoint_frequency=args.checkpoint_frequency,
+                    checkpoint_interval=args.checkpoint_interval,
                     max_num_not_improved=max_num_checkpoint_not_improved,
+                    max_checkpoints=args.max_checkpoints,
                     min_samples=min_samples,
                     max_samples=max_samples,
                     min_updates=min_updates,

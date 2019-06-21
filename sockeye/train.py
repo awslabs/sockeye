@@ -14,15 +14,25 @@
 """
 Simple Training CLI.
 """
+
+# Start the forkserver. It is important that this is done before any other imports so that the forkserver is in a clean
+# state.
+if __name__ == "__main__":
+    import sockeye.multiprocessing_utils as mp
+    mp.initialize()
+
+
 import argparse
 import os
 import shutil
 import sys
 import tempfile
+import logging
 from contextlib import ExitStack
 from typing import Any, cast, Optional, Dict, List, Tuple
 
 import mxnet as mx
+
 
 from . import arguments
 from . import checkpoint_decoder
@@ -34,6 +44,7 @@ from . import decoder
 from . import encoder
 from . import initializer
 from . import loss
+from . import layers
 from . import lr_scheduler
 from . import model
 from . import rnn
@@ -48,7 +59,7 @@ from .optimizers import OptimizerConfig
 from .utils import check_condition
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
-logger = setup_main_logger(__name__, file_logging=False, console=True)
+logger = logging.getLogger(__name__)
 
 
 def none_if_negative(val):
@@ -78,24 +89,6 @@ def check_arg_compatibility(args: argparse.Namespace):
 
     :param args: Arguments as returned by argparse.
     """
-    if args.encoder == C.TRANSFORMER_TYPE:
-        check_condition(args.transformer_model_size[0] == args.num_embed[0],
-                        "Source embedding size must match transformer model size: %s vs. %s"
-                        % (args.transformer_model_size, args.num_embed[0]))
-
-        total_source_factor_size = sum(args.source_factors_num_embed)
-        if total_source_factor_size > 0:
-            adjusted_transformer_encoder_model_size = args.num_embed[0] + total_source_factor_size
-            check_condition(adjusted_transformer_encoder_model_size % 2 == 0 and
-                            adjusted_transformer_encoder_model_size % args.transformer_attention_heads[0] == 0,
-                            "Sum of source factor sizes, i.e. num-embed plus source-factors-num-embed, (%d) "
-                            "has to be even and a multiple of encoder attention heads (%d)" % (
-                                adjusted_transformer_encoder_model_size, args.transformer_attention_heads[0]))
-
-    if args.decoder == C.TRANSFORMER_TYPE:
-        check_condition(args.transformer_model_size[1] == args.num_embed[1],
-                        "Target embedding size must match transformer model size: %s vs. %s"
-                        % (args.transformer_model_size, args.num_embed[1]))
 
     if args.lhuc is not None:
         # Actually this check is a bit too strict
@@ -176,7 +169,7 @@ def create_checkpoint_decoder(args: argparse.Namespace,
     if args.use_cpu or args.decode_and_evaluate_use_cpu:
         context = mx.cpu()
     elif args.decode_and_evaluate_device_id is not None:
-        context = utils.determine_context(device_ids=args.decode_and_evaluate_device_id,
+        context = utils.determine_context(device_ids=[args.decode_and_evaluate_device_id],
                                           use_cpu=False,
                                           disable_device_locking=args.disable_device_locking,
                                           lock_dir=args.lock_dir,
@@ -263,10 +256,10 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             shared_vocab=shared_vocab,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
-            batch_num_devices=batch_num_devices,
-            fill_up=args.fill_up)
+            batch_num_devices=batch_num_devices)
 
-        check_condition(len(source_vocabs) == len(args.source_factors_num_embed) + 1,
+        check_condition(args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM \
+                        or len(source_vocabs) == len(args.source_factors_num_embed) + 1,
                         "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
                             len(source_vocabs), len(args.source_factors_num_embed) + 1))
 
@@ -318,7 +311,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 word_min_count_target=word_min_count_target,
                 pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
-        check_condition(len(args.source_factors) == len(args.source_factors_num_embed),
+        check_condition(args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM \
+                        or len(args.source_factors) == len(args.source_factors_num_embed),
                         "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (
                             len(args.source_factors), len(args.source_factors_num_embed)))
 
@@ -342,7 +336,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
             batch_num_devices=batch_num_devices,
-            fill_up=args.fill_up,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
@@ -358,8 +351,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 def create_encoder_config(args: argparse.Namespace,
                           max_seq_len_source: int,
                           max_seq_len_target: int,
-                          config_conv: Optional[encoder.ConvolutionalEmbeddingConfig]) -> Tuple[encoder.EncoderConfig,
-                                                                                                int]:
+                          config_conv: Optional[encoder.ConvolutionalEmbeddingConfig],
+                          num_embed_source: int) -> Tuple[encoder.EncoderConfig, int]:
     """
     Create the encoder config.
 
@@ -367,10 +360,10 @@ def create_encoder_config(args: argparse.Namespace,
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
     :param config_conv: The config for the convolutional encoder (optional).
+    :param num_embed_source: The size of the source embedding.
     :return: The encoder config and the number of hidden units of the encoder.
     """
     encoder_num_layers, _ = args.num_layers
-    num_embed_source, _ = args.num_embed
     config_encoder = None  # type: Optional[Config]
 
     if args.decoder_only:
@@ -388,8 +381,8 @@ def create_encoder_config(args: argparse.Namespace,
         encoder_transformer_model_size = args.transformer_model_size[0]
 
         total_source_factor_size = sum(args.source_factors_num_embed)
-        if total_source_factor_size > 0:
-            logger.info("Encoder transformer-model-size adjusted to account source factor embeddings: %d -> %d" % (
+        if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT and total_source_factor_size > 0:
+            logger.info("Encoder transformer-model-size adjusted to account for source factor embeddings: %d -> %d" % (
                 encoder_transformer_model_size, num_embed_source + total_source_factor_size))
             encoder_transformer_model_size = num_embed_source + total_source_factor_size
         config_encoder = transformer.TransformerConfig(
@@ -415,7 +408,9 @@ def create_encoder_config(args: argparse.Namespace,
                                                    num_hidden=args.cnn_num_hidden,
                                                    act_type=args.cnn_activation_type,
                                                    weight_normalization=args.weight_normalization)
-        cnn_num_embed = num_embed_source + sum(args.source_factors_num_embed)
+        cnn_num_embed = num_embed_source
+        if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+            cnn_num_embed += sum(args.source_factors_num_embed)
         config_encoder = encoder.ConvolutionalEncoderConfig(num_embed=cnn_num_embed,
                                                             max_seq_len_source=max_seq_len_source,
                                                             cnn_config=cnn_config,
@@ -446,7 +441,8 @@ def create_encoder_config(args: argparse.Namespace,
 
 
 def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
-                          max_seq_len_source: int, max_seq_len_target: int) -> decoder.DecoderConfig:
+                          max_seq_len_source: int, max_seq_len_target: int,
+                          num_embed_target: int) -> decoder.DecoderConfig:
     """
     Create the config for the decoder.
 
@@ -454,10 +450,10 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
     :param encoder_num_hidden: Number of hidden units of the Encoder.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
+    :param num_embed_target: The size of the source embedding.
     :return: The config for the decoder.
     """
     _, decoder_num_layers = args.num_layers
-    _, num_embed_target = args.num_embed
 
     config_decoder = None  # type: Optional[Config]
 
@@ -513,6 +509,7 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
         config_coverage = None
         if args.rnn_attention_type == C.ATT_COV:
             config_coverage = coverage.CoverageConfig(type=args.rnn_attention_coverage_type,
+                                                      max_fertility=args.rnn_attention_coverage_max_fertility,
                                                       num_hidden=args.rnn_attention_coverage_num_hidden,
                                                       layer_normalization=args.layer_normalization)
         config_attention = rnn_attention.AttentionConfig(type=args.rnn_attention_type,
@@ -574,6 +571,48 @@ def check_encoder_decoder_args(args) -> None:
                         "Recurrent dropout without memory loss only supported for LSTMs right now.")
 
 
+def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
+    num_embed_source, num_embed_target = args.num_embed
+    if args.encoder == C.TRANSFORMER_TYPE:
+        transformer_model_size_source = args.transformer_model_size[0]
+        if not num_embed_source:
+            logger.info("Source embedding size was not set it will automatically be adjusted to match the "
+                        "Transformer source model size (%d).", transformer_model_size_source)
+            num_embed_source = transformer_model_size_source
+        else:
+            check_condition(args.transformer_model_size[0] == num_embed_source,
+                            "Source embedding size must match transformer model size: %s vs. %s"
+                            % (args.transformer_model_size, num_embed_source))
+
+        total_source_factor_size = sum(args.source_factors_num_embed)
+        if total_source_factor_size > 0 and args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+            adjusted_transformer_encoder_model_size = num_embed_source + total_source_factor_size
+            check_condition(adjusted_transformer_encoder_model_size % 2 == 0 and
+                            adjusted_transformer_encoder_model_size % args.transformer_attention_heads[0] == 0,
+                            "Sum of source factor sizes, i.e. num-embed plus source-factors-num-embed, (%d) "
+                            "has to be even and a multiple of encoder attention heads (%d)" % (
+                                adjusted_transformer_encoder_model_size, args.transformer_attention_heads[0]))
+
+    if args.decoder == C.TRANSFORMER_TYPE:
+        transformer_model_size_target = args.transformer_model_size[1]
+        if not num_embed_target:
+            logger.info("Target embedding size was not set it will automatically be adjusted to match the "
+                        "Transformer target model size (%d).", transformer_model_size_target)
+            num_embed_target = transformer_model_size_target
+        else:
+            # Make sure that if the user sets num_embed it matches the Transformer model size
+            check_condition(args.transformer_model_size[1] == num_embed_target,
+                            "Target embedding size must match transformer model size: %s vs. %s"
+                            % (args.transformer_model_size, num_embed_target))
+
+    if not num_embed_source:
+        num_embed_source = C.DEFAULT_NUM_EMBED
+    if not num_embed_target:
+        num_embed_target = C.DEFAULT_NUM_EMBED
+
+    return num_embed_source, num_embed_target
+
+
 def create_model_config(args: argparse.Namespace,
                         source_vocab_sizes: List[int],
                         target_vocab_size: int,
@@ -591,7 +630,8 @@ def create_model_config(args: argparse.Namespace,
     :param config_data: Data config.
     :return: The model configuration.
     """
-    num_embed_source, num_embed_target = args.num_embed
+    num_embed_source, num_embed_target = get_num_embed(args)
+
     embed_dropout_source, embed_dropout_target = args.embed_dropout
     source_vocab_size, *source_factor_vocab_sizes = source_vocab_sizes
 
@@ -615,18 +655,27 @@ def create_model_config(args: argparse.Namespace,
                                                            dropout=args.conv_embed_dropout)
 
     config_encoder, encoder_num_hidden = create_encoder_config(args, max_seq_len_source, max_seq_len_target,
-                                                               config_conv)
-    config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target)
+                                                               config_conv, num_embed_source)
+    config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target,
+                                           num_embed_target)
 
     source_factor_configs = None
     if len(source_vocab_sizes) > 1:
+        source_factors_num_embed = args.source_factors_num_embed
+        if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM:
+            # If factors are being added instead of concatenated, set all dimensions to the embedding dimensions
+            logger.info("Setting all source factor embedding sizes to `num_embed` ('%d') for summing",
+                        num_embed_source)
+            source_factors_num_embed = [num_embed_source] * len(source_factor_vocab_sizes)
+
         source_factor_configs = [encoder.FactorConfig(size, dim) for size, dim in zip(source_factor_vocab_sizes,
-                                                                                      args.source_factors_num_embed)]
+                                                                                      source_factors_num_embed)]
 
     config_embed_source = encoder.EmbeddingConfig(vocab_size=source_vocab_size,
                                                   num_embed=num_embed_source,
                                                   dropout=embed_dropout_source,
-                                                  factor_configs=source_factor_configs)
+                                                  factor_configs=source_factor_configs,
+                                                  source_factors_combine=args.source_factors_combine)
 
     config_embed_target = encoder.EmbeddingConfig(vocab_size=target_vocab_size,
                                                   num_embed=num_embed_target,
@@ -637,6 +686,16 @@ def create_model_config(args: argparse.Namespace,
                                   normalization_type=args.loss_normalization_type,
                                   label_smoothing=args.label_smoothing)
 
+    if args.length_task is not None:
+        config_length_task = layers.LengthRatioConfig(num_layers=args.length_task_layers, weight=args.length_task_weight)
+        link = C.LINK_NORMAL if args.length_task == C.LENGTH_TASK_RATIO else C.LINK_POISSON
+        config_length_task_loss = loss.LossConfig(name=C.LENRATIO_REGRESSION,
+                                                   length_task_link=link,
+                                                   length_task_weight=args.length_task_weight)
+    else:
+        config_length_task = None
+        config_length_task_loss = None
+
     model_config = model.ModelConfig(config_data=config_data,
                                      vocab_source_size=source_vocab_size,
                                      vocab_target_size=target_vocab_size,
@@ -645,6 +704,8 @@ def create_model_config(args: argparse.Namespace,
                                      config_encoder=config_encoder,
                                      config_decoder=config_decoder,
                                      config_loss=config_loss,
+                                     config_length_task_loss=config_length_task_loss,
+                                     config_length_task=config_length_task,
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
                                      weight_normalization=args.weight_normalization,
@@ -675,7 +736,9 @@ def create_training_model(config: model.ModelConfig,
                                             default_bucket_key=train_iter.default_bucket_key,
                                             bucketing=not args.no_bucketing,
                                             gradient_compression_params=gradient_compression_params(args),
-                                            fixed_param_names=args.fixed_param_names)
+                                            gradient_accumulation=args.update_interval > 1,
+                                            fixed_param_names=args.fixed_param_names,
+                                            fixed_param_strategy=args.fixed_param_strategy)
 
     return training_model
 
@@ -711,6 +774,8 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
     else:
         gradient_clipping_type = args.gradient_clipping_type
 
+    effective_batch_size = args.batch_size * args.update_interval
+
     # Note: for 'abs' we use the implementation inside of MXNet's optimizer and 'norm_*' we implement ourselves
     # inside the TrainingModel.
     if gradient_clipping_threshold is not None and gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_ABS:
@@ -719,10 +784,10 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
         optimizer_params["momentum"] = args.momentum
     if args.loss_normalization_type == C.LOSS_NORM_VALID:
         # When we normalize by the number of non-PAD symbols in a batch we need to disable rescale_grad.
-        optimizer_params["rescale_grad"] = 1.0
+        optimizer_params["rescale_grad"] = 1.0 / args.update_interval
     elif args.loss_normalization_type == C.LOSS_NORM_BATCH:
         # Making MXNet module API's default scaling factor explicit
-        optimizer_params["rescale_grad"] = 1.0 / args.batch_size
+        optimizer_params["rescale_grad"] = 1.0 / effective_batch_size
     # Manually specified params
     if args.optimizer_params:
         optimizer_params.update(args.optimizer_params)
@@ -737,7 +802,7 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
                                               extra_initializers=extra_initializers)
 
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
-                                             args.checkpoint_frequency,
+                                             args.checkpoint_interval,
                                              none_if_negative(args.learning_rate_half_life),
                                              args.learning_rate_reduce_factor,
                                              args.learning_rate_reduce_num_not_improved,
@@ -749,10 +814,14 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
                              kvstore=args.kvstore,
                              initializer=weight_init,
                              gradient_clipping_type=gradient_clipping_type,
-                             gradient_clipping_threshold=gradient_clipping_threshold)
+                             gradient_clipping_threshold=gradient_clipping_threshold,
+                             update_interval=args.update_interval)
     config.set_lr_scheduler(lr_sched)
     logger.info("Optimizer: %s", config)
     logger.info("Gradient Compression: %s", gradient_compression_params(args))
+    if args.update_interval > 1:
+        logger.info("Gradient accumulation over %d batches. Effective batch size: %d",
+                    args.update_interval, effective_batch_size)
     return config
 
 
@@ -763,7 +832,7 @@ def main():
     train(args)
 
 
-def train(args: argparse.Namespace):
+def train(args: argparse.Namespace) -> training.TrainState:
     if args.dry_run:
         # Modify arguments so that we write to a temporary directory and
         # perform 0 training iterations
@@ -777,10 +846,12 @@ def train(args: argparse.Namespace):
     output_folder = os.path.abspath(args.output)
     resume_training = check_resume(args, output_folder)
 
-    global logger
-    logger = setup_main_logger(__name__,
-                               file_logging=True,
-                               console=not args.quiet, path=os.path.join(output_folder, C.LOG_NAME))
+    setup_main_logger(file_logging=True,
+                      console=not args.quiet,
+                      path=os.path.join(output_folder, C.LOG_NAME),
+                      level=args.loglevel)
+    if hasattr(args, "checkpoint_frequency"):
+        logger.warning("'--checkpoint-frequency' is deprecated, and will be removed in the future.  Please use '--checkpoint-interval'")
     utils.log_basic_info(args)
     arguments.save_args(args, os.path.join(output_folder, C.ARGS_STATE_NAME))
 
@@ -790,6 +861,9 @@ def train(args: argparse.Namespace):
     max_seq_len_target = max_seq_len_target + C.SPACE_FOR_XOS
     logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
                 max_seq_len_source, max_seq_len_target)
+
+    check_condition(args.length_task is not None or C.LENRATIO_MSE not in args.metrics,
+                    "%s metrics requires enabling length ratio prediction with --length-task." % C.LENRATIO_MSE)
 
     with ExitStack() as exit_stack:
         context = utils.determine_context(device_ids=args.device_ids,
@@ -847,6 +921,7 @@ def train(args: argparse.Namespace):
         if min_epochs is not None and max_epochs is not None:
             check_condition(min_epochs <= max_epochs,
                             "Minimum number of epochs must be smaller than maximum number of epochs")
+
         # Fixed training schedule always runs for a set number of updates
         if args.learning_rate_schedule:
             min_updates = None
@@ -860,29 +935,32 @@ def train(args: argparse.Namespace):
         trainer = training.EarlyStoppingTrainer(model=training_model,
                                                 optimizer_config=create_optimizer_config(args, source_vocab_sizes),
                                                 max_params_files_to_keep=args.keep_last_params,
+                                                keep_initializations=args.keep_initializations,
                                                 source_vocabs=source_vocabs,
-                                                target_vocab=target_vocab)
+                                                target_vocab=target_vocab,
+                                                stop_training_on_decoder_failure=args.stop_training_on_decoder_failure)
 
-        trainer.fit(train_iter=train_iter,
-                    validation_iter=eval_iter,
-                    early_stopping_metric=args.optimized_metric,
-                    metrics=args.metrics,
-                    checkpoint_frequency=args.checkpoint_frequency,
-                    max_num_not_improved=max_num_checkpoint_not_improved,
-                    min_samples=min_samples,
-                    max_samples=max_samples,
-                    min_updates=min_updates,
-                    max_updates=max_updates,
-                    min_epochs=min_epochs,
-                    max_epochs=max_epochs,
-                    lr_decay_param_reset=args.learning_rate_decay_param_reset,
-                    lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset,
-                    decoder=create_checkpoint_decoder(args, exit_stack, context),
-                    mxmonitor_pattern=args.monitor_pattern,
-                    mxmonitor_stat_func=args.monitor_stat_func,
-                    allow_missing_parameters=args.allow_missing_params or model_config.lhuc,
-                    existing_parameters=args.params)
-
+        training_state = trainer.fit(train_iter=train_iter,
+                                     validation_iter=eval_iter,
+                                     early_stopping_metric=args.optimized_metric,
+                                     metrics=args.metrics,
+                                     checkpoint_interval=args.checkpoint_interval,
+                                     max_num_not_improved=max_num_checkpoint_not_improved,
+                                     max_checkpoints=args.max_checkpoints,
+                                     min_samples=min_samples,
+                                     max_samples=max_samples,
+                                     min_updates=min_updates,
+                                     max_updates=max_updates,
+                                     min_epochs=min_epochs,
+                                     max_epochs=max_epochs,
+                                     lr_decay_param_reset=args.learning_rate_decay_param_reset,
+                                     lr_decay_opt_states_reset=args.learning_rate_decay_optimizer_states_reset,
+                                     decoder=create_checkpoint_decoder(args, exit_stack, context),
+                                     mxmonitor_pattern=args.monitor_pattern,
+                                     mxmonitor_stat_func=args.monitor_stat_func,
+                                     allow_missing_parameters=args.allow_missing_params or model_config.lhuc,
+                                     existing_parameters=args.params)
+        return training_state
 
 if __name__ == "__main__":
     main()

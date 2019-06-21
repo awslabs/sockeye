@@ -15,6 +15,7 @@
 A set of utility methods for images.
 """
 import os
+import logging
 from shutil import copyfile
 from typing import List, Optional
 
@@ -24,7 +25,7 @@ from ..log import setup_main_logger
 
 # Temporary logger, the real one (logging to a file probably, will be created
 # in the main function)
-logger = setup_main_logger(__name__, file_logging=False, console=True)
+logger = logging.getLogger(__name__)
 
 try:  # Try to import pillow
     from PIL import Image  # pylint: disable=import-error
@@ -186,11 +187,12 @@ def zero_pad_features(features: List[np.ndarray],
         elif len(feature_shape) > len(target_shape):
             raise ValueError("Provided target shape must be bigger then the original "
                              "shape. (provided: {}, original {})".format(len(target_shape), len(feature_shape)))
-        diff_shape = np.subtract(target_shape, feature_shape)
+        diff_shape = np.subtract(target_shape, feature_shape)  # pylint: disable=assignment-from-no-return
         if np.any(diff_shape < 0):
             raise ValueError("Provided target values must be bigger then the original "
                              "values for each dimension. (provided: {}, original {})".format(target_shape, feature_shape))
-        diff_shape = [[0, d] for d in diff_shape]  # pad format: ((before_1, after_1), ... (before_N, after_N))
+        # pad format: ((before_1, after_1), ... (before_N, after_N))
+        diff_shape = [[0, d] for d in diff_shape]  # pylint: disable=not-an-iterable
         p = np.pad(feature, diff_shape, 'constant', constant_values=0)
         pad_features.append(p)
     return pad_features

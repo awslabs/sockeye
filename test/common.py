@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -18,7 +18,7 @@ import random
 import sys
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 from unittest.mock import patch
 
 import mxnet as mx
@@ -36,7 +36,6 @@ import sockeye.score
 import sockeye.train
 import sockeye.translate
 import sockeye.utils
-from sockeye.evaluate import raw_corpus_bleu, raw_corpus_chrf
 
 logger = logging.getLogger(__name__)
 
@@ -80,20 +79,6 @@ def uniform_vector(shape, min_value=0, max_value=1, return_symbol=False):
         else np.random.uniform(low=min_value, high=max_value, size=shape)
 
 
-def generate_random_sentence(vocab_size, max_len):
-    """
-    Generates a random "sentence" as a list of integers.
-
-    :param vocab_size: Number of words in the "vocabulary". Note that due to
-                       the inclusion of special words (BOS, EOS, UNK) this does *not*
-                       correspond to the maximum possible value.
-    :param max_len: maximum sentence length.
-    """
-    length = random.randint(1, max_len)
-    # Due to the special words, the actual words start at index 3 and go up to vocab_size+2
-    return [random.randint(3, vocab_size + 2) for _ in range(length)]
-
-
 _DIGITS = "0123456789"
 _MID = 5
 
@@ -130,7 +115,7 @@ def generate_low_high_factors(source_path: str,
     with open(source_path, 'r') as fin, open(output_path, 'w') as fout:
         for line in fin:
             digits = map(int, line.rstrip().split())
-            factors = ["l" if digit < _MID else "h" for digit in digits]
+            factors = ("l" if digit < _MID else "h" for digit in digits)
             print(" ".join(factors), file=fout)
 
 
@@ -145,17 +130,21 @@ def generate_fast_align_lex(lex_path: str):
             print("{0}\t{0}\t0".format(digit), file=lex_out)
 
 
-_LEXICON_CREATE_PARAMS_COMMON = "create -i {input} -m {model} -k {topk} -o {lexicon} {quiet}"
+_LEXICON_CREATE_PARAMS_COMMON = "create -i {input} -m {model} -k {topk} -o {lexicon}"
 
 
 @contextmanager
 def tmp_digits_dataset(prefix: str,
-                       train_line_count: int, train_max_length: int,
+                       train_line_count: int, train_line_count_empty: int, train_max_length: int,
                        dev_line_count: int, dev_max_length: int,
                        test_line_count: int, test_line_count_empty: int, test_max_length: int,
                        sort_target: bool = False,
                        seed_train: int = 13, seed_dev: int = 13,
-                       with_source_factors: bool = False):
+                       with_source_factors: bool = False) -> Dict[str, Any]:
+    """
+    Creates a temporary dataset with train, dev, and test. Returns a dictionary with paths to the respective temporary
+    files.
+    """
     with TemporaryDirectory(prefix=prefix) as work_dir:
         # Simple digits files for train/dev data
         train_source_path = os.path.join(work_dir, "train.src")
@@ -164,17 +153,17 @@ def tmp_digits_dataset(prefix: str,
         dev_target_path = os.path.join(work_dir, "dev.tgt")
         test_source_path = os.path.join(work_dir, "test.src")
         test_target_path = os.path.join(work_dir, "test.tgt")
-        generate_digits_file(train_source_path, train_target_path, train_line_count,
-                             train_max_length, sort_target=sort_target, seed=seed_train)
+        generate_digits_file(train_source_path, train_target_path, train_line_count, train_max_length,
+                             line_count_empty=train_line_count_empty, sort_target=sort_target, seed=seed_train)
         generate_digits_file(dev_source_path, dev_target_path, dev_line_count, dev_max_length, sort_target=sort_target,
                              seed=seed_dev)
         generate_digits_file(test_source_path, test_target_path, test_line_count, test_max_length,
                              line_count_empty=test_line_count_empty, sort_target=sort_target, seed=seed_dev)
         data = {'work_dir': work_dir,
-                'source': train_source_path,
-                'target': train_target_path,
-                'validation_source': dev_source_path,
-                'validation_target': dev_target_path,
+                'train_source': train_source_path,
+                'train_target': train_target_path,
+                'dev_source': dev_source_path,
+                'dev_target': dev_target_path,
                 'test_source': test_source_path,
                 'test_target': test_target_path}
 
@@ -193,20 +182,21 @@ def tmp_digits_dataset(prefix: str,
 
 
 _TRAIN_PARAMS_COMMON = "--use-cpu --max-seq-len {max_len} --source {train_source} --target {train_target}" \
-                       " --validation-source {dev_source} --validation-target {dev_target} --output {model} {quiet}" \
+                       " --validation-source {dev_source} --validation-target {dev_target} --output {model}" \
                        " --seed {seed}"
 
 _PREPARE_DATA_COMMON = " --max-seq-len {max_len} --source {train_source} --target {train_target}" \
-                       " --output {output} {quiet} --pad-vocab-to-multiple-of 16"
+                       " --output {output} --pad-vocab-to-multiple-of 16"
 
 _TRAIN_WITH_FACTORS_COMMON = " --source-factors {source_factors}"
 _DEV_WITH_FACTORS_COMMON = " --validation-source-factors {dev_source_factors}"
 
 _TRAIN_PARAMS_PREPARED_DATA_COMMON = "--use-cpu --max-seq-len {max_len} --prepared-data {prepared_data}" \
                                      " --validation-source {dev_source} --validation-target {dev_target} " \
-                                     "--output {model} {quiet}"
+                                     "--output {model}"
 
-_TRANSLATE_PARAMS_COMMON = "--use-cpu --models {model} --input {input} --output {output} {quiet}"
+_TRANSLATE_PARAMS_COMMON = "--use-cpu --models {model} --input {input} --output {output} " \
+                           "--output-type translation_with_score"
 
 _TRANSLATE_WITH_FACTORS_COMMON = " --input-factors {input_factors}"
 
@@ -216,394 +206,339 @@ _SCORE_PARAMS_COMMON = "--use-cpu --model {model} --source {source} --target {ta
 
 _SCORE_WITH_FACTORS_COMMON = " --source-factors {source_factors}"
 
-_EVAL_PARAMS_COMMON = "--hypotheses {hypotheses} --references {references} --metrics {metrics} {quiet}"
 
-_EXTRACT_PARAMS = "--input {input} --names target_output_bias --list-all --output {output}"
+def check_train_translate(train_params: str,
+                          translate_params: str,
+                          data: Dict[str, Any],
+                          use_prepared_data: bool,
+                          max_seq_len: int,
+                          compare_output: bool = True,
+                          seed: int = 13) -> Dict[str, Any]:
+    """
+    Tests core features (training, inference).
+    """
+    # train model and translate test set
+    data = run_train_translate(train_params=train_params,
+                               translate_params=translate_params,
+                               data=data,
+                               use_prepared_data=use_prepared_data,
+                               max_seq_len=max_seq_len,
+                               seed=seed)
+
+    # Test equivalence of batch decoding
+    translate_params_batch = translate_params + " --batch-size 2"
+    test_translate_equivalence(data, translate_params_batch, compare_output)
+
+    # Run translate with restrict-lexicon
+    data = run_translate_restrict(data, translate_params)
+
+    # Test scoring by ensuring that the sockeye.scoring module produces the same scores when scoring the output
+    # of sockeye.translate. However, since this training is on very small datasets, the output of sockeye.translate
+    # is often pure garbage or empty and cannot be scored. So we only try to score if we have some valid output
+    # to work with.
+    # Only run scoring under these conditions. Why?
+    # - translate splits up too-long sentences and translates them in sequence, invalidating the score, so skip that
+    # - scoring requires valid translation output to compare against
+    if '--max-input-len' not in translate_params and _translate_output_is_valid(data['test_outputs']):
+        test_scoring(data, translate_params, compare_output)
+
+    return data
 
 
 def run_train_translate(train_params: str,
                         translate_params: str,
-                        translate_params_equiv: Optional[str],
-                        train_source_path: str,
-                        train_target_path: str,
-                        dev_source_path: str,
-                        dev_target_path: str,
-                        test_source_path: str,
-                        test_target_path: str,
-                        train_source_factor_paths: Optional[List[str]] = None,
-                        dev_source_factor_paths: Optional[List[str]] = None,
-                        test_source_factor_paths: Optional[List[str]] = None,
+                        data: Dict[str, Any],
                         use_prepared_data: bool = False,
-                        use_target_constraints: bool = False,
                         max_seq_len: int = 10,
-                        restrict_lexicon: bool = False,
-                        work_dir: Optional[str] = None,
-                        seed: int = 13,
-                        quiet: bool = False) -> Tuple[float, float, float, float]:
+                        seed: int = 13) -> Dict[str, Any]:
     """
-    Train a model and translate a dev set.  Report validation perplexity and BLEU.
+    Train a model and translate a test set. Returns the updated data dictionary containing paths to translation outputs
+    and scores.
 
     :param train_params: Command line args for model training.
     :param translate_params: First command line args for translation.
-    :param translate_params_equiv: Second command line args for translation. Should produce the same outputs
-    :param train_source_path: Path to the source file.
-    :param train_target_path: Path to the target file.
-    :param dev_source_path: Path to the development source file.
-    :param dev_target_path: Path to the development target file.
-    :param test_source_path: Path to the test source file.
-    :param test_target_path: Path to the test target file.
-    :param train_source_factor_paths: Optional list of paths to training source factor files.
-    :param dev_source_factor_paths: Optional list of paths to dev source factor files.
-    :param test_source_factor_paths: Optional list of paths to test source factor files.
+    :param data: Dictionary containing test data
     :param use_prepared_data: Whether to use the prepared data functionality.
     :param max_seq_len: The maximum sequence length.
-    :param restrict_lexicon: Additional translation run with top-k lexicon-based vocabulary restriction.
-    :param work_dir: The directory to store the model and other outputs in.
     :param seed: The seed used for training.
-    :param quiet: Suppress the console output of training and decoding.
-    :return: A tuple containing perplexity, bleu scores for standard and reduced vocab decoding, chrf score.
+    :return: Data dictionary, updated with translation outputs and scores
     """
-    if quiet:
-        quiet_arg = "--quiet"
-    else:
-        quiet_arg = ""
-    with TemporaryDirectory(dir=work_dir, prefix="test_train_translate.") as work_dir:
-        # Optionally create prepared data directory
-        if use_prepared_data:
-            prepared_data_path = os.path.join(work_dir, "prepared_data")
-            params = "{} {}".format(sockeye.prepare_data.__file__,
-                                    _PREPARE_DATA_COMMON.format(train_source=train_source_path,
-                                                                train_target=train_target_path,
-                                                                output=prepared_data_path,
-                                                                max_len=max_seq_len,
-                                                                quiet=quiet_arg))
-            if train_source_factor_paths is not None:
-                params += _TRAIN_WITH_FACTORS_COMMON.format(source_factors=" ".join(train_source_factor_paths))
+    work_dir = os.path.join(data['work_dir'], 'train_translate')
+    data['model'] = os.path.join(work_dir, "model")
+    # Optionally create prepared data directory
+    if use_prepared_data:
+        data['train_prepared'] = os.path.join(work_dir, "prepared_data")
+        params = "{} {}".format(sockeye.prepare_data.__file__,
+                                _PREPARE_DATA_COMMON.format(train_source=data['train_source'],
+                                                            train_target=data['train_target'],
+                                                            output=data['train_prepared'],
+                                                            max_len=max_seq_len))
+        if 'train_source_factors' in data:
+            params += _TRAIN_WITH_FACTORS_COMMON.format(source_factors=" ".join(data['train_source_factors']))
 
-            logger.info("Creating prepared data folder.")
-            with patch.object(sys, "argv", params.split()):
-                sockeye.prepare_data.main()
-            # Train model
-            model_path = os.path.join(work_dir, "model")
-            params = "{} {} {}".format(sockeye.train.__file__,
-                                       _TRAIN_PARAMS_PREPARED_DATA_COMMON.format(prepared_data=prepared_data_path,
-                                                                                 dev_source=dev_source_path,
-                                                                                 dev_target=dev_target_path,
-                                                                                 model=model_path,
-                                                                                 max_len=max_seq_len,
-                                                                                 quiet=quiet_arg),
-                                       train_params)
-
-            if dev_source_factor_paths is not None:
-                params += _DEV_WITH_FACTORS_COMMON.format(dev_source_factors=" ".join(dev_source_factor_paths))
-
-            logger.info("Starting training with parameters %s.", train_params)
-            with patch.object(sys, "argv", params.split()):
-                sockeye.train.main()
-        else:
-            # Train model
-            model_path = os.path.join(work_dir, "model")
-            params = "{} {} {}".format(sockeye.train.__file__,
-                                       _TRAIN_PARAMS_COMMON.format(train_source=train_source_path,
-                                                                   train_target=train_target_path,
-                                                                   dev_source=dev_source_path,
-                                                                   dev_target=dev_target_path,
-                                                                   model=model_path,
-                                                                   max_len=max_seq_len,
-                                                                   seed=seed,
-                                                                   quiet=quiet_arg),
-                                       train_params)
-
-            if train_source_factor_paths is not None:
-                params += _TRAIN_WITH_FACTORS_COMMON.format(source_factors=" ".join(train_source_factor_paths))
-            if dev_source_factor_paths is not None:
-                params += _DEV_WITH_FACTORS_COMMON.format(dev_source_factors=" ".join(dev_source_factor_paths))
-
-            logger.info("Starting training with parameters %s.", train_params)
-            with patch.object(sys, "argv", params.split()):
-                sockeye.train.main()
-
-        # run checkpoint decoder on 1% of dev data
-        with open(dev_source_path) as dev_fd:
-            num_dev_sent = sum(1 for _ in dev_fd)
-        sample_size = min(1, int(num_dev_sent * 0.01))
-        cp_decoder = sockeye.checkpoint_decoder.CheckpointDecoder(context=mx.cpu(),
-                                                                  inputs=[dev_source_path],
-                                                                  references=dev_target_path,
-                                                                  model=model_path,
-                                                                  sample_size=sample_size,
-                                                                  batch_size=2,
-                                                                  beam_size=2)
-        cp_metrics = cp_decoder.decode_and_evaluate()
-        logger.info("Checkpoint decoder metrics: %s", cp_metrics)
-
-        logger.info("Translating with parameters %s.", translate_params)
-        # Translate corpus with the 1st params
-        out_path = os.path.join(work_dir, "out.txt")
-        translate_score_path = os.path.join(work_dir, "out.scores.txt")
-        params = "{} {} {} --output-type translation_with_score".format(sockeye.translate.__file__,
-                                                                        _TRANSLATE_PARAMS_COMMON.format(model=model_path,
-                                                                                                        input=test_source_path,
-                                                                                                        output=out_path,
-                                                                                                        quiet=quiet_arg),
-                                                                        translate_params)
-
-        if test_source_factor_paths is not None:
-            params += _TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(test_source_factor_paths))
-
+        logger.info("Creating prepared data folder.")
         with patch.object(sys, "argv", params.split()):
-            sockeye.translate.main()
+            sockeye.prepare_data.main()
+        # Train model
+        params = "{} {} {}".format(sockeye.train.__file__,
+                                   _TRAIN_PARAMS_PREPARED_DATA_COMMON.format(prepared_data=data['train_prepared'],
+                                                                             dev_source=data['dev_source'],
+                                                                             dev_target=data['dev_target'],
+                                                                             model=data['model'],
+                                                                             max_len=max_seq_len),
+                                   train_params)
 
-        # Break out translation and score
-        with open(out_path) as out_fh:
-            outputs = out_fh.readlines()
-        with open(out_path, 'w') as out_translate, open(translate_score_path, 'w') as out_scores:
-            for output in outputs:
-                output = output.strip()
-                # blank lines on test input will have only one field output (-inf for the score)
-                try:
-                    score, translation = output.split('\t')
-                except ValueError:
-                    score = output
-                    translation = ""
-                print(translation, file=out_translate)
-                print(score, file=out_scores)
+        if 'dev_source_factors' in data:
+            params += _DEV_WITH_FACTORS_COMMON.format(dev_source_factors=" ".join(data['dev_source_factors']))
 
-        # Test target constraints
-        if use_target_constraints:
-            """
-            Read in the unconstrained system output from the first pass and use it to generate positive
-            and negative constraints. It is important to generate a mix of positive, negative, and no
-            constraints per batch, to test these production-realistic interactions as well.
-            """
-            # 'constraint' = positive constraints (must appear), 'avoid' = negative constraints (must not appear)
-            for constraint_type in ["constraints", "avoid"]:
-                constrained_sources = []
-                with open(test_source_path) as source_inp, open(out_path) as system_out:
-                    for sentno, (source, target) in enumerate(zip(source_inp, system_out)):
-                        target_words = target.rstrip().split()
-                        target_len = len(target_words)
-                        new_source = {'text': source.rstrip()}
-                        # From the odd-numbered sentences that are not too long, create constraints. We do
-                        # only odds to ensure we get batches with mixed constraints / lack of constraints.
-                        if target_len > 0 and sentno % 2 == 0:
-                            start_pos = 0
-                            end_pos = min(target_len, 3)
-                            constraint = ' '.join(target_words[start_pos:end_pos])
-                            new_source[constraint_type] = [constraint]
-                        constrained_sources.append(json.dumps(new_source))
+        logger.info("Starting training with parameters %s.", train_params)
+        with patch.object(sys, "argv", params.split()):
+            sockeye.train.main()
+    else:
+        # Train model
+        params = "{} {} {}".format(sockeye.train.__file__,
+                                   _TRAIN_PARAMS_COMMON.format(train_source=data['train_source'],
+                                                               train_target=data['train_target'],
+                                                               dev_source=data['dev_source'],
+                                                               dev_target=data['dev_target'],
+                                                               model=data['model'],
+                                                               max_len=max_seq_len,
+                                                               seed=seed),
+                                   train_params)
 
-                new_test_source_path = os.path.join(work_dir, "test_constrained.txt")
-                with open(new_test_source_path, 'w') as out:
-                    for json_line in constrained_sources:
-                        print(json_line, file=out)
+        if 'train_source_factors' in data:
+            params += _TRAIN_WITH_FACTORS_COMMON.format(source_factors=" ".join(data['train_source_factors']))
+        if 'dev_source_factors' in data:
+            params += _DEV_WITH_FACTORS_COMMON.format(dev_source_factors=" ".join(data['dev_source_factors']))
 
-                out_path_constrained = os.path.join(work_dir, "out_constrained.txt")
-                params = "{} {} {} --json-input".format(sockeye.translate.__file__,
-                                                        _TRANSLATE_PARAMS_COMMON.format(model=model_path,
-                                                                                        input=new_test_source_path,
-                                                                                        output=out_path_constrained,
-                                                                                        quiet=quiet_arg),
-                                                        translate_params)
+        logger.info("Starting training with parameters %s.", train_params)
+        with patch.object(sys, "argv", params.split()):
+            sockeye.train.main()
 
-                with patch.object(sys, "argv", params.split()):
-                    sockeye.translate.main()
+    # Translate corpus with the 1st params and scoring output handler to obtain scores
+    data['test_output'] = os.path.join(work_dir, "test.out")
+    params = "{} {} {}".format(sockeye.translate.__file__,
+                               _TRANSLATE_PARAMS_COMMON.format(model=data['model'],
+                                                               input=data['test_source'],
+                                                               output=data['test_output']),
+                               translate_params)
 
-                for json_input, constrained_out, unconstrained_out in zip(open(new_test_source_path),
-                                                                          open(out_path_constrained),
-                                                                          open(out_path)):
-                    jobj = json.loads(json_input)
-                    if jobj.get(constraint_type, None) == None:
-                        # if there were no constraints, make sure the output is the same as the unconstrained output
-                        assert constrained_out == unconstrained_out
-                    else:
-                        restriction = jobj[constraint_type][0]
-                        if constraint_type == 'constraints':
-                            # for positive constraints, ensure the constraint is in the constrained output
-                            assert restriction in constrained_out
-                        else:
-                            # for negative constraints, ensure the constraints is *not* in the constrained output
-                            assert restriction not in constrained_out
+    if 'test_source_factors' in data:
+        params += _TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(data['test_source_factors']))
 
-        # Test scoring by ensuring that the sockeye.scoring module produces the same scores when scoring the output
-        # of sockeye.translate. However, since this training is on very small datasets, the output of sockeye.translate
-        # is often pure garbage or empty and cannot be scored. So we only try to score if we have some valid output
-        # to work with.
+    logger.info("Translating with params %s", params)
+    with patch.object(sys, "argv", params.split()):
+        sockeye.translate.main()
 
-        # Skip if there are invalid tokens in the output, or if no valid outputs were found
-        translate_output_is_valid = True
-        with open(out_path) as out_fh:
-            sentences = list(map(lambda x: x.rstrip(), out_fh.readlines()))
-            # At least one output must be non-empty
-            found_valid_output = any(sentences)
+    # Collect test inputs
+    with open(data['test_source']) as inputs:
+        data['test_inputs'] = [line.strip() for line in inputs]
 
+    # Collect test references
+    with open(data['test_target'], "r") as ref:
+        data['test_targets'] = [line.strip() for line in ref]
+
+    # Collect test translate outputs and scores
+    data['test_outputs'], data['test_scores'] = collect_translate_output_and_scores(data['test_output'])
+    assert len(data['test_inputs']) == len(data['test_targets']) == len(data['test_outputs']) == len(data['test_scores'])
+    return data
+
+
+def run_translate_restrict(data: Dict[str, Any], translate_params: str) -> Dict[str, Any]:
+    """
+    Runs sockeye.translate with vocabulary selection and checks if number of outputs are the same as without
+    vocabulary selection. Adds restricted outputs and scores to the data dictionary.
+    """
+    out_path = os.path.join(data['work_dir'], "out-restrict.txt")
+    # fast_align lex table
+    ttable_path = os.path.join(data['work_dir'], "ttable")
+    generate_fast_align_lex(ttable_path)
+    # Top-K lexicon
+    lexicon_path = os.path.join(data['work_dir'], "lexicon")
+    params = "{} {}".format(sockeye.lexicon.__file__,
+                            _LEXICON_CREATE_PARAMS_COMMON.format(input=ttable_path,
+                                                                 model=data['model'],
+                                                                 topk=20,
+                                                                 lexicon=lexicon_path))
+    with patch.object(sys, "argv", params.split()):
+        sockeye.lexicon.main()
+    # Translate corpus with restrict-lexicon
+    params = "{} {} {} {}".format(sockeye.translate.__file__,
+                                  _TRANSLATE_PARAMS_COMMON.format(model=data['model'],
+                                                                  input=data['test_source'],
+                                                                  output=out_path),
+                                  translate_params,
+                                  _TRANSLATE_PARAMS_RESTRICT.format(lexicon=lexicon_path, topk=1))
+    if 'test_source_factors' in data:
+        params += _TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(data['test_source_factors']))
+    with patch.object(sys, "argv", params.split()):
+        sockeye.translate.main()
+
+    # Collect test translate outputs and scores
+    data['test_outputs_restricted'], data['test_scores_restricted'] = collect_translate_output_and_scores(out_path)
+    assert len(data['test_outputs_restricted']) == len(data['test_outputs'])
+    return data
+
+
+def test_translate_equivalence(data: Dict[str, Any], translate_params_equiv: str, compare_output: bool):
+    """
+    Tests whether the output and scores generated by sockeye.translate with translate_params_equiv are equal to
+    the previously generated outputs, referenced in the data dictionary.
+    """
+    out_path = os.path.join(data['work_dir'], "test.out.equiv")
+    params = "{} {} {}".format(sockeye.translate.__file__,
+                               _TRANSLATE_PARAMS_COMMON.format(model=data['model'],
+                                                               input=data['test_source'],
+                                                               output=out_path),
+                               translate_params_equiv)
+    if 'test_source_factors' in data:
+        params += _TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(data['test_source_factors']))
+    with patch.object(sys, "argv", params.split()):
+        sockeye.translate.main()
+    # Collect translate outputs and scores
+    translate_outputs_equiv, translate_scores_equiv = collect_translate_output_and_scores(out_path)
+
+    assert 'test_outputs' in data and 'test_scores' in data
+    assert len(data['test_outputs']) == len(translate_outputs_equiv)
+    assert len(data['test_scores']) == len(translate_scores_equiv)
+    if compare_output:
+        assert all(a == b for a, b in zip(data['test_outputs'], translate_outputs_equiv))
+        assert all(abs(a - b) < 0.01 or np.isnan(a - b) for a, b in zip(data['test_scores'], translate_scores_equiv))
+
+
+def _create_reference_constraints(translate_inputs: List[str], translate_outputs: List[str]) -> List[Dict[str, Any]]:
+    constrained_inputs = []
+    for sentno, (source, translate_output) in enumerate(zip(translate_inputs, translate_outputs)):
+        constrained_inputs.append(json.dumps({'text': source, 'constraints': ['<s> {} </s>'.format(translate_output)]}, ensure_ascii=False))
+    return constrained_inputs
+
+
+def test_constrained_decoding_against_ref(data: Dict[str, Any], translate_params: str):
+    constrained_inputs = _create_reference_constraints(data['test_inputs'], data['test_outputs'])
+    new_test_source_path = os.path.join(data['work_dir'], "test_constrained.txt")
+    with open(new_test_source_path, 'w') as out:
+        for json_line in constrained_inputs:
+            print(json_line, file=out)
+    out_path_constrained = os.path.join(data['work_dir'], "out_constrained.txt")
+    params = "{} {} {} --json-input --output-type translation_with_score --beam-size 1 --batch-size 1 --nbest-size 1".format(
+        sockeye.translate.__file__,
+        _TRANSLATE_PARAMS_COMMON.format(model=data['model'],
+                                        input=new_test_source_path,
+                                        output=out_path_constrained),
+        translate_params)
+    with patch.object(sys, "argv", params.split()):
+        sockeye.translate.main()
+    constrained_outputs, constrained_scores = collect_translate_output_and_scores(out_path_constrained)
+    assert len(constrained_outputs) == len(data['test_outputs']) == len(constrained_inputs)
+    for json_input, constrained_out, unconstrained_out in zip(constrained_inputs, constrained_outputs, data['test_outputs']):
+        # Make sure the constrained output is the same as we got when decoding unconstrained
+        assert constrained_out == unconstrained_out
+
+    data['test_constrained_inputs'] = constrained_inputs
+    data['test_constrained_outputs'] = constrained_outputs
+    data['test_constrained_scores'] = constrained_scores
+    return data
+
+
+def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_scores: bool):
+    """
+    Tests the scoring CLI and checks for score equivalence with previously generated translate scores.
+    """
+    # Translate params that affect the score need to be used for scoring as well.
+    relevant_params = {'--softmax-temperature',
+                       '--brevity-penalty-type',
+                       '--brevity-penalty-weight',
+                       '--brevity-penalty-constant-length-ratio',
+                       '--length-penalty-alpha',
+                       '--length-penalty-beta'}
+    score_params = ''
+    params = translate_params.split()
+    for i, param in enumerate(params):
+        if param in relevant_params:
+            score_params = '{} {}'.format(param, params[i + 1])
+    out_path = os.path.join(data['work_dir'], "score.out")
+
+    # write translate outputs as target file for scoring and collect tokens
+    target_path = os.path.join(data['work_dir'], "score.target")
+    translate_tokens = []
+    with open(target_path, 'w') as target_out:
+        for output in data['test_outputs']:
+            print(output, file=target_out)
+            translate_tokens.append(output.split())
+
+    params = "{} {} {}".format(sockeye.score.__file__,
+                               _SCORE_PARAMS_COMMON.format(model=data['model'],
+                                                           source=data['test_source'],
+                                                           target=target_path,
+                                                           output=out_path),
+                               score_params)
+    if 'test_source_factors' in data:
+        params += _SCORE_WITH_FACTORS_COMMON.format(source_factors=" ".join(data['test_source_factors']))
+    logger.info("Scoring with params %s", params)
+    with patch.object(sys, "argv", params.split()):
+        sockeye.score.main()
+
+    # Collect scores from output file
+    with open(out_path) as score_out:
+        score_scores = [float(line.strip()) for line in score_out]
+
+    # Compare scored output to original translation output. Unfortunately, sockeye.translate doesn't enforce
+    # generation of </s> and have had length normalization applied. So, skip all sentences that are as long
+    # as the maximum length, in order to safely exclude them.
+    if test_similar_scores:
+        model_config = sockeye.model.SockeyeModel.load_config(os.path.join(data['model'], C.CONFIG_NAME))
+        max_len = model_config.config_data.max_seq_len_target
+
+        valid_outputs = list(filter(lambda x: len(x[0]) < max_len - 1,
+                                    zip(translate_tokens, data['test_scores'], score_scores)))
+        for translate_tokens, translate_score, score_score in valid_outputs:
+            # Skip sentences that are close to the maximum length to avoid confusion about whether
+            # the length penalty was applied
+            if len(translate_tokens) >= max_len - 2:
+                continue
+            assert (translate_score == -np.inf and score_score == -np.inf) or abs(translate_score - score_score) < 0.02
+
+
+def _translate_output_is_valid(translate_outputs: List[str]) -> bool:
+    """
+    True if there are invalid tokens in out_path, or if no valid outputs were found.
+    """
+    # At least one output must be non-empty
+    found_valid_output = False
+    bad_tokens = set(C.VOCAB_SYMBOLS)
+    for output in translate_outputs:
+        if output:
+            found_valid_output = True
+        if any(token for token in output.split() if token in bad_tokens):
             # There must be no bad tokens
-            found_bad_tokens = any([bad_token in ' '.join(sentences) for bad_token in C.VOCAB_SYMBOLS])
+            return False
+    return found_valid_output
 
-            translate_output_is_valid = found_valid_output and not found_bad_tokens
 
-        # Only run scoring under these conditions. Why?
-        # - scoring isn't compatible with prepared data because that loses the source ordering
-        # - scoring doesn't support skipping softmax (which can be enabled explicitly or implicitly by using a beam size of 1)
-        # - translate splits up too-long sentences and translates them in sequence, invalidating the score, so skip that
-        # - scoring requires valid translation output to compare against
-        if not use_prepared_data \
-           and '--beam-size 1' not in translate_params \
-           and '--max-input-len' not in translate_params \
-           and translate_output_is_valid:
-
-            ## Score
-            # We use the translation parameters, but have to remove irrelevant arguments from it.
-            # Currently, the only relevant flag passed is the --softmax-temperature flag.
-            score_params = ''
-            if 'softmax-temperature' in translate_params:
-                params = translate_params.split(C.TOKEN_SEPARATOR)
-                for i, param in enumerate(params):
-                    if param == '--softmax-temperature':
-                        score_params = '--softmax-temperature {}'.format(params[i + 1])
-                        break
-
-            scores_output_file = out_path + '.score'
-            params = "{} {} {}".format(sockeye.score.__file__,
-                                       _SCORE_PARAMS_COMMON.format(model=model_path,
-                                                                   source=test_source_path,
-                                                                   target=out_path,
-                                                                   output=scores_output_file),
-                                       score_params)
-
-            if test_source_factor_paths is not None:
-                params += _SCORE_WITH_FACTORS_COMMON.format(source_factors=" ".join(test_source_factor_paths))
-
-            with patch.object(sys, "argv", params.split()):
-                sockeye.score.main()
-
-            # Compare scored output to original translation output. There are a few tricks: for blank source sentences,
-            # inference will report a score of -inf, so skip these. Second, we don't know if the scores include the
-            # generation of </s> and have had length normalization applied. So, skip all sentences that are as long
-            # as the maximum length, in order to safely exclude them.
-            with open(translate_score_path) as in_translate, open(out_path) as in_words, open(scores_output_file) as in_score:
-                model_config = sockeye.model.SockeyeModel.load_config(os.path.join(model_path, C.CONFIG_NAME))
-                max_len = model_config.config_data.max_seq_len_target
-
-                # Filter out sockeye.translate sentences that had -inf or were too long (which sockeye.score will have skipped)
-                translate_scores = []
-                translate_lens = []
-                score_scores = in_score.readlines()
-                for score, sent in zip(in_translate.readlines(), in_words.readlines()):
-                    if score != '-inf\n' and len(sent.split()) < max_len:
-                        translate_scores.append(score)
-                        translate_lens.append(len(sent.split()))
-
-                assert len(translate_scores) == len(score_scores)
-
-                # Compare scores (using 0.002 which covers common noise comparing e.g., 1.234 and 1.235)
-                for translate_score, translate_len, score_score in zip(translate_scores, translate_lens, score_scores):
-                    # Skip sentences that are close to the maximum length to avoid confusion about whether
-                    # the length penalty was applied
-                    if translate_len >= max_len - 2:
-                        continue
-
-                    translate_score = float(translate_score)
-                    score_score = float(score_score)
-
-                    assert abs(translate_score - score_score) < 0.002
-
-        # Translate corpus with the 2nd params
-        if translate_params_equiv is not None:
-            out_path_equiv = os.path.join(work_dir, "out_equiv.txt")
-            params = "{} {} {}".format(sockeye.translate.__file__,
-                                       _TRANSLATE_PARAMS_COMMON.format(model=model_path,
-                                                                       input=test_source_path,
-                                                                       output=out_path_equiv,
-                                                                       quiet=quiet_arg),
-                                       translate_params_equiv)
-
-            if test_source_factor_paths is not None:
-                params += _TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(test_source_factor_paths))
-
-            with patch.object(sys, "argv", params.split()):
-                sockeye.translate.main()
-
-            # read-in both outputs, ensure they are the same
-            with open(out_path, 'rt') as f:
-                lines = f.readlines()
-            with open(out_path_equiv, 'rt') as f:
-                lines_equiv = f.readlines()
-            assert all(a == b for a, b in zip(lines, lines_equiv))
-
-        # Test restrict-lexicon
-        out_restrict_path = os.path.join(work_dir, "out-restrict.txt")
-        if restrict_lexicon:
-            # fast_align lex table
-            ttable_path = os.path.join(work_dir, "ttable")
-            generate_fast_align_lex(ttable_path)
-            # Top-K lexicon
-            lexicon_path = os.path.join(work_dir, "lexicon")
-            params = "{} {}".format(sockeye.lexicon.__file__,
-                                    _LEXICON_CREATE_PARAMS_COMMON.format(input=ttable_path,
-                                                                         model=model_path,
-                                                                         topk=20,
-                                                                         lexicon=lexicon_path,
-                                                                         quiet=quiet_arg))
-            with patch.object(sys, "argv", params.split()):
-                sockeye.lexicon.main()
-            # Translate corpus with restrict-lexicon
-            params = "{} {} {} {}".format(sockeye.translate.__file__,
-                                          _TRANSLATE_PARAMS_COMMON.format(model=model_path,
-                                                                          input=test_source_path,
-                                                                          output=out_restrict_path,
-                                                                          quiet=quiet_arg),
-                                          translate_params,
-                                          _TRANSLATE_PARAMS_RESTRICT.format(lexicon=lexicon_path, topk=1))
-
-            if test_source_factor_paths is not None:
-                params += _TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(test_source_factor_paths))
-
-            with patch.object(sys, "argv", params.split()):
-                sockeye.translate.main()
-
-        # test averaging
-        points = sockeye.average.find_checkpoints(model_path=model_path,
-                                                  size=1,
-                                                  strategy='best',
-                                                  metric=C.PERPLEXITY)
-        assert len(points) > 0
-        averaged_params = sockeye.average.average(points)
-        assert averaged_params
-
-        # test parameter extraction
-        extract_params = _EXTRACT_PARAMS.format(output=os.path.join(model_path, "params.extracted"),
-                                                input=model_path)
-        with patch.object(sys, "argv", extract_params.split()):
-            sockeye.extract_parameters.main()
-        with np.load(os.path.join(model_path, "params.extracted.npz")) as data:
-            assert "target_output_bias" in data
-
-        # get best validation perplexity
-        metrics = sockeye.utils.read_metrics_file(path=os.path.join(model_path, C.METRICS_NAME))
-        perplexity = min(m[C.PERPLEXITY + '-val'] for m in metrics)
-
-        with open(out_path, "r") as out:
-            hypotheses = out.readlines()
-        with open(test_target_path, "r") as ref:
-            references = ref.readlines()
-        assert len(hypotheses) == len(references)
-
-        # compute metrics
-        bleu = raw_corpus_bleu(hypotheses=hypotheses, references=references, offset=0.01)
-        chrf = raw_corpus_chrf(hypotheses=hypotheses, references=references)
-
-        bleu_restrict = None
-        if restrict_lexicon:
-            bleu_restrict = raw_corpus_bleu(hypotheses=hypotheses, references=references, offset=0.01)
-
-        # Run evaluate cli
-        eval_params = "{} {} ".format(sockeye.evaluate.__file__,
-                                      _EVAL_PARAMS_COMMON.format(hypotheses=out_path,
-                                                                 references=test_target_path,
-                                                                 metrics="bleu chrf rouge1",
-                                                                 quiet=quiet_arg), )
-        with patch.object(sys, "argv", eval_params.split()):
-            sockeye.evaluate.main()
-
-        return perplexity, bleu, bleu_restrict, chrf
+def collect_translate_output_and_scores(out_path: str) -> Tuple[List[str], List[float]]:
+    """
+    Collects translation outputs and scores from an output file
+    produced with the 'translation_and_score' or nbest output handler.
+    """
+    translations = []  # type: List[str]
+    scores = []  # type: List[float]
+    with open(out_path) as out_fh:
+        for line in out_fh:
+            output = line.strip()
+            translation = ''
+            score = -np.inf
+            try:
+                output = json.loads(output)
+                try:
+                    translation = output['translation']
+                    score = output['score']
+                except IndexError:
+                    pass
+            except:
+                try:
+                    score, translation = output.split('\t', 1)
+                except ValueError:
+                    pass
+            translations.append(translation)
+            scores.append(float(score))
+    return translations, scores

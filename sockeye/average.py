@@ -21,6 +21,7 @@ works well in practice.
 import argparse
 import itertools
 import os
+import logging
 from typing import Dict, Iterable, List
 
 import mxnet as mx
@@ -30,7 +31,7 @@ from . import arguments
 from . import constants as C
 from . import utils
 
-logger = setup_main_logger(__name__, console=True, file_logging=False)
+logger = logging.getLogger(__name__)
 
 
 def average(param_paths: Iterable[str]) -> Dict[str, mx.nd.NDArray]:
@@ -148,6 +149,7 @@ def main():
     """
     Commandline interface to average parameters.
     """
+    setup_main_logger(console=True, file_logging=False)
     params = argparse.ArgumentParser(description="Averages parameters from multiple models.")
     arguments.add_average_args(params)
     args = params.parse_args()

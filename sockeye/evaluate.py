@@ -22,15 +22,16 @@ from functools import partial
 from typing import Callable, Iterable, Dict, List, Tuple, Optional
 
 import numpy as np
+import sacrebleu
 
-from sockeye_contrib import sacrebleu, rouge
+from sockeye_contrib import rouge
 from . import arguments
 from . import constants as C
 from . import data_io
 from . import utils
 from .log import setup_main_logger, log_sockeye_version
 
-logger = setup_main_logger(__name__, file_logging=False)
+logger = logging.getLogger(__name__)
 
 
 def raw_corpus_bleu(hypotheses: Iterable[str], references: Iterable[str], offset: Optional[float] = 0.01) -> float:
@@ -81,7 +82,7 @@ def raw_corpus_rouge2(hypotheses: Iterable[str], references: Iterable[str]) -> f
 
 def raw_corpus_rougel(hypotheses: Iterable[str], references: Iterable[str]) -> float:
     """
-    Simple wrapper around ROUGE-1 implementation.
+    Simple wrapper around ROUGE-L implementation.
 
     :param hypotheses: Hypotheses stream.
     :param references: Reference stream.
@@ -90,7 +91,20 @@ def raw_corpus_rougel(hypotheses: Iterable[str], references: Iterable[str]) -> f
     return rouge.rouge_l(hypotheses, references)
 
 
+def raw_corpus_length_ratio(hypotheses: Iterable[str], references: Iterable[str]) -> float:
+    """
+    Simple wrapper around length ratio implementation.
+
+    :param hypotheses: Hypotheses stream.
+    :param references: Reference stream.
+    :return: Length ratio score as float.
+    """
+    ratios = [len(h.split())/len(r.split()) for h, r in zip(hypotheses, references)]
+    return sum(ratios)/len(ratios) if len(ratios) else 0.0
+
+
 def main():
+    setup_main_logger(file_logging=False)
     params = argparse.ArgumentParser(description='Evaluate translations by calculating metrics with '
                                                  'respect to a reference set. If multiple hypotheses files are given'
                                                  'the mean and standard deviation of the metrics are reported.')

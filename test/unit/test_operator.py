@@ -19,25 +19,7 @@ import sockeye.transformer
 
 
 def test_auto_regressive_bias_op():
-    bias = mx.nd.Custom(op_type='auto_regressive_bias', length=2)
-
-    assert bias.dtype == np.float32
-
-    expected = np.array([[0.0, -1.0e8], [0.0, 0.0]]).reshape((1, 2, 2))
-    np.testing.assert_array_equal(bias.asnumpy(), expected)
-
-
-def test_auto_regressive_bias_op_float16():
-    bias = mx.nd.Custom(op_type='auto_regressive_bias', length=2, dtype=C.DTYPE_FP16)
-
-    assert bias.dtype == np.float16
-
-    expected = np.array([[0.0, -49152.0], [0.0, 0.0]]).reshape((1, 2, 2))
-    np.testing.assert_array_equal(bias.asnumpy(), expected)
-
-
-def test_auto_regressive_bias_sym():
-    bias = mx.sym.Custom(op_type='auto_regressive_bias', length=2)
+    bias = sockeye.transformer.get_autoregressive_bias(2, dtype='float32')
 
     arg_types, out_types, aux_types = bias.infer_type()
     assert out_types[0] == np.float32
@@ -51,7 +33,7 @@ def test_auto_regressive_bias_sym():
 
 
 def test_auto_regressive_bias_sym_float16():
-    bias = mx.sym.Custom(op_type='auto_regressive_bias', length=2, dtype=C.DTYPE_FP16)
+    bias = sockeye.transformer.get_autoregressive_bias(2, dtype=C.DTYPE_FP16)
 
     arg_types, out_types, aux_types = bias.infer_type()
     assert out_types[0] == np.float16

@@ -483,45 +483,45 @@ class ConstrainedCandidate:
         return '({}, {}, {}, {})'.format(self.row, self.col, self.score, self.hypothesis.num_met())
 
 
-def topk(batch_size: int,
+def topk(timestep: int,
+         batch_size: int,
          beam_size: int,
          inactive: mx.nd.NDArray,
          scores: mx.nd.NDArray,
          hypotheses: List[ConstrainedHypothesis],
          best_ids: mx.nd.NDArray,
          best_word_ids: mx.nd.NDArray,
-         seq_scores: mx.nd.NDArray,
-         context: mx.context.Context) -> Tuple[np.array, np.array, np.array, List[ConstrainedHypothesis], mx.nd.NDArray]:
+         seq_scores: mx.nd.NDArray) -> Tuple[np.array, np.array, np.array, List[ConstrainedHypothesis], mx.nd.NDArray]:
     """
     Builds a new topk list such that the beam contains hypotheses having completed different numbers of constraints.
     These items are built from three different types: (1) the best items across the whole
     scores matrix, (2) the set of words that must follow existing constraints, and (3) k-best items from each row.
 
+    :param timestep: The current decoder timestep.
     :param batch_size: The number of segments in the batch.
     :param beam_size: The length of the beam for each segment.
     :param inactive: Array listing inactive rows (shape: (beam_size,)).
-    :param scores: The scores array (shape: (beam_size, target_vocab_size)).
+    :param scores: The scores array (shape: (batch_size if t==1 else beam_size, target_vocab_size)).
     :param hypotheses: The list of hypothesis objects.
     :param best_ids: The current list of best hypotheses (shape: (beam_size,)).
     :param best_word_ids: The parallel list of best word IDs (shape: (beam_size,)).
     :param seq_scores: (shape: (beam_size, 1)).
-    :param context: The MXNet device context.
     :return: A tuple containing the best hypothesis rows, the best hypothesis words, the scores,
         the updated constrained hypotheses, and the updated set of inactive hypotheses.
     """
 
     for sentno in range(batch_size):
-        rows = slice(sentno * beam_size, (sentno + 1) * beam_size)
+        rows = slice(sentno * beam_size, sentno * beam_size + beam_size)
         if hypotheses[rows.start] is not None and hypotheses[rows.start].size() > 0:
             best_ids[rows], best_word_ids[rows], seq_scores[rows], \
-            hypotheses[rows], inactive[rows] = _topk(beam_size,
-                                                     inactive[rows],
-                                                     scores[rows],
-                                                     hypotheses[rows],
-                                                     best_ids[rows] - rows.start,
-                                                     best_word_ids[rows],
-                                                     seq_scores[rows],
-                                                     context)
+                hypotheses[rows], inactive[rows] = _sequential_topk(timestep,
+                                                                    beam_size,
+                                                                    inactive[rows],
+                                                                    scores[rows],
+                                                                    hypotheses[rows],
+                                                                    best_ids[rows] - rows.start,
+                                                                    best_word_ids[rows],
+                                                                    seq_scores[rows])
 
             # offsetting since the returned smallest_k() indices were slice-relative
             best_ids[rows] += rows.start
@@ -533,19 +533,21 @@ def topk(batch_size: int,
     return best_ids, best_word_ids, seq_scores, hypotheses, inactive
 
 
-def _topk(beam_size: int,
-          inactive: mx.nd.NDArray,
-          scores: mx.nd.NDArray,
-          hypotheses: List[ConstrainedHypothesis],
-          best_ids: mx.nd.NDArray,
-          best_word_ids: mx.nd.NDArray,
-          sequence_scores: mx.nd.NDArray,
-          context: mx.context.Context) -> Tuple[np.array, np.array, np.array, List[ConstrainedHypothesis], mx.nd.NDArray]:
+def _sequential_topk(timestep: int,
+                     beam_size: int,
+                     inactive: mx.nd.NDArray,
+                     scores: mx.nd.NDArray,
+                     hypotheses: List[ConstrainedHypothesis],
+                     best_ids: mx.nd.NDArray,
+                     best_word_ids: mx.nd.NDArray,
+                     sequence_scores: mx.nd.NDArray) -> Tuple[np.array, np.array, np.array,
+                                                              List[ConstrainedHypothesis], mx.nd.NDArray]:
     """
     Builds a new topk list such that the beam contains hypotheses having completed different numbers of constraints.
     These items are built from three different types: (1) the best items across the whole
     scores matrix, (2) the set of words that must follow existing constraints, and (3) k-best items from each row.
 
+    :param timestep: The current decoder timestep.
     :param beam_size: The length of the beam for each segment.
     :param inactive: Array listing inactive rows (shape: (beam_size,)).
     :param scores: The scores array (shape: (beam_size, target_vocab_size)).
@@ -553,7 +555,6 @@ def _topk(beam_size: int,
     :param best_ids: The current list of best hypotheses (shape: (beam_size,)).
     :param best_word_ids: The parallel list of best word IDs (shape: (beam_size,)).
     :param sequence_scores: (shape: (beam_size, 1)).
-    :param context: The MXNet device context.
     :return: A tuple containing the best hypothesis rows, the best hypothesis words, the scores,
         the updated constrained hypotheses, and the updated set of inactive hypotheses.
     """
@@ -565,7 +566,7 @@ def _topk(beam_size: int,
     for row, col, seq_score in zip(best_ids, best_word_ids, sequence_scores):
         row = int(row.asscalar())
         col = int(col.asscalar())
-        if hypotheses[row].is_valid(col):
+        if hypotheses[row] is not None and hypotheses[row].is_valid(col):
             seq_score = float(seq_score.asscalar())
             new_item = hypotheses[row].advance(col)
             cand = ConstrainedCandidate(row, col, seq_score, new_item)
@@ -573,7 +574,7 @@ def _topk(beam_size: int,
 
     # For each hypothesis, we add (2) all the constraints that could follow it and
     # (3) the best item (constrained or not) in that row
-    best_next = mx.nd.NDArray.argmin(scores, axis=1)
+    best_next = mx.nd.argmin(scores, axis=1)
     for row in range(beam_size):
         if inactive[row]:
             continue
@@ -600,7 +601,7 @@ def _topk(beam_size: int,
     sorted_candidates = sorted(candidates, key=attrgetter('score'))
 
     # The number of hypotheses in each bank
-    counts = [0 for x in range(num_constraints + 1)]
+    counts = [0 for _ in range(num_constraints + 1)]
     for cand in sorted_candidates:
         counts[cand.hypothesis.num_met()] += 1
 
@@ -616,12 +617,14 @@ def _topk(beam_size: int,
             pruned_candidates.append(cand)
             bank_sizes[bank] -= 1
 
-    inactive[:len(pruned_candidates)] = 0
+    num_pruned_candidates = len(pruned_candidates)
+
+    inactive[:num_pruned_candidates] = 0
 
     # Pad the beam so array assignment still works
-    if len(pruned_candidates) < beam_size:
-        inactive[len(pruned_candidates):] = 1
-        pruned_candidates += [pruned_candidates[len(pruned_candidates) - 1]] * (beam_size - len(pruned_candidates))
+    if num_pruned_candidates < beam_size:
+        inactive[num_pruned_candidates:] = 1
+        pruned_candidates += [pruned_candidates[num_pruned_candidates - 1]] * (beam_size - num_pruned_candidates)
 
     return (np.array([x.row for x in pruned_candidates]),
             np.array([x.col for x in pruned_candidates]),

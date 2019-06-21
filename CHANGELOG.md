@@ -10,6 +10,201 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.99]
+### Changed
+- Updated to [MXNet 1.4.1](https://github.com/apache/incubator-mxnet/tree/1.4.1)
+
+## [1.18.98]
+### Changed
+- Converted several transformer-related layer implementations to Gluon HybridBlocks. No functional change.
+
+## [1.18.97]
+### Changed
+- Updated to PyYAML 5.1
+
+## [1.18.96]
+### Changed
+- Extracted prepare vocab functionality in the build vocab step into its own function. This matches the pattern in prepare data and train where the main() function only has argparsing, and it invokes a separate function to do the work. This is to allow modules that import this one to circumvent the command line. 
+
+## [1.18.95]
+### Changed
+- Removed custom operators from transformer models and replaced them with symbolic operators.
+  Improves Performance.
+
+## [1.18.94]
+### Added
+- Added ability to accumulate gradients over multiple batches (--update-interval). This allows simulation of large
+  batch sizes on environments with limited memory. For example: training with `--batch-size 4096 --update-interval 2`
+  should be close to training with `--batch-size 8192` at smaller memory footprint.
+
+## [1.18.93]
+### Fixed
+- Made `brevity_penalty` argument in `Translator` class optional to ensure backwards compatibility.
+
+## [1.18.92]
+### Added
+- Added sentence length (and length ratio) prediction to be able to discourage hypotheses that are too short at inference time. Can be enabled for training with `--length-task` and with `--brevity-penalty-type` during inference.
+
+## [1.18.91]
+### Changed
+- Multiple lexicons can now be specified with the `--restrict-lexicon` option:
+  - For a single lexicon: `--restrict-lexicon /path/to/lexicon`.
+  - For multiple lexicons: `--restrict-lexicon key1:/path/to/lexicon1 key2:/path/to/lexicon2 ...`.
+  - Use `--json-input` to specify the lexicon to use for each input, ex: `{"text": "some input string", "restrict_lexicon": "key1"}`.
+
+## [1.18.90]
+### Changed
+- Updated to [MXNet 1.4.0](https://github.com/apache/incubator-mxnet/tree/1.4.0)
+- Integration tests no longer check for equivalence of outputs with batch size 2
+
+## [1.18.89]
+### Fixed
+- Made the length ratios per bucket change backwards compatible.
+
+## [1.18.88]
+### Changed
+- Made sacrebleu a pip dependency and removed it from `sockeye_contrib`.
+
+## [1.18.87]
+### Added
+- Data statistics at training time now compute mean and standard deviation of length ratios per bucket.
+  This information is stored in the model's config, but not used at the moment.
+
+## [1.18.86]
+### Added
+- Added the `--fixed-param-strategy` option that allows fixing various model parameters during training via named strategies.
+  These include some of the simpler combinations from [Wuebker et al. (2018)](https://arxiv.org/abs/1811.01990) such as fixing everything except the first and last layers of the encoder and decoder (`all_except_outer_layers`).  See the help message for a full list of strategies.
+
+## [1.18.85]
+### Changed
+- Disabled dynamic batching for `Translator.translate()` by default due to increased memory usage. The default is to
+  fill-up batches to `Translator.max_batch_size`.
+  Dynamic batching can still be enabled if `fill_up_batches` is set to False.
+### Added
+- Added parameter to force training to stop after a given number of checkpoints. Useful when forced to share limited GPU resources.
+
+## [1.18.84]
+### Fixed
+- Fixed lexical constraints bugs that broke batching and caused large drop in BLEU.
+  These were introduced with sampling (1.18.64).
+
+## [1.18.83]
+### Changed
+ - The embedding size is automatically adjusted to the Transformer model size in case it is not specified on the command line.
+
+## [1.18.82]
+### Fixed
+- Fixed type conversion in metrics file reading introduced in 1.18.79.
+
+## [1.18.81]
+### Fixed
+- Making sure the training pickled training state contains the checkpoint decoder's BLEU score of the last checkpoint.
+
+## [1.18.80]
+### Fixed
+- Fixed a bug introduced in 1.18.77 where blank lines in the training data resulted in failure.
+
+## [1.18.79]
+### Added
+- Writing of the convergence/divergence status to the metrics file and guarding against numpy.histogram's errors for NaNs during divergent behaviour.
+
+## [1.18.78]
+### Changed
+- Dynamic batch sizes: `Translator.translate()` will adjust batch size in beam search to the actual number of inputs without using padding.
+
+## [1.18.77]
+### Added
+- `sockeye.score` now loads data on demand and doesn't skip any input lines
+
+## [1.18.76]
+### Changed
+- Do not compare scores from translation and scoring in integration tests.
+
+### Added
+- Adding the option via the flag `--stop-training-on-decoder-failure` to stop training in case the checkpoint decoder dies (e.g. because there is not enough memory).
+In case this is turned on a checkpoint decoder is launched right when training starts in order to fail as early as possible.
+
+## [1.18.75]
+### Changed
+- Do not create dropout layers for inference models for performance reasons.
+
+## [1.18.74]
+### Changed
+- Revert change in 1.18.72 as no memory saving could be observed.
+
+## [1.18.73]
+### Fixed
+- Fixed a bug where `source-factors-num-embed` was not correctly adjusted to `num-embed`
+  when using prepared data & `source-factor-combine` sum.
+
+## [1.18.72]
+### Changed
+- Removed use of `expand_dims` in favor of `reshape` to save memory.
+
+## [1.18.71]
+### Fixed
+- Fixed default setting of source factor combination to be 'concat' for backwards compatibility.
+
+## [1.18.70]
+### Added
+- Sockeye now outputs fields found in a JSON input object, if they are not overwritten by Sockeye. This behavior can be enabled by selecting `--json-input` (to read input as a JSON object) and `--output-type json` (to write a JSON object to output).
+
+## [1.18.69]
+### Added
+- Source factors can now be added to the embeddings instead of concatenated with `--source-factors-combine sum` (default: concat)
+
+## [1.18.68]
+- Fixed training crashes with `--learning-rate-decay-optimizer-states-reset initial` option.
+
+## [1.18.67]
+### Added
+- Added `fertility` as a further type of attention coverage.
+- Added an option for training to keep the initializations of the model via `--keep-initializations`. When set, the trainer will avoid deleting the params file for the first checkpoint, no matter what `--keep-last-params` is set to.
+
+## [1.18.66]
+### Fixed
+- Fix to argument names that are allowed to differ for resuming training.
+
+## [1.18.65]
+### Changed
+- More informative error message about inconsistent --shared-vocab setting.
+
+## [1.18.64]
+### Added
+- Adding translation sampling via `--sample [N]`. This causes the decoder to sample each next step from the target distribution probabilities at each
+  timestep. An optional value of `N` causes the decoder to sample only from the top `N` vocabulary items for each hypothesis at each timestep (the
+  default is 0, meaning to sample from the entire vocabulary).
+
+## [1.18.63]
+### Changed
+- The checkpoint decoder and nvidia-smi subprocess are now launched from a forkserver, allowing for a better separation between processes.
+
+## [1.18.62]
+### Added
+- Add option to make `TranslatorInputs` directly from a dict.
+
+## [1.18.61]
+### Changed
+- Update to MXNet 1.3.1. Removed requirements/requirements.gpu-cu{75,91}.txt as CUDA 7.5 and 9.1 are deprecated.
+
+## [1.18.60]
+### Fixed
+- Performance optimization to skip the softmax operation for single model greedy decoding is now only applied if no translation scores are required in the output.
+
+## [1.18.59]
+### Added
+- Full training state is now returned from EarlyStoppingTrainer's fit().
+### Changed
+- Training state cleanup will not be performed for training runs that did not converge yet.
+- Switched to portalocker for locking files (Windows compatibility).
+
+## [1.18.58]
+### Added
+- Added nbest translation, exposed as `--nbest-size`. Nbest translation means to not only output the most probable translation according to a model, but the top n most probable hypotheses. If `--nbest-size > 1` and the option `--output-type` is not explicitly specified, the output type will be changed to one JSON list of nbest translations per line. `--nbest-size` can never be larger than `--beam-size`.
+
+### Changed
+- Changed `sockeye.rerank` CLI to be compatible with nbest translation JSON output format.
+
 ## [1.18.57]
 ### Added
 - Added `sockeye.score` CLI for quickly scoring existing translations ([documentation](tutorials/scoring.md)).
@@ -50,7 +245,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.48]
 ### Changed
-- Translator.max_input_length now reports correct maximum input length for TranslatorInput objects, independent of the internal representation, where an additional EOS gets added. 
+- Translator.max_input_length now reports correct maximum input length for TranslatorInput objects, independent of the internal representation, where an additional EOS gets added.
 
 ## [1.18.47]
 ### Changed
