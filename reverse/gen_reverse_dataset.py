@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 """
-CLI for generating datasets for testing reverse sequence copying.
+CLI for generating datasets for testing reverse sequence copying
 """
 
 import argparse
