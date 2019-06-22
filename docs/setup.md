@@ -51,9 +51,9 @@ where `${CUDA_VERSION}` can be `80` (8.0), `90` (9.0), `92` (9.2), or `100` (10.
 
 Developers will be better served by pointing `$PYTHONPATH` to the root of the git-cloned source.
 
-### → on AWS and Azure ...
+### → in an Anaconda environment ...
 
-[AWS DeepLearning AMI](https://aws.amazon.com/amazon-ai/amis/) users only need to run the following line to install sockeye (on an instance without a GPU):
+In an Anaconda environment such as the one provided by the [AWS DeepLearning AMI](https://aws.amazon.com/amazon-ai/amis/) or Azure when using the [Data Science Virtual Machine](http://aka.ms/dsvm/discover) image, users only need to run the following line to install sockeye (on an instance without a GPU):
 
 ```bash
 > conda create -n sockeye python=3.6
@@ -66,12 +66,11 @@ On an instance with a GPU, the following commands will work
 ```bash
 > conda create -n sockeye python=3.6
 > source activate sockeye
-> wget https://raw.githubusercontent.com/awslabs/sockeye/master/requirements/requirements.gpu-cu100.txt
-> pip install sockeye --no-deps -r requirements.gpu-cu100.txt
-rm requirements.gpu-cu100.txt
+> wget https://raw.githubusercontent.com/awslabs/sockeye/master/requirements/requirements.gpu-cu${CUDA_VERSION}.txt
+> pip install sockeye --no-deps -r requirements.gpu-cu${CUDA_VERSION}.txt
+rm requirements.gpu-cu${CUDA_VERSION}.txt
 ```
-
-For other environments, you can choose between installing via pip or directly from source. This will also work with Azure when using the [Data Science Virtual Machine](http://aka.ms/dsvm/discover) image.
+where `${CUDA_VERSION}` can be `80` (8.0), `90` (9.0), `92` (9.2), or `100` (10.0).
 
 ### Optional dependencies
 In order to write training statistics to a Tensorboard event file for visualization, you can optionally install mxboard
