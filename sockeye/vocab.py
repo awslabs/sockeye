@@ -72,8 +72,12 @@ def build_vocab(data: Iterable[str], num_words: Optional[int] = None, min_count:
     :return: Word-to-id mapping.
     """
     vocab_symbols_set = set(C.VOCAB_SYMBOLS)
-    raw_vocab = Counter(token for line in data for token in utils.get_tokens(line)
-                        if (token not in vocab_symbols_set and not is_pointer(token)))
+    
+    if num_pointers:
+        is_symbol = lambda token: (token in vocab_symbols_set or is_pointer(token))
+    else:
+        is_symbol = lambda token: (token in vocab_symbols_set)
+    raw_vocab = Counter(token for line in data for token in utils.get_tokens(line) if not is_symbol(token))
     # For words with the same count, they will be ordered reverse alphabetically.
     # Not an issue since we only care for consistency
     pruned_vocab = [w for c, w in sorted(((c, w) for w, c in raw_vocab.items() if c >= min_count), reverse=True)]

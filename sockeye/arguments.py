@@ -709,7 +709,9 @@ def add_model_parameters(params):
                                    'For example: n:drn '
                                    'Default: %(default)s.')
     model_params.add_argument('--attention-based-copying', action="store_true",
-                              help="Enables an attention-based copying mechanism.")
+                              help="Enables an attention-based copying mechanism. Supported only by RNN decoders. "
+                                   "This allows to explicitly declare pointers to source tokens in the target "
+                                   "sequence (format: <ptr\d+>).")
 
     # LHUC
     # TODO: The convolutional model does not support lhuc yet

@@ -110,7 +110,7 @@ class Decoder(ABC):
         :param target_embed_max_length: Dimension of the embedded target sequence.
         :return:
             Decoder data. Shape: (batch_size, target_embed_max_length, decoder_depth).
-            Pointer data.
+            Pointer data. Shape: (batch_size, target_embed_max_length, source_seq_len).
         """
         pass
 
@@ -119,7 +119,7 @@ class Decoder(ABC):
                     step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol], mx.sym.Symbol]:
+                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol], Optional[mx.sym.Symbol]]:
         """
         Decodes a single time step given the current step, the previous embedded target word,
         and previous decoder states.
@@ -255,7 +255,7 @@ class TransformerDecoder(Decoder):
         :param target_embed_max_length: Dimension of the embedded target sequence.
         :return:
             Decoder data. Shape: (batch_size, target_embed_max_length, decoder_depth).
-            Pointer data.
+            Pointer data. Shape: (batch_size, target_embed_max_length, source_seq_len).
         """
 
         # (batch_size * heads, max_length)
@@ -283,7 +283,7 @@ class TransformerDecoder(Decoder):
                     step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol], mx.sym.Symbol]:
+                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol], Optional[mx.sym.Symbol]]:
         """
         Decodes a single time step given the current step, the previous embedded target word,
         and previous decoder states.
@@ -574,7 +574,7 @@ class RecurrentDecoder(Decoder):
         :param target_embed_max_length: Dimension of the embedded target sequence.
         :return:
             Decoder data. Shape: (batch_size, target_embed_max_length, decoder_depth).
-            Pointer data.
+            Pointer data. Shape: (batch_size, target_embed_max_length, source_seq_len).
         """
 
         # target_embed: target_seq_len * (batch_size, num_target_embed)
@@ -624,7 +624,7 @@ class RecurrentDecoder(Decoder):
                     step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol], mx.sym.Symbol]:
+                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol], Optional[mx.sym.Symbol]]:
         """
         Decodes a single time step given the current step, the previous embedded target word,
         and previous decoder states.
@@ -1046,7 +1046,7 @@ class ConvolutionalDecoder(Decoder):
         :param target_embed_max_length: Dimension of the embedded target sequence.
         :return:
             Decoder data. Shape: (batch_size, target_embed_max_length, decoder_depth).
-            Pointer data.
+            Pointer data. Shape: (batch_size, target_embed_max_length, source_seq_len).
         """
 
         # (batch_size, target_seq_len, num_hidden)
@@ -1105,7 +1105,7 @@ class ConvolutionalDecoder(Decoder):
                     step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol], mx.sym.Symbol]:
+                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol], Optional[mx.sym.Symbol]]:
         """
         Decodes a single time step given the current step, the previous embedded target word,
         and previous decoder states.
