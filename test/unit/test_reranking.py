@@ -47,7 +47,7 @@ def test_rerank_hypotheses(hypotheses, reference, expected_output, metric):
     (["Completely different",
       "No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament"],
      "Parliament Does Not Support Amendment Fre@@ eing Ty@@ mo@@ sh@@ en@@ ko",
-     [60.26404810093175, 3.2102598200446005e-05, ])
+     [60.26404810093175, 0.0])
 ])
 def test_rerank_return_score(hypotheses, reference, expected_scores):
     reranker = rerank.Reranker(metric="bleu", return_score=True)
