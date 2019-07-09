@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+
+## [1.18.100]
+### Fixed
+- Always initializing the multiprocessing context. This should fix issues observed when running `sockeye-train`.
+
 ## [1.18.99]
 ### Changed
 - Updated to [MXNet 1.4.1](https://github.com/apache/incubator-mxnet/tree/1.4.1)
