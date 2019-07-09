@@ -11,13 +11,9 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import mxnet as mx
-import pytest
-
 import sockeye.constants as C
 import sockeye.decoder
 import sockeye.transformer
-from test.common import gaussian_vector, integer_vector
 
 step_tests = [(C.GRU_TYPE, True), (C.LSTM_TYPE, False)]
 
@@ -36,8 +32,7 @@ def test_get_decoder():
         preprocess_sequence=C.FIXED_POSITIONAL_EMBEDDING,
         postprocess_sequence='test_post_seq',
         max_seq_len_source=60,
-        max_seq_len_target=70,
-        conv_config=None)
+        max_seq_len_target=70)
     decoder = sockeye.decoder.get_decoder(config, 'test_')
 
     assert type(decoder) == sockeye.decoder.TransformerDecoder

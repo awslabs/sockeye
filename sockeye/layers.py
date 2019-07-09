@@ -13,7 +13,7 @@
 
 import logging
 import math
-from typing import Optional
+from typing import Optional, Union
 
 import mxnet as mx
 import numpy as np
@@ -619,11 +619,13 @@ class PositionalEmbeddings(mx.gluon.HybridBlock):
     """
     Takes an encoded sequence and adds sinusoidal or learned positional embeddings as in Vaswani et al, 2017 to it.
 
+    :param weight_type: type of embeddings, fixed or learned.
     :param num_embed: Embedding size.
     :param max_seq_len: Maximum sequence length.
     :param prefix: Name prefix for symbols of this encoder.
     :param scale_up_input: If True, scales input data up by num_embed ** 0.5.
     :param scale_down_positions: If True, scales positional embeddings down by num_embed ** -0.5.
+    :param weight_init: Optional initializer for learned embeddings.
     """
 
     def __init__(self,
@@ -632,7 +634,8 @@ class PositionalEmbeddings(mx.gluon.HybridBlock):
                  max_seq_len: int,
                  prefix: str,
                  scale_up_input: bool,
-                 scale_down_positions: bool) -> None:
+                 scale_down_positions: bool,
+                 weight_init: Optional[Union[str, mx.init.Initializer]] = None) -> None:
         utils.check_condition(num_embed % 2 == 0, "Positional embeddings require an even embedding size it "
                                                   "is however %d." % num_embed)
         super().__init__(prefix=prefix)
@@ -649,7 +652,7 @@ class PositionalEmbeddings(mx.gluon.HybridBlock):
                     pos_weight *= self.num_embed ** -0.5
                 self.weight = self.params.get_constant('weight', pos_weight)
             elif self.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
-                self.weight = self.params.get('weight', shape=(self.max_seq_len, self.num_embed))
+                self.weight = self.params.get('weight', shape=(self.max_seq_len, self.num_embed), init=weight_init)
             else:
                 raise ValueError("weight_type '%s' is not supported!" % self.weight_type)
 

@@ -270,7 +270,7 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
         bucket_counts = [None for _ in buckets]
     bucket_counts = [random.randint(min_count, max_count) if given_count is None else given_count
                      for given_count in bucket_counts]
-    source = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(1, bucket[0])))) for count, bucket in
+    source = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(1, bucket[0]), 1))) for count, bucket in
               zip(bucket_counts, buckets)]
     target = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(1, bucket[1])))) for count, bucket in
               zip(bucket_counts, buckets)]
@@ -521,11 +521,15 @@ def test_get_training_data_iters():
             train_iter.reset()
 
 
-def _data_batches_equal(db1, db2):
-    # We just compare the data, should probably be enough
+def _data_batches_equal(db1: data_io.Batch, db2: data_io.Batch) -> bool:
     equal = True
-    for data1, data2 in zip(db1.data, db2.data):
-        equal = equal and np.allclose(data1.asnumpy(), data2.asnumpy())
+    equal = equal and np.allclose(db1.source.asnumpy(), db2.source.asnumpy())
+    equal = equal and np.allclose(db1.source_length.asnumpy(), db2.source_length.asnumpy())
+    equal = equal and np.allclose(db1.target.asnumpy(), db2.target.asnumpy())
+    equal = equal and np.allclose(db1.target_length.asnumpy(), db2.target_length.asnumpy())
+    equal = equal and db1.labels.keys() == db2.labels.keys()
+    equal = equal and db1.samples == db2.samples
+    equal = equal and db1.tokens == db2.tokens
     return equal
 
 

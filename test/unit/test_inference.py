@@ -26,6 +26,7 @@ import sockeye.data_io
 import sockeye.inference
 import sockeye.lexical_constraints
 import sockeye.lexicon
+import sockeye.model
 import sockeye.utils
 
 _BOS = 0
@@ -43,13 +44,14 @@ def mock_translator(batch_size: int = 1,
     """
     with patch.object(sockeye.inference.Translator, '__init__', lambda self, **kwargs: None):
         translator = sockeye.inference.Translator(context=None,
+                                                  batch_size=batch_size,
+                                                  beam_size=beam_size,
                                                   ensemble_mode=None,
-                                                  bucket_source_width=None,
                                                   length_penalty=None,
                                                   brevity_penalty=None,
-                                                  beam_prune=None,
+                                                  beam_prune=beam_prune,
                                                   beam_search_stop=None,
-                                                  nbest_size=None,
+                                                  nbest_size=nbest_size,
                                                   models=None,
                                                   source_vocabs=None,
                                                   target_vocab=None,
@@ -59,19 +61,14 @@ def mock_translator(batch_size: int = 1,
 
         # This is needed for returning the right number of source factors
         def mock_model():
-            t_mock = Mock(sockeye.inference.InferenceModel)
+            t_mock = Mock(sockeye.model.SockeyeModel)
             t_mock.num_source_factors = num_source_factors
             return t_mock
 
         translator.models = [mock_model()]
-
-        translator.batch_size = batch_size
-        translator.beam_size = beam_size
-        translator.nbest_size = nbest_size
-        translator.beam_prune = beam_prune
         translator.zeros_array = mx.nd.zeros((beam_size,), dtype='int32')
         translator.inf_array = mx.nd.full((batch_size * beam_size,), val=np.inf, dtype='float32')
-        translator.inf_array = mx.nd.slice(translator.inf_array, begin=(0), end=(beam_size))
+        translator.inf_array = mx.nd.slice(translator.inf_array, begin=(0,), end=(beam_size,))
         translator.restrict_lexicon = None
         return translator
 
