@@ -44,14 +44,14 @@ def mock_translator(batch_size: int = 1,
     """
     with patch.object(sockeye.inference.Translator, '__init__', lambda self, **kwargs: None):
         translator = sockeye.inference.Translator(context=None,
-                                                  batch_size=batch_size,
-                                                  beam_size=beam_size,
+                                                  batch_size=None,
+                                                  beam_size=None,
                                                   ensemble_mode=None,
                                                   length_penalty=None,
                                                   brevity_penalty=None,
-                                                  beam_prune=beam_prune,
+                                                  beam_prune=None,
                                                   beam_search_stop=None,
-                                                  nbest_size=nbest_size,
+                                                  nbest_size=None,
                                                   models=None,
                                                   source_vocabs=None,
                                                   target_vocab=None,
@@ -65,6 +65,10 @@ def mock_translator(batch_size: int = 1,
             t_mock.num_source_factors = num_source_factors
             return t_mock
 
+        translator.batch_size = batch_size
+        translator.beam_size = beam_size
+        translator.beam_prune = beam_prune
+        translator.nbest_size = nbest_size
         translator.models = [mock_model()]
         translator.zeros_array = mx.nd.zeros((beam_size,), dtype='int32')
         translator.inf_array = mx.nd.full((batch_size * beam_size,), val=np.inf, dtype='float32')
