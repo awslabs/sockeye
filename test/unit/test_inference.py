@@ -221,26 +221,18 @@ def test_translator_input(sentence_id, sentence, factors, chunk_size):
                 assert factor == expected_factor[chunk_id * chunk_size: (chunk_id + 1) * chunk_size]
 
 
-@pytest.mark.parametrize("supported_max_seq_len_source, supported_max_seq_len_target, training_max_seq_len_source, "
+@pytest.mark.parametrize("supported_max_seq_len_source, supported_max_seq_len_target, "
                          "forced_max_input_len, length_ratio_mean, length_ratio_std, "
                          "expected_max_input_len, expected_max_output_len",
                          [
-                             (100, 100, 100, None, 0.9, 0.2, 89, 100),
-                             (100, 100, 100, None, 1.1, 0.2, 75, 100),
-                             # No source length constraints.
-                             (None, 100, 100, None, 0.9, 0.1, 98, 100),
-                             # No target length constraints.
-                             (80, None, 100, None, 1.1, 0.4, 80, 122),
-                             # No source/target length constraints. Source is max observed during training and target
-                             # based on length ratios.
-                             (None, None, 100, None, 1.0, 0.1, 100, 113),
+                             (100, 100, None, 0.9, 0.2, 89, 100),
+                             (100, 100, None, 1.1, 0.2, 75, 100),
                              # Force a maximum input length.
-                             (100, 100, 100, 50, 1.1, 0.2, 50, 67),
+                             (100, 100, 50, 1.1, 0.2, 50, 67),
                          ])
 def test_get_max_input_output_length(
         supported_max_seq_len_source,
         supported_max_seq_len_target,
-        training_max_seq_len_source,
         forced_max_input_len,
         length_ratio_mean,
         length_ratio_std,
@@ -249,21 +241,19 @@ def test_get_max_input_output_length(
     max_input_len, get_max_output_len = sockeye.inference.get_max_input_output_length(
         supported_max_seq_len_source=supported_max_seq_len_source,
         supported_max_seq_len_target=supported_max_seq_len_target,
-        training_max_seq_len_source=training_max_seq_len_source,
         forced_max_input_len=forced_max_input_len,
         length_ratio_mean=length_ratio_mean,
         length_ratio_std=length_ratio_std,
         num_stds=1)
+    print('max input len', max_input_len)
     max_output_len = get_max_output_len(max_input_len)
+    print('max output len', max_output_len)
 
-    if supported_max_seq_len_source is not None:
-        assert max_input_len <= supported_max_seq_len_source
-    if supported_max_seq_len_target is not None:
-        assert max_output_len <= supported_max_seq_len_target
-    if expected_max_input_len is not None:
-        assert max_input_len == expected_max_input_len
-    if expected_max_output_len is not None:
-        assert max_output_len == expected_max_output_len
+    assert max_input_len <= supported_max_seq_len_source
+    assert max_output_len <= supported_max_seq_len_target
+
+    assert max_input_len == expected_max_input_len
+    assert max_output_len == expected_max_output_len
 
 
 @pytest.mark.parametrize("sentence, num_expected_factors, delimiter, expected_tokens, expected_factors",

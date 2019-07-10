@@ -199,10 +199,9 @@ def get_max_input_output_length(supported_max_seq_len_source: int,
         (see data_io.analyze_sequence_lengths)
         """
         if forced_max_output_len is not None:
-            output_len = forced_max_output_len
+            return forced_max_output_len
         else:
-            output_len = int(np.ceil(factor * input_length)) + space_for_bos + space_for_eos
-        return min(output_len, max_output_len)
+            return int(np.ceil(factor * input_length)) + space_for_bos + space_for_eos
 
     return max_input_len, get_max_output_length
 
