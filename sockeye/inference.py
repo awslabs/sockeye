@@ -171,7 +171,7 @@ def get_max_input_output_length(supported_max_seq_len_source: int,
     :param num_stds: The number of standard deviations the target length may exceed the mean target length (as long as
            the supported maximum length allows for this).
     :param forced_max_input_len: An optional overwrite of the maximum input length.
-    :param forced_max_output_len: An optional overwrite of the maximum out length.
+    :param forced_max_output_len: An optional overwrite of the maximum output length.
     :return: The maximum input length and a function to get the output length given the input length.
     """
     space_for_bos = 1
@@ -1395,50 +1395,36 @@ class Translator:
 
         return model_states, predicted_output_lengths.astype('float32', copy=False)
 
-    def _decode_step(self,
-                     prev_word: mx.nd.NDArray,
+    def _decode_step(self, prev_word: mx.nd.NDArray,
                      states: List[ModelState],
-                     models_output_layer_w: List[mx.nd.NDArray],
-                     models_output_layer_b: List[mx.nd.NDArray]) \
-            -> Tuple[mx.nd.NDArray, mx.nd.NDArray, List[ModelState]]:
+                     vocab_slice_ids: Optional[mx.nd.NDArray]) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, List[ModelState]]:
         """
         Returns decoder predictions (combined from all models), attention scores, and updated states.
 
         :param prev_word: Previous words of hypotheses. Shape: (batch_size * beam_size,).
         :param states: List of model states.
-        :param models_output_layer_w: Custom model weights for logit computation (empty for none).
-        :param models_output_layer_b: Custom model biases for logit computation (empty for none).
+        :param vocab_slice_ids: Optional vocab slice ids for vocabulary selection.
         :return: (scores, attention scores, list of model states)
         """
         model_outs, model_attention_probs, model_states = [], [], []
-        # We use zip_longest here since we'll have empty lists when not using restrict_lexicon
-        for model, out_w, out_b, state in itertools.zip_longest(
-                self.models, models_output_layer_w, models_output_layer_b, states):
+        for model, state in zip(self.models, states):
             model = model  # type: SockeyeModel
             state = state  # type: ModelState
             prev_word = prev_word.astype(self.dtype, copy=False)
             decoder_out, new_states, step_additional_outputs = model.decode_step(prev_word, state.states)
             state.states = new_states
 
-            # Compute logits and softmax with restricted vocabulary
-            if self.restrict_lexicon:
-                raise NotImplementedError()
-                # TODO: FP16 safety below
-                # Apply output layer outside decoder module.
-                logits = model.output_layer(decoder_out, out_w, out_b)
-                if self.skip_softmax:
-                    model_out = logits  # raw logits
-                else:
-                    model_out = mx.nd.softmax(logits)  # normalized probabilities
+            # Reduced size of output layer if vocab_slice_ids is not None
+            logits = model.output_layer(decoder_out, vocab_slice_ids).astype('float32', copy=False)
+            if self.skip_softmax:
+                model_out = logits
             else:
-                logits = model.output_layer(decoder_out)
-                if self.skip_softmax:
-                    model_out = logits.astype('float32', copy=False)
-                else:
-                    model_out = mx.nd.softmax(logits.astype('float32', copy=False), axis=-1)
+                model_out = logits.softmax(axis=-1)
+
             model_outs.append(model_out)
             model_attention_probs.append(mx.nd.zeros_like(logits))  # TODO
             model_states.append(state)
+
         scores, attention_probs = self._combine_predictions(model_outs, model_attention_probs)
         return scores, attention_probs, model_states
 
@@ -1542,9 +1528,7 @@ class Translator:
 
         # If using a top-k lexicon, select param rows for logit computation that correspond to the
         # target vocab for this sentence.
-        models_output_layer_w = list()
-        models_output_layer_b = list()
-        vocab_slice_ids = None  # type: mx.nd.NDArray
+        vocab_slice_ids = None  # type: Optional[mx.nd.NDArray]
         if restrict_lexicon:
             source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
             # TODO: See note in method about migrating to pure MXNet when set operations are supported.
@@ -1573,9 +1557,6 @@ class Translator:
 
             pad_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids.shape[0] - 1),
                                   val=np.inf, ctx=self.context)
-            for m in self.models:
-                models_output_layer_w.append(m.output_layer_w.take(vocab_slice_ids))
-                models_output_layer_b.append(m.output_layer_b.take(vocab_slice_ids))
 
         # (0) encode source sentence, returns a list
         model_states, estimated_reference_lengths = self._encode(source, source_length)
@@ -1600,8 +1581,7 @@ class Translator:
             # attention_scores: (batch_size * beam_size, bucket_key)
             target_dists, attention_scores, model_states = self._decode_step(prev_word=best_word_indices,
                                                                              states=model_states,
-                                                                             models_output_layer_w=models_output_layer_w,
-                                                                             models_output_layer_b=models_output_layer_b)
+                                                                             vocab_slice_ids=vocab_slice_ids)
 
             # (2) Produces the accumulated cost of target words in each row.
             # There is special treatment for finished and inactive rows: inactive rows are inf everywhere;
@@ -1843,7 +1823,7 @@ class Translator:
         sequence = sequence[:length].tolist()
         attention_matrix = attention_lists[:length, :]
         score = float(seq_score)
-        estimated_reference_length=float(estimated_reference_length) if estimated_reference_length else None
+        estimated_reference_length = float(estimated_reference_length) if estimated_reference_length else None
         beam_history_list = [beam_history] if beam_history is not None else []
         return Translation(sequence, attention_matrix, score, beam_history_list,
                            nbest_translations=None,

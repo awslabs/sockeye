@@ -89,3 +89,32 @@ def test_positional_embeddings():
     expected_learned_embeddings = np.ones((data_len, num_embed))
     out = b(data, None).asnumpy()
     assert np.allclose(out[0], expected_learned_embeddings)
+
+
+def test_output_layer():
+    num_hidden = 32
+    vocab_size = 64
+    data = mx.nd.ones((2, 10, num_hidden))
+    vocab_slice_ids = mx.nd.array([4, 7, 23])
+
+    b = sockeye.layers.OutputLayer(num_hidden, vocab_size)
+    b.initialize()
+
+    output = b(data, None)
+    assert output.shape == (2, 10, vocab_size)
+    reduced_output = output.take(vocab_slice_ids, axis=-1).asnumpy()
+
+    output_restricted = b(data, vocab_slice_ids).asnumpy()
+    assert output_restricted.shape == (2, 10, len(vocab_slice_ids))
+
+    assert np.allclose(output_restricted, reduced_output)
+
+    b.hybridize()
+    output = b(data, None)
+    assert output.shape == (2, 10, vocab_size)
+    reduced_output = output.take(vocab_slice_ids, axis=-1).asnumpy()
+
+    output_restricted = b(data, vocab_slice_ids).asnumpy()
+    assert output_restricted.shape == (2, 10, len(vocab_slice_ids))
+
+    assert np.allclose(output_restricted, reduced_output)

@@ -121,7 +121,8 @@ class SockeyeModel(mx.gluon.Block):
             # TODO
             self.decoder = cast(decoder.TransformerDecoder, self.decoder)
 
-            self.output_layer = layers.OutputLayer(vocab_size=self.config.vocab_target_size,
+            self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
+                                                   vocab_size=self.config.vocab_target_size,
                                                    weight=self.output_weight)
 
             self.length_ratio = None
@@ -191,7 +192,7 @@ class SockeyeModel(mx.gluon.Block):
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, is_inference=False)
         target = self.decoder.decode_seq(target_embed, states=states)
 
-        output = self.output_layer(target)
+        output = self.output_layer(target, None)
 
         if self.length_ratio is not None:
             # predicted_length_ratios: (batch_size,)

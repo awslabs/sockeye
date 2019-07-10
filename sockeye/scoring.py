@@ -160,7 +160,7 @@ class ScoringModel(model.SockeyeModel):
 
             # output layer
             # logits: (batch_size * target_seq_len, target_vocab_size)
-            logits = self.output_layer(mx.sym.reshape(data=target_decoded, shape=(-3, 0)))
+            logits = self.output_layer(mx.sym.reshape(data=target_decoded, shape=(-3, 0)), None)
             # logits after reshape: (batch_size, target_seq_len, target_vocab_size)
             logits = mx.sym.reshape(data=logits, shape=(-4, -1, target_embed_seq_len, 0))
 

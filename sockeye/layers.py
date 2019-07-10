@@ -124,9 +124,9 @@ class OutputLayer(mx.gluon.HybridBlock):
     """
     Defines the output layer of Sockeye decoders. Supports weight tying and weight normalization.
 
+    :param hidden_size: Input hidden size.
     :param vocab_size: Target vocabulary size.
     :param weight: Optional shared weight Parameter.
-    :param weight_normalization: Whether to apply weight normalization.
     :param weight_initializer: Initializer for weight.
     :param bias_initializer: Initializer for bias.
     :param dtype: Data type.
@@ -135,9 +135,9 @@ class OutputLayer(mx.gluon.HybridBlock):
     """
 
     def __init__(self,
+                 hidden_size: int,
                  vocab_size: int,
                  weight: Optional[mx.gluon.Parameter] = None,
-                 weight_normalization: bool = False,
                  weight_initializer: Optional[str] = None,
                  bias_initializer: str = 'zeros',
                  dtype: str = 'float32',
@@ -147,27 +147,38 @@ class OutputLayer(mx.gluon.HybridBlock):
         with self.name_scope():
             if weight is None:
                 self.weight = self.params.get("weight",
+                                              shape=(vocab_size, hidden_size),
                                               init=weight_initializer,
                                               dtype=dtype,
-                                              allow_deferred_init=True)
+                                              allow_deferred_init=False)
             else:
                 self.weight = weight  # adds to self._reg_params
                 self.params.update({weight.name: weight})  # adds to self.params
-
-            self.weight_norm = None  # type: Optional[WeightNormalization]
-            if weight_normalization:
-                self.weight_norm = WeightNormalization(num_hidden=vocab_size, ndim=2, prefix="wn_")
 
             self.bias = self.params.get("bias",
                                         shape=(vocab_size,),
                                         init=bias_initializer,
                                         dtype=dtype,
-                                        allow_deferred_init=True)
+                                        allow_deferred_init=False)
 
-    def hybrid_forward(self, F, hidden, weight, bias):
-        return F.FullyConnected(data=hidden,
+    def forward(self, data, vocab_slice_ids):
+        if vocab_slice_ids is not None:
+            # imperative, reduced matrix multiplication for vocabulary selection
+            weight = self.weight.data().take(vocab_slice_ids)
+            bias = self.bias.data().take(vocab_slice_ids)
+            return mx.nd.FullyConnected(data=data,
+                                        num_hidden=vocab_slice_ids.shape[0],
+                                        weight=weight,
+                                        bias=bias,
+                                        flatten=False,
+                                        name=C.LOGITS_NAME)
+        else:
+            return super().forward(data)
+
+    def hybrid_forward(self, F, data, weight, bias):
+        return F.FullyConnected(data=data,
                                 num_hidden=self.vocab_size,
-                                weight=self.weight_norm(weight) if self.weight_norm is not None else weight,
+                                weight=weight,
                                 bias=bias,
                                 flatten=False,
                                 name=C.LOGITS_NAME)

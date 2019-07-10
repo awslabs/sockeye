@@ -100,6 +100,10 @@ class Decoder(mx.gluon.Block):
         """
         raise NotImplementedError()
 
+    @abstractmethod
+    def get_num_hidden(self):
+        raise NotImplementedError()
+
 
 @Decoder.register(transformer.TransformerConfig, C.TRANSFORMER_DECODER_PREFIX)
 class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
@@ -278,3 +282,6 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         target = self.final_process(target, None)
 
         return target, new_self_att_kv
+
+    def get_num_hidden(self):
+        return self.config.model_size
