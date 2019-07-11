@@ -787,6 +787,8 @@ def parse_metrics_line(line_number: int, line: str) -> Dict[str, Any]:
         key, value = field.split("=", 1)
         if value == 'True' or value == 'False':
             metric[key] = (value == 'True')
+        elif value == 'None':
+            metric[key] = None
         else:
             metric[key] = float(value)
     return metric

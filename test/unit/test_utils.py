@@ -396,16 +396,17 @@ def test_compute_lengths(data, expected_lengths):
 
 
 @pytest.mark.parametrize("line_num,line,expected_metrics", [
-        (1, "1\tfloat_metric=3.45\tbool_metric=True", {'float_metric':3.45, 'bool_metric': True}),
-        (3, "3\tfloat_metric=1.0\tbool_metric=False", {'float_metric':1.00, 'bool_metric': False}),
+        (1, "1\tfloat_metric=3.45\tbool_metric=True", {'float_metric': 3.45, 'bool_metric': True}),
+        (3, "3\tfloat_metric=1.0\tbool_metric=False", {'float_metric': 1.00, 'bool_metric': False}),
+        (3, "3\tfloat_metric=1.0\tnone_metric=None", {'float_metric': 1.00, 'none_metric': None}),
         # line_num and checkpoint are not equal, should fail
-        (2, "4\tfloat_metric=1.0\tbool_metric=False", {'float_metric':1.00, 'bool_metric': False}),
+        (2, "4\tfloat_metric=1.0\tbool_metric=False", {'float_metric': 1.00, 'bool_metric': False}),
         ])
 def test_parse_metrics_line(line_num, line, expected_metrics):
     if line_num == int(line.split('\t')[0]):
         parsed_metrics = utils.parse_metrics_line(line_num, line)
         for k, v in parsed_metrics.items():
-            assert type(v) == type(expected_metrics[k])
+            assert isinstance(v, type(expected_metrics[k]))
             assert v == expected_metrics[k]
     else:
         with pytest.raises(utils.SockeyeError) as e:
