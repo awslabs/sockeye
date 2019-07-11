@@ -224,9 +224,9 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         target, self_attention_key_values = super().forward(step_input, states)
 
         if is_inference:
-            # During inference, length dimension of decoder output has size 1, squeeze it
+            # During inference, length dimension of decoder output has size 1, remove it
             # (batch, num_hidden)
-            target = target.squeeze()
+            target = target.reshape((-1, self.config.model_size))
             # We also increment time step state (2nd state in the list) and add new caches
             step = states[1] + 1
             # constant encoder attention keys & values
