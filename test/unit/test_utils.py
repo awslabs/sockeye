@@ -392,7 +392,7 @@ def test_smart_open_without_suffix():
 ])
 def test_compute_lengths(data, expected_lengths):
     lengths = utils.compute_lengths(mx.sym.Variable('data')).eval(data=data)[0]
-    assert (lengths.asnumpy() == expected_lengths.asnumpy()).all()
+    assert np.allclose(lengths.asnumpy(), expected_lengths.asnumpy())
 
 
 @pytest.mark.parametrize("line_num,line,expected_metrics", [
