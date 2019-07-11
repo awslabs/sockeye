@@ -22,9 +22,9 @@ from contextlib import ExitStack
 from . import arguments
 from . import constants as C
 from . import data_io
-from . import inference
 from . import scoring
 from . import utils
+from .inference import LengthPenalty, BrevityPenalty
 from .log import setup_main_logger
 from .model import load_model
 from .output_handler import get_output_handler
@@ -83,17 +83,27 @@ def score(args: argparse.Namespace):
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target)
 
+        constant_length_ratio = args.brevity_penalty_constant_length_ratio
+        if args.brevity_penalty_type == C.BREVITY_PENALTY_CONSTANT:
+            if constant_length_ratio <= 0.0:
+                constant_length_ratio = model.length_ratio_mean
+                logger.info("Using constant length ratio saved in the model config: %f", constant_length_ratio)
+        else:
+            constant_length_ratio = -1.0
+
+        batch_scorer = scoring.BatchScorer(length_penalty=LengthPenalty(alpha=args.length_penalty_alpha,
+                                                                        beta=args.length_penalty_beta),
+                                           brevity_penalty=BrevityPenalty(weight=args.brevity_penalty_weight),
+                                           score_type=args.score_type,
+                                           softmax_temperature=args.softmax_temperature,
+                                           constant_length_ratio=constant_length_ratio)
+        batch_scorer.hybridize(static_alloc=True)
+
         scorer = scoring.Scorer(model=model,
+                                batch_scorer=batch_scorer,
                                 source_vocabs=source_vocabs,
                                 target_vocab=target_vocab,
-                                context=context,
-                                softmax_temperature=args.softmax_temperature,
-                                score_type=args.score_type,
-                                length_penalty=inference.LengthPenalty(alpha=args.length_penalty_alpha,
-                                                                       beta=args.length_penalty_beta),
-                                brevity_penalty=inference.BrevityPenalty(weight=args.brevity_penalty_weight),
-                                brevity_penalty_type=args.brevity_penalty_type,
-                                constant_length_ratio=args.brevity_penalty_constant_length_ratio)
+                                context=context)
 
         scorer.score(score_iter=score_iter,
                      output_handler=get_output_handler(output_type=args.output_type,

@@ -349,7 +349,7 @@ class SockeyeModel(mx.gluon.Block):
 
 
 def load_model(model_folder: str,
-               context: Union[List[mx.context.Context], mx.context.Context],
+               context: Union[List[mx.context.Context], mx.context.Context] = mx.cpu(),
                dtype: str = C.DTYPE_FP32,
                checkpoint: Optional[int] = None,
                hybridize: bool = True) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:

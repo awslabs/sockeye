@@ -63,11 +63,11 @@ def extract(param_path: str,
     :return: Extracted parameter dictionary.
     """
     logger.info("Loading parameters from '%s'", param_path)
-    arg_params, aux_params = utils.load_params(param_path)
+    params = mx.nd.load(param_path)
 
     ext_params = {}  # type: Dict[str, np.ndarray]
-    param_names = _extract(param_names, arg_params, ext_params)
-    param_names = _extract(param_names, aux_params, ext_params)
+    param_names = _extract(param_names, params, ext_params)
+    param_names = _extract(param_names, params, ext_params)
 
     if len(param_names) > 0:
         logger.info("The following parameters were not found:")
@@ -77,14 +77,10 @@ def extract(param_path: str,
         list_all = True
 
     if list_all:
-        if arg_params:
+        if params:
             logger.info("Available arg parameters:")
-            for name in arg_params:
-                logger.info("\t%s: shape=%s", name, str(arg_params[name].shape))
-        if aux_params:
-            logger.info("Available aux parameters:")
-            for name in aux_params:
-                logger.info("\t%s: shape=%s", name, str(aux_params[name].shape))
+            for name in params:
+                logger.info("\t%s: shape=%s", name, str(params[name].shape))
 
     return ext_params
 
@@ -107,12 +103,12 @@ def extract_parameters(args: argparse.Namespace):
         param_path = os.path.join(args.input, C.PARAMS_BEST_NAME)
     else:
         param_path = args.input
-    ext_params = extract(param_path, args.names, args.list_all)
+    extracted_parameters = extract(param_path, args.names, args.list_all)
 
-    if len(ext_params) > 0:
+    if len(extracted_parameters) > 0:
         utils.check_condition(args.output is not None, "An output filename must be specified. (Use --output)")
         logger.info("Writing extracted parameters to '%s'", args.output)
-        np.savez_compressed(args.output, **ext_params)
+        np.savez_compressed(args.output, **extracted_parameters)
 
 
 if __name__ == "__main__":

@@ -128,24 +128,21 @@ class CheckpointDecoder:
         :param output_name: Filename to write translations to. Defaults to /dev/null.
         :return: Mapping of metric names to scores.
         """
-        models, source_vocabs, target_vocab = load_model(
-            self.context,
-            self.max_input_len,
-            self.beam_size,
-            self.batch_size,
-            [self.model],
-            [checkpoint],
-            softmax_temperature=self.softmax_temperature,
-            max_output_length_num_stds=self.max_output_length_num_stds)
+        model, source_vocabs, target_vocab = load_model(model_folder=self.model,
+                                                        context=self.context,
+                                                        dtype=C.DTYPE_FP32,
+                                                        checkpoint=checkpoint,
+                                                        hybridize=True)
         translator = inference.Translator(context=self.context,
                                           ensemble_mode=self.ensemble_mode,
-                                          bucket_source_width=self.bucket_width_source,
                                           length_penalty=inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
                                           brevity_penalty=inference.BrevityPenalty(weight=0.0),
+                                          beam_size=self.beam_size,
+                                          batch_size=self.batch_size,
                                           beam_prune=0.0,
                                           beam_search_stop='all',
                                           nbest_size=self.nbest_size,
-                                          models=models,
+                                          models=[model],
                                           source_vocabs=source_vocabs,
                                           target_vocab=target_vocab,
                                           restrict_lexicon=None,

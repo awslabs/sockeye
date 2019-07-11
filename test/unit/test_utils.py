@@ -263,31 +263,12 @@ def test_average_arrays():
     expected_average /= 4
 
     mx_arrays = [mx.nd.array(a) for a in arrays]
-    assert np.isclose(utils.average_arrays(mx_arrays).asnumpy(), expected_average).all()
+    assert np.allclose(utils.average_arrays(mx_arrays).asnumpy(), expected_average)
 
     with pytest.raises(utils.SockeyeError) as e:
         other_shape = (12, 13)
         utils.average_arrays(mx_arrays + [mx.nd.zeros(other_shape)])
     assert "nd array shapes do not match" == str(e.value)
-
-
-def test_save_and_load_params():
-    array = mx.nd.uniform(0, 1, (10, 12))
-    arg_params = {"array": array}
-    aux_params = {"array": array}
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = os.path.join(tmpdir, "params")
-        utils.save_params(arg_params, path, aux_params=aux_params)
-        params = mx.nd.load(path)
-        assert len(params.keys()) == 2
-        assert "arg:array" in params.keys()
-        assert "aux:array" in params.keys()
-        loaded_arg_params, loaded_aux_params = utils.load_params(path)
-        assert "array" in loaded_arg_params
-        assert "array" in loaded_aux_params
-        assert np.isclose(loaded_arg_params['array'].asnumpy(), array.asnumpy()).all()
-        assert np.isclose(loaded_aux_params['array'].asnumpy(), array.asnumpy()).all()
 
 
 def test_print_value():
@@ -392,20 +373,21 @@ def test_smart_open_without_suffix():
 ])
 def test_compute_lengths(data, expected_lengths):
     lengths = utils.compute_lengths(mx.sym.Variable('data')).eval(data=data)[0]
-    assert (lengths.asnumpy() == expected_lengths.asnumpy()).all()
+    assert np.allclose(lengths.asnumpy(), expected_lengths.asnumpy())
 
 
 @pytest.mark.parametrize("line_num,line,expected_metrics", [
-        (1, "1\tfloat_metric=3.45\tbool_metric=True", {'float_metric':3.45, 'bool_metric': True}),
-        (3, "3\tfloat_metric=1.0\tbool_metric=False", {'float_metric':1.00, 'bool_metric': False}),
+        (1, "1\tfloat_metric=3.45\tbool_metric=True", {'float_metric': 3.45, 'bool_metric': True}),
+        (3, "3\tfloat_metric=1.0\tbool_metric=False", {'float_metric': 1.00, 'bool_metric': False}),
+        (3, "3\tfloat_metric=1.0\tnone_metric=None", {'float_metric': 1.00, 'none_metric': None}),
         # line_num and checkpoint are not equal, should fail
-        (2, "4\tfloat_metric=1.0\tbool_metric=False", {'float_metric':1.00, 'bool_metric': False}),
+        (2, "4\tfloat_metric=1.0\tbool_metric=False", {'float_metric': 1.00, 'bool_metric': False}),
         ])
 def test_parse_metrics_line(line_num, line, expected_metrics):
     if line_num == int(line.split('\t')[0]):
         parsed_metrics = utils.parse_metrics_line(line_num, line)
         for k, v in parsed_metrics.items():
-            assert type(v) == type(expected_metrics[k])
+            assert isinstance(v, type(expected_metrics[k]))
             assert v == expected_metrics[k]
     else:
         with pytest.raises(utils.SockeyeError) as e:

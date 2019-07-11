@@ -33,90 +33,102 @@ from .output_handler import OutputHandler
 logger = logging.getLogger(__name__)
 
 
+class BatchScorer(mx.gluon.HybridBlock):
+
+    def __init__(self,
+                 length_penalty: inference.LengthPenalty,
+                 brevity_penalty: inference.BrevityPenalty,
+                 score_type: str = C.SCORING_TYPE_DEFAULT,
+                 softmax_temperature: Optional[float] = None,
+                 constant_length_ratio: Optional[float] = None,
+                 prefix='BatchScorer_'):
+        super().__init__(prefix=prefix)
+        self.score_type = score_type
+        self.softmax_temperature = softmax_temperature
+        self.length_penalty = length_penalty
+        self.brevity_penalty = brevity_penalty
+        self.constant_length_ratio = constant_length_ratio
+
+    def hybrid_forward(self, F, logits, labels, length_ratio, source_length, target_length):
+        """
+
+        :param F: MXNet Namespace
+        :param logits: Model logits. Shape: (batch, length, vocab_size).
+        :param labels: Gold targets. Shape: (batch, length).
+        :param length_ratio: Length Ratios. Shape: (batch,).
+        :param source_length: Source lengths. Shape: (batch,).
+        :param target_length: Target lengths. Shape: (batch,).
+        :return: Sequence scores. Shape: (batch,).
+        """
+        if self.softmax_temperature is not None:
+            logits = logits / self.softmax_temperature
+        target_dists = F.softmax(logits, axis=-1)
+
+        # Select the label probability, then take their logs.
+        # probs and scores: (batch_size, target_seq_len)
+        probs = F.pick(target_dists, labels, axis=-1)
+        token_scores = F.log(probs)
+        if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
+            token_scores = token_scores * -1
+
+        # Sum, then apply length penalty. The call to `mx.sym.where` masks out invalid values from scores.
+        # zeros and sums: (batch_size,)
+        scores = F.sum(F.where(labels != 0, token_scores, F.zeros_like(token_scores)), axis=1) / (
+                     self.length_penalty(target_length - 1))
+
+        # Deal with the potential presence of brevity penalty
+        # length_ratio: (batch_size,)
+        if self.constant_length_ratio is not None:
+            # override all ratios with the constant value
+            length_ratio = length_ratio + self.constant_length_ratio * F.ones_like(scores)
+
+        scores = scores - self.brevity_penalty(target_length - 1, length_ratio * source_length)
+        return scores
+
+
 class Scorer:
     """
     Scorer class takes a ScoringModel and uses it to score a stream of parallel sentences.
     It also takes the vocabularies so that the original sentences can be printed out, if desired.
 
     :param model: The model to score with.
+    :param batch_scorer: BatchScorer block to score each batch.
     :param source_vocabs: The source vocabularies.
     :param target_vocab: The target vocabulary.
+    :param context: Context.
     """
     def __init__(self,
                  model: SockeyeModel,
+                 batch_scorer: BatchScorer,
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
-                 context: Union[List[mx.context.Context], mx.context.Context],
-                 length_penalty: inference.LengthPenalty,
-                 brevity_penalty: inference.BrevityPenalty,
-                 constant_length_ratio: float = 0.0,
-                 softmax_temperature: Optional[float] = None,
-                 score_type: str = C.SCORING_TYPE_DEFAULT,
-                 brevity_penalty_type: str = '') -> None:
+                 context: Union[List[mx.context.Context], mx.context.Context]) -> None:
         self.source_vocab_inv = vocab.reverse_vocab(source_vocabs[0])
         self.target_vocab_inv = vocab.reverse_vocab(target_vocab)
         self.model = model
+        self.batch_scorer = batch_scorer
         self.context = context
         self.exclude_list = {source_vocabs[0][C.BOS_SYMBOL], target_vocab[C.EOS_SYMBOL], C.PAD_ID}
-        self.softmax_temperature = softmax_temperature
-        self.score_type = score_type
-        self.length_penalty = length_penalty
-        self.brevity_penalty = brevity_penalty
-        if brevity_penalty_type == C.BREVITY_PENALTY_CONSTANT:
-            if constant_length_ratio <= 0.0:
-                self.constant_length_ratio = self.model.length_ratio_mean
-                logger.info("Using constant length ratio saved in the model config: %f",
-                            self.constant_length_ratio)
-        else:
-            self.constant_length_ratio = -1.0
 
     def score_batch(self, batch: data_io.Batch) -> mx.nd.NDArray:
-        # split batch into shards
         batch = batch.split_and_load(ctx=self.context)
         batch_scores = []  # type: List[mx.nd.NDArray]
         for inputs, labels in batch.shards():
             if self.model.dtype == C.DTYPE_FP16:
                 inputs = (i.astype(C.DTYPE_FP16, copy=False) for i in inputs)
-
             source, source_length, target, target_length = inputs
             outputs = self.model(*inputs)  # type: Dict[str, mx.nd.NDArray]
             logits = outputs[C.LOGITS_NAME]  # type: mx.nd.NDArray
-
-            if self.softmax_temperature is not None:
-                logits /= self.softmax_temperature
-            target_dists = logits.softmax(axis=-1)
-
-            # Select the label probability, then take their logs.
-            # probs and scores: (batch_size, target_seq_len)
-            probs = target_dists.pick(labels[C.TARGET_LABEL_NAME], axis=-1)
-            token_scores = mx.nd.log(probs)
-            if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
-                token_scores *= -1
-
-            # Sum, then apply length penalty. The call to `mx.sym.where` masks out invalid values from scores.
-            # zeros and sums: (batch_size,)
-            scores = mx.nd.sum(mx.nd.where(labels[C.TARGET_LABEL_NAME] != 0,
-                                           token_scores,
-                                           mx.nd.zeros_like(token_scores)), axis=1) / (
-                         self.length_penalty(target_length - 1))
-
-            # Deal with the potential presence of brevity penalty
-            # length_ratio: (batch_size,)
-            if self.constant_length_ratio > 0.0:
-                # override all ratios with the constant value
-                length_ratio = self.constant_length_ratio * mx.nd.ones_like(scores)
-            else:
-                # predict length ratio if supported
-                length_ratio = outputs.get(C.LENRATIO_NAME, mx.nd.zeros_like(scores))
-            scores = scores - self.brevity_penalty(target_length - 1, length_ratio * source_length)
-
+            label = labels[C.TARGET_LABEL_NAME]
+            length_ratio = outputs.get(C.LENRATIO_NAME, mx.nd.zeros_like(source_length))
+            scores = self.batch_scorer(logits, label, length_ratio, source_length, target_length)
             batch_scores.append(scores)
 
         # shape: (batch_size,).
         scores = mx.nd.concat(*batch_scores, dim=0)  # type: mx.nd.NDArray
         return scores
 
-    def score(self, score_iter: data_io.BatchedRawParallelSampleIter, output_handler: OutputHandler):
+    def score(self, score_iter: data_io.BaseParallelSampleIter, output_handler: OutputHandler):
         total_time = 0.
         sentence_no = 0
         batch_no = 0

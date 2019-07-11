@@ -269,12 +269,12 @@ def _test_extract_parameters_cli(model_path: str):
     """
     Runs parameter extraction CLI and asserts that the resulting numpy serialization contains a parameter key.
     """
-    extract_params = "--input {input} --names target_output_bias --list-all --output {output}".format(
+    extract_params = "--input {input} --names output_layer.bias --list-all --output {output}".format(
         output=os.path.join(model_path, "params.extracted"), input=model_path)
     with patch.object(sys, "argv", extract_params.split()):
         sockeye.extract_parameters.main()
     with np.load(os.path.join(model_path, "params.extracted.npz")) as data:
-        assert "target_output_bias" in data
+        assert "output_layer.bias" in data
 
 
 def _test_parameter_averaging(model_path: str):
