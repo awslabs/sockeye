@@ -48,6 +48,7 @@ class ModelConfig(Config):
     :param weight_tying: Enables weight tying if True.
     :param weight_tying_type: Determines which weights get tied. Must be set if weight_tying is enabled.
     :param lhuc: LHUC (Vilar 2018) is applied at some part of the model.
+    :param num_pointers: The number of pointers to the source sequence that can be outputted by the decoder.
     """
 
     def __init__(self,

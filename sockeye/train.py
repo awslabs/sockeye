@@ -99,6 +99,10 @@ def check_arg_compatibility(args: argparse.Namespace):
     if args.decoder_only:
         check_condition(args.decoder != C.TRANSFORMER_TYPE and args.decoder != C.CONVOLUTION_TYPE,
                         "Decoder pre-training currently supports RNN decoders only.")
+    
+    if args.attention_based_copying:
+        check_condition(args.decoder == C.RNN_NAME,
+                        "The attention-based copying mechanism currently supports RNN decoders only.")
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:

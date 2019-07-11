@@ -1833,6 +1833,7 @@ class Translator:
             decoder_out, attention_probs, state = model.run_decoder(prev_word, bucket_key, state)
             
             if model.config.num_pointers:
+                # Fill up the predictions up to the maximum number of pointer elements for shorter source sentences
                 (beam_size, target_vocab_size) = decoder_out.shape
                 diff_size = len(self.vocab_target) - target_vocab_size
                 if diff_size > 0:

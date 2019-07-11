@@ -97,7 +97,7 @@ class Decoder(ABC):
                         source_encoded_max_length: int,
                         target_embed: mx.sym.Symbol,
                         target_embed_lengths: mx.sym.Symbol,
-                        target_embed_max_length: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
+                        target_embed_max_length: int) -> Tuple[mx.sym.Symbol, Optional[mx.sym.Symbol]]:
         """
         Decodes a sequence of embedded target words and returns sequence of last decoder
         representations for each time step.
@@ -242,7 +242,7 @@ class TransformerDecoder(Decoder):
                         source_encoded_max_length: int,
                         target_embed: mx.sym.Symbol,
                         target_embed_lengths: mx.sym.Symbol,
-                        target_embed_max_length: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
+                        target_embed_max_length: int) -> Tuple[mx.sym.Symbol, Optional[mx.sym.Symbol]]:
         """
         Decodes a sequence of embedded target words and returns sequence of last decoder
         representations for each time step.
@@ -561,7 +561,7 @@ class RecurrentDecoder(Decoder):
                         source_encoded_max_length: int,
                         target_embed: mx.sym.Symbol,
                         target_embed_lengths: mx.sym.Symbol,
-                        target_embed_max_length: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
+                        target_embed_max_length: int) -> Tuple[mx.sym.Symbol, Optional[mx.sym.Symbol]]:
         """
         Decodes a sequence of embedded target words and returns sequence of last decoder
         representations for each time step.
@@ -1033,7 +1033,7 @@ class ConvolutionalDecoder(Decoder):
                         source_encoded_max_length: int,
                         target_embed: mx.sym.Symbol,
                         target_embed_lengths: mx.sym.Symbol,
-                        target_embed_max_length: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
+                        target_embed_max_length: int) -> Tuple[mx.sym.Symbol, Optional[mx.sym.Symbol]]:
         """
         Decodes a sequence of embedded target words and returns sequence of last decoder
         representations for each time step.

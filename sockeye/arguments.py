@@ -711,7 +711,9 @@ def add_model_parameters(params):
     model_params.add_argument('--attention-based-copying', action="store_true",
                               help="Enables an attention-based copying mechanism. Supported only by RNN decoders. "
                                    "This allows to explicitly declare pointers to source tokens in the target "
-                                   "sequence (format: <ptr\d+>).")
+                                   "sequence (format: <ptr\d+>)."
+                                   "Each pointer on the target side can point to any of the d input tokens, "
+                                   "e.g. <ptr0> points to the first source token.")
 
     # LHUC
     # TODO: The convolutional model does not support lhuc yet
