@@ -730,22 +730,28 @@ def train(args: argparse.Namespace) -> training.TrainState:
         args.output = temp_dir.name
         args.max_updates = 0
 
-    # When using MPI (for Horovod etc.), multiple instances of sockeye.train are
-    # launched.  Each has a rank (global unique ID) and local rank (unique ID
-    # for the current host).  For instance, running on 2 hosts with 4 GPUs each,
-    # ranks will range 0-7 and local ranks will range 0-3.
-    mpi_rank = 0
-    mpi_local_rank = 0
+    # When using Horovod, multiple instances of sockeye.train (workers) are
+    # launched via OpenMPI.  Each worker has a rank (unique among all workers)
+    # and local rank (unique on the current host).  For example, running on 2
+    # hosts with 4 GPUs each will assign ranks 0-7 and local ranks 0-3.
+    hvd_rank = 0
+    hvd_local_rank = 0
     if args.horovod:
-        # Only attempt to import Horovod module if we're using it.
+        # Only import the Horovod module if we're using it.
         import horovod.mxnet as hvd
         hvd.init()
-        mpi_rank = hvd.rank()
-        mpi_local_rank = hvd.local_rank()
+        hvd_rank = hvd.rank()
+        hvd_local_rank = hvd.local_rank()
+        # When using Horovod, each worker uses a sub-directory within the main
+        # output directory.
+        args.output = os.path.join(args.output, 'workers', str(hvd_rank))
+        # When using Horovod, scale the learning rate by the number of workers.
+        # TODO: Control this behavior with a CLI arg?
+        args.initial_learning_rate *= hvd.size()
 
-    # Use a different seed for each Sockeye instance when running with MPI.
-    # Defaults to no change (+0) when running without MPI.
-    utils.seed_rngs(args.seed + mpi_rank)
+    # Use a different seed for each worker when running with Horovod.  Defaults
+    # to no change (+0) when running without Horovod.
+    utils.seed_rngs(args.seed + hvd_rank)
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
@@ -771,7 +777,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                           disable_device_locking=args.disable_device_locking,
                                           lock_dir=args.lock_dir,
                                           exit_stack=exit_stack,
-                                          pre_assigned_id=mpi_local_rank if args.horovod else None)
+                                          pre_assigned_id=hvd_local_rank if args.horovod else None)
         if args.batch_type == C.BATCH_TYPE_SENTENCE:
             check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
                                                                  "divisible by the number of devices. Choose a batch "
