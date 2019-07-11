@@ -1183,6 +1183,9 @@ def add_score_cli_args(params):
                         default=C.SCORING_TYPE_DEFAULT,
                         help='Score type to output. Default: %(default)s')
 
+    params.add_argument('--dtype', default=C.DTYPE_FP32, choices=[C.DTYPE_FP32, C.DTYPE_FP16],
+                        help="Data type.")
+
     add_logging_args(params)
 
 

@@ -17,9 +17,8 @@ Simple Training CLI.
 
 # Start the forkserver. It is important that this is done before any other imports so that the forkserver is in a clean
 # state.
-if __name__ == "__main__":
-    import sockeye.multiprocessing_utils as mp
-    mp.initialize()
+import sockeye.multiprocessing_utils as mp
+mp.initialize()
 
 
 import argparse
@@ -662,7 +661,7 @@ def set_grad_req_for_fixed_params(config: model.ModelConfig,
                           "LHUC fixes all other parameters and is thus not compatible with other fixing strategies.")
     if config.lhuc:
         # fix everything except LHUC-related parameters
-        fixed_param_names += [name for name in params if not name.endswith(C.LHUC_NAME)]
+        fixed_param_names += [name for name in params if not name.endswith(C.LHUC_PREFIX + "weight")]
         logger.info("LHUC enabled, fixing all non-LHUC parameters")
     elif fixed_param_strategy is not None:
         fixed_param_names += fixed_param_names_from_stragegy(config, params, fixed_param_strategy)

@@ -67,33 +67,22 @@ class LHUC(mx.gluon.HybridBlock):
     Machine Translation Models" NAACL 2018
 
     :param num_hidden: Number of hidden units of the layer to be modified.
-    :param weight: Optional parameter vector.
     :param prefix: Optional prefix for created parameters (if not given as weight).
     """
     def __init__(self,
                  num_hidden: int,
-                 weight: Optional[mx.sym.Symbol] = None,
-                 prefix: str = "") -> None:
+                 prefix: str = C.LHUC_PREFIX,
+                 weight_init: Union[str, mx.init.Initializer] = mx.init.Uniform(0.1)) -> None:
         super().__init__(prefix=prefix)
-        self.num_hidden = num_hidden
-        self.weight = weight
-        if self.weight is None:
-            with self.name_scope():
-                self.lhuc = self.params.get(C.LHUC_NAME, shape=(num_hidden,), init=mx.init.Uniform(0.1))
+        with self.name_scope():
+            self.weight = self.params.get('weight', shape=(num_hidden,), init=weight_init)
 
-    def hybrid_forward(self, F, inputs: mx.sym.Symbol, **params) -> mx.sym.Symbol:
-        if isinstance(self.weight, mx.sym.Symbol):
-            weight = self.weight
-        else:
-            weight = params[C.LHUC_NAME]
-
+    def hybrid_forward(self, F, data, weight) -> mx.sym.Symbol:
         # We use a sigmoid with amplitude 2 for weighting the hidden units. The
         # activation is dampened when the value of the sigmoid is close to 0, and
         # strengthened when it's close to 2 (see also original paper)
-        weight_vector = 2 * F.Activation(data=weight, act_type="sigmoid")
-        out = F.broadcast_mul(weight_vector, inputs)
-
-        return out
+        weight = 2 * F.Activation(weight, act_type="sigmoid")
+        return F.broadcast_mul(weight, data)
 
 
 class WeightNormalization(mx.gluon.HybridBlock):

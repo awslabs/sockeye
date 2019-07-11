@@ -15,9 +15,9 @@
 Translation CLI.
 """
 import argparse
+import logging
 import sys
 import time
-import logging
 from contextlib import ExitStack
 from typing import Dict, Generator, List, Optional, Union
 
@@ -30,6 +30,7 @@ from . import constants as C
 from . import data_io
 from . import inference
 from . import utils
+from .model import load_models
 
 logger = logging.getLogger(__name__)
 
@@ -74,11 +75,11 @@ def run_translate(args: argparse.Namespace):
                                     exit_stack=exit_stack)[0]
         logger.info("Translate Device: %s", context)
 
-        models, source_vocabs, target_vocab = inference.load_models(
-            context=context,
-            model_folders=args.models,
-            checkpoints=args.checkpoints,
-            dtype=args.dtype)
+        models, source_vocabs, target_vocab = load_models(context=context,
+                                                          model_folders=args.models,
+                                                          checkpoints=args.checkpoints,
+                                                          dtype=args.dtype,
+                                                          hybridize=True)
 
         restrict_lexicon = None  # type: Optional[Union[TopKLexicon, Dict[str, TopKLexicon]]]
         if args.restrict_lexicon is not None:
@@ -89,7 +90,8 @@ def run_translate(args: argparse.Namespace):
                 # Handle a single arg of key:path or path (parsed as path:path)
                 restrict_lexicon.load(args.restrict_lexicon[0][1], k=args.restrict_lexicon_topk)
             else:
-                check_condition(args.json_input, "JSON input is required when using multiple lexicons for vocabulary restriction")
+                check_condition(args.json_input,
+                                "JSON input is required when using multiple lexicons for vocabulary restriction")
                 # Multiple lexicons with specified names
                 restrict_lexicon = dict()
                 for key, path in args.restrict_lexicon:

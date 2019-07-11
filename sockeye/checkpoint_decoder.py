@@ -25,6 +25,7 @@ import mxnet as mx
 
 import sockeye.output_handler
 import sockeye.translate
+from sockeye.model import load_model
 from . import constants as C
 from . import data_io
 from . import evaluate
@@ -127,7 +128,7 @@ class CheckpointDecoder:
         :param output_name: Filename to write translations to. Defaults to /dev/null.
         :return: Mapping of metric names to scores.
         """
-        models, source_vocabs, target_vocab = inference.load_models(
+        models, source_vocabs, target_vocab = load_model(
             self.context,
             self.max_input_len,
             self.beam_size,

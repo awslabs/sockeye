@@ -43,7 +43,7 @@ def raw_corpus_bleu(hypotheses: Iterable[str], references: Iterable[str], offset
     :param offset: Smoothing constant.
     :return: BLEU score as float between 0 and 1.
     """
-    return sacrebleu.raw_corpus_bleu(hypotheses, [references], smooth_floor=offset).score / 100.0
+    return sacrebleu.raw_corpus_bleu(hypotheses, [references], smooth_value=offset).score / 100.0
 
 
 def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> float:

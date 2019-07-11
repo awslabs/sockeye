@@ -12,6 +12,7 @@
 # permissions and limitations under the License.
 
 import copy
+import time
 import logging
 import os
 from typing import cast, Optional, Tuple, Union, List
@@ -26,6 +27,7 @@ from . import decoder
 from . import encoder
 from . import layers
 from . import utils
+from . import vocab
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +145,6 @@ class SockeyeModel(mx.gluon.Block):
         Parameters
         ----------
         inputs : NDArray
-        states : list of NDArrays or None, default None
         valid_length : NDArray or None, default None
 
         Returns
@@ -345,3 +346,107 @@ class SockeyeModel(mx.gluon.Block):
     @property
     def length_ratio_std(self) -> float:
         return self.config.config_data.data_statistics.length_ratio_std
+
+
+def load_model(model_folder: str,
+               context: Union[List[mx.context.Context], mx.context.Context],
+               dtype: str = C.DTYPE_FP32,
+               checkpoint: Optional[int] = None,
+               hybridize: bool = True) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:
+    """
+    Load a model from model_folder.
+
+    :param model_folder: Model folder.
+    :param context: MXNet context to bind modules to.
+    :param checkpoint: Checkpoint to use. If none, uses best checkpoint.
+    :param dtype: Float precision to use. Default: float32.
+    :param hybridize: Whether to hybridize the loaded models. Default: true.
+    :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
+    :return:
+    """
+    source_vocabs = vocab.load_source_vocabs(model_folder)
+    target_vocab = vocab.load_target_vocab(model_folder)
+    model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
+    logger.info("Model version: %s", model_version)
+    utils.check_version(model_version)
+    model_config = SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
+
+    logger.info("Disabling dropout layers for performance reasons")
+    model_config.disable_dropout()
+
+    if checkpoint is None:
+        params_fname = os.path.join(model_folder, C.PARAMS_BEST_NAME)
+    else:
+        params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
+
+    model = SockeyeModel(model_config)
+    model.initialize(ctx=context)
+
+    if dtype == C.DTYPE_FP16:
+        logger.info("Using fp16 precision")
+        model.cast(C.DTYPE_FP16)
+
+    # TODO: store training precision in model config, or store final parameters in fp32 to make loading of params more forgiving
+
+    model.load_params_from_file(fname=params_fname,
+                                ctx=context,
+                                allow_missing=False,
+                                ignore_extra=False)
+    for param in model.collect_params().values():
+        param.grad_req = 'null'
+
+    if hybridize:
+        model.hybridize(static_alloc=True)
+
+    utils.check_condition(model.num_source_factors == len(source_vocabs),
+                          "Number of loaded source vocabularies (%d) does not match "
+                          "number of source factors for model '%s' (%d)" % (len(source_vocabs), model_folder,
+                                                                            model.num_source_factors))
+    return model, source_vocabs, target_vocab
+
+
+def load_models(context: Union[List[mx.context.Context], mx.context.Context],
+                model_folders: List[str],
+                checkpoints: Optional[List[int]] = None,
+                dtype: str = C.DTYPE_FP32,
+                hybridize: bool = True) -> Tuple[List[SockeyeModel], List[vocab.Vocab], vocab.Vocab]:
+    """
+    Loads a list of models for inference.
+
+    :param context: MXNet context to bind modules to.
+    :param model_folders: List of model folders to load models from.
+    :param checkpoints: List of checkpoints to use for each model in model_folders. Use None to load best checkpoint.
+    :param dtype: Float precision to use. Default: float32.
+    :param hybridize: Whether to hybridize the loaded models. Default: true.
+    :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
+    """
+    logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
+    load_time_start = time.time()
+    models = []  # type: List[SockeyeModel]
+    source_vocabs = []  # type: List[List[vocab.Vocab]]
+    target_vocabs = []  # type: List[vocab.Vocab]
+
+    if checkpoints is None:
+        checkpoints = [None] * len(model_folders)
+    else:
+        utils.check_condition(len(checkpoints) == len(model_folders), "Must provide checkpoints for each model")
+
+    for model_folder, checkpoint in zip(model_folders, checkpoints):
+        model, src_vcbs, trg_vcb = load_model(model_folder,
+                                              context=context,
+                                              dtype=dtype,
+                                              checkpoint=checkpoint,
+                                              hybridize=hybridize)
+        models.append(model)
+        source_vocabs.append(src_vcbs)
+        target_vocabs.append(trg_vcb)
+
+    utils.check_condition(vocab.are_identical(*target_vocabs), "Target vocabulary ids do not match")
+    first_model_vocabs = source_vocabs[0]
+    for fi in range(len(first_model_vocabs)):
+        utils.check_condition(vocab.are_identical(*[source_vocabs[i][fi] for i in range(len(source_vocabs))]),
+                              "Source vocabulary ids do not match. Factor %d" % fi)
+
+    load_time = time.time() - load_time_start
+    logger.info("%d model(s) loaded in %.4fs", len(models), load_time)
+    return models, source_vocabs[0], target_vocabs[0]

@@ -432,7 +432,7 @@ LARGEST_INT = sys.maxsize
 # TODO: better to use dynamic loss scaling for FP16, but unclear how to do this with SoftmaxOutpu loss for CE.
 FIXED_GRAD_SCALE_FP16 = 128.0
 
-LHUC_NAME = "lhuc"
+LHUC_PREFIX = "lhuc_"
 # lhuc application points
 LHUC_ENCODER = "encoder"
 LHUC_DECODER = "decoder"

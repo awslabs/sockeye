@@ -893,7 +893,6 @@ def get_scoring_data_iters(sources: List[str],
                            source_vocabs: List[vocab.Vocab],
                            target_vocab: vocab.Vocab,
                            batch_size: int,
-                           batch_num_devices: int,
                            max_seq_len_source: int,
                            max_seq_len_target: int) -> 'BaseParallelSampleIter':
     """
@@ -906,7 +905,6 @@ def get_scoring_data_iters(sources: List[str],
     :param source_vocabs: Source vocabulary and optional factor vocabularies.
     :param target_vocab: Target vocabulary.
     :param batch_size: Batch size.
-    :param batch_num_devices: Number of devices batches will be parallelized across.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
     :return: The scoring data iterator.
@@ -1538,10 +1536,15 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
                  max_lens: Tuple[int, int],
                  num_factors: int = 1,
                  dtype='float32') -> None:
-        super().__init__(buckets=[bucket], batch_size=batch_size, bucket_batch_sizes=[BucketBatchSize(bucket, batch_size, None)],
-                         num_factors=num_factors, permute=False, dtype=dtype)
+        super().__init__(buckets=[bucket],
+                         batch_size=batch_size,
+                         bucket_batch_sizes=[BucketBatchSize(bucket, batch_size, None)],
+                         num_factors=num_factors,
+                         permute=False,
+                         dtype=dtype)
         self.data_loader = data_loader
-        self.sources_sentences, self.target_sentences = create_sequence_readers(sources, target, source_vocabs, target_vocab)
+        self.sources_sentences, self.target_sentences = create_sequence_readers(sources, target,
+                                                                                source_vocabs, target_vocab)
         self.sources_iters = [iter(s) for s in self.sources_sentences]
         self.target_iter = iter(self.target_sentences)
         self.max_len_source, self.max_len_target = max_lens
@@ -1582,25 +1585,13 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
             self.next_batch = None
             return False
 
-        # The final batch may be underfilled, so mark it
-        num_pad = self.batch_size - num_read
+        dataset = self.data_loader.load(sources_sentences, target_sentences, [num_read])
 
-        dataset = self.data_loader.load(sources_sentences,
-                                        target_sentences,
-                                        [num_read]).fill_up(self.bucket_batch_sizes)
+        source = dataset.source[0]
+        target = dataset.target[0][:, :-1]
+        label = dataset.target[0][:, 1:]
 
-        data = [dataset.source[0], dataset.target[0]]
-        label = dataset.label
-
-        provide_data = [mx.io.DataDesc(name=n, shape=x.shape, layout=C.BATCH_MAJOR) for n, x in
-                        zip(self.data_names, data)]
-        provide_label = [mx.io.DataDesc(name=n, shape=x.shape, layout=C.BATCH_MAJOR) for n, x in
-                         zip(self.label_names, label)]
-
-        self.next_batch = mx.io.DataBatch(data, label,
-                                          pad=num_pad, index=None, bucket_key=self.buckets[0],
-                                          provide_data=provide_data, provide_label=provide_label)
-
+        self.next_batch = create_batch_from_parallel_sample(source, target, label)
         return True
 
     def next(self) -> mx.io.DataBatch:
@@ -1773,17 +1764,7 @@ class ParallelSampleIter(BaseParallelSampleIter):
         target = self.data.target[i][j:j + batch_size, :-1]
         label = self.data.target[i][j:j + batch_size, 1:]
 
-        source_words = mx.nd.squeeze(mx.nd.slice(source, begin=(None, None, 0), end=(None, None, 1)), axis=2)
-        source_length = mx.nd.sum(source_words != C.PAD_ID, axis=1)
-        target_length = mx.nd.sum(target != C.PAD_ID, axis=1)
-        length_ratio = source_length / target_length
-
-        samples = source.shape[0]
-        tokens = source.shape[1] * samples
-
-        labels = {C.TARGET_LABEL_NAME: label, C.LENRATIO_LABEL_NAME: length_ratio}
-
-        return Batch(source, source_length, target, target_length, labels, samples, tokens)
+        return create_batch_from_parallel_sample(source, target, label)
 
     def save_state(self, fname: str):
         """
@@ -1858,3 +1839,20 @@ class Batch:
         for i, inputs in enumerate(zip(self.source, self.source_length, self.target, self.target_length)):
             # model inputs, labels
             yield inputs, {name: label[i] for name, label in self.labels.items()}
+
+
+def create_batch_from_parallel_sample(source: mx.nd.NDArray, target: mx.nd.NDArray, label: mx.nd.NDArray) -> Batch:
+    """
+    Creates a Batch instance from parallel data.
+    """
+    source_words = mx.nd.squeeze(mx.nd.slice(source, begin=(None, None, 0), end=(None, None, 1)), axis=2)
+    source_length = mx.nd.sum(source_words != C.PAD_ID, axis=1)
+    target_length = mx.nd.sum(target != C.PAD_ID, axis=1)
+    length_ratio = source_length / target_length
+
+    samples = source.shape[0]
+    tokens = source.shape[1] * samples
+
+    labels = {C.TARGET_LABEL_NAME: label, C.LENRATIO_LABEL_NAME: length_ratio}
+
+    return Batch(source, source_length, target, target_length, labels, samples, tokens)
