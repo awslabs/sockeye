@@ -65,7 +65,8 @@ class TrainerConfig(Config):
                  min_epochs: Optional[int] = None,
                  max_epochs: Optional[int] = None,
                  update_interval: int = 1,
-                 stop_training_on_decoder_failure: bool = False) -> None:
+                 stop_training_on_decoder_failure: bool = False,
+                 hvd_rank: int = 0) -> None:
         super().__init__()
         self.output_dir = output_dir
         self.early_stopping_metric = early_stopping_metric

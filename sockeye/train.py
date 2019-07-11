@@ -829,7 +829,8 @@ def train(args: argparse.Namespace) -> training.TrainState:
             min_epochs=args.min_num_epochs,
             max_epochs=args.max_num_epochs,
             update_interval=args.update_interval,
-            stop_training_on_decoder_failure=args.stop_training_on_decoder_failure
+            stop_training_on_decoder_failure=args.stop_training_on_decoder_failure,
+            hvd_rank=hvd_rank
         )
         if trainer_config.min_epochs is not None and trainer_config.max_epochs is not None:
             check_condition(trainer_config.min_epochs <= trainer_config.max_epochs,
