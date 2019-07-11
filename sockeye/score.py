@@ -18,17 +18,15 @@ import argparse
 import logging
 import os
 from contextlib import ExitStack
-from typing import Optional, List, Tuple
 
 from . import arguments
 from . import constants as C
 from . import data_io
 from . import inference
-from . import model
 from . import scoring
 from . import utils
-from . import vocab
 from .log import setup_main_logger
+from .model import load_model
 from .output_handler import get_output_handler
 from .utils import check_condition
 
@@ -42,47 +40,6 @@ def main():
     args = params.parse_args()
     setup_main_logger(file_logging=False, console=True, level=args.loglevel)  # pylint: disable=no-member
     score(args)
-
-
-def get_data_iters_and_vocabs(args: argparse.Namespace,
-                              model_folder: Optional[str]) -> Tuple['data_io.BaseParallelSampleIter',
-                                                                    List[vocab.Vocab], vocab.Vocab, model.ModelConfig]:
-    """
-    Loads the data iterators and vocabularies.
-
-    :param args: Arguments as returned by argparse.
-    :param model_folder: Output folder.
-    :return: The scoring data iterator as well as the source and target vocabularies.
-    """
-
-    model_config = model.SockeyeModel.load_config(os.path.join(args.model, C.CONFIG_NAME))
-
-    if args.max_seq_len is None:
-        max_seq_len_source = model_config.config_data.max_seq_len_source
-        max_seq_len_target = model_config.config_data.max_seq_len_target
-    else:
-        max_seq_len_source, max_seq_len_target = args.max_seq_len
-
-    batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
-
-    # Load the existing vocabs created when starting the training run.
-    source_vocabs = vocab.load_source_vocabs(model_folder)
-    target_vocab = vocab.load_target_vocab(model_folder)
-
-    sources = [args.source] + args.source_factors
-    sources = [str(os.path.abspath(source)) for source in sources]
-
-    score_iter = data_io.get_scoring_data_iters(
-        sources=sources,
-        target=os.path.abspath(args.target),
-        source_vocabs=source_vocabs,
-        target_vocab=target_vocab,
-        batch_size=args.batch_size,
-        batch_num_devices=batch_num_devices,
-        max_seq_len_source=max_seq_len_source,
-        max_seq_len_target=max_seq_len_target)
-
-    return score_iter, source_vocabs, target_vocab, model_config
 
 
 def score(args: argparse.Namespace):
@@ -103,32 +60,40 @@ def score(args: argparse.Namespace):
                                                                  "size that is a multiple of %d." % len(context))
         logger.info("Scoring Device(s): %s", ", ".join(str(c) for c in context))
 
-        # This call has a number of different parameters compared to training which reflect our need to get scores
-        # one-for-one and in the same order as the input data.
-        # To enable code reuse, we stuff the `args` parameter with some values.
-        # Bucketing and permuting need to be turned off in order to preserve the ordering of sentences.
-        # Finally, 'resume_training' needs to be set to True because it causes the model to be loaded instead of initialized.
-        args.no_bucketing = True
-        args.bucket_width = 10
-        score_iter, source_vocabs, target_vocab, model_config = get_data_iters_and_vocabs(
-            args=args,
-            model_folder=args.model)
+        model, source_vocabs, target_vocab = load_model(args.model, context=context, dtype=args.dtype)
 
-        scoring_model = scoring.ScoringModel(config=model_config,
-                                             model_dir=args.model,
-                                             context=context,
-                                             provide_data=score_iter.provide_data,
-                                             provide_label=score_iter.provide_label,
-                                             default_bucket_key=score_iter.default_bucket_key,
-                                             score_type=args.score_type,
-                                             length_penalty=inference.LengthPenalty(alpha=args.length_penalty_alpha,
-                                                                                    beta=args.length_penalty_beta),
-                                             brevity_penalty=inference.BrevityPenalty(weight=args.brevity_penalty_weight),
-                                             softmax_temperature=args.softmax_temperature,
-                                             brevity_penalty_type=args.brevity_penalty_type,
-                                             constant_length_ratio=args.brevity_penalty_constant_length_ratio)
+        # TODO(fhieber): this will cause trimming of all sentences longer than max training sequence lengths.
+        # TODO(fhieber): ideally, we should allow splitting as in actual translation to compute reasonable scores.
+        if args.max_seq_len is None:
+            max_seq_len_source = model.max_supported_seq_len_source
+            max_seq_len_target = model.max_supported_seq_len_target
+        else:
+            max_seq_len_source, max_seq_len_target = args.max_seq_len
 
-        scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab)
+        sources = [args.source] + args.source_factors
+        sources = [str(os.path.abspath(source)) for source in sources]
+        target = os.path.abspath(args.target)
+
+        score_iter = data_io.get_scoring_data_iters(
+            sources=sources,
+            target=target,
+            source_vocabs=source_vocabs,
+            target_vocab=target_vocab,
+            batch_size=args.batch_size,
+            max_seq_len_source=max_seq_len_source,
+            max_seq_len_target=max_seq_len_target)
+
+        scorer = scoring.Scorer(model=model,
+                                source_vocabs=source_vocabs,
+                                target_vocab=target_vocab,
+                                context=context,
+                                softmax_temperature=args.softmax_temperature,
+                                score_type=args.score_type,
+                                length_penalty=inference.LengthPenalty(alpha=args.length_penalty_alpha,
+                                                                       beta=args.length_penalty_beta),
+                                brevity_penalty=inference.BrevityPenalty(weight=args.brevity_penalty_weight),
+                                brevity_penalty_type=args.brevity_penalty_type,
+                                constant_length_ratio=args.brevity_penalty_constant_length_ratio)
 
         scorer.score(score_iter=score_iter,
                      output_handler=get_output_handler(output_type=args.output_type,
