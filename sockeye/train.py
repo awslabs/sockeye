@@ -730,7 +730,22 @@ def train(args: argparse.Namespace) -> training.TrainState:
         args.output = temp_dir.name
         args.max_updates = 0
 
-    utils.seed_rngs(args.seed)
+    # When using MPI (for Horovod etc.), multiple instances of sockeye.train are
+    # launched.  Each has a rank (global unique ID) and local rank (unique ID
+    # for the current host).  For instance, running on 2 hosts with 4 GPUs each,
+    # ranks will range 0-7 and local ranks will range 0-3.
+    mpi_rank = 0
+    mpi_local_rank = 0
+    if args.horovod:
+        # Only attempt to import Horovod module if we're using it.
+        import horovod.mxnet as hvd
+        hvd.init()
+        mpi_rank = hvd.rank()
+        mpi_local_rank = hvd.local_rank()
+
+    # Use a different seed for each Sockeye instance when running with MPI.
+    # Defaults to no change (+0) when running without MPI.
+    utils.seed_rngs(args.seed + mpi_rank)
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
@@ -755,7 +770,8 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                           use_cpu=args.use_cpu,
                                           disable_device_locking=args.disable_device_locking,
                                           lock_dir=args.lock_dir,
-                                          exit_stack=exit_stack)
+                                          exit_stack=exit_stack,
+                                          pre_assigned_id=mpi_local_rank if args.horovod else None)
         if args.batch_type == C.BATCH_TYPE_SENTENCE:
             check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
                                                                  "divisible by the number of devices. Choose a batch "
@@ -837,6 +853,9 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                                fixed_param_names=args.fixed_param_names,
                                                fixed_param_strategy=args.fixed_param_strategy)
 
+        if args.horovod:
+            hvd.broadcast_parameters(params, root_rank=0)
+
         if args.dtype == C.DTYPE_FP16:
             training_model.cast(C.DTYPE_FP16)
         utils.log_parameters(params)
@@ -849,11 +868,17 @@ def train(args: argparse.Namespace) -> training.TrainState:
 
         kvstore = mx.kvstore.create(args.kvstore)
 
-        gluon_trainer = gluon.Trainer(params,
-                                      optimizer_config.name,
-                                      optimizer_config.params,
-                                      kvstore=kvstore,
-                                      update_on_kvstore=None)
+        if args.horovod:
+            gluon_trainer = hvd.DistributedTrainer(params,
+                                                   optimizer_config.name,
+                                                   optimizer_config.params)
+        else:
+            gluon_trainer = gluon.Trainer(params,
+                                          optimizer_config.name,
+                                          optimizer_config.params,
+                                          kvstore=kvstore,
+                                          update_on_kvstore=None)
+
         losses = create_losses(args)
 
         hybridize = True

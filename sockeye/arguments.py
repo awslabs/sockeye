@@ -975,6 +975,12 @@ def add_training_args(params):
                               default=None,
                               help='Additional optimizer params as dictionary. Format: key1:value1,key2:value2,...')
 
+    train_params.add_argument('--horovod',
+                              action='store_true',
+                              help='Use Horovod for distributed training (Sergeev and Del Balso 2018, '
+                                   'arxiv.org/abs/1802.05799).  When using this option, run Sockeye with `horovodrun '
+                                   '-np ... -H ... python`.')
+
     train_params.add_argument("--kvstore",
                               type=str,
                               default=C.KVSTORE_DEVICE,
