@@ -68,11 +68,21 @@ RUN ldconfig /usr/local/cuda/targets/x86_64-linux/lib/stubs && \
          pip install --no-cache-dir horovod && \
     ldconfig
 
-# Install Sockeye dependencies
-RUN pip install \
-    pyyaml>=5.1 \
-    numpy>=1.14 \
-    typing \
-    portalocker \
-    sacrebleu==1.3.5 \
-    gluonnlp
+# Add default users for Ubuntu and Amazon Linux for ease of use with EC2 Deep
+# Learning AMIs
+RUN groupadd --gid 1000 ubuntu && \
+    useradd --uid 1000 --gid ubuntu ubuntu && \
+    mkdir -p /home/ubuntu && \
+    chown ubuntu:ubuntu /home/ubuntu
+RUN groupadd --gid 500 ec2-user && \
+    useradd --uid 500 --gid ec2-user ec2-user && \
+    mkdir -p /home/ec2-user && \
+    chown ec2-user:ec2-user /home/ec2-user
+
+# Install Sockeye
+# Make sure image is current with latest local commit
+ARG SOCKEYE_COMMIT
+COPY . /opt/sockeye
+RUN cd /opt/sockeye && \
+    pip install -r requirements/requirements.txt && \
+    python setup.py build install
