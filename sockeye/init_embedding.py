@@ -124,6 +124,7 @@ def main():
     """
     Commandline interface to initialize Sockeye embedding weights with pretrained word representations.
     """
+    raise NotImplementedError()  # TODO: re-implement for sockeye 2.0 / Gluon
     setup_main_logger(console=True, file_logging=False)
     params = argparse.ArgumentParser(description='Quick usage: python3 -m sockeye.init_embedding '
                                                  '-w embed-in-src.npy embed-in-tgt.npy '

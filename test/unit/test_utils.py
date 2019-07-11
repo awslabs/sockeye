@@ -263,31 +263,12 @@ def test_average_arrays():
     expected_average /= 4
 
     mx_arrays = [mx.nd.array(a) for a in arrays]
-    assert np.isclose(utils.average_arrays(mx_arrays).asnumpy(), expected_average).all()
+    assert np.allclose(utils.average_arrays(mx_arrays).asnumpy(), expected_average)
 
     with pytest.raises(utils.SockeyeError) as e:
         other_shape = (12, 13)
         utils.average_arrays(mx_arrays + [mx.nd.zeros(other_shape)])
     assert "nd array shapes do not match" == str(e.value)
-
-
-def test_save_and_load_params():
-    array = mx.nd.uniform(0, 1, (10, 12))
-    arg_params = {"array": array}
-    aux_params = {"array": array}
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = os.path.join(tmpdir, "params")
-        utils.save_params(arg_params, path, aux_params=aux_params)
-        params = mx.nd.load(path)
-        assert len(params.keys()) == 2
-        assert "arg:array" in params.keys()
-        assert "aux:array" in params.keys()
-        loaded_arg_params, loaded_aux_params = utils.load_params(path)
-        assert "array" in loaded_arg_params
-        assert "array" in loaded_aux_params
-        assert np.isclose(loaded_arg_params['array'].asnumpy(), array.asnumpy()).all()
-        assert np.isclose(loaded_aux_params['array'].asnumpy(), array.asnumpy()).all()
 
 
 def test_print_value():
