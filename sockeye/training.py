@@ -27,10 +27,9 @@ from typing import Dict, List, Optional, Iterable, Tuple, Union
 import gluonnlp
 import mxnet as mx
 import numpy as np
-import sockeye.multiprocessing_utils as mp_utils
 from mxnet import gluon
 
-from . import checkpoint_decoder
+from .checkpoint_decoder import CheckpointDecoder
 from . import constants as C
 from . import data_io
 from . import loss
@@ -152,11 +151,11 @@ class GluonEarlyStoppingTrainer:
     def fit(self,
             train_iter: data_io.BaseParallelSampleIter,
             validation_iter: data_io.BaseParallelSampleIter,
-            ck_decoder: Optional[checkpoint_decoder.CheckpointDecoder] = None):
+            checkpoint_decoder: Optional[CheckpointDecoder] = None):
         logger.info("Early stopping by optimizing '%s'", self.config.early_stopping_metric)
 
         if self.config.early_stopping_metric in C.METRICS_REQUIRING_DECODER:
-            utils.check_condition(ck_decoder is not None,
+            utils.check_condition(checkpoint_decoder is not None,
                                   "%s requires CheckpointDecoder" % self.config.early_stopping_metric)
 
         resume_training = os.path.exists(self.training_state_dirname)
@@ -204,6 +203,10 @@ class GluonEarlyStoppingTrainer:
 
             if self.state.updates > 0 and self.state.batches % (
                     self.config.checkpoint_interval * self.config.update_interval) == 0:
+                # ############
+                # CHECKPOINT
+                ############
+                
                 time_cost = time.time() - tic
                 self.state.checkpoint += 1
 
@@ -216,7 +219,7 @@ class GluonEarlyStoppingTrainer:
                 logger.info('Checkpoint [%d]\t%s',
                             self.state.checkpoint, "\t".join("Train-%s" % str(lf.metric) for lf in self.loss_functions))
 
-                val_metrics = self._evaluate(validation_iter)
+                val_metrics = self._evaluate(self.state.checkpoint, validation_iter, checkpoint_decoder)
 
                 mx.nd.waitall()
 
@@ -289,7 +292,7 @@ class GluonEarlyStoppingTrainer:
         self._speedometer(self.state.epoch, self.state.batches,
                           self.state.updates, batch.samples, batch.tokens, (lf.metric for lf in self.loss_functions))
 
-    def _evaluate(self, data_iter) -> List[loss.LossMetric]:
+    def _evaluate(self, checkpoint: int, data_iter, checkpoint_decoder: Optional[CheckpointDecoder]) -> List[loss.LossMetric]:
         """
         Computes loss(es) on validation data and returns their metrics.
         :param data_iter: Validation data iterator.
@@ -317,10 +320,18 @@ class GluonEarlyStoppingTrainer:
             for loss_metric, (loss_value, num_samples) in zip(val_metrics, output_per_loss_function):
                 loss_metric.update(loss_value.asscalar(), num_samples.asscalar())
 
+        # Optionally run the checkpoint decoder
+        if checkpoint_decoder is not None:
+            output_name = os.path.join(self.config.output_dir, C.DECODE_OUT_NAME % checkpoint)
+            decoder_metrics = checkpoint_decoder.decode_and_evaluate(output_name=output_name)
+            for metric_name, metric_value in decoder_metrics.items():
+                assert metric_name not in val_metrics, "Duplicate validation metric %s" % metric_name
+                metric = loss.LossMetric(name=metric_name)
+                metric.update(metric_value, num_samples=1)
+                val_metrics.append(metric)
+
         logger.info('Checkpoint [%d]\t%s',
                     self.state.checkpoint, "\t".join("Validation-%s" % str(lm) for lm in val_metrics))
-
-        # TODO CheckpointDecoder
 
         return val_metrics
 
@@ -331,9 +342,11 @@ class GluonEarlyStoppingTrainer:
         :param val_metrics: Validation metrics.
         :return: Whether model has improved on held-out data since last checkpoint.
         """
+        value = None
         for val_metric in val_metrics:
             if val_metric.name == self.config.early_stopping_metric:
                 value = val_metric.get()
+                
                 if utils.metric_value_is_better(value,
                                                 self.state.best_metric,
                                                 self.config.early_stopping_metric):
@@ -343,6 +356,7 @@ class GluonEarlyStoppingTrainer:
                     self.state.best_checkpoint = self.state.checkpoint
                     self.state.num_not_improved = 0
                     return True
+        assert value is not None, "Early stoppin metric %s not found in validation metrics." % self.config.early_stopping_metric
 
         self.state.num_not_improved += 1
         logger.info("Validation-%s has not improved for %d checkpoints, best so far: %f",
@@ -717,98 +731,3 @@ class Speedometer:
         else:
             self.init = True
             self.tic = time.time()
-
-
-class DecoderProcessManager(object):
-    """
-    Thin wrapper around a CheckpointDecoder instance to start non-blocking decodes and collect the results.
-
-    :param output_folder: Folder where decoder outputs are written to.
-    :param decoder: CheckpointDecoder instance.
-    """
-
-    def __init__(self,
-                 output_folder: str,
-                 decoder: checkpoint_decoder.CheckpointDecoder) -> None:
-        self.output_folder = output_folder
-        self.decoder = decoder
-        self.ctx = mp_utils.get_context()  # type: ignore
-        self.decoder_metric_queue = self.ctx.Queue()
-        self.decoder_process = None  # type: Optional[multiprocessing.Process]
-        self._any_process_died = False
-        self._results_pending = False
-
-    def start_decoder(self, checkpoint: int):
-        """
-        Starts a new CheckpointDecoder process and returns. No other process may exist.
-
-        :param checkpoint: The checkpoint to decode.
-        """
-        assert self.decoder_process is None
-        output_name = os.path.join(self.output_folder, C.DECODE_OUT_NAME % checkpoint)
-        self.decoder_process = self.ctx.Process(target=_decode_and_evaluate,
-                                                args=(self.decoder, checkpoint, output_name, self.decoder_metric_queue))
-        self.decoder_process.name = 'Decoder-%d' % checkpoint
-        logger.info("Starting process: %s", self.decoder_process.name)
-        self.decoder_process.start()
-        self._results_pending = True
-
-    def collect_results(self) -> Optional[Tuple[int, Dict[str, float]]]:
-        """
-        Returns the decoded checkpoint and the decoder metrics or None if the queue is empty.
-        """
-        self.wait_to_finish()
-        if self.decoder_metric_queue.empty():
-            if self._results_pending:
-                self._any_process_died = True
-            self._results_pending = False
-            return None
-        decoded_checkpoint, decoder_metrics = self.decoder_metric_queue.get()
-        assert self.decoder_metric_queue.empty()
-        self._results_pending = False
-        logger.info("Decoder-%d finished: %s", decoded_checkpoint, decoder_metrics)
-        return decoded_checkpoint, decoder_metrics
-
-    def wait_to_finish(self):
-        if self.decoder_process is None:
-            return
-        if not self.decoder_process.is_alive():
-            self.decoder_process = None
-            return
-        name = self.decoder_process.name
-        logger.warning("Waiting for process %s to finish.", name)
-        wait_start = time.time()
-        self.decoder_process.join()
-        self.decoder_process = None
-        wait_time = int(time.time() - wait_start)
-        logger.warning("Had to wait %d seconds for the Checkpoint %s to finish. Consider increasing the "
-                       "checkpoint interval (updates between checkpoints, see %s) or reducing the size of the "
-                       "validation samples that are decoded (see %s)." % (wait_time, name,
-                                                                          C.TRAIN_ARGS_CHECKPOINT_INTERVAL,
-                                                                          C.TRAIN_ARGS_MONITOR_BLEU))
-
-    @property
-    def any_process_died(self):
-        """ Returns true if any decoder process exited and did not provide a result. """
-        return self._any_process_died
-
-    def update_process_died_status(self):
-        """ Update the flag indicating whether any process exited and did not provide a result. """
-
-        # There is a result pending, the process is no longer alive, yet there is no result in the queue
-        # This means the decoder process has not succesfully produced metrics
-        queue_should_hold_result = self._results_pending and self.decoder_process is not None and not self.decoder_process.is_alive()
-        if queue_should_hold_result and self.decoder_metric_queue.empty():
-            self._any_process_died = True
-
-
-def _decode_and_evaluate(decoder: checkpoint_decoder.CheckpointDecoder,
-                         checkpoint: int,
-                         output_name: str,
-                         queue: multiprocessing.Queue):
-    """
-    Decodes and evaluates using given checkpoint_decoder and puts result in the queue,
-    indexed by the checkpoint.
-    """
-    metrics = decoder.decode_and_evaluate(checkpoint, output_name)
-    queue.put((checkpoint, metrics))

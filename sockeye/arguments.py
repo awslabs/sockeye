@@ -1087,10 +1087,7 @@ def add_training_args(params):
                               type=int,
                               help='x>0: decode x sampled sentences from validation data and '
                                    'compute evaluation metrics. x==-1: use full validation data. Default: %(default)s.')
-    train_params.add_argument('--decode-and-evaluate-use-cpu',
-                              action='store_true',
-                              help='Use CPU for decoding validation data. Overrides --decode-and-evaluate-device-id. '
-                                   'Default: %(default)s.')
+
     train_params.add_argument('--decode-and-evaluate-device-id',
                               default=None,
                               type=int,

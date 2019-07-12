@@ -34,8 +34,8 @@ logger = logging.getLogger(__name__)
 DecoderConfig = Union['RecurrentDecoderConfig', transformer.TransformerConfig, 'ConvolutionalDecoderConfig']
 
 
-def get_decoder(config: DecoderConfig, prefix: str = '') -> 'Decoder':
-    return Decoder.get_decoder(config, prefix)
+def get_decoder(config: DecoderConfig, inference_only: bool = False, prefix: str = '') -> 'Decoder':
+    return Decoder.get_decoder(config, inference_only, prefix)
 
 
 class Decoder(mx.gluon.Block):
@@ -67,11 +67,12 @@ class Decoder(mx.gluon.Block):
         return wrapper
 
     @classmethod
-    def get_decoder(cls, config: DecoderConfig, prefix: str) -> 'Decoder':
+    def get_decoder(cls, config: DecoderConfig, inference_only: bool, prefix: str) -> 'Decoder':
         """
         Creates decoder based on config type.
 
         :param config: Decoder config.
+        :param inference_ony: Create a decoder that is only used for inference.
         :param prefix: Prefix to prepend for decoder.
 
         :return: Decoder instance.
@@ -81,7 +82,7 @@ class Decoder(mx.gluon.Block):
             raise ValueError('Unsupported decoder configuration %s' % config_type.__name__)
         decoder_cls, suffix = cls.__registry[config_type]
         # TODO: move final suffix/prefix construction logic into config builder
-        return decoder_cls(config=config, prefix=prefix + suffix)
+        return decoder_cls(config=config, inference_only=inference_only, prefix=prefix + suffix)
 
     @abstractmethod
     def __init__(self):
@@ -206,14 +207,18 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
     :param config: Transformer configuration.
     :param prefix: Name prefix for symbols of this decoder.
+    :param inference_only: Only use the model for inference enabling some optimizations, such as disabling the auto-regressive mask.
     """
 
     def __init__(self,
                  config: transformer.TransformerConfig,
-                 prefix: str = C.TRANSFORMER_DECODER_PREFIX) -> None:
+                 prefix: str = C.TRANSFORMER_DECODER_PREFIX,
+                 # TODO: bubble up the parameter
+                 inference_only: bool = False) -> None:
         Decoder.__init__(self)
         mx.gluon.HybridBlock.__init__(self, prefix=prefix)
         self.config = config
+        self.inference_only = inference_only
         with self.name_scope():
             self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
                                                              num_embed=self.config.model_size,
@@ -236,8 +241,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
     def init_state_from_encoder(self,
                                 encoder_outputs: mx.nd.NDArray,
-                                encoder_valid_length: Optional[mx.nd.NDArray] = None,
-                                is_inference: bool = True) -> List[mx.nd.NDArray]:
+                                encoder_valid_length: Optional[mx.nd.NDArray] = None) -> List[mx.nd.NDArray]:
         """
         Returns the initial states given encoder output. States for teacher-forced training are encoder outputs
         and a valid length mask for encoder outputs.
@@ -248,30 +252,31 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
         :param encoder_outputs: Encoder outputs. Shape: (batch, source_length, encoder_dim).
         :param encoder_valid_length: Valid lengths of encoder outputs. Shape: (batch,).
-        :param is_inference: Whether to return states for inference or for training.
         :return: Initial states.
         """
         source_mask = self.valid_length_mask(encoder_outputs, encoder_valid_length)
 
-        if is_inference:
+        # (batch_size, 1)
+        step = mx.nd.expand_dims(mx.nd.zeros_like(encoder_valid_length), axis=1)
 
-            step = mx.nd.zeros_like(encoder_valid_length)
-            states = [source_mask, step]
+        if self.inference_only:
+            # Encoder projection caching, therefore we don't pass the encoder_outputs
+            states = [step, source_mask]
 
             for layer in self.layers:
                 encoder_attention_keys = layer.enc_attention.ff_k(encoder_outputs)
                 encoder_attention_values = layer.enc_attention.ff_v(encoder_outputs)
                 states.append(encoder_attention_keys)
                 states.append(encoder_attention_values)
-
-            batch_size = encoder_outputs.shape[0]
-            self_attention_key_value_dummies = [mx.nd.zeros((batch_size, 1, self.config.model_size),
-                                                            ctx=encoder_outputs.context,
-                                                            dtype=encoder_outputs.dtype)] * self.config.num_layers * 2
-            states += self_attention_key_value_dummies
-
         else:
-            states = [source_mask, encoder_outputs]
+            # NO encoder projection caching
+            states = [step, encoder_outputs, source_mask]
+
+        batch_size = encoder_outputs.shape[0]
+        self_attention_key_value_dummies = [mx.nd.zeros((batch_size, 1, self.config.model_size),
+                                                        ctx=encoder_outputs.context,
+                                                        dtype=encoder_outputs.dtype)] * self.config.num_layers * 2
+        states += self_attention_key_value_dummies
 
         return states
 
@@ -297,8 +302,10 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
              (batch, seq_len, num_hidden): full sequence decode during training.
 
         states is either:
-             len(states) == 3: encoder_outputs, source_bias, step
-             len(states) > 3: encoder_outputs, source_bias, step, layer_caches...
+            if self.inference_only == False: (Training and Checkpoint decoder during training)
+                steps, encoder_outputs, source_bias, layer_caches...
+            else: (during translation outside of training)
+                steps, source_bias, layer_caches..., projected encoder outputs...
         """
         input_shape = step_input.shape
 
@@ -308,6 +315,13 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             # Just add the length dimension:
             # (batch, num_hidden) -> (batch, 1, num_hidden)
             step_input = mx.nd.expand_dims(step_input, axis=1)
+        else:
+            assert not self.inference_only, "Decoder created with inference_only=True but used during training."
+            # Replace the single step by multiple steps for training
+            step, *states = states
+            # Create steps (1, trg_seq_len,)
+            steps = mx.nd.expand_dims(mx.nd.arange(step_input.shape[1], ctx=step_input.context), axis=0)
+            states = [steps] + states
 
         # run decoder op
         target, self_attention_key_values = super().forward(step_input, states)
@@ -316,45 +330,51 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             # During inference, length dimension of decoder output has size 1, squeeze it
             # (batch, num_hidden)
             target = target.squeeze()
+
             # We also increment time step state (2nd state in the list) and add new caches
-            step = states[1] + 1
-            # constant encoder attention keys & values
-            encoder_attention_keys_values = states[2:2 + self.config.num_layers * 2]
-            new_states = [states[0], step] + encoder_attention_keys_values + self_attention_key_values
+            step = states[0] + 1
+            
+            if self.inference_only:
+                # pass in cached encoder states
+                encoder_attention_keys_values = states[2:2 + self.config.num_layers * 2]
+                new_states = [step, states[1]] + encoder_attention_keys_values + self_attention_key_values
+            else:
+                encoder_outputs = states[1]
+                source_mask = states[2]
+                new_states = [step, encoder_outputs, source_mask] + self_attention_key_values
+                
+            assert len(new_states) == len(states)
         else:
             new_states = None  # we don't care about states in training
-
         return target, new_states
 
     def hybrid_forward(self, F, step_input, states):
-        # unpack states list
-        is_training = len(states) == 2
-        is_inference = len(states) == 2 + self.config.num_layers * 4
+        if self.inference_only:
+            # No autoregressive mask needed for decoding
+            mask = None
 
-        if is_training:
-            source_mask, source_encoded = states
-            mask = self.autoregressive_bias(step_input)  # mask: (1, length, length)
-            step = None  # no step information required at training
-            enc_att_kv = [(None, None) for _ in range(self.config.num_layers)]  # no self-attention caching
-            self_att_kv = [(None, None) for _ in range(self.config.num_layers)]  # no self-attention caching
-
-        elif is_inference:
-            source_mask, step, *other = states
+            steps, source_mask, *other = states
+        
             source_encoded = None  # use constant pre-computed key value projections from the states
-            mask = None  # no autoregressive bias needed at inference
             enc_att_kv = other[:self.config.num_layers * 2]
             enc_att_kv = [enc_att_kv[i:i + 2] for i in range(0, len(enc_att_kv), 2)]
             self_att_kv = other[self.config.num_layers * 2:]
             self_att_kv = [self_att_kv[i:i + 2] for i in range(0, len(self_att_kv), 2)]
-
         else:
-            raise ValueError("Invalid state list")
+            mask = self.autoregressive_bias(step_input)  # mask: (1, length, length)
 
+            steps, source_encoded, source_mask, *other = states
+
+            self_att_kv = other
+            self_att_kv = [self_att_kv[i:i + 2] for i in range(0, len(self_att_kv), 2)]
+            
+            enc_att_kv = [[None, None] for i in range(0, len(self_att_kv), 2)]    
+        
         # Fold the heads of source_mask (batch_size, num_heads, seq_len) -> (batch_size * num_heads, 1, seq_len)
         source_mask = F.expand_dims(F.reshape(source_mask, shape=(-3, -2)), axis=1)
 
         # target: (batch_size, length, model_size)
-        target = self.pos_embedding(step_input, step)
+        target = self.pos_embedding(step_input, steps)
 
         if self.config.dropout_prepost > 0.0:
             target = F.Dropout(data=target, p=self.config.dropout_prepost)

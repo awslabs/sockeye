@@ -43,7 +43,8 @@ def load_models(context: mx.context.Context,
                 model_folders: List[str],
                 checkpoints: Optional[List[int]] = None,
                 dtype: str = C.DTYPE_FP32,
-                hybridize: bool = True) -> Tuple[List[SockeyeModel], List[vocab.Vocab], vocab.Vocab]:
+                hybridize: bool = True,
+                inference_only: bool = False) -> Tuple[List[SockeyeModel], List[vocab.Vocab], vocab.Vocab]:
     """
     Loads a list of models for inference.
 
@@ -52,6 +53,7 @@ def load_models(context: mx.context.Context,
     :param checkpoints: List of checkpoints to use for each model in model_folders. Use None to load best checkpoint.
     :param dtype: Float precision to use. Default: float32.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
+    :param inference_only: Use the model only for inference, enabling optimizations.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
@@ -84,7 +86,7 @@ def load_models(context: mx.context.Context,
         else:
             params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
-        model = SockeyeModel(model_config)
+        model = SockeyeModel(model_config, inference_only=inference_only)
         model.initialize(ctx=context)
 
         if dtype == C.DTYPE_FP16:
@@ -902,12 +904,12 @@ class Translator:
                  ensemble_mode: str,
                  length_penalty: LengthPenalty,
                  batch_size: int,
-                 beam_size: int,
                  beam_prune: float,
                  beam_search_stop: str,
                  models: List[SockeyeModel],
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
+                 beam_size: int = 5,
                  nbest_size: int = 1,
                  restrict_lexicon: Optional[Union[lexicon.TopKLexicon, Dict[str, lexicon.TopKLexicon]]] = None,
                  avoid_list: Optional[str] = None,
@@ -1379,7 +1381,7 @@ class Translator:
             predicted_output_lengths.append(predicted_output_length)
 
             # Decoder init states
-            decoder_init_states = model.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths, is_inference=True)
+            decoder_init_states = model.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths)
             # replicate encoder/init module results beam size times. Shape: (batch*beam, ...)
             decoder_init_states = [s.repeat(repeats=self.beam_size, axis=0) for s in decoder_init_states]
             model_state = ModelState(decoder_init_states)
@@ -2068,7 +2070,7 @@ class BeamSearch(mx.gluon.Block):
             predicted_output_lengths.append(predicted_output_length)
 
             # Decoder init states
-            decoder_init_states = model.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths, is_inference=True)
+            decoder_init_states = model.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths)
             # replicate encoder/init module results beam size times. Shape: (batch*beam, ...)
             decoder_init_states = [s.repeat(repeats=self.beam_size, axis=0) for s in decoder_init_states]
             model_state = ModelState(decoder_init_states)

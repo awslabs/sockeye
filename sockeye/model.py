@@ -93,10 +93,11 @@ class SockeyeModel(mx.gluon.Block):
     time.
 
     :param config: Model configuration.
+    :param inference_only: Use the model only for inference, enabling optimizations.
     :param prefix: Name prefix for all parameters of this model.
     """
 
-    def __init__(self, config: ModelConfig, prefix: str = '', **kwargs) -> None:
+    def __init__(self, config: ModelConfig, inference_only: bool = False, prefix: str = '', **kwargs) -> None:
         super().__init__(prefix=prefix, **kwargs)
         self.config = copy.deepcopy(config)
         logger.info("%s", self.config)
@@ -117,7 +118,7 @@ class SockeyeModel(mx.gluon.Block):
 
             # encoder & decoder first (to know the decoder depth)
             self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix)
-            self.decoder = decoder.get_decoder(self.config.config_decoder, prefix=self.prefix)
+            self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only, prefix=self.prefix)
             # TODO
             self.decoder = cast(decoder.TransformerDecoder, self.decoder)
 
@@ -188,7 +189,7 @@ class SockeyeModel(mx.gluon.Block):
         target_embed, target_embed_length = self.embedding_target(target, target_length)
         source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
 
-        states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, is_inference=False)
+        states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length)
         target = self.decoder.decode_seq(target_embed, states=states)
 
         output = self.output_layer(target)
