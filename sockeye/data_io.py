@@ -1548,7 +1548,7 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
         self.sources_iters = [iter(s) for s in self.sources_sentences]
         self.target_iter = iter(self.target_sentences)
         self.max_len_source, self.max_len_target = max_lens
-        self.next_batch = None
+        self.next_batch = None  # type: Optional[Batch]
         self.sentno = 1
 
     def reset(self):
@@ -1834,7 +1834,7 @@ class Batch:
         labels = {name: mx.gluon.utils.split_and_load(label, ctx, batch_axis=0) for name, label in self.labels.items()}
         return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens)
 
-    def shards(self) -> Iterable[Tuple[Any]]:
+    def shards(self) -> Iterable[Tuple[Tuple, Dict[str, mx.nd.NDArray]]]:
         assert isinstance(self.source, list), "Must call split_and_load() first"
         for i, inputs in enumerate(zip(self.source, self.source_length, self.target, self.target_length)):
             # model inputs, labels

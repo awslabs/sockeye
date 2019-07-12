@@ -22,23 +22,22 @@ import random
 import shutil
 import time
 from math import sqrt
-from typing import Dict, List, Optional, Iterable, Tuple, Union
+from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union
 
-import gluonnlp
 import mxnet as mx
 import numpy as np
-import sockeye.multiprocessing_utils as mp_utils
-from mxnet import gluon
 
+import sockeye.multiprocessing_utils as mp_utils
 from . import checkpoint_decoder
 from . import constants as C
 from . import data_io
 from . import loss
 from . import lr_scheduler
-from . import model
 from . import utils
 from . import vocab
+from . import parallel
 from .config import Config
+from .model import SockeyeModel
 
 logger = logging.getLogger(__name__)
 
@@ -132,8 +131,8 @@ class TrainState:
 class GluonEarlyStoppingTrainer:
     def __init__(self,
                  config: TrainerConfig,
-                 sockeye_model: model.SockeyeModel,
-                 trainer: gluon.Trainer,
+                 sockeye_model: SockeyeModel,
+                 trainer: mx.gluon.Trainer,
                  loss_functions: List[loss.Loss],
                  context: List[mx.context.Context],
                  dtype: str) -> None:
@@ -142,10 +141,10 @@ class GluonEarlyStoppingTrainer:
         self.trainer = trainer
         self.loss_functions = loss_functions
         self.context = context
-        self._parallel = gluonnlp.utils.Parallel(len(context) if len(context) > 1 else 0,
-                                                 ParallelModel(sockeye_model,
-                                                               loss_functions,
-                                                               rescale_factor=self.config.update_interval))
+        self._parallel = parallel.Parallel(len(context) if len(context) > 1 else 0,
+                                           ParallelModel(sockeye_model,
+                                                         loss_functions,
+                                                         rescale_factor=self.config.update_interval))
         self.dtype = dtype
         self.state = None  # type: Optional[TrainState]
         self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
@@ -259,7 +258,7 @@ class GluonEarlyStoppingTrainer:
         # send sharded inputs to the backend
         for inputs, labels in batch.shards():
             if self.dtype == C.DTYPE_FP16:
-                inputs = (i.astype(C.DTYPE_FP16, copy=False) for i in inputs)
+                inputs = (i.astype(C.DTYPE_FP16, copy=False) for i in inputs)  # type: ignore
             self._parallel.put((inputs, labels))
 
         # get outputs from parallel requests to the backend. Each shard output contains a list of tuples, one for each
@@ -585,9 +584,9 @@ class GluonEarlyStoppingTrainer:
         return os.path.join(self.config.output_dir, C.OPT_STATES_BEST)
 
 
-class ParallelModel(gluonnlp.utils.Parallelizable):
+class ParallelModel(parallel.Parallelizable):
 
-    def __init__(self, model, loss_functions: List[loss.Loss], rescale_factor: float):
+    def __init__(self, model: Callable, loss_functions: List[loss.Loss], rescale_factor: float) -> None:
         self.model = model
         self.loss_functions = loss_functions
         self.rescale_factor = rescale_factor

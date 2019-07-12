@@ -95,8 +95,8 @@ class Loss(mx.gluon.HybridBlock):
 class LossMetric(ABC):
     def __init__(self, name: str) -> None:
         self._name = name
-        self._sum = 0
-        self._num_inst = 0
+        self._sum = 0.0
+        self._num_inst = 0.0
 
     def __repr__(self):
         return "%s(%.2f/%.2f=%.2f)" % (self.name, self._sum, self._num_inst, self.get())
@@ -116,8 +116,8 @@ class LossMetric(ABC):
         return self._sum / self._num_inst if self._num_inst else float('nan')
 
     def reset(self):
-        self._sum = 0
-        self._num_inst = 0
+        self._sum = 0.0
+        self._num_inst = 0.0
 
 
 class CrossEntropyLoss(Loss):
