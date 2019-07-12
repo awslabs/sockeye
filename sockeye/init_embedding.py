@@ -160,7 +160,7 @@ def init_embeddings(args: argparse.Namespace):
         params[name] = init_weight(weight, vocab_in, vocab_out, initializer)
 
     logger.info('Saving initialized parameters to %s', args.file)
-    utils.save_params(params, args.file)
+    #utils.save_params(params, args.file)
 
 
 if __name__ == '__main__':
