@@ -464,7 +464,8 @@ def determine_context(device_ids: List[int],
                       use_cpu: bool,
                       disable_device_locking: bool,
                       lock_dir: str,
-                      exit_stack: ExitStack) -> List[mx.Context]:
+                      exit_stack: ExitStack,
+                      horovod_local_rank: Optional[int] = None) -> List[mx.Context]:
     """
     Determine the MXNet context to run on (CPU or GPU).
 
@@ -473,6 +474,8 @@ def determine_context(device_ids: List[int],
     :param disable_device_locking: Disable Sockeye's device locking feature.
     :param lock_dir: Directory to place device lock files in.
     :param exit_stack: An ExitStack from contextlib.
+    :param horovod_local_rank: An optional index specified only when running
+                               Horovod.  The local rank is used to assign GPUs.
 
     :return: A list with the context(s) to run on.
     """
@@ -482,11 +485,18 @@ def determine_context(device_ids: List[int],
         num_gpus = get_num_gpus()
         check_condition(num_gpus >= 1,
                         "No GPUs found, consider running on the CPU with --use-cpu ")
-        if disable_device_locking:
-            context = expand_requested_device_ids(device_ids)
+        if horovod_local_rank is not None:
+            check_condition(len(device_ids) == 1 and device_ids[0] < 0,
+                            "When using Horovod, --device-ids should be a negative integer indicating the number of "
+                            "GPUs each worker should use.")
+            n_ids = -device_ids[0]
+            context = [mx.gpu(i + horovod_local_rank * n_ids) for i in range(n_ids)]
         else:
-            context = exit_stack.enter_context(acquire_gpus(device_ids, lock_dir=lock_dir))
-        context = [mx.gpu(gpu_id) for gpu_id in context]
+            if disable_device_locking:
+                context = expand_requested_device_ids(device_ids)
+            else:
+                context = exit_stack.enter_context(acquire_gpus(device_ids, lock_dir=lock_dir))
+            context = [mx.gpu(gpu_id) for gpu_id in context]
     return context
 
 
