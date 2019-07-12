@@ -139,6 +139,7 @@ def run_translate(args: argparse.Namespace):
                                           strip_unknown_words=args.strip_unknown_words,
                                           skip_topk=args.skip_topk,
                                           sample=args.sample,
+                                          output_scores=output_handler.reports_score(),
                                           constant_length_ratio=constant_length_ratio,
                                           brevity_penalty=brevity_penalty)
         read_and_translate(translator=translator,
