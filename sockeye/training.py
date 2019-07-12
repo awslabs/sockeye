@@ -26,9 +26,7 @@ from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union
 
 import mxnet as mx
 import numpy as np
-from mxnet import gluon
 
-import gluonnlp
 import sockeye.multiprocessing_utils as mp_utils
 from . import checkpoint_decoder
 from . import constants as C
@@ -37,6 +35,7 @@ from . import loss
 from . import lr_scheduler
 from . import utils
 from . import vocab
+from . import parallel
 from .config import Config
 from .model import SockeyeModel
 
@@ -132,7 +131,7 @@ class GluonEarlyStoppingTrainer:
     def __init__(self,
                  config: TrainerConfig,
                  sockeye_model: SockeyeModel,
-                 trainer: gluon.Trainer,
+                 trainer: mx.gluon.Trainer,
                  loss_functions: List[loss.Loss],
                  context: List[mx.context.Context],
                  dtype: str) -> None:
@@ -141,10 +140,10 @@ class GluonEarlyStoppingTrainer:
         self.trainer = trainer
         self.loss_functions = loss_functions
         self.context = context
-        self._parallel = gluonnlp.utils.Parallel(len(context) if len(context) > 1 else 0,
-                                                 ParallelModel(sockeye_model,
-                                                               loss_functions,
-                                                               rescale_factor=self.config.update_interval))
+        self._parallel = parallel.Parallel(len(context) if len(context) > 1 else 0,
+                                           ParallelModel(sockeye_model,
+                                                         loss_functions,
+                                                         rescale_factor=self.config.update_interval))
         self.dtype = dtype
         self.state = None  # type: Optional[TrainState]
         self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
@@ -584,7 +583,7 @@ class GluonEarlyStoppingTrainer:
         return os.path.join(self.config.output_dir, C.OPT_STATES_BEST)
 
 
-class ParallelModel(gluonnlp.utils.Parallelizable):
+class ParallelModel(parallel.Parallelizable):
 
     def __init__(self, model: Callable, loss_functions: List[loss.Loss], rescale_factor: float) -> None:
         self.model = model
