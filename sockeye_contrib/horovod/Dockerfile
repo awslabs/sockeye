@@ -58,13 +58,11 @@ RUN cat /etc/ssh/ssh_config | grep -v StrictHostKeyChecking > /etc/ssh/ssh_confi
 
 # Install MXNet
 ENV MXNET_VERSION=1.5.0b20190710
-#RUN pip install mxnet-cu100mkl==${MXNET_VERSION}
-RUN pip install mxnet-mkl==${MXNET_VERSION}
+RUN pip install mxnet-cu100mkl==${MXNET_VERSION}
 
 # Install Horovod, temporarily using CUDA stubs
-#    HOROVOD_GPU_ALLREDUCE=NCCL HOROVOD_WITH_MXNET=1 \
 RUN ldconfig /usr/local/cuda/targets/x86_64-linux/lib/stubs && \
-    HOROVOD_WITH_MXNET=1 \
+    HOROVOD_GPU_ALLREDUCE=NCCL HOROVOD_WITH_MXNET=1 \
          pip install --no-cache-dir horovod && \
     ldconfig
 
@@ -84,5 +82,5 @@ RUN groupadd --gid 500 ec2-user && \
 ARG SOCKEYE_COMMIT
 COPY . /opt/sockeye
 RUN cd /opt/sockeye && \
-    pip install -r requirements/requirements.txt && \
-    python setup.py build install
+    pip install -r requirements/requirements.gpu-cu100.txt && \
+    python setup.py build install -r requirements/requirements.gpu-cu100.txt
