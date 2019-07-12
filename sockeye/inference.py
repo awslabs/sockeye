@@ -18,11 +18,9 @@ import copy
 import itertools
 import json
 import logging
-import os
-import time
 from collections import defaultdict
 from functools import partial
-from typing import Callable, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set, Any
+from typing import Callable, cast, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set, Any
 
 import mxnet as mx
 import numpy as np
@@ -1311,7 +1309,7 @@ class Translator:
         # (batch*beam, 1)
         predicted_output_lengths = mx.nd.repeat(predicted_output_lengths, repeats=self.beam_size, axis=0)
 
-        return model_states, predicted_output_lengths.astype('float32', copy=False)
+        return model_states, cast(mx.nd.NDArray, predicted_output_lengths).astype('float32', copy=False)
 
     def _decode_step(self, prev_word: mx.nd.NDArray,
                      states: List[ModelState],
@@ -1326,8 +1324,6 @@ class Translator:
         """
         model_outs, model_attention_probs, model_states = [], [], []
         for model, state in zip(self.models, states):
-            model = model  # type: SockeyeModel
-            state = state  # type: ModelState
             prev_word = prev_word.astype(self.dtype, copy=False)
             decoder_out, new_states, step_additional_outputs = model.decode_step(prev_word, state.states)
             state.states = new_states

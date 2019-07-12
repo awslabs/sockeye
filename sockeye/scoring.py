@@ -17,7 +17,7 @@ Code for scoring.
 import logging
 import math
 import time
-from typing import Dict, List, Optional, Union
+from typing import cast, Dict, List, Optional, Union
 
 import mxnet as mx
 import numpy as np
@@ -41,7 +41,7 @@ class BatchScorer(mx.gluon.HybridBlock):
                  score_type: str = C.SCORING_TYPE_DEFAULT,
                  softmax_temperature: Optional[float] = None,
                  constant_length_ratio: Optional[float] = None,
-                 prefix='BatchScorer_'):
+                 prefix='BatchScorer_') -> None:
         super().__init__(prefix=prefix)
         self.score_type = score_type
         self.softmax_temperature = softmax_temperature
@@ -115,7 +115,7 @@ class Scorer:
         batch_scores = []  # type: List[mx.nd.NDArray]
         for inputs, labels in batch.shards():
             if self.model.dtype == C.DTYPE_FP16:
-                inputs = (i.astype(C.DTYPE_FP16, copy=False) for i in inputs)
+                inputs = (i.astype(C.DTYPE_FP16, copy=False) for i in inputs)  # type: ignore
             source, source_length, target, target_length = inputs
             outputs = self.model(*inputs)  # type: Dict[str, mx.nd.NDArray]
             logits = outputs[C.LOGITS_NAME]  # type: mx.nd.NDArray
@@ -125,8 +125,8 @@ class Scorer:
             batch_scores.append(scores)
 
         # shape: (batch_size,).
-        scores = mx.nd.concat(*batch_scores, dim=0)  # type: mx.nd.NDArray
-        return scores
+        batch_scores = mx.nd.concat(*batch_scores, dim=0)
+        return cast(mx.nd.NDArray, batch_scores)
 
     def score(self, score_iter: data_io.BaseParallelSampleIter, output_handler: OutputHandler):
         total_time = 0.
