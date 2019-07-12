@@ -809,6 +809,9 @@ class Translator:
     :param strip_unknown_words: If True, removes any <unk> symbols from outputs.
     :param skip_topk: If True, uses argmax instead of topk for greedy decoding.
     :param sample: If True, sample from softmax multinomial instead of using topk.
+    :param output_scores: Whether the scores will be needed as outputs. If True, scores will be normalized, negative
+           log probabilities. If False, scores will be negative, raw logit activations if decoding with beam size 1
+           and a single model.
     :param constant_length_ratio: If > 0, will override models' prediction of the length ratio (if any).
     :param brevity_penalty: Optional BrevityPenalty.
     """
@@ -831,6 +834,7 @@ class Translator:
                  strip_unknown_words: bool = False,
                  skip_topk: bool = False,
                  sample: int = None,
+                 output_scores: bool = False,
                  constant_length_ratio: float = 0.0,
                  brevity_penalty: Optional[BrevityPenalty] = None,
                  hybridize: bool = True,
@@ -875,11 +879,8 @@ class Translator:
             utils.check_condition(self.beam_search_stop == C.BEAM_SEARCH_STOP_ALL,
                                   "nbest_size > 1 requires beam_search_stop to be set to 'all'")
 
-        # TODO clean up
-        output_scores = False  # set according to output_handler.reports_score()
-        sampling = False
         self.skip_softmax = False
-        if len(self.models) == 1 and self.beam_size == 1 and not output_scores and not sampling:
+        if len(self.models) == 1 and self.beam_size == 1 and not output_scores and not sample:
             self.skip_softmax = True
             logger.info("Enabled skipping softmax for a single model and greedy decoding.")
 
