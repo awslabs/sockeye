@@ -775,8 +775,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                           use_cpu=args.use_cpu,
                                           disable_device_locking=args.disable_device_locking,
                                           lock_dir=args.lock_dir,
-                                          exit_stack=exit_stack,
-                                          pre_assigned_id=hvd_local_rank if args.horovod else None)
+                                          exit_stack=exit_stack)
         if args.batch_type == C.BATCH_TYPE_SENTENCE:
             check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
                                                                  "divisible by the number of devices. Choose a batch "

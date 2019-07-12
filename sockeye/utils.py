@@ -464,8 +464,7 @@ def determine_context(device_ids: List[int],
                       use_cpu: bool,
                       disable_device_locking: bool,
                       lock_dir: str,
-                      exit_stack: ExitStack,
-                      pre_assigned_id: Optional[int] = None) -> List[mx.Context]:
+                      exit_stack: ExitStack) -> List[mx.Context]:
     """
     Determine the MXNet context to run on (CPU or GPU).
 
@@ -474,22 +473,15 @@ def determine_context(device_ids: List[int],
     :param disable_device_locking: Disable Sockeye's device locking feature.
     :param lock_dir: Directory to place device lock files in.
     :param exit_stack: An ExitStack from contextlib.
-    :param pre_assigned_id: ID that has been pre-assigned by MPI/Horovod or
-                            similar.
 
     :return: A list with the context(s) to run on.
     """
     if use_cpu:
-        if pre_assigned_id is not None:
-            context = [mx.cpu(pre_assigned_id)]
-        else:
-            context = [mx.cpu()]
+        context = [mx.cpu()]
     else:
         num_gpus = get_num_gpus()
         check_condition(num_gpus >= 1,
                         "No GPUs found, consider running on the CPU with --use-cpu ")
-        if pre_assigned_id is not None:
-            device_ids = [pre_assigned_id]
         if disable_device_locking:
             context = expand_requested_device_ids(device_ids)
         else:
