@@ -30,7 +30,6 @@ from . import constants as C
 from . import data_io
 from . import inference
 from . import utils
-from . import vocab
 
 logger = logging.getLogger(__name__)
 
@@ -90,14 +89,9 @@ def run_translate(args: argparse.Namespace):
             output_scores=output_handler.reports_score(),
             sampling=args.sample)
         
-        max_ptr = vocab.get_max_ptr(target_vocab)
-        if max_ptr is not None:
+        if any([model.config.num_pointers for model in models]):
             check_condition(args.restrict_lexicon is None,
-                            "The pointer networks does not currently work with vocabulary restriction.")
-            
-            for model in models:
-                check_condition(max_ptr >= model.max_supported_seq_len_source,
-                                      "Not enough pointers for the given maximum input length.")
+                            "The pointer mechanism does not currently work with vocabulary restriction.")
         
         restrict_lexicon = None  # type: Optional[Union[TopKLexicon, Dict[str, TopKLexicon]]]
         if args.restrict_lexicon is not None:

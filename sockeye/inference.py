@@ -369,7 +369,11 @@ class InferenceModel(model.SockeyeModel):
     @property
     def max_supported_seq_len_source(self) -> Optional[int]:
         """ If not None this is the maximally supported source length during inference (hard constraint). """
-        return self.encoder.get_max_seq_len()
+        max_src_len = self.encoder.get_max_seq_len()
+        if self.config.num_pointers > 0:
+            # Constraint given by the attention-based pointer mechanism
+            max_src_len = self.config.num_pointers if max_src_len is None else min(max_src_len, self.config.num_pointers)
+        return max_src_len
 
     @property
     def max_supported_seq_len_target(self) -> Optional[int]:

@@ -37,19 +37,6 @@ def is_pointer(token):
     return pointer_pattern.match(token) is not None
 
 
-def get_max_ptr(vocab):
-    max_ptr = None
-    for sym in vocab.keys():
-        ptr_match =  pointer_pattern.match(sym)
-        if ptr_match:
-            ptr = int(ptr_match.group('index'))
-            if max_ptr is None:
-                max_ptr = ptr
-            elif max_ptr < ptr:
-                max_ptr = ptr
-    return max_ptr
-
-
 def build_from_paths(paths: List[str], num_words: Optional[int] = None, min_count: int = 1,
                      pad_to_multiple_of: Optional[int] = None,
                      num_pointers: int = 0) -> Vocab:
