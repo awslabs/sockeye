@@ -268,16 +268,19 @@ def run_train_translate(train_params: str,
     # Optionally create prepared data directory
     if use_prepared_data:
         data['train_prepared'] = os.path.join(work_dir, "prepared_data")
-        params = "{} {}".format(sockeye.prepare_data.__file__,
-                                _PREPARE_DATA_COMMON.format(train_source=data['train_source'],
-                                                            train_target=data['train_target'],
-                                                            output=data['train_prepared'],
-                                                            max_len=max_seq_len))
+        prepare_params = "{} {}".format(sockeye.prepare_data.__file__,
+                                        _PREPARE_DATA_COMMON.format(train_source=data['train_source'],
+                                                                    train_target=data['train_target'],
+                                                                    output=data['train_prepared'],
+                                                                    max_len=max_seq_len))
         if 'train_source_factors' in data:
-            params += _TRAIN_WITH_FACTORS_COMMON.format(source_factors=" ".join(data['train_source_factors']))
+            prepare_params += _TRAIN_WITH_FACTORS_COMMON.format(source_factors=" ".join(data['train_source_factors']))
 
-        logger.info("Creating prepared data folder.")
-        with patch.object(sys, "argv", params.split()):
+        if '--weight-tying' in train_params and '--weight-tying-type src_trg' in train_params:
+            prepare_params += ' --shared-vocab'
+
+        logger.info("Preparing data with parameters %s.", prepare_params)
+        with patch.object(sys, "argv", prepare_params.split()):
             sockeye.prepare_data.main()
         # Train model
         params = "{} {} {}".format(sockeye.train.__file__,
