@@ -36,20 +36,23 @@ _LINE_MAX_LENGTH = 9
 _TEST_MAX_LENGTH = 20
 
 TEST_CONFIGS = [
-    # "Vanilla" LSTM encoder-decoder with attention
-    ("--encoder rnn --decoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 8 --num-embed 4 "
-     " --rnn-attention-type mlp"
-     " --rnn-attention-num-hidden 8 --loss cross-entropy --optimized-metric perplexity --max-updates 2"
-     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --batch-type sentence "
-     " --decode-and-evaluate 0",
-     "--batch-size 3 --beam-size 10 --beam-prune 1"),
-    # Full transformer
+    # beam prune
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying --weight-tying-type src_trg_softmax"
-     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
+     "--batch-size 3 --beam-size 10 --beam-prune 1"),
+    # no beam prune
+    ("--encoder transformer --decoder transformer"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying --weight-tying-type src_trg_softmax"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
      "--batch-size 1 --beam-size 10")]

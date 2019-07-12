@@ -39,7 +39,6 @@ from . import constants as C
 from . import data_io
 from . import decoder
 from . import encoder
-from . import initializer
 from . import layers
 from . import loss
 from . import lr_scheduler
@@ -84,17 +83,7 @@ def check_arg_compatibility(args: argparse.Namespace):
 
     :param args: Arguments as returned by argparse.
     """
-
-    if args.lhuc is not None:
-        # Actually this check is a bit too strict
-        check_condition(args.encoder != C.CONVOLUTION_TYPE or args.decoder != C.CONVOLUTION_TYPE,
-                        "LHUC is not supported for convolutional models yet.")
-        check_condition(args.decoder != C.TRANSFORMER_TYPE or C.LHUC_STATE_INIT not in args.lhuc,
-                        "The %s options only applies to RNN models" % C.LHUC_STATE_INIT)
-
-    if args.decoder_only:
-        check_condition(args.decoder != C.TRANSFORMER_TYPE and args.decoder != C.CONVOLUTION_TYPE,
-                        "Decoder pre-training currently supports RNN decoders only.")
+    pass
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
@@ -189,15 +178,10 @@ def use_shared_vocab(args: argparse.Namespace) -> bool:
     weight_tying = args.weight_tying
     weight_tying_type = args.weight_tying_type
     shared_vocab = args.shared_vocab
-    decoder_only = args.decoder_only
     if weight_tying and C.WEIGHT_TYING_SRC in weight_tying_type and C.WEIGHT_TYING_TRG in weight_tying_type:
         if not shared_vocab:
             logger.info("A shared source/target vocabulary will be used as weight tying source/target weight tying "
                         "is enabled")
-        shared_vocab = True
-    if decoder_only:
-        if not shared_vocab:
-            logger.info("A shared source/target vocabulary will be used for pre-training the decoder.")
         shared_vocab = True
     return shared_vocab
 
@@ -353,7 +337,6 @@ def create_encoder_config(args: argparse.Namespace,
     :param args: Arguments as returned by argparse.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
-    :param config_conv: The config for the convolutional encoder (optional).
     :param num_embed_source: The size of the source embedding.
     :return: The encoder config and the number of hidden units of the encoder.
     """
@@ -424,26 +407,6 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
     return config_decoder
 
 
-def check_encoder_decoder_args(args) -> None:
-    """
-    Check possible encoder-decoder argument conflicts.
-
-    :param args: Arguments as returned by argparse.
-    """
-    encoder_embed_dropout, decoder_embed_dropout = args.embed_dropout
-    encoder_rnn_dropout_inputs, decoder_rnn_dropout_inputs = args.rnn_dropout_inputs
-    if encoder_embed_dropout > 0 and encoder_rnn_dropout_inputs > 0:
-        logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
-                       "two dropout layers on top of each other.")
-    if decoder_embed_dropout > 0 and decoder_rnn_dropout_inputs > 0:
-        logger.warning("Setting encoder RNN AND source embedding dropout > 0 leads to "
-                       "two dropout layers on top of each other.")
-    encoder_rnn_dropout_recurrent, decoder_rnn_dropout_recurrent = args.rnn_dropout_recurrent
-    if encoder_rnn_dropout_recurrent > 0 or decoder_rnn_dropout_recurrent > 0:
-        check_condition(args.rnn_cell_type == C.LSTM_TYPE,
-                        "Recurrent dropout without memory loss only supported for LSTMs right now.")
-
-
 def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
     num_embed_source, num_embed_target = args.num_embed
     if args.encoder == C.TRANSFORMER_TYPE:
@@ -508,8 +471,6 @@ def create_model_config(args: argparse.Namespace,
     embed_dropout_source, embed_dropout_target = args.embed_dropout
     source_vocab_size, *source_factor_vocab_sizes = source_vocab_sizes
 
-    check_encoder_decoder_args(args)
-
     config_encoder, encoder_num_hidden = create_encoder_config(args, max_seq_len_source, max_seq_len_target,
                                                                num_embed_source)
     config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target,
@@ -552,7 +513,6 @@ def create_model_config(args: argparse.Namespace,
                                      config_length_task=config_length_task,
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
-                                     weight_normalization=args.weight_normalization,
                                      lhuc=args.lhuc is not None)
     return model_config
 
@@ -582,14 +542,11 @@ def create_losses(args: argparse.Namespace) -> List[loss.Loss]:
     return losses
 
 
-def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[int],
-                            extra_initializers: List[Tuple[str, mx.initializer.Initializer]] = None) -> OptimizerConfig:
+def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
     """
     Returns an OptimizerConfig.
 
     :param args: Arguments as returned by argparse.
-    :param source_vocab_sizes: Source vocabulary sizes.
-    :param extra_initializers: extra initializer to pass to `get_initializer`.
     :return: The optimizer type and its parameters as well as the kvstore.
     """
     optimizer_params = {'wd': args.weight_decay,
@@ -620,14 +577,15 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
     if args.optimizer_params:
         optimizer_params.update(args.optimizer_params)
 
-    weight_init = initializer.get_initializer(default_init_type=args.weight_init,
-                                              default_init_scale=args.weight_init_scale,
-                                              default_init_xavier_rand_type=args.weight_init_xavier_rand_type,
-                                              default_init_xavier_factor_type=args.weight_init_xavier_factor_type,
-                                              embed_init_type=args.embed_weight_init,
-                                              embed_init_sigma=source_vocab_sizes[0] ** -0.5,
-                                              rnn_init_type=args.rnn_h2h_init,
-                                              extra_initializers=extra_initializers)
+    if args.weight_init == C.INIT_XAVIER:
+        weight_init = mx.init.Xavier(rnd_type=args.weight_init_xavier_rand_type,
+                                     factor_type=args.weight_init_xavier_factor_type,
+                                     magnitude=args.weight_init_scale)
+    elif args.weight_init == C.INIT_UNIFORM:
+        weight_init = mx.init.Uniform(scale=args.weight_init_scale)
+    else:
+        raise ValueError("Invalid weight initialization type: %s" % args.weight_init)
+
     # TODO: remove lr schedulers entirely and let the early stopping trainer handle learning rates.
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
                                              args.checkpoint_interval,
@@ -823,7 +781,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
             trainer_config.min_epochs = None
             trainer_config.max_epochs = None
 
-        optimizer_config = create_optimizer_config(args, source_vocab_sizes)
+        optimizer_config = create_optimizer_config(args)
         training_model.initialize(optimizer_config.initializer, ctx=context)
         if args.params is not None:  # load existing parameters if present
             training_model.load_params_from_file(fname=args.params,

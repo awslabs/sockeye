@@ -436,9 +436,8 @@ LHUC_PREFIX = "lhuc_"
 # lhuc application points
 LHUC_ENCODER = "encoder"
 LHUC_DECODER = "decoder"
-LHUC_STATE_INIT = "state_init"
 LHUC_ALL = "all"
-LHUC_CHOICES = [LHUC_ENCODER, LHUC_DECODER, LHUC_STATE_INIT, LHUC_ALL]
+LHUC_CHOICES = [LHUC_ENCODER, LHUC_DECODER, LHUC_ALL]
 
 # Strategies for fixing various parameters.
 FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER = "all_except_decoder"

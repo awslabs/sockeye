@@ -583,87 +583,6 @@ def add_model_parameters(params):
                               help='Number of layers for encoder & decoder. '
                                    'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
 
-    model_params.add_argument('--conv-embed-output-dim',
-                              type=int_greater_or_equal(1),
-                              default=None,
-                              help="Project segment embeddings to this size for ConvolutionalEmbeddingEncoder. Omit to"
-                                   " avoid projection, leaving segment embeddings total size of all filters. Default:"
-                                   " %(default)s.")
-    model_params.add_argument('--conv-embed-max-filter-width',
-                              type=int_greater_or_equal(1),
-                              default=8,
-                              help="Maximum filter width for ConvolutionalEmbeddingEncoder. Default: %(default)s.")
-    model_params.add_argument('--conv-embed-num-filters',
-                              type=multiple_values(greater_or_equal=1),
-                              default=(200, 200, 250, 250, 300, 300, 300, 300),
-                              help="List of number of filters of each width 1..max for ConvolutionalEmbeddingEncoder. "
-                                   "Default: %(default)s.")
-    model_params.add_argument('--conv-embed-pool-stride',
-                              type=int_greater_or_equal(1),
-                              default=5,
-                              help="Pooling stride for ConvolutionalEmbeddingEncoder. Default: %(default)s.")
-    model_params.add_argument('--conv-embed-num-highway-layers',
-                              type=int_greater_or_equal(0),
-                              default=4,
-                              help="Number of highway layers for ConvolutionalEmbeddingEncoder. Default: %(default)s.")
-    model_params.add_argument('--conv-embed-add-positional-encodings',
-                              action='store_true',
-                              default=False,
-                              help="Add positional encodings to final segment embeddings for"
-                                   " ConvolutionalEmbeddingEncoder. Default: %(default)s.")
-
-    # convolutional encoder/decoder arguments arguments
-    model_params.add_argument('--cnn-kernel-width',
-                              type=multiple_values(num_values=2, greater_or_equal=1, data_type=int),
-                              default=(3, 3),
-                              help='Kernel width of the convolutional encoder and decoder. Default: %(default)s.')
-    model_params.add_argument('--cnn-num-hidden',
-                              type=int_greater_or_equal(1),
-                              default=512,
-                              help='Number of hidden units for the convolutional encoder and decoder. '
-                                   'Default: %(default)s.')
-    model_params.add_argument('--cnn-activation-type',
-                              choices=C.CNN_ACTIVATION_TYPES,
-                              default=C.GLU,
-                              help="Type activation to use for each convolutional layer. Default: %(default)s.")
-    model_params.add_argument('--cnn-positional-embedding-type',
-                              choices=C.POSITIONAL_EMBEDDING_TYPES,
-                              default=C.LEARNED_POSITIONAL_EMBEDDING,
-                              help='The type of positional embedding. Default: %(default)s.')
-    model_params.add_argument('--cnn-project-qkv',
-                              action='store_true',
-                              default=False,
-                              help="Optionally apply query, key and value projections to the source and target hidden "
-                                   "vectors before applying the attention mechanism.")
-
-    # rnn arguments
-    model_params.add_argument('--rnn-cell-type',
-                              choices=C.CELL_TYPES,
-                              default=C.LSTM_TYPE,
-                              help='RNN cell type for encoder and decoder. Default: %(default)s.')
-    model_params.add_argument('--rnn-num-hidden',
-                              type=int_greater_or_equal(1),
-                              default=1024,
-                              help='Number of RNN hidden units for encoder and decoder. Default: %(default)s.')
-    model_params.add_argument('--rnn-encoder-reverse-input',
-                              action='store_true',
-                              help='Reverse input sequence for RNN encoder. Default: %(default)s.')
-    model_params.add_argument('--rnn-decoder-state-init',
-                              default=C.RNN_DEC_INIT_LAST,
-                              choices=C.RNN_DEC_INIT_CHOICES,
-                              help='How to initialize RNN decoder states. Default: %(default)s.')
-    model_params.add_argument('--rnn-residual-connections',
-                              action="store_true",
-                              default=False,
-                              help="Add residual connections to stacked RNNs. (see Wu ETAL'16). Default: %(default)s.")
-    model_params.add_argument('--rnn-first-residual-layer',
-                              type=int_greater_or_equal(2),
-                              default=2,
-                              help='First RNN layer to have a residual connection. Default: %(default)s.')
-    model_params.add_argument('--rnn-context-gating', action="store_true",
-                              help="Enables a context gate which adaptively weighs the RNN decoder input against the "
-                                   "source context vector before each update of the decoder hidden state.")
-
     # transformer arguments
     model_params.add_argument('--transformer-model-size',
                               type=multiple_values(num_values=2, greater_or_equal=1),
@@ -710,15 +629,14 @@ def add_model_parameters(params):
                                    'Default: %(default)s.')
 
     # LHUC
-    # TODO: The convolutional model does not support lhuc yet
     model_params.add_argument('--lhuc',
                               nargs="+",
                               default=None,
                               choices=C.LHUC_CHOICES,
                               metavar="COMPONENT",
                               help="Use LHUC (Vilar 2018). Include an amplitude parameter to hidden units for"
-                              " domain adaptation. Needs a pre-trained model. Valid values: {values}. Currently not"
-                              " supported for convolutional models. Default: %(default)s.".format(
+                              " domain adaptation. Needs a pre-trained model. Valid values: {values}."
+                              " Default: %(default)s.".format(
                                   values=", ".join(C.LHUC_CHOICES)))
 
     # embedding arguments
@@ -739,49 +657,6 @@ def add_model_parameters(params):
                               default=C.SOURCE_FACTORS_COMBINE_CONCAT,
                               help='How to combine source factors. Default: %(default)s.')
 
-    # attention arguments
-    model_params.add_argument('--rnn-attention-type',
-                              choices=C.ATT_TYPES,
-                              default=C.ATT_MLP,
-                              help='Attention model for RNN decoders. Choices: {%(choices)s}. '
-                                   'Default: %(default)s.')
-    model_params.add_argument('--rnn-attention-num-hidden',
-                              default=None,
-                              type=int,
-                              help='Number of hidden units for attention layers. Default: equal to --rnn-num-hidden.')
-    model_params.add_argument('--rnn-attention-use-prev-word', action="store_true",
-                              help="Feed the previous target embedding into the attention mechanism.")
-
-    model_params.add_argument('--rnn-scale-dot-attention',
-                              action='store_true',
-                              help='Optional scale before dot product. Only applicable to \'dot\' attention type. '
-                                   '[Vaswani et al, 2017]')
-
-    model_params.add_argument('--rnn-attention-coverage-type',
-                              choices=C.COVERAGE_TYPES,
-                              default=C.COVERAGE_COUNT,
-                              help="Type of model for updating coverage vectors. 'count' refers to an update method "
-                                   "that accumulates attention scores. 'fertility' accumulates attention scores as well "
-                                   "but also computes a fertility value for every source word. "
-                                   "'tanh', 'sigmoid', 'relu', 'softrelu' "
-                                   "use non-linear layers with the respective activation type, and 'gru' uses a "
-                                   "GRU to update the coverage vectors. Default: %(default)s.")
-    model_params.add_argument('--rnn-attention-coverage-max-fertility',
-                              type=int,
-                              default=2,
-                              help="Maximum fertility for individual source words. Default: %(default)s.")
-    model_params.add_argument('--rnn-attention-coverage-num-hidden',
-                              type=int,
-                              default=1,
-                              help="Number of hidden units for coverage vectors. Default: %(default)s.")
-    model_params.add_argument('--rnn-attention-in-upper-layers',
-                              action="store_true",
-                              help="Pass the attention to the upper layers of the RNN decoder, similar "
-                                   "to GNMT paper. Only applicable if more than one layer is used.")
-    model_params.add_argument('--rnn-attention-mhdot-heads',
-                              type=int, default=None,
-                              help='Number of heads for Multi-head dot attention. Default: %(default)s.')
-
     model_params.add_argument('--weight-tying',
                               action='store_true',
                               help='Turn on weight tying (see arxiv.org/abs/1608.05859). '
@@ -794,18 +669,6 @@ def add_model_parameters(params):
                                        C.WEIGHT_TYING_TRG_SOFTMAX],
                               help='The type of weight tying. source embeddings=src, target embeddings=trg, '
                                    'target softmax weight matrix=softmax. Default: %(default)s.')
-
-    model_params.add_argument('--layer-normalization', action="store_true",
-                              help="Adds layer normalization before non-linear activations. "
-                                   "This includes MLP attention, RNN decoder state initialization, "
-                                   "RNN decoder hidden state, and cnn layers."
-                                   "It does not normalize RNN cell activations "
-                                   "(this can be done using the '%s' or '%s' rnn-cell-type." % (C.LNLSTM_TYPE,
-                                                                                                C.LNGLSTM_TYPE))
-
-    model_params.add_argument('--weight-normalization', action="store_true",
-                              help="Adds weight normalization to decoder output layers "
-                                   "(and all convolutional weight matrices for CNN decoders). Default: %(default)s.")
 
     model_params.add_argument('--dtype', default=C.DTYPE_FP32, choices=[C.DTYPE_FP32, C.DTYPE_FP16],
                               help="Data type.")
@@ -833,11 +696,6 @@ def add_training_args(params):
     train_params = params.add_argument_group("Training parameters")
 
     add_batch_args(train_params)
-
-    train_params.add_argument('--decoder-only',
-                              action='store_true',
-                              help='Pre-train a decoder. This is currently for RNN decoders only. '
-                                   'Default: %(default)s.')
 
     train_params.add_argument('--loss',
                               default=C.CROSS_ENTROPY,
@@ -920,31 +778,6 @@ def add_training_args(params):
                               default=(.0, .0),
                               help='Dropout probability for source & target embeddings. Use "x:x" to specify '
                                    'separate values. Default: %(default)s.')
-    train_params.add_argument('--rnn-dropout-inputs',
-                              type=multiple_values(2, data_type=float),
-                              default=(.0, .0),
-                              help='RNN variational dropout probability for encoder & decoder RNN inputs. (Gal, 2015)'
-                                   'Use "x:x" to specify separate values. Default: %(default)s.')
-    train_params.add_argument('--rnn-dropout-states',
-                              type=multiple_values(2, data_type=float),
-                              default=(.0, .0),
-                              help='RNN variational dropout probability for encoder & decoder RNN states. (Gal, 2015)'
-                                   'Use "x:x" to specify separate values. Default: %(default)s.')
-    train_params.add_argument('--rnn-dropout-recurrent',
-                              type=multiple_values(2, data_type=float),
-                              default=(.0, .0),
-                              help='Recurrent dropout without memory loss (Semeniuta, 2016) for encoder & decoder '
-                                   'LSTMs. Use "x:x" to specify separate values. Default: %(default)s.')
-    train_params.add_argument('--rnn-enc-last-hidden-concat-to-embedding',
-                              action="store_true",
-                              help='Concatenate the last hidden layer of the encoder to the input of the decoder, '
-                                   'instead of the previous state of the decoder. Default: %(default)s.')
-
-    train_params.add_argument('--rnn-decoder-hidden-dropout',
-                              type=float,
-                              default=.2,
-                              help='Dropout probability for hidden state that combines the context with the '
-                                   'RNN hidden state in the decoder. Default: %(default)s.')
     train_params.add_argument('--transformer-dropout-attention',
                               type=float,
                               default=0.1,
@@ -957,14 +790,6 @@ def add_training_args(params):
                               type=float,
                               default=0.1,
                               help='Dropout probability for pre/postprocessing blocks. Default: %(default)s.')
-    train_params.add_argument('--conv-embed-dropout',
-                              type=float,
-                              default=.0,
-                              help="Dropout probability for ConvolutionalEmbeddingEncoder. Default: %(default)s.")
-    train_params.add_argument('--cnn-hidden-dropout',
-                              type=float,
-                              default=.2,
-                              help="Dropout probability for dropout between convolutional layers. Default: %(default)s.")
 
     train_params.add_argument('--optimizer',
                               default=C.OPTIMIZER_ADAM,
@@ -1003,13 +828,6 @@ def add_training_args(params):
                               default=C.RAND_TYPE_UNIFORM,
                               choices=[C.RAND_TYPE_UNIFORM, C.RAND_TYPE_GAUSSIAN],
                               help='Xavier random number generator type. Default: %(default)s.')
-    train_params.add_argument('--embed-weight-init',
-                              type=str,
-                              default=C.EMBED_INIT_DEFAULT,
-                              choices=C.EMBED_INIT_TYPES,
-                              help='Type of embedding matrix weight initialization. If normal, initializes embedding '
-                                   'weights using a normal distribution with std=1/srqt(vocab_size). '
-                                   'Default: %(default)s.')
     train_params.add_argument('--initial-learning-rate',
                               type=float,
                               default=0.0002,
@@ -1062,14 +880,6 @@ def add_training_args(params):
                               default=0,
                               help="Number of warmup steps. If set to x, linearly increases learning rate from 10%% "
                                    "to 100%% of the initial learning rate. Default: %(default)s.")
-
-    train_params.add_argument('--rnn-forget-bias',
-                              default=0.0,
-                              type=float,
-                              help='Initial value of RNN forget biases.')
-    train_params.add_argument('--rnn-h2h-init', type=str, default=C.RNN_INIT_ORTHOGONAL,
-                              choices=[C.RNN_INIT_ORTHOGONAL, C.RNN_INIT_ORTHOGONAL_STACKED, C.RNN_INIT_DEFAULT],
-                              help="Initialization method for RNN parameters. Default: %(default)s.")
 
     train_params.add_argument('--fixed-param-strategy',
                                default=None,
