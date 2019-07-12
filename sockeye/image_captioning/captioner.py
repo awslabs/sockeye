@@ -42,7 +42,8 @@ logger = logging.getLogger(__name__)
 
 def get_pretrained_caption_net(args: argparse.Namespace,
                                context: mx.Context,
-                               image_preextracted_features: bool) -> inference_image.ImageCaptioner:
+                               image_preextracted_features: bool,
+                               features_in_memory=False) -> inference_image.ImageCaptioner:
     models, target_vocab = inference_image.load_models(
         context=context,
         max_input_len=args.max_input_len,
@@ -82,7 +83,8 @@ def get_pretrained_caption_net(args: argparse.Namespace,
                                                 source_image_size=tuple(
                                                     args.feature_size),
                                                 source_root=args.source_root,
-                                                use_feature_loader=image_preextracted_features)
+                                                use_feature_loader=image_preextracted_features,
+                                                features_in_memory=features_in_memory)
     return translator
 
 
@@ -152,7 +154,8 @@ def caption(args: argparse.Namespace):
             _, args.feature_size = read_feature_shape(args.source_root)
 
         captioner = get_pretrained_caption_net(args, context,
-                                               image_preextracted_features)
+                                               image_preextracted_features,
+                                               features_in_memory=False)
 
         read_and_translate(translator=captioner,
                            output_handler=out_handler,
