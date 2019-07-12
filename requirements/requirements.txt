@@ -1,5 +1,5 @@
 pyyaml>=5.1
-mxnet-mkl==1.5.0b20190710
+mxnet-mkl==1.4.1
 numpy>=1.14
 typing
 portalocker

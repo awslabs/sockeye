@@ -77,10 +77,16 @@ RUN groupadd --gid 500 ec2-user && \
     mkdir -p /home/ec2-user && \
     chown ec2-user:ec2-user /home/ec2-user
 
-# Install Sockeye
-# Make sure image is current with latest local commit
+# Everything below this ARG command re-runs if the local commit has changed
 ARG SOCKEYE_COMMIT
+
+# Install Sockeye, including Docker entry point script
 COPY . /opt/sockeye
 RUN cd /opt/sockeye && \
     pip install -r requirements/requirements.gpu-cu100.txt && \
-    python setup.py build install -r requirements/requirements.gpu-cu100.txt
+    python setup.py build install -r requirements/requirements.gpu-cu100.txt && \
+    cp /opt/sockeye/sockeye_contrib/horovod/entrypoint.sh /usr/local/bin/ && \
+    chmod +x /usr/local/bin/entrypoint.sh
+
+# Set entry point to use CUDA stubs when needed
+ENTRYPOINT ["entrypoint.sh"]
