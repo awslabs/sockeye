@@ -818,7 +818,10 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                                fixed_param_strategy=args.fixed_param_strategy)
 
         if args.horovod:
-            hvd.broadcast_parameters(params, root_rank=0)
+            # Use the copy of parameter values in context 0
+            with mx.Context(context[0]):
+                # Broadcast parameter values to all other workers
+                hvd.broadcast_parameters(params, root_rank=0)
 
         if args.dtype == C.DTYPE_FP16:
             training_model.cast(C.DTYPE_FP16)
