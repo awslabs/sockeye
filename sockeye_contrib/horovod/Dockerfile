@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y --allow-downgrades --allow-change-held-
     curl \
     vim \
     wget \
+    sudo \
     ca-certificates \
     libcudnn7=${CUDNN_VERSION} \
     libnccl2=${NCCL_VERSION} \
@@ -66,14 +67,15 @@ RUN ldconfig /usr/local/cuda/targets/x86_64-linux/lib/stubs && \
          pip install --no-cache-dir horovod && \
     ldconfig
 
-# Add default users for Ubuntu and Amazon Linux for ease of use with EC2 Deep
-# Learning AMIs
+# Add default users for Ubuntu and Amazon Linux for ease of use
 RUN groupadd --gid 1000 ubuntu && \
-    useradd --uid 1000 --gid ubuntu ubuntu && \
+    useradd --uid 1000 --gid ubuntu -G sudo ubuntu && \
+    echo "ubuntu ALL=(ALL) NOPASSWD:ALL" >/etc/sudoers.d/ubuntu && \
     mkdir -p /home/ubuntu && \
     chown ubuntu:ubuntu /home/ubuntu
 RUN groupadd --gid 500 ec2-user && \
-    useradd --uid 500 --gid ec2-user ec2-user && \
+    useradd --uid 500 --gid ec2-user -G sudo ec2-user && \
+    echo "ec2-user ALL=(ALL) NOPASSWD:ALL" >/etc/sudoers.d/ec2-user && \
     mkdir -p /home/ec2-user && \
     chown ec2-user:ec2-user /home/ec2-user
 
