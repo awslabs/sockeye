@@ -474,8 +474,9 @@ def determine_context(device_ids: List[int],
     :param disable_device_locking: Disable Sockeye's device locking feature.
     :param lock_dir: Directory to place device lock files in.
     :param exit_stack: An ExitStack from contextlib.
-    :param horovod_local_rank: An optional index specified only when running
-                               Horovod.  The local rank is used to assign GPUs.
+    :param horovod_local_rank: Only specified when running Horovod: worker local
+                               rank, a unique ID on this host used to assign
+                               GPUs.
 
     :return: A list with the context(s) to run on.
     """
@@ -490,7 +491,7 @@ def determine_context(device_ids: List[int],
                             "When using Horovod, --device-ids should be a negative integer indicating the number of "
                             "GPUs each worker should use.")
             n_ids = -device_ids[0]
-            context = [mx.gpu(i + horovod_local_rank * n_ids) for i in range(n_ids)]
+            context = [mx.gpu(_id + horovod_local_rank * n_ids) for _id in range(n_ids)]
         else:
             if disable_device_locking:
                 context = expand_requested_device_ids(device_ids)

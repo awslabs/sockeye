@@ -687,28 +687,32 @@ def train(args: argparse.Namespace) -> training.TrainState:
         args.output = temp_dir.name
         args.max_updates = 0
 
-    # When using Horovod, multiple instances of sockeye.train (workers) are
-    # launched via OpenMPI.  Each worker has a rank (unique among all workers)
-    # and local rank (unique on the current host).  For example, running on 2
-    # hosts with 4 GPUs each will assign ranks 0-7 and local ranks 0-3.
-    hvd_rank = 0
-    hvd_local_rank = 0
+    # When using Horovod, multiple workers (instances of sockeye.train) are
+    # launched via OpenMPI.  Each worker has a rank (unique among all workers in
+    # the training run) and a local rank (unique on the current host).  For
+    # example, running on 2 hosts with 4 slots each will assign ranks 0-7 and
+    # local ranks 0-4.
+    horovod_rank = 0
+    horovod_local_rank = 0
     if args.horovod:
         # Only import the Horovod module if we're using it.
         import horovod.mxnet as hvd
         hvd.init()
-        hvd_rank = hvd.rank()
-        hvd_local_rank = hvd.local_rank()
-        # When using Horovod, each worker uses a sub-directory within the main
-        # output directory.
-        args.output = os.path.join(args.output, 'workers', str(hvd_rank))
-        # When using Horovod, scale the learning rate by the number of workers.
-        # TODO: Control this behavior with a CLI arg?
+        horovod_rank = hvd.rank()
+        horovod_local_rank = hvd.local_rank()
+        # Each worker uses a separate output directory.  The primary worker
+        # (rank 0) writes files to the root of the output directory (standard
+        # behavior).  Secondary workers write files to rank-named
+        # sub-directories.
+        if horovod_rank > 0:
+            args.output = os.path.join(args.output, C.HOROVOD_SECONDARY_WORKERS_DIRNAME, str(horovod_rank))
+        # Scale the learning rate by the number of workers.
+        # TODO(horovod): Control this behavior with a CLI arg?
         args.initial_learning_rate *= hvd.size()
+        # Use a different random seed for each worker
+        args.seed += horovod_rank
 
-    # Use a different seed for each worker when running with Horovod.  Defaults
-    # to no change (+0) when running without Horovod.
-    utils.seed_rngs(args.seed + hvd_rank)
+    utils.seed_rngs(args.seed)
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
@@ -734,7 +738,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                           disable_device_locking=args.disable_device_locking,
                                           lock_dir=args.lock_dir,
                                           exit_stack=exit_stack,
-                                          horovod_local_rank=hvd_local_rank if args.horovod else None)
+                                          horovod_local_rank=horovod_local_rank if args.horovod else None)
         if args.batch_type == C.BATCH_TYPE_SENTENCE:
             check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
                                                                  "divisible by the number of devices. Choose a batch "
@@ -788,7 +792,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
             max_epochs=args.max_num_epochs,
             update_interval=args.update_interval,
             stop_training_on_decoder_failure=args.stop_training_on_decoder_failure,
-            hvd_rank=hvd_rank
+            horovod_rank=horovod_rank
         )
         if trainer_config.min_epochs is not None and trainer_config.max_epochs is not None:
             check_condition(trainer_config.min_epochs <= trainer_config.max_epochs,
@@ -818,9 +822,10 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                                fixed_param_strategy=args.fixed_param_strategy)
 
         if args.horovod:
-            # Use the copy of parameter values in context 0
+            # When using Horovod, synchronize initial parameter values across
+            # workers.  Broadcast worker 0's parameter values to all other
+            # workers.
             with mx.Context(context[0]):
-                # Broadcast parameter values to all other workers
                 hvd.broadcast_parameters(params, root_rank=0)
 
         if args.dtype == C.DTYPE_FP16:
@@ -836,6 +841,9 @@ def train(args: argparse.Namespace) -> training.TrainState:
         kvstore = mx.kvstore.create(args.kvstore)
 
         if args.horovod:
+            # Horovod provides a trainer that subclasses gluon.Trainer and uses
+            # allreduce to collect averaged gradients across all workers for
+            # each update.
             gluon_trainer = hvd.DistributedTrainer(params,
                                                    optimizer_config.name,
                                                    optimizer_config.params)

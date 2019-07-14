@@ -65,7 +65,7 @@ class TrainerConfig(Config):
                  max_epochs: Optional[int] = None,
                  update_interval: int = 1,
                  stop_training_on_decoder_failure: bool = False,
-                 hvd_rank: int = 0) -> None:
+                 horovod_rank: int = 0) -> None:
         super().__init__()
         self.output_dir = output_dir
         self.early_stopping_metric = early_stopping_metric
@@ -82,6 +82,7 @@ class TrainerConfig(Config):
         self.max_epochs = max_epochs
         self.update_interval = update_interval
         self.stop_training_on_decoder_failure = stop_training_on_decoder_failure
+        self.horovod_rank = horovod_rank
 
 
 class TrainState:
