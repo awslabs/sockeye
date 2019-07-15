@@ -118,8 +118,6 @@ class SockeyeModel(mx.gluon.Block):
             # encoder & decoder first (to know the decoder depth)
             self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix)
             self.decoder = decoder.get_decoder(self.config.config_decoder, prefix=self.prefix)
-            # TODO
-            self.decoder = cast(decoder.TransformerDecoder, self.decoder)
 
             self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                    vocab_size=self.config.vocab_target_size,
@@ -229,32 +227,51 @@ class SockeyeModel(mx.gluon.Block):
         logger.info('Loaded model config from "%s"', fname)
         return cast(ModelConfig, config)  # type: ignore
 
-    def save_params_to_file(self, fname: str):
+    def save_parameters(self, fname: str):
         """
         Saves model parameters to file.
         :param fname: Path to save parameters to.
         """
-        self.save_parameters(fname)
+        super().save_parameters(fname)
         logging.info('Saved params to "%s"', fname)
 
-    def load_params_from_file(self,
-                              fname: str,
-                              ctx: Union[mx.Context, List[mx.Context]] = None,
-                              allow_missing: bool = False,
-                              ignore_extra: bool = False):
-        """
-        Loads and sets model parameters from file.
+    def load_parameters(self,
+                        filename: str,
+                        ctx: Union[mx.Context, List[mx.Context]] = None,
+                        allow_missing: bool = False,
+                        ignore_extra: bool = False,
+                        cast_dtype: bool = False,
+                        dtype_source: str = 'current'):
+        """Load parameters from file previously saved by `save_parameters`.
 
-        :param fname: Path to load parameters from.
-        :param ctx: Context to load parameters to.
-        :param allow_missing: Whether to not fail on missing parameters.
-        :param ignore_extra: Whether to ignore extra parameters in the file.
+        Parameters
+        ----------
+        filename : str
+            Path to parameter file.
+        ctx : Context or list of Context, default cpu()
+            Context(s) to initialize loaded parameters on.
+        allow_missing : bool, default False
+            Whether to silently skip loading parameters not represents in the file.
+        ignore_extra : bool, default False
+            Whether to silently ignore parameters from the file that are not
+            present in this Block.
+        cast_dtype : bool, default False
+            Cast the data type of the NDArray loaded from the checkpoint to the dtype
+            provided by the Parameter if any.
+        dtype_source : str, default 'current'
+            must be in {'current', 'saved'}
+            Only valid if cast_dtype=True, specify the source of the dtype for casting
+            the parameters
+        References
+        ----------
+        `Saving and Loading Gluon Models \
+        <https://mxnet.incubator.apache.org/tutorials/gluon/save_load_params.html>`_
         """
-        utils.check_condition(os.path.exists(fname), "No model parameter file found under %s. "
+        utils.check_condition(os.path.exists(filename), "No model parameter file found under %s. "
                                                      "This is either not a model directory or the first training "
-                                                     "checkpoint has not happened yet." % fname)
-        self.load_parameters(fname, ctx=ctx, allow_missing=allow_missing, ignore_extra=ignore_extra)
-        logger.info('Loaded params from "%s" to "%s"', fname, mx.cpu() if ctx is None else ctx)
+                                                     "checkpoint has not happened yet." % filename)
+        super().load_parameters(filename, ctx=ctx, allow_missing=allow_missing, ignore_extra=ignore_extra)
+        logger.info('Loaded params from "%s" to "%s"', filename, mx.cpu() if ctx is None else ctx)
 
     @staticmethod
     def save_version(folder: str):
@@ -310,9 +327,7 @@ class SockeyeModel(mx.gluon.Block):
 
     @property
     def num_source_factors(self) -> int:
-        """
-        Returns the number of source factors of this model (at least 1).
-        """
+        """ Returns the number of source factors of this model (at least 1). """
         return self.config.config_data.num_source_factors
 
     @property
@@ -384,10 +399,10 @@ def load_model(model_folder: str,
 
     # TODO: store training precision in model config, or store final parameters in fp32 to make loading of params more forgiving
 
-    model.load_params_from_file(fname=params_fname,
-                                ctx=context,
-                                allow_missing=False,
-                                ignore_extra=False)
+    model.load_parameters(filename=params_fname,
+                          ctx=context,
+                          allow_missing=False,
+                          ignore_extra=False)
     for param in model.collect_params().values():
         param.grad_req = 'null'
 
