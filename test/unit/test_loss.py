@@ -24,7 +24,7 @@ import sockeye.utils
 
 
 # Dummy loss for testing
-class TestLoss(sockeye.loss.Loss):
+class DummyLoss(sockeye.loss.Loss):
     def hybrid_forward(self, F, outputs, labels):
         return (outputs + labels) * self.weight
 
@@ -33,7 +33,7 @@ class TestLoss(sockeye.loss.Loss):
 
 
 def test_loss_block():
-    b = TestLoss(name='test', output_name='output', label_name='label', weight=2.0)
+    b = DummyLoss(name='test', output_name='output', label_name='label', weight=2.0)
     b.initialize()
     assert b.name == 'test'
     assert b.output_name == 'output'

@@ -450,7 +450,7 @@ class GluonEarlyStoppingTrainer:
         """
         Saves model parameters at current checkpoint and optionally cleans up older parameter files to save disk space.
         """
-        self.model.save_params_to_file(self.current_params_fname)
+        self.model.save_parameters(self.current_params_fname)
         utils.cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep, self.state.checkpoint,
                                    self.state.best_checkpoint, self.config.keep_initializations)
 
@@ -518,7 +518,7 @@ class GluonEarlyStoppingTrainer:
         """
         # (1) Parameters
         params_fname = os.path.join(self.training_state_dirname, C.TRAINING_STATE_PARAMS_NAME)
-        self.model.load_params_from_file(params_fname, ctx=self.context, allow_missing=False, ignore_extra=False)
+        self.model.load_parameters(params_fname, ctx=self.context, allow_missing=False, ignore_extra=False)
 
         # (2) Optimizer states
         opt_state_fname = os.path.join(self.training_state_dirname, C.OPT_STATES_LAST)

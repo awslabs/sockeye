@@ -20,7 +20,6 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict
 
 import mxnet as mx
-import numpy as np
 
 from . import constants as C
 from . import utils
@@ -174,6 +173,110 @@ class CrossEntropyLoss(Loss):
         Create an instance of the EvalMetric that corresponds to this Loss function.
         """
         return PerplexityMetric()
+
+
+class CrossEntropyLossWithoutSoftmaxOutput(Loss):
+    """ no label smoothing supported """
+
+    def __init__(self,
+                 name: str = C.CROSS_ENTROPY,
+                 weight: float = 1.0,
+                 label_smoothing: float = 0.0,
+                 dtype: str = C.DTYPE_FP32,
+                 output_name: str = C.LOGITS_NAME,
+                 label_name: str = C.TARGET_LABEL_NAME,
+                 ignore_label: int = C.PAD_ID) -> None:
+        super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight)
+        self.ls = None
+        if label_smoothing > 0.0:
+            with self.name_scope():
+                self.ls = LabelSmoothing(epsilon=label_smoothing, units=8230)  # TODO
+        self.ignore_label = ignore_label
+        self._alpha = label_smoothing
+        self._dtype = dtype
+
+    def hybrid_forward(self, F, logits, labels):
+        pred = F.log_softmax(logits, axis=-1)
+
+        if self.ls is None:
+            # (batch, len)
+            loss = -F.pick(pred, labels, axis=-1, keepdims=False)
+        else:
+            loss = -F.sum(pred * self.ls(labels), axis=-1, keepdims=False)
+
+        # (batch, len,)
+        valid_mask = labels != self.ignore_label
+
+        # (batch, len)
+        loss = loss * valid_mask
+
+        # (1,)
+        ce = F.sum(loss) * self.weight
+        return ce, F.sum(valid_mask)
+
+    def create_metric(self) -> 'LossMetric':
+        """
+        Create an instance of the EvalMetric that corresponds to this Loss function.
+        """
+        return PerplexityMetric()
+
+
+class LabelSmoothing(mx.gluon.HybridBlock):
+    """Applies label smoothing. See https://arxiv.org/abs/1512.00567.
+
+    Parameters
+    ----------
+    axis : int, default -1
+        The axis to smooth.
+    epsilon : float, default 0.1
+        The epsilon parameter in label smoothing
+    sparse_label : bool, default True
+        Whether input is an integer array instead of one hot array.
+    units : int or None
+        Vocabulary size. If units is not given, it will be inferred from the input.
+    prefix : str, default 'rnn_'
+        Prefix for name of `Block`s
+        (and name of weight if params is `None`).
+    params : Parameter or None
+        Container for weight sharing between cells.
+        Created if `None`.
+    """
+    def __init__(self, axis=-1, epsilon=0.1, units=None,
+                 sparse_label=True, prefix=None, params=None):
+        super(LabelSmoothing, self).__init__(prefix=prefix, params=params)
+        self._axis = axis
+        self._epsilon = epsilon
+        self._sparse_label = sparse_label
+        self._units = units
+
+    def hybrid_forward(self, F, inputs, units=None): # pylint: disable=arguments-differ
+        """
+
+        Parameters
+        ----------
+        F
+        inputs : Symbol or NDArray
+            Shape (batch_size, length) or (batch_size, length, V)
+        units : int or None
+        Returns
+        -------
+        smoothed_label : Symbol or NDArray
+            Shape (batch_size, length, V)
+        """
+        if self._sparse_label:
+            assert units is not None or self._units is not None, \
+                'units needs to be given in function call or ' \
+                'instance initialization when sparse_label is False'
+            if units is None:
+                units = self._units
+            inputs = F.one_hot(inputs, depth=units)
+        if units is None and self._units is None:
+            return F.Custom(inputs, epsilon=self._epsilon, axis=self._axis,
+                            op_type='_smoothing_with_dim')
+        else:
+            if units is None:
+                units = self._units
+            return ((1 - self._epsilon) * inputs) + (self._epsilon / units)
 
 
 class PerplexityMetric(LossMetric):

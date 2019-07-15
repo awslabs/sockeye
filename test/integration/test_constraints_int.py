@@ -45,7 +45,7 @@ TEST_CONFIGS = [
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
-     "--batch-size 3 --beam-size 10 --beam-prune 1"),
+     "--batch-size 3 --beam-size 9 --beam-prune 1"),
     # no beam prune
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -55,7 +55,8 @@ TEST_CONFIGS = [
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 4 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 4 --optimizer adam --initial-learning-rate 0.01",
-     "--batch-size 1 --beam-size 10")]
+     "--batch-size 1 --beam-size 10")
+]
 
 
 @pytest.mark.parametrize("train_params, translate_params", TEST_CONFIGS)

@@ -319,17 +319,10 @@ class TransformerValidLengthMask(mx.gluon.HybridBlock):
         :param lengths: Sequence lengths. Shape: (batch,).
         :return:
         """
-        if mx.__version__.startswith("1.3"):
-            # TODO(fhieber): remove old branch eventually
-            # mxnet 1.3.1's broadcast_like operator does not support individual axes yet. This branch uses another way
-            # of creating the required zeros array.
-            # (batch, seq_len)
-            mask = F.sum(F.zeros_like(data), axis=2, keepdims=False)
-        else:
-            # (batch, 1)
-            mask = F.reshape(F.zeros_like(lengths), shape=(-1, 1))
-            # (batch, seq_len)
-            mask = F.broadcast_like(mask, data, lhs_axes=(1,), rhs_axes=(1,))
+        # (batch, 1)
+        mask = F.reshape(F.zeros_like(lengths), shape=(-1, 1))
+        # (batch, seq_len)
+        mask = F.broadcast_like(mask, data, lhs_axes=(1,), rhs_axes=(1,))
         # (batch_size, max_length)
         mask = F.SequenceMask(data=mask,
                               use_sequence_length=True,
@@ -364,21 +357,3 @@ class AutoRegressiveBias(mx.gluon.HybridBlock):
         bias = bias * -C.LARGE_VALUES[self._dtype]
         bias = F.expand_dims(bias, axis=0)
         return F.BlockGrad(bias)
-
-
-def get_autoregressive_bias(max_length: int, ctx, dtype: str = C.DTYPE_FP32) -> NDarrayOrSymbol:
-    """
-    Returns bias/mask to ensure position i can only attend to positions <i.
-
-    :param max_length: Sequence length.
-    :param dtype: dtype of bias
-    :return: Bias symbol of shape (1, max_length, max_length).
-    """
-    F = mx.nd
-    length_array = F.arange(max_length, ctx=ctx, dtype=dtype)
-    # matrix with lower triangle and main diagonal set to 0, upper triangle set to 1
-    bias = F.broadcast_greater(F.reshape(length_array, shape=(1, -1)),
-                               F.reshape(length_array, shape=(-1, 1)))
-    bias = bias * -C.LARGE_VALUES[dtype]
-    bias = F.reshape(bias, shape=(1, max_length, max_length))
-    return F.BlockGrad(bias)

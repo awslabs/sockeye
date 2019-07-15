@@ -1296,7 +1296,8 @@ class Translator:
             predicted_output_lengths.append(predicted_output_length)
 
             # Decoder init states
-            decoder_init_states = model.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths, is_inference=True)
+            decoder_init_states = model.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths,
+                                                                        is_inference=True)
             # replicate encoder/init module results beam size times. Shape: (batch*beam, ...)
             decoder_init_states = [s.repeat(repeats=self.beam_size, axis=0) for s in decoder_init_states]
             model_state = ModelState(decoder_init_states)
@@ -1328,18 +1329,12 @@ class Translator:
             prev_word = prev_word.astype(self.dtype, copy=False)
             decoder_out, new_states, step_additional_outputs = model.decode_step(prev_word, state.states)
             state.states = new_states
-
             # Reduced size of output layer if vocab_slice_ids is not None
             logits = model.output_layer(decoder_out, vocab_slice_ids).astype('float32', copy=False)
-            if self.skip_softmax:
-                model_out = logits
-            else:
-                model_out = logits.softmax(axis=-1)
-
+            model_out = logits if self.skip_softmax else logits.softmax(axis=-1)
             model_outs.append(model_out)
             model_attention_probs.append(mx.nd.zeros_like(logits))  # TODO
             model_states.append(state)
-
         scores, attention_probs = self._combine_predictions(model_outs, model_attention_probs)
         return scores, attention_probs, model_states
 
@@ -1356,7 +1351,6 @@ class Translator:
         :param attention_probs: List of Shape(beam_size, bucket_key).
         :return: Combined scores, averaged attention scores.
         """
-        # average attention prob scores. TODO: is there a smarter way to do this?
         attention_prob_score = utils.average_arrays(attention_probs)
 
         # combine model predictions and convert to neg log probs

@@ -811,9 +811,9 @@ def train(args: argparse.Namespace) -> training.TrainState:
         optimizer_config = create_optimizer_config(args)
         training_model.initialize(optimizer_config.initializer, ctx=context)
         if args.params is not None:  # load existing parameters if present
-            training_model.load_params_from_file(fname=args.params,
-                                                 ctx=context,
-                                                 allow_missing=args.allow_missing_params or model_config.lhuc)
+            training_model.load_parameters(filename=args.params,
+                                           ctx=context,
+                                           allow_missing=args.allow_missing_params or model_config.lhuc)
         params = training_model.collect_params()
         # set grad_req for fixed params
         params = set_grad_req_for_fixed_params(config=model_config,
