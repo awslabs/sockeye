@@ -299,7 +299,10 @@ class GluonEarlyStoppingTrainer:
         data_iter.reset()
         val_metrics = [lf.create_metric() for lf in self.loss_functions]
         for batch in data_iter:
-            batch = batch.split_and_load(ctx=self.context)
+            # TODO(horovod): Running with Horovod on multiple GPUs _per worker_
+            # causes a CUDA error 77 (illegal memory access) when evaluating the
+            # validation set using more than one context.
+            batch = batch.split_and_load(ctx=[self.context[0]] if self.config.horovod_rank is not None else self.context)
             sharded_loss_outputs = []  # type: List[List[Tuple[mx.nd.NDArray, mx.nd.NDArray]]]
             for inputs, labels in batch.shards():
                 if self.dtype == C.DTYPE_FP16:

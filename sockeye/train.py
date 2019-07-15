@@ -821,9 +821,11 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                                fixed_param_names=args.fixed_param_names,
                                                fixed_param_strategy=args.fixed_param_strategy)
 
-        if args.horovod:
-            # When using Horovod, synchronize the parameter initialization point
-            # across all workers by broadcasting worker 0's parameter values.
+        # When using Horovod, synchronize the parameter initialization point
+        # across all workers by broadcasting worker 0's values.  This is not
+        # required when resuming training as synchronized training states
+        # already exist.
+        if args.horovod and not resume_training:
             for ctx in context:
                 with mx.Context(ctx):
                     hvd.broadcast_parameters(params, root_rank=0)
