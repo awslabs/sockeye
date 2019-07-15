@@ -822,11 +822,11 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                                fixed_param_strategy=args.fixed_param_strategy)
 
         if args.horovod:
-            # When using Horovod, synchronize initial parameter values across
-            # workers.  Broadcast worker 0's parameter values to all other
-            # workers.
-            with mx.Context(context[0]):
-                hvd.broadcast_parameters(params, root_rank=0)
+            # When using Horovod, synchronize the parameter initialization point
+            # across all workers by broadcasting worker 0's parameter values.
+            for ctx in context:
+                with mx.Context(ctx):
+                    hvd.broadcast_parameters(params, root_rank=0)
 
         if args.dtype == C.DTYPE_FP16:
             training_model.cast(C.DTYPE_FP16)
