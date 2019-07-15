@@ -173,7 +173,7 @@ class SockeyeModel(mx.gluon.Block):
         """
         # TODO: do we need valid length!?
         valid_length = mx.nd.ones(shape=(step_input.shape[0],), ctx=step_input.context)
-        # target_embed: (batch_size, num_factors, num_hidden)  # TODO(FH): why num_factors?
+        # target_embed: (batch_size, num_hidden)
         target_embed, _ = self.embedding_target(step_input, valid_length=valid_length)
 
         # TODO: add step_additional_outputs
@@ -328,13 +328,11 @@ class SockeyeModel(mx.gluon.Block):
     @property
     def max_supported_seq_len_source(self) -> Optional[int]:
         """ If not None this is the maximally supported source length during inference (hard constraint). """
-        # TODO: this forced to training max length due to pos embeddings
         return self.training_max_seq_len_source
 
     @property
     def max_supported_seq_len_target(self) -> Optional[int]:
         """ If not None this is the maximally supported target length during inference (hard constraint). """
-        # TODO: this forced to training max length due to pos embeddings
         return self.training_max_seq_len_target
 
     @property

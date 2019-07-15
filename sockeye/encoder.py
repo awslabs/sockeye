@@ -137,7 +137,6 @@ class Embedding(Encoder):
         self.is_source = is_source
 
         with self.name_scope():
-            # TODO: weight_initializer
             if embed_weight is None:
                 self.embed_weight = self.params.get('weight', shape=(self.config.vocab_size, self.config.num_embed))
             else:

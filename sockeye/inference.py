@@ -1356,7 +1356,6 @@ class Translator:
         :param attention_probs: List of Shape(beam_size, bucket_key).
         :return: Combined scores, averaged attention scores.
         """
-        # average attention prob scores. TODO: is there a smarter way to do this?
         attention_prob_score = utils.average_arrays(attention_probs)
 
         # combine model predictions and convert to neg log probs

@@ -184,8 +184,6 @@ class LengthRatioConfig(config.Config):
     def __init__(self, num_layers: int, weight: float) -> None:
         super().__init__()
         self.num_layers = num_layers
-        # TODO: keeping weight here is redundant because it is also stored
-        # in the loss config, but it's used to test if we need length prediction
         self.weight = weight
 
 

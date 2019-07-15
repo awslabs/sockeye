@@ -20,7 +20,6 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict
 
 import mxnet as mx
-import numpy as np
 
 from . import constants as C
 from . import utils
