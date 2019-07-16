@@ -20,7 +20,7 @@ from ..arguments import regular_file, regular_folder, add_training_data_args, \
     add_vocab_args, add_training_output_args, add_monitoring_args, \
     add_device_args, int_greater_or_equal, add_model_parameters, \
     add_training_args, add_logging_args, add_max_output_cli_args, \
-    add_translate_cli_args
+    add_translate_cli_args, add_score_cli_args
 
 
 def add_image_source_root_args(params, required=False):
@@ -148,6 +148,14 @@ def add_image_caption_cli_args(params):
     add_translate_cli_args(params)
     add_image_source_root_args(params, required=False)
     add_max_output_cli_args(params)
+    # Used only if images as input instead of features
+    add_image_model_parameters(params)
+    add_image_size_args(params)
+
+
+def add_image_score_caption_cli_args(params):
+    add_score_cli_args(params)
+    add_image_source_root_args(params, required=False)
     # Used only if images as input instead of features
     add_image_model_parameters(params)
     add_image_size_args(params)

@@ -10,6 +10,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.103]
+### Added
+- Added ability to score image-sentence pairs by extending the scoring feature originally implemented for machine 
+  translation to the image captioning module.
+
 ## [1.18.102]
 ### Fixed
 - Fixed loading of more than 10 source vocabulary files to be in the right, numerical order.
