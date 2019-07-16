@@ -17,9 +17,8 @@ Simple Training CLI.
 
 # Start the forkserver. It is important that this is done before any other imports so that the forkserver is in a clean
 # state.
-if __name__ == "__main__":
-    import sockeye.multiprocessing_utils as mp
-    mp.initialize()
+import sockeye.multiprocessing_utils as mp
+mp.initialize()
 
 
 import argparse

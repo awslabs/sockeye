@@ -12,9 +12,10 @@
 # permissions and limitations under the License.
 
 import pytest
+from unittest import mock
 
 import sockeye.constants as C
-from sockeye.vocab import build_vocab, get_ordered_tokens_from_vocab, is_valid_vocab
+from sockeye.vocab import build_vocab, get_ordered_tokens_from_vocab, is_valid_vocab, _get_sorted_source_vocab_fnames
 
 test_vocab = [
         # Example 1
@@ -100,3 +101,11 @@ def test_get_ordered_tokens_from_vocab(vocab, expected_output):
 )
 def test_verify_valid_vocab(vocab, expected_result):
     assert is_valid_vocab(vocab) == expected_result
+
+
+def test_get_sorted_source_vocab_fnames():
+    expected_fnames = [C.VOCAB_SRC_NAME % i for i in [1, 2, 10]]
+    with mock.patch('os.listdir') as mocked_listdir:
+        mocked_listdir.return_value = [C.VOCAB_SRC_NAME % i for i in [2, 1, 10]]
+        fnames = _get_sorted_source_vocab_fnames(None)
+        assert fnames == expected_fnames
