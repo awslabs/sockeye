@@ -1,4 +1,4 @@
-# Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -35,7 +35,7 @@ from ..log import setup_main_logger
 from ..output_handler import get_output_handler
 from ..utils import check_condition
 from .train import read_feature_shape
-from.captioner import _extract_features
+from .captioner import _extract_features
 from .encoder import ImageLoadedCnnEncoderConfig  # needed otherwise the model fails to be loaded
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)

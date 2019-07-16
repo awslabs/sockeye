@@ -1,4 +1,4 @@
-# Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -33,11 +33,11 @@ logger = logging.getLogger(__name__)
 
 class Scorer:
     """
-    Scorer class takes a ScoringModel and uses it to score a stream of parallel sentences.
+    Scorer class takes a ScoringModel and uses it to score a stream of parallel image-sentence pairs.
     It also takes the vocabularies so that the original sentences can be printed out, if desired.
 
     :param model: The model to score with.
-    :param source_vocabs: The source vocabularies.
+    :param source_vocabs: The source vocabularies. Not used, kept for consistency with main sockeye.score.Scorer.
     :param target_vocab: The target vocabulary.
     """
     def __init__(self,
@@ -45,7 +45,6 @@ class Scorer:
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
                  constant_length_ratio: float = -1.0) -> None:
-        #self.source_vocab_inv = vocab.reverse_vocab(source_vocabs[0])
         self.target_vocab_inv = vocab.reverse_vocab(target_vocab)
         self.model = model
         self.exclude_list = {None, target_vocab[C.EOS_SYMBOL], C.PAD_ID}
