@@ -65,7 +65,7 @@ class TrainerConfig(Config):
                  max_epochs: Optional[int] = None,
                  update_interval: int = 1,
                  stop_training_on_decoder_failure: bool = False,
-                 horovod_rank: int = 0) -> None:
+                 horovod_rank: Optional[int] = None) -> None:
         super().__init__()
         self.output_dir = output_dir
         self.early_stopping_metric = early_stopping_metric
@@ -299,7 +299,7 @@ class GluonEarlyStoppingTrainer:
         data_iter.reset()
         val_metrics = [lf.create_metric() for lf in self.loss_functions]
         for batch in data_iter:
-            # TODO(horovod): Running with Horovod on multiple GPUs _per worker_
+            # TODO(horovod): Running with Horovod and multiple GPUs _per worker_
             # causes a CUDA error 77 (illegal memory access) when evaluating the
             # validation set using more than one context.
             batch = batch.split_and_load(ctx=[self.context[0]] if self.config.horovod_rank is not None else self.context)

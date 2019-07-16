@@ -802,7 +802,7 @@ def add_training_args(params):
 
     train_params.add_argument('--horovod',
                               action='store_true',
-                              help='Use Horovod for distributed training (Sergeev and Del Balso 2018, '
+                              help='Use Horovod/OpenMPI for distributed training (Sergeev and Del Balso 2018, '
                                    'arxiv.org/abs/1802.05799).  When using this option, run Sockeye with `horovodrun '
                                    '-np ... -H ... python`.')
 

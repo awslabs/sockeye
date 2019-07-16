@@ -1,27 +1,27 @@
-# Distributed Training with Horovod
+# Docker Image
 
-## Docker Image
-
-Run the build script from the Sockeye root directory:
+Run the Docker build script from the Sockeye root directory:
 
 ```bash
-bash sockeye_contrib/horovod/build.sh
+bash sockeye_contrib/docker/build.sh
 ```
 
-This produces a nvidia-docker compatible image containing Horovod and the current commit of Sockeye.  The Dockerfile is derived from the [official Horovod Dockerfile](https://github.com/horovod/horovod/blob/958695e7343ce470ad3b0d9df1967b5af3bd6ec3/Dockerfile), also released under the Apache 2.0 license.
+The script produces a nvidia-docker compatible image with this version Sockeye, including full CPU/GPU support and Horovod/OpenMPI.  The Dockerfile uses logic from the [official Horovod Dockerfile](https://github.com/horovod/horovod/blob/958695e7343ce470ad3b0d9df1967b5af3bd6ec3/Dockerfile), also released under the Apache 2.0 license.
 
-## Setup
+## Example: Distributed Training with Horovod
+
+### Host Setup
 
 See the Horovod instructions for setting up hosts:
 
 - [Performance improvements for GPU hosts](https://github.com/horovod/horovod/blob/master/docs/gpus.rst)
 - [Passwordless SSH for running on multiple hosts](https://github.com/horovod/horovod/blob/master/docs/docker.rst#running-on-multiple-machines)
 
-## Running
+### Running
 
 This is a test system running on CPUs across 2 hosts.
 
-### Secondary Host(s)
+#### Secondary Host(s)
 
 On each secondary host, start a Docker container running sshd.  Horovod will connect to these hosts to launch workers.
 
@@ -33,7 +33,7 @@ docker run --rm -i --network=host -v /mnt/share/ssh:/home/ec2-user/.ssh -v /mnt/
     bash -c "/usr/sbin/sshd -p 12345; sleep infinity"
 ```
 
-### Primary Host
+#### Primary Host
 
 On the primary host, start Sockeye/Horovod training in a Docker container.
 

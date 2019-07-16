@@ -156,6 +156,7 @@ def test_inference_args(test_params, expected_params):
               transformer_dropout_prepost=0.1,
               optimizer='adam',
               optimizer_params=None,
+              horovod=False,
               kvstore='device',
               min_samples=None,
               max_samples=None,

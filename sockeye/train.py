@@ -692,8 +692,8 @@ def train(args: argparse.Namespace) -> training.TrainState:
     # the training run) and a local rank (unique on the current host).  For
     # example, running on 2 hosts with 4 slots each will assign ranks 0-7 and
     # local ranks 0-4.
-    horovod_rank = 0
-    horovod_local_rank = 0
+    horovod_rank = None  # type: int
+    horovod_local_rank = None  # type: int
     if args.horovod:
         # Only import the Horovod module if we're using it.
         import horovod.mxnet as hvd
@@ -706,9 +706,6 @@ def train(args: argparse.Namespace) -> training.TrainState:
         # sub-directories.
         if horovod_rank > 0:
             args.output = os.path.join(args.output, C.HOROVOD_SECONDARY_WORKERS_DIRNAME, str(horovod_rank))
-        # Scale the learning rate by the number of workers.
-        # TODO(horovod): Control this behavior with a CLI arg?
-        args.initial_learning_rate *= hvd.size()
         # Use a different random seed for each worker
         args.seed += horovod_rank
 
@@ -738,7 +735,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                           disable_device_locking=args.disable_device_locking,
                                           lock_dir=args.lock_dir,
                                           exit_stack=exit_stack,
-                                          horovod_local_rank=horovod_local_rank if args.horovod else None)
+                                          horovod_local_rank=horovod_local_rank)
         if args.batch_type == C.BATCH_TYPE_SENTENCE:
             check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
                                                                  "divisible by the number of devices. Choose a batch "
