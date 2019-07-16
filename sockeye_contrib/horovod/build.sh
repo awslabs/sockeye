@@ -7,7 +7,7 @@ if [ ! -f ${DOCKERFILE} ]; then
   exit 2
 fi
 
-REPO="sockeye-horovod"
+REPO="sockeye"
 TAG=$(git rev-parse --short HEAD)
 SOCKEYE_COMMIT=$(git rev-parse HEAD)
 

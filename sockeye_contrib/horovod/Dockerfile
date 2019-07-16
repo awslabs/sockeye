@@ -61,10 +61,10 @@ RUN cat /etc/ssh/ssh_config | grep -v StrictHostKeyChecking > /etc/ssh/ssh_confi
 ENV MXNET_VERSION=1.5.0b20190710
 RUN pip install mxnet-cu100mkl==${MXNET_VERSION}
 
-# Install Horovod, temporarily using CUDA stubs
+# Install Horovod and the MPI Python library, temporarily using CUDA stubs
 RUN ldconfig /usr/local/cuda/targets/x86_64-linux/lib/stubs && \
     HOROVOD_GPU_ALLREDUCE=NCCL HOROVOD_WITH_MXNET=1 \
-         pip install --no-cache-dir horovod && \
+        pip install --no-cache-dir horovod mpi4py && \
     ldconfig
 
 # Add default users for Ubuntu and Amazon Linux for ease of use
@@ -85,7 +85,7 @@ ARG SOCKEYE_COMMIT
 # Install Sockeye, including Docker entry point script
 COPY . /opt/sockeye
 RUN cd /opt/sockeye && \
-    pip install -r requirements/requirements.gpu-cu100.txt && \
+    pip install --no-cache-dir -r requirements/requirements.gpu-cu100.txt && \
     python setup.py build install -r requirements/requirements.gpu-cu100.txt && \
     cp /opt/sockeye/sockeye_contrib/horovod/entrypoint.sh /usr/local/bin/ && \
     chmod +x /usr/local/bin/entrypoint.sh
