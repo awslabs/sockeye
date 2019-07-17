@@ -23,12 +23,14 @@ try:
 except ImportError:
     hvd = None
 
-# Import mpi4py.MPI but do not automatically initialize the MPI environment.
-# Horovod already initializes the MPI environment and running multiple
-# initializations causes errors.
+# Import mpi4py.MPI but do not automatically initialize/finalize the MPI
+# environment.  Horovod already initializes the environment and running multiple
+# initializations causes errors.  Finalization causes errors with other
+# processes.
 try:
     import mpi4py
     mpi4py.rc.initialize = False
+    mpi4py.rc.finalize = False
     from mpi4py import MPI
 except ImportError:
     mpi4py = None

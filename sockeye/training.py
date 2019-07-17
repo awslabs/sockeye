@@ -31,6 +31,7 @@ import sockeye.multiprocessing_utils as mp_utils
 from . import checkpoint_decoder
 from . import constants as C
 from . import data_io
+from . import horovod_mpi
 from . import loss
 from . import lr_scheduler
 from . import utils
@@ -338,9 +339,28 @@ class GluonEarlyStoppingTrainer:
         for val_metric in val_metrics:
             if val_metric.name == self.config.early_stopping_metric:
                 value = val_metric.get()
-                if utils.metric_value_is_better(value,
-                                                self.state.best_metric,
-                                                self.config.early_stopping_metric):
+                # When using Horovod, the primary worker makes an authoritative
+                # check of whether metric value has improved and broadcasts the
+                # result to secondary workers.  Non-determinism in the order of
+                # GPU operations can lead to slight numeric variation across
+                # workers, causing potential desync if each worker makes its own
+                # check for key training decisions (reducing learning rate,
+                # early stopping, etc.).
+                if self.config.horovod_rank is not None and self.config.horovod_rank > 0:
+                    # Horovod secondary workers: wait for primary worker to send
+                    # result.
+                    value_is_better = None  # type: bool
+                    value_is_better = horovod_mpi.MPI.COMM_WORLD.bcast(value_is_better, root=0)
+                else:
+                    # Horovod primary worker or non-Horovod: make authoritative
+                    # metric check.
+                    value_is_better = utils.metric_value_is_better(value,
+                                                                   self.state.best_metric,
+                                                                   self.config.early_stopping_metric)
+                    if self.config.horovod_rank == 0:
+                        # Horovod primary worker: broadcast result.
+                        horovod_mpi.MPI.COMM_WORLD.bcast(value_is_better, root=0)
+                if value_is_better:
                     logger.info("Validation-%s improved to %f (delta=%f).", self.config.early_stopping_metric,
                                 value, abs(value - self.state.best_metric))
                     self.state.best_metric = value

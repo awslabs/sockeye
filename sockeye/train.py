@@ -136,7 +136,7 @@ def check_resume(args: argparse.Namespace, output_folder: str, horovod_rank: Opt
     if horovod_rank is not None and horovod_rank == 0:
         # Horovod primary worker: make sure sub-directory for secondary worker
         # outputs exists and signal secondary workers.
-        os.makedirs(os.path.join(output_folder, C.HOROVOD_SECONDARY_WORKERS_DIRNAME))
+        os.makedirs(os.path.join(output_folder, C.HOROVOD_SECONDARY_WORKERS_DIRNAME), exist_ok=True)
         primary_worker_dir_check = True
         horovod_mpi.MPI.COMM_WORLD.bcast(primary_worker_dir_check, root=0)
 
@@ -232,6 +232,10 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     validation_sources = [str(os.path.abspath(source)) for source in validation_sources]
     validation_target = str(os.path.abspath(args.validation_target))
 
+    if args.horovod:
+        horovod_data_error_msg = "Horovod training requires prepared training data.  Use `python -m " \
+                                 "sockeye.prepare_data` and specify with %s" % C.TRAINING_ARG_PREPARED_DATA
+        check_condition(args.prepared_data is not None, horovod_data_error_msg)
     either_raw_or_prepared_error_msg = "Either specify a raw training corpus with %s and %s or a preprocessed corpus " \
                                        "with %s." % (C.TRAINING_ARG_SOURCE,
                                                      C.TRAINING_ARG_TARGET,
