@@ -10,7 +10,7 @@
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
-"""Horovod and OpenMPI support"""
+"""Optional Horovod and OpenMPI support"""
 
 # Import MPI-related packages once and in order.  Horovod should be initialized
 # once and mpi4py should not auto-initialize.
@@ -18,11 +18,18 @@
 # Import Horovod but do not call `init` yet.  Initialization should be called
 # as part of the main program after all modules (including Sockeye modules) have
 # been imported.
-import horovod.mxnet as hvd
+try:
+    import horovod.mxnet as hvd
+except ImportError:
+    hvd = None
 
 # Import mpi4py.MPI but do not automatically initialize the MPI environment.
 # Horovod already initializes the MPI environment and running multiple
 # initializations causes errors.
-import mpi4py
-mpi4py.rc.initialize = False
-from mpi4py import MPI
+try:
+    import mpi4py
+    mpi4py.rc.initialize = False
+    from mpi4py import MPI
+except ImportError:
+    mpi4py = None
+    MPI = None
