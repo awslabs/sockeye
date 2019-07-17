@@ -30,6 +30,7 @@ import numpy as np
 
 from . import config
 from . import constants as C
+from . import horovod_mpi
 from . import vocab
 from .utils import check_condition, smart_open, get_tokens, OnlineMeanAndVariance
 
@@ -696,9 +697,10 @@ def get_prepared_data_iters(prepared_data_dir: str,
                             batch_size: int,
                             batch_by_words: bool,
                             batch_num_devices: int,
-                            permute: bool = True) -> Tuple['BaseParallelSampleIter',
-                                                           'BaseParallelSampleIter',
-                                                           'DataConfig', List[vocab.Vocab], vocab.Vocab]:
+                            permute: bool = True,
+                            using_horovod: bool = False) -> Tuple['BaseParallelSampleIter',
+                                                                  'BaseParallelSampleIter',
+                                                                  'DataConfig', List[vocab.Vocab], vocab.Vocab]:
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
@@ -753,7 +755,8 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                            batch_size,
                                            bucket_batch_sizes,
                                            num_factors=len(data_info.sources),
-                                           permute=permute)
+                                           permute=permute,
+                                           using_horovod=using_horovod)
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=target_vocab[C.EOS_SYMBOL],
@@ -1345,14 +1348,22 @@ class ParallelDataSet(Sized):
         mx.nd.save(fname, self.source + self.target)
 
     @staticmethod
-    def load(fname: str) -> 'ParallelDataSet':
+    def load(fname: str, horovod_split: bool = False) -> 'ParallelDataSet':
         """
-        Loads a dataset from a binary .npy file.
+        Loads a dataset from a binary .npy file.  Option to split across Horovod
+        workers, where each worker loads a different slice based on its rank.
         """
         data = mx.nd.load(fname)
         n = len(data) // 2
         source = data[:n]
         target = data[n:2 * n]
+        if horovod_split:
+            split_index = horovod_mpi.hvd.rank()
+            total_splits = horovod_mpi.hvd.size()
+            i = split_index / total_splits
+            j = (split_index + 1) / total_splits
+            source = [s[math.floor(i * s.shape[0]):math.floor(j * s.shape[0])] for s in source]
+            target = [t[math.floor(i * t.shape[0]):math.floor(j * t.shape[0])] for t in target]
         assert len(source) == len(target)
         return ParallelDataSet(source, target)
 
@@ -1622,9 +1633,11 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                  bucket_batch_sizes,
                  num_factors: int = 1,
                  permute: bool = True,
-                 dtype='float32') -> None:
+                 using_horovod: bool = False,
+                 dtype = 'float32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          num_factors=num_factors, permute=permute, dtype=dtype)
+        self.using_horovod = using_horovod
         assert len(shards_fnames) > 0
         self.shards_fnames = list(shards_fnames)
         self.shard_index = -1
@@ -1634,8 +1647,9 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
     def _load_shard(self):
         shard_fname = self.shards_fnames[self.shard_index]
         logger.info("Loading shard %s.", shard_fname)
-        dataset = ParallelDataSet.load(self.shards_fnames[self.shard_index]).fill_up(self.bucket_batch_sizes,
-                                                                                     seed=self.shard_index)
+        dataset = ParallelDataSet.load(self.shards_fnames[self.shard_index],
+                                       horovod_split=self.using_horovod).fill_up(self.bucket_batch_sizes,
+                                                                                 seed=self.shard_index)
         self.shard_iter = ParallelSampleIter(data=dataset,
                                              buckets=self.buckets,
                                              batch_size=self.batch_size,

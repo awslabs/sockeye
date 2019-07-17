@@ -66,7 +66,7 @@ class TrainerConfig(Config):
                  max_epochs: Optional[int] = None,
                  update_interval: int = 1,
                  stop_training_on_decoder_failure: bool = False,
-                 horovod_rank: Optional[int] = None) -> None:
+                 using_horovod: bool = False) -> None:
         super().__init__()
         self.output_dir = output_dir
         self.early_stopping_metric = early_stopping_metric
@@ -83,7 +83,7 @@ class TrainerConfig(Config):
         self.max_epochs = max_epochs
         self.update_interval = update_interval
         self.stop_training_on_decoder_failure = stop_training_on_decoder_failure
-        self.horovod_rank = horovod_rank
+        self.using_horovod = using_horovod
 
 
 class TrainState:
@@ -303,7 +303,7 @@ class GluonEarlyStoppingTrainer:
             # TODO(horovod): Running with Horovod and multiple GPUs _per worker_
             # causes a CUDA error 77 (illegal memory access) when evaluating the
             # validation set using more than one context.
-            batch = batch.split_and_load(ctx=[self.context[0]] if self.config.horovod_rank is not None else self.context)
+            batch = batch.split_and_load(ctx=[self.context[0]] if self.config.using_horovod else self.context)
             sharded_loss_outputs = []  # type: List[List[Tuple[mx.nd.NDArray, mx.nd.NDArray]]]
             for inputs, labels in batch.shards():
                 if self.dtype == C.DTYPE_FP16:
@@ -346,7 +346,7 @@ class GluonEarlyStoppingTrainer:
                 # workers, causing potential desync if each worker makes its own
                 # check for key training decisions (reducing learning rate,
                 # early stopping, etc.).
-                if self.config.horovod_rank is not None and self.config.horovod_rank > 0:
+                if self.config.using_horovod and horovod_mpi.hvd.rank() > 0:
                     # Horovod secondary workers: wait for primary worker to send
                     # result.
                     value_is_better = None  # type: bool
@@ -357,7 +357,7 @@ class GluonEarlyStoppingTrainer:
                     value_is_better = utils.metric_value_is_better(value,
                                                                    self.state.best_metric,
                                                                    self.config.early_stopping_metric)
-                    if self.config.horovod_rank == 0:
+                    if self.config.using_horovod and horovod_mpi.hvd.rank() == 0:
                         # Horovod primary worker: broadcast result.
                         horovod_mpi.MPI.COMM_WORLD.bcast(value_is_better, root=0)
                 if value_is_better:
