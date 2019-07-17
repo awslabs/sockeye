@@ -39,6 +39,7 @@ from . import constants as C
 from . import data_io
 from . import decoder
 from . import encoder
+from . import horovod_mpi
 from . import layers
 from . import loss
 from . import lr_scheduler
@@ -86,17 +87,24 @@ def check_arg_compatibility(args: argparse.Namespace):
     pass
 
 
-def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
+def check_resume(args: argparse.Namespace, output_folder: str, horovod_rank: Optional[int] = None) -> bool:
     """
     Check if we should resume a broken training run.
 
     :param args: Arguments as returned by argparse.
     :param output_folder: Main output folder for the model.
+    :param horovod_rank: Horovod/MPI rank, None when not using Horovod.
+
     :return: Flag signaling if we are resuming training and the directory with
         the training status.
     """
     resume_training = False
     training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
+    if horovod_rank is not None and horovod_rank > 0:
+        # Horovod secondary workers: wait for primary worker to create the sub-
+        # directory where secondary workers create output directories.
+        primary_worker_dir_check = False
+        horovod_mpi.MPI.COMM_WORLD.bcast(primary_worker_dir_check, root=0)
     if os.path.exists(output_folder):
         if args.overwrite_output:
             logger.info("Removing existing output folder %s.", output_folder)
@@ -125,6 +133,12 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
                         "Will start training from scratch.", output_folder)
     else:
         os.makedirs(output_folder)
+    if horovod_rank is not None and horovod_rank == 0:
+        # Horovod primary worker: make sure sub-directory for secondary worker
+        # outputs exists and signal secondary workers.
+        os.makedirs(os.path.join(output_folder, C.HOROVOD_SECONDARY_WORKERS_DIRNAME))
+        primary_worker_dir_check = True
+        horovod_mpi.MPI.COMM_WORLD.bcast(primary_worker_dir_check, root=0)
 
     return resume_training
 
@@ -695,11 +709,9 @@ def train(args: argparse.Namespace) -> training.TrainState:
     horovod_rank = None  # type: int
     horovod_local_rank = None  # type: int
     if args.horovod:
-        # Only import the Horovod module if we're using it.
-        import horovod.mxnet as hvd
-        hvd.init()
-        horovod_rank = hvd.rank()
-        horovod_local_rank = hvd.local_rank()
+        horovod_mpi.hvd.init()
+        horovod_rank = horovod_mpi.hvd.rank()
+        horovod_local_rank = horovod_mpi.hvd.local_rank()
         # Each worker uses a separate output directory.  The primary worker
         # (rank 0) writes files to the root of the output directory (standard
         # behavior).  Secondary workers write files to rank-named
@@ -713,7 +725,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
-    resume_training = check_resume(args, output_folder)
+    resume_training = check_resume(args, output_folder, horovod_rank)
 
     setup_main_logger(file_logging=True,
                       console=not args.quiet,
@@ -825,7 +837,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
         if args.horovod and not resume_training:
             for ctx in context:
                 with mx.Context(ctx):
-                    hvd.broadcast_parameters(params, root_rank=0)
+                    horovod_mpi.hvd.broadcast_parameters(params, root_rank=0)
 
         if args.dtype == C.DTYPE_FP16:
             training_model.cast(C.DTYPE_FP16)
@@ -843,9 +855,9 @@ def train(args: argparse.Namespace) -> training.TrainState:
             # Horovod provides a trainer that subclasses gluon.Trainer and uses
             # allreduce to collect averaged gradients across all workers for
             # each update.
-            gluon_trainer = hvd.DistributedTrainer(params,
-                                                   optimizer_config.name,
-                                                   optimizer_config.params)
+            gluon_trainer = horovod_mpi.hvd.DistributedTrainer(params,
+                                                          optimizer_config.name,
+                                                          optimizer_config.params)
         else:
             gluon_trainer = gluon.Trainer(params,
                                           optimizer_config.name,
