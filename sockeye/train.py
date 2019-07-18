@@ -605,12 +605,13 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
     else:
         raise ValueError("Invalid weight initialization type: %s" % args.weight_init)
 
-    # TODO: remove lr schedulers entirely and let the early stopping trainer handle learning rates.
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
                                              args.checkpoint_interval,
                                              none_if_negative(args.learning_rate_half_life),
                                              args.learning_rate_reduce_factor,
                                              args.learning_rate_reduce_num_not_improved,
+                                             args.learning_rate_end,
+                                             args.learning_rate_decay_steps,
                                              args.learning_rate_schedule,
                                              args.learning_rate_warmup)
 

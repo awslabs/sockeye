@@ -175,6 +175,8 @@ def test_inference_args(test_params, expected_params):
               learning_rate_reduce_num_not_improved=8,
               learning_rate_half_life=10,
               learning_rate_warmup=0,
+              learning_rate_decay_steps=0,
+              learning_rate_end=0,
               learning_rate_schedule=None,
               weight_init='xavier',
               weight_init_scale=3.0,

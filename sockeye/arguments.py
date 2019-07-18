@@ -870,6 +870,17 @@ def add_training_args(params):
                               default=8,
                               help="For 'plateau-reduce' learning rate scheduler. Adjust learning rate "
                                    "if <optimized-metric> did not improve for x checkpoints. Default: %(default)s.")
+    train_params.add_argument('--learning-rate-end',
+                              type=int,
+                              default=0,
+                              help="For 'fixed-rate-linear-decay' learning rate scheduler. The final learning rate "
+                                   "after decay_steps. Default: %(default)s.")
+    train_params.add_argument('--learning-rate-decay-steps',
+                              type=int,
+                              default=0,
+                              help="For 'fixed-rate-linear-decay' learning rate scheduler. The number of straining "
+                                   "steps (updates) in which to decay from the initial learning rate to the end "
+                                   "learning rate. Default: %(default)s.")
     train_params.add_argument('--learning-rate-schedule',
                               type=learning_schedule(),
                               default=None,

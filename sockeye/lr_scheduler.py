@@ -156,6 +156,9 @@ class LearningRateSchedulerInvSqrtT(LearningRateScheduler):
         if num_updates > self.t_last_log and num_updates % self.log_every_t == 0:
             logger.info("Learning rate currently at %1.2e", lr)
             self.t_last_log = num_updates
+        # For this scheduler, `self.lr` represents the last seen lr and is only
+        # used for logging purposes.
+        self.lr = lr
 
         return lr
 
@@ -187,8 +190,45 @@ class LearningRateSchedulerInvT(LearningRateScheduler):
         if num_updates > self.t_last_log and num_updates % self.log_every_t == 0:
             logger.info("Learning rate currently at %1.2e", lr)
             self.t_last_log = num_updates
+        # For this scheduler, `self.lr` represents the last seen lr and is only
+        # used for logging purposes.
+        self.lr = lr
 
         return lr
+
+
+class LearningRateSchedulerLinearDecay(LearningRateScheduler):
+    """
+    Learning rate schedule: (lr - end_lr) * (1 - step / decay_steps) + end_lr
+    Step grows until it reaches decay_steps then remains constant.
+
+    This is the schedule used by Devlin et al. in the BERT paper
+    (https://arxiv.org/pdf/1810.04805.pdf).
+
+    :param end_lr: The final learning rate at the end of decay_steps.
+    :param decay_steps: The number of steps to reach the final learning rate.
+    """
+
+    def __init__(self, end_lr: int, decay_steps: int, warmup: int = 0):
+        super().__init__(warmup)
+        check_condition(end_lr >= 0, "end_lr needs to be >= 0.")
+        check_condition(decay_steps >= 0, "decay_steps need to be >= 0.")
+        self.end_lr = end_lr
+        self.decay_steps = decay_steps
+
+    def __call__(self, num_updates: int):
+        # Warmup
+        if num_updates < self.warmup:
+            warmed_lr = (num_updates / self.warmup) * self.base_lr
+        else:
+            warmed_lr = self.base_lr
+        # Linear decay
+        step = min(num_updates, self.decay_steps)
+        decayed_lr = (warmed_lr - self.end_lr) * (1 - step / self.decay_steps) + self.end_lr
+        # For this scheduler, `self.lr` represents the last seen lr and is only
+        # used for logging purposes.
+        self.lr = decayed_lr
+        return decayed_lr
 
 
 class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
@@ -255,6 +295,8 @@ def get_lr_scheduler(scheduler_type: str,
                      learning_rate_half_life: int,
                      learning_rate_reduce_factor: float,
                      learning_rate_reduce_num_not_improved: int,
+                     learning_rate_end: Optional[float] = None,
+                     learning_rate_decay_steps: Optional[float] = None,
                      learning_rate_schedule: Optional[List[Tuple[float, int]]] = None,
                      learning_rate_warmup: Optional[int] = 0) -> Optional[LearningRateScheduler]:
     """
@@ -266,6 +308,8 @@ def get_lr_scheduler(scheduler_type: str,
     :param learning_rate_reduce_factor: Factor to reduce learning rate with.
     :param learning_rate_reduce_num_not_improved: Number of checkpoints with no improvement after which learning rate is
            reduced.
+    :param learning_rate_end: End learning rate.
+    :param learning_rate_decay_steps: Number of decay steps
     :param learning_rate_schedule: Optional fixed learning rate schedule.
     :param learning_rate_warmup: Number of batches that the learning rate is linearly increased.
     :raises: ValueError if unknown scheduler_type
@@ -280,6 +324,8 @@ def get_lr_scheduler(scheduler_type: str,
         return LearningRateSchedulerInvSqrtT(updates_per_checkpoint, learning_rate_half_life, learning_rate_warmup)
     elif scheduler_type == C.LR_SCHEDULER_FIXED_RATE_INV_T:
         return LearningRateSchedulerInvT(updates_per_checkpoint, learning_rate_half_life, learning_rate_warmup)
+    elif scheduler_type == C.LR_SCHEDULER_FIXED_RATE_LINEAR_DECAY:
+        return LearningRateSchedulerLinearDecay(learning_rate_end, learning_rate_decay_steps, learning_rate_warmup)
     elif scheduler_type == C.LR_SCHEDULER_FIXED_STEP:
         check_condition(learning_rate_schedule is not None,
                         "learning_rate_schedule needed for %s scheduler" % C.LR_SCHEDULER_FIXED_STEP)
