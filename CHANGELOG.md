@@ -13,6 +13,15 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ## [2.0.0]
 *TODO*
 
+## [1.18.103]
+### Added
+- Added ability to score image-sentence pairs by extending the scoring feature originally implemented for machine 
+  translation to the image captioning module.
+
+## [1.18.102]
+### Fixed
+- Fixed loading of more than 10 source vocabulary files to be in the right, numerical order.
+
 ## [1.18.101]
 ### Changed
 - Update to Sacrebleu 1.3.6
