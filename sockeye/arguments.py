@@ -24,7 +24,6 @@ import yaml
 
 from . import constants as C
 from . import data_io
-from .lr_scheduler import LearningRateSchedulerFixedStep
 from . import utils
 
 
@@ -168,25 +167,6 @@ def float_greater_or_equal(threshold: float) -> Callable:
         return value_to_check
 
     return check_greater_equal
-
-
-def learning_schedule() -> Callable:
-    """
-    Returns a method that can be used in argument parsing to check that the argument is a valid learning rate schedule
-    string.
-
-    :return: A method that can be used as a type in argparse.
-    """
-
-    def parse(schedule_str):
-        try:
-            schedule = LearningRateSchedulerFixedStep.parse_schedule_str(schedule_str)
-        except ValueError:
-            raise argparse.ArgumentTypeError(
-                "Learning rate schedule string should have form rate1:num_updates1[,rate2:num_updates2,...]")
-        return schedule
-
-    return parse
 
 
 def simple_dict() -> Callable:
@@ -870,28 +850,6 @@ def add_training_args(params):
                               default=8,
                               help="For 'plateau-reduce' learning rate scheduler. Adjust learning rate "
                                    "if <optimized-metric> did not improve for x checkpoints. Default: %(default)s.")
-    train_params.add_argument('--learning-rate-end',
-                              type=int,
-                              default=0,
-                              help="For 'fixed-rate-linear-decay' learning rate scheduler. The final learning rate "
-                                   "after decay_steps. Default: %(default)s.")
-    train_params.add_argument('--learning-rate-decay-steps',
-                              type=int,
-                              default=0,
-                              help="For 'fixed-rate-linear-decay' learning rate scheduler. The number of straining "
-                                   "steps (updates) in which to decay from the initial learning rate to the end "
-                                   "learning rate. Default: %(default)s.")
-    train_params.add_argument('--learning-rate-schedule',
-                              type=learning_schedule(),
-                              default=None,
-                              help="For 'fixed-step' scheduler. Fully specified learning schedule in the form"
-                                   " \"rate1:num_updates1[,rate2:num_updates2,...]\". Overrides all other args related"
-                                   " to learning rate and stopping conditions. Default: %(default)s.")
-    train_params.add_argument('--learning-rate-half-life',
-                              type=float,
-                              default=10,
-                              help="Half-life of learning rate in checkpoints. For 'fixed-rate-*' "
-                                   "learning rate schedulers. Default: %(default)s.")
     train_params.add_argument('--learning-rate-warmup',
                               type=int,
                               default=0,

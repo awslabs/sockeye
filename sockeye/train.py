@@ -606,15 +606,11 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
         raise ValueError("Invalid weight initialization type: %s" % args.weight_init)
 
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
-                                             args.checkpoint_interval,
-                                             none_if_negative(args.learning_rate_half_life),
                                              args.learning_rate_reduce_factor,
                                              args.learning_rate_reduce_num_not_improved,
-                                             args.learning_rate_end,
-                                             args.learning_rate_decay_steps,
-                                             args.learning_rate_schedule,
-                                             args.learning_rate_warmup)
-
+                                             args.learning_rate_warmup,
+                                             args.update_interval,
+                                             args.max_updates)
     config = OptimizerConfig(name=args.optimizer,
                              params=optimizer_params,
                              kvstore=args.kvstore,
@@ -810,16 +806,6 @@ def train(args: argparse.Namespace) -> training.TrainState:
         if trainer_config.min_epochs is not None and trainer_config.max_epochs is not None:
             check_condition(trainer_config.min_epochs <= trainer_config.max_epochs,
                             "Minimum number of epochs must be smaller than maximum number of epochs")
-
-        # Fixed training schedule always runs for a set number of updates
-        if args.learning_rate_schedule:
-            trainer_config.min_updates = None
-            trainer_config.max_updates = sum(num_updates for (_, num_updates) in args.learning_rate_schedule)
-            trainer_config.max_num_checkpoint_not_improved = -1
-            trainer_config.min_samples = None
-            trainer_config.max_samples = None
-            trainer_config.min_epochs = None
-            trainer_config.max_epochs = None
 
         optimizer_config = create_optimizer_config(args)
         training_model.initialize(optimizer_config.initializer, ctx=context)

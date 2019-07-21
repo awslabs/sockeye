@@ -26,8 +26,7 @@ class LearningRateScheduler:
         self.base_lr = None  # Note: will be overwritten by MXNet optimizer
         check_condition(warmup >= 0, "warmup needs to be >= 0.")
         self.warmup = warmup
-        self.log_warmup_every_t = max(self.warmup // 10, 1)
-        self.last_warmup_log = -1
+        self.lr = None  # type: Optional[float]
 
     def __call__(self, num_updates):
         pass
@@ -39,11 +38,7 @@ class LearningRateScheduler:
         assert self.base_lr is not None
         if not self.warmup:
             return self.base_lr
-        fraction = (num_updates + 1) * self.base_lr / (self.warmup + 1)
-        if num_updates > self.last_warmup_log and num_updates % self.log_warmup_every_t == 0:
-            self.last_warmup_log = num_updates
-            logger.info("Learning rate warmup: %3.0f%%", fraction / self.base_lr * 100.0)
-        return fraction
+        return self.base_lr * min(1.0, num_updates / self.warmup)
 
 
 class AdaptiveLearningRateScheduler(LearningRateScheduler):
@@ -62,134 +57,35 @@ class AdaptiveLearningRateScheduler(LearningRateScheduler):
         return False
 
 
-class LearningRateSchedulerFixedStep(AdaptiveLearningRateScheduler):
+class LearningRateSchedulerInvSqrtDecay(LearningRateScheduler):
     """
-    Use a fixed schedule of learning rate steps: lr_1 for N steps, lr_2 for M steps, etc.
+    Learning rate schedule: lr / sqrt(max(step, warmup_steps)).
 
-    :param schedule: List of learning rate step tuples in the form (rate, num_updates).
-    :param updates_per_checkpoint: Updates per checkpoint.
+    This is the schedule used by Vaswani et al. in the Transformer paper
+    (https://arxiv.org/pdf/1706.03762.pdf)
+
+    NOTE: For this scheduler, the index of the current update is divided by the
+          update interval.  Warmup corresponds to the number of _updates_, not
+          the number of batches processed (updates = batches / update_interval).
+
+    :param update_interval: Number of batches per update.  Number of updates is
+                            divided by this value for all calculations.
+    :param warmup: Number of initial updates during which the learning rate
+                   linearly increases.
     """
-
-    def __init__(self, schedule: List[Tuple[float, int]], updates_per_checkpoint: int) -> None:
-        super().__init__()
-        check_condition(all(num_updates > 0 for (_, num_updates) in schedule),
-                        "num_updates for each step should be > 0.")
-        check_condition(all(num_updates % updates_per_checkpoint == 0 for (_, num_updates) in schedule),
-                        "num_updates for each step should be divisible by updates_per_checkpoint.")
-        self.schedule = schedule
-        self.current_step = 0
-        self.current_rate = 0.
-        self.current_step_num_updates = 0
-        self.current_step_started_at = 0
-        self.next_step_at = 0
-        self.latest_t = 0
-        self._update_rate(self.current_step)
-
-    def new_evaluation_result(self, has_improved: bool) -> bool:
-        """
-        Returns true if the parameters should be reset to the ones with the best validation score.
-
-        :param has_improved: Whether the model improved on held-out validation data.
-        :return: True if parameters should be reset to the ones with best validation score.
-        """
-        logger.info("Checkpoint learning rate: %1.2e (%d/%d updates)",
-                    self.current_rate,
-                    self.latest_t - self.current_step_started_at,
-                    self.current_step_num_updates)
-        if self.latest_t >= self.next_step_at:
-            self.current_step += 1
-            self._update_rate(self.current_step)
-        return False
-
-    def _update_rate(self, step: int):
-        if self.current_step < len(self.schedule):
-            self.current_rate, self.current_step_num_updates = self.schedule[step]
-            self.current_step_started_at = self.latest_t
-            self.next_step_at += self.current_step_num_updates
-            logger.info("Changing learning rate to %1.2e for %d updates",
-                        self.current_rate,
-                        self.current_step_num_updates)
-
-    def __call__(self, t: int):
-        self.latest_t = max(t, self.latest_t)
-        return self.current_rate
-
-    @staticmethod
-    def parse_schedule_str(schedule_str: str) -> List[Tuple[float, int]]:
-        """
-        Parse learning schedule string.
-
-        :param schedule_str: String in form rate1:num_updates1[,rate2:num_updates2,...]
-        :return: List of tuples (learning_rate, num_updates).
-        """
-        schedule = list()
-        for step in schedule_str.split(","):
-            rate, num_updates = step.split(":")
-            schedule.append((float(rate), int(num_updates)))
-        return schedule
-
-
-class LearningRateSchedulerInvSqrtT(LearningRateScheduler):
-    """
-    Learning rate schedule: lr / sqrt(1 + factor * t).
-    Note: The factor is calculated from the half life of the learning rate.
-
-    :param updates_per_checkpoint: Number of batches between checkpoints.
-    :param half_life: Half life of the learning rate in number of checkpoints.
-    :param warmup: Number of (linear) learning rate increases to warm-up.
-    """
-
-    def __init__(self, updates_per_checkpoint: int, half_life: int, warmup: int = 0) -> None:
+    def __init__(self, update_interval: int = 1, warmup: int = 0):
         super().__init__(warmup)
-        check_condition(updates_per_checkpoint > 0, "updates_per_checkpoint needs to be > 0.")
-        check_condition(half_life > 0, "half_life needs to be > 0.")
-        # 0.5 base_lr = base_lr * sqrt(1 + T * factor)
-        # then factor = 3 ./ T, with T = half_life * updates_per_checkpoint
-        self.factor = 3. / (half_life * updates_per_checkpoint)
-        self.t_last_log = -1
-        self.log_every_t = int(half_life * updates_per_checkpoint)
+        check_condition(update_interval > 0, "update_interval need to be > 0.")
+        self.update_interval = update_interval
 
     def __call__(self, num_updates: int):
-        lr = min(self.base_lr / sqrt(1 + num_updates * self.factor),
-                 self._warmup(num_updates) if self.warmup > 0 else C.LARGE_POSITIVE_VALUE)
-        # Note: this method is called once per parameter for the same t. Making sure to just log once.
-        if num_updates > self.t_last_log and num_updates % self.log_every_t == 0:
-            logger.info("Learning rate currently at %1.2e", lr)
-            self.t_last_log = num_updates
-        # For this scheduler, `self.lr` represents the last seen lr and is only
-        # used for logging purposes.
-        self.lr = lr
-
-        return lr
-
-
-class LearningRateSchedulerInvT(LearningRateScheduler):
-    """
-    Learning rate schedule: lr / (1 + factor * t).
-    Note: The factor is calculated from the half life of the learning rate.
-
-    :param updates_per_checkpoint: Number of batches between checkpoints.
-    :param half_life: Half life of the learning rate in number of checkpoints.
-    """
-
-    def __init__(self, updates_per_checkpoint: int, half_life: int, warmup: int = 0) -> None:
-        super().__init__(warmup)
-        check_condition(updates_per_checkpoint > 0, "updates_per_checkpoint needs to be > 0.")
-        check_condition(half_life > 0, "half_life needs to be > 0.")
-
-        # 0.5 base_lr = base_lr * (1 + T * factor)
-        # then factor = 1 ./ T, with T = half_life * updates_per_checkpoint
-        self.factor = 1. / (half_life * updates_per_checkpoint)
-        self.t_last_log = -1
-        self.log_every_t = int(half_life * updates_per_checkpoint)
-
-    def __call__(self, num_updates: int):
-        lr = min(self.base_lr / (1 + num_updates * self.factor),
-                 self._warmup(num_updates) if self.warmup > 0 else C.LARGE_POSITIVE_VALUE)
-        # Note: this method is called once per parameter for the same t. Making sure to just log once.
-        if num_updates > self.t_last_log and num_updates % self.log_every_t == 0:
-            logger.info("Learning rate currently at %1.2e", lr)
-            self.t_last_log = num_updates
+        num_updates /= self.update_interval
+        # Warmup
+        warm_lr = self._warmup(num_updates)
+        # Avoid square root of zero
+        warmup_updates = max(1, self.warmup)
+        # Warmup first N steps, then decay
+        lr = warm_lr / sqrt(max(num_updates, warmup_updates))
         # For this scheduler, `self.lr` represents the last seen lr and is only
         # used for logging purposes.
         self.lr = lr
@@ -199,36 +95,33 @@ class LearningRateSchedulerInvT(LearningRateScheduler):
 
 class LearningRateSchedulerLinearDecay(LearningRateScheduler):
     """
-    Learning rate schedule: (lr - end_lr) * (1 - step / decay_steps) + end_lr
+    Learning rate schedule: lr * (1 - step / decay_steps)
     Step grows until it reaches decay_steps then remains constant.
 
     This is the schedule used by Devlin et al. in the BERT paper
     (https://arxiv.org/pdf/1810.04805.pdf).
 
-    :param end_lr: The final learning rate at the end of decay_steps.
-    :param decay_steps: The number of steps to reach the final learning rate.
+    :param decay: The number of updates to decay completely (to zero), usually
+                  the total/maximum number of training steps.
+    :param warmup: Number of initial steps during which the learning rate
+                   linearly increases.
     """
 
-    def __init__(self, end_lr: int, decay_steps: int, warmup: int = 0):
+    def __init__(self, decay: int, warmup: int = 0):
         super().__init__(warmup)
-        check_condition(end_lr >= 0, "end_lr needs to be >= 0.")
-        check_condition(decay_steps >= 0, "decay_steps need to be >= 0.")
-        self.end_lr = end_lr
-        self.decay_steps = decay_steps
+        check_condition(decay >= 0, "decay_steps need to be >= 0.")
+        self.decay = decay
 
     def __call__(self, num_updates: int):
         # Warmup
-        if num_updates < self.warmup:
-            warmed_lr = (num_updates / self.warmup) * self.base_lr
-        else:
-            warmed_lr = self.base_lr
+        warmed_lr = self._warmup(num_updates)
         # Linear decay
-        step = min(num_updates, self.decay_steps)
-        decayed_lr = (warmed_lr - self.end_lr) * (1 - step / self.decay_steps) + self.end_lr
+        bounded_updates = min(max(num_updates, 1), self.decay)
+        lr = warmed_lr * (1 - bounded_updates / self.decay)
         # For this scheduler, `self.lr` represents the last seen lr and is only
         # used for logging purposes.
-        self.lr = decayed_lr
-        return decayed_lr
+        self.lr = lr
+        return lr
 
 
 class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
@@ -291,46 +184,38 @@ class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
 
 
 def get_lr_scheduler(scheduler_type: str,
-                     updates_per_checkpoint: int,
-                     learning_rate_half_life: int,
                      learning_rate_reduce_factor: float,
                      learning_rate_reduce_num_not_improved: int,
-                     learning_rate_end: Optional[float] = None,
-                     learning_rate_decay_steps: Optional[float] = None,
-                     learning_rate_schedule: Optional[List[Tuple[float, int]]] = None,
-                     learning_rate_warmup: Optional[int] = 0) -> Optional[LearningRateScheduler]:
+                     learning_rate_warmup: Optional[int] = 0,
+                     update_interval: Optional[int] = 1,
+                     max_updates: Optional[int] = None) -> Optional[LearningRateScheduler]:
     """
     Returns a learning rate scheduler.
 
     :param scheduler_type: Scheduler type.
-    :param updates_per_checkpoint: Number of batches between checkpoints.
-    :param learning_rate_half_life: Half life of the learning rate in number of checkpoints.
     :param learning_rate_reduce_factor: Factor to reduce learning rate with.
     :param learning_rate_reduce_num_not_improved: Number of checkpoints with no improvement after which learning rate is
            reduced.
-    :param learning_rate_end: End learning rate.
-    :param learning_rate_decay_steps: Number of decay steps
-    :param learning_rate_schedule: Optional fixed learning rate schedule.
-    :param learning_rate_warmup: Number of batches that the learning rate is linearly increased.
+    :param learning_rate_warmup: Number of batches that the learning rate is
+                                 linearly increased.
+    :param update_interval: Number of batches per update.
+    :param max_updates: Maximum number of training batches, used as  over which the learning rate
+                                decays to zero.
+
     :raises: ValueError if unknown scheduler_type
+
     :return: Learning rate scheduler.
     """
-    check_condition(learning_rate_schedule is None or scheduler_type == C.LR_SCHEDULER_FIXED_STEP,
-                    "Learning rate schedule can only be used with '%s' learning rate scheduler."
-                    % C.LR_SCHEDULER_FIXED_STEP)
     if scheduler_type is None:
         return None
-    if scheduler_type == C.LR_SCHEDULER_FIXED_RATE_INV_SQRT_T:
-        return LearningRateSchedulerInvSqrtT(updates_per_checkpoint, learning_rate_half_life, learning_rate_warmup)
-    elif scheduler_type == C.LR_SCHEDULER_FIXED_RATE_INV_T:
-        return LearningRateSchedulerInvT(updates_per_checkpoint, learning_rate_half_life, learning_rate_warmup)
-    elif scheduler_type == C.LR_SCHEDULER_FIXED_RATE_LINEAR_DECAY:
-        return LearningRateSchedulerLinearDecay(learning_rate_end, learning_rate_decay_steps, learning_rate_warmup)
-    elif scheduler_type == C.LR_SCHEDULER_FIXED_STEP:
-        check_condition(learning_rate_schedule is not None,
-                        "learning_rate_schedule needed for %s scheduler" % C.LR_SCHEDULER_FIXED_STEP)
-        return LearningRateSchedulerFixedStep(learning_rate_schedule, updates_per_checkpoint)
-    elif scheduler_type == C.LR_SCHEDULER_PLATEAU_REDUCE:
+    if scheduler_type == C.LR_SCHEDULER_INV_SQRT_DECAY:
+        return LearningRateSchedulerInvSqrtDecay(update_interval, learning_rate_warmup)
+    if scheduler_type == C.LR_SCHEDULER_LINEAR_DECAY:
+        check_condition(max_updates is not None,
+                        "The total number of training updates (--max-updates) must be specified when using the linear "
+                        "decay learning rate scheduler.")
+        return LearningRateSchedulerLinearDecay(decay=max_updates, warmup=learning_rate_warmup)
+    if scheduler_type == C.LR_SCHEDULER_PLATEAU_REDUCE:
         check_condition(learning_rate_reduce_factor is not None,
                         "learning_rate_reduce_factor needed for %s scheduler" % C.LR_SCHEDULER_PLATEAU_REDUCE)
         check_condition(learning_rate_reduce_num_not_improved is not None,
@@ -341,5 +226,4 @@ def get_lr_scheduler(scheduler_type: str,
             return None
         return LearningRateSchedulerPlateauReduce(learning_rate_reduce_factor, learning_rate_reduce_num_not_improved,
                                                   learning_rate_warmup)
-    else:
-        raise ValueError("Unknown learning rate scheduler type %s." % scheduler_type)
+    raise ValueError("Unknown learning rate scheduler type %s." % scheduler_type)

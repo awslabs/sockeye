@@ -173,11 +173,7 @@ def test_inference_args(test_params, expected_params):
               learning_rate_scheduler_type='plateau-reduce',
               learning_rate_reduce_factor=0.7,
               learning_rate_reduce_num_not_improved=8,
-              learning_rate_half_life=10,
               learning_rate_warmup=0,
-              learning_rate_decay_steps=0,
-              learning_rate_end=0,
-              learning_rate_schedule=None,
               weight_init='xavier',
               weight_init_scale=3.0,
               weight_init_xavier_rand_type='uniform',
@@ -195,76 +191,6 @@ def test_inference_args(test_params, expected_params):
 ])
 def test_training_arg(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_training_args)
-
-
-# # Make sure that the parameter names and default values used in the tutorials do not change without the tutorials
-# # being updated accordingly.
-# @pytest.mark.parametrize("test_params, expected_params, expected_params_present", [
-#     # seqcopy tutorial
-#     ('-s train.source '
-#      '-t train.target '
-#      '-vs dev.source '
-#      '-vt dev.target '
-#      '--num-embed 32 '
-#      '--rnn-num-hidden 64 '
-#      '--rnn-attention-type dot '
-#      '--use-cpu '
-#      '--max-num-checkpoint-not-improved 3 '
-#      '-o seqcopy_model',
-#      dict(source="train.source",
-#           target="train.target",
-#           validation_source="dev.source",
-#           validation_target="dev.target",
-#           num_embed=(32, 32),
-#           rnn_num_hidden=64,
-#           use_cpu=True,
-#           max_num_checkpoint_not_improved=3,
-#           output="seqcopy_model",
-#           # The tutorial text mentions that we train a RNN model:
-#           encoder=C.TRANSFORMER_TYPE,
-#           decoder=C.TRANSFORMER_TYPE),
-#      # Additionally we mention the checkpoint_interval
-#      ['checkpoint_interval']),
-#     # WMT tutorial
-#     ('-d train_data '
-#      '-vs newstest2016.tc.BPE.de '
-#      '-vt newstest2016.tc.BPE.en '
-#      '--encoder rnn '
-#      '--decoder rnn '
-#      '--num-embed 256 '
-#      '--rnn-num-hidden 512 '
-#      '--rnn-attention-type dot '
-#      '--max-seq-len 60 '
-#      '--decode-and-evaluate 500 '
-#      '--use-cpu '
-#      '-o wmt_mode',
-#      dict(
-#          source=None,
-#          target=None,
-#          prepared_data="train_data",
-#          validation_source="newstest2016.tc.BPE.de",
-#          validation_target="newstest2016.tc.BPE.en",
-#          num_embed=(256, 256),
-#          rnn_num_hidden=512,
-#          rnn_attention_type='dot',
-#          max_seq_len=(60, 60),
-#          decode_and_evaluate=500,
-#          use_cpu=True,
-#          # Arguments mentioned in the text, should be renamed in the tutorial if they change:
-#          rnn_cell_type="lstm",
-#          encoder=C.RNN_NAME,
-#          decoder=C.RNN_NAME,
-#          optimizer="adam"),
-#      ["num_layers",
-#       "rnn_residual_connections",
-#       "batch_size",
-#       "learning_rate_schedule",
-#       "optimized_metric",
-#       "decode_and_evaluate",
-#       "seed"])
-# ])
-# def test_tutorial_train_args(test_params, expected_params, expected_params_present):
-#     _test_args_subset(test_params, expected_params, expected_params_present, arguments.add_train_cli_args)
 
 
 @pytest.mark.parametrize("test_params, expected_params, expected_params_present", [
