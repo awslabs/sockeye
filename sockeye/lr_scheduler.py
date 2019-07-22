@@ -64,22 +64,11 @@ class LearningRateSchedulerInvSqrtDecay(LearningRateScheduler):
     This is the schedule used by Vaswani et al. in the Transformer paper
     (https://arxiv.org/pdf/1706.03762.pdf)
 
-    NOTE: For this scheduler, the index of the current update is divided by the
-          update interval.  Warmup corresponds to the number of _updates_, not
-          the number of batches processed (updates = batches / update_interval).
-
-    :param update_interval: Number of batches per update.  Number of updates is
-                            divided by this value for all calculations.
     :param warmup: Number of initial updates during which the learning rate
                    linearly increases.
     """
-    def __init__(self, update_interval: int = 1, warmup: int = 0):
-        super().__init__(warmup)
-        check_condition(update_interval > 0, "update_interval need to be > 0.")
-        self.update_interval = update_interval
 
     def __call__(self, num_updates: int):
-        num_updates /= self.update_interval
         # Warmup
         warm_lr = self._warmup(num_updates)
         # Avoid square root of zero
@@ -114,10 +103,10 @@ class LearningRateSchedulerLinearDecay(LearningRateScheduler):
 
     def __call__(self, num_updates: int):
         # Warmup
-        warmed_lr = self._warmup(num_updates)
+        warm_lr = self._warmup(num_updates)
         # Linear decay
         bounded_updates = min(max(num_updates, 1), self.decay)
-        lr = warmed_lr * (1 - bounded_updates / self.decay)
+        lr = warm_lr * (1 - bounded_updates / self.decay)
         # For this scheduler, `self.lr` represents the last seen lr and is only
         # used for logging purposes.
         self.lr = lr
@@ -187,7 +176,6 @@ def get_lr_scheduler(scheduler_type: str,
                      learning_rate_reduce_factor: float,
                      learning_rate_reduce_num_not_improved: int,
                      learning_rate_warmup: Optional[int] = 0,
-                     update_interval: Optional[int] = 1,
                      max_updates: Optional[int] = None) -> Optional[LearningRateScheduler]:
     """
     Returns a learning rate scheduler.
@@ -198,7 +186,6 @@ def get_lr_scheduler(scheduler_type: str,
            reduced.
     :param learning_rate_warmup: Number of batches that the learning rate is
                                  linearly increased.
-    :param update_interval: Number of batches per update.
     :param max_updates: Maximum number of training batches, used as  over which the learning rate
                                 decays to zero.
 
@@ -209,7 +196,7 @@ def get_lr_scheduler(scheduler_type: str,
     if scheduler_type is None:
         return None
     if scheduler_type == C.LR_SCHEDULER_INV_SQRT_DECAY:
-        return LearningRateSchedulerInvSqrtDecay(update_interval, learning_rate_warmup)
+        return LearningRateSchedulerInvSqrtDecay(learning_rate_warmup)
     if scheduler_type == C.LR_SCHEDULER_LINEAR_DECAY:
         check_condition(max_updates is not None,
                         "The total number of training updates (--max-updates) must be specified when using the linear "

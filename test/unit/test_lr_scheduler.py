@@ -17,20 +17,19 @@ import numpy as np
 
 from sockeye import lr_scheduler
 
-@pytest.mark.parametrize('update_interval', [1, 2])
-def test_inv_sqrt_decay_scheduler(update_interval):
+
+def test_inv_sqrt_decay_scheduler():
     warmup = 3
     scheduler = lr_scheduler.get_lr_scheduler('inv-sqrt-decay',
                                               learning_rate_reduce_factor=0,
                                               learning_rate_reduce_num_not_improved=0,
                                               learning_rate_warmup=warmup,
-                                              update_interval=update_interval,
                                               max_updates=10)
     scheduler.base_lr = 1
 
     def alternate_implementation(t):
         # Reference formula from Transformer paper
-        return min((t / update_interval)**-0.5, (t / update_interval) * (warmup)**-1.5)
+        return min(t**-0.5, t * warmup**-1.5)
 
     expected_schedule = [alternate_implementation(t) for t in range(1, 11)]
 
@@ -45,9 +44,9 @@ def test_linear_decay_scheduler():
                                               learning_rate_reduce_factor=0,
                                               learning_rate_reduce_num_not_improved=0,
                                               learning_rate_warmup=3,
-                                              update_interval=2,
                                               max_updates=10)
     scheduler.base_lr = 1
+
     # Warmup term * decay term
     expected_schedule = [
         (1/3) * (9/10),
@@ -74,7 +73,6 @@ def test_get_lr_scheduler(scheduler_type, expected_instance):
                                               learning_rate_reduce_factor=0.5,
                                               learning_rate_reduce_num_not_improved=16,
                                               learning_rate_warmup=1000,
-                                              update_interval=2,
                                               max_updates=10000)
     assert isinstance(scheduler, expected_instance)
 
