@@ -845,8 +845,8 @@ def train(args: argparse.Namespace) -> training.TrainState:
             # allreduce to collect averaged gradients across all workers for
             # each update.
             gluon_trainer = horovod_mpi.hvd.DistributedTrainer(params,
-                                                          optimizer_config.name,
-                                                          optimizer_config.params)
+                                                               optimizer_config.name,
+                                                               optimizer_config.params)
         else:
             gluon_trainer = gluon.Trainer(params,
                                           optimizer_config.name,

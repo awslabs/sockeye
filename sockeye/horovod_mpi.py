@@ -15,7 +15,7 @@
 # Import MPI-related packages once and in order.  Horovod should be initialized
 # once and mpi4py should not auto-initialize.
 
-# Import Horovod but do not call `init` yet.  Initialization should be called
+# Import Horovod but do not call `init()` yet.  Initialization should be called
 # as part of the main program after all modules (including Sockeye modules) have
 # been imported.
 try:
