@@ -11,7 +11,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
 ## [2.0.0]
-*TODO*
+### Changed
+- Update to [MXNet 1.5.0](https://github.com/apache/incubator-mxnet/tree/1.5.0)
+- Moved `SockeyeModel` implementation and all layers to [Gluon API](http://mxnet.incubator.apache.org/versions/master/gluon/index.html)
+- /TODO/
 
 ## [1.18.103]
 ### Added
