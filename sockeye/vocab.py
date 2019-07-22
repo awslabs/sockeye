@@ -178,6 +178,11 @@ def save_target_vocab(target_vocab: Vocab, folder: str):
     vocab_to_json(target_vocab, os.path.join(folder, C.VOCAB_TRG_NAME % 0))
 
 
+def _get_sorted_source_vocab_fnames(folder) -> List[str]:
+    _key = lambda x: int(x.split('.', 3)[-2])
+    return sorted([f for f in os.listdir(folder) if f.startswith(C.VOCAB_SRC_PREFIX)], key=_key)
+
+
 def load_source_vocabs(folder: str) -> List[Vocab]:
     """
     Loads source vocabularies from folder. The first element in the list is the primary source vocabulary.
@@ -186,8 +191,7 @@ def load_source_vocabs(folder: str) -> List[Vocab]:
     :param folder: Source folder.
     :return: List of vocabularies.
     """
-    return [vocab_from_json(os.path.join(folder, fname)) for fname in
-            sorted([f for f in os.listdir(folder) if f.startswith(C.VOCAB_SRC_PREFIX)])]
+    return [vocab_from_json(os.path.join(folder, fname)) for fname in _get_sorted_source_vocab_fnames(folder)]
 
 
 def load_target_vocab(folder: str) -> Vocab:

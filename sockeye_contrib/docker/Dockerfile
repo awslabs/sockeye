@@ -58,7 +58,7 @@ RUN cat /etc/ssh/ssh_config | grep -v StrictHostKeyChecking > /etc/ssh/ssh_confi
     mv /etc/ssh/ssh_config.new /etc/ssh/ssh_config
 
 # Install MXNet
-ENV MXNET_VERSION=1.5.0b20190710
+ENV MXNET_VERSION=1.5.0
 RUN pip install mxnet-cu100mkl==${MXNET_VERSION}
 
 # Install Horovod and the MPI Python library, temporarily using CUDA stubs
@@ -87,7 +87,7 @@ COPY . /opt/sockeye
 RUN cd /opt/sockeye && \
     pip install --no-cache-dir -r requirements/requirements.gpu-cu100.txt && \
     python setup.py build install -r requirements/requirements.gpu-cu100.txt && \
-    cp /opt/sockeye/sockeye_contrib/horovod/entrypoint.sh /usr/local/bin/ && \
+    cp /opt/sockeye/sockeye_contrib/docker/entrypoint.sh /usr/local/bin/ && \
     chmod +x /usr/local/bin/entrypoint.sh
 
 # Set entry point to use CUDA stubs when needed

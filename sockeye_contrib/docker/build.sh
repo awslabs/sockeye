@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-DOCKERFILE="sockeye_contrib/horovod/Dockerfile"
+DOCKERFILE="sockeye_contrib/docker/Dockerfile"
 
 if [ ! -f ${DOCKERFILE} ]; then
   echo "This script should be run from the sockeye root directory (containing ${DOCKERFILE})."
