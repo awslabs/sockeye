@@ -131,4 +131,4 @@ def test_fixed_param_strategy(param_names, strategy, expected_fixed_param_names)
     config.config_decoder.num_layers = NUM_LAYERS
     params = {name: None for name in ALL_PARAMS}
     fixed_param_names = fixed_param_names_from_stragegy(config, params, strategy)
-    assert fixed_param_names == expected_fixed_param_names
+    assert sorted(fixed_param_names) == sorted(expected_fixed_param_names)
