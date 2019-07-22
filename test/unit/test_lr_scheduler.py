@@ -27,9 +27,8 @@ def test_inv_sqrt_decay_scheduler():
                                               max_updates=10)
     scheduler.base_lr = 1
 
-    def alternate_implementation(t):
-        # Reference formula from Transformer paper
-        return min(t**-0.5, t * warmup**-1.5)
+    # Reference formula from Transformer paper
+    alternate_implementation = lambda t: min(t**-0.5, t * warmup**-1.5)
 
     expected_schedule = [alternate_implementation(t) for t in range(1, 11)]
 

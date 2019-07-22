@@ -13,7 +13,7 @@
 
 import logging
 from math import sqrt
-from typing import List, Optional, Tuple
+from typing import Optional
 import sockeye.constants as C
 from sockeye.utils import check_condition
 
@@ -84,29 +84,29 @@ class LearningRateSchedulerInvSqrtDecay(LearningRateScheduler):
 
 class LearningRateSchedulerLinearDecay(LearningRateScheduler):
     """
-    Learning rate schedule: lr * (1 - step / decay_steps)
+    Learning rate schedule: lr * (1 - step / total_steps)
     Step grows until it reaches decay_steps then remains constant.
 
     This is the schedule used by Devlin et al. in the BERT paper
     (https://arxiv.org/pdf/1810.04805.pdf).
 
-    :param decay: The number of updates to decay completely (to zero), usually
-                  the total/maximum number of training steps.
-    :param warmup: Number of initial steps during which the learning rate
+    :param max_updates: Number of total training updates.  The learning rate
+                        linearly decays to zero over this period.
+    :param warmup: Number of initial updates during which the learning rate
                    linearly increases.
     """
 
-    def __init__(self, decay: int, warmup: int = 0):
+    def __init__(self, max_updates: int, warmup: int = 0):
         super().__init__(warmup)
-        check_condition(decay >= 0, "decay_steps need to be >= 0.")
-        self.decay = decay
+        check_condition(max_updates >= 0, "max_updates need to be >= 0.")
+        self.max_updates = max_updates
 
     def __call__(self, num_updates: int):
         # Warmup
         warm_lr = self._warmup(num_updates)
         # Linear decay
-        bounded_updates = min(max(num_updates, 1), self.decay)
-        lr = warm_lr * (1 - bounded_updates / self.decay)
+        bounded_updates = min(max(num_updates, 1), self.max_updates)
+        lr = warm_lr * (1 - bounded_updates / self.max_updates)
         # For this scheduler, `self.lr` represents the last seen lr and is only
         # used for logging purposes.
         self.lr = lr
@@ -184,10 +184,9 @@ def get_lr_scheduler(scheduler_type: str,
     :param learning_rate_reduce_factor: Factor to reduce learning rate with.
     :param learning_rate_reduce_num_not_improved: Number of checkpoints with no improvement after which learning rate is
            reduced.
-    :param learning_rate_warmup: Number of batches that the learning rate is
-                                 linearly increased.
-    :param max_updates: Maximum number of training batches, used as  over which the learning rate
-                                decays to zero.
+    :param learning_rate_warmup: Number of initial updates during which the
+                                 learning rate linearly increases.
+    :param max_updates: Number of total training updates.
 
     :raises: ValueError if unknown scheduler_type
 
@@ -201,7 +200,7 @@ def get_lr_scheduler(scheduler_type: str,
         check_condition(max_updates is not None,
                         "The total number of training updates (--max-updates) must be specified when using the linear "
                         "decay learning rate scheduler.")
-        return LearningRateSchedulerLinearDecay(decay=max_updates, warmup=learning_rate_warmup)
+        return LearningRateSchedulerLinearDecay(max_updates, learning_rate_warmup)
     if scheduler_type == C.LR_SCHEDULER_PLATEAU_REDUCE:
         check_condition(learning_rate_reduce_factor is not None,
                         "learning_rate_reduce_factor needed for %s scheduler" % C.LR_SCHEDULER_PLATEAU_REDUCE)
