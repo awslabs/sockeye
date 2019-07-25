@@ -141,7 +141,10 @@ def run_translate(args: argparse.Namespace):
                                           sample=args.sample,
                                           output_scores=output_handler.reports_score(),
                                           constant_length_ratio=constant_length_ratio,
-                                          brevity_penalty=brevity_penalty)
+                                          brevity_penalty=brevity_penalty,
+                                          max_output_length_num_stds=args.max_output_length_num_stds,
+                                          max_input_length=args.max_input_length,
+                                          max_output_length=args.max_output_length)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,

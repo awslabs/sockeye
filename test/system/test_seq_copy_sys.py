@@ -65,7 +65,7 @@ COMMON_TRAINING_PARAMS = " --checkpoint-interval 1000 --optimizer adam --initial
      " --length-task length --length-task-weight 1.5 --length-task-layers 3"
      " --batch-size 16 --batch-type sentence" + COMMON_TRAINING_PARAMS,
      "--beam-size 5 --batch-size 2 --brevity-penalty-type learned"
-     " --brevity-penalty-weight 0.9 --max-input-len %s" % _TEST_MAX_LENGTH,
+     " --brevity-penalty-weight 0.9 --max-input-length %s" % _TEST_MAX_LENGTH,
      True,
      1.02,
      0.96),
@@ -77,7 +77,7 @@ COMMON_TRAINING_PARAMS = " --checkpoint-interval 1000 --optimizer adam --initial
      " --length-task ratio --length-task-weight 0.1 --length-task-layers 1"
      " --batch-size 16 --batch-type sentence" + COMMON_TRAINING_PARAMS,
      "--beam-size 5 --batch-size 2 --brevity-penalty-type constant"
-     " --brevity-penalty-weight 1.0 --brevity-penalty-constant-length-ratio 1 --max-input-len %s" % _TEST_MAX_LENGTH,
+     " --brevity-penalty-weight 1.0 --brevity-penalty-constant-length-ratio 1 --max-input-length %s" % _TEST_MAX_LENGTH,
      False,
      1.02,
      0.94)

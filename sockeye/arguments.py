@@ -1076,7 +1076,7 @@ def add_inference_args(params):
                                type=int_greater_or_equal(0),
                                default=10,
                                help='Bucket width for encoder steps. 0 means no bucketing. Default: %(default)s.')
-    decode_params.add_argument('--max-input-len', '-n',
+    decode_params.add_argument('--max-input-length',
                                type=int,
                                default=None,
                                help='Maximum input sequence length. Default: value from model(s).')
@@ -1091,6 +1091,11 @@ def add_inference_args(params):
                                help='Number of target-to-source length ratio standard deviations from training to add '
                                     'to calculate maximum output length for beam search for each sentence. '
                                     'Default: %(default)s.')
+    decode_params.add_argument('--max-output-length',
+                               type=int,
+                               default=None,
+                               help='Maximum number of words to generate during translation. '
+                                    'If None, it will be computed automatically. Default: %(default)s.')
     decode_params.add_argument('--restrict-lexicon',
                                nargs='+',
                                type=multiple_values(num_values=2, data_type=str),
