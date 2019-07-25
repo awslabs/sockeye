@@ -300,10 +300,7 @@ class GluonEarlyStoppingTrainer:
         data_iter.reset()
         val_metrics = [lf.create_metric() for lf in self.loss_functions]
         for batch in data_iter:
-            # TODO(horovod): Running with Horovod and multiple GPUs _per worker_
-            # causes a CUDA error 77 (illegal memory access) when evaluating the
-            # validation set using more than one context.
-            batch = batch.split_and_load(ctx=[self.context[0]] if self.config.using_horovod else self.context)
+            batch = batch.split_and_load(ctx=self.context)
             sharded_loss_outputs = []  # type: List[List[Tuple[mx.nd.NDArray, mx.nd.NDArray]]]
             for inputs, labels in batch.shards():
                 if self.dtype == C.DTYPE_FP16:
@@ -315,9 +312,9 @@ class GluonEarlyStoppingTrainer:
 
             # repack outputs into a list of loss_values (length = number of shards) for each loss function
             sharded_loss_outputs_per_loss_function = list(zip(*sharded_loss_outputs))
-            # sum loss values and number of samples for each loss function
-            output_per_loss_function = [tuple(mx.nd.add_n(*shard) for shard in zip(*outs)) for outs in
-                                        sharded_loss_outputs_per_loss_function]
+            # sum loss values (on the cpu) and number of samples for each loss function
+            output_per_loss_function = [tuple(mx.nd.add_n(*(s.as_in_context(mx.cpu()) for s in shard))
+                                        for shard in zip(*outs)) for outs in sharded_loss_outputs_per_loss_function]
             # update validation metrics for batch
             for loss_metric, (loss_value, num_samples) in zip(val_metrics, output_per_loss_function):
                 loss_metric.update(loss_value.asscalar(), num_samples.asscalar())
