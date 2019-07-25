@@ -39,8 +39,8 @@ logger = logging.getLogger(__name__)
 
 def models_max_input_output_length(models: List[SockeyeModel],
                                    num_stds: int,
-                                   forced_max_input_len: Optional[int] = None,
-                                   forced_max_output_len: Optional[int] = None) -> Tuple[int, Callable]:
+                                   forced_max_input_length: Optional[int] = None,
+                                   forced_max_output_length: Optional[int] = None) -> Tuple[int, Callable]:
     """
     Returns a function to compute maximum output length given a fixed number of standard deviations as a
     safety margin, and the current input length.
@@ -50,8 +50,8 @@ def models_max_input_output_length(models: List[SockeyeModel],
     :param models: List of models.
     :param num_stds: Number of standard deviations to add as a safety margin. If -1, returned maximum output lengths
                      will always be 2 * input_length.
-    :param forced_max_input_len: An optional overwrite of the maximum input length.
-    :param forced_max_output_len: An optional overwrite of the maximum output length.
+    :param forced_max_input_length: An optional overwrite of the maximum input length.
+    :param forced_max_output_length: An optional overwrite of the maximum output length.
     :return: The maximum input length and a function to get the output length given the input length.
     """
     max_mean = max(model.length_ratio_mean for model in models)
@@ -65,8 +65,8 @@ def models_max_input_output_length(models: List[SockeyeModel],
                                        length_ratio_mean=max_mean,
                                        length_ratio_std=max_std,
                                        num_stds=num_stds,
-                                       forced_max_input_len=forced_max_input_len,
-                                       forced_max_output_len=forced_max_output_len)
+                                       forced_max_input_len=forced_max_input_length,
+                                       forced_max_output_len=forced_max_output_length)
 
 
 def get_max_input_output_length(supported_max_seq_len_source: int,
@@ -839,8 +839,8 @@ class Translator:
                  brevity_penalty: Optional[BrevityPenalty] = None,
                  hybridize: bool = True,
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
-                 max_input_len: Optional[int] = None,
-                 max_output_len: Optional[int] = None) -> None:
+                 max_input_length: Optional[int] = None,
+                 max_output_length: Optional[int] = None) -> None:
         self.context = context
         self.dtype = models[0].dtype
         self.length_penalty = length_penalty
@@ -869,8 +869,8 @@ class Translator:
         self._max_input_length, self.get_max_output_length = models_max_input_output_length(
             models,
             max_output_length_num_stds,
-            forced_max_input_len=max_input_len,
-            forced_max_output_len=max_output_len)
+            forced_max_input_length=max_input_length,
+            forced_max_output_length=max_output_length)
 
         self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.nbest_size = nbest_size
@@ -1045,7 +1045,7 @@ class Translator:
                         "Splitting into chunks of size %d.",
                         trans_input.sentence_id, len(trans_input.tokens),
                         self.max_input_length, self.max_input_length)
-                    chunks = [trans_input_chunk
+                    chunks = [trans_input_chunk.with_eos()
                               for trans_input_chunk in
                               trans_input.chunks(self.max_input_length)]
                     input_chunks.extend([IndexedTranslatorInput(trans_input_idx, chunk_idx, chunk_input)
@@ -1054,7 +1054,7 @@ class Translator:
                     # regular input
                     input_chunks.append(IndexedTranslatorInput(trans_input_idx,
                                                                chunk_idx=0,
-                                                               translator_input=trans_input))
+                                                               translator_input=trans_input.with_eos()))
 
             if trans_input.constraints is not None:
                 logger.info("Input %s has %d %s: %s", trans_input.sentence_id,
