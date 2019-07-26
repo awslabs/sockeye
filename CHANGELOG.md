@@ -14,6 +14,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Changed
 - Update to [MXNet 1.5.0](https://github.com/apache/incubator-mxnet/tree/1.5.0)
 - Moved `SockeyeModel` implementation and all layers to [Gluon API](http://mxnet.incubator.apache.org/versions/master/gluon/index.html)
+- Removed support for Python 3.4.
 - /TODO/
 
 ## [1.18.103]

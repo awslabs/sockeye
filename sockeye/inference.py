@@ -31,7 +31,6 @@ from . import lexical_constraints as constrained
 from . import lexicon
 from . import utils
 from . import vocab
-from .log import is_python34
 from .model import SockeyeModel
 
 logger = logging.getLogger(__name__)
@@ -267,7 +266,7 @@ def make_input_from_json_string(sentence_id: SentenceId,
         return make_input_from_dict(sentence_id, jobj, translator)
 
     except Exception as e:
-        logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
+        logger.exception(e, exc_info=True)  # type: ignore
         return _bad_input(sentence_id, reason=json_string)
 
 
@@ -338,7 +337,7 @@ def make_input_from_dict(sentence_id: SentenceId,
                                avoid_list=avoid_list, pass_through_dict=input_dict)
 
     except Exception as e:
-        logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
+        logger.exception(e, exc_info=True)  # type: ignore
         return _bad_input(sentence_id, reason=str(input_dict))
 
 
