@@ -578,7 +578,8 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
     else:
         gradient_clipping_type = args.gradient_clipping_type
 
-    effective_batch_size = args.batch_size * args.update_interval
+    num_workers = 1 if not args.horovod else horovod_mpi.hvd.size()
+    effective_batch_size = args.batch_size * args.update_interval * num_workers
 
     # Note: for 'abs' we use the implementation inside of MXNet's optimizer and 'norm_*' we implement ourselves
     # inside the TrainingModel.
@@ -621,8 +622,8 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
     logger.info("Optimizer: %s | kvstore=%s | params=%s | initializer=%s",
                 config.name, config.kvstore, config.params, config.initializer)
     if args.update_interval > 1:
-        logger.info("Gradient accumulation over %d batches. Effective batch size: %d",
-                    args.update_interval, effective_batch_size)
+        logger.info("Gradient accumulation over %d batches by %d worker(s). Effective batch size: %d",
+                    args.update_interval, num_workers, effective_batch_size)
     return config
 
 
