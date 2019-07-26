@@ -94,8 +94,8 @@ def plot_metrics(args: argparse.Namespace):
 
 
 def main():
-    params = argparse.ArgumentParser(description='Plot data from `metrics` file written during training.')
-    params.add_argument('-i', '--input', required=True, nargs='+', help='Input `metrics` file to plot.')
+    params = argparse.ArgumentParser(description='Plot data from \'metrics\' files written during training.')
+    params.add_argument('-i', '--input', required=True, nargs='+', help='One or more \'metrics\' files to plot.')
     params.add_argument('-o', '--output', required=True, help='Output file to write (ex: plot.pdf).')
     params.add_argument('-x', default='time-elapsed', help='X axis metric.')
     params.add_argument('-y', default='perplexity-val', help='Y axis metric.')
